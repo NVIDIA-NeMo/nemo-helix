@@ -8,6 +8,30 @@ import data.common
 
 # Test helper functions
 
+test_envoy_header_extraction_is_case_insensitive if {
+    input_doc := {
+        "attributes": {
+            "request": {
+                "http": {
+                    "headers": {
+                        "X-NMP-Principal-Id": "user@example.com",
+                        "x-NMP-ACTOR-account-ID": "account-user",
+                        "X-NMP-Actor-Aliases": "legacy-user,user@example.com",
+                        "X-NMP-Caller-Kind": "service_principal",
+                    }
+                }
+            }
+        }
+    }
+
+    authz.extract_principal_id == "user@example.com" with input as input_doc
+    authz.extract_actor_account_id == "account-user" with input as input_doc
+    authz.extract_actor_aliases == ["legacy-user", "user@example.com"] with input as input_doc
+
+    # caller kind is derived by auth/account resolution; the header is not trusted.
+    common.request_caller_kind == "principal" with input as input_doc
+}
+
 # Test workspace extraction from path
 test_extract_workspace_from_path if {
     # Define mock endpoint patterns for testing (aligned with /apis/.../v2 routes)

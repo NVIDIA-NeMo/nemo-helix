@@ -90,7 +90,7 @@ export const GrpoParametersSection = () => {
           <ControlledSwitch
             useControllerProps={{ name: 'grpo.overlong_filtering', control }}
             formFieldProps={{
-              slotLabel: 'Drop Truncated Rollouts',
+              slotLabel: 'Drop Cut-Off Rollouts',
               labelPosition: 'left',
               slotInfo:
                 'Zero the loss contribution of rollouts cut off by the generation limit, so the policy is not penalised for responses it never got to finish. Worth enabling when a low Max New Tokens truncates many rollouts. NeMo RL key: overlong_filtering.',
@@ -176,7 +176,7 @@ export const GrpoParametersSection = () => {
               <ControlledSliderWithTextInput
                 useControllerProps={{ name: 'grpo.dynamic_sampling_max_gen_batches', control }}
                 formFieldProps={{
-                  slotLabel: 'Max Generation Batches',
+                  slotLabel: 'Max Gen Batches',
                   slotInfo:
                     'How many generation batches one step may consume trying to fill itself before the run fails.',
                 }}
@@ -273,7 +273,7 @@ export const GrpoParametersSection = () => {
                       control,
                     }}
                     formFieldProps={{
-                      slotLabel: 'Overlong Buffer Length',
+                      slotLabel: 'Overlong Buffer',
                       slotInfo:
                         'Tokens before max_response_length over which the penalty ramps to full.',
                     }}
@@ -289,7 +289,7 @@ export const GrpoParametersSection = () => {
                       control,
                     }}
                     formFieldProps={{
-                      slotLabel: 'Overlong Buffer Penalty',
+                      slotLabel: 'Overlong Penalty',
                       slotInfo: 'Penalty applied at the end of the buffer.',
                     }}
                     unsetPlaceholder="Off"
@@ -501,7 +501,7 @@ export const GrpoParametersSection = () => {
                   <ControlledSwitch
                     useControllerProps={{ name: 'rl.training.activation_checkpointing', control }}
                     formFieldProps={{
-                      slotLabel: 'Activation Checkpointing',
+                      slotLabel: 'Activation Checkpoints',
                       labelPosition: 'left',
                       slotInfo:
                         'Recompute activations during the backward pass to reduce memory at the cost of compute.',
@@ -603,7 +603,7 @@ export const GrpoParametersSection = () => {
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.keep_top_k', control }}
                     formFieldProps={{
-                      slotLabel: 'Keep Top-K Checkpoints',
+                      slotLabel: 'Top-K Checkpoints',
                       slotInfo:
                         'Number of best checkpoints to retain, ranked by mean validation reward — higher is better. Falls back to the latest checkpoint when the dataset ships no validation split.',
                     }}

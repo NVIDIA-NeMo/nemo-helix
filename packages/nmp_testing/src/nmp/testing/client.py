@@ -22,6 +22,7 @@ from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nmp.common.auth import Principal
 from nmp.common.config.base import AuthConfig, Configuration, DatabaseConfig, PlatformConfig, ServiceConfig
 from nmp.common.entities.client import EntityClient
 from nmp.common.service import Service
@@ -387,6 +388,7 @@ def create_test_client(
                     policy_data_refresh_interval=auth_policy_data_refresh_interval,
                     bundle_cache_seconds=auth_bundle_cache_seconds,
                     admin_email=TEST_ADMIN_EMAIL,
+                    allowed_service_principals=["integration-test"],
                 )
 
         # If IGW mock provider mode is enabled, configure the prefix and register cleanup
@@ -597,7 +599,7 @@ def create_test_client(
                         for key, value in dict(async_sdk.default_headers or {}).items()
                         if isinstance(value, str)
                     }
-                    headers["X-NMP-Principal-Id"] = "service:auth"
+                    headers.update(Principal(id="service:auth", authz_aliases=["service:auth"]).get_headers())
                     seeding_sdk = async_sdk.with_options(set_default_headers=headers)
                     seeding_entity_client = EntityClient(client_from_platform(seeding_sdk, AsyncEntitiesClient))
 

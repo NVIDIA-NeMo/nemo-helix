@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from nemo_platform_plugin.client.client import AsyncNemoClient
+from nmp.common.entities.utils import parse_adapters_suffix
 from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
@@ -117,7 +118,11 @@ def resolve_vm_for_model(
     Returns:
         The matching :class:`VirtualModel`, or ``None`` if none is cached.
     """
-    base_model_name = model_name.split("&adapters/", 1)[0]
+    # A LoRA composite (``base&adapters/adapter_ws/adapter_name``) routes through the
+    # base model's VM; parse_adapters_suffix owns that grammar split (shared with the
+    # reconciler + validation). A plain name has no suffix and is looked up as-is.
+    adapter_parts = parse_adapters_suffix(model_name)
+    base_model_name = adapter_parts[0] if adapter_parts is not None else model_name
     return virtual_model_cache.get(workspace, base_model_name)
 
 

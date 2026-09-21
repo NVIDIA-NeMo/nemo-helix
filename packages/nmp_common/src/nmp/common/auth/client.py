@@ -6,8 +6,8 @@
 import asyncio
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
 
 import httpx
 from nmp.common.config import AuthConfig
@@ -33,6 +33,25 @@ class AuthorizationResult:
 
     allowed: bool
     reason: Optional[str] = None
+    actor_account_id: Optional[str] = None
+    actor_aliases: list[str] = field(default_factory=list)
+    subject_account_id: Optional[str] = None
+    subject_aliases: list[str] = field(default_factory=list)
+
+    def apply_to_principal(self, principal: Principal) -> Principal:
+        """Return ``principal`` with account context from the PDP response applied."""
+        update: dict[str, Any] = {}
+        if self.actor_account_id:
+            update["account_id"] = self.actor_account_id
+        if self.actor_aliases:
+            update["authz_aliases"] = self.actor_aliases
+        if self.subject_account_id:
+            update["on_behalf_of_account_id"] = self.subject_account_id
+        if self.subject_aliases:
+            update["on_behalf_of_authz_aliases"] = self.subject_aliases
+        if not update:
+            return principal
+        return principal.model_copy(update=update)
 
 
 class AuthClient(BaseModel):
@@ -67,6 +86,10 @@ class AuthClient(BaseModel):
             "scope claims, e.g. to prevent a scope-restricted access key from minting a broader one."
         ),
     )
+    identity_resolution: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Trusted identity material used by the PDP to resolve stable account context.",
+    )
 
     model_config = {"arbitrary_types_allowed": True, "validate_assignment": False}
 
@@ -97,7 +120,26 @@ class AuthClient(BaseModel):
         return {
             **MARK_INTERNAL_REQUEST_HEADERS,
             "X-NMP-Principal-Id": f"service:{self.service_name or 'unknown'}",
+            "X-NMP-Actor-Aliases": f"service:{self.service_name or 'unknown'}",
         }
+
+    def _add_principal_context(
+        self,
+        auth_input: dict[str, Any],
+        *,
+        principal: Principal,
+        include_identity_resolution: bool,
+    ) -> None:
+        if principal.account_id:
+            auth_input["actor_account_id"] = principal.account_id
+        if principal.authz_aliases:
+            auth_input["actor_aliases"] = list(principal.authz_aliases)
+        if principal.on_behalf_of_account_id:
+            auth_input["subject_account_id"] = principal.on_behalf_of_account_id
+        if principal.on_behalf_of_authz_aliases:
+            auth_input["subject_aliases"] = list(principal.on_behalf_of_authz_aliases)
+        if include_identity_resolution and self.identity_resolution:
+            auth_input["identity_resolution"] = self.identity_resolution
 
     async def authorize_request(
         self,
@@ -156,6 +198,7 @@ class AuthClient(BaseModel):
             auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
         if scopes:
             auth_input["scopes"] = scopes
+        self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=True)
 
         auth_url = self.config.get_pdp_url("allow")
 
@@ -177,6 +220,12 @@ class AuthClient(BaseModel):
         result = response.json().get("result", {})
         allowed = result.get("allowed", False)
         reason = result.get("reason")
+        actor_aliases = result.get("actor_aliases", [])
+        if not isinstance(actor_aliases, list):
+            actor_aliases = []
+        subject_aliases = result.get("subject_aliases", [])
+        if not isinstance(subject_aliases, list):
+            subject_aliases = []
 
         logger.debug(
             "PDP response: method=%s, path=%s, allowed=%s, reason=%s",
@@ -186,7 +235,14 @@ class AuthClient(BaseModel):
             reason,
         )
 
-        return AuthorizationResult(allowed=allowed, reason=reason)
+        return AuthorizationResult(
+            allowed=allowed,
+            reason=reason,
+            actor_account_id=result.get("actor_account_id"),
+            actor_aliases=[str(alias) for alias in actor_aliases if isinstance(alias, str)],
+            subject_account_id=result.get("subject_account_id"),
+            subject_aliases=[str(alias) for alias in subject_aliases if isinstance(alias, str)],
+        )
 
     async def _pdp_check(self, pdp_endpoint: str, auth_input: dict, result_key: str, check_name: str) -> bool:
         """Send a single-shot PDP check and extract a boolean result.
@@ -277,6 +333,7 @@ class AuthClient(BaseModel):
             auth_input["principal_groups"] = self.principal.effective_groups
         if self.principal.on_behalf_of:
             auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
+        self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=False)
 
         allowed = await self._pdp_check("has_permissions", auth_input, "allowed", "permission check")
 
@@ -297,17 +354,19 @@ class AuthClient(BaseModel):
         if not self.policy_decision_point_base_url:
             raise RuntimeError("Policy Decision Point URL not configured for role checks")
 
+        effective_principal = self.principal.effective_principal
         auth_input = {
-            "principal_id": self.principal.effective_id,
+            "principal_id": effective_principal.id,
             "workspace": workspace_id,
             "role": role,
         }
-        if self.principal.effective_email:
-            auth_input["principal_email"] = self.principal.effective_email
-        if self.principal.effective_groups:
-            auth_input["principal_groups"] = self.principal.effective_groups
+        if effective_principal.email:
+            auth_input["principal_email"] = effective_principal.email
+        if effective_principal.groups:
+            auth_input["principal_groups"] = effective_principal.groups
         if self.principal.on_behalf_of:
             auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
+        self._add_principal_context(auth_input, principal=effective_principal, include_identity_resolution=False)
 
         return await self._pdp_check("has_role", auth_input, "has_role", "role check")
 

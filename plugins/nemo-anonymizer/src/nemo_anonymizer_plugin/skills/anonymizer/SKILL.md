@@ -5,6 +5,9 @@
 name: anonymizer
 description: Use when the user wants to detect and replace, hash, redact, annotate, or rewrite PII (names, emails, phone numbers, locations, ...) in a CSV or Parquet dataset using the NeMo Anonymizer plugin.
 argument-hint: [describe the dataset and how PII should be handled]
+allowed-tools: Bash, Read
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Before You Start

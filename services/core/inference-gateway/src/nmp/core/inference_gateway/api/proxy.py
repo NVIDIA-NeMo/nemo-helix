@@ -32,7 +32,7 @@ from nemo_platform_plugin.inference_middleware import (
 )
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
-from nmp.common.entities.utils import parse_model_entity_ref
+from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
 from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
 from nmp.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -1027,9 +1027,18 @@ async def virtual_model_proxy(
     # (the existing behavior); if default_model_entity is unset, body["model"] is left as-is.
     if virtual_model.default_model_entity:
         body_model = json_body.get("model")
-        if isinstance(body_model, str) and "&adapters/" in body_model:
-            adapter_suffix = body_model.split("&adapters/", 1)[1]
-            json_body["model"] = f"{virtual_model.default_model_entity}&adapters/{adapter_suffix}"
+        adapter_parts = (
+            parse_adapters_suffix(body_model) if isinstance(body_model, str) and "&adapters/" in body_model else None
+        )
+        if adapter_parts is not None:
+            # Splice the request's adapter onto the VM's base entity. default_model_entity
+            # is used verbatim as the prefix (not parsed - it's an unrestricted field).
+            # Example: body ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` ->
+            # ``base-ws/base&adapters/a-ws/a-name``.
+            _, adapter_workspace, adapter_name = adapter_parts
+            json_body["model"] = (
+                f"{virtual_model.default_model_entity}{ADAPTERS_INFIX}{adapter_workspace}/{adapter_name}"
+            )
         else:
             json_body["model"] = virtual_model.default_model_entity
 

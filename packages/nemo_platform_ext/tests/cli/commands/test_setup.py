@@ -10,6 +10,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, call, patch
 
 import httpx
@@ -18,8 +19,6 @@ import pytest
 import typer
 from click.core import ParameterSource
 from click.exceptions import Exit as ClickExit
-from nemo_platform import APIConnectionError, APIStatusError, APITimeoutError
-from nemo_platform.resources.inference.providers import ProvidersResource
 from nemo_platform_ext.cli.commands.setup import (
     _AGENT_API_READINESS_POLL_INTERVAL,
     _AGENT_DEPLOY_POLL_INTERVAL,
@@ -36,6 +35,7 @@ from nemo_platform_ext.cli.commands.setup import (
     ONBOARDING_PATHS,
     KeyValidationResult,
     ModelPair,
+    SetupClients,
     _agent_config_path,
     _agent_exists,
     _agents_api_ready,
@@ -103,7 +103,13 @@ from nemo_platform_ext.config.models import (
 )
 from nemo_platform_ext.local.process import PortConflict
 from nemo_platform_ext.ui.prompts import UserCancelled
-from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, raise_for_status
+from nemo_platform_plugin.client.types import RetryPolicy
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_platform_plugin.inference_gateway.types import JsonBody
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
+from nemo_platform_plugin.secrets.client import SecretsClient
 from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest, PlatformSecretUpdateRequest
 from pydantic import SecretStr
 
@@ -386,67 +392,95 @@ class TestCheckOllamaRunning:
 # ---------------------------------------------------------------------------
 
 
+def _http_error(status_code: int, text: str = "", body: object | None = None, *, url: str) -> NemoHTTPError:
+    """Build the typed-client error for a non-2xx response, exactly as the client raises it."""
+    request = httpx.Request("POST", url)
+    response = (
+        httpx.Response(status_code, json=body, request=request)
+        if body is not None
+        else httpx.Response(status_code, text=text, request=request)
+    )
+    try:
+        raise_for_status(response)
+    except NemoHTTPError as exc:
+        return exc
+    raise AssertionError(f"{status_code} is not an error status")
+
+
 def _not_found_error() -> NotFoundError:
-    """Build a NotFoundError backed by a mock 404 response for `get_secret`."""
-    resp = MagicMock(spec=httpx.Response)
-    resp.status_code = 404
-    resp.json.side_effect = ValueError("no body")
-    resp.text = "not found"
-    resp.reason_phrase = "Not Found"
-    return NotFoundError(resp)
+    """Build the NotFoundError a typed client raises for a 404 lookup."""
+    error = _http_error(404, text="not found", url="http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/x")
+    assert isinstance(error, NotFoundError)
+    return error
+
+
+def _entity_response(body: object) -> MagicMock:
+    """Mimic a ``NemoResponse`` whose ``.data()`` returns *body*."""
+    response = MagicMock()
+    response.data.return_value = body
+    return response
+
+
+def _list_response(items: list[object]) -> MagicMock:
+    """Mimic a ``NemoPaginatedResponse`` whose ``.items()`` yields *items*."""
+    response = MagicMock()
+    response.items.return_value = list(items)
+    response.page.return_value.items = list(items)
+    return response
 
 
 def _make_mock_secrets_client(*, secret_exists: bool = False) -> MagicMock:
     """Build a mock typed SecretsClient with get/create/update as MagicMocks."""
-    secrets = MagicMock()
+    secrets = MagicMock(spec=SecretsClient)
     secrets.get_secret = MagicMock()
     secrets.create_secret = MagicMock()
     secrets.update_secret = MagicMock()
     if secret_exists:
-        secrets.get_secret.return_value = MagicMock()
+        secrets.get_secret.return_value = _entity_response(MagicMock())
     else:
         secrets.get_secret.side_effect = _not_found_error()
     return secrets
 
 
-def _make_mock_client(*, provider_exists: bool = False, secret_exists: bool = False) -> MagicMock:
-    """Build a mock NeMoPlatform client with configurable provider/secret state.
-
-    The typed secrets client returned by ``client_from_platform`` (patched via
-    the ``_patch_secrets_client`` fixture) is stashed on ``client.mock_secrets``
-    so tests can assert on ``get_secret``/``create_secret``/``update_secret``.
-    """
-    client = MagicMock()
-    client.inference.providers = MagicMock(spec=ProvidersResource)
-    client.mock_secrets = _make_mock_secrets_client(secret_exists=secret_exists)
+def _make_mock_models_client(*, provider_exists: bool = False) -> MagicMock:
+    """Build a mock typed ModelsClient with the provider methods setup uses."""
+    models = MagicMock(spec=ModelsClient)
+    models.get_provider = MagicMock()
+    models.create_provider = MagicMock()
+    models.upsert_provider = MagicMock()
+    models.list_providers = MagicMock(return_value=_list_response([]))
     if provider_exists:
-        client.inference.providers.retrieve.return_value = MagicMock()
+        models.get_provider.return_value = _entity_response(MagicMock())
     else:
-        client.inference.providers.retrieve.side_effect = Exception("not found")
-    return client
+        models.get_provider.side_effect = _not_found_error()
+    return models
 
 
-@pytest.fixture(autouse=True)
-def _patch_secrets_client():
-    """Route ``client_from_platform(client, SecretsClient)`` to ``client.mock_secrets``.
+def _make_mock_client(*, provider_exists: bool = False, secret_exists: bool = False) -> Any:
+    """Build the typed-client bundle setup runs against, with configurable provider/secret state.
 
-    The secrets helpers in setup.py obtain a typed ``SecretsClient`` via
-    ``client_from_platform``. Real adaptation would run against a MagicMock and
-    blow up in ``raise_for_status``, so tests patch it to return the mock secrets
-    client attached to the mock platform client (falling back to a fresh mock for
-    plain ``MagicMock()`` clients that lack ``mock_secrets``).
+    Returns a ``SetupClients`` whose ``models``, ``secrets`` and ``gateway`` are
+    spec'd MagicMocks (typed ``Any`` so tests can reach mock attributes) for
+    asserting on ``create_provider``/``upsert_provider``,
+    ``get_secret``/``create_secret``/``update_secret`` and ``openai_post``.
     """
+    return SetupClients(
+        models=_make_mock_models_client(provider_exists=provider_exists),
+        secrets=_make_mock_secrets_client(secret_exists=secret_exists),
+        gateway=MagicMock(spec=InferenceGatewayClient),
+    )
 
-    def _resolve(client, _client_cls):
-        secrets = getattr(client, "mock_secrets", None)
-        if isinstance(secrets, MagicMock):
-            return secrets
-        fallback = _make_mock_secrets_client()
-        client.mock_secrets = fallback
-        return fallback
 
-    with patch(f"{SETUP_MOD}.client_from_platform", side_effect=_resolve):
-        yield
+def _create_body(client: Any) -> CreateModelProviderRequest:
+    body = client.models.create_provider.call_args.kwargs["body"]
+    assert isinstance(body, CreateModelProviderRequest)
+    return body
+
+
+def _upsert_body(client: Any) -> UpsertModelProviderRequest:
+    body = client.models.upsert_provider.call_args.kwargs["body"]
+    assert isinstance(body, UpsertModelProviderRequest)
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -455,16 +489,11 @@ def _patch_secrets_client():
 
 
 class TestCreateProvider:
-    """Tests for _create_provider -- ensures only SDK-supported kwargs are passed."""
-
-    def _make_client(self):
-        client = MagicMock()
-        client.inference.providers = MagicMock(spec=ProvidersResource)
-        return client
+    """Tests for _create_provider -- ensures only user-provided fields land in the request body."""
 
     def test_anthropic_provider_kwargs(self):
         """Provider creation keeps auth templating in the dedicated field."""
-        client = self._make_client()
+        client = _make_mock_client()
         _create_provider(
             client,
             name="anthropic",
@@ -474,15 +503,17 @@ class TestCreateProvider:
             auth_header_format="X-Api-Key: {{ auth_secret }}",
             default_extra_headers={"anthropic-version": "2023-06-01"},
         )
-        call_kwargs = client.inference.providers.create.call_args.kwargs
-        assert call_kwargs["api_key_secret_name"] == "anthropic-api-key"
-        assert call_kwargs["auth_header_format"] == "X-Api-Key: {{ auth_secret }}"
-        assert "required_extra_headers" not in call_kwargs
-        assert call_kwargs["default_extra_headers"] == {"anthropic-version": "2023-06-01"}
+        assert client.models.create_provider.call_args.kwargs["workspace"] == "default"
+        body = _create_body(client)
+        assert body.name == "anthropic"
+        assert body.api_key_secret_name == "anthropic-api-key"
+        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        assert "required_extra_headers" not in body.model_fields_set
+        assert body.default_extra_headers == {"anthropic-version": "2023-06-01"}
 
     def test_no_auth_header_format_skips_auth_fields(self):
         """Providers using default Bearer auth do not send auth overrides."""
-        client = self._make_client()
+        client = _make_mock_client()
         _create_provider(
             client,
             name="openai",
@@ -490,13 +521,13 @@ class TestCreateProvider:
             secret_name="openai-api-key",
             workspace="default",
         )
-        call_kwargs = client.inference.providers.create.call_args.kwargs
-        assert "required_extra_headers" not in call_kwargs
-        assert "auth_header_format" not in call_kwargs
+        body = _create_body(client)
+        assert "required_extra_headers" not in body.model_fields_set
+        assert "auth_header_format" not in body.model_fields_set
 
     def test_provider_without_secret(self):
         """Providers without secrets (e.g. Ollama) should omit api_key_secret_name."""
-        client = self._make_client()
+        client = _make_mock_client()
         _create_provider(
             client,
             name="ollama",
@@ -504,8 +535,9 @@ class TestCreateProvider:
             secret_name=None,
             workspace="default",
         )
-        call_kwargs = client.inference.providers.create.call_args.kwargs
-        assert "api_key_secret_name" not in call_kwargs
+        body = _create_body(client)
+        assert "api_key_secret_name" not in body.model_fields_set
+        assert body.model_dump(exclude_unset=True) == {"name": "ollama", "host_url": "http://localhost:11434/v1"}
 
 
 # ---------------------------------------------------------------------------
@@ -537,19 +569,20 @@ class TestAutoSetup:
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test123"}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "openai"
-        client.mock_secrets.create_secret.assert_called_once()
-        client.inference.providers.create.assert_called_once()
-        create_kwargs = client.inference.providers.create.call_args
-        assert create_kwargs.kwargs["name"] == "openai"
-        assert create_kwargs.kwargs["host_url"] == "https://api.openai.com/v1"
+        client.secrets.create_secret.assert_called_once()
+        client.models.create_provider.assert_called_once()
+        assert client.models.create_provider.call_args.kwargs["workspace"] == "default"
+        body = _create_body(client)
+        assert body.name == "openai"
+        assert body.host_url == "https://api.openai.com/v1"
+        assert body.api_key_secret_name == "openai-api-key"
 
     def test_nvidia_key_creates_build_provider(self):
         client = _make_mock_client()
         with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-test"}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "nvidia-build"
-        create_kwargs = client.inference.providers.create.call_args
-        assert create_kwargs.kwargs["name"] == "nvidia-build"
+        assert _create_body(client).name == "nvidia-build"
 
     def test_nemo_default_key_with_url(self):
         client = _make_mock_client()
@@ -560,8 +593,7 @@ class TestAutoSetup:
         with patch.dict("os.environ", env, clear=True):
             result = _auto_setup(client, "default")
         assert result == "openai"
-        create_kwargs = client.inference.providers.create.call_args
-        assert create_kwargs.kwargs["name"] == "openai"
+        assert _create_body(client).name == "openai"
 
     def test_nemo_default_key_with_custom_url(self):
         client = _make_mock_client()
@@ -572,17 +604,19 @@ class TestAutoSetup:
         with patch.dict("os.environ", env, clear=True):
             result = _auto_setup(client, "default")
         assert result == "my-custom-llm-example-com"
-        create_kwargs = client.inference.providers.create.call_args
-        assert create_kwargs.kwargs["name"] == "my-custom-llm-example-com"
-        assert create_kwargs.kwargs["host_url"] == "https://my-custom-llm.example.com/v1"
+        body = _create_body(client)
+        assert body.name == "my-custom-llm-example-com"
+        assert body.host_url == "https://my-custom-llm.example.com/v1"
 
     def test_existing_provider_updated_not_recreated(self):
         client = _make_mock_client(provider_exists=True, secret_exists=True)
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test123"}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "openai"
-        client.inference.providers.create.assert_not_called()
-        client.inference.providers.update.assert_called_once()
+        client.models.create_provider.assert_not_called()
+        client.models.upsert_provider.assert_called_once()
+        assert client.models.upsert_provider.call_args.kwargs["name"] == "openai"
+        assert client.models.upsert_provider.call_args.kwargs["workspace"] == "default"
 
     def test_priority_order(self):
         """NEMO_DEFAULT_INFERENCE_KEY takes priority over OPENAI_API_KEY."""
@@ -595,8 +629,7 @@ class TestAutoSetup:
         with patch.dict("os.environ", env, clear=True):
             result = _auto_setup(client, "default")
         assert result == "anthropic"
-        create_kwargs = client.inference.providers.create.call_args
-        assert create_kwargs.kwargs["name"] == "anthropic"
+        assert _create_body(client).name == "anthropic"
 
     def test_anthropic_auto_setup_maps_auth_header(self):
         """Auto-setup persists the Anthropic auth template without exposing the key."""
@@ -605,12 +638,12 @@ class TestAutoSetup:
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": api_key}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "anthropic"
-        call_kwargs = client.inference.providers.create.call_args.kwargs
-        assert call_kwargs["name"] == "anthropic"
-        assert call_kwargs["api_key_secret_name"] == "anthropic-api-key"
-        assert call_kwargs["auth_header_format"] == "X-Api-Key: {{ auth_secret }}"
-        assert "required_extra_headers" not in call_kwargs
-        assert api_key not in str(call_kwargs)
+        body = _create_body(client)
+        assert body.name == "anthropic"
+        assert body.api_key_secret_name == "anthropic-api-key"
+        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        assert "required_extra_headers" not in body.model_fields_set
+        assert api_key not in str(client.models.create_provider.call_args)
 
 
 # ---------------------------------------------------------------------------
@@ -1936,15 +1969,15 @@ class TestProviderIdempotency:
             api_key="new-key-value",
             workspace="default",
         )
-        client.mock_secrets.update_secret.assert_called_once()
-        update_call = client.mock_secrets.update_secret.call_args
+        client.secrets.update_secret.assert_called_once()
+        update_call = client.secrets.update_secret.call_args
         assert update_call.kwargs["name"] == "nvidia-build-api-key"
         assert update_call.kwargs["workspace"] == "default"
         assert isinstance(update_call.kwargs["body"], PlatformSecretUpdateRequest)
         assert update_call.kwargs["body"].value.get_secret_value() == "new-key-value"
-        client.mock_secrets.create_secret.assert_not_called()
-        client.inference.providers.create.assert_called_once()
-        client.inference.providers.update.assert_not_called()
+        client.secrets.create_secret.assert_not_called()
+        client.models.create_provider.assert_called_once()
+        client.models.upsert_provider.assert_not_called()
 
     def test_existing_provider_gets_updated_with_secret(self):
         """When the provider exists, it should be updated to point at the secret."""
@@ -1956,18 +1989,21 @@ class TestProviderIdempotency:
             api_key="my-key",
             workspace="default",
         )
-        client.mock_secrets.create_secret.assert_called_once()
-        create_call = client.mock_secrets.create_secret.call_args
+        client.secrets.create_secret.assert_called_once()
+        create_call = client.secrets.create_secret.call_args
         assert create_call.kwargs["workspace"] == "default"
         assert isinstance(create_call.kwargs["body"], PlatformSecretCreateRequest)
         assert create_call.kwargs["body"].name == "nvidia-build-api-key"
         assert create_call.kwargs["body"].value.get_secret_value() == "my-key"
-        client.mock_secrets.update_secret.assert_not_called()
-        client.inference.providers.update.assert_called_once()
-        call_kwargs = client.inference.providers.update.call_args.kwargs
-        assert call_kwargs["api_key_secret_name"] == "nvidia-build-api-key"
-        assert call_kwargs["host_url"] == "https://integrate.api.nvidia.com"
-        client.inference.providers.create.assert_not_called()
+        client.secrets.update_secret.assert_not_called()
+        client.models.upsert_provider.assert_called_once()
+        upsert_call = client.models.upsert_provider.call_args
+        assert upsert_call.kwargs["name"] == "nvidia-build"
+        assert upsert_call.kwargs["workspace"] == "default"
+        body = _upsert_body(client)
+        assert body.api_key_secret_name == "nvidia-build-api-key"
+        assert body.host_url == "https://integrate.api.nvidia.com"
+        client.models.create_provider.assert_not_called()
 
     def test_fresh_install_creates_both(self):
         """When neither exists, both secret and provider are created (regression guard)."""
@@ -1979,10 +2015,10 @@ class TestProviderIdempotency:
             api_key="sk-test",
             workspace="default",
         )
-        client.mock_secrets.create_secret.assert_called_once()
-        client.inference.providers.create.assert_called_once()
-        client.mock_secrets.update_secret.assert_not_called()
-        client.inference.providers.update.assert_not_called()
+        client.secrets.create_secret.assert_called_once()
+        client.models.create_provider.assert_called_once()
+        client.secrets.update_secret.assert_not_called()
+        client.models.upsert_provider.assert_not_called()
 
     def test_existing_provider_updated_with_extra_headers(self):
         """Provider update repairs Anthropic auth without exposing the API key."""
@@ -1997,12 +2033,13 @@ class TestProviderIdempotency:
             auth_header_format="X-Api-Key: {{ auth_secret }}",
             default_extra_headers={"anthropic-version": "2023-06-01"},
         )
-        call_kwargs = client.inference.providers.update.call_args.kwargs
-        assert call_kwargs["api_key_secret_name"] == "anthropic-api-key"
-        assert call_kwargs["auth_header_format"] == "X-Api-Key: {{ auth_secret }}"
-        assert call_kwargs["required_extra_headers"] is None
-        assert api_key not in str(call_kwargs)
-        assert call_kwargs["default_extra_headers"] == {"anthropic-version": "2023-06-01"}
+        body = _upsert_body(client)
+        assert body.api_key_secret_name == "anthropic-api-key"
+        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        # The legacy required_extra_headers auth path is explicitly cleared on the wire.
+        assert body.model_dump(exclude_unset=True)["required_extra_headers"] is None
+        assert api_key not in str(client.models.upsert_provider.call_args)
+        assert body.default_extra_headers == {"anthropic-version": "2023-06-01"}
 
     def test_auto_setup_updates_existing_anthropic_auth(self):
         """Auto setup repairs an existing Anthropic provider's auth template."""
@@ -2011,11 +2048,11 @@ class TestProviderIdempotency:
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": api_key}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "anthropic"
-        call_kwargs = client.inference.providers.update.call_args.kwargs
-        assert call_kwargs["api_key_secret_name"] == "anthropic-api-key"
-        assert call_kwargs["auth_header_format"] == "X-Api-Key: {{ auth_secret }}"
-        assert call_kwargs["required_extra_headers"] is None
-        assert api_key not in str(call_kwargs)
+        body = _upsert_body(client)
+        assert body.api_key_secret_name == "anthropic-api-key"
+        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        assert body.model_dump(exclude_unset=True)["required_extra_headers"] is None
+        assert api_key not in str(client.models.upsert_provider.call_args)
 
     # -- auto path --
 
@@ -2025,10 +2062,9 @@ class TestProviderIdempotency:
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-new-key"}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "openai"
-        client.mock_secrets.create_secret.assert_called_once()
-        client.inference.providers.update.assert_called_once()
-        call_kwargs = client.inference.providers.update.call_args.kwargs
-        assert call_kwargs["api_key_secret_name"] == "openai-api-key"
+        client.secrets.create_secret.assert_called_once()
+        client.models.upsert_provider.assert_called_once()
+        assert _upsert_body(client).api_key_secret_name == "openai-api-key"
 
     def test_auto_setup_updates_existing_secret_value(self):
         """In auto mode, existing secret should be updated with the new key value."""
@@ -2036,13 +2072,13 @@ class TestProviderIdempotency:
         with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-new"}, clear=True):
             result = _auto_setup(client, "default")
         assert result == "nvidia-build"
-        client.mock_secrets.update_secret.assert_called_once()
-        update_call = client.mock_secrets.update_secret.call_args
+        client.secrets.update_secret.assert_called_once()
+        update_call = client.secrets.update_secret.call_args
         assert update_call.kwargs["name"] == "nvidia-build-api-key"
         assert update_call.kwargs["workspace"] == "default"
         assert isinstance(update_call.kwargs["body"], PlatformSecretUpdateRequest)
         assert update_call.kwargs["body"].value.get_secret_value() == "nvapi-new"
-        client.mock_secrets.create_secret.assert_not_called()
+        client.secrets.create_secret.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -2172,7 +2208,7 @@ class TestInteractiveModelPairSelection:
 
     def test_picker_only_includes_models_from_selected_provider(self):
         """Models from another provider in the workspace must not enter the picker."""
-        client = MagicMock()
+        client = _make_mock_client()
         provider_a = MagicMock()
         provider_a.name = "nvidia-build"
         provider_a.served_models = [
@@ -2183,7 +2219,7 @@ class TestInteractiveModelPairSelection:
         provider_b.served_models = [
             MagicMock(model_entity_id="default/qwen2.5:1.5b"),
         ]
-        client.inference.providers.list.return_value = MagicMock(data=[provider_a, provider_b])
+        client.models.list_providers.return_value = _list_response([provider_a, provider_b])
 
         with patch(
             f"{self._MOD}.prompt_select",
@@ -2210,9 +2246,10 @@ class TestInteractiveModelPairSelection:
         assert fast_call.args[0] == "Choose your fast model (used for latency-sensitive agent work):"
         assert fast_call.kwargs["default"] == "default/qwen2.5:1.5b"
         assert fast_call.kwargs["hint"] == "Press Enter to reuse the default model."
+        assert client.models.list_providers.call_args.kwargs == {"workspace": "default"}
 
     def test_picker_has_no_unverified_default(self):
-        client = MagicMock()
+        client = _make_mock_client()
         choices = [
             ("default/ai21labs-jamba-1-5-large-instruct", "Jamba"),
             ("default/nvidia/nemotron-nano-9b-v2", "Nemotron Nano"),
@@ -2238,7 +2275,7 @@ class TestInteractiveModelPairSelection:
         assert fast_call.kwargs["default"] == "default/nvidia/nemotron-nano-9b-v2"
 
     def test_returns_none_when_only_specialist_models_are_available(self):
-        client = MagicMock()
+        client = _make_mock_client()
         provider = MagicMock()
         provider.name = "nvidia-build"
         provider.served_models = [
@@ -2246,7 +2283,7 @@ class TestInteractiveModelPairSelection:
             MagicMock(model_entity_id="default/nvidia-nv-embedqa-e5-v5"),
             MagicMock(model_entity_id="default/llama-3.1-nemoguard-8b-content-safety"),
         ]
-        client.inference.providers.list.return_value = MagicMock(data=[provider])
+        client.models.list_providers.return_value = _list_response([provider])
 
         with (
             patch(f"{self._MOD}.prompt_select") as mock_prompt_select,
@@ -2279,27 +2316,44 @@ class TestPickDefaultChatEntity:
         assert _pick_default_chat_entity(["default/adept-fuyu-8b", "default/nv-embedqa"]) is None
 
 
-def _probe_error(status_code: int, text: str = "", body: object | None = None) -> APIStatusError:
-    """Build the SDK error the gateway raises for a non-2xx probe response."""
-    request = httpx.Request("POST", "http://localhost:8080/v1/chat/completions")
-    return APIStatusError("probe failed", response=httpx.Response(status_code, text=text, request=request), body=body)
+_PROBE_URL = "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/v1/chat/completions"
 
 
-def _client_answering(outcomes: dict[str, object]) -> MagicMock:
-    """Return a client whose gateway probe answers per model entity ID.
+def _probe_error(status_code: int, text: str = "", body: object | None = None) -> NemoHTTPError:
+    """Build the typed-client error the gateway raises for a non-2xx probe response."""
+    return _http_error(status_code, text=text, body=body, url=_PROBE_URL)
+
+
+def _probe_timeout() -> NemoTransportError:
+    """Build the typed-client error raised when the probe request times out."""
+    return NemoTransportError(httpx.ReadTimeout("timed out", request=httpx.Request("POST", _PROBE_URL)))
+
+
+def _probe_unreachable() -> NemoTransportError:
+    """Build the typed-client error raised when the gateway cannot be reached."""
+    return NemoTransportError(httpx.ConnectError("connection refused", request=httpx.Request("POST", _PROBE_URL)))
+
+
+def _probe_post(client: Any) -> MagicMock:
+    """Return the ``openai_post`` mock on the zero-retry probe client setup derives from the gateway."""
+    return client.gateway.with_options.return_value.openai_post
+
+
+def _client_answering(outcomes: dict[str, object]) -> Any:
+    """Return clients whose gateway probe answers per model entity ID.
 
     A value that is an exception is raised; anything else is returned as the
     successful response.
     """
-    client = MagicMock()
+    client = _make_mock_client()
 
-    def post(trailing_uri: str, *, workspace: str, body: dict) -> object:
-        outcome = outcomes[str(body["model"])]
+    def post(*, trailing_uri: str, workspace: str, body: JsonBody) -> object:
+        outcome = outcomes[str(body.root["model"])]
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
 
-    client.with_options.return_value.inference.gateway.openai.post.side_effect = post
+    _probe_post(client).side_effect = post
     return client
 
 
@@ -2361,54 +2415,53 @@ class TestModelProbe:
     def test_classifies_gateway_responses(self, outcome, expected):
         client = _client_answering({"default/model": outcome})
 
-        assert _probe_model_entity(client.with_options(), "default", "default/model") is expected
+        assert _probe_model_entity(client.gateway.with_options(), "default", "default/model") is expected
 
     def test_retries_a_404_until_the_route_is_published(self):
         """The gateway 404s a discovered model until its VirtualModel exists."""
-        client = MagicMock()
-        client.inference.gateway.openai.post.side_effect = [_probe_error(404), _probe_error(404), MagicMock()]
+        gateway = MagicMock()
+        gateway.openai_post.side_effect = [_probe_error(404), _probe_error(404), MagicMock()]
 
         with patch(f"{SETUP_MOD}._pause"):
-            usable = _probe_model_entity(client, "default", "default/model")
+            usable = _probe_model_entity(gateway, "default", "default/model")
 
         assert usable is True
-        assert client.inference.gateway.openai.post.call_count == 3
+        assert gateway.openai_post.call_count == 3
 
     def test_does_not_retry_an_entitlement_404(self):
-        client = MagicMock()
-        client.inference.gateway.openai.post.side_effect = _probe_error(
-            404, body={"detail": "Function not found for account"}
-        )
+        gateway = MagicMock()
+        gateway.openai_post.side_effect = _probe_error(404, body={"detail": "Function not found for account"})
 
-        assert _probe_model_entity(client, "default", "default/model") is False
-        assert client.inference.gateway.openai.post.call_count == 1
+        assert _probe_model_entity(gateway, "default", "default/model") is False
+        assert gateway.openai_post.call_count == 1
 
     def test_skips_timeouts_so_later_candidates_can_be_tried(self):
-        client = _client_answering(
-            {"default/model": APITimeoutError(request=httpx.Request("POST", "http://localhost:8080"))}
-        )
+        client = _client_answering({"default/model": _probe_timeout()})
 
-        assert _probe_model_entity(client.with_options(), "default", "default/model") is False
+        assert _probe_model_entity(client.gateway.with_options(), "default", "default/model") is False
 
     def test_reraises_when_the_gateway_is_unreachable(self):
-        client = _client_answering(
-            {"default/model": APIConnectionError(request=httpx.Request("POST", "http://localhost:8080"))}
-        )
+        client = _client_answering({"default/model": _probe_unreachable()})
 
-        with pytest.raises(APIConnectionError):
-            _probe_model_entity(client.with_options(), "default", "default/model")
+        with pytest.raises(NemoTransportError):
+            _probe_model_entity(client.gateway.with_options(), "default", "default/model")
 
     def test_sends_a_short_chat_request_for_the_candidate(self):
         client = _client_answering({"default/model": MagicMock()})
-        gateway = client.with_options()
+        gateway = client.gateway.with_options()
 
         _probe_model_entity(gateway, "default", "default/model")
 
-        gateway.inference.gateway.openai.post.assert_called_once()
-        _, kwargs = gateway.inference.gateway.openai.post.call_args
+        gateway.openai_post.assert_called_once()
+        _, kwargs = gateway.openai_post.call_args
+        assert kwargs["trailing_uri"] == "v1/chat/completions"
         assert kwargs["workspace"] == "default"
-        assert kwargs["body"]["model"] == "default/model"
-        assert kwargs["body"]["messages"][0]["role"] == "user"
+        assert isinstance(kwargs["body"], JsonBody)
+        assert kwargs["body"].root == {
+            "model": "default/model",
+            "messages": [{"role": "user", "content": "Respond with 'OK'"}],
+            "max_tokens": 16,
+        }
 
 
 class TestUsableModelPairSelection:
@@ -2428,6 +2481,17 @@ class TestUsableModelPairSelection:
         assert _select_usable_model_pair(client, "default", entity_ids) == ModelPair(
             default="default/nvidia-nemotron-3.5-lightning-30b-a3b",
             fast="default/nvidia-nemotron-nano-9b-v2",
+        )
+
+    def test_probes_with_a_zero_retry_short_timeout_gateway_client(self):
+        """Probes must not inherit the CLI's retry policy or 60s timeout."""
+        entity_ids = ["default/nvidia-nemotron-nano-9b-v2"]
+        client = _client_answering({entity_ids[0]: MagicMock()})
+
+        _select_usable_model_pair(client, "default", entity_ids)
+
+        client.gateway.with_options.assert_called_once_with(
+            retry=RetryPolicy(max_retries=0), timeout=setup_commands._MODEL_PROBE_TIMEOUT
         )
 
     def test_skips_a_model_the_account_cannot_serve(self):
@@ -2460,8 +2524,7 @@ class TestUsableModelPairSelection:
         client = _client_answering({entity_id: _probe_error(404) for entity_id in entity_ids})
 
         assert _select_usable_model_pair(client, "default", entity_ids) is None
-        post = client.with_options.return_value.inference.gateway.openai.post
-        probed = {str(probe.kwargs["body"]["model"]) for probe in post.call_args_list}
+        probed = {str(probe.kwargs["body"].root["model"]) for probe in _probe_post(client).call_args_list}
         assert len(probed) == setup_commands._MODEL_PROBE_MAX_ATTEMPTS
 
     def test_skips_a_timed_out_candidate_and_keeps_probing(self):
@@ -2469,10 +2532,9 @@ class TestUsableModelPairSelection:
             "default/nvidia-nemotron-3-ultra-550b-a55b",
             "default/nvidia-nemotron-nano-9b-v2",
         ]
-        timeout = APITimeoutError(request=httpx.Request("POST", "http://localhost:8080"))
         client = _client_answering(
             {
-                "default/nvidia-nemotron-3-ultra-550b-a55b": timeout,
+                "default/nvidia-nemotron-3-ultra-550b-a55b": _probe_timeout(),
                 "default/nvidia-nemotron-nano-9b-v2": MagicMock(),
             }
         )
@@ -2485,8 +2547,8 @@ class TestUsableModelPairSelection:
     def test_waits_out_the_reconcile_lag_before_rejecting_candidates(self):
         """Cold start: the first probe 404s because the model has no route yet."""
         entity_ids = ["default/nvidia-nemotron-nano-9b-v2"]
-        client = MagicMock()
-        client.with_options.return_value.inference.gateway.openai.post.side_effect = [
+        client = _make_mock_client()
+        _probe_post(client).side_effect = [
             _probe_error(404),
             MagicMock(),
         ]
@@ -2499,12 +2561,12 @@ class TestUsableModelPairSelection:
     def test_each_candidate_gets_a_route_readiness_window(self):
         large = "default/nvidia-model-70b-instruct"
         small = "default/nvidia-model-8b-instruct"
-        client = MagicMock()
+        client = _make_mock_client()
         attempts = {large: 0, small: 0}
         clock = {"now": 0.0}
 
-        def post(trailing_uri: str, *, workspace: str, body: dict) -> object:
-            entity_id = str(body["model"])
+        def post(*, trailing_uri: str, workspace: str, body: JsonBody) -> object:
+            entity_id = str(body.root["model"])
             attempts[entity_id] += 1
             if entity_id == large:
                 if attempts[large] == setup_commands._MODEL_ROUTE_MAX_RETRIES + 1:
@@ -2514,7 +2576,7 @@ class TestUsableModelPairSelection:
                 raise _probe_error(404)
             return MagicMock()
 
-        client.with_options.return_value.inference.gateway.openai.post.side_effect = post
+        _probe_post(client).side_effect = post
 
         with patch(f"{SETUP_MOD}.time.monotonic", side_effect=lambda: clock["now"]):
             assert _select_usable_model_pair(client, "default", [large, small]) == ModelPair(
@@ -2528,20 +2590,17 @@ class TestUsableModelPairSelection:
 
     def test_stops_probing_after_the_time_budget(self):
         entity_ids = [f"default/model-{index}b-instruct" for index in range(1, 6)]
-        timeout = APITimeoutError(request=httpx.Request("POST", "http://localhost:8080"))
-        client = _client_answering({entity_id: timeout for entity_id in entity_ids})
+        client = _client_answering({entity_id: _probe_timeout() for entity_id in entity_ids})
         clock = iter([0.0, 0.0, 0.0, 91.0])
 
         with patch(f"{SETUP_MOD}.time.monotonic", side_effect=lambda: next(clock)):
             assert _select_usable_model_pair(client, "default", entity_ids) is None
 
-        post = client.with_options.return_value.inference.gateway.openai.post
-        assert post.call_count == 1
+        assert _probe_post(client).call_count == 1
 
     def test_saves_nothing_when_the_gateway_is_unreachable(self):
         entity_ids = ["default/nvidia-nemotron-nano-9b-v2", "default/meta-llama-3-3-70b-instruct"]
-        unreachable = APIConnectionError(request=httpx.Request("POST", "http://localhost:8080"))
-        client = _client_answering({entity_id: unreachable for entity_id in entity_ids})
+        client = _client_answering({entity_id: _probe_unreachable() for entity_id in entity_ids})
 
         assert _select_usable_model_pair(client, "default", entity_ids) is None
 
@@ -2550,19 +2609,19 @@ class TestUsableModelPairSelection:
         client = _client_answering({})
 
         assert _select_usable_model_pair(client, "default", entity_ids) is None
-        client.with_options.return_value.inference.gateway.openai.post.assert_not_called()
+        _probe_post(client).assert_not_called()
 
 
 class TestAutoModelPairSelection:
     def test_entity_discovery_filters_other_workspace_providers(self):
-        client = MagicMock()
+        client = _make_mock_client()
         openai = MagicMock()
         openai.name = "openai"
         openai.served_models = [MagicMock(model_entity_id="default/gpt-4.1")]
         anthropic = MagicMock()
         anthropic.name = "anthropic"
         anthropic.served_models = [MagicMock(model_entity_id="default/claude-sonnet-4-6")]
-        client.inference.providers.list.return_value = MagicMock(data=[openai, anthropic])
+        client.models.list_providers.return_value = _list_response([openai, anthropic])
 
         result = setup_commands._get_all_model_entity_ids(
             client,
@@ -2571,6 +2630,23 @@ class TestAutoModelPairSelection:
         )
 
         assert result == ["default/claude-sonnet-4-6"]
+        assert client.models.list_providers.call_args.kwargs == {"workspace": "default"}
+
+    def test_entity_discovery_walks_every_provider_page(self):
+        """Providers past the first page still contribute their served models."""
+        client = _make_mock_client()
+        first = MagicMock()
+        first.name = "openai"
+        first.served_models = [MagicMock(model_entity_id="default/gpt-4.1")]
+        second = MagicMock()
+        second.name = "anthropic"
+        second.served_models = [MagicMock(model_entity_id="default/claude-sonnet-4-6")]
+        client.models.list_providers.return_value.items.return_value = iter([first, second])
+
+        assert setup_commands._get_all_model_entity_ids(client, "default") == [
+            "default/claude-sonnet-4-6",
+            "default/gpt-4.1",
+        ]
 
     def test_explicit_default_and_fast_models_are_saved_independently(self):
         cli_context = MagicMock()
@@ -3127,7 +3203,7 @@ class TestValidateApiKeyIntegration:
         ):
             result = _auto_setup(client, "default")
         assert result == "nvidia-build"
-        client.inference.providers.create.assert_called_once()
+        client.models.create_provider.assert_called_once()
         printed = " ".join(str(call) for call in print_message.call_args_list)
         assert "Check the value of $NVIDIA_API_KEY" not in printed
         assert "Could not validate API key" not in printed
@@ -3149,7 +3225,7 @@ class TestValidateApiKeyIntegration:
         ):
             _auto_setup(client, "default")
         assert exc_info.value.exit_code == 1
-        client.inference.providers.create.assert_not_called()
+        client.models.create_provider.assert_not_called()
         printed = " ".join(str(call) for call in print_message.call_args_list)
         assert "Check the value of $NVIDIA_API_KEY" in printed
 
@@ -3351,10 +3427,10 @@ class TestWaitForModelsSpinner:
     def test_shows_spinner_during_model_discovery(self, spinner_console):
         """console.status() should be active during model discovery polling."""
         mock_console, _ = spinner_console
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         provider = MagicMock()
         provider.served_models = []
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         with (
             patch(f"{self._MOD}._pause"),
@@ -3363,16 +3439,17 @@ class TestWaitForModelsSpinner:
             _wait_for_models(client, "nvidia-build", "default", round_seconds=5, max_rounds=1)
 
         mock_console.status.assert_called()
+        client.models.get_provider.assert_called_with(name="nvidia-build", workspace="default")
 
     def test_spinner_updates_with_elapsed_time(self, spinner_console):
         """status.update() should include elapsed seconds during model polling."""
         _, mock_status = spinner_console
-        client = MagicMock()
+        client = _make_mock_client()
         model = MagicMock()
         model.model_entity_id = "default/nvidia-llama"
-        client.inference.providers.retrieve.side_effect = [
-            MagicMock(served_models=[]),
-            MagicMock(served_models=[model]),
+        client.models.get_provider.side_effect = [
+            _entity_response(MagicMock(served_models=[])),
+            _entity_response(MagicMock(served_models=[model])),
         ]
 
         with (
@@ -3387,13 +3464,13 @@ class TestWaitForModelsSpinner:
 
     def test_continues_polling_when_served_models_lack_entity_ids(self, spinner_console):
         """Polling should continue when served_models exist but have no entity IDs."""
-        client = MagicMock()
+        client = _make_mock_client()
         model_without_id = MagicMock(spec=[])
         model_with_id = MagicMock()
         model_with_id.model_entity_id = "default/nvidia-llama"
-        client.inference.providers.retrieve.side_effect = [
-            MagicMock(served_models=[model_without_id]),
-            MagicMock(served_models=[model_with_id]),
+        client.models.get_provider.side_effect = [
+            _entity_response(MagicMock(served_models=[model_without_id])),
+            _entity_response(MagicMock(served_models=[model_with_id])),
         ]
 
         with (
@@ -3416,12 +3493,12 @@ class TestWaitForModelsEarlyExit:
     def test_exits_early_on_non_compliant_provider(self, spinner_console):
         """Returns [] immediately when provider status_message indicates non-compliant."""
         mock_console, _ = spinner_console
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         provider = MagicMock()
         provider.served_models = []
         provider.status = "READY"
         provider.status_message = "Non-OpenAI compliant endpoint, model entity routing disabled"
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         with (
             patch(f"{self._MOD}._pause"),
@@ -3437,7 +3514,7 @@ class TestWaitForModelsEarlyExit:
             )
 
         assert result == []
-        assert client.inference.providers.retrieve.call_count == 1
+        assert client.models.get_provider.call_count == 1
         mock_console.print.assert_any_call(
             "\n  [yellow]![/yellow] Provider 'bad-provider' (https://inference.nvidia.com) "
             "returned a non-OpenAI compliant response from GET /v1/models."
@@ -3446,12 +3523,12 @@ class TestWaitForModelsEarlyExit:
     def test_exits_early_on_error_status(self, spinner_console):
         """Returns [] immediately when provider status is ERROR."""
         _mock_console, _ = spinner_console
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         provider = MagicMock()
         provider.served_models = []
         provider.status = "ERROR"
         provider.status_message = "Provider discovery failed: Gateway error (HTTP 502)"
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         with (
             patch(f"{self._MOD}._pause"),
@@ -3467,16 +3544,16 @@ class TestWaitForModelsEarlyExit:
             )
 
         assert result == []
-        assert client.inference.providers.retrieve.call_count == 1
+        assert client.models.get_provider.call_count == 1
 
     def test_exits_early_on_lost_status(self, spinner_console):
         """Returns [] immediately when provider status is LOST."""
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         provider = MagicMock()
         provider.served_models = []
         provider.status = "LOST"
         provider.status_message = "Provider discovery permanently failed."
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         with (
             patch(f"{self._MOD}._pause"),
@@ -3488,12 +3565,12 @@ class TestWaitForModelsEarlyExit:
 
     def test_no_false_positive_on_created_status(self, spinner_console):
         """CREATED status with no status_message should NOT trigger early exit."""
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         provider = MagicMock()
         provider.served_models = []
         provider.status = "CREATED"
         provider.status_message = None
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         # monotonic calls: start, deadline, while-check, elapsed, while-check, elapsed, while-check(exit)
         with (
@@ -3503,18 +3580,18 @@ class TestWaitForModelsEarlyExit:
             result = _wait_for_models(client, "new-provider", "default", round_seconds=5, max_rounds=1)
 
         assert result == []
-        assert client.inference.providers.retrieve.call_count > 1
+        assert client.models.get_provider.call_count > 1
 
     def test_models_found_before_non_compliant(self, spinner_console):
         """If models appear on the same poll, served_models are checked first."""
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         model = MagicMock()
         model.model_entity_id = "default/my-model"
         provider = MagicMock()
         provider.served_models = [model]
         provider.status = "READY"
         provider.status_message = None
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         with (
             patch(f"{self._MOD}._pause"),
@@ -3527,12 +3604,12 @@ class TestWaitForModelsEarlyExit:
     def test_host_url_omitted_in_warning(self, spinner_console):
         """When host_url is empty the warning should not include a parenthetical."""
         mock_console, _ = spinner_console
-        client = MagicMock()
+        client = _make_mock_client(provider_exists=True)
         provider = MagicMock()
         provider.served_models = []
         provider.status = "READY"
         provider.status_message = "Non-OpenAI compliant endpoint, model entity routing disabled"
-        client.inference.providers.retrieve.return_value = provider
+        client.models.get_provider.return_value = _entity_response(provider)
 
         with (
             patch(f"{self._MOD}._pause"),
@@ -3977,7 +4054,7 @@ def _make_setup_command_ctx(
         workspace=workspace,
         preferences={},
     )
-    cli_context.get_client.return_value.workspaces.retrieve.return_value = MagicMock()
+    cli_context.typed_client.return_value.get_workspace.return_value = _entity_response(MagicMock())
     ctx.obj = cli_context
     return ctx, cli_context
 

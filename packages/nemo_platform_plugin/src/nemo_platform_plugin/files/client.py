@@ -26,6 +26,7 @@ class _FilesMethods:
     get_fileset = method(endpoints.get_fileset)
     update_fileset = method(endpoints.update_fileset)
     delete_fileset = method(endpoints.delete_fileset)
+    refresh_fileset = method(endpoints.refresh_fileset)
     list_files = method(endpoints.list_files)
     upload_file = method(endpoints.upload_file)
     download_file = method(endpoints.download_file)

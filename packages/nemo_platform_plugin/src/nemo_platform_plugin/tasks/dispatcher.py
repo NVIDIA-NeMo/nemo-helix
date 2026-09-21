@@ -52,6 +52,8 @@ from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import PlatformJobResults
+from nemo_platform_plugin.job_usage import PlatformJobUsageReporter
+from nemo_platform_plugin.jobs.client import JobsClient
 from nemo_platform_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -205,6 +207,7 @@ def build_ctx_from_env(sdk: NeMoPlatform) -> JobContext:
     job_id = os.environ.get(NEMO_JOB_ID_ENVVAR, "").strip()
     if not job_id:
         raise RuntimeError(f"{NEMO_JOB_ID_ENVVAR} not set; running outside the platform?")
+    client = client_from_platform(sdk, NemoClient)
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(
@@ -214,7 +217,12 @@ def build_ctx_from_env(sdk: NeMoPlatform) -> JobContext:
         results=PlatformJobResults(
             job_name=job_id,
             workspace=workspace,
-            client=client_from_platform(sdk, NemoClient),
+            client=client,
+        ),
+        usage=PlatformJobUsageReporter(
+            job_name=job_id,
+            workspace=workspace,
+            jobs_client=JobsClient.from_client(client),
         ),
         job_id=job_id,
     )

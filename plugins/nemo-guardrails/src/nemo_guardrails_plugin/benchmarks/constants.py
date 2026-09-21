@@ -34,6 +34,17 @@ NMP_BASE_URL = "http://localhost:8080"
 NMP_HEALTH_PATH = "/health/ready"
 IGW_CHAT_PATH = f"/apis/inference-gateway/v2/workspaces/{WORKSPACE}/openai/-/v1/chat/completions"
 
+# The benchmark only needs enough platform surface to seed workspaces, models,
+# guardrail configs, virtual models, and proxy chat completions through IGW.
+NMP_BENCHMARK_SERVICES = (
+    "entities",
+    "models",
+    "inference-gateway",
+    "guardrails",
+    "secrets",
+)
+NMP_BENCHMARK_CONTROLLERS = ("models",)
+
 # Local shim that satisfies AIPerf's pre-check and reverse-proxies chat
 # completion requests through to NMP's IGW. See
 # `nemo_guardrails_plugin.benchmarks.shim` for the implementation.

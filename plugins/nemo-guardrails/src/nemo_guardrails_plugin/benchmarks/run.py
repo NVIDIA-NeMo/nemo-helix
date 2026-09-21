@@ -67,7 +67,6 @@ log = logging.getLogger("nemo_guardrails_plugin.benchmarks")
 _MOCK_HEALTH_TIMEOUT_SECONDS = 60.0
 _NMP_HEALTH_TIMEOUT_SECONDS = 180.0
 
-
 _REQUIRED_NEMOGUARDRAILS_FILES = (
     Path("benchmark/aiperf/__main__.py"),
     Path("benchmark/aiperf/run_aiperf.py"),
@@ -163,7 +162,11 @@ def _build_nmp_process(paths: RunPaths) -> SupervisedProcess:
     """
     return SupervisedProcess(
         name="nmp-services",
-        cmd=["nemo", "services", "run"],
+        cmd=[
+            sys.executable,
+            "-m",
+            "nemo_guardrails_plugin.benchmarks.platform_runner",
+        ],
         log_path=paths.log_dir / "nmp-services.log",
         cwd=paths.nmp_repo_root,
         env={"NMP_BASE_URL": NMP_BASE_URL, "NMP_DATA_DIR": str(paths.nmp_data_dir)},

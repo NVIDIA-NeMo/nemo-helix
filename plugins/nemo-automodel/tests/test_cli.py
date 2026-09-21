@@ -230,3 +230,5 @@ def test_cli_expose_input_and_output_schemas() -> None:
     assert "input_spec_schema" in payload
     assert "spec_schema" in payload
     assert "/automodel/jobs" in payload["endpoint"]
+    retrieval = payload["input_spec_schema"]["$defs"]["AutomodelRetrievalSpec"]["properties"]
+    assert "do_distributed_inbatch_negative" in retrieval

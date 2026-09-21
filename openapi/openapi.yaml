@@ -9630,6 +9630,10 @@ components:
           type: string
           title: Principal Id
           description: The principal's unique identifier
+        principal_account_id:
+          title: Principal Account Id
+          description: Stable NeMo account identifier for the principal
+          type: string
         principal_email:
           title: Principal Email
           description: The principal's email address
@@ -9640,6 +9644,12 @@ components:
           type: array
           title: Principal Groups
           description: Groups the principal belongs to
+        principal_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal Authz Aliases
+          description: Alternate trusted identifiers for the principal
         principal_on_behalf_of:
           title: Principal On Behalf Of
           description: If acting on behalf of another principal, their principal ID
@@ -9654,6 +9664,16 @@ components:
           title: Principal On Behalf Of Email
           description: The on-behalf-of principal's email address
           type: string
+        principal_on_behalf_of_account_id:
+          title: Principal On Behalf Of Account Id
+          description: Stable NeMo account identifier for the on-behalf-of principal
+          type: string
+        principal_on_behalf_of_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal On Behalf Of Authz Aliases
+          description: Alternate trusted identifiers for the on-behalf-of principal
       type: object
       required:
       - principal_id

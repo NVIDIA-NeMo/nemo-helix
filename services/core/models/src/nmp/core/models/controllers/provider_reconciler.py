@@ -29,7 +29,7 @@ from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nmp.common.datetime_utils import ensure_utc
 from nmp.common.entities.constants import NAME_PATTERN
-from nmp.common.entities.utils import parse_entity_ref
+from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_entity_ref
 from nmp.core.models.app import (
     ModelWeightsType,
     get_model_weights_type,
@@ -201,13 +201,15 @@ def _is_valid_served_model_entity_id(model_entity_id: str) -> bool:
     workspace, remainder = model_entity_id.split("/", 1)
     if not _is_valid_model_entity_name(workspace):
         return False
+    # A LoRA composite's remainder is ``base&adapters/adapter_workspace/adapter_name``.
+    # parse_adapters_suffix owns that grammar split (shared with IGW validation);
+    # here we only NAME_PATTERN-check each recovered segment. A remainder that
+    # contains ``&adapters/`` but is malformed yields None and is rejected.
     if "&adapters/" in remainder:
-        base, _, adapter_part = remainder.partition("&adapters/")
-        if not base or not adapter_part or "/" not in adapter_part:
+        adapter_parts = parse_adapters_suffix(remainder)
+        if adapter_parts is None:
             return False
-        adapter_ws, _, adapter_name = adapter_part.partition("/")
-        if not adapter_ws or not adapter_name:
-            return False
+        base, adapter_ws, adapter_name = adapter_parts
         return all(_is_valid_model_entity_name(s) for s in (base, adapter_ws, adapter_name))
     return _is_valid_model_entity_name(remainder)
 
@@ -469,6 +471,7 @@ class ModelProviderReconciler:
                     extra={"provider": provider_id},
                 )
                 ctx.served_models = []
+                non_compliant_update_ok = False
                 try:
                     ctx.model_provider = (
                         await self._models_client.update_provider_status(
@@ -481,8 +484,16 @@ class ModelProviderReconciler:
                             ),
                         )
                     ).data()
+                    non_compliant_update_ok = True
                 except Exception as e:
                     logger.error(f"Failed to update provider {provider_id} status: {e}")
+                # A non-compliant provider serves nothing this cycle, so unlink every entity
+                # it served last cycle (same pruning as the success path, empty resolved set).
+                # ``provider`` still holds the pre-update served_models to diff against. Guarded
+                # on the status write succeeding: if it failed the persisted mapping is
+                # unchanged, so unlinking now would leave entities inconsistent with it.
+                if non_compliant_update_ok:
+                    self._unlink_dropped_model_entities(provider, provider_id, [])
                 return
             case DiscoverySuccess() as success:
                 pass
@@ -526,6 +537,7 @@ class ModelProviderReconciler:
 
         logger.debug(f"Provider {provider_id}: serving {len(served_models)} model(s)")
 
+        update_ok = False
         try:
             ctx.model_provider = (
                 await self._models_client.update_provider_status(
@@ -537,6 +549,7 @@ class ModelProviderReconciler:
                     ),
                 )
             ).data()
+            update_ok = True
             if served_models:
                 logger.debug(f"Updated provider {provider_id} with {len(served_models)} served model(s)")
             else:
@@ -572,6 +585,59 @@ class ModelProviderReconciler:
             # intended self-healing behaviour.
             self._entity_cache.stage_provider_link(ref.workspace, ref.name, provider_id)
             await self._ensure_passthrough_virtual_model(ref.workspace, ref.name, existing_vm_names)
+            self._emit_heartbeat()
+
+        # Unlink this provider from any Model Entity it served last cycle but not this
+        # one: the served_models mapping and passthrough VM already prune on removal, but
+        # the entity's model_providers back-reference did not (unlink was previously only
+        # done on full provider/deployment teardown), so a removed model kept advertising a
+        # provider that no longer serves it. Guarded on update_ok: if the mapping write above
+        # failed, the persisted served_models is unchanged, so unlinking now would leave the
+        # entity inconsistent with the provider; the next successful cycle re-runs the diff.
+        if update_ok:
+            self._unlink_dropped_model_entities(provider, provider_id, served_models)
+
+    def _unlink_dropped_model_entities(
+        self,
+        provider: ModelProvider,
+        provider_id: str,
+        served_models: list[ServedModelMapping],
+    ) -> None:
+        """Stage an unlink of ``provider_id`` from entities it served before but not now.
+
+        Diffs the provider's previously-persisted ``served_models`` against the set
+        resolved this cycle and stages ``stage_provider_unlink`` for every entity that
+        fell out. Only this provider's own id is removed from each entity's
+        ``model_providers`` — an entity still served by another provider keeps that
+        other link (``stage_provider_unlink`` removes a single id, never clears the
+        list), so a model served by two providers is unaffected when just one drops it.
+
+        LoRA composite ids (``...&adapters/...``) are skipped for the same reason the
+        link loop skips them: they have no standalone Model Entity, so there is no
+        ``model_providers`` back-reference to unlink.
+        """
+        current_ids = {m.model_entity_id for m in served_models if "&adapters/" not in m.model_entity_id}
+        for previous in provider.served_models or ():
+            model_entity_id = previous.model_entity_id
+            if not model_entity_id or "&adapters/" in model_entity_id:
+                continue
+            if model_entity_id in current_ids:
+                continue
+            try:
+                ref = parse_entity_ref(model_entity_id)
+            except ValueError:
+                logger.warning(
+                    "Skipping unlink for provider %s: unparsable dropped model_entity_id %r",
+                    provider_id,
+                    model_entity_id,
+                )
+                continue
+            self._entity_cache.stage_provider_unlink(ref.workspace, ref.name, provider_id)
+            logger.info(
+                "Unlinking provider %s from Model Entity %s (no longer served)",
+                provider_id,
+                model_entity_id,
+            )
             self._emit_heartbeat()
 
     # -------------------------------------------------------------------------
@@ -995,7 +1061,13 @@ class ModelProviderReconciler:
                     )
                     continue
 
-                model_entity_id = f"{base_id}&adapters/{adapter_ws}/{adapter_name}"
+                # Build the LoRA composite id from the base id + recovered adapter
+                # segments using the shared ADAPTERS_INFIX (single home for the grammar).
+                # base_id is used verbatim as the prefix (as the prior f-string did) - we
+                # do NOT parse it, because _resolve_base_backend_model_id may return an
+                # unqualified id and parsing would raise here, aborting the whole mapping
+                # loop where the old code produced an id later dropped by validation.
+                model_entity_id = f"{base_id}{ADAPTERS_INFIX}{adapter_ws}/{adapter_name}"
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
 

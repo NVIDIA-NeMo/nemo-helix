@@ -255,7 +255,7 @@ export const TrainingMethodSection = () => {
                     control,
                   }}
                   formFieldProps={{
-                    slotLabel: 'Distillation Temperature',
+                    slotLabel: 'Distill Temperature',
                     slotInfo:
                       'Softens the teacher’s output distribution. Higher values spread probability mass onto lower-ranked tokens, so the student learns more than just the teacher’s top choice.',
                   }}

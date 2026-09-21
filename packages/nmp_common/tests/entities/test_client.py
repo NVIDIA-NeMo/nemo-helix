@@ -1579,6 +1579,7 @@ async def test_as_service_internal_marks_requests_internal_on_the_wire():
     sent_headers = mock_http.request.call_args.kwargs["headers"]
     assert sent_headers["X-NMP-Principal-Id"] == "service:audit"
     assert sent_headers["X-NMP-Internal"] == "true"
+    assert sent_headers["X-NMP-Actor-Aliases"] == "service:audit"
 
 
 def test_sync_as_service_returns_new_client_without_mutating_the_original():
@@ -1637,3 +1638,4 @@ def test_sync_as_service_internal_marks_requests_internal_on_the_wire():
     sent_headers = mock_http.request.call_args.kwargs["headers"]
     assert sent_headers["X-NMP-Principal-Id"] == "service:audit"
     assert sent_headers["X-NMP-Internal"] == "true"
+    assert sent_headers["X-NMP-Actor-Aliases"] == "service:audit"
