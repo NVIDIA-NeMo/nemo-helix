@@ -137,8 +137,8 @@ Do not submit Automodel until a sample of `training.jsonl` has enough negatives.
 Download the file (or the first lines) and count `len(neg_doc)`:
 
 ```bash
-nemo files download <artifacts> --workspace default \
-  --remote-path training.jsonl -o /tmp/training.jsonl
+nemo files download <job-fileset> --workspace default \
+  --remote-path results/<attempt>/artifacts/training.jsonl -o /tmp/training.jsonl
 python3 - <<'PY'
 import json
 from collections import Counter
@@ -189,19 +189,37 @@ nemo data-designer retrieval-prepare --workspace default --spec '{
 
 ## Stage 1 output
 
-One `artifacts` result per job. At the result root: `training.jsonl` and
+One `artifacts` result per job. The result is a directory inside the job
+fileset, not a separate fileset. Its `artifact_url` has this shape:
+`default/job-fileset-<job>#results/<attempt>/artifacts`. Append `/` when passing
+it as Automodel `dataset.training`; the trailing slash makes `file_io` stage the
+directory contents at the dataset root. At that root are `training.jsonl` and
 `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`). Wrapped
-`train.json`, corpus parquet, mining caches, and miner intermediates go under
-`additional/`. Pass that artifacts fileset to Automodel as `dataset.training`
-and to `retrieve-eval` as `dataset`.
+`train.json`, corpus parquet, mining caches, and miner intermediates are under
+`additional/`.
 
 ```bash
 nemo jobs get-status <prepare-job> -f json
-nemo files list <artifacts-fileset> --workspace default
+nemo jobs results list <prepare-job> --workspace default -f json
+nemo files list <job-fileset> --workspace default
 ```
+
+Use the returned path, not only the job fileset name:
+
+```json
+{
+  "dataset": {
+    "training": "default/job-fileset-<job>#results/<attempt>/artifacts/"
+  }
+}
+```
+
+For `retrieve-eval`, select the BEIR subtree with
+`default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**`.
 
 ## Next Steps
 
 - Choose `embed.md` for a bi-encoder or `rerank.md` for a cross-encoder.
-- Pass the unchanged Stage 1 `artifacts` fileset to Automodel training and
-  `retrieve-eval` so base and tuned models use the same frozen `eval_beir`.
+- Pass the unchanged Stage 1 result path to Automodel training and its
+  `eval_beir/**` subtree to `retrieve-eval` so base and tuned models use the
+  same frozen evaluation set.

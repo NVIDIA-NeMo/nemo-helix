@@ -68,8 +68,12 @@ Read only the matching recipe after this routing step:
 - Recall@100 OK but nDCG@10 poor, relevant docs buried in top-k → `references/rerank.md`
 - User asks both or a two-stage stack → embed first (candidate coverage), then rerank.
 
-Use one workspace. Stage 1 publishes one `artifacts` fileset holding `training.jsonl`
-and `eval_beir/`; Automodel and `retrieve-eval` both read that one fileset directly.
+Use one workspace. Stage 1 publishes an `artifacts` result inside its job fileset.
+Use the result's full path fragment
+(`workspace/job-fileset#results/<attempt>/artifacts/`) as Automodel
+`dataset.training`; keep the trailing slash so the result contents are staged at
+the training dataset root. Use that same result's `eval_beir` subtree for
+`retrieve-eval`.
 Keep `query: ` / `passage: ` prefixes for embed and
 `question:{query} \n \n passage:{passage}` for rerank.
 

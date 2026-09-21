@@ -64,7 +64,9 @@ class LoRAParams(AutomodelSchema):
 
 
 class DatasetSpec(AutomodelSchema):
-    training: str = Field(description="Training fileset as 'name' or 'workspace/name'.")
+    training: str = Field(
+        description="Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory."
+    )
     validation: str | None = None
     prompt_template: str | None = None
 

@@ -75,12 +75,15 @@ nemo models get nemotron-3-embed-1b --workspace default
 Do not submit until the last command reports
 `"fileset": "default/nemotron-3-embed-1b"`.
 
-Stage 2 (`dataset.training` is the Stage 1 `artifacts` fileset):
+Stage 2 (`dataset.training` is the Stage 1 `artifacts` result path, including
+the trailing slash):
 
 ```json
 {
   "model": "default/nemotron-3-embed-1b",
-  "dataset": {"training": "default/retrieval-stage1-artifacts"},
+  "dataset": {
+    "training": "default/job-fileset-<job>#results/<attempt>/artifacts/"
+  },
   "training": {
     "recipe": "bi_encoder",
     "training_type": "sft",
@@ -92,17 +95,18 @@ Stage 2 (`dataset.training` is the Stage 1 `artifacts` fileset):
 ```
 
 Leave batch/LR unset to take Nemotron retrieval defaults. Do not set `max_steps` with `epochs`.
-Pass the Stage 1 artifacts fileset as-is: `training.jsonl` and `eval_beir/` sit
-at the result root; wrapped `train.json` and mining caches are under `additional/`.
+Pass the full Stage 1 result path, not only the job fileset name. The trailing
+slash stages `training.jsonl` at the local dataset root; wrapped `train.json`
+and mining caches remain under `additional/`.
 
-Stage 3 reads the same fileset — the BEIR loader accepts a root containing `eval_beir`.
+Stage 3 reads the frozen `eval_beir` subtree from the same job result.
 Both `target` and `baseline` must already have IGW providers (`deploy.md`) before submit.
 `query_prefix` / `passage_prefix` default to `query: ` / `passage: `, matching Stage 2
 training and Stage 1 mining.
 
 ```bash
 nemo evaluator retrieve-eval submit --spec '{
-  "dataset": "default/retrieval-stage1-artifacts",
+  "dataset": "default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**",
   "target": {
     "embeddings": "default/nemotron-3-embed-1b-tuned",
     "query_prefix": "query: ",

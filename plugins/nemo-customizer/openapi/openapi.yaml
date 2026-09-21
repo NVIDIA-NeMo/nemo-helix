@@ -1209,7 +1209,8 @@ components:
         training:
           type: string
           title: Training
-          description: Training fileset as 'name' or 'workspace/name'.
+          description: Training fileset as 'name', 'workspace/name', or either form
+            with a '#path/' directory.
         validation:
           title: Validation
           type: string

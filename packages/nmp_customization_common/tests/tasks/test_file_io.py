@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 
 def _make_job_ctx(*, workspace: str = "default", storage_path: Path | None = None):
@@ -67,6 +68,62 @@ def _make_dir(tmp_path: Path) -> Path:
     (src / "adapter_model.safetensors").write_bytes(b"\x00" * 16)
     (src / "tokenizer.json").write_text("{}")
     return src
+
+
+class TestFileSetRef:
+    @pytest.mark.parametrize(
+        ("value", "workspace", "name", "path", "rendered"),
+        [
+            ("dataset", None, "dataset", None, "dataset"),
+            ("default/dataset", "default", "dataset", None, "default/dataset"),
+            (
+                "dataset#results/attempt/artifacts",
+                None,
+                "dataset",
+                "results/attempt/artifacts/",
+                "dataset#results/attempt/artifacts/",
+            ),
+            (
+                "fileset://default/dataset#results/attempt/artifacts/",
+                "default",
+                "dataset",
+                "results/attempt/artifacts/",
+                "default/dataset#results/attempt/artifacts/",
+            ),
+        ],
+    )
+    def test_parses_and_normalizes_directory_path(
+        self,
+        value: str,
+        workspace: str | None,
+        name: str,
+        path: str | None,
+        rendered: str,
+    ) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+
+        ref = FileSetRef.model_validate(value)
+
+        assert ref.workspace == workspace
+        assert ref.name == name
+        assert ref.path == path
+        assert str(ref) == rendered
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "default/dataset#",
+            "default/dataset#../artifacts",
+            "default/dataset#results//artifacts",
+            "default/dataset#results/./artifacts",
+            "default/dataset#results#artifacts",
+        ],
+    )
+    def test_rejects_invalid_directory_path(self, value: str) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+
+        with pytest.raises((ValidationError, ValueError)):
+            FileSetRef.model_validate(value)
 
 
 class TestCreateFileset:
@@ -128,6 +185,12 @@ class TestCreateFileset:
 
 
 class TestUploadFileset:
+    def test_upload_item_rejects_directory_path(self) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef, UploadItem
+
+        with pytest.raises(ValidationError, match="must reference a FileSet root"):
+            UploadItem(src="/tmp/model", dest=FileSetRef.model_validate("default/models#nested"))
+
     @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
     def test_uses_files_client_for_transfer(self, mock_fs_cls, tmp_path: Path) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
@@ -236,6 +299,31 @@ class TestDownloadFileset:
 
         assert stats.files_downloaded == 0
         assert stats.total_bytes == 0
+
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_directory_path_downloads_its_contents_to_destination_root(self, mock_fs_cls, tmp_path: Path) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+
+        fs = MagicMock()
+        mock_fs_cls.return_value = fs
+        files = _make_files_client()
+        files.list_files.return_value.data.return_value = types.SimpleNamespace(
+            data=[
+                types.SimpleNamespace(path="results/attempt/artifacts/training.jsonl", size=100),
+                types.SimpleNamespace(path="results/attempt/artifacts/eval_beir/corpus.jsonl", size=20),
+                types.SimpleNamespace(path="logs/task.log", size=30),
+            ]
+        )
+        runner = _make_runner(files)
+        dest = tmp_path / "downloads"
+        fileset = FileSetRef.model_validate("default/job-fileset#results/attempt/artifacts")
+
+        runner.download_fileset(fileset, dest)
+
+        get_call = fs.get.call_args
+        assert get_call.args[0] == "default/job-fileset#results/attempt/artifacts/"
+        assert get_call.args[1] == str(dest)
+        assert get_call.kwargs["recursive"] is True
 
 
 class TestRun:

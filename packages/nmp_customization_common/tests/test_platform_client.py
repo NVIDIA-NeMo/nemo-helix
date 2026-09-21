@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    check_dataset_access,
+    check_environment_access,
+    check_gym_dataset_layout,
+    fetch_model_entity,
+)
 
 
 def _not_found() -> NotFoundError:
@@ -60,3 +66,57 @@ async def test_fetch_model_entity_without_weights_fileset_skips_files_service() 
 
     assert result is model
     files.get_fileset.assert_not_awaited()
+
+
+async def test_dataset_access_resolves_fileset_name_and_checks_directory_path() -> None:
+    _, files, platform = _clients(SimpleNamespace())
+    files.list_files = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: SimpleNamespace(data=[SimpleNamespace(path="results/attempt/artifacts/training.jsonl")])
+        )
+    )
+
+    await check_dataset_access(
+        platform,
+        "default/job-fileset#results/attempt/artifacts",
+        "default",
+    )
+
+    files.get_fileset.assert_awaited_once_with(workspace="default", name="job-fileset")
+    files.list_files.assert_awaited_once_with(workspace="default", name="job-fileset")
+
+
+async def test_dataset_access_rejects_missing_directory_path() -> None:
+    _, files, platform = _clients(SimpleNamespace())
+    files.list_files = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(data=[SimpleNamespace(path="other/training.jsonl")]))
+    )
+
+    with pytest.raises(ValueError, match="Dataset path 'results/attempt/artifacts/' not found"):
+        await check_dataset_access(
+            platform,
+            "default/job-fileset#results/attempt/artifacts",
+            "default",
+        )
+
+
+async def test_gym_layout_checks_training_file_below_directory_path() -> None:
+    _, files, platform = _clients(SimpleNamespace())
+    files.list_files = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: SimpleNamespace(data=[SimpleNamespace(path="results/attempt/artifacts/training.jsonl")])
+        )
+    )
+
+    await check_gym_dataset_layout(
+        platform,
+        "default/job-fileset#results/attempt/artifacts",
+        "default",
+    )
+
+
+async def test_environment_access_rejects_directory_path() -> None:
+    _, _, platform = _clients(SimpleNamespace())
+
+    with pytest.raises(ValueError, match="must not include a '#path/' directory"):
+        await check_environment_access(platform, "default/environment#package", "default")
