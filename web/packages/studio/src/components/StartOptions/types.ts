@@ -3,6 +3,7 @@
 
 import type { BadgeProps } from '@nvidia/foundations-react-core';
 import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 export interface StartOptionTag {
   label: string;
@@ -39,4 +40,42 @@ export interface StartOptionCardProps {
    * way somewhere rather than the main event.
    */
   compact?: boolean;
+}
+
+/** One template tile below the divider. */
+export interface StartTemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+export interface StartTemplateGroup {
+  id: string;
+  title: string;
+  templates: StartTemplate[];
+}
+
+export interface StartPageProps {
+  heading: string;
+  headingDescription: string;
+  options: StartOption[];
+  templateGroups?: StartTemplateGroup[];
+  /**
+   * The selected option or template id. Both live in one radio group: a template is
+   * picked outright rather than by first choosing an "and then pick one" option, so the
+   * two sets of ids share a namespace and must not collide.
+   */
+  value: string | null;
+  onChange: (value: string) => void;
+  /** Locks the whole group. Set while a selection is being acted on. */
+  disabled?: boolean;
+  /** Shown beside a disabled Continue, in place of the default prompt. */
+  blockedHint?: string;
+  continueLabel?: ReactNode;
+  continueLoading?: boolean;
+  canContinue: boolean;
+  onContinue: () => void;
+  /** Rendered above the footer — an error banner, typically. */
+  slotBanner?: ReactNode;
 }
