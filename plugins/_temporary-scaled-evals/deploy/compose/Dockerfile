@@ -116,6 +116,12 @@ RUN set -eu; \
 
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim
 
+# The python-flavoured tag lags the uv release stream, and the `uv sync` below
+# runs inside the workspace, so it is bound by the root pyproject's
+# `required-version`. Overlay the pinned binary the platform builds with;
+# the harbor stage above is exempt because it installs outside the workspace.
+COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /usr/local/bin/uv
+
 # Both the API (`GET /v1/readyz`) and the build worker shell out to buildctl.
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
 COPY --from=jobs-launcher /app/jobs-launcher/jobs-launcher /tools/jobs-launcher
