@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,7 @@ assert _spec is not None and _spec.loader is not None
 check_test_gates = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_test_gates)
 
-GATED = '''
+GATED = """
 import os
 import pytest
 
@@ -33,7 +32,7 @@ pytestmark = pytest.mark.skipif(not os.environ.get("{var}"), reason="opt-in")
 
 def test_thing():
     pass
-'''
+"""
 
 
 def _tree(tmp_path: Path, *, gate: str, workflow: str = "") -> tuple[Path, Path]:
