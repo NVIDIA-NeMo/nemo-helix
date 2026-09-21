@@ -438,43 +438,51 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         else:
             return self.create_step_update(step, job)
 
+    def _cancel_active_step_tasks(self, step: PlatformJobStepWithContext) -> None:
+        """Mark tasks still ACTIVE as cancelled; their pods are gone by this point."""
+        tasks = self._jobs.list_job_step_tasks(
+            name=step.name,
+            job=step.job,
+            workspace=step.workspace,
+        ).data()
+        for task in tasks.data:
+            if task.status != PlatformJobStatus.ACTIVE:
+                continue
+            if task.name is None:
+                logger.warning(
+                    "Skipping cancellation update for Kubernetes task with missing name",
+                    extra={"workspace": step.workspace, "job": step.job, "step": step.name},
+                )
+                continue
+            self._jobs.update_job_step_task(
+                name=task.name,
+                workspace=step.workspace,
+                job=step.job,
+                step=step.name,
+                body=PlatformJobTaskUpdate(
+                    status=PlatformJobStatus.CANCELLED,
+                    status_details={"message": "Task cancelled as part of job cancellation"},
+                ),
+            )
+
     def sync_terminate_job(self, step: PlatformJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
             self._workload_delegations.revoke_by_key(namespace=self.namespace, name=name_for_step(step))
-            # Job already deleted
-            # List all the tasks on the step that are ACTIVE and mark them as CANCELLED too,
-            # since at this point all those pods should be deleted.
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
-                job=step.job,
-                workspace=step.workspace,
-            ).data()
-            for task in tasks.data:
-                if task.status == PlatformJobStatus.ACTIVE:
-                    if task.name is None:
-                        logger.warning(
-                            "Skipping cancellation update for Kubernetes task with missing name",
-                            extra={"workspace": step.workspace, "job": step.job, "step": step.name},
-                        )
-                        continue
-                    self._jobs.update_job_step_task(
-                        name=task.name,
-                        workspace=step.workspace,
-                        job=step.job,
-                        step=step.name,
-                        body=PlatformJobTaskUpdate(
-                            status=PlatformJobStatus.CANCELLED,
-                            status_details={"message": "Task cancelled as part of job cancellation"},
-                        ),
-                    )
-
+            # Job already deleted, so every pod backing this step is gone too.
+            self._cancel_active_step_tasks(step)
             return JobUpdate(
                 status=PlatformJobStatus.CANCELLED,
                 status_details={"message": "Job is cancelled"},
             )
         else:
             self.terminate_job(job)
-            return self.create_step_update(step, job)
+            update = self.create_step_update(step, job)
+            # update_all_tasks only visits tasks that still have a pod, so a task whose pod is
+            # already gone stays ACTIVE. Once this update is terminal nothing reconciles the
+            # step again -- including the branch above -- so sweep before returning.
+            if update.status in PlatformJobStatus.terminals():
+                self._cancel_active_step_tasks(step)
+            return update
 
     def sync_suspend_job(self, step: PlatformJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
