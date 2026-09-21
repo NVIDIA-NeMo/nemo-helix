@@ -38,7 +38,7 @@ def _make_preview(
 ) -> None:
     """Run ``Anonymizer.preview(...)`` and stream the result frames."""
     anonymizer = _make_anonymizer(model_configs_yaml=model_configs_yaml, dd_providers=dd_providers)
-    config: AnonymizerConfig = spec.config
+    config: AnonymizerConfig = spec.config.to_anonymizer_config()
 
     result = anonymizer.preview(config=config, data=data, num_records=num_records)
 

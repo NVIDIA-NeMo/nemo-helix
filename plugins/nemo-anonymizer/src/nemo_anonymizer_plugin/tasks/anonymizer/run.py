@@ -94,7 +94,7 @@ def _run_with_step_config(
                 artifact_path=storage_path / "anonymizer-artifacts",
             )
         logger.info("Running anonymizer pipeline")
-        result = anonymizer.run(config=request.config, data=prepared_input.input)
+        result = anonymizer.run(config=request.config.to_anonymizer_config(), data=prepared_input.input)
     finally:
         prepared_input.cleanup()
 

@@ -76,6 +76,17 @@ class AnonymizerService(NemoService):
                 content={"detail": str(ex)},
             )
 
+        async def type_error_handler(_request: Request, ex: TypeError):
+            # The upstream `ReplaceMethod` union resolves `kind` through a callable
+            # `Discriminator` that raises a bare `TypeError` on a bad/missing `kind`
+            # instead of a pydantic `ValidationError` (ASTD-328). Any caller that
+            # still reaches the upstream discriminator directly — bypassing the
+            # `kind`-aware wire schema in `task_config.py` — gets a 422 here too.
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={"detail": str(ex)},
+            )
+
         async def anonymizer_invalid_config_handler(_request: Request, ex: InvalidConfigError):
             return JSONResponse(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -114,6 +125,7 @@ class AnonymizerService(NemoService):
 
         return {
             ValidationError: validation_error_handler,
+            TypeError: type_error_handler,
             InvalidConfigError: anonymizer_invalid_config_handler,
             AnonymizerError: anonymizer_error_handler,
             AnonymizerInternalError: plugin_internal_error_handler,

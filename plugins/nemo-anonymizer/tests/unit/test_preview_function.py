@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock
 import data_designer.config as dd
 import pandas as pd
 import pytest
-from anonymizer.config.anonymizer_config import AnonymizerConfig, AnonymizerInput
-from anonymizer.config.replace_strategies import Redact
+from anonymizer.config.anonymizer_config import AnonymizerInput
 from nemo_anonymizer_plugin.app import context as context_module
 from nemo_anonymizer_plugin.app.errors import AnonymizerInvalidConfigError
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
+from nemo_anonymizer_plugin.app.task_config import AnonymizerConfigRequest, RedactRequest
 from nemo_anonymizer_plugin.functions import _preview_worker as worker_module
 from nemo_anonymizer_plugin.functions._preview_logs import request_callback_cvar
 from nemo_anonymizer_plugin.functions.preview import LogFrame, PreviewFunction, PreviewSpec, TraceDatasetFrame
@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 def _preview_spec() -> PreviewSpec:
     return PreviewSpec(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="biography"),
         model_configs=[dd.ModelConfig(alias="detector", model="test/model", provider="provider")],
         num_records=1,

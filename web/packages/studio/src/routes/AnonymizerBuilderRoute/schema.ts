@@ -7,12 +7,16 @@ import {
 } from '@nemo/common/src/components/ModelSelectV2/InferenceParameters';
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import type {
-  AnonymizerConfig,
+  AnnotateRequest,
+  AnonymizerConfigRequest,
+  HashRequest,
   ModelConfig,
   PreviewRequest,
+  RedactRequest,
   Rewrite,
   RunJobRequest,
   SelectedModelsOverrides,
+  SubstituteRequest,
 } from '@nemo/sdk/generated/anonymizer/schema';
 import {
   activeRolesForStrategy,
@@ -144,30 +148,27 @@ const withTemplate = <T extends object>(base: T, template: string): T => {
   return trimmed ? { ...base, format_template: trimmed } : base;
 };
 
-const buildReplaceConfig = (form: AnonymizerFormData): AnonymizerConfig['replace'] => {
-  const replace = ((): object => {
-    switch (form.strategy) {
-      case STRATEGY_REDACT:
-        return withTemplate(
-          { kind: STRATEGY_REDACT, normalize_label: form.redactNormalizeLabel },
-          form.redactTemplate
-        );
-      case STRATEGY_ANNOTATE:
-        return withTemplate({ kind: STRATEGY_ANNOTATE }, form.annotateTemplate);
-      case STRATEGY_HASH:
-        return withTemplate(
-          {
-            kind: STRATEGY_HASH,
-            algorithm: form.hashAlgorithm,
-            digest_length: form.hashDigestLength,
-          },
-          form.hashTemplate
-        );
-      default:
-        return { kind: STRATEGY_SUBSTITUTE };
-    }
-  })();
-  return replace as AnonymizerConfig['replace'];
+const buildReplaceConfig = (form: AnonymizerFormData): AnonymizerConfigRequest['replace'] => {
+  switch (form.strategy) {
+    case STRATEGY_REDACT:
+      return withTemplate<RedactRequest>(
+        { kind: STRATEGY_REDACT, normalize_label: form.redactNormalizeLabel },
+        form.redactTemplate
+      );
+    case STRATEGY_ANNOTATE:
+      return withTemplate<AnnotateRequest>({ kind: STRATEGY_ANNOTATE }, form.annotateTemplate);
+    case STRATEGY_HASH:
+      return withTemplate<HashRequest>(
+        {
+          kind: STRATEGY_HASH,
+          algorithm: form.hashAlgorithm,
+          digest_length: form.hashDigestLength,
+        },
+        form.hashTemplate
+      );
+    default:
+      return { kind: STRATEGY_SUBSTITUTE } satisfies SubstituteRequest;
+  }
 };
 
 const buildRewriteConfig = (form: AnonymizerFormData): Rewrite => {
@@ -199,7 +200,7 @@ const buildRewriteConfig = (form: AnonymizerFormData): Rewrite => {
 const buildDetectConfig = (
   form: AnonymizerFormData,
   defaultEntityLabels: string[]
-): AnonymizerConfig['detect'] => {
+): AnonymizerConfigRequest['detect'] => {
   if (form.entityMode !== ENTITY_MODE_CUSTOM) return undefined;
 
   const labels = form.includeDefaultEntities
@@ -242,7 +243,7 @@ export const buildAnonymizerJobRequest = (
   form: AnonymizerFormData,
   defaultEntityLabels: string[] = []
 ): RunJobRequest => {
-  const config: AnonymizerConfig =
+  const config: AnonymizerConfigRequest =
     form.strategy === REWRITE_STRATEGY
       ? { rewrite: buildRewriteConfig(form) }
       : { replace: buildReplaceConfig(form) };

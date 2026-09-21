@@ -7,15 +7,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from anonymizer.config.anonymizer_config import AnonymizerConfig
 from anonymizer.config.replace_strategies import Redact
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
-from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, PreviewRequest
+from nemo_anonymizer_plugin.app.task_config import (
+    AnonymizerConfigRequest,
+    AnonymizerRequest,
+    PreviewRequest,
+    RedactRequest,
+)
 from nemo_anonymizer_plugin.config import DEFAULT_MAX_PREVIEW_NUM_RECORDS
+from pydantic import ValidationError
 
 
-def _config() -> AnonymizerConfig:
-    return AnonymizerConfig(replace=Redact())
+def _config() -> AnonymizerConfigRequest:
+    return AnonymizerConfigRequest(replace=RedactRequest())
 
 
 def test_preview_request_accepts_http_source() -> None:
@@ -73,3 +80,53 @@ def test_request_dump_preserves_replace_discriminator() -> None:
     dumped = req.model_dump(mode="json")
 
     assert dumped["config"]["replace"]["kind"] == "redact"
+
+
+def test_replace_missing_kind_raises_validation_error_not_type_error() -> None:
+    """ASTD-328: a missing discriminator must 422, not crash the upstream callable Discriminator with a raw TypeError."""
+    with pytest.raises(ValidationError, match="kind"):
+        AnonymizerConfigRequest.model_validate({"replace": {}})
+
+
+def test_replace_invalid_kind_raises_validation_error() -> None:
+    with pytest.raises(ValidationError, match="kind"):
+        AnonymizerConfigRequest.model_validate({"replace": {"kind": "not-a-real-strategy"}})
+
+
+def test_replace_schema_models_kind_as_a_literal_field() -> None:
+    """ASTD-329: ``kind`` must be a real modelled field so OpenAPI/generated SDKs see it."""
+    schema = AnonymizerConfigRequest.model_json_schema()
+    replace_variants = schema["$defs"]
+
+    for variant_name in ("SubstituteRequest", "RedactRequest", "AnnotateRequest", "HashRequest"):
+        variant = replace_variants[variant_name]
+        assert (
+            variant["properties"]["kind"]["const"]
+            == {
+                "SubstituteRequest": "substitute",
+                "RedactRequest": "redact",
+                "AnnotateRequest": "annotate",
+                "HashRequest": "hash",
+            }[variant_name]
+        )
+
+
+def test_replace_accepts_a_valid_kind_and_round_trips_to_upstream_config() -> None:
+    req = AnonymizerConfigRequest.model_validate({"replace": {"kind": "redact"}})
+
+    upstream = req.to_anonymizer_config()
+
+    assert isinstance(upstream, AnonymizerConfig)
+    assert isinstance(upstream.replace, Redact)
+
+
+def test_config_still_accepts_an_upstream_anonymizer_config_instance() -> None:
+    """SDK callers that build an upstream ``AnonymizerConfig`` directly (as before ASTD-329) keep working."""
+    req = AnonymizerRequest(
+        config=AnonymizerConfig(replace=Redact()),  # ty: ignore[invalid-argument-type]
+        data=AnonymizerInputSpec(source="https://example.com/x.csv", text_column="text"),
+    )
+
+    assert req.config.replace is not None
+    assert req.config.replace.kind == "redact"
+    assert isinstance(req.config.to_anonymizer_config().replace, Redact)
