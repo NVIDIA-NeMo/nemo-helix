@@ -14,11 +14,6 @@ docs/fern/openapi/
 plugins/*/openapi/
 web/packages/studio/src/generated/
 web/vendor/
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/_shared/records.json
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/instruction.md
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/records.json
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/tests/expected.txt
-plugins/nemo-experimentalist/tests/experimentalist/fixtures/harbor_evaluator_parity/dataset/validation/*/instruction.md
 packages/garak_api/garakapi/_config.py
 packages/garak_api/garakapi/_plugins.py
 packages/garak_api/garakapi/exception.py
