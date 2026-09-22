@@ -5,14 +5,15 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import raise_if_errors
 from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig, DataDesignerStepConfig
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import (
@@ -42,7 +43,7 @@ class CreateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         is_local: bool,
     ) -> BaseModel:  # DataDesignerStepConfig
         del entity_client, is_local
@@ -66,9 +67,9 @@ class CreateJob(NemoJob):
         spec: BaseModel,  # DataDesignerStepConfig
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
-        options: dict | None = None,
+        options: dict[str, Any] | None = None,
     ) -> PlatformJobSpec:
         del workspace, entity_client, job_name, async_sdk, options
 

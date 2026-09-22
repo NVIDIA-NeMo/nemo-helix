@@ -9,13 +9,13 @@ description: ""
 
 Register an existing embedding dataset as a platform fileset so Stage 2 Automodel can train on it. This replaces the NVDocs data, not the Nemotron 3 Embed model entity.
 
-The default recipe is [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job), which mines hard negatives from NVDocs. SPECTER negatives are papers that the positive does not cite, not passages mined for proximity to the positive, so expect a smaller nDCG gain. SPECTER also carries no evaluation split: keep a frozen NVDocs `eval_beir` fileset for Stage 4, or skip evaluation.
+The default recipe is [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job), which mines hard negatives from NVDocs. SPECTER negatives are papers that the positive does not cite, not passages mined for proximity to the positive, so expect a smaller nDCG gain. SPECTER carries no retrieval evaluation split (`eval_beir`): keep a frozen NVDocs `eval_beir` fileset for Stage 4, or skip retrieval evaluation. The `validation.jsonl` created below is only for validation loss and checkpoint selection during training.
 
 ## What this notebook registers
 
 | Automodel field | Source |
 | --- | --- |
-| `dataset.training` | The fileset created here, holding `training.jsonl` |
+| `dataset.training` | The fileset created here, holding `training.jsonl` and optional `validation.jsonl` |
 | `model` | `default/nemotron-3-embed-1b` from the embedding tutorial |
 
 Rows use the triplet schema described in [dataset format](/documentation/customizer-reference/models/dataset-format):
@@ -24,7 +24,7 @@ Rows use the triplet schema described in [dataset format](/documentation/customi
 {"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}
 ```
 
-`neg_doc` is a non-empty JSON list. The cells below convert SPECTER locally and upload the result; the JSONL has to land at the fileset root, where Automodel looks for `train*.jsonl`.
+`neg_doc` is a non-empty JSON list. The cells below convert SPECTER locally and upload the result. At the fileset root, Automodel discovers `train*.jsonl` or `training*.jsonl` as training data and `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` as optional validation data. If no validation file is present, Automodel creates a deterministic holdout from the training rows using `schedule.validation_split`, which defaults to 10%.
 
 Equivalent CLI for the upload, once the files exist on disk:
 
@@ -117,16 +117,16 @@ nemo customization automodel.jobs submit --workspace default --name embed-specte
     "recipe": "bi_encoder",
     "finetuning_type": "all_weights",
     "max_seq_length": 512,
-    "retrieval": {"train_n_passages": 2, "export": {"primary": "hf"}}
+    "retrieval": {"query_max_length": 512, "passage_max_length": 512, "train_n_passages": 2, "export": {"primary": "hf"}}
   },
-  "schedule": {"epochs": 1},
+  "schedule": {"epochs": 2},
   "batch": {"global_batch_size": 128, "micro_batch_size": 4},
-  "optimizer": {"learning_rate": 1e-5, "warmup_steps": 5},
+  "optimizer": {"learning_rate": 1e-5, "warmup_steps": 5, "weight_decay": 0.01},
   "parallelism": {"num_gpus_per_node": 1},
   "output": {"name": "nemotron-3-embed-1b-specter"}
 }'
 ```
 
-Each SPECTER row carries one negative, so `train_n_passages` is 2 rather than the 5 used with mined NVDocs negatives. Automodel reads training data from a fileset, not from a local path or a Hugging Face dataset URI.
+Each SPECTER row carries one negative, so `train_n_passages` is 2 rather than the 5 used with mined NVDocs negatives. `dataset.training` points at the whole fileset, so Automodel reads both `training.jsonl` and the optional `validation.jsonl`; no separate dataset reference is needed. Automodel reads data from a fileset, not from a local path or a Hugging Face dataset URI.
 
 For Stage 4, pass the NVDocs `eval_beir` artifacts fileset to `retrieve-eval`.

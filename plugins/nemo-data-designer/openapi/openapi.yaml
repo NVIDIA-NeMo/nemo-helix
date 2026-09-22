@@ -4129,6 +4129,28 @@ components:
           title: Num Files
           type: integer
           minimum: 1.0
+        multi_doc:
+          type: boolean
+          title: Multi Doc
+          default: false
+        bundle_size:
+          type: integer
+          minimum: 1.0
+          title: Bundle Size
+          default: 2
+        bundle_strategy:
+          type: string
+          enum:
+          - sequential
+          - doc_balanced
+          - interleaved
+          title: Bundle Strategy
+          default: sequential
+        max_docs_per_bundle:
+          type: integer
+          minimum: 1.0
+          title: Max Docs Per Bundle
+          default: 3
         max_artifacts_per_type:
           type: integer
           minimum: 1.0
@@ -4171,6 +4193,10 @@ components:
           minimum: 0.0
           title: Similarity Threshold
           default: 0.9
+        max_parallel_requests_for_gen:
+          title: Max Parallel Requests For Gen
+          type: integer
+          minimum: 1.0
         buffer_size:
           type: integer
           minimum: 1.0
