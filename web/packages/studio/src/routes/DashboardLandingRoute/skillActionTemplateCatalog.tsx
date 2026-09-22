@@ -92,7 +92,7 @@ export const SKILL_ACTION_TEMPLATES = {
   },
   'nemo-customizer': {
     title: 'Fine-tune a model',
-    description: 'Train a custom model on your dataset with NeMo Customizer.',
+    description: 'Train a custom model on your own dataset.',
     prompt:
       'Use the nemo-customizer skill to fine-tune a model. Help me choose a base model, dataset, and training configuration, then launch and monitor the customization job.',
     icon: <Sliders size={18} />,

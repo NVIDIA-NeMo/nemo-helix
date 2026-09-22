@@ -33,17 +33,17 @@ export const customizationRoutes: RouteObject[] = gateCustomizationRoutes([
   {
     path: ROUTES.workspace.newCustomizationJob,
     element: <NewCustomizationRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    errorElement: <RouteErrorPanel title="Fine-tune" />,
   },
   {
     path: ROUTES.workspace.customizationJobList,
     element: <CustomizationJobListRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    errorElement: <RouteErrorPanel title="Fine-tune" />,
   },
   {
     path: ROUTES.workspace.customizationJobDetails,
     element: <CustomizationJobDetailsRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    errorElement: <RouteErrorPanel title="Fine-tune" />,
   },
 ]);
 

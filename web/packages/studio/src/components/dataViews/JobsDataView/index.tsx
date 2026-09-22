@@ -36,7 +36,7 @@ import { ComponentProps, type ReactNode, useRef } from 'react';
 
 const SOURCE_DISPLAY: Record<string, { label: string; icon: ReactNode }> = {
   [JOB_SOURCE.CUSTOMIZATION]: {
-    label: 'Customizer',
+    label: 'Fine-tuning',
     icon: <Sliders className={iconColorClass} size={14} />,
   },
   [JOB_SOURCE.DATA_DESIGNER]: {
