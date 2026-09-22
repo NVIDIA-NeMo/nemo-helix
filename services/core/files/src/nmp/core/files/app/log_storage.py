@@ -6,7 +6,7 @@
 import re
 
 from anyio import to_thread
-from nmp.common.jobs.schemas import InvalidPageCursorError, PlatformJobLogPage, decode_log_page_cursor
+from nmp.common.jobs.schemas import PlatformJobLogPage, decode_log_page_cursor
 from nmp.core.files.app.backends.base import StorageImpl
 from nmp.core.files.app.log_db import DuckDBLogRepository, LogEntry, LogQuery, LogRepository
 from nmp.core.files.exceptions import InvalidPathError
@@ -54,10 +54,7 @@ class LogStorage:
         """
         cursor = None
         if page_cursor:
-            try:
-                cursor = decode_log_page_cursor(page_cursor)
-            except ValueError:
-                raise InvalidPageCursorError("Invalid page cursor")
+            cursor = decode_log_page_cursor(page_cursor)
 
         query = LogQuery(
             base_path=logs_base_path(storage, artifact_base_path),
