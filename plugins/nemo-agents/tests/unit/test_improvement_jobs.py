@@ -17,8 +17,10 @@ def test_jobs_discovered_via_entry_points() -> None:
     jobs = discover_jobs()
     assert "agents.evaluate-suite" in jobs
     assert "agents.analyze" in jobs
-    assert "agents.optimize" in jobs
     assert "agents.optimize-skills" in jobs
+    # Optimization is not an agents job: nemo-agent-optimization-plugin owns the
+    # `nemo agents optimize` group and registers its own job and routes.
+    assert "agents.optimize" not in jobs
 
 
 def test_evaluate_suite_job_metadata() -> None:

@@ -149,7 +149,8 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-chatonly \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -228,7 +229,8 @@ nemo agents optimize prepare-fileset \
   --agent hermes-optimize-chatonly \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly-via-agent \
   --optimize-config optimize-chatonly-via-agent.yaml \
   --agent hermes-optimize-chatonly \
@@ -286,7 +288,8 @@ The command that `prepare-fileset` prints, with `--optimize-config` now relative
 to the fileset root:
 
 ```bash
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -409,7 +412,8 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-mcp \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default
