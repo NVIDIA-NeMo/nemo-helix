@@ -270,18 +270,80 @@ Two interactions probed separately:
 | `force=true` together with a stale `expected_db_version` | `409` — forcing does not bypass optimistic locking |
 | Foreign children *and* a stale `expected_db_version` | Children guard wins; both are `409`, and the message names the workspaces, which is the more actionable of the two. Entity survives either way |
 
-## Still untested
+## Run 4 — the three items run 3 left open
 
-- **The `MAX_DEPENDENT_CHILDREN_REPORTED = 1000` cap** on the dependent-children scan.
-  Exercising it needs more than a thousand children on one parent. Under the cap the scan
-  is exact; above it the guard still refuses (it only needs one foreign child to fire), but
-  the set of workspaces named in the message could be incomplete.
-- **Concurrent delete.** The guard is check-then-act rather than transactional: it queries
-  for foreign children, then deletes. A child created in another workspace between those
-  two steps is still cascaded away silently. The window is small and the pre-existing
-  behaviour was to cascade unconditionally, so this is narrower than what it replaces — but
-  it is a real limitation, not a closed hole.
-- **Postgres.** All three runs used the local SQLite-backed store. The repository has a
-  known SQLite/Postgres divergence in JSON path extraction (there is a skipped test citing
-  it), and the listing change routes through the filter layer, so CI's Postgres integration
-  run is the real check.
+### PostgreSQL
+
+Run 3 claimed CI's Postgres job was the real check for the listing change. **That was
+wrong: there is no Postgres anywhere in CI.** No workflow in `.github/workflows/`
+references it, and `services/core/entities/tests/integration/conftest.py` hardcodes
+`sqlite:///{db_path}`. Production ships PostgreSQL (`k8s/helm/values.yaml`), local
+development defaults to SQLite, and nothing exercises the former.
+
+That matters here because the listing change replaces a `workspace = X` equality with a
+cross-workspace query plus an `IN` filter, so its SQL runs on a backend no test touches.
+
+Verified by hand: PostgreSQL 16 in Docker, `DATABASE_URL` pointed at it, Alembic
+migrations applied on startup (`entities` and `workspaces` tables created). Re-ran the
+edge-case suite — **22 of 22, identical to SQLite** — plus resolution, listing, scope, and
+cascade rows from run 1. Virtual models were seeded to cover the gateway rows that run 1
+got from the developer's populated database; global fallback, `owned_by` provenance,
+request-workspace ids, unknown-model 404, and local-shadows-global all behaved as on
+SQLite.
+
+### The dependent-children scan limit — a real bug, now fixed
+
+Exercising the guard above its `page_size=1000` scan found it **naming only some of the
+workspaces it was about to destroy**. The repository's default ordering is `created_at`
+descending, so with more than a thousand children the scan saw only the newest thousand.
+
+Made deterministic with 1201 children on one parent: the lone child of `cap-old` created
+first (oldest), then 1200 in `cap-a`. The 409 named `cap-a` only. The guard still refused,
+so nothing was deleted — but a caller reading "affected workspaces: cap-a", judging that
+acceptable, and passing `force=true` would have destroyed a child in a workspace the
+message never mentioned.
+
+A first attempt at this test passed and proved nothing: the rare child was created near
+the end of a 24-thread batch, so it landed inside the newest thousand. The ordering had to
+be pinned before the test meant anything.
+
+Fixed by selecting the distinct workspaces directly rather than paging children — exact at
+any child count, and cheaper (one row per workspace instead of up to a thousand entities,
+against the already-indexed `parent` column). Re-verified against the same 1201-child
+fixture: the 409 now names both workspaces. Two integration tests cover it.
+
+### Concurrency
+
+| Check | Result |
+| --- | --- |
+| 20 concurrent `DELETE`s of one entity, 15 trials (300 requests) | Exactly one `200` per trial; the rest `404`/`409`. **No 5xx.** |
+| Child created simultaneously with a parent delete, 25 trials | Child silently destroyed in **24 of 25** |
+
+The second result corrects run 3, which called the window "small". It is not small when
+the two operations are genuinely concurrent — the guard reads the children, finds none,
+and the cascade then removes a child that appeared in between.
+
+This is **not a regression**: before this work the delete cascaded unconditionally, so the
+same child was destroyed with no check at all. The guard closes the ordinary case and does
+nothing for the racing one. Closing it properly means making the check and the delete one
+transaction, or changing the foreign key from `ON DELETE CASCADE` to `RESTRICT` and
+handling the error — a schema change with its own blast radius, out of scope here and
+worth its own discussion.
+
+## Totals
+
+| Run | Focus | Scenarios | Result |
+| --- | --- | --- | --- |
+| 1 | Resolution and routing, real seeded data | 32 | all pass |
+| 2 | Authorization, four principals | 22 | all pass |
+| 3 | Edge cases and error handling | 22 | all pass |
+| 4 | PostgreSQL re-run | 22 | all pass |
+| 4 | Scan limit, before and after the fix | 2 | bug found, fixed, re-verified |
+| 4 | Concurrency | 2 | one clean, one known limitation |
+
+## Known limitations
+
+- **Racing child creation.** See run 4. Narrower than the unconditional cascade it
+  replaces, but open.
+- **No automated PostgreSQL coverage.** Run 4 checked it by hand. Nothing in CI will
+  catch a future Postgres-only regression in this path.
