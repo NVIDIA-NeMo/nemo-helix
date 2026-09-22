@@ -403,3 +403,38 @@ class TestTotalWallClockBudget:
 
         # Left behind: no cap leaks out to later tests.
         assert "stuck in pending" in poll(0.05)
+
+    def test_a_nested_budget_cannot_extend_the_enclosing_one(self):
+        """The outer cap is what keeps the wait inside pytest's timeout."""
+        started = time.monotonic()
+        with wait_budget(0.3), wait_budget(30.0), pytest.raises(TimeoutError) as excinfo:
+            poll_until_terminal(
+                lambda: "pending",
+                label="stuck-job",
+                terminal=TERMINAL_STATUSES,
+                timeout=300.0,
+                image_pull_timeout=600.0,
+                poll_interval=0.01,
+            )
+
+        assert time.monotonic() - started < 10.0, "the inner budget extended the outer one"
+        assert "total wall-clock budget" in str(excinfo.value)
+
+    def test_the_wait_does_not_sleep_past_its_deadline(self):
+        """A poll interval longer than the remaining budget must not overshoot it.
+
+        Overshooting by a whole interval is exactly the margin that decides
+        whether this raises its own error or pytest kills the process first.
+        """
+        started = time.monotonic()
+        with wait_budget(0.3), pytest.raises(TimeoutError):
+            poll_until_terminal(
+                lambda: "pending",
+                label="stuck-job",
+                terminal=TERMINAL_STATUSES,
+                timeout=300.0,
+                image_pull_timeout=600.0,
+                poll_interval=30.0,
+            )
+
+        assert time.monotonic() - started < 5.0, "slept past the deadline"

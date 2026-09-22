@@ -41,10 +41,18 @@ def wait_budget(seconds: float | None) -> Iterator[None]:
 
     The e2e harness publishes each test's share of its pytest budget here.
     ``None`` clears the cap, for callers outside pytest.
+
+    A nested block can only tighten the cap, never extend it: the outer budget
+    is what keeps the wait inside pytest's own timeout, so letting an inner one
+    reach past it would defeat the point.
     """
     global _wait_deadline
     previous = _wait_deadline
-    _wait_deadline = None if seconds is None else time.monotonic() + seconds
+    if seconds is None:
+        _wait_deadline = None
+    else:
+        deadline = time.monotonic() + seconds
+        _wait_deadline = deadline if previous is None else min(previous, deadline)
     try:
         yield
     finally:
@@ -103,7 +111,9 @@ def poll_until_terminal(
                 f"(job timeout {timeout}s, image pull timeout {image_pull_timeout}s). Status: {status}"
             )
 
-        time.sleep(poll_interval)
+        # Never sleep past the deadline: overshooting it by a poll interval is
+        # exactly the margin that decides whether this raises or pytest kills us.
+        time.sleep(max(0.0, min(poll_interval, deadline - time.monotonic())))
         poll_duration = time.time() - poll_start
 
         if status == "pending":
