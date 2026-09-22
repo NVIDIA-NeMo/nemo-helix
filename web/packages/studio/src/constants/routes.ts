@@ -66,6 +66,8 @@ export const ROUTES = {
     /** Base models list with a specific model panel open (model name in path) */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
+    /** Dataset-driven model evaluation builder. */
+    evaluationNew: `/workspaces/:${P.workspace}/evaluation/new`,
     evaluationMetrics: `/workspaces/:${P.workspace}/evaluation/metrics`,
     evaluationMetricNew: `/workspaces/:${P.workspace}/evaluation/metrics/new`,
     /** Run panel without a pre-selected metric — user picks from within the panel */

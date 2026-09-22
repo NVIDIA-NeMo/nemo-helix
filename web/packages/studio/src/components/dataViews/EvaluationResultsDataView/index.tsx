@@ -3,28 +3,34 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { type FilterTree, jsonFilter } from '@nemo/common/src/api/filterOperators';
+import { CancelJobButton } from '@nemo/common/src/components/CancelJobButton';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import {
   type ApiFilter,
   useStudioDataViewState,
 } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
-import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import {
+  getEvaluatorListEvaluateJobsQueryKey,
+  useEvaluatorListEvaluateJobs,
+} from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
 import {
   type EvaluateJob,
   type EvaluateJobsListFilter,
   EvaluateJobsSortField,
 } from '@nemo/sdk/generated/evaluator/schema';
+import { Flex } from '@nvidia/foundations-react-core';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
-import { keepPreviousData } from '@tanstack/react-query';
+import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { ComponentProps } from 'react';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
@@ -58,6 +64,7 @@ const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobs
 export const EvaluationResultsDataView = () => {
   const workspace = useWorkspaceFromPath();
   const openRow = useRowNavigation();
+  const queryClient = useQueryClient();
 
   const dataViewState = useStudioDataViewState<EvaluateJobsListFilter>({
     defaultSort: [{ id: 'created_at', desc: true }],
@@ -65,7 +72,7 @@ export const EvaluationResultsDataView = () => {
 
   const {
     data: jobsData,
-    isFetching,
+    isLoading,
     error,
   } = useEvaluatorListEvaluateJobs(
     workspace,
@@ -80,6 +87,11 @@ export const EvaluationResultsDataView = () => {
         placeholderData: keepPreviousData,
         staleTime: 0,
         refetchOnWindowFocus: true,
+        // Job rows change state on their own, so the list has to poll -- as
+        // every sibling job list does. Without it a status badge is frozen at
+        // whatever it was on page load, and Cancel appears to hang at
+        // "Cancelling" even after the job has long since finished.
+        refetchInterval: JOB_POLLING_INTERVAL_MS,
       },
     }
   );
@@ -116,11 +128,31 @@ export const EvaluationResultsDataView = () => {
       },
       cell: ({ row }) => <RelativeTime datetime={row.original.created_at ?? ''} />,
     }),
+    accessor(() => '', {
+      id: 'actions',
+      header: '',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Flex justify="end">
+          <CancelJobButton
+            workspace={workspace}
+            jobName={row.original.name}
+            jobStatus={row.original.status}
+            onCancelled={() =>
+              queryClient.invalidateQueries({
+                queryKey: getEvaluatorListEvaluateJobsQueryKey(workspace),
+              })
+            }
+            compact
+          />
+        </Flex>
+      ),
+    }),
   ];
 
   const hasActiveFilters =
     !!dataViewState.debouncedSearchBar || dataViewState.debouncedColumnFilters.length > 0;
-  const isInitialEmpty = jobs.length === 0 && !isFetching && !error && !hasActiveFilters;
+  const isInitialEmpty = jobs.length === 0 && !isLoading && !error && !hasActiveFilters;
 
   if (error) {
     return <ErrorPanel errorMessage={getErrorMessage(error)} />;
@@ -142,7 +174,11 @@ export const EvaluationResultsDataView = () => {
         DataViewRoot: {
           data: jobs,
           totalCount: jobsData?.pagination?.total_results ?? 0,
-          requestStatus: isFetching ? 'loading' : undefined,
+          // `isLoading`, not `isFetching`: this list polls, and `isFetching` is
+          // true on every background refetch, which swapped the rows for
+          // skeletons every few seconds. `keepPreviousData` was already holding
+          // the rows -- the table was simply being told they were not there.
+          requestStatus: isLoading && !jobsData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: () =>

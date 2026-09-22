@@ -9,6 +9,7 @@ import { iconColorClass } from '@studio/routes/constants';
 import {
   gateEvaluationBenchmarksRoutes,
   gateEvaluationRoutes,
+  gateModelEvaluationFormRoutes,
   getEvaluationResultsRoute,
 } from '@studio/routes/utils';
 import { lazy } from 'react';
@@ -34,6 +35,11 @@ const EvaluationResultDetailsRoute = lazy(() =>
     default: module.EvaluationResultDetailsRoute,
   }))
 );
+const EvaluationNewRoute = lazy(() =>
+  import('@studio/routes/evaluation/EvaluationNewRoute').then((module) => ({
+    default: module.EvaluationNewRoute,
+  }))
+);
 
 export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
   {
@@ -48,6 +54,11 @@ export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
       ...gateEvaluationBenchmarksRoutes([]),
     ],
   },
+  ...gateModelEvaluationFormRoutes({
+    path: ROUTES.workspace.evaluationNew,
+    element: <EvaluationNewRoute />,
+    errorElement: <RouteErrorPanel title="Evaluator" />,
+  }),
   {
     path: ROUTES.workspace.evaluationResultDetails,
     element: <EvaluationResultDetailsRoute />,

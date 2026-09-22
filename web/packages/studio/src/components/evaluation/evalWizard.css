@@ -4,8 +4,10 @@
  */
 
 /*
+ * Shared by the agent and model evaluation wizards.
+ *
  * KUI's horizontal stepper sets each step's label beside its node, which reads as a row of
- * "1 Begin ---- 2 Create evaluation". In a modal this wizard's width is short enough that the
+ * "1 Begin ---- 2 Run Evaluation". In a modal this wizard's width is short enough that the
  * labels crowd the connectors, so the node row is re-laid-out as a grid: node and connector on
  * the first line, label underneath the node it belongs to.
  *

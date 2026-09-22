@@ -161,7 +161,7 @@ describe('SubmitEvaluationModal', () => {
 
     // Re-running has no experiment to set up, so it is two steps.
     expect(await screen.findByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Create evaluation')).toBeInTheDocument();
+    expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
     expect(screen.queryByText('Create experiment')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('radio', { name: /Create a new experiment/ }));
@@ -169,7 +169,7 @@ describe('SubmitEvaluationModal', () => {
     // The new-experiment path gains its own step, and all three are named up front.
     expect(await screen.findByText('Create experiment')).toBeInTheDocument();
     expect(screen.getByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Create evaluation')).toBeInTheDocument();
+    expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
   });
 
   it("puts the new run's name under the picker it is derived from", async () => {

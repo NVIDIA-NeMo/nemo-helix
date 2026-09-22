@@ -61,7 +61,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
     items: [
       {
         href: getEvaluationResultsRoute(workspace),
-        slotLabel: 'Evaluations',
+        slotLabel: 'Model Evaluations',
       },
       {
         slotLabel: job?.name ?? id,

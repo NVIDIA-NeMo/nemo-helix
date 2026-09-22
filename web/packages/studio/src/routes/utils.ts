@@ -22,6 +22,7 @@ import {
   JOBS_ENABLED,
   MEMBERS_ENABLED,
   MODEL_COMPARE_ENABLED,
+  MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
   PLUGINS_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
@@ -71,6 +72,9 @@ export const gateDataDesignerRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateAnonymizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ANONYMIZER_ENABLED, routes);
+
+export const gateModelEvaluationFormRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(MODEL_EVALUATION_FORM_ENABLED, routes);
 
 export const gateEvaluationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EVALUATOR_ENABLED, routes);

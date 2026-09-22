@@ -8,7 +8,7 @@ import {
   type TableExpandableCellState,
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { Badge, Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
+import { Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
 import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
 import { Rows3 } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -124,19 +124,14 @@ export const DatasetEvalRowResultsPanel: FC<DatasetEvalRowResultsPanelProps> = (
       col.display({
         id: 'expected',
         header: 'Expected',
-        size: 130,
-        cell: ({ row }) => {
-          const expected = expectedValue(row.original.item);
-          return expected ? (
-            <Badge kind="outline" color="gray">
-              {expected}
-            </Badge>
-          ) : (
-            <Text kind="body/regular/sm" color="secondary">
-              —
-            </Text>
-          );
-        },
+        size: 240,
+        cell: ({ row }) => (
+          <LongCell
+            content={expectedValue(row.original.item) ?? ''}
+            title={`Row ${row.original.row_index ?? absoluteIndex(row.index)} — Expected`}
+            onExpand={setExpandedCell}
+          />
+        ),
       }),
       col.display({
         id: 'output',

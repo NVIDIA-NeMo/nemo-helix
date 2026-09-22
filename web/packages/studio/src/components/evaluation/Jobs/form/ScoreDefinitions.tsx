@@ -118,8 +118,13 @@ export const ScoreDefinitions: FC = () => {
                   </Badge>
                 ) : (
                   score.rubric.map((item, i) => (
-                    <Badge key={i} kind="solid" color="gray">
-                      {item.label}: {item.value}
+                    <Badge key={i} kind="solid" color="gray" title={item.description ?? undefined}>
+                      {/* `label: value` only when they differ. A numeric rubric
+                          labels its levels by their own value, so repeating it
+                          reads as "0: 0" and hides the level's meaning. */}
+                      {String(item.label) === String(item.value)
+                        ? item.label
+                        : `${item.label}: ${item.value}`}
                     </Badge>
                   ))
                 )}
