@@ -144,14 +144,13 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 
 ### SDK Generation
 
-The Python SDK is automatically generated from the OpenAPI specification using Stainless. The SDK is maintained in a separate Git repository and integrated into this project.
+The Python SDK is generated from the OpenAPI specification and checked in to this repository. The Stainless cloud generation step has been removed; the SDK is now maintained in-repo (regenerate the OpenAPI spec locally, then hand-maintain the SDK under `sdk/python/nemo-platform`).
 
 **Update the SDK:**
-- `make update-sdk` - Full SDK update (regenerate OpenAPI spec + sync with Stainless)
+- `make update-sdk` - Full SDK update (regenerate OpenAPI spec, web SDK, and CLI)
 
 **Individual steps:**
 - `make refresh-openapi` - Regenerate OpenAPI spec from API definitions
-- `make stainless` - Sync with Stainless (requires `STAINLESS_API_KEY` env var)
 
 **When to regenerate the SDK:**
 Regenerate the SDK whenever you modify:
@@ -164,9 +163,7 @@ Regenerate the SDK whenever you modify:
 
 **How it works:**
 1. `refresh-openapi` generates `openapi/openapi.yaml` from your API code
-2. `stainless` pushes the spec to Stainless API, which generates SDK code
-3. Generated SDK is pulled from stainless remote and vendored packages are integrated
-4. Post-generation updates apply licenses, README, and other metadata
+2. Post-generation updates apply licenses, README, and other metadata
 
 **Note:** OpenAPI generation also runs as a pre-commit hook (manual stage) when API files change.
 

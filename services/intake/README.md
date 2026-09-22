@@ -219,5 +219,4 @@ make test-service SERVICE=intake
 
 ## Generated API Artifacts
 
-Run `make refresh-openapi` after Intake route or schema changes. The Stainless
-resource config lives in `sdk/stainless.yaml`.
+Run `make refresh-openapi` after Intake route or schema changes.
