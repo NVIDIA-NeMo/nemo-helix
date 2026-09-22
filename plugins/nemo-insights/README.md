@@ -36,8 +36,7 @@ Run `nemo setup` first to select the default and fast NeMo Platform models.
 `--since <ISO-8601 timestamp>` to set a lower time bound, or
 `--evaluation-id <id>` to select one evaluation.
 
-Submission requires `--agent` and does not discover `optimizer.yaml` or load
-an adjacent `.env`. Pass the workspace and Ethos explicitly when needed.
+Provide `--agent` and pass the workspace and Ethos explicitly when needed.
 `--base-url` defaults to `NMP_BASE_URL`, then `http://localhost:8080`.
 
 ### Telemetry requirement

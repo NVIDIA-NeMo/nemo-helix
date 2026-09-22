@@ -214,9 +214,8 @@ from the current directory.
 
 An `optimizer.yaml` profile must identify the agent and its source, one task
 template, and independent train and validation datasets. It can also set the
-workspace, Ethos, run configuration, and framework skills. The
-Analyst and Experimentalist share this profile, allowing the latter to use the
-default Insight created by the former.
+workspace, Ethos, run configuration, and framework skills.
+Pass a Platform Insight ID from an AnalysisRun explicitly with `--insight`.
 
 ## Explore configuration
 

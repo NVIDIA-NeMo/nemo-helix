@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Experimentalist-owned models for the shared ``optimizer.yaml`` profile.
+"""Experimentalist-owned models for the ``optimizer.yaml`` profile.
 
 The profile can supply a local insights file at
 ``<profile-dir>/.nemo-optimizer/insights.yaml``. Platform AnalysisRuns persist

@@ -44,9 +44,9 @@ aliases:
 - the dataset cache moved from `~/.cache/nemo-optimizer/` to
   `~/.cache/nemo-experimentalist/`, so cached datasets re-download once
 
-Two names deliberately did **not** change. `optimizer.yaml` and the
-`.nemo-optimizer/` state directory are a shared contract with
-`nemo-insights-plugin`: `PROFILE_FILENAME` and `discover_profile()` live in
+Two names deliberately did **not** change: `optimizer.yaml` and the
+`.nemo-optimizer/` state directory. The Experimentalist's profile helpers,
+`PROFILE_FILENAME` and `discover_profile()`, still live in
 `nemo_insights_plugin.contracts.profile`. Existing local insight files can still
 be read from `<profile-dir>/.nemo-optimizer/insights.yaml`; AnalysisRuns write to
 Platform, so pass the resulting Insight ID explicitly with `--insight`.

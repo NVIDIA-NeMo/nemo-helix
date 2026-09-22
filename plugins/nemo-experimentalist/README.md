@@ -81,8 +81,9 @@ single leader, so complementary strengths stay alive across rounds.
   group, so the lineage is visible in Studio. Structure only — rewards and
   trials are not copied there.
 
-Both the Analyst and the Experimentalist read the same `optimizer.yaml`
-profile, discovered by walking up from the current directory. See
+The Experimentalist reads `optimizer.yaml`, discovered by walking up from the
+current directory. Submit Analyst settings through command-line flags and pass
+the resulting Platform Insight ID to the Experimentalist with `--insight`. See
 [Insight-driven optimization](../../docs/agents/insight-driven-optimization.mdx)
 for the full concept guide.
 

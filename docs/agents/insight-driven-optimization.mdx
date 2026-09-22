@@ -89,12 +89,11 @@ dependencies:
   development kit (SDK), and skill entry points. For a fully local platform, restart
   `nemo services run` after installation so the platform discovers them.
 
-### The Shared Profile
+### The Experimenter Profile
 
-Both halves of the loop read a shared per-agent profile, `optimizer.yaml`,
-discovered by walking up from the current directory. The Analyst consumes only
-its analysis subset (`agent`, `ethos`, `workspace`); the Experimenter
-validates the full schema:
+The Experimenter reads `optimizer.yaml`, discovered by walking up from the
+current directory, and validates its schema. For Analyst submissions, pass
+`--agent`, `--workspace`, and optional `--ethos` explicitly.
 
 ```yaml
 agent: research-agent
@@ -108,9 +107,10 @@ datasets:
 ```
 
 The optional `ethos` path is the agent's [ETHOS.md](/documentation/agents/optimize-agents/ethos) contract.
-When omitted, the Analyst looks for `ETHOS.md`, then `README.md`, beside the profile.
-Relative paths resolve against the profile. An adjacent `.env` is loaded when
-a profile is found, without replacing variables already set in the shell.
+For the Experimenter, relative paths resolve against the profile. An adjacent
+`.env` is loaded when a profile is found, without replacing variables already
+set in the shell. Analyst submissions use `--ethos` when supplied; they do not
+automatically select an Ethos file.
 `NMP_BASE_URL` is the base-URL environment variable for this workflow, and
 `--base-url` takes precedence over it.
 
@@ -170,8 +170,8 @@ rather than restating the problem.
 #### Insight Persistence
 
 AnalysisRuns execute on NeMo Platform. The Insights plugin stores new insights
-and appends evidence to existing insights through the Insights API. Submission
-does not discover a local profile or write a local Insights mirror.
+and appends evidence to existing insights through the Insights API.
+Pass analysis settings explicitly; results are stored in NeMo Platform.
 
 #### Telemetry Hierarchy
 
@@ -492,7 +492,7 @@ Submit analysis through `nemo insights analysis-runs`.
 Submit one analysis of an agent's traces. `--agent` is required. Optional flags
 include `--workspace`, `--base-url`, `--ethos`, `--since`, `--evaluation-id`,
 `--default-model`, and `--fast-model`. Use `--wait` to wait for the backing job.
-This command does not discover `optimizer.yaml` or support local file mirrors.
+Provide analysis settings through command-line flags. Results are stored in NeMo Platform.
 
 ### `nemo insights analysis enable | disable | status`
 
