@@ -208,4 +208,4 @@ studio:
   static_files_path: web/packages/studio/dist
   sandbox_enabled: true
   feature_flags:
-    assistant_studio_enabled: true
+    assistant_studio_enabled: false
