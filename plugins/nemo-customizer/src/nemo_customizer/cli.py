@@ -11,6 +11,8 @@ from typing import ClassVar
 
 import typer
 from nemo_platform_plugin.cli import NemoCLI
+from nemo_platform_plugin.cli_options import WorkspaceOption
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 from nemo_platform_plugin.customization_contributor import (
     CustomizationCLISummaryProvider,
     CustomizationContributorDiscoveryError,
@@ -135,7 +137,7 @@ def _add_upload_callback(app: typer.Typer) -> None:
             help="Reuse whichever of the above already exists. Its files are left as they are.",
             rich_help_panel=_UPLOAD_PANEL,
         ),
-        workspace: str = typer.Option("default", "--workspace", "-w", help="Target workspace."),
+        workspace: WorkspaceOption = None,
         base_url: str | None = typer.Option(None, "--base-url", help="Override the platform API host."),
         cluster: str | None = typer.Option(None, "--cluster", help="Name of a cluster in the CLI config."),
         hf_token_secret: str | None = typer.Option(
@@ -146,13 +148,34 @@ def _add_upload_callback(app: typer.Typer) -> None:
         ),
     ) -> None:
         # The callback also runs on the way to a backend subcommand, where these
-        # flags do not apply and the subcommand owns the work.
+        # flags do not apply and the subcommand owns the work. Refuse them there
+        # rather than drop them: `nemo customization --upload-dataset x automodel
+        # submit` would otherwise submit without uploading anything. Every option
+        # here defaults to None or False and none reads an env var, so a set value
+        # means the user typed the flag.
         if typer_ctx.invoked_subcommand is not None:
+            given = {
+                "--upload-model": upload_model is not None,
+                "--upload-dataset": upload_dataset is not None,
+                "--upload-environment": upload_environment is not None,
+                "--exist-ok": exist_ok,
+                "--workspace": workspace is not None,
+                "--base-url": base_url is not None,
+                "--cluster": cluster is not None,
+                "--hf-token-secret": hf_token_secret is not None,
+            }
+            misplaced = [flag for flag, is_set in given.items() if is_set]
+            if misplaced:
+                typer_ctx.fail(
+                    f"{', '.join(misplaced)} must come after the subcommand: "
+                    f"'nemo customization {typer_ctx.invoked_subcommand} submit [OPTIONS] JOB_JSON'."
+                )
             return
         if upload_model is None and upload_dataset is None and upload_environment is None:
             typer.echo(typer_ctx.get_help())
             raise typer.Exit()
 
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         report = _create_customization_resources(
             typer_ctx,
             model_source=upload_model,
