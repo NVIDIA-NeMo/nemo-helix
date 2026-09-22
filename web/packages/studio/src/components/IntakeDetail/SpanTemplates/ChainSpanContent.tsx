@@ -10,6 +10,7 @@ import {
   type TemplateField,
 } from '@studio/components/IntakeDetail/SpanTemplates/templateFields';
 import type { SpanTemplateContentProps } from '@studio/components/IntakeDetail/SpanTemplates/types';
+import { formatDurationMs } from '@studio/util/intakeTelemetry';
 import type { FC } from 'react';
 
 /**
@@ -22,6 +23,15 @@ export const ChainSpanContent: FC<SpanTemplateContentProps> = ({ span }) => {
   const stepCount = asNumber(attributes['chain.step_count']);
 
   const fields: TemplateField[] = [{ label: 'Steps', value: stepCount?.toLocaleString() }];
+  if (span.source === 'gym') {
+    const recordedDuration = asNumber(attributes['gym.observed_duration_ms']);
+    if (recordedDuration !== undefined && recordedDuration >= 0) {
+      fields.push({ label: 'Recorded rollout duration', value: formatDurationMs(recordedDuration) });
+    }
+    if (attributes['gym.timing'] === 'observed_child_window') {
+      fields.push({ label: 'Timing basis', value: 'Observed child operations' });
+    }
+  }
 
   return <TemplateKeyValues span={span} fields={fields} />;
 };

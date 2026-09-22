@@ -82,6 +82,12 @@ def test_evidence_maps_to_existing_intake_contract(importer: ModuleType, rollout
     assert tool.parent_span_id == agent.span_id
     assert agent.parent_span_id == root.span_id
     assert child.status.value == "error"
+    # A successful top-level invocation may have recovered from a child failure.
+    assert root.status.value == "success"
+    assert root.attributes["gym.status_source"] == "top_level_invocations"
+    assert root.attributes["gym.timing"] == "observed_child_window"
+    assert root.started_at == model.started_at
+    assert root.ended_at == model.ended_at
     assert model.input == {"input": "Hello"}
     assert tool.input == '{"q":"x"}'
     assert tool.output == "42"
@@ -110,6 +116,92 @@ def test_replay_and_run_isolation(importer: ModuleType, rollout: dict) -> None:
     second = importer.map_gym_rollouts([rollout], run_id="two", agent_name="agent")
     assert {s["span_id"] for s in first.spans}.isdisjoint(s["span_id"] for s in second.spans)
     assert first.spans[0]["session_id"] != second.spans[0]["session_id"]
+
+
+@pytest.mark.parametrize(
+    "statuses,expected",
+    [
+        (["completed", "completed"], "success"),
+        (["completed", "failed"], "error"),
+        (["completed", "cancelled"], "cancelled"),
+        (["completed", "incomplete"], "unknown"),
+        (["unknown"], "unknown"),
+        ([], "unknown"),
+    ],
+)
+def test_rollout_status_summarizes_top_level_invocations(
+    importer: ModuleType, rollout: dict, statuses: list[str], expected: str
+) -> None:
+    rollout["ng_trajectory"]["invocations"] = [
+        {"invocation_id": str(index), "status": status} for index, status in enumerate(statuses)
+    ]
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    assert root["status"] == expected
+
+
+def test_explicit_rollout_status_overrides_invocations(importer: ModuleType, rollout: dict) -> None:
+    rollout["status"] = "failed"
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    assert root["status"] == "error"
+    assert root["attributes"]["gym.status_source"] == "rollout"
+
+
+def test_missing_invocation_parent_does_not_imply_rollout_success(importer: ModuleType, rollout: dict) -> None:
+    rollout["ng_trajectory"]["invocations"][1]["parent_invocation_id"] = "missing"
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    assert root["status"] == "unknown"
+
+
+def test_parallel_calls_use_elapsed_window_not_sum(importer: ModuleType, rollout: dict) -> None:
+    first = rollout["ng_trajectory"]["model_calls"][0]
+    second = deepcopy(first)
+    second.update(model_call_id="call-2", started_at=1790000000.5, completed_at=1790000002)
+    rollout["ng_trajectory"]["model_calls"].append(second)
+    rollout["ng_perf"] = {"total_latency_ms": 2200}
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    elapsed = datetime.fromisoformat(root["ended_at"]) - datetime.fromisoformat(root["started_at"])
+    assert elapsed.total_seconds() == 2
+    assert root["attributes"]["gym.observed_duration_ms"] == 2200
+    assert root["attributes"]["gym.duration_source"] == "ng_perf.total_latency_ms"
+
+
+def test_rollup_preserves_earlier_turn_anchor_for_replay(importer: ModuleType, rollout: dict) -> None:
+    rollout["ng_trajectory"]["turns"] = [{"timestamp": 1789999999}]
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    assert datetime.fromisoformat(root["started_at"]).timestamp() == 1789999999
+    assert datetime.fromisoformat(root["ended_at"]).timestamp() == 1790000001
+
+
+def test_elapsed_duration_does_not_fabricate_timestamps(importer: ModuleType, rollout: dict) -> None:
+    rollout["ng_trajectory"]["model_calls"] = []
+    rollout["ng_perf"] = {"total_latency_ms": 2200}
+    root = importer.map_gym_rollouts(
+        [rollout], run_id="one", agent_name="agent", started_at=datetime(2026, 9, 21, tzinfo=timezone.utc)
+    ).spans[0]
+    assert root["ended_at"] is None
+    assert root["attributes"]["gym.timing"] == "anchor_only"
+    assert root["attributes"]["gym.observed_duration_ms"] == 2200
+
+
+def test_incomplete_observed_interval_does_not_imply_rollout_end(importer: ModuleType, rollout: dict) -> None:
+    del rollout["ng_trajectory"]["model_calls"][0]["completed_at"]
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    assert root["ended_at"] is None
+
+
+def test_explicit_rollout_bounds_are_preserved(importer: ModuleType, rollout: dict) -> None:
+    rollout.update(started_at=1789999999, completed_at=1790000003)
+    root = importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent").spans[0]
+    elapsed = datetime.fromisoformat(root["ended_at"]) - datetime.fromisoformat(root["started_at"])
+    assert elapsed.total_seconds() == 4
+    assert root["attributes"]["gym.timing"] == "observed"
+
+
+@pytest.mark.parametrize("duration", [-1, float("nan"), float("inf"), True, "100"])
+def test_invalid_rollout_duration_rejected(importer: ModuleType, rollout: dict, duration: object) -> None:
+    rollout["ng_perf"] = {"total_latency_ms": duration}
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        importer.map_gym_rollouts([rollout], run_id="one", agent_name="agent")
 
 
 def test_untimed_rollout_requires_explicit_anchor(importer: ModuleType, rollout: dict) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -124,7 +125,11 @@ def map_gym_rollouts(
         calls = _records(trajectory.get("model_calls", []), "model_calls")
         tools = _records(trajectory.get("tool_calls", []), "tool_calls")
         turns = _records(trajectory.get("turns", []), "turns")
-        observed = [_time(item["started_at"]) for item in calls + tools if item.get("started_at") is not None]
+        observed = [
+            _time(item["started_at"])
+            for item in [row, *invocations, *calls, *tools]
+            if item.get("started_at") is not None
+        ]
         observed.extend(_time(item["timestamp"]) for item in turns if item.get("timestamp") is not None)
         if observed:
             anchor = min(observed, key=datetime.fromisoformat)
@@ -151,6 +156,7 @@ def map_gym_rollouts(
             anchor=anchor,
             attributes=attributes,
         )
+        rollout_start = len(bundle.spans)
         # Preserve the complete evidence envelope, including gaps, turns and supplemental observations.
         bundle.spans.append(root)
         invocation_map = {_identity(item.get("invocation_id"), "invocation_id"): item for item in invocations}
@@ -258,6 +264,7 @@ def map_gym_rollouts(
                 if len(arguments) == 1:
                     span["input"] = arguments[0]
             bundle.spans.append(span)
+        _roll_up_rollout(root, row, invocations, bundle.spans[rollout_start + 1 :])
         if include_feedback and row.get("reward") is not None:
             results, annotations = project_signal(
                 provider="gym",
@@ -272,6 +279,53 @@ def map_gym_rollouts(
             bundle.annotations.extend(annotations)
     bundle.validate()
     return bundle
+
+
+def _roll_up_rollout(root: JsonObject, row: JsonObject, invocations: list[JsonObject], spans: list[JsonObject]) -> None:
+    """Summarize execution outcomes and observed bounds without using reward as status."""
+    attributes = _object(root["attributes"], "attributes")
+    if row.get("status") is not None or row.get("error_type"):
+        attributes["gym.status_source"] = "rollout"
+    else:
+        top_level = [item for item in invocations if item.get("parent_invocation_id") is None]
+        statuses = [normalize_status(item.get("status"), error=item.get("error_type")) for item in top_level]
+        identities = {item["invocation_id"] for item in invocations}
+        missing_parent = any(
+            item.get("parent_invocation_id") is not None and item["parent_invocation_id"] not in identities
+            for item in invocations
+        )
+        if "error" in statuses:
+            root["status"] = "error"
+        elif "cancelled" in statuses:
+            root["status"] = "cancelled"
+        elif statuses and all(status == "success" for status in statuses) and not missing_parent:
+            root["status"] = "success"
+        attributes["gym.status_source"] = "top_level_invocations"
+
+    perf = _object(row.get("ng_perf") or {}, "ng_perf")
+    duration = perf.get("total_latency_ms")
+    if duration is not None:
+        if (
+            isinstance(duration, bool)
+            or not isinstance(duration, int | float)
+            or not math.isfinite(duration)
+            or duration < 0
+        ):
+            raise ValueError("ng_perf.total_latency_ms must be a finite nonnegative number")
+        attributes["gym.observed_duration_ms"] = duration
+        attributes["gym.duration_source"] = "ng_perf.total_latency_ms"
+
+    # A recorded elapsed duration does not establish an absolute start or end.
+    # Only project a child window when the rollout has neither boundary itself.
+    if row.get("started_at") is None and row.get("completed_at") is None:
+        timed = [span for span in spans if _object(span["attributes"], "attributes")["gym.timing"] == "observed"]
+        if timed and all(span.get("ended_at") is not None for span in timed):
+            # Retain the source anchor, which also includes observed turn timestamps.
+            # start_time is part of Intake's storage key, so replay must not shift it.
+            root["ended_at"] = max(
+                (span["ended_at"] for span in timed), key=lambda value: datetime.fromisoformat(str(value))
+            )
+            attributes["gym.timing"] = "observed_child_window"
 
 
 def _matches(ref: JsonObject, call: JsonObject, metadata: JsonObject) -> bool:

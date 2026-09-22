@@ -30,6 +30,19 @@ substitute. Untimed spans have `gym.timing=anchor_only`, no end time, and any re
 in `gym.observed_duration_ms`. A fallback anchor is a placement aid, not measured execution time.
 If timestamps exist, the earliest observed model/tool start or turn timestamp anchors untimed spans.
 
+The rollout wrapper keeps the hierarchy consistent for one or multiple top-level invocations.
+Its explicit status takes precedence; otherwise, top-level invocation outcomes determine status:
+an error wins, then cancellation, then success only when every top-level invocation succeeded and
+no invocation parent is missing. Reward remains independent of execution status. Nested failures
+do not override a successful top-level invocation that may have recovered from them.
+
+When the rollout supplies neither absolute boundary, complete observed child intervals establish
+its start-to-end window (`gym.timing=observed_child_window`). Overlapping intervals are not summed.
+This window may exclude unobserved setup or teardown. A child with a recorded start but no end
+prevents an inferred end. Recorded `ng_perf.total_latency_ms` is retained separately as
+`gym.observed_duration_ms`; it never manufactures an absolute timestamp. Studio shows this as
+**Recorded rollout duration**, alongside the observed window used by the trace summary.
+
 For upload, verify Intake's read path as described in `SKILL.md`, then remove `--dry-run` and
 supply `--nmp-base-url` and `--workspace` if the active CLI context does not select the destination.
 The shared importer runtime handles authentication, batching, and read-back verification of span IDs.
