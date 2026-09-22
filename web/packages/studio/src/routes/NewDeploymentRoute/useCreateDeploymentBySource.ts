@@ -10,7 +10,11 @@
  * its affiliates is strictly prohibited.
  */
 
-import { getErrorMessage, isNotFoundError } from '@nemo/common/src/api/common/utils';
+import {
+  getErrorMessage,
+  isNotFoundError,
+  isVersionConflictError,
+} from '@nemo/common/src/api/common/utils';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
@@ -20,6 +24,7 @@ import {
 import {
   getModelsListDeploymentConfigsQueryKey,
   modelsCreateDeploymentConfig,
+  modelsGetLatestDeploymentConfig,
 } from '@nemo/sdk/generated/platform/model-deployment-configs';
 import {
   getModelsListDeploymentsQueryKey,
@@ -34,6 +39,7 @@ import {
   Engine,
   type ContainerExecutorConfig,
   type CreateFilesetRequest,
+  type ModelDeploymentConfig,
 } from '@nemo/sdk/generated/platform/schema';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
@@ -54,7 +60,7 @@ import { NO_SECRET_SELECT_VALUE } from '@studio/routes/SecretsListRoute/SecretSe
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 
-type ReportStage = (message: string) => void;
+export type ReportStage = (message: string) => void;
 
 /**
  * Image overrides for the engines that accept one.
@@ -198,13 +204,27 @@ async function createHuggingFaceDeployment(
   });
 }
 
-async function createWorkspaceDeployment(
+/**
+ * Create the `ModelDeploymentConfig` for a model that already exists in the workspace.
+ *
+ * Split out from `createWorkspaceDeployment` because a config is useful on its own:
+ * the fine-tuning form creates one for the adapter's **base model** and hands its
+ * name to the job as `deployment_config`, letting the job create the deployment
+ * once training finishes rather than idling a GPU for the whole run.
+ *
+ * Validation is the reason this is worth doing up front. `_validate_engine_config`
+ * runs synchronously inside `create_deployment_config`, so a missing image for the
+ * NIM engine fails here in milliseconds — before the caller commits to anything
+ * expensive.
+ *
+ * Callers outside the wizard own their own error surface and query invalidation.
+ */
+export async function createWorkspaceDeploymentConfig(
   workspace: string,
   values: WizardFormValues,
-  deploymentName: string,
   configName: string,
   reportStage: ReportStage
-) {
+): Promise<ModelDeploymentConfig> {
   let modelNamespace: string;
   let modelName: string;
 
@@ -232,7 +252,7 @@ async function createWorkspaceDeployment(
   }
 
   reportStage('Creating deployment configuration…');
-  await modelsCreateDeploymentConfig(workspace, {
+  return await modelsCreateDeploymentConfig(workspace, {
     name: configName,
     engine: values.engine,
     model_spec: {
@@ -246,6 +266,17 @@ async function createWorkspaceDeployment(
     },
     model_entity_id: `${modelNamespace}/${modelName}`,
   });
+}
+
+/** Create a config + deployment for a model that already exists in the workspace. */
+export async function createWorkspaceDeployment(
+  workspace: string,
+  values: WizardFormValues,
+  deploymentName: string,
+  configName: string,
+  reportStage: ReportStage
+) {
+  await createWorkspaceDeploymentConfig(workspace, values, configName, reportStage);
 
   reportStage('Creating deployment…');
   await modelsCreateDeployment(workspace, {
@@ -323,4 +354,55 @@ export function useCreateDeploymentBySource(workspace: string) {
     statusMessage,
     clearStatusMessage,
   };
+}
+
+/** Whether `ensureWorkspaceDeploymentConfig` created the config or found one already there. */
+export interface EnsuredDeploymentConfig {
+  /** Always the config the caller should reference by name. */
+  config: ModelDeploymentConfig;
+  /** True when an existing config was adopted rather than created. */
+  reused: boolean;
+}
+
+/**
+ * Create the config, or adopt the one already under that name.
+ *
+ * The fine-tuning form derives the config name from the **base model**, deliberately:
+ * one LoRA-enabled deployment of a base can serve every adapter trained against it, so
+ * a name that varies per run would invite duplicates. The cost is that the name is not
+ * free the second time — and it stays taken for the hours the first job trains, because
+ * readiness only reports `serving-lora` once that job has actually deployed. Without
+ * this, a second adapter run against the same base fails at submit with a 409 and never
+ * starts training.
+ *
+ * Adopting the existing config is the intent rather than a fallback: one config per base
+ * is what the naming scheme is *for*. But the adopted config was created by an earlier
+ * run and may specify a different engine or GPU count than the caller just filled in, so
+ * `reused` is returned rather than swallowed — the caller is expected to say so.
+ *
+ * Deliberately not an update-to-a-new-version: `get_deployment_config` resolves the
+ * latest, and the earlier job has not resolved its config yet — it does that when
+ * training ends. Bumping the version here would silently change what that job deploys.
+ */
+export async function ensureWorkspaceDeploymentConfig(
+  workspace: string,
+  values: WizardFormValues,
+  configName: string,
+  reportStage: ReportStage
+): Promise<EnsuredDeploymentConfig> {
+  try {
+    const config = await createWorkspaceDeploymentConfig(
+      workspace,
+      values,
+      configName,
+      reportStage
+    );
+    return { config, reused: false };
+  } catch (error) {
+    if (!isVersionConflictError(error)) throw error;
+
+    reportStage('Reusing the existing deployment configuration…');
+    const existing = await modelsGetLatestDeploymentConfig(workspace, configName);
+    return { config: existing, reused: true };
+  }
 }

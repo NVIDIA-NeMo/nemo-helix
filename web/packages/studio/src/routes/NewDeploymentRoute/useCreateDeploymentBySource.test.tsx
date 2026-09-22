@@ -3,7 +3,10 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { filesCreateFileset } from '@nemo/sdk/generated/platform/files';
-import { modelsCreateDeploymentConfig } from '@nemo/sdk/generated/platform/model-deployment-configs';
+import {
+  modelsCreateDeploymentConfig,
+  modelsGetLatestDeploymentConfig,
+} from '@nemo/sdk/generated/platform/model-deployment-configs';
 import { modelsCreateDeployment } from '@nemo/sdk/generated/platform/model-deployments';
 import { modelsCreateModel, modelsGetModel } from '@nemo/sdk/generated/platform/models';
 import { Engine } from '@nemo/sdk/generated/platform/schema';
@@ -15,9 +18,13 @@ import {
   SOURCE_WORKSPACE,
   type WizardFormValues,
 } from '@studio/routes/NewDeploymentRoute/schema';
-import { useCreateDeploymentBySource } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
+import {
+  ensureWorkspaceDeploymentConfig,
+  useCreateDeploymentBySource,
+} from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
+import { AxiosError, AxiosHeaders } from 'axios';
 import { type ReactNode } from 'react';
 
 vi.mock('@nemo/common/src/providers/toast/useToast');
@@ -31,6 +38,7 @@ const mockFilesCreateFileset = vi.mocked(filesCreateFileset);
 const mockModelsCreateModel = vi.mocked(modelsCreateModel);
 const mockModelsGetModel = vi.mocked(modelsGetModel);
 const mockModelsCreateDeploymentConfig = vi.mocked(modelsCreateDeploymentConfig);
+const mockModelsGetLatestDeploymentConfig = vi.mocked(modelsGetLatestDeploymentConfig);
 const mockModelsCreateDeployment = vi.mocked(modelsCreateDeployment);
 
 const workspace = 'ws';
@@ -305,5 +313,80 @@ describe('useCreateDeploymentBySource — huggingface name collisions', () => {
     expect(mockModelsCreateDeployment).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
     expect(result.current.submitError).toBeTruthy();
+  });
+});
+
+describe('ensureWorkspaceDeploymentConfig', () => {
+  const noop = () => {};
+
+  /** What axios raises on a 409; `isVersionConflictError` tests `instanceof AxiosError`. */
+  const conflict = () =>
+    new AxiosError('Conflict', '409', undefined, undefined, {
+      status: 409,
+      data: {},
+      statusText: 'Conflict',
+      headers: {},
+      config: { headers: new AxiosHeaders() },
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockModelsGetModel.mockRejectedValue({ response: { status: 404 } });
+  });
+
+  it('reports a freshly created config as not reused', async () => {
+    const created = { name: 'base-config', engine: Engine.vllm };
+    mockModelsCreateDeploymentConfig.mockResolvedValue(
+      created as Awaited<ReturnType<typeof modelsCreateDeploymentConfig>>
+    );
+
+    const result = await ensureWorkspaceDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/base' }),
+      'base-config',
+      noop
+    );
+
+    expect(result.reused).toBe(false);
+    expect(mockModelsGetLatestDeploymentConfig).not.toHaveBeenCalled();
+  });
+
+  // The reported bug: a second adapter run against the same base reuses the name while
+  // the first job is still training, so the 409 blocked the job from ever starting.
+  it('adopts the existing config on a 409 instead of failing', async () => {
+    const existing = { name: 'base-config', engine: Engine.nim };
+    mockModelsCreateDeploymentConfig.mockRejectedValue(conflict());
+    mockModelsGetLatestDeploymentConfig.mockResolvedValue(
+      existing as Awaited<ReturnType<typeof modelsGetLatestDeploymentConfig>>
+    );
+
+    const result = await ensureWorkspaceDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/base' }),
+      'base-config',
+      noop
+    );
+
+    expect(result.reused).toBe(true);
+    // The adopted config is returned, not the values that were submitted — the caller
+    // needs the real settings to be able to report them.
+    expect(result.config).toBe(existing);
+    expect(mockModelsGetLatestDeploymentConfig).toHaveBeenCalledWith(workspace, 'base-config');
+  });
+
+  // Only a conflict means "already there". Anything else is a real failure and must
+  // not be quietly converted into a reused config.
+  it('propagates a non-conflict failure', async () => {
+    mockModelsCreateDeploymentConfig.mockRejectedValue(new Error('image pull denied'));
+
+    await expect(
+      ensureWorkspaceDeploymentConfig(
+        workspace,
+        baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/base' }),
+        'base-config',
+        noop
+      )
+    ).rejects.toThrow('image pull denied');
+    expect(mockModelsGetLatestDeploymentConfig).not.toHaveBeenCalled();
   });
 });
