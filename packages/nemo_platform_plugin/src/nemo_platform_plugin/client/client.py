@@ -1023,11 +1023,15 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         from nemo_platform_plugin.client.method import EndpointMethod
 
         for name in dir(cls):
-            if name in cls.__dict__:
-                continue  # already owned by this class; nothing inherited to re-bind
-            inherited = inspect.getattr_static(cls, name, None)
-            if isinstance(inherited, EndpointMethod):
-                setattr(cls, name, inherited.bound_to_owner(cls))
+            # Every endpoint, not only the inherited ones. Endpoints live on generated mixins
+            # today, so nothing is declared in an async client's own body -- but one that were
+            # would keep a `__wrapped__` pointing at the synchronous endpoint and spec as a
+            # non-awaitable mock, which is a miserable thing to debug for the sake of skipping
+            # a few rebinds. `bound_to_owner` returns a clone, so this never mutates a
+            # descriptor a sync client is also using.
+            resolved = inspect.getattr_static(cls, name, None)
+            if isinstance(resolved, EndpointMethod):
+                setattr(cls, name, resolved.bound_to_owner(cls))
 
     def __init__(
         self,

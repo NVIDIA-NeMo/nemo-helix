@@ -1189,7 +1189,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Must satisfy uv.lock's requires-python (>=3.12,<3.14), which this job syncs against.
+        # Must satisfy uv.lock's requires-python (>=3.12,<3.15), which this job syncs against.
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
