@@ -554,7 +554,8 @@ class TestRenderFabricDockerfile:
         assert 'm.version("nemo-fabric")' in result
         assert '"nemo-fabric[relay]==${FABRIC_VERSION}"' in result
         assert '"nemo-fabric-adapters-hermes==${FABRIC_VERSION}"' in result
-        assert f"hermes-agent.git@{PINNED_HERMES_COMMIT}" in result
+        assert f"git -C /opt/hermes-agent fetch --depth 1 origin {PINNED_HERMES_COMMIT}" in result
+        assert "--editable /opt/hermes-agent" in result
         assert "uv pip check --python /opt/hermes-venv/bin/python" in result
         assert "ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python" in result
 

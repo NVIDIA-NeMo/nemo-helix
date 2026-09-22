@@ -123,7 +123,7 @@ WHEEL_ENV = "NEMO_AGENTS_WHEEL"
 #: Newest wheel in the checkout's ``dist``, so the value survives every rebuild.
 WHEEL_LATEST = "LATEST"
 
-PINNED_HERMES_COMMIT = "f80f453ae0679347e38abc917c7f94f717bf96c5"  # Hermes Agent 0.20.1
+PINNED_HERMES_COMMIT = "29112bef099274229cadff79cdff7bf7b99c4b77"  # Hermes Agent 0.21.0
 
 _FABRIC_HARNESS_INSTALLS = {
     "claude": "nemo-agents-plugin-claude",
@@ -287,13 +287,17 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 # through its isolated interpreter.
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python 3.12 /opt/hermes-venv && \\
+    git init --quiet /opt/hermes-agent && \\
+    git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git && \\
+    git -C /opt/hermes-agent fetch --depth 1 origin {{ pinned_hermes_commit }} && \\
+    git -C /opt/hermes-agent checkout --quiet --detach FETCH_HEAD && \\
     FABRIC_VERSION="$(/workspace/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("nemo-fabric"))')" && \\
     uv pip install --no-sources --prerelease=allow --python /opt/hermes-venv/bin/python \\
       "nemo-fabric[relay]==${FABRIC_VERSION}" \\
       "nemo-fabric-adapters-hermes==${FABRIC_VERSION}" \\
-      "hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git@{{ pinned_hermes_commit }}" && \\
+      --editable /opt/hermes-agent && \\
     uv pip check --python /opt/hermes-venv/bin/python && \\
-    chmod -R a+rX /opt/hermes-venv
+    chmod -R a+rX /opt/hermes-agent /opt/hermes-venv
 ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
 {% endif %}
 
