@@ -129,9 +129,11 @@ The job runs the agent inside a container image. That image must contain the
 Fabric adapter the agent's harness names, so the image you need depends on the
 harness:
 
-- **A first-party harness** (`claude`, `codex`, `hermes`, `deepagents`) needs no
-  image at all. Its adapter ships in the platform's task image, which is what
+- **A bundled harness** (`claude`, `codex`, or `deepagents`) needs no image at
+  all. Its harness and adapter ship in the platform's task image, which is what
   the job uses when you omit `image`.
+- **Hermes** needs a separately packaged execution image because its harness
+  cannot share the platform environment.
 - **Your own Fabric adapter** needs an image that contains it. Build one with
   `nemo agents package` and pass it as `image`; the packaged image carries both
   the adapter and the execute task module.
