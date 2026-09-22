@@ -38,7 +38,7 @@
     },
     {
       "type": "implicit",
-      "prompt": "nemo-explore is finished. The agent does triage, three tools, cloud deploy. What model do I put in the Ethos?",
+      "prompt": "The agent does triage, three tools, cloud deploy. What model do I put in agent.yaml?",
       "expected_skill": "nemo-model-selection"
     },
     {
@@ -103,7 +103,7 @@
     },
     {
       "type": "negative-control",
-      "prompt": "Write the Ethos for the support agent we just designed.",
+      "prompt": "Implement the support agent we just designed.",
       "expected_skill_not": "nemo-model-selection"
     },
     {

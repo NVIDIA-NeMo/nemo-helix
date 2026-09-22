@@ -3,18 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: nemo-build-agent
-description: Use when a customer asks NeMo Platform to build, implement, package, register, or deploy a new agent from an idea or approved Ethos. Builds the supported LangChain Deep Agents shape through Fabric. Do not use for design-only work, focused agent.yaml editing, testing an existing deployment, onboarding an existing non-Deep-Agents agent, or maintaining NAT workflows.
+description: Use when a customer asks NeMo Platform to build, implement, package, register, or deploy a new agent from confirmed requirements. Builds the supported LangChain Deep Agents shape through Fabric. Do not use for design-only work, focused agent.yaml editing, testing an existing deployment, onboarding an existing non-Deep-Agents agent, or maintaining NAT workflows.
 triggers:
   - nemo-build-agent
   - build an agent
   - implement the approved agent
   - package the agent
   - deploy the new agent
-  - build from the agent Ethos
   - onboard the new agent through Fabric
 not-for:
-  - nemo-explore (use for design-only discovery)
-  - nemo-ethos (use to persist a design without implementation)
   - nemo-agent-config (use for focused agent.yaml authoring or validation)
   - nemo-try-agent (use to query an existing deployment)
   - existing agent onboarding through another Fabric adapter
@@ -40,55 +37,21 @@ agent from config. The optional NeMo Agents plugin supplies the Fabric harness
 adapters and their runtime dependencies. Customer code runs only when it is
 packaged as a config-referenced service such as MCP.
 
-## Explain the path in customer language
+## Confirm requirements and the supported path
 
-Do not assume the user knows NeMo Platform, Fabric, Ethos, MCP or Agent Skills.
-Introduce each term only when it affects a decision.
+Confirm the agent's purpose, users, tools, data, constraints, required approvals,
+and representative tasks with expected outcomes. Use requirements already supplied
+by the user, including an existing `ETHOS.md` when available. Resolve missing
+requirements conversationally before implementation.
 
-Before writing implementation files:
-
-1. Explain that an Ethos is a plain-language design contract for the agent. It
-   records who the agent serves, what it should accomplish, the tools and data
-   it may use, required approvals, forbidden actions, failure behavior and the
-   examples that will become tests. It is not code or deployment config.
-2. Explain that the Ethos will be drafted from the user's answers, shown for
-   review and revised until the user explicitly approves it. No implementation
-   begins before that approval.
-3. Explain that the supported build path uses the external LangChain Deep
-   Agents runtime. NeMo Platform does not vendor the customer's agent. The
-   optional NeMo Agents plugin installs the supported Fabric adapter and its
-   Deep Agents dependency. Fabric registers the agent and makes it available
-   for deployment, testing, observation and optimization in NeMo Platform.
-4. Explain executable tools only when the requested agent needs them: custom
-   code is exposed through MCP so the deployed agent can call it. Explain Agent
-   Skills only when an instruction package is the right artifact.
-5. Ask whether to continue with this supported path.
-
-If the user declines, stop. Offer onboarding of an existing agent through an
-available Fabric adapter. Do not fall back to NAT.
-
-## Approve and persist the design
-
-Use `agents/<agent-name>-ethos/ETHOS.md` as the canonical design and package
-root. If an Ethos exists, summarize it in plain language and confirm that it is
-approved for this build. If it is absent or needs changes, gather the design
-inputs conversationally. Ask about the customer's work first and translate the
-answers into NeMo artifacts yourself:
-
-- concrete role, users and outcomes;
-- tools, data, credentials and side effects;
-- constraints, approvals, forbidden actions and sensitive data handling;
-- five to ten representative tasks with expected outcomes;
-- mandatory ordering or transactional invariants.
-
-Route unresolved design questions to `nemo-explore`. Then invoke `nemo-ethos`
-to render, validate and save `agents/<agent-name>-ethos/ETHOS.md`. Show the
-result and wait for explicit approval. Do not create implementation files before
-the Ethos is approved.
+Explain that the supported build path uses LangChain Deep Agents through Fabric.
+The optional NeMo Agents plugin supplies the adapter and runtime dependencies.
+Custom executable tools are packaged as MCP services. Confirm this path with the
+user before proceeding; do not fall back to NAT.
 
 ## Confirm the build environment
 
-After the Ethos is approved and before creating implementation files, confirm
+After the requirements are confirmed and before creating implementation files, confirm
 the target workspace, environment, model provider, network access, credential
 availability and whether Docker deployment is available. Discover what can be
 read from the current environment instead of asking the user to supply NeMo
@@ -132,13 +95,13 @@ compiled local graphs into Deep Agents settings. Stop when a requirement cannot
 be expressed by the installed adapter contract.
 
 The current deployed Deep Agents path does not expose a verified end-to-end
-resume contract for runtime human approval. If the Ethos requires an in-run
+resume contract for runtime human approval. If the requirements include an in-run
 approve, edit or reject step, stop and report that adapter gap. Do not treat an
 accepted `interrupt_on` setting as proof that the deployed workflow can resume.
 
 ## Build the project
 
-Keep the deployable project under `agents/<agent-name>-ethos/`. Create only the
+Keep the deployable project under `agents/<agent-name>/`. Create only the
 files required by the selected shape. For custom Python tools, use a `uv`
 project with a locked dependency set, a typed MCP server and a console script.
 Do not install dependencies globally. Do not add `deepagents` or a Fabric
@@ -149,7 +112,7 @@ for transient failures and redacted errors. Never write credentials, customer
 data or production traces into source, YAML, fixtures or logs.
 
 Use `nemo-agent-config` to author the canonical
-`agents/<agent-name>-ethos/agent.yaml`, but do not run its `nemo agents create`
+`agents/<agent-name>/agent.yaml`, but do not run its `nemo agents create`
 registration step. This build workflow owns registration after every
 pre-registration gate has passed. Require:
 
@@ -168,7 +131,7 @@ against the installed descriptor. Keep referenced paths relative to
 ## Test before registration
 
 Read [references/testing-and-signoff.md](references/testing-and-signoff.md).
-Derive one acceptance case file from the approved Ethos and reuse it for local
+Derive one acceptance case file from the confirmed requirements and reuse it for local
 tests, deployed invocation and evaluation.
 
 Require unit tests, MCP contract tests, behavioral tests and trajectory tests
@@ -223,15 +186,15 @@ enabled, verify at least one trace with the expected agent, model and tool spans
 Treat missing telemetry or unreachable tools as incomplete onboarding even when
 the final answer looks correct.
 
-Run `nemo-evaluator` only after invocation passes. Use the approved Ethos cases
+Run `nemo-evaluator` only after invocation passes. Use the confirmed requirements cases
 and thresholds. Report passed, failed and skipped checks separately.
 
 ## Gotchas
 
 - Fabric constructs the Deep Agent from `agent.yaml`; it never imports customer
   `agent.py`.
-- Keep `ETHOS.md`, `agent.yaml` and packaged artifacts together under
-  `agents/<agent-name>-ethos/` so registration uploads one canonical bundle.
+- Keep `agent.yaml` and packaged artifacts together under
+  `agents/<agent-name>/` so registration uploads one canonical bundle.
 - Custom Python code is deployable only when a declared MCP server or another
   supported runtime surface can reach it.
 - Prompt instructions and subagent delegation do not guarantee fixed ordering.
@@ -245,12 +208,12 @@ and thresholds. Report passed, failed and skipped checks separately.
 
 ## Stop conditions
 
-Stop without registration or deployment when the Ethos is unapproved, the
+Stop without registration or deployment when the requirements are unconfirmed, the
 adapter cannot express a requirement, a required tool is unreachable, a local
 gate fails, a secret is present in the build context or Fabric validation fails.
 
 Stop without production-candidate status when a live test is skipped, telemetry
-is missing, a target integration is mocked or an Ethos threshold is unmet.
+is missing, a target integration is mocked or an acceptance threshold is unmet.
 
 Call the result `Built`, `Onboarded` or `Production candidate` only according to
 the evidence levels in `references/testing-and-signoff.md`.

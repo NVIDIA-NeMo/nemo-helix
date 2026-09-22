@@ -59,7 +59,7 @@ Trials execute the Agent under Test in the study's own process tree; see
 container isolation (not implemented).
 
 This package is intentionally not a Customizer contributor. A future
-Experimentalist / Customizer agent may call the same library.
+Customizer agent may call the same library.
 
 ## Next Steps
 

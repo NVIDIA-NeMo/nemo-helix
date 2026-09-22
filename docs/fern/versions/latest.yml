@@ -27,9 +27,6 @@ navigation:
                 path: ../../get-started/concepts/projects.mdx
               - page: Workspaces
                 path: ../../get-started/concepts/workspaces.mdx
-          - page: Example Agent
-            hidden: true
-            path: ../../get-started/example-agent.mdx
       - section: Models and Inference
         path: ../../run-inference/about.mdx
         contents:
@@ -53,13 +50,8 @@ navigation:
             path: ../../agents/scan-trace-data.mdx
           - section: Optimize Agents
             contents:
-              - page: ETHOS.md
-                path: ../../agents/ethos.mdx
-                slug: ethos
               - page: Run the Agent Optimizer
                 path: ../../agents/optimization.mdx
-              - page: Insight-Driven Optimization
-                path: ../../agents/insight-driven-optimization.mdx
           - page: Plugins and Skills
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models

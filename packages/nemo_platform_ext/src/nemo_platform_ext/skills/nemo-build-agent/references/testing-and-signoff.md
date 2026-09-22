@@ -1,10 +1,10 @@
 # Testing and signoff
 
-Use this reference after the Ethos is approved and before registration.
+Use this reference after the requirements is approved and before registration.
 
 ## Derive one acceptance contract
 
-Turn the approved Ethos examples and success criteria into one versioned test
+Turn the confirmed requirements examples and success criteria into one versioned test
 case file in the generated project. Reuse those cases for local behavioral
 tests, deployed invocations and evaluation. Do not create separate definitions
 that can drift.
@@ -23,7 +23,7 @@ Each case should identify:
 1. Unit test every MCP operation, including invalid input, denied actions,
    upstream errors, timeouts and redacted error messages.
 2. Contract test MCP schemas, tool discovery and structured outputs.
-3. Run the Ethos cases against the assembled local agent shape.
+3. Run the requirements cases against the assembled local agent shape.
 4. Record trajectories when tool choice, approval or ordering is part of the
    result.
 5. Run a separate live smoke test only when the required credentials and
@@ -47,7 +47,7 @@ After image deployment:
    schema.
 3. Exercise one denied action and one upstream failure.
 4. Confirm telemetry contains the invocation, tool and error or approval spans
-   expected by the Ethos.
+   expected by the requirements.
 
 ## Status language
 
@@ -55,9 +55,9 @@ Use these states consistently:
 
 | State | Minimum evidence |
 |---|---|
-| Built | Approved Ethos, generated artifacts and required local tests pass |
+| Built | Confirmed requirements, generated artifacts and required local tests pass |
 | Onboarded | Fabric validation, registration, deployment and telemetry checks pass |
-| Production candidate | Live representative checks pass in the target environment and every required Ethos threshold is met |
+| Production candidate | Live representative checks pass in the target environment and every required acceptance threshold is met |
 
 A skipped live test, missing telemetry or untested production integration
 prevents `Production candidate` status. Report passed, failed and skipped checks

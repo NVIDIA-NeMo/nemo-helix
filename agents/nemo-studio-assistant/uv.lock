@@ -911,6 +911,28 @@ wheels = [
 ]
 
 [[package]]
+name = "filesets"
+version = "0.0.0"
+source = { editable = "../../packages/filesets" }
+dependencies = [
+    { name = "anyio" },
+    { name = "fsspec" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.0.0" },
+    { name = "fsspec", specifier = ">=2023.1.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "nemo-platform-sdk", editable = "../../sdk/python/nemo-platform" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+]
+
+[[package]]
 name = "filetype"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1075,9 +1097,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/04/81bd731d6d1e3a469d9a4c36f5eb069bcf0cbb2d5d342c9fec22245b91fc/greenlet-3.5.4-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:3d66250e8b09f182ede05490998c818b5961f7a3640332d44c4927caec7bbfe4", size = 295909, upload-time = "2026-07-22T11:38:09.261Z" },
     { url = "https://files.pythonhosted.org/packages/cc/dd/f5f22903a6ae70f5ea328ed0beaec92ad903f0e3b7d2845133b354abc4b8/greenlet-3.5.4-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c90e930c9c192e5b3ee9fb8bcd920ea3926155e2e3ded39fc697323addecee17", size = 612011, upload-time = "2026-07-22T12:26:40.69Z" },
     { url = "https://files.pythonhosted.org/packages/8e/10/92a4a88d12b915d74ea5b6d288e4afefda4771647caa34442c156f7a454f/greenlet-3.5.4-cp312-cp312-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:791fdfeeb9c6e0c7b10fa151bf110d2a6974866f13dcb5b1c7efae698245893a", size = 624299, upload-time = "2026-07-22T12:29:02.089Z" },
-    { url = "https://files.pythonhosted.org/packages/6c/f9/03e26be3487c5238e81f2b84714959a86ea8515a869828cf41f4fc54b34e/greenlet-3.5.4-cp312-cp312-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:b7c895310363f310361e0fe2072af85269d2a2a285cd04c0c59e79a5e3670dcf", size = 629603, upload-time = "2026-07-22T12:43:43.456Z" },
     { url = "https://files.pythonhosted.org/packages/50/6d/0b14bb9db2989f32cd9fe7f76afedea01ee8bee3f87c07e69f24adfe7e63/greenlet-3.5.4-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f88193799d43dbf8c8a806d6405c9c52fe2af40bf75072a606357b33cc336c7f", size = 621541, upload-time = "2026-07-22T11:51:09.464Z" },
-    { url = "https://files.pythonhosted.org/packages/57/6b/7c55ca72ef80d57c16c4a55210f82582622462dc4485799a30f4ec6f3372/greenlet-3.5.4-cp312-cp312-manylinux_2_39_riscv64.whl", hash = "sha256:13b980043cb1b3134e81ea469da1250ddcc6bfe6d245bbaa59168d9cdc8f228f", size = 432554, upload-time = "2026-07-22T12:39:51.379Z" },
     { url = "https://files.pythonhosted.org/packages/48/3d/25e9a2d9eb6b2e8b7ca4e80a3a26cb887cce6c8e0a87c921164f11bc5574/greenlet-3.5.4-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:b7a5f095767c4493afcd06067f2bb3b8716e3f3f9e92b99c88e7e99f885b3d4d", size = 1581444, upload-time = "2026-07-22T12:25:03.818Z" },
     { url = "https://files.pythonhosted.org/packages/b9/96/4c9bf2e2c408dcc0556edce69efa9f802e82223573c53240136a086821f1/greenlet-3.5.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:42afdc1ab5f66da8c586c32af9224a74a706b4f0ea0dc3a4188a0860a09c65c9", size = 1645842, upload-time = "2026-07-22T11:51:12.295Z" },
     { url = "https://files.pythonhosted.org/packages/b5/41/303ecb26a3a56122c0f4d4073ee078881847bd6b6f463ae0ec57ec20223b/greenlet-3.5.4-cp312-cp312-win_amd64.whl", hash = "sha256:60149df8f462d1b230038e6590c23c3b4768bb5d6c022b3b6e82532b34b0b8a3", size = 247169, upload-time = "2026-07-22T11:38:19.893Z" },
@@ -1085,9 +1105,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c0/9a/e51225dcd58713f16ccbdcc501a8da21098ea14515b7870f1f94459e5ff5/greenlet-3.5.4-cp313-cp313-macosx_11_0_universal2.whl", hash = "sha256:24e61b88cb7e1b1d794b32a10cc346ac779681d6d74ff137a3e0a444d2bf1f02", size = 294831, upload-time = "2026-07-22T11:38:53.389Z" },
     { url = "https://files.pythonhosted.org/packages/9f/ea/de50a50fadf979713ab18b46f22ad5ff5f2dcfc637a3ebdecf669801e1a5/greenlet-3.5.4-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:870d730fec833f5a06906a32596cc099b9161594642a92a520b7a88911c95356", size = 614619, upload-time = "2026-07-22T12:26:42.282Z" },
     { url = "https://files.pythonhosted.org/packages/db/c7/2aae27fea41205b8650294c301f042a2a4bb6155eea48c995b890a92f2c1/greenlet-3.5.4-cp313-cp313-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:ec5ff0d1878df6af3bf9b638a5a92a7d5693291de77c91bff10fa48519c604ef", size = 627021, upload-time = "2026-07-22T12:29:03.445Z" },
-    { url = "https://files.pythonhosted.org/packages/1b/80/fb4d4788bbc8e54761f1fc88533af9523a6e86299fa113d6e8a8503ed9fc/greenlet-3.5.4-cp313-cp313-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:07bd44616608d873d06735b63ef1a88191d6ca57c8d291d6559c71bc14c0893c", size = 632845, upload-time = "2026-07-22T12:43:45.19Z" },
     { url = "https://files.pythonhosted.org/packages/eb/56/79fd826f9ccaae0b84e1b4ef68dabba5e105bb044ffcd448a0b782fcba9a/greenlet-3.5.4-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d84d993f6e575c950d91a23c1345d18fe1a4310d447bf630849d7809196b52f0", size = 624002, upload-time = "2026-07-22T11:51:11.391Z" },
-    { url = "https://files.pythonhosted.org/packages/42/e3/6086fa578ebb72772722cdc4bcd628459814b42e0c2db1e3cbd6552b3271/greenlet-3.5.4-cp313-cp313-manylinux_2_39_riscv64.whl", hash = "sha256:3529a8a933582ad19e224792cac7372489526576b75b4c124e8e4f29948f4861", size = 435053, upload-time = "2026-07-22T12:39:52.715Z" },
     { url = "https://files.pythonhosted.org/packages/0a/1a/27319f97e731298513dcba1a2e91b63e9d8811d9de22130f960b129b1bf1/greenlet-3.5.4-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:58023945f421093de5e6fa108c0985a8659d43f49e0216da25099369a121bcbd", size = 1581533, upload-time = "2026-07-22T12:25:05.322Z" },
     { url = "https://files.pythonhosted.org/packages/b1/6d/24240bf562e9786dd2799ee0a4a4dadb4ded22510f41b20245099159ac8c/greenlet-3.5.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:bae2728e1897aa8df8cb1af38cd48b3a743aefe29372de7b8b7a9f532501e69f", size = 1645781, upload-time = "2026-07-22T11:51:14.805Z" },
     { url = "https://files.pythonhosted.org/packages/c1/5a/442ab1a9ef7ca6bf7210e5397a95972206a91a31033a03c8900866a10039/greenlet-3.5.4-cp313-cp313-win_amd64.whl", hash = "sha256:ca5726c0b08ca35ae873557266a78b2c3f3b2b7d7401aa5ff886c2045dd0111c", size = 247133, upload-time = "2026-07-22T11:39:20.661Z" },
@@ -2280,7 +2298,7 @@ dependencies = [
     { name = "nemo-agents-example-email-phishing" },
     { name = "nemo-agents-example-email-security" },
     { name = "nemo-deployments-plugin" },
-    { name = "nemo-fabric", extra = ["claude", "codex", "relay"] },
+    { name = "nemo-fabric", extra = ["claude", "codex", "relay", "streaming"] },
     { name = "nemo-fabric-adapters-deepagents" },
     { name = "nemo-fabric-adapters-hermes" },
     { name = "nemo-optimization-plugin" },
@@ -2313,7 +2331,7 @@ requires-dist = [
     { name = "nemo-agents-example-email-phishing", editable = "../../plugins/nemo-agents/examples/email-phishing-analyzer" },
     { name = "nemo-agents-example-email-security", editable = "../../plugins/nemo-agents/examples/email-security-analyst" },
     { name = "nemo-deployments-plugin", editable = "../../plugins/nemo-deployments" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay", "streaming"], specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-optimization-plugin", editable = "../../plugins/nemo-optimization" },
@@ -2385,6 +2403,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "nemo-fabric" },
     { name = "nemo-relay" },
+    { name = "nemo-sandboxed-gym" },
     { name = "openai" },
     { name = "opentelemetry-proto" },
     { name = "pandas" },
@@ -2394,12 +2413,11 @@ dependencies = [
     { name = "ragas" },
     { name = "rouge-score" },
     { name = "sacrebleu" },
-    { name = "sandboxed-gym" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'harbor'", specifier = ">=0.20,<0.21" },
+    { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.20,<0.21" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
@@ -2411,6 +2429,7 @@ requires-dist = [
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'fabric'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-platform-sdk", marker = "extra == 'nemo-platform'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-relay", specifier = ">=0.7.3,<0.8" },
+    { name = "nemo-sandboxed-gym", editable = "../../packages/sandboxed_gym" },
     { name = "openai", specifier = ">=1.61.0" },
     { name = "openai-agents", extras = ["docker"], marker = "extra == 'agent-runtimes'", specifier = ">=0.17.3,<0.18" },
     { name = "opentelemetry-proto", specifier = ">=1.27.0" },
@@ -2421,7 +2440,6 @@ requires-dist = [
     { name = "ragas", specifier = "==0.4.3" },
     { name = "rouge-score", specifier = "==0.1.2" },
     { name = "sacrebleu", specifier = ">=2.5.1" },
-    { name = "sandboxed-gym", editable = "../../packages/sandboxed_gym" },
 ]
 provides-extras = ["agent-runtimes", "engine", "harbor", "nemo-platform", "fabric"]
 
@@ -2451,6 +2469,9 @@ codex = [
 ]
 relay = [
     { name = "nemo-relay" },
+]
+streaming = [
+    { name = "nemo-fabric-runtime", extra = ["streaming"] },
 ]
 
 [[package]]
@@ -2538,6 +2559,18 @@ wheels = [
 ]
 
 [[package]]
+name = "nemo-fabric-collector"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/48/11d35278a659b3d94ab18a2d6583cd41f0e96ed595a603dc1f8a297af0f4/nemo_fabric_collector-0.3.0-py3-none-any.whl", hash = "sha256:31894ff33d37f8376600ae0ccf1ebd84305f795cf1383350e2ee9bb584715f83", size = 13834, upload-time = "2026-09-15T16:41:31.405Z" },
+]
+
+[[package]]
 name = "nemo-fabric-runtime"
 version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2551,6 +2584,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/3f/5cdd4bb42e27c33c6af065294d71e0d2cd3e9716b8ff159f2a24a2553d67/nemo_fabric_runtime-0.3.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e2c2bf02e5ecafe78612453b86952ae7f76008371d45d2227317ba30ff9eef94", size = 2678665, upload-time = "2026-09-15T16:41:57.427Z" },
     { url = "https://files.pythonhosted.org/packages/7d/30/18c4763a7536c0bcdd1b67ffa3203d2cc7cbe66c2d17ca53c215e072774f/nemo_fabric_runtime-0.3.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2427487ce0e50151f1995da57de7433bd8a5bd122cf377738c76dad5891a8865", size = 2871108, upload-time = "2026-09-15T16:42:21.394Z" },
     { url = "https://files.pythonhosted.org/packages/f1/af/90822e57be949e045a043cee91ca9f2844fa7dfd59ec403fc1adce05f1f9/nemo_fabric_runtime-0.3.0-cp311-abi3-win_amd64.whl", hash = "sha256:e64f33323e26ac59b435d7647841bb5c86cdfd1f4c7d6fc413f2712ec5e67215", size = 2807638, upload-time = "2026-09-15T16:42:49.047Z" },
+]
+
+[package.optional-dependencies]
+streaming = [
+    { name = "nemo-fabric-collector" },
 ]
 
 [[package]]
@@ -2671,12 +2709,12 @@ requires-dist = [
     { name = "cloudpickle", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=3.1.1" },
     { name = "cloudpickle", marker = "extra == 'plugins'", specifier = ">=3.1.1" },
     { name = "cloudpickle", marker = "extra == 'services'", specifier = ">=3.1.1" },
-    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.1" },
+    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.3" },
     { name = "data-designer-nemo", marker = "extra == 'all'", editable = "../../packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-anonymizer-plugin'", editable = "../../packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-data-designer-plugin'", editable = "../../packages/data_designer_nemo" },
@@ -2751,6 +2789,7 @@ requires-dist = [
     { name = "filesets", marker = "extra == 'all'", editable = "../../packages/filesets" },
     { name = "filesets", marker = "extra == 'core-service'", editable = "../../packages/filesets" },
     { name = "filesets", marker = "extra == 'files-service'", editable = "../../packages/filesets" },
+    { name = "filesets", marker = "extra == 'nemo-platform-plugin'", editable = "../../packages/filesets" },
     { name = "filesets", marker = "extra == 'nmp-customization-common'", editable = "../../packages/filesets" },
     { name = "filesets", marker = "extra == 'services'", editable = "../../packages/filesets" },
     { name = "fsspec", marker = "extra == 'all'", specifier = ">=2024.10.0" },
@@ -2772,25 +2811,23 @@ requires-dist = [
     { name = "gunicorn", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=23.0.0" },
     { name = "gunicorn", marker = "extra == 'plugins'", specifier = ">=23.0.0" },
     { name = "gunicorn", marker = "extra == 'services'", specifier = ">=23.0.0" },
-    { name = "harbor", marker = "extra == 'all'", specifier = ">=0.20,<0.21" },
-    { name = "harbor", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.20,<0.21" },
-    { name = "harbor", marker = "extra == 'plugins'", specifier = ">=0.20,<0.21" },
-    { name = "harbor", marker = "extra == 'services'", specifier = ">=0.20,<0.21" },
     { name = "httpx", marker = "extra == 'all'" },
+    { name = "httpx", marker = "extra == 'all'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'auditor-service'", specifier = ">=0.28.1,<1.0.0" },
     { name = "httpx", marker = "extra == 'auth-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'automodel-service'", specifier = ">=0.27.0" },
+    { name = "httpx", marker = "extra == 'core-service'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'core-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'guardrails-service'", specifier = ">=0.27.2" },
+    { name = "httpx", marker = "extra == 'jobs-service'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-anonymizer-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-data-designer-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
-    { name = "httpx", marker = "extra == 'nemo-experimentalist-plugin'" },
     { name = "httpx", marker = "extra == 'nemo-insights-plugin'" },
     { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.27.2" },
@@ -2800,6 +2837,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'rl-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'services'" },
+    { name = "httpx", marker = "extra == 'services'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'switchyard-vendored'", specifier = ">=0.28.1,<1.0" },
@@ -2869,10 +2907,10 @@ requires-dist = [
     { name = "nemo-agents-example-calculator", marker = "extra == 'nemo-agents-plugin'", editable = "../../plugins/nemo-agents/examples/calculator-agent" },
     { name = "nemo-agents-example-calculator", marker = "extra == 'plugins'", editable = "../../plugins/nemo-agents/examples/calculator-agent" },
     { name = "nemo-agents-example-calculator", marker = "extra == 'services'", editable = "../../plugins/nemo-agents/examples/calculator-agent" },
-    { name = "nemo-anonymizer", marker = "extra == 'all'", specifier = "==0.3.3" },
-    { name = "nemo-anonymizer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.3.3" },
-    { name = "nemo-anonymizer", marker = "extra == 'plugins'", specifier = "==0.3.3" },
-    { name = "nemo-anonymizer", marker = "extra == 'services'", specifier = "==0.3.3" },
+    { name = "nemo-anonymizer", marker = "extra == 'all'", specifier = "==0.4.0" },
+    { name = "nemo-anonymizer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.4.0" },
+    { name = "nemo-anonymizer", marker = "extra == 'plugins'", specifier = "==0.4.0" },
+    { name = "nemo-anonymizer", marker = "extra == 'services'", specifier = "==0.4.0" },
     { name = "nemo-auditor-plugin", marker = "extra == 'all'", editable = "../../plugins/nemo-auditor" },
     { name = "nemo-auditor-plugin", marker = "extra == 'platform-seed-service'", editable = "../../plugins/nemo-auditor" },
     { name = "nemo-auditor-plugin", marker = "extra == 'services'", editable = "../../plugins/nemo-auditor" },
@@ -2882,15 +2920,14 @@ requires-dist = [
     { name = "nemo-deployments-plugin", marker = "extra == 'services'", editable = "../../plugins/nemo-deployments" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'all'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'nemo-evaluator-plugin'", editable = "../../packages/nemo_evaluator_sdk" },
-    { name = "nemo-evaluator-sdk", marker = "extra == 'nemo-experimentalist-plugin'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'nemo-optimization-plugin'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'plugins'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'services'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay", "streaming"], marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay", "streaming"], marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay", "streaming"], marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay", "streaming"], marker = "extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapter-contract", marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapter-contract", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapter-contract", marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
@@ -2907,10 +2944,6 @@ requires-dist = [
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-insights-plugin", marker = "extra == 'all'", editable = "../../plugins/nemo-insights" },
-    { name = "nemo-insights-plugin", marker = "extra == 'nemo-experimentalist-plugin'", editable = "../../plugins/nemo-insights" },
-    { name = "nemo-insights-plugin", marker = "extra == 'plugins'", editable = "../../plugins/nemo-insights" },
-    { name = "nemo-insights-plugin", marker = "extra == 'services'", editable = "../../plugins/nemo-insights" },
     { name = "nemo-optimization-plugin", marker = "extra == 'all'", editable = "../../plugins/nemo-optimization" },
     { name = "nemo-optimization-plugin", marker = "extra == 'nemo-agents-plugin'", editable = "../../plugins/nemo-optimization" },
     { name = "nemo-optimization-plugin", marker = "extra == 'plugins'", editable = "../../plugins/nemo-optimization" },
@@ -2920,6 +2953,7 @@ requires-dist = [
     { name = "nemo-platform-plugin", marker = "extra == 'automodel-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'core-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'inference-gateway-service'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'intake-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'jobs-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'models-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-agents-plugin'", editable = "../../packages/nemo_platform_plugin" },
@@ -2930,7 +2964,6 @@ requires-dist = [
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-data-designer-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-deployments-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-evaluator-plugin'", editable = "../../packages/nemo_platform_plugin" },
-    { name = "nemo-platform-plugin", marker = "extra == 'nemo-experimentalist-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-guardrails-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-insights-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-optimization-plugin'", editable = "../../packages/nemo_platform_plugin" },
@@ -3011,6 +3044,10 @@ requires-dist = [
     { name = "nmp-customization-common", marker = "extra == 'rl-service'", editable = "../../packages/nmp_customization_common" },
     { name = "nmp-customization-common", marker = "extra == 'services'", editable = "../../packages/nmp_customization_common" },
     { name = "nmp-customization-common", marker = "extra == 'unsloth-service'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-entities", marker = "extra == 'all'", editable = "../../services/core/entities" },
+    { name = "nmp-entities", marker = "extra == 'auth-service'", editable = "../../services/core/entities" },
+    { name = "nmp-entities", marker = "extra == 'core-service'", editable = "../../services/core/entities" },
+    { name = "nmp-entities", marker = "extra == 'services'", editable = "../../services/core/entities" },
     { name = "nmp-guardrails", marker = "extra == 'all'", editable = "../../services/guardrails" },
     { name = "nmp-guardrails", marker = "extra == 'platform-seed-service'", editable = "../../services/guardrails" },
     { name = "nmp-guardrails", marker = "extra == 'services'", editable = "../../services/guardrails" },
@@ -3023,7 +3060,6 @@ requires-dist = [
     { name = "nmp-unsloth", marker = "extra == 'plugins'", editable = "../../services/unsloth" },
     { name = "nmp-unsloth", marker = "extra == 'services'", editable = "../../services/unsloth" },
     { name = "nooa", marker = "extra == 'all'", specifier = ">=0.0.9" },
-    { name = "nooa", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.0.9" },
     { name = "nooa", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.0.9" },
     { name = "nooa", marker = "extra == 'plugins'", specifier = ">=0.0.9" },
     { name = "nooa", marker = "extra == 'services'", specifier = ">=0.0.9" },
@@ -3095,16 +3131,12 @@ requires-dist = [
     { name = "opentelemetry-processor-baggage", marker = "extra == 'nmp-common'", specifier = ">=0.64b0" },
     { name = "opentelemetry-proto", marker = "extra == 'all'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'all'", specifier = ">=1.28.2" },
-    { name = "opentelemetry-proto", marker = "extra == 'all'", specifier = ">=1.42.1" },
     { name = "opentelemetry-proto", marker = "extra == 'core-service'", specifier = ">=1.28.2" },
     { name = "opentelemetry-proto", marker = "extra == 'files-service'", specifier = ">=1.28.2" },
     { name = "opentelemetry-proto", marker = "extra == 'intake-service'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.27.0" },
-    { name = "opentelemetry-proto", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=1.42.1" },
-    { name = "opentelemetry-proto", marker = "extra == 'plugins'", specifier = ">=1.42.1" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.28.2" },
-    { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.42.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.42.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'guardrails-service'", specifier = ">=1.27.0,<2.0.0" },
@@ -3134,10 +3166,6 @@ requires-dist = [
     { name = "prometheus-client", marker = "extra == 'nmp-common'", specifier = ">=0.23.0" },
     { name = "prometheus-fastapi-instrumentator", marker = "extra == 'nmp-common'", specifier = ">=8.0.2" },
     { name = "prompt-toolkit", marker = "extra == 'nemo-platform-sdk'", specifier = ">=3.0.0" },
-    { name = "protobuf", marker = "extra == 'all'", specifier = ">=6.0.0" },
-    { name = "protobuf", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=6.0.0" },
-    { name = "protobuf", marker = "extra == 'plugins'", specifier = ">=6.0.0" },
-    { name = "protobuf", marker = "extra == 'services'", specifier = ">=6.0.0" },
     { name = "psutil", marker = "extra == 'nemo-platform-sdk'", specifier = ">=5.9.0" },
     { name = "psycopg2-binary", marker = "extra == 'all'", specifier = ">=2.9.10" },
     { name = "psycopg2-binary", marker = "extra == 'core-service'", specifier = ">=2.9.10" },
@@ -3167,7 +3195,6 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
-    { name = "pydantic", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'nemo-insights-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-platform-plugin'", specifier = ">=2.12.0" },
@@ -3176,7 +3203,6 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nemo-unsloth-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nmp-common'", specifier = ">=2.10.3" },
     { name = "pydantic", marker = "extra == 'nmp-customization-common'", specifier = ">=2.10.6" },
-    { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'rl-service'", specifier = ">=2.10.6" },
@@ -3253,7 +3279,6 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'nemo-anonymizer-plugin'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=6.0" },
-    { name = "pyyaml", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=6.0.3" },
     { name = "pyyaml", marker = "extra == 'nemo-insights-plugin'", specifier = ">=6.0.3" },
     { name = "pyyaml", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-platform-plugin'", specifier = ">=6.0.2" },
@@ -3310,10 +3335,6 @@ requires-dist = [
     { name = "tenacity", marker = "extra == 'rl-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'services'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'unsloth-service'", specifier = ">=8.5.0" },
-    { name = "tomlkit", marker = "extra == 'all'", specifier = ">=0.13.3" },
-    { name = "tomlkit", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.13.3" },
-    { name = "tomlkit", marker = "extra == 'plugins'", specifier = ">=0.13.3" },
-    { name = "tomlkit", marker = "extra == 'services'", specifier = ">=0.13.3" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.9.0" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.20.0" },
@@ -3382,7 +3403,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
 ]
-provides-extras = ["aiohttp", "all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "guardrails-service", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agents-example-calculator", "nemo-agents-plugin", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-experimentalist-plugin", "nemo-guardrails-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-platform-plugin", "nemo-platform-sdk", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nmp-common", "nmp-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "switchyard-vendored", "unsloth-service"]
+provides-extras = ["aiohttp", "all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "guardrails-service", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agents-example-calculator", "nemo-agents-plugin", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-guardrails-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-platform-plugin", "nemo-platform-sdk", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nmp-common", "nmp-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "switchyard-vendored", "unsloth-service"]
 
 [[package]]
 name = "nemo-platform-plugin"
@@ -3390,6 +3411,7 @@ source = { editable = "../../packages/nemo_platform_plugin" }
 dependencies = [
     { name = "anthropic" },
     { name = "fastapi" },
+    { name = "filesets" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "nemo-platform-sdk" },
@@ -3407,6 +3429,7 @@ requires-dist = [
     { name = "distro", marker = "extra == 'nemo-platform-sdk'", specifier = ">=1.7.0,<2" },
     { name = "docker", marker = "extra == 'nemo-platform-sdk'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
+    { name = "filesets", editable = "../../packages/filesets" },
     { name = "fsspec", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2023.1.0" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
@@ -3491,6 +3514,7 @@ requires-dist = [
     { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-platform-plugin", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.3,<0.8" },
+    { name = "nemo-sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "../../packages/sandboxed_gym" },
     { name = "ngcsdk", specifier = ">=4.8.2" },
     { name = "nvidia-ml-py", specifier = ">=13.0.0" },
     { name = "openai" },
@@ -3509,7 +3533,6 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7.1" },
     { name = "rouge-score", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.1.2" },
     { name = "sacrebleu", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.5.1" },
-    { name = "sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "../../packages/sandboxed_gym" },
     { name = "sniffio" },
     { name = "typer", specifier = ">=0.20.0" },
     { name = "typing-extensions", specifier = ">=4.14,<5" },
@@ -3563,6 +3586,32 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/ba/b965baa4920f58923bcc02ebcc613f675ba825d76aec485796a9d1908c04/nemo_relay_cli_bin-0.7.3-py3-none-win_amd64.whl", hash = "sha256:e69f3e7608575a2f91088f4ee61b516f3c66cb442532c0985f20b06736dcfa29", size = 9949847, upload-time = "2026-08-14T14:40:39.131Z" },
     { url = "https://files.pythonhosted.org/packages/2a/9f/69bf79f6816102cd696dd7a6051fe20b894ee50ce861e32f81b63adfc78b/nemo_relay_cli_bin-0.7.3-py3-none-win_arm64.whl", hash = "sha256:3cc4ba58ab1cc05bf39abcc6e3c26cc50f61bb08bbfba5c41affbf76869c5658", size = 9431754, upload-time = "2026-08-14T14:40:41.492Z" },
 ]
+
+[[package]]
+name = "nemo-sandboxed-gym"
+source = { editable = "../../packages/sandboxed_gym" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115.0" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
+    { name = "opensandbox", marker = "extra == 'dev'", specifier = ">=0.1.15" },
+    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = ">=0.1.15" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.2" },
+    { name = "pyyaml", marker = "extra == 'runtime'", specifier = ">=6.0.2" },
+    { name = "pyyaml", marker = "extra == 'server'", specifier = ">=6.0.2" },
+    { name = "ray", marker = "extra == 'ray'", specifier = ">=2.40.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'dev'", specifier = ">=0.30.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.30.0" },
+]
+provides-extras = ["dev", "opensandbox", "ray", "runtime", "server"]
 
 [[package]]
 name = "nemo-studio-assistant"
@@ -5241,30 +5290,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/d3/ed/d7acddcff74d690c5
 wheels = [
     { url = "https://files.pythonhosted.org/packages/06/f2/6c90ccf3ad1d09a7d662a405b274f3c93b92df59c8d6a025d26aaf34d302/sacrebleu-2.6.0-py3-none-any.whl", hash = "sha256:3edc1531575cfe4ad04ce53491a9307e234af1c3f805a1f491cbec844229a8a8", size = 100785, upload-time = "2026-01-12T17:17:18.868Z" },
 ]
-
-[[package]]
-name = "sandboxed-gym"
-version = "0.1.0"
-source = { editable = "../../packages/sandboxed_gym" }
-dependencies = [
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
-    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = ">=0.1.15" },
-    { name = "pydantic", specifier = ">=2.10.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "pyyaml", marker = "extra == 'runtime'", specifier = ">=6.0.2" },
-    { name = "ray", marker = "extra == 'ray'", specifier = ">=2.40.0" },
-    { name = "sandboxed-gym", extras = ["runtime"], marker = "extra == 'server'", editable = "../../packages/sandboxed_gym" },
-    { name = "sandboxed-gym", extras = ["server", "opensandbox"], marker = "extra == 'dev'", editable = "../../packages/sandboxed_gym" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.30.0" },
-]
-provides-extras = ["server", "runtime", "opensandbox", "ray", "dev"]
 
 [[package]]
 name = "scikit-network"
