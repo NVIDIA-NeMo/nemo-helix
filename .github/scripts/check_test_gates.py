@@ -39,7 +39,8 @@ ALLOWED_UNSET = {
 #: trees. Their tests are not ours to gate, and parsing them is pure noise.
 NOT_OURS = frozenset({".venv", ".flox", "node_modules", "site-packages", ".git", "sdk"})
 
-_ENV_READ = re.compile(r"""os\.environ(?:\.get)?[(\[]\s*["']([A-Z][A-Z0-9_]*)["']""")
+#: ``os.environ["X"]``, ``os.environ.get("X")`` and ``os.getenv("X")`` are the same gate.
+_ENV_READ = re.compile(r"""os\.(?:environ(?:\.get)?|getenv)[(\[]\s*["']([A-Z][A-Z0-9_]*)["']""")
 
 
 def gate_variables(tree: ast.AST) -> set[str]:

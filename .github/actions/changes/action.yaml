@@ -122,6 +122,7 @@ runs:
             - 'packages/nemo_evaluator_sdk/**'
             - 'packages/nemo_platform_plugin/**'
             - '.github/workflows/ci.yaml'  # the job definition itself
+            - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
             # Paths that can change what `import ...harbor_runtime` loads or how the smoke job runs.
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure

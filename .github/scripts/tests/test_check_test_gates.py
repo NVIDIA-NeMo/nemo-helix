@@ -28,25 +28,34 @@ GATED = """
 import os
 import pytest
 
-pytestmark = pytest.mark.skipif(not os.environ.get("{var}"), reason="opt-in")
+pytestmark = pytest.mark.skipif(not {read}, reason="opt-in")
 
 def test_thing():
     pass
 """
 
+#: The three spellings of one gate. A check that knows only the first would miss the others, and the
+#: tests they guard would keep skipping in CI while the check reported nothing.
+ENV_READS = (
+    'os.environ.get("{var}")',
+    'os.environ["{var}"]',
+    'os.getenv("{var}")',
+)
 
-def _tree(tmp_path: Path, *, gate: str, workflow: str = "") -> tuple[Path, Path]:
+
+def _tree(tmp_path: Path, *, gate: str, workflow: str = "", read: str = ENV_READS[0]) -> tuple[Path, Path]:
     tests = tmp_path / "pkg" / "tests"
     tests.mkdir(parents=True)
-    (tests / "test_gated.py").write_text(GATED.format(var=gate), encoding="utf-8")
+    (tests / "test_gated.py").write_text(GATED.format(read=read.format(var=gate)), encoding="utf-8")
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
     (workflows / "ci.yaml").write_text(workflow or "jobs:\n  build:\n    steps: []\n", encoding="utf-8")
     return tmp_path, workflows
 
 
-def test_a_gate_no_workflow_sets_is_reported(tmp_path: Path) -> None:
-    root, workflows = _tree(tmp_path, gate="RUN_NOTHING_SETS_THIS")
+@pytest.mark.parametrize("read", ENV_READS)
+def test_a_gate_no_workflow_sets_is_reported(tmp_path: Path, read: str) -> None:
+    root, workflows = _tree(tmp_path, gate="RUN_NOTHING_SETS_THIS", read=read)
 
     orphans = check_test_gates.orphaned_gates(root, workflows)
 
@@ -74,7 +83,7 @@ def test_installed_packages_are_not_our_gates(tmp_path: Path) -> None:
     # A dependency's own test suite is full of opt-in gates we neither own nor can set.
     vendored = tmp_path / ".venv" / "lib" / "site-packages" / "dep" / "tests"
     vendored.mkdir(parents=True)
-    (vendored / "test_dep.py").write_text(GATED.format(var="SOME_DEP_FLAG"), encoding="utf-8")
+    (vendored / "test_dep.py").write_text(GATED.format(read=ENV_READS[0].format(var="SOME_DEP_FLAG")), encoding="utf-8")
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
     (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")
