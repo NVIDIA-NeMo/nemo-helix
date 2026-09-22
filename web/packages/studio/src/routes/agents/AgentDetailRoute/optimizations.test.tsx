@@ -30,11 +30,16 @@ describe('AgentDetailRoute optimizations tab', () => {
       'aria-selected',
       'true'
     );
-    expect(
-      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
-    ).toBeInTheDocument();
-    expect(screen.getByText('accuracy-sweep-1')).toBeInTheDocument();
-    expect(screen.queryByText('other-agent-sweep')).not.toBeInTheDocument();
+    // Rerenders can replace table cells between an awaited query and its assertion.
+    // Query and assert the current rows together on each retry.
+    await waitFor(
+      () => {
+        expect(screen.queryByRole('cell', { name: 'brevity-sweep-3' })).toBeVisible();
+        expect(screen.queryByRole('cell', { name: 'accuracy-sweep-1' })).toBeVisible();
+        expect(screen.queryByRole('cell', { name: 'other-agent-sweep' })).not.toBeInTheDocument();
+      },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
   });
 
   it('scopes the list server-side with a spec.agent filter', async () => {
