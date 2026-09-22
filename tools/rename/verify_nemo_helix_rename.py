@@ -44,15 +44,31 @@ def parse_args() -> argparse.Namespace:
         default=Path("."),
         help="repository checkout to verify; defaults to the current working directory",
     )
+    parser.add_argument(
+        "--include-glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="only verify repo-relative paths matching this glob; may be repeated",
+    )
+    parser.add_argument(
+        "--exclude-glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="skip repo-relative paths matching this glob; may be repeated",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     os.chdir(repo_root(args.repo_dir))
+    include_globs = tuple(args.include_glob)
+    exclude_globs = tuple(args.exclude_glob)
     failed = False
 
-    paths = content_paths()
+    paths = content_paths(include_globs, exclude_globs)
     product_matches = [print_matches(path, LEGACY_PRODUCT_PATTERN.search) for path in paths]
     if any(product_matches):
         print("Legacy product names remain in tracked file contents.", file=sys.stderr)
@@ -63,7 +79,7 @@ def main() -> int:
         print("Legacy acronym references remain in tracked file contents.", file=sys.stderr)
         failed = True
 
-    for path in git_file_set():
+    for path in git_file_set(include_globs, exclude_globs):
         if not path.exists() and not path.is_symlink():
             continue
         path_string = path.as_posix()
@@ -71,11 +87,12 @@ def main() -> int:
             print(f"Legacy name remains in tracked path: {path}", file=sys.stderr)
             failed = True
 
-    text = read_text(Path("docker-bake.hcl")) or ""
-    for image in sorted(set(BAKE_IMAGE_PATTERN.findall(text))):
-        if not image.startswith(IMAGE_PREFIX):
-            print(f"First-party published image lacks the {IMAGE_PREFIX} prefix: {image}", file=sys.stderr)
-            failed = True
+    if Path("docker-bake.hcl") in paths:
+        text = read_text(Path("docker-bake.hcl")) or ""
+        for image in sorted(set(BAKE_IMAGE_PATTERN.findall(text))):
+            if not image.startswith(IMAGE_PREFIX):
+                print(f"First-party published image lacks the {IMAGE_PREFIX} prefix: {image}", file=sys.stderr)
+                failed = True
 
     if failed:
         return 1

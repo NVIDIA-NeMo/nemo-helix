@@ -149,6 +149,49 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "No legacy product" in verify.stdout
 
 
+def test_include_and_exclude_globs_limit_rename_scope(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+    install_rename_tools(repo)
+
+    (repo / "docs").mkdir()
+    (repo / "web").mkdir()
+    (repo / "docs/guide.md").write_text("NeMo Platform uses NMP.\n")
+    (repo / "docs/skip.md").write_text("NeMo Platform uses NMP.\n")
+    (repo / "web/app.md").write_text("NeMo Platform uses NMP.\n")
+
+    run(["git", "add", "."], repo)
+    run(["git", "commit", "-m", "initial"], repo)
+
+    run(
+        [
+            "tools/rename/rename-to-nemo-helix.sh",
+            "--include-glob",
+            "docs/**",
+            "--exclude-glob",
+            "docs/skip.md",
+        ],
+        repo,
+    )
+
+    assert (repo / "docs/guide.md").read_text() == "NeMo Helix uses NHX.\n"
+    assert (repo / "docs/skip.md").read_text() == "NeMo Platform uses NMP.\n"
+    assert (repo / "web/app.md").read_text() == "NeMo Platform uses NMP.\n"
+
+    verify = run(
+        [
+            "tools/rename/verify-nemo-helix-rename.sh",
+            "--include-glob",
+            "docs/**",
+            "--exclude-glob",
+            "docs/skip.md",
+        ],
+        repo,
+    )
+    assert "No legacy product" in verify.stdout
+
+
 def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

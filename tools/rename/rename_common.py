@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import subprocess
 from pathlib import Path
@@ -106,16 +107,41 @@ def git_paths(*args: str) -> list[Path]:
     return [Path(path) for path in output.split("\0") if path]
 
 
-def tracked_paths() -> list[Path]:
-    return git_paths("ls-files", "-z")
+def glob_matches(path: Path, pattern: str) -> bool:
+    path_string = path.as_posix()
+    normalized = pattern.removeprefix("./")
+    if normalized.endswith("/**"):
+        prefix = normalized[:-3].rstrip("/")
+        return path_string == prefix or path_string.startswith(f"{prefix}/")
+    if normalized.endswith("/"):
+        return path_string.startswith(normalized)
+    if "/" not in normalized:
+        return fnmatch.fnmatchcase(path.name, normalized)
+    return fnmatch.fnmatchcase(path_string, normalized)
 
 
-def git_file_set() -> list[Path]:
-    return git_paths("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+def path_selected(path: Path, include_globs: tuple[str, ...], exclude_globs: tuple[str, ...]) -> bool:
+    included = not include_globs or any(glob_matches(path, pattern) for pattern in include_globs)
+    excluded = any(glob_matches(path, pattern) for pattern in exclude_globs)
+    return included and not excluded
 
 
-def content_paths() -> list[Path]:
-    return [path for path in git_file_set() if path not in SCRIPT_PATHS]
+def filter_paths(paths: list[Path], include_globs: tuple[str, ...], exclude_globs: tuple[str, ...]) -> list[Path]:
+    return [path for path in paths if path_selected(path, include_globs, exclude_globs)]
+
+
+def tracked_paths(include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = ()) -> list[Path]:
+    return filter_paths(git_paths("ls-files", "-z"), include_globs, exclude_globs)
+
+
+def git_file_set(include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = ()) -> list[Path]:
+    return filter_paths(
+        git_paths("ls-files", "-z", "--cached", "--others", "--exclude-standard"), include_globs, exclude_globs
+    )
+
+
+def content_paths(include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = ()) -> list[Path]:
+    return [path for path in git_file_set(include_globs, exclude_globs) if path not in SCRIPT_PATHS]
 
 
 def read_text(path: Path) -> str | None:

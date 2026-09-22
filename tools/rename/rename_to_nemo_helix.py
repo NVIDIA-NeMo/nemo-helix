@@ -35,8 +35,8 @@ def replace_text(text: str) -> str:
     return IMAGE_PATTERN.sub(rename_image, replace_legacy_names(text))
 
 
-def inventory() -> None:
-    paths = content_paths()
+def inventory(include_globs: tuple[str, ...], exclude_globs: tuple[str, ...]) -> None:
+    paths = content_paths(include_globs, exclude_globs)
     print("Legacy content categories:")
     for old, new in PRODUCT_REPLACEMENTS:
         count = 0
@@ -57,13 +57,15 @@ def inventory() -> None:
 
     print()
     print("Legacy tracked paths:")
-    for path in tracked_paths():
+    for path in tracked_paths(include_globs, exclude_globs):
         renamed = renamed_path(path)
         if renamed != path:
             print(f"  {path} -> {renamed}")
 
     print()
     print("First-party published image renames:")
+    if Path("docker-bake.hcl") not in paths:
+        return
     text = read_text(Path("docker-bake.hcl")) or ""
     for image in sorted(set(BAKE_IMAGE_PATTERN.findall(text))):
         renamed_image = replace_legacy_names(image)
@@ -73,8 +75,8 @@ def inventory() -> None:
             print(f"  {image} -> {renamed_image}")
 
 
-def apply_content_replacements() -> None:
-    for path in content_paths():
+def apply_content_replacements(include_globs: tuple[str, ...], exclude_globs: tuple[str, ...]) -> None:
+    for path in content_paths(include_globs, exclude_globs):
         if path.is_symlink() or not path.is_file():
             continue
         text = read_text(path)
@@ -85,8 +87,8 @@ def apply_content_replacements() -> None:
             path.write_bytes(updated.encode("utf-8"))
 
 
-def apply_path_renames() -> None:
-    for path in git_file_set():
+def apply_path_renames(include_globs: tuple[str, ...], exclude_globs: tuple[str, ...]) -> None:
+    for path in git_file_set(include_globs, exclude_globs):
         if not path.exists() and not path.is_symlink():
             continue
         destination = renamed_path(path)
@@ -109,22 +111,38 @@ def parse_args() -> argparse.Namespace:
         default=Path("."),
         help="repository checkout to modify; defaults to the current working directory",
     )
+    parser.add_argument(
+        "--include-glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="only modify repo-relative paths matching this glob; may be repeated",
+    )
+    parser.add_argument(
+        "--exclude-glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="skip repo-relative paths matching this glob; may be repeated",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     os.chdir(repo_root(args.repo_dir))
+    include_globs = tuple(args.include_glob)
+    exclude_globs = tuple(args.exclude_glob)
     if args.dry_run:
-        inventory()
+        inventory(include_globs, exclude_globs)
         return 0
     if not args.resume and run_git("status", "--short").stdout:
         print("The worktree must be clean before running the rename.", file=sys.stderr)
         return 1
 
     try:
-        apply_content_replacements()
-        apply_path_renames()
+        apply_content_replacements(include_globs, exclude_globs)
+        apply_path_renames(include_globs, exclude_globs)
     except RuntimeError as error:
         print(error, file=sys.stderr)
         return 1
