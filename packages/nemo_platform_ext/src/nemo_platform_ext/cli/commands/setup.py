@@ -2425,7 +2425,11 @@ def setup_command(
     ] = False,
     workspace: Annotated[
         str,
-        typer.Option("--workspace", "-w", help="Target workspace"),
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Target workspace. Defaults to the active CLI context's workspace.",
+        ),
     ] = "default",
     start_services: Annotated[
         bool | None,
@@ -2549,6 +2553,12 @@ def setup_command(
             certificate_authority=certificate_authority,
         )
         if service_result == "start_local":
+            # Rebind (not just resolve inline) so every later step -- the
+            # workspace get/create below and the auto/interactive run -- agrees
+            # with the workspace written into the new local context. Resolved
+            # *before* _configure_local_connection so it reads the context the
+            # user is currently on, which is the one we want to inherit.
+            workspace = _resolve_setup_workspace(ctx, cli_context, workspace)
             _configure_local_connection(cli_context, workspace)
             base_url = DEFAULT_BASE_URL
             certificate_authority = cli_context.get_sdk_context().cluster.certificate_authority

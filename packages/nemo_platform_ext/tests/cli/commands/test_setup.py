@@ -4272,6 +4272,33 @@ class TestSetupCommandRemoteFlow:
         mocks.configure_local.assert_called_once_with(cli_context, "default")
         assert mocks.run_interactive.call_args.args[3] == DEFAULT_BASE_URL
 
+    def test_start_local_seeds_the_active_context_workspace(self):
+        """The local context must inherit the workspace the user is actually on.
+
+        The connect-remote branch already resolved ``--workspace`` against the
+        active context; the start-local branch passed the raw flag value, so an
+        omitted flag seeded the new local context with the literal ``"default"``
+        and silently dropped the user's workspace.
+        """
+        ctx, cli_context = _make_setup_command_ctx(workspace="team-a")
+        with _patch_setup_command(maybe_start_services=["start_local", "ready"]) as mocks:
+            setup_command(ctx)
+
+        mocks.configure_local.assert_called_once_with(cli_context, "team-a")
+        # The resolved workspace must also reach everything downstream of the
+        # branch -- provisioning and the interactive run -- not just the
+        # context write, or setup configures one workspace and provisions
+        # another.
+        assert mocks.run_interactive.call_args.args[2] == "team-a"
+        assert mocks.bootstrap.call_args.args[1] == "team-a"
+
+    def test_start_local_explicit_workspace_flag_wins(self):
+        ctx, cli_context = _make_setup_command_ctx(workspace="team-a", workspace_source=ParameterSource.COMMANDLINE)
+        with _patch_setup_command(maybe_start_services=["start_local", "ready"]) as mocks:
+            setup_command(ctx, workspace="flag-ws")
+
+        mocks.configure_local.assert_called_once_with(cli_context, "flag-ws")
+
 
 # ---------------------------------------------------------------------------
 # Controller health check
