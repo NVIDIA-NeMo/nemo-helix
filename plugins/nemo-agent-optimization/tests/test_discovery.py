@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, ClassVar
 
 import pytest
@@ -13,6 +14,34 @@ from nemo_agent_optimization_plugin.discovery import discover_strategies, discov
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
+
+
+@pytest.fixture(autouse=True)
+def _fresh_discovery() -> Iterator[None]:
+    """``discover_strategy_jobs`` is cached per process; each test swaps ``discover_jobs``.
+
+    Cleared after the test as well, so a later test that relies on the real
+    discovery does not inherit a view built from these fakes.
+    """
+    discover_strategy_jobs.cache_clear()
+    yield
+    discover_strategy_jobs.cache_clear()
+
+
+def test_the_scan_runs_once_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Repeat calls must not re-walk (and re-warn about) every installed job."""
+    calls = 0
+
+    def _discover_jobs() -> dict[str, type[NemoJob]]:
+        nonlocal calls
+        calls += 1
+        return {"whatever.optimize": _Strategy}
+
+    monkeypatch.setattr(discovery, "discover_jobs", _discover_jobs)
+
+    assert discover_strategy_jobs() is discover_strategy_jobs()
+    discover_strategies()
+    assert calls == 1
 
 
 class _Strategy(NemoJob):

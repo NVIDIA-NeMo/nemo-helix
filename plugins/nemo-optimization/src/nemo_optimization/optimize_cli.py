@@ -12,7 +12,7 @@ and submitted many times.
 
 Lives with this plugin for now rather than with the generic ``optimize`` group: the bundle it validates
 is a NAT optimize bundle, so the command is only meaningful where this plugin is installed. Future work
-will unfify the bundle across all optimization plugins. It reaches the shared group by registering
+will unify the bundle across all optimization plugins. It reaches the shared group by registering
 :func:`register_prepare_fileset_command` under the ``nemo.cli.agents.optimize`` entry-point group,
 which ``nemo agents optimize`` scans as it assembles itself.
 """

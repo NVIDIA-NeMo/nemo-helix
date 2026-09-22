@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 #: and an unreachable platform should cost a noticeable pause, not a hang.
 STRATEGIES_TIMEOUT_SECONDS = 10.0
 
+#: Same flag and env var as ``nemo_agents_plugin.cli_context.BaseUrlOption``. Declared
+#: here rather than imported because typer resolves annotations against module globals,
+#: and that module is deliberately not imported at module scope (see
+#: :func:`_remote_strategy_names`).
 BaseUrlOption = Annotated[
     Optional[str],
     typer.Option(
@@ -79,6 +83,10 @@ class AgentOptimizeCLI(NemoCLI):
             has it, and vice versa. Answering from this environment instead would
             describe a different machine, so an unreachable platform is an error
             rather than a cue to guess.
+
+            Stdout carries names and nothing else, so `for s in $(nemo agents optimize
+            list-strategies)` is safe: an empty platform prints nothing there. The
+            target is announced once on stderr by the shared base-URL resolver.
             """
             try:
                 names, target = _remote_strategy_names(base_url)
@@ -88,10 +96,9 @@ class AgentOptimizeCLI(NemoCLI):
                 typer.echo(f"Error: could not list the platform's strategies: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
 
-            typer.echo(f"Strategies installed on {target}.", err=True)
             if not names:
-                typer.echo("No optimization strategies are installed.")
-                raise typer.Exit(code=0)
+                typer.echo(f"No optimization strategies are installed on {target}.", err=True)
+                return
             for name in names:
                 typer.echo(name)
 
@@ -122,32 +129,21 @@ def _register_contributed_subcommands(group: typer.Typer) -> None:
 
 
 def _remote_strategy_names(base_url: str | None) -> tuple[list[str], str]:
-    """Ask the platform for its installed strategies. Raises if it cannot answer."""
-    target = _resolve_base_url(base_url)
-    client = AgentOptimizationClient(
-        base_url=target,
-        default_headers=_context_headers(),
-        timeout=STRATEGIES_TIMEOUT_SECONDS,
-    )
-    listing = client.list_strategies().data()
-    return [strategy.name for strategy in listing.data], target
+    """Ask the platform for its installed strategies. Raises if it cannot answer.
 
-
-def _resolve_base_url(base_url: str | None) -> str:
-    """Resolve the platform target the way the rest of ``nemo agents`` does.
-
+    The target and auth headers resolve the way the rest of ``nemo agents`` does.
     ``nemo_agents_plugin.cli_context`` is imported lazily and is not a declared
     dependency: this group is only ever reached through the ``nemo.cli.agents``
     entry point, so the agents plugin is installed whenever this code runs, and
     declaring it would drag the whole agents stack into service-only installs.
     """
-    from nemo_agents_plugin.cli_context import resolve_base_url
+    from nemo_agents_plugin.cli_context import resolve_base_url, resolve_context_headers
 
-    return resolve_base_url(base_url)
-
-
-def _context_headers() -> dict[str, str]:
-    """Auth headers from the shared CLI context — same lazy-import rationale."""
-    from nemo_agents_plugin.cli_context import resolve_context_headers
-
-    return resolve_context_headers()
+    target = resolve_base_url(base_url)
+    with AgentOptimizationClient(
+        base_url=target,
+        default_headers=resolve_context_headers(),
+        timeout=STRATEGIES_TIMEOUT_SECONDS,
+    ) as client:
+        listing = client.list_strategies().data()
+    return [strategy.name for strategy in listing.data], target

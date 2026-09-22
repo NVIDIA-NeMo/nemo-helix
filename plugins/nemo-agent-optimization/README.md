@@ -85,9 +85,13 @@ write, and so on. A mismatch surfaces as a 422 on the submit.
 
 ```bash
 $ nemo agents optimize list-strategies
-Strategies installed on http://localhost:8080.
+Targeting http://localhost:8080
 nat
 ```
+
+Only the names go to stdout (the target line is on stderr), so the output is
+safe to loop over in a shell; when the platform has no strategies, stdout is
+empty and a note goes to stderr.
 
 It asks the platform — `GET /apis/agent-optimization/v2/strategies` — because
 the platform is what resolves `--strategy` when the run is submitted. A client

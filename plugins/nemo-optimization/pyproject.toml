@@ -27,11 +27,14 @@ dependencies = [
 version = "0.0.0"
 
 # Discovered by `nemo agents optimize` as the `nat` strategy, via the
-# `nemo_agent_optimization_strategy` class variable on OptimizeJob. The key prefix names
-# no existing API segment on purpose: the study runs as a step of the router job's record, so
-# this job needs to be discoverable, not separately submittable.
+# `nemo_agent_optimization_strategy` class variable on OptimizeJob. The key sits under the
+# dispatcher's `agent-optimization` plugin namespace rather than minting a new one: plugin
+# allowlists and `nemo plugins list` group `nemo.jobs` entries by that prefix, so a deployment
+# that allows the router also gets its strategies. Nothing mounts the key itself — the
+# agent-optimization service adds routes explicitly and has no `nemo.cli` group — so the study
+# stays discoverable, not separately submittable; it runs as a step of the router job's record.
 [project.entry-points."nemo.jobs"]
-"optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
 
 # Hangs `prepare-fileset` off the shared `nemo agents optimize` group. The value is a plain
 # function taking that group; joining this group is independent of the strategy job above.
