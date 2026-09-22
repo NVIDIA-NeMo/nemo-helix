@@ -75,14 +75,23 @@ export const RadioCard: FC<RadioCardProps> = ({
   const id = labelId ?? `${String(value).replace(/\s+/g, '-')}-label`;
   const hasDescription = isDefined(description);
 
+  /**
+   * With no radio indicator, the icon takes the column the indicator would have had, so
+   * the description lines up under the label rather than under the icon.
+   */
+  const iconColumn = !showIndicator && icon != null;
+
   const textStartClass =
-    'text-left ' + (showIndicator && labelSide === 'right' ? 'col-start-2' : 'col-start-1');
+    'text-left ' +
+    ((showIndicator && labelSide === 'right') || iconColumn ? 'col-start-2' : 'col-start-1');
   const labelClass = `${textStartClass} row-start-1`;
   const descriptionClass = `${textStartClass} row-start-2`;
 
   // The hidden input is absolutely positioned, so it leaves grid flow entirely.
   const colClass = !showIndicator
-    ? '[&_.nv-card-content]:grid-cols-1'
+    ? iconColumn
+      ? '[&_.nv-card-content]:grid-cols-[auto_1fr]'
+      : '[&_.nv-card-content]:grid-cols-1'
     : labelSide === 'right'
       ? '[&_.nv-card-content]:grid-cols-[auto_1fr]'
       : '[&_.nv-card-content]:grid-cols-[1fr_auto]';
@@ -123,6 +132,15 @@ export const RadioCard: FC<RadioCardProps> = ({
           aria-labelledby={id}
           {...attributes?.RadioGroupInput}
         />
+        {iconColumn && (
+          <Flex
+            align="center"
+            aria-hidden
+            className="col-start-1 row-span-2 row-start-1 shrink-0 self-start pt-0.5 text-base-foreground"
+          >
+            {icon}
+          </Flex>
+        )}
         {/* Single column for label + description (separate from the radio indicator column) */}
         <Flex direction="col" gap="density-sm" className={labelClass}>
           <Flex
@@ -130,7 +148,7 @@ export const RadioCard: FC<RadioCardProps> = ({
             align="center"
             className={cn('min-h-0', slotEnd != null && 'w-full')}
           >
-            {icon != null && (
+            {icon != null && !iconColumn && (
               <Flex align="center" className="shrink-0 text-base-foreground" aria-hidden>
                 {icon}
               </Flex>

@@ -69,3 +69,14 @@ export const START_OPTIONS: StartOption[] = [
  */
 export const TEMPLATE_SECTIONS = ['Evaluation', 'Fine-tuning'] as const;
 export const OTHER_SECTION = 'Other';
+
+/**
+ * One accent per section, which is what makes the groups readable as groups when the
+ * headings scroll out of view. Theme tokens rather than the design's literals, so the
+ * light theme gets its own shade.
+ */
+export const SECTION_ACCENTS: Record<string, string> = {
+  Evaluation: 'var(--text-color-accent-purple)',
+  'Fine-tuning': 'var(--text-color-accent-yellow)',
+  [OTHER_SECTION]: 'var(--text-color-accent-teal)',
+};
