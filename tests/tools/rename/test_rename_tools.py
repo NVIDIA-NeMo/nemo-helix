@@ -46,13 +46,30 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
 
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
-    (repo / "dist/index.js").write_bytes(b"window.product = 'NeMo Platform'; window.acronym = 'NMP';\nraw = '\xff';\n")
-    (repo / "docs").mkdir()
+    (repo / "dist/index.js").write_text("window.product = 'NeMo Platform'; window.acronym = 'NMP';\n")
+    (repo / "dist/binary.dat").write_bytes(b"NeMo Platform NMP should remain in undecodable content: \xff\n")
+    (repo / "docs/snmp/nmp-common").mkdir(parents=True)
+    (repo / "docs/snmp/nmp-common/NMP_DATA.txt").write_text(
+        " ".join(
+            [
+                "nmp_common",
+                "NMP_CONFIG",
+                "nmp-common",
+                "NMP",
+                "nmp",
+                "snmp",
+                "abcNMPdef012",
+                "abc-nmpXYZ",
+                "sha384-AbCdNMPefghnmpQRST==",
+            ]
+        )
+        + "\n"
+    )
     (repo / "docs/overview.md").write_text("The nemo-platform repository publishes auditor-tasks.\n")
     (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("auditor-tasks") }\n')
 
     run(["git", "add", "."], repo)
-    run(["git", "add", "-f", "dist/index.js"], repo)
+    run(["git", "add", "-f", "dist/index.js", "dist/binary.dat"], repo)
     run(["git", "commit", "-m", "initial"], repo)
 
     result = run(["tools/rename/rename-to-nemo-helix.sh"], repo)
@@ -61,9 +78,22 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     index_bytes = (repo / "dist/index.js").read_bytes()
     assert b"NeMo Helix" in index_bytes
     assert b"NHX" in index_bytes
-    assert b"\xff" in index_bytes
+    assert (repo / "dist/binary.dat").read_bytes() == b"NeMo Platform NMP should remain in undecodable content: \xff\n"
     assert "nemo-helix" in (repo / "docs/overview.md").read_text()
     assert "nhx-auditor-tasks" in (repo / "docker-bake.hcl").read_text()
+
+    renamed_path = repo / "docs/snmp/nhx-common/NHX_DATA.txt"
+    assert renamed_path.exists()
+    renamed_text = renamed_path.read_text()
+    assert "nhx_common" in renamed_text
+    assert "NHX_CONFIG" in renamed_text
+    assert "nhx-common" in renamed_text
+    assert " NHX " in f" {renamed_text} "
+    assert " nhx " in f" {renamed_text} "
+    assert "snmp" in renamed_text
+    assert "abcNMPdef012" in renamed_text
+    assert "abc-nmpXYZ" in renamed_text
+    assert "sha384-AbCdNMPefghnmpQRST==" in renamed_text
 
     common_text = (repo / "tools/rename/rename_common.py").read_text()
     assert '("NeMo Platform", "NeMo Helix")' in common_text
@@ -82,7 +112,7 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
 
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
-    (repo / "dist/index.js").write_text("const product = 'NeMo Platform';\n")
+    (repo / "dist/index.js").write_text("const product = 'NeMo Platform'; snmp abcNMPdef nmp_common\n")
     (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
 
     run(["git", "add", "."], repo)
@@ -94,6 +124,7 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "dist/index.js" in result.stdout
     assert "Legacy product names remain" in result.stderr
+    assert "Legacy acronym references remain" in result.stderr
 
 
 def test_rename_tools_do_not_depend_on_perl_or_ripgrep() -> None:

@@ -3,11 +3,11 @@
 
 # NeMo Helix rename HOW-TO
 
-Use these scripts from the repository root to preview, apply, and verify the NeMo Helix to NeMo Helix rename.
+Use these scripts from the repository root to preview, apply, and verify the NeMo Platform to NeMo Helix rename.
 
 ## Prerequisites
 
-- Run from a git checkout of `nemo-helix`.
+- Run from a git checkout of this repository.
 - Install the standard repository tools, including `git`, `grep`, `sed`, and Python 3.7 or newer.
 - Start with a clean worktree before the actual rename. The script refuses to run when `git status --short` is non-empty unless `--continue` is used.
 - Review the dry-run output before applying changes.
@@ -26,7 +26,7 @@ Expected outcome: the command prints the legacy content categories, tracked path
 tools/rename/rename-to-nemo-helix.sh
 ```
 
-Expected outcome: the script updates file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned.
+Expected outcome: the script updates UTF-8 text file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned. Acronym-only replacements require non-alphanumeric boundaries, so `nmp_common`, `nmp-common`, and `NMP_*` are renamed while `snmp` and opaque alphanumeric values are left unchanged.
 
 If a previous rename attempt stopped after making changes, inspect the worktree and then resume the remaining passes with:
 
@@ -45,5 +45,5 @@ Expected outcome: the verifier prints `No legacy product, package, acronym, path
 ## Next Steps
 
 - Review `git diff` carefully, especially generated or vendored files.
-- Run the relevant repository validation for the changed areas.
+- Run the relevant [repository validation](../../CONTRIBUTING.md) and [tests](../../TESTING.md) for the changed areas.
 - Commit the reviewed rename with `git commit -s`.

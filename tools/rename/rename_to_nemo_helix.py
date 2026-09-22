@@ -10,14 +10,17 @@ import sys
 from pathlib import Path
 
 from rename_common import (
+    ACRONYM_PATTERN,
+    ACRONYM_REPLACEMENTS,
     BAKE_IMAGE_PATTERN,
     IMAGE_PATTERN,
     IMAGE_PREFIX,
-    REPLACEMENTS,
+    PRODUCT_REPLACEMENTS,
     content_paths,
     git_file_set,
     read_text,
     renamed_path,
+    replace_legacy_names,
     repo_root,
     run_git,
     tracked_paths,
@@ -29,22 +32,27 @@ def rename_image(match: re.Match[str]) -> str:
 
 
 def replace_text(text: str) -> str:
-    updated = text
-    for old, new in REPLACEMENTS:
-        updated = updated.replace(old, new)
-    return IMAGE_PATTERN.sub(rename_image, updated)
+    return IMAGE_PATTERN.sub(rename_image, replace_legacy_names(text))
 
 
 def inventory() -> None:
     paths = content_paths()
     print("Legacy content categories:")
-    for old, new in REPLACEMENTS:
+    for old, new in PRODUCT_REPLACEMENTS:
         count = 0
         for path in paths:
             text = read_text(path)
             if text is None:
                 continue
             count += sum(1 for line in text.splitlines() if old in line)
+        print(f"  {old:<24} -> {new:<24} {count:8d} matching lines")
+    for old, new in ACRONYM_REPLACEMENTS.items():
+        count = 0
+        for path in paths:
+            text = read_text(path)
+            if text is None:
+                continue
+            count += sum(match == old for line in text.splitlines() for match in ACRONYM_PATTERN.findall(line))
         print(f"  {old:<24} -> {new:<24} {count:8d} matching lines")
 
     print()
@@ -58,9 +66,7 @@ def inventory() -> None:
     print("First-party published image renames:")
     text = read_text(Path("docker-bake.hcl")) or ""
     for image in sorted(set(BAKE_IMAGE_PATTERN.findall(text))):
-        renamed_image = image
-        for old, new in REPLACEMENTS:
-            renamed_image = renamed_image.replace(old, new)
+        renamed_image = replace_legacy_names(image)
         if not renamed_image.startswith(IMAGE_PREFIX):
             renamed_image = f"{IMAGE_PREFIX}{renamed_image}"
         if renamed_image != image:
@@ -76,7 +82,7 @@ def apply_content_replacements() -> None:
             continue
         updated = replace_text(text)
         if updated != text:
-            path.write_bytes(updated.encode("utf-8", errors="surrogateescape"))
+            path.write_bytes(updated.encode("utf-8"))
 
 
 def apply_path_renames() -> None:

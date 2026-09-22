@@ -14,7 +14,7 @@ VERIFY_IMPL = Path("tools/rename/verify_nemo_helix_rename.py")
 COMMON_IMPL = Path("tools/rename/rename_common.py")
 SCRIPT_PATHS = {RENAME_SCRIPT, RENAME_IMPL, VERIFY_SCRIPT, VERIFY_IMPL, COMMON_IMPL}
 
-REPLACEMENTS = [
+PRODUCT_REPLACEMENTS = [
     ("NeMo Platform", "NeMo Helix"),
     ("NeMo platform", "NeMo Helix"),
     ("NeMoPlatform", "NeMoHelix"),
@@ -33,10 +33,16 @@ REPLACEMENTS = [
     ("NEMO Platform", "NEMO Helix"),
     ("NEMO-PLATFORM", "NEMO-HELIX"),
     ("NEMO_PLATFORM", "NEMO_HELIX"),
-    ("NMP", "NHX"),
-    ("Nmp", "Nhx"),
-    ("nmp", "nhx"),
 ]
+
+ACRONYM_REPLACEMENTS = {
+    "NMP": "NHX",
+    "Nmp": "Nhx",
+    "nmp": "nhx",
+}
+
+REPLACEMENTS = [*PRODUCT_REPLACEMENTS, *ACRONYM_REPLACEMENTS.items()]
+ACRONYM_PATTERN = re.compile(r"(?<![A-Za-z0-9])(NMP|Nmp|nmp)(?![A-Za-z0-9])")
 
 # These are first-party published image names that predate the common prefix.
 UNPREFIXED_IMAGES = [
@@ -49,7 +55,7 @@ IMAGE_PREFIX = "nhx-"
 IMAGE_PATTERN = re.compile(r"(?<![A-Za-z0-9-])(" + "|".join(re.escape(image) for image in UNPREFIXED_IMAGES) + r")")
 BAKE_IMAGE_PATTERN = re.compile(r'(?:sha_and_maybe_latest_tags|base_tags)\("([^"]+)"\)')
 LEGACY_PRODUCT_PATTERN = re.compile(r"nemo[ _-]?platform", re.IGNORECASE)
-LEGACY_ACRONYMS = ("NMP", "Nmp", "nmp")
+LEGACY_ACRONYM_PATTERN = ACRONYM_PATTERN
 
 
 def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -78,16 +84,28 @@ def content_paths() -> list[Path]:
 
 
 def read_text(path: Path) -> str | None:
+    data = path.read_bytes()
+    if b"\0" in data:
+        return None
     try:
-        return path.read_bytes().decode("utf-8", errors="surrogateescape")
-    except OSError:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
         return None
 
 
+def replace_acronyms(text: str) -> str:
+    return ACRONYM_PATTERN.sub(lambda match: ACRONYM_REPLACEMENTS[match.group(1)], text)
+
+
+def replace_legacy_names(text: str) -> str:
+    updated = text
+    for old, new in PRODUCT_REPLACEMENTS:
+        updated = updated.replace(old, new)
+    return replace_acronyms(updated)
+
+
 def renamed_path(path: Path) -> Path:
-    renamed = path.as_posix()
-    for old, new in REPLACEMENTS:
-        renamed = renamed.replace(old, new)
+    renamed = replace_legacy_names(path.as_posix())
     for image in UNPREFIXED_IMAGES:
         prefixed = f"{IMAGE_PREFIX}{image}"
         if prefixed not in renamed:
