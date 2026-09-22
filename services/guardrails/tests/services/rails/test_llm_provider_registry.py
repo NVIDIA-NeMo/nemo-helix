@@ -4,8 +4,8 @@
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.llm.models.initializer import init_llm_model
 from nemoguardrails.llm.providers import get_chat_provider_names, get_llm_provider_names
-from nmp.guardrails.app.constants import NIM_CHAT, NIM_LLM
-from nmp.guardrails.app.services import rails
+from nhx.guardrails.app.constants import NIM_CHAT, NIM_LLM
+from nhx.guardrails.app.services import rails
 
 rails.register_providers()
 

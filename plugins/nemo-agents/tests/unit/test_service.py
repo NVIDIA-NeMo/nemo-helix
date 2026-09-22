@@ -13,7 +13,7 @@ from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
 from nemo_agents_plugin.service import AgentsService
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import submit_path_for
+from nemo_helix_plugin.scheduler import submit_path_for
 
 
 def _mounted_routes() -> dict[str, set[str]]:

@@ -12,19 +12,19 @@ import pytest
 ROOT = Path(__file__).parent.parent.parent
 WORKSPACE_SLICES = ("automodel", "customizer", "rl", "unsloth")
 SDK_EDITABLE_DOCKERFILES = (
-    Path("docker/Dockerfile.nmp-customizer-tasks"),
-    Path("docker/Dockerfile.nmp-unsloth-training"),
-    Path("docker/automodel/Dockerfile.nmp-automodel-training"),
-    Path("docker/rl/Dockerfile.nmp-rl-training"),
+    Path("docker/Dockerfile.nhx-customizer-tasks"),
+    Path("docker/Dockerfile.nhx-unsloth-training"),
+    Path("docker/automodel/Dockerfile.nhx-automodel-training"),
+    Path("docker/rl/Dockerfile.nhx-rl-training"),
 )
 SDK_ALIAS_PACKAGES = ("filesets", "models")
 WANDB_PACKAGE_SPEC_RE = re.compile(r"(?<![\w./-])wandb(?:\[[^\]]+\])?(?:==|~=|!=|<=|>=|<|>)[^\\\s\"']+")
 DOCKER_IMAGE_WANDB_CONFIG_PATHS = (
-    Path("docker/Dockerfile.nmp-customizer-tasks"),
-    Path("docker/Dockerfile.safe-synthesizer-tasks"),
-    Path("docker/automodel/Dockerfile.nmp-automodel-base"),
+    Path("docker/Dockerfile.nhx-customizer-tasks"),
+    Path("docker/Dockerfile.nhx-safe-synthesizer-tasks"),
+    Path("docker/automodel/Dockerfile.nhx-automodel-base"),
     Path("docker/automodel/no_override_requirements.txt"),
-    Path("docker/rl/Dockerfile.nmp-rl-base"),
+    Path("docker/rl/Dockerfile.nhx-rl-base"),
     Path("docker/unsloth/no_override_requirements.txt"),
 )
 CVE_PACKAGE_FLOORS = (
@@ -35,10 +35,10 @@ CVE_PACKAGE_FLOORS = (
             Path("pyproject.toml"),
             Path("services/rl/pyproject.toml"),
             Path("services/unsloth/pyproject.toml"),
-            Path("docker/automodel/Dockerfile.nmp-automodel-base"),
-            Path("docker/Dockerfile.nmp-unsloth-training"),
-            Path("docker/rl/Dockerfile.nmp-rl-base"),
-            Path("docker/locks/nmp-gym-tasks/pyproject.toml"),
+            Path("docker/automodel/Dockerfile.nhx-automodel-base"),
+            Path("docker/Dockerfile.nhx-unsloth-training"),
+            Path("docker/rl/Dockerfile.nhx-rl-base"),
+            Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
         ),
     ),
     (
@@ -46,10 +46,10 @@ CVE_PACKAGE_FLOORS = (
         "0.6.0",
         (
             Path("pyproject.toml"),
-            Path("docker/automodel/Dockerfile.nmp-automodel-base"),
-            Path("docker/Dockerfile.nmp-unsloth-training"),
-            Path("docker/rl/Dockerfile.nmp-rl-base"),
-            Path("docker/locks/nmp-gym-tasks/pyproject.toml"),
+            Path("docker/automodel/Dockerfile.nhx-automodel-base"),
+            Path("docker/Dockerfile.nhx-unsloth-training"),
+            Path("docker/rl/Dockerfile.nhx-rl-base"),
+            Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
         ),
     ),
 )
@@ -148,7 +148,7 @@ def test_distributed_image_cve_package_specs_use_reviewed_floor(
 
 def test_automodel_cve_layer_does_not_pin_full_mlflow_with_cryptography() -> None:
     """Full MLflow 3.15 requires cryptography<50 and cannot coinstall with the image floor."""
-    text = (ROOT / "docker/automodel/Dockerfile.nmp-automodel-base").read_text(encoding="utf-8")
+    text = (ROOT / "docker/automodel/Dockerfile.nhx-automodel-base").read_text(encoding="utf-8")
     assert "cryptography>=50.0.0,<51" in text
     assert "mlflow-skinny>=3.15.0" in text
     assert not FULL_MLFLOW_SPEC_RE.search(text)
@@ -181,7 +181,7 @@ def test_sdk_editable_image_installs_sdk_alias_packages(path: Path) -> None:
     """Editable SDK installs need source packages for SDK aliases available separately."""
     text = path.read_text(encoding="utf-8")
 
-    assert "-e /app/sdk/python/nemo-platform" in text
+    assert "-e /app/sdk/python/nemo-helix" in text
     for package in SDK_ALIAS_PACKAGES:
         assert f"-e /app/packages/{package}" in text
 
@@ -203,13 +203,13 @@ def test_sdk_editable_workspace_slice_includes_sdk_alias_package(slice_name: str
 
 def test_gym_host_lock_has_local_source_for_first_party_build_tools() -> None:
     """The standalone gym-host lock must not resolve first-party build hooks from PyPI."""
-    lock_project = _load_pyproject(ROOT / "docker/locks/nmp-gym-host/pyproject.toml")
+    lock_project = _load_pyproject(ROOT / "docker/locks/nhx-gym-host/pyproject.toml")
     uv_config = lock_project["tool"]["uv"]
     dockerfile_text = (ROOT / "docker/gym-host/Dockerfile").read_text(encoding="utf-8")
 
-    assert uv_config["sources"]["nmp-build-tools"] == {"path": "../../../packages/nmp_build_tools"}
-    assert uv_config["extra-build-dependencies"]["nemo-sandboxed-gym"] == ["nmp-build-tools"]
-    assert "COPY packages/nmp_build_tools /app/packages/nmp_build_tools" in dockerfile_text
+    assert uv_config["sources"]["nhx-build-tools"] == {"path": "../../../packages/nhx_build_tools"}
+    assert uv_config["extra-build-dependencies"]["nemo-sandboxed-gym"] == ["nhx-build-tools"]
+    assert "COPY packages/nhx_build_tools /app/packages/nhx_build_tools" in dockerfile_text
 
 
 def test_deployments_plugin_is_optional_for_models_service():
@@ -218,7 +218,7 @@ def test_deployments_plugin_is_optional_for_models_service():
     dependency_names = {_package_name_from_spec(dependency) for dependency in models["project"]["dependencies"]}
 
     assert "nemo-deployments-plugin" not in dependency_names, (
-        "nmp-models loads the deployments backend lazily, so nemo-deployments-plugin "
+        "nhx-models loads the deployments backend lazily, so nemo-deployments-plugin "
         "must not be an unconditional dependency"
     )
     assert "nemo-deployments-plugin" not in _workspace_sources(models), (

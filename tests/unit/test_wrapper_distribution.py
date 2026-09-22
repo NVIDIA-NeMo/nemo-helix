@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression tests for the published ``nemo-platform`` wrapper distribution."""
+"""Regression tests for the published ``nemo-helix`` wrapper distribution."""
 
 import tomllib
 from pathlib import Path
@@ -10,8 +10,8 @@ ROOT = Path(__file__).parent.parent.parent
 
 
 def test_all_extra_bundles_default_deployments_backend() -> None:
-    """The backend enabled by the packaged config must ship in ``nemo-platform[all]``."""
-    pyproject_path = ROOT / "packages/nemo_platform/pyproject.toml"
+    """The backend enabled by the packaged config must ship in ``nemo-helix[all]``."""
+    pyproject_path = ROOT / "packages/nemo_helix/pyproject.toml"
     with open(pyproject_path, "rb") as pyproject:
         wrapper = tomllib.load(pyproject)
 
@@ -21,9 +21,9 @@ def test_all_extra_bundles_default_deployments_backend() -> None:
     assert bundle["inherit"]["entry-points"] == ["nemo.*"]
     assert bundle["module"] == "nemo_deployments_plugin"
     assert (pyproject_path.parent / bundle["source"]).resolve().is_dir()
-    assert "nemo-platform[services]" in project["optional-dependencies"]["all"]
-    assert "nemo-platform[plugins]" in project["optional-dependencies"]["services"]
-    assert "nemo-platform[nemo-deployments-plugin]" in project["optional-dependencies"]["plugins"]
+    assert "nemo-helix[services]" in project["optional-dependencies"]["all"]
+    assert "nemo-helix[plugins]" in project["optional-dependencies"]["services"]
+    assert "nemo-helix[nemo-deployments-plugin]" in project["optional-dependencies"]["plugins"]
     assert "nemo-deployments-plugin" in project["optional-dependencies"]
     assert project["entry-points"]["nemo.services"]["deployments"].startswith("nemo_deployments_plugin.")
     assert project["entry-points"]["nemo.controllers"]["deployments"].startswith("nemo_deployments_plugin.")
@@ -35,10 +35,10 @@ def test_bundled_shared_data_is_carried_into_the_wrapper_wheel() -> None:
     """Every bundled package's shared-data must be re-declared on its bundle entry.
 
     Bundled packages are not installed as their own distribution in a packaged
-    ``nemo-platform`` install, so anything they would install under the
+    ``nemo-helix`` install, so anything they would install under the
     environment prefix is lost unless the wrapper bundle entry declares it too.
     """
-    pyproject_path = ROOT / "packages/nemo_platform/pyproject.toml"
+    pyproject_path = ROOT / "packages/nemo_helix/pyproject.toml"
     with open(pyproject_path, "rb") as pyproject:
         bundles = tomllib.load(pyproject)["tool"]["bundle-package"]
 
@@ -76,7 +76,7 @@ def test_bundled_shared_data_is_carried_into_the_wrapper_wheel() -> None:
 
 def test_insights_analyst_fabric_descriptor_ships_in_the_wrapper_wheel() -> None:
     """Fabric resolves ``nvidia.fabric.insights-analyst`` from the install prefix."""
-    pyproject_path = ROOT / "packages/nemo_platform/pyproject.toml"
+    pyproject_path = ROOT / "packages/nemo_helix/pyproject.toml"
     with open(pyproject_path, "rb") as pyproject:
         bundle = tomllib.load(pyproject)["tool"]["bundle-package"]["nemo-insights-plugin"]
 

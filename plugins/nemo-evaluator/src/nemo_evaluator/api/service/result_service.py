@@ -18,10 +18,10 @@ from typing import TypeVar
 
 from nemo_evaluator.api.schemas import AgentEvalResult, EvaluateResult
 from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
-from nemo_platform_plugin.entities import PaginationInfo
-from nemo_platform_plugin.entity_client import NemoAnyEntityDeleteClientProtocol, NemoEntityNotFoundError
-from nemo_platform_plugin.filter_ops import FilterOperation
-from nemo_platform_plugin.schema import Page, PaginationData
+from nemo_helix_plugin.entities import PaginationInfo
+from nemo_helix_plugin.entity_client import NemoAnyEntityDeleteClientProtocol, NemoEntityNotFoundError
+from nemo_helix_plugin.filter_ops import FilterOperation
+from nemo_helix_plugin.schema import Page, PaginationData
 
 
 def _timestamps(entity: AgentEvalResultEntity | EvaluateResultEntity) -> tuple[datetime, datetime]:

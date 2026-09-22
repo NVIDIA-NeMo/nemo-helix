@@ -38,8 +38,8 @@ from nemo_experimentalist_plugin.experimentalist.components.trace_explorer impor
 )
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter
 from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agentdoc import doc
 from nooa.agents import TokenBudgetSummarizer
@@ -336,7 +336,7 @@ class EvalAuthor(Agent):
         Args:
             trace_ref: Production trace identifier.
             task_template: Pre-staged task copy; resolve its directory from ``task_template.uri``.
-            client: NeMo Platform client for fetching the trace.
+            client: NeMo Helix client for fetching the trace.
             workspace: Workspace the trace belongs to.
         """
         ...
@@ -403,7 +403,7 @@ class EvalAuthor(Agent):
             task_template: Parsed evaluator task containing explicit placeholders.
             train_dataset: Staged training dataset to augment in place.
             validation_dataset: Staged validation dataset to augment in place.
-            client: Existing NeMo Platform client used for Intake requests.
+            client: Existing NeMo Helix client used for Intake requests.
         """
         reporter = self._reporter
         if reporter is not None:

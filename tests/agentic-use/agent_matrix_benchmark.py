@@ -143,7 +143,7 @@ class MatrixDefaults(BaseModel):
     skip_build: bool | None = None
     allow_dirty: bool | None = None
     parallel_candidates: int | None = None
-    nmp_base_url: str | None = None
+    nhx_base_url: str | None = None
     anthropic_base_url: str | None = None
 
 
@@ -297,7 +297,7 @@ def build_nat_runner_command(
     allow_dirty: bool,
     timeout: int,
     codex_auth_json: Path | None,
-    nmp_base_url: str,
+    nhx_base_url: str,
     anthropic_base_url: str,
     python_executable: str = sys.executable,
 ) -> list[str]:
@@ -313,8 +313,8 @@ def build_nat_runner_command(
         str(jobs_dir),
         "--timeout",
         str(timeout),
-        "--nmp-base-url",
-        nmp_base_url,
+        "--nhx-base-url",
+        nhx_base_url,
     ]
     if candidate.model is not None:
         command.extend(["--agent-model", candidate.model])
@@ -371,7 +371,7 @@ def run_candidates(
     allow_dirty: bool,
     timeout: int,
     codex_auth_json: Path | None,
-    nmp_base_url: str,
+    nhx_base_url: str,
     anthropic_base_url: str,
     parallel_candidates: int = 1,
 ) -> list[dict[str, object]]:
@@ -397,7 +397,7 @@ def run_candidates(
                     allow_dirty=allow_dirty,
                     timeout=timeout,
                     codex_auth_json=codex_auth_json,
-                    nmp_base_url=nmp_base_url,
+                    nhx_base_url=nhx_base_url,
                     anthropic_base_url=anthropic_base_url,
                 )
             )
@@ -422,7 +422,7 @@ def run_candidates(
                 allow_dirty=allow_dirty,
                 timeout=timeout,
                 codex_auth_json=codex_auth_json,
-                nmp_base_url=nmp_base_url,
+                nhx_base_url=nhx_base_url,
                 anthropic_base_url=anthropic_base_url,
             )
             for index, candidate in enumerate(candidates, start=1)
@@ -450,7 +450,7 @@ def _run_candidate(
     allow_dirty: bool,
     timeout: int,
     codex_auth_json: Path | None,
-    nmp_base_url: str,
+    nhx_base_url: str,
     anthropic_base_url: str,
 ) -> dict[str, object]:
     """Run one candidate subprocess and return normalized metadata."""
@@ -466,7 +466,7 @@ def _run_candidate(
         allow_dirty=allow_dirty,
         timeout=timeout,
         codex_auth_json=codex_auth_json,
-        nmp_base_url=nmp_base_url,
+        nhx_base_url=nhx_base_url,
         anthropic_base_url=anthropic_base_url,
     )
     _log(
@@ -1423,7 +1423,7 @@ def main() -> int:
             "Values greater than 1 require --skip-build to avoid concurrent Docker tag rebuilds."
         ),
     )
-    parser.add_argument("--nmp-base-url")
+    parser.add_argument("--nhx-base-url")
     parser.add_argument(
         "--anthropic-base-url",
         default=None,
@@ -1471,7 +1471,7 @@ def main() -> int:
             )
             if parallel_candidates is None:
                 parallel_candidates = 1
-            nmp_base_url = args.nmp_base_url or config.defaults.nmp_base_url or nat_runner.DEFAULT_LOCAL_NMP_BASE_URL
+            nhx_base_url = args.nhx_base_url or config.defaults.nhx_base_url or nat_runner.DEFAULT_LOCAL_NHX_BASE_URL
             anthropic_base_url = (
                 args.anthropic_base_url
                 or config.defaults.anthropic_base_url
@@ -1486,7 +1486,7 @@ def main() -> int:
             skip_build = args.skip_build
             allow_dirty = args.allow_dirty
             parallel_candidates = args.parallel_candidates if args.parallel_candidates is not None else 1
-            nmp_base_url = args.nmp_base_url or nat_runner.DEFAULT_LOCAL_NMP_BASE_URL
+            nhx_base_url = args.nhx_base_url or nat_runner.DEFAULT_LOCAL_NHX_BASE_URL
             anthropic_base_url = args.anthropic_base_url or os.environ.get(
                 "ANTHROPIC_BASE_URL", "https://inference-api.nvidia.com"
             )
@@ -1532,7 +1532,7 @@ def main() -> int:
         allow_dirty=allow_dirty,
         timeout=timeout,
         codex_auth_json=args.codex_auth_json.expanduser().resolve() if args.codex_auth_json else None,
-        nmp_base_url=nmp_base_url,
+        nhx_base_url=nhx_base_url,
         anthropic_base_url=anthropic_base_url,
         parallel_candidates=parallel_candidates,
     )

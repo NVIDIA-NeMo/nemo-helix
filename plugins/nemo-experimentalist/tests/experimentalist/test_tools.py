@@ -9,7 +9,7 @@ import pytest
 from nemo_experimentalist_plugin.experimentalist.components.coder import CodeEditBuilder, CodeEditBuilderConfig
 from nemo_experimentalist_plugin.experimentalist.components.holdout_utils import BLOCKED_MESSAGE
 from nemo_experimentalist_plugin.experimentalist.components.tools import GuardedShellTools
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelClients, ConfiguredModelRefs, activate_model_clients
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients, ConfiguredModelRefs, activate_model_clients
 from nooa.agentdoc import pformat
 from nooa.errors import GenerationError
 from nooa.tools import ShellResult

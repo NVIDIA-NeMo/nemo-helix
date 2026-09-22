@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from nemo_auditor.entities import AuditConfig
 from nemo_auditor.seed_job import DEFAULT_CONFIG_NAME, SYSTEM_WORKSPACE, AuditorSeedJob
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 
 @pytest.mark.asyncio

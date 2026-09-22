@@ -157,7 +157,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -345,7 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -377,7 +377,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -409,7 +409,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -572,11 +572,11 @@ components:
         \           AnonymizerConfig \u2014 replace/rewrite mode + detection params.\n\
         \  data:             AnonymizerInputSpec \u2014 HTTP(S) URL or fileset source\
         \ + text/id columns.\n  model_configs:    DD ``ModelConfig`` list. ``provider``\
-        \ on each entry must\n                    reference a NeMo Platform inference\
+        \ on each entry must\n                    reference a NeMo Helix inference\
         \ provider name (optionally\n                    ``workspace/provider``).\
         \ Optional on the request model for\n                    compatibility, but\
         \ required by plugin preview/run execution\n                    so requests\
-        \ route through NeMo Platform Inference Gateway.\n  selected_models:  Optional\
+        \ route through NeMo Helix Inference Gateway.\n  selected_models:  Optional\
         \ role->alias overrides. Omitted roles fall back\n                    to the\
         \ upstream library YAML defaults."
     AnonymizerStepConfig:
@@ -1047,18 +1047,18 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PlatformJobListResultResponse:
+    HelixJobListResultResponse:
       properties:
         data:
           items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
+            $ref: '#/components/schemas/HelixJobResultResponse'
           type: array
           title: Data
       type: object
       required:
       - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
+      title: HelixJobListResultResponse
+    HelixJobLog:
       properties:
         timestamp:
           type: string
@@ -1083,12 +1083,12 @@ components:
       - job_step
       - job_task
       - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
+      title: HelixJobLog
+    HelixJobLogPage:
       properties:
         data:
           items:
-            $ref: '#/components/schemas/PlatformJobLog'
+            $ref: '#/components/schemas/HelixJobLog'
           type: array
           title: Data
         total:
@@ -1106,8 +1106,8 @@ components:
       - total
       - next_page
       - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
+      title: HelixJobLogPage
+    HelixJobResultResponse:
       properties:
         name:
           type: string
@@ -1144,8 +1144,8 @@ components:
       - workspace
       - artifact_url
       - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
+      title: HelixJobResultResponse
+    HelixJobStatus:
       type: string
       enum:
       - created
@@ -1158,14 +1158,14 @@ components:
       - paused
       - pausing
       - resuming
-      title: PlatformJobStatus
+      title: HelixJobStatus
       description: 'Enumeration of possible job statuses.
 
 
         This enum represents the various states a job can be in during its lifecycle,
 
         from creation to a terminal state.'
-    PlatformJobStatusResponse:
+    HelixJobStatusResponse:
       properties:
         id:
           type: string
@@ -1174,7 +1174,7 @@ components:
           type: string
           title: Name
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           additionalProperties: true
           type: object
@@ -1185,7 +1185,7 @@ components:
           type: object
         steps:
           items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
           type: array
           title: Steps
         created_at:
@@ -1206,8 +1206,8 @@ components:
       - steps
       - created_at
       - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
       properties:
         id:
           type: string
@@ -1216,7 +1216,7 @@ components:
           type: string
           title: Name
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           additionalProperties: true
           type: object
@@ -1227,7 +1227,7 @@ components:
           type: object
         tasks:
           items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
           type: array
           title: Tasks
         created_at:
@@ -1248,8 +1248,8 @@ components:
       - tasks
       - created_at
       - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
       properties:
         id:
           type: string
@@ -1258,7 +1258,7 @@ components:
           type: string
           title: Name
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           additionalProperties: true
           type: object
@@ -1288,7 +1288,7 @@ components:
       - error_stack
       - created_at
       - updated_at
-      title: PlatformJobTaskStatusResponse
+      title: HelixJobTaskStatusResponse
     PreviewDatasetFrame:
       properties:
         kind:
@@ -1448,7 +1448,7 @@ components:
         spec:
           $ref: '#/components/schemas/AnonymizerStepConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -1528,7 +1528,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.

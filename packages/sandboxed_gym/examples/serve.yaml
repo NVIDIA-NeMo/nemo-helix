@@ -4,7 +4,7 @@
 job_id: demo-job
 host_provider: opensandbox
 sandbox:
-  image: example.registry/nmp-gym-runtime:dev
+  image: example.registry/nhx-gym-runtime:dev
   environment_pvc_claim: job-pvc
   environment_sub_path: environments/my-env
   env_mount_path: /job/environment

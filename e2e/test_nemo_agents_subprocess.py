@@ -3,7 +3,7 @@
 
 """E2E tests for subprocess-mode agent deployments.
 
-This module starts NeMo Platform through the subprocess E2E harness, deploys a
+This module starts NeMo Helix through the subprocess E2E harness, deploys a
 real agent as a child process through the agents plugin, and invokes it through
 the agents gateway. The end-to-end chain is::
 
@@ -21,7 +21,7 @@ Platform, where this module's local harness configuration would be ignored.
 
 import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from e2e.agents_deploy_helpers import run_agent_deploy_and_invoke, wait_for_agent_spans
 
@@ -34,7 +34,7 @@ pytestmark = [
 ]
 
 
-def test_nat_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, workspace: str) -> None:
+def test_nat_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, workspace: str) -> None:
     """Deploy a NAT agent as a subprocess and invoke it through the gateway."""
     run_agent_deploy_and_invoke(
         sdk,
@@ -44,7 +44,7 @@ def test_nat_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, worksp
     )
 
 
-def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, workspace: str) -> None:
+def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, workspace: str) -> None:
     """Deploy a Fabric-backed agent as a subprocess and invoke it through the gateway.
 
     The agent config names no export destination, so reaching Intake proves the
@@ -70,7 +70,7 @@ def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, wor
     )
 
 
-def test_fabric_agent_streams_through_gateway(sdk: NeMoPlatform, workspace: str) -> None:
+def test_fabric_agent_streams_through_gateway(sdk: NeMoHelix, workspace: str) -> None:
     """A default Fabric deployment supports SSE chat completions."""
     run_agent_deploy_and_invoke(
         sdk,
@@ -81,7 +81,7 @@ def test_fabric_agent_streams_through_gateway(sdk: NeMoPlatform, workspace: str)
     )
 
 
-def test_fabric_agent_invokes_with_persisted_session(sdk: NeMoPlatform, workspace: str) -> None:
+def test_fabric_agent_invokes_with_persisted_session(sdk: NeMoHelix, workspace: str) -> None:
     """A persisted session can start its streaming-enabled Fabric runtime."""
     run_agent_deploy_and_invoke(
         sdk,

@@ -96,7 +96,7 @@ the only complete worked path, and it is far easier to point this at your own
 agent once you have watched a run finish. The rest of this section is reference
 for when you get there.
 
-This plugin lives in the `nemo-platform` monorepo and shares the root `.venv`.
+This plugin lives in the `nemo-helix` monorepo and shares the root `.venv`.
 From the root of the checkout:
 
 ```bash
@@ -171,7 +171,7 @@ win. "Required" below means required *when the profile does not supply it*.
 | `--task-template` | Directory holding one Harbor task template (`task.toml` with placeholders); Experimentalist fills a copy per failing trace. | Insight-driven mode only. |
 | `--config` | Run configuration: round and candidate limits plus `source`, `storage`, `goal_config`, `coder`, `analyzer`, `proposer`, `evaluator`, `eval_author`. Rejects a `models:` key. | No — defaults apply. |
 | `--workspace` | NeMo workspace for traces and run metadata. | No — profile, else `default`. |
-| `--base-url` | URL of the running platform. | No — `NMP_BASE_URL`, else `http://localhost:8080`. |
+| `--base-url` | URL of the running platform. | No — `NHX_BASE_URL`, else `http://localhost:8080`. |
 | `--experiment-dir` | Where `eval-and-optimize/` is written. Also `-o`, `--output`, `--experiments-output`. | No — see [Output](#output). |
 | `--framework-skills` | Directory of framework skills to load into the optimizer agents; repeatable. Two ship with the plugin — see below. | No. |
 
@@ -246,7 +246,7 @@ the effective pair.
 For non-interactive or isolated environments, `NEMO_DEFAULT_MODEL` and
 `NEMO_FAST_MODEL` override the stored selections; both take Platform Model
 Entity IDs in `workspace/model-name` form. The sandbox example below passes them
-because the host's `~/.config/nmp/config.yaml` is not part of the clone. The
+because the host's `~/.config/nhx/config.yaml` is not part of the clone. The
 [example agent's `.env.example`](examples/tau3-nooa-agent/.env.example) shows
 the shape, and an adjacent `.env` is loaded automatically when a profile is
 found.
@@ -335,7 +335,7 @@ writable clone instead of write access to your checkout. Requires Docker Engine
 repo="$(git rev-parse --show-toplevel)"
 sbx create --clone --name nemo-experimentalist shell "$repo"
 sbx exec --workdir "$repo" \
-  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-platform \
+  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-helix \
   --env NEMO_DEFAULT_MODEL \
   --env NEMO_FAST_MODEL \
   nemo-experimentalist \

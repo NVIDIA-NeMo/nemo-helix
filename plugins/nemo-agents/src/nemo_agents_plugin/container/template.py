@@ -97,7 +97,7 @@ _ENV_MAP: dict[str, str] = {
     "uv_version": "NEMO_AGENTS_UV_VERSION",
 }
 
-#: Local nemo-platform wheel to install instead of resolving the pinned contract
+#: Local nemo-helix wheel to install instead of resolving the pinned contract
 #: version. Set by an operator rather than a caller: it names a path on the build
 #: host, and packaging runs there for the CLI and the platform job alike.
 WHEEL_ENV = "NEMO_AGENTS_WHEEL"
@@ -254,7 +254,7 @@ COPY ./ /workspace
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-helix[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
       "nemo-relay=={{ pinned_nemo_relay_cli_version }}" . && \\
     chmod -R a+rX /opt/uv /workspace/.venv
 {% else %}
@@ -262,7 +262,7 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-helix[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
       "nemo-relay=={{ pinned_nemo_relay_cli_version }}" && \\
     chmod -R a+rX /opt/uv /workspace/.venv
 {% endif %}
@@ -689,11 +689,11 @@ def render_fabric_dockerfile(
 
 
 def get_contract_version() -> str:
-    """Return the published ``nemo-platform`` package version."""
+    """Return the published ``nemo-helix`` package version."""
     from importlib.metadata import PackageNotFoundError, version
 
     try:
-        return version("nemo-platform")
+        return version("nemo-helix")
     except PackageNotFoundError:
         return UNRESOLVED_CONTRACT_VERSION
 
@@ -706,7 +706,7 @@ def require_installable_contract_version(contract_version: str, *, pins_contract
     """
     if contract_version == UNRESOLVED_CONTRACT_VERSION:
         raise ValueError(
-            "Unable to resolve the installed nemo-platform contract version; "
+            "Unable to resolve the installed nemo-helix contract version; "
             "Fabric packaging requires an installed release version."
         )
 
@@ -726,11 +726,11 @@ def require_installable_contract_version(contract_version: str, *, pins_contract
         return
 
     raise ValueError(
-        f"The installed nemo-platform version '{contract_version}' {' and '.join(reasons)}, so no "
+        f"The installed nemo-helix version '{contract_version}' {' and '.join(reasons)}, so no "
         "package index serves it. Fabric packaging pins this exact version inside the image, so the "
         "build would fail while resolving it. Point NEMO_AGENTS_WHEEL at a locally built wheel "
-        "(`uv build --package nemo-platform --wheel --out-dir dist`) to package from a source "
-        "checkout, install a released nemo-platform, or set "
+        "(`uv build --package nemo-helix --wheel --out-dir dist`) to package from a source "
+        "checkout, install a released nemo-helix, or set "
         "NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1 if your index serves this version."
     )
 

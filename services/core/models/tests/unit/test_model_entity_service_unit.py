@@ -9,23 +9,23 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.files.metadata import FilesetMetadata
-from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig, LocalStorageConfig, NGCStorageConfig
-from nemo_platform_plugin.files.types import FilesetFileOutput, FilesetOutput, ListFilesetFilesResponse
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nmp.common.api.parsed_filter import ParsedFilter
-from nmp.common.entities.client import EntityClient, EntityNotFoundError
-from nmp.core.models.api.service.model_entity_service import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.files.metadata import FilesetMetadata
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, LocalStorageConfig, NGCStorageConfig
+from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput, ListFilesetFilesResponse
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.common.entities.client import EntityClient, EntityNotFoundError
+from nhx.core.models.api.service.model_entity_service import (
     ModelEntityService,
     _model_to_model_entity,
     _repo_id_matches_trusted,
 )
-from nmp.core.models.api.v2.models import is_trusted_repo_id
-from nmp.core.models.config import config
-from nmp.core.models.entities import Adapter, Model, ModelDeploymentConfig
-from nmp.core.models.schemas import (
+from nhx.core.models.api.v2.models import is_trusted_repo_id
+from nhx.core.models.config import config
+from nhx.core.models.entities import Adapter, Model, ModelDeploymentConfig
+from nhx.core.models.schemas import (
     CreateModelAdapterRequest,
     CreateModelEntityRequest,
     LinearLayerSpec,
@@ -202,14 +202,14 @@ def _mock_files_client():
     mock_response = MagicMock()
     mock_response.data.return_value = fileset_output
     mock_fc.get_fileset.return_value = mock_response
-    with patch("nmp.core.models.api.permissions.client_from_platform", return_value=mock_fc):
+    with patch("nhx.core.models.api.permissions.client_from_platform", return_value=mock_fc):
         yield mock_fc
 
 
 @pytest.fixture
 def model_entity_service(mock_entity_client, _mock_files_client):
     """Create a ModelEntityService with mocked EntityClient."""
-    async_sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    async_sdk = AsyncMock(spec=AsyncNeMoHelix)
     async_sdk.files.list = AsyncMock(
         return_value=ListFilesetFilesResponse(
             data=[
@@ -228,7 +228,7 @@ def model_entity_service(mock_entity_client, _mock_files_client):
 
 @pytest.fixture
 def adapter_entity_service(model_entity_service):
-    from nmp.core.models.api.service.adapter_entity_service import AdapterEntityService
+    from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 
     return AdapterEntityService(model_entity_service.entity_client, sdk=model_entity_service.sdk)
 
@@ -798,7 +798,7 @@ async def test_get_model_entity_non_verbose_keeps_adapters(model_entity_service,
 @pytest.mark.asyncio
 async def test_get_model_entity_includes_cross_workspace_adapters(model_entity_service, mock_entity_client):
     """Adapters in other workspaces parented to this model must appear in ``ModelEntity.adapters``."""
-    from nmp.common.entities import ALL_WORKSPACES
+    from nhx.common.entities import ALL_WORKSPACES
 
     base_model = create_model_entity(entity_id="model-base-id", name="llama-3-2-1b-instruct", workspace="ws-base")
     same_ws = create_adapter_entity(parent=base_model, name="lora-english", workspace="ws-base")
@@ -829,7 +829,7 @@ async def test_list_model_entities_uses_all_workspaces_for_adapter_lookup(
     model_entity_service, mock_entity_client, sample_model
 ):
     """List path also resolves adapters cross-workspace so listed entities show all their adapters."""
-    from nmp.common.entities import ALL_WORKSPACES
+    from nhx.common.entities import ALL_WORKSPACES
 
     cross_ws_adapter = create_adapter_entity(parent=sample_model, name="cross-ws-adapter", workspace="other-ws")
 
@@ -862,7 +862,7 @@ async def test_update_model_entity_uses_all_workspaces_for_adapter_lookup(
     model_entity_service, mock_entity_client, sample_model
 ):
     """Update path resolves adapters cross-workspace so the response carries all of them."""
-    from nmp.common.entities import ALL_WORKSPACES
+    from nhx.common.entities import ALL_WORKSPACES
 
     cross_ws_adapter = create_adapter_entity(parent=sample_model, name="cross-ws-adapter", workspace="other-ws")
     mock_entity_client.update.return_value = sample_model
@@ -1140,7 +1140,7 @@ async def test_list_adapters_resolves_parent_models_with_canonical_all_workspace
     *id* in the ``model`` field instead of ``"{ws}/{name}"``. Pin the canonical
     ``"-"`` to prevent that regression.
     """
-    from nmp.common.entities import ALL_WORKSPACES
+    from nhx.common.entities import ALL_WORKSPACES
 
     assert ALL_WORKSPACES == "-"  # canonical wildcard used by the entity store
 
@@ -1249,7 +1249,7 @@ async def test_is_trusted_repo_id_direct_match(model_entity_service):
     fileset = _hf_fileset("nvidia/trusted-model")
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", ["nvidia/trusted-model"]):
             result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
     # Assert
@@ -1263,7 +1263,7 @@ async def test_is_trusted_repo_id_regex_match(model_entity_service):
     fileset = _hf_fileset("nvidia/Llama-3.1-70B")
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", [r"nvidia/.*"]):
             result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
     # Assert
@@ -1277,7 +1277,7 @@ async def test_is_trusted_repo_id_no_match(model_entity_service):
     fileset = _hf_fileset("unknown/repo")
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", ["nvidia/only-this", r"meta-llama/.*"]):
             result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
     # Assert
@@ -1303,7 +1303,7 @@ async def test_is_trusted_repo_id_non_huggingface_storage(model_entity_service):
     )
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", [r"nvidia/.*"]):
             result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
     # Assert
@@ -1317,7 +1317,7 @@ async def test_is_trusted_repo_id_ngc_direct_match(model_entity_service):
     fileset = _ngc_fileset("nvidia", "nemotron", "nemotron-4-340b")
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "ngc_allow_list", ["nvidia/nemotron/nemotron-4-340b"]):
             result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
     # Assert
@@ -1331,7 +1331,7 @@ async def test_is_trusted_repo_id_ngc_regex_match(model_entity_service):
     fileset = _ngc_fileset("nvidia", "team", "some-model")
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "ngc_allow_list", [r"nvidia/.*/some-model"]):
             result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
     # Assert
@@ -1345,7 +1345,7 @@ async def test_is_trusted_repo_id_ngc_no_match(model_entity_service):
     fileset = _ngc_fileset("other-org", "team", "model")
     mock_get = AsyncMock(return_value=(fileset, []))
     # Act
-    with patch("nmp.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
+    with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(
             config.trust_remote_code, "ngc_allow_list", ["nvidia/only-this/only", r"nvidia/.*/ngc-model"]
         ):
@@ -1365,7 +1365,7 @@ def _make_deployment_config(
     nim_deployment_present: bool = True,
 ) -> ModelDeploymentConfig:
     """Helper to create a ModelDeploymentConfig entity for testing."""
-    from nmp.core.models.schemas import ContainerExecutorConfig, ModelDeploymentConfigModelSpec
+    from nhx.core.models.schemas import ContainerExecutorConfig, ModelDeploymentConfigModelSpec
 
     model_spec = ModelDeploymentConfigModelSpec(lora_enabled=lora_enabled) if nim_deployment_present else None
     executor_config = ContainerExecutorConfig(gpu=1) if nim_deployment_present else None

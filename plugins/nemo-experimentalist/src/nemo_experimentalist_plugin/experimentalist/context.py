@@ -116,7 +116,7 @@ class ExperimentContext:
 
     Args:
         backend: Data-access backend. Held privately; never handed to a component.
-        workspace: NeMo Platform workspace this run belongs to.
+        workspace: NeMo Helix workspace this run belongs to.
         run: The ``ExperimentRun`` entity the runner created (or re-opened on resume).
         root: Working directory for the run's artifacts.
         agent_dir: The agent under test, materialized by the runner. A strategy forks

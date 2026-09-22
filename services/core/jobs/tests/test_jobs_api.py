@@ -13,39 +13,39 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import FileStorageType, PlatformJobResultCreateRequest
-from nemo_platform_plugin.jobs.types import PlatformJobTaskUpdate
-from nmp.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
-from nmp.common.entities.client import EntityValidationError
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.endpoints import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
+from nemo_helix_plugin.jobs.types import HelixJobTaskUpdate
+from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
+from nhx.common.entities.client import EntityValidationError
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.endpoints import (
     _format_create_job_conflict,
     _format_entity_validation_error,
     get_platform_jobs_steps_list_filter,
 )
-from nmp.core.jobs.api.v2.jobs.schemas import (
-    CreatePlatformJobRequest,
-    PlatformJobResponse,
-    PlatformJobSortField,
-    PlatformJobStepsListFilter,
+from nhx.core.jobs.api.v2.jobs.schemas import (
+    CreateHelixJobRequest,
+    HelixJobResponse,
+    HelixJobSortField,
+    HelixJobStepsListFilter,
 )
-from nmp.core.jobs.app.dispatcher import (
+from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDispatcher,
     JobOutputLocationError,
     JobSecretValidationError,
     StateTransitionConflictError,
 )
-from nmp.core.jobs.app.providers import ContainerSpec, GPUExecutionProvider, SubprocessExecutionProvider
-from nmp.core.jobs.app.schemas import (
-    PlatformJobSecret,
-    PlatformJobSpec,
-    PlatformJobStepSpec,
+from nhx.core.jobs.app.providers import ContainerSpec, GPUExecutionProvider, SubprocessExecutionProvider
+from nhx.core.jobs.app.schemas import (
+    HelixJobSecret,
+    HelixJobSpec,
+    HelixJobStepSpec,
 )
-from nmp.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.app.test_helpers import TestConstants
 from pydantic import ValidationError
 from starlette.datastructures import QueryParams
 
@@ -56,7 +56,7 @@ def expected_translated_executor_dump() -> Dict[str, Any]:
     The Jobs API rewrites ``cpu/<profile>`` steps into ``subprocess/<profile>``
     steps before persistence (see
     ``translate_cpu_container_steps_to_subprocess`` in
-    ``services/core/jobs/src/nmp/core/jobs/api/v2/jobs/endpoints.py``), so the
+    ``services/core/jobs/src/nhx/core/jobs/api/v2/jobs/endpoints.py``), so the
     round-trip representation of a step submitted with ``TestConstants.TEST_EXECUTOR``
     is the translated subprocess executor — with ``command`` set to
     ``container.entrypoint + container.command``.
@@ -70,16 +70,16 @@ def expected_translated_executor_dump() -> Dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_create_job_using_sdk(test_sdk: AsyncNeMoPlatform):
+async def test_create_job_using_sdk(test_sdk: AsyncNeMoHelix):
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
     job = (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
-            body=CreatePlatformJobRequest(
+            body=CreateHelixJobRequest(
                 name="test-job",
                 source="testing",
                 spec={},
-                platform_spec=PlatformJobSpec.model_validate(
+                platform_spec=HelixJobSpec.model_validate(
                     {
                         "steps": [
                             {
@@ -96,7 +96,7 @@ async def test_create_job_using_sdk(test_sdk: AsyncNeMoPlatform):
                                     "container": {
                                         "image": "test-image",
                                         "entrypoint": ["python", "-m"],
-                                        "command": ["nmp.testing.fake_task"],
+                                        "command": ["nhx.testing.fake_task"],
                                     },
                                 },
                             }
@@ -157,9 +157,9 @@ async def test_create_job_with_invalid_step_name(test_client: AsyncClient):
     ],
 )
 def test_step_name_validation(step_name: str, should_pass: bool):
-    """Test PlatformJobStepSpec validates step names via Pydantic."""
+    """Test HelixJobStepSpec validates step names via Pydantic."""
     if should_pass:
-        step = PlatformJobStepSpec(
+        step = HelixJobStepSpec(
             name=step_name,
             executor=TestConstants.TEST_EXECUTOR,
             config={},
@@ -167,7 +167,7 @@ def test_step_name_validation(step_name: str, should_pass: bool):
         assert step.name == step_name
     else:
         with pytest.raises(ValidationError) as exc_info:
-            PlatformJobStepSpec(
+            HelixJobStepSpec(
                 name=step_name,
                 executor=TestConstants.TEST_EXECUTOR,
                 config={},
@@ -178,13 +178,13 @@ def test_step_name_validation(step_name: str, should_pass: bool):
 
 @pytest.mark.asyncio
 @pytest.mark.skip("This is an integration test that requires secrets service.")
-async def test_create_job_with_secrets(test_sdk: AsyncNeMoPlatform):
+async def test_create_job_with_secrets(test_sdk: AsyncNeMoHelix):
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
-    request = CreatePlatformJobRequest(
+    request = CreateHelixJobRequest(
         name="test-job",
         source="testing",
         spec={},
-        platform_spec=PlatformJobSpec.model_validate(
+        platform_spec=HelixJobSpec.model_validate(
             {
                 "steps": [
                     {
@@ -195,7 +195,7 @@ async def test_create_job_with_secrets(test_sdk: AsyncNeMoPlatform):
                             "container": {
                                 "image": "test-image",
                                 "entrypoint": ["python", "-m"],
-                                "command": ["nmp.testing.fake_task"],
+                                "command": ["nhx.testing.fake_task"],
                             },
                         },
                         "environment": [
@@ -203,7 +203,7 @@ async def test_create_job_with_secrets(test_sdk: AsyncNeMoPlatform):
                         ],
                     }
                 ],
-                "secrets": [PlatformJobSecret(name="secret_name_1", value="secret_value_1")],
+                "secrets": [HelixJobSecret(name="secret_name_1", value="secret_value_1")],
             }
         ),
     )
@@ -231,14 +231,14 @@ async def test_create_job_with_secrets(test_sdk: AsyncNeMoPlatform):
 @pytest.mark.asyncio
 async def test_create_job_with_invalid_project_name(test_client: AsyncClient):
     """Test that creating a job with an invalid project name (containing space) returns 422, not 500."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-invalid-project",
         project="A Project",  # Invalid: contains space
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -385,7 +385,7 @@ async def test_create_job_conflict_sanitizes_log_fields(
     caplog,
 ):
     with patch.object(mock_dispatcher, "create_job", new=AsyncMock(side_effect=ValueError("conflict"))):
-        with caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"):
+        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
             response = await test_client.post(
                 "/apis/jobs/v2/workspaces/default%0Aforged/jobs",
                 json={
@@ -413,20 +413,20 @@ async def test_create_job_conflict_sanitizes_log_fields(
 @pytest.mark.asyncio
 async def test_create_job_gpu_fail_fast_when_docker_no_gpus(test_client: AsyncClient):
     """Direct Jobs API create with GPU step fails fast with 422 when platform is Docker with no GPUs."""
-    from nmp.common.config import Runtime
+    from nhx.common.config import Runtime
 
     gpu_executor = GPUExecutionProvider(
         provider="gpu",
         profile="default",
         container=ContainerSpec(image="gpu-image"),
     )
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="gpu-job",
         source="test-source",
         spec={},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="gpu_step", executor=gpu_executor, config={}),
+                HelixJobStepSpec(name="gpu_step", executor=gpu_executor, config={}),
             ]
         ),
     )
@@ -434,7 +434,7 @@ async def test_create_job_gpu_fail_fast_when_docker_no_gpus(test_client: AsyncCl
     mock_platform_config.runtime = Runtime.DOCKER
     mock_platform_config.docker.get_reserved_gpu_ids.return_value = []
 
-    with patch("nemo_platform_plugin.jobs.docker.get_platform_config", return_value=mock_platform_config):
+    with patch("nemo_helix_plugin.jobs.docker.get_platform_config", return_value=mock_platform_config):
         response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
 
     assert response.status_code == 422
@@ -470,7 +470,7 @@ async def test_hello_world_jobs_list(test_client: AsyncClient):
     data = response.json()
     assert "data" in data, f"No 'data' key in response: {data}"
     assert len(data["data"]) > 0, f"No jobs returned: {data}"
-    value = PlatformJobResponse.model_validate(data["data"][0])
+    value = HelixJobResponse.model_validate(data["data"][0])
     assert value.name == fake_name
     assert value.description == fake_description
     assert value.project == fake_project
@@ -499,7 +499,7 @@ async def test_hello_world_jobs_list(test_client: AsyncClient):
     data = response.json()
     assert len(data["data"]) == 2
     # Default listing is in descending order, so the second job we just created should be first now
-    value = PlatformJobResponse.model_validate(data["data"][0])
+    value = HelixJobResponse.model_validate(data["data"][0])
     assert value.workspace == "default"
     assert value.project == fake_project
     assert value.source == "hello-world"
@@ -524,7 +524,7 @@ async def test_hello_world_jobs_list(test_client: AsyncClient):
     data = response.json()
     assert len(data["data"]) == 3
     # Default listing is in descending order, so the second job we just created should be first now
-    value = PlatformJobResponse.model_validate(data["data"][0])
+    value = HelixJobResponse.model_validate(data["data"][0])
     assert value.name.startswith("hello-world-")
     assert value.workspace == fake_workspace_id
     assert value.project == fake_project
@@ -534,13 +534,13 @@ async def test_hello_world_jobs_list(test_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_job_lifecycle_single_step(test_client: AsyncClient):
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -694,14 +694,14 @@ async def test_job_lifecycle_single_step(test_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_job_lifecycle_multi_step(test_client: AsyncClient):
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
-                PlatformJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -866,14 +866,14 @@ async def test_job_lifecycle_multi_step(test_client: AsyncClient):
 async def test_job_lifecycle_errored_job(test_client: AsyncClient):
     """Test the lifecycle of a job that encounters an error."""
     # Create a job
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-errored",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
-                PlatformJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -913,12 +913,12 @@ async def test_job_paging(test_client: AsyncClient):
     # Create multiple jobs for paging test
     job_ids = []
     for i in range(15):  # Create 15 jobs to test pagination
-        req = CreatePlatformJobRequest(
+        req = CreateHelixJobRequest(
             name=f"test-job-{i}",
             source="test-source",
             spec={"param1": f"value{i}"},
-            platform_spec=PlatformJobSpec(
-                steps=[PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
+            platform_spec=HelixJobSpec(
+                steps=[HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
             ),
         )
         response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
@@ -1015,7 +1015,7 @@ async def test_job_paging(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_job_result_crud(test_sdk: AsyncNeMoPlatform, sample_platform_job_request: CreatePlatformJobRequest):
+async def test_job_result_crud(test_sdk: AsyncNeMoHelix, sample_platform_job_request: CreateHelixJobRequest):
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
     sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     resp = (
@@ -1023,7 +1023,7 @@ async def test_job_result_crud(test_sdk: AsyncNeMoPlatform, sample_platform_job_
             name="result-name1",
             workspace=DEFAULT_WORKSPACE,
             job=sdk_job_resp.name,
-            body=PlatformJobResultCreateRequest(
+            body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#myartifact",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -1036,7 +1036,7 @@ async def test_job_result_crud(test_sdk: AsyncNeMoPlatform, sample_platform_job_
             name="result-name2",
             workspace=DEFAULT_WORKSPACE,
             job=sdk_job_resp.name,
-            body=PlatformJobResultCreateRequest(
+            body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#myartifact",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -1060,8 +1060,8 @@ async def test_job_result_crud(test_sdk: AsyncNeMoPlatform, sample_platform_job_
 
 @pytest.mark.asyncio
 async def test_job_result_download(
-    test_sdk: AsyncNeMoPlatform,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    test_sdk: AsyncNeMoHelix,
+    sample_platform_job_request: CreateHelixJobRequest,
     mock_result_manager,
     tmp_path: Path,
 ):
@@ -1081,7 +1081,7 @@ async def test_job_result_download(
             name="result-name1",
             workspace=DEFAULT_WORKSPACE,
             job=sdk_job_resp.name,
-            body=PlatformJobResultCreateRequest(
+            body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#result_name1",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -1089,7 +1089,7 @@ async def test_job_result_download(
     ).data()
 
     with patch(
-        "nmp.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
+        "nhx.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
     ) as factory:
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
         download_bytes = await download.read()
@@ -1110,7 +1110,7 @@ async def test_job_result_download(
     mock_result_manager._tmp_dir = tmp_dir
     mock_result_manager._path = tmp_dir
 
-    with patch("nmp.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
+    with patch("nhx.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
         tar_content = await download.read()
 
@@ -1131,8 +1131,8 @@ async def test_job_result_download(
 @pytest.mark.asyncio
 async def test_job_status_details_crud(
     test_client: AsyncClient,
-    test_sdk: AsyncNeMoPlatform,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    test_sdk: AsyncNeMoHelix,
+    sample_platform_job_request: CreateHelixJobRequest,
 ):
     original_details = {"progress": 50, "metadata": {"key": "value"}}
     updated_details = {"progress": 75, "metadata": {"key": "value"}}
@@ -1190,8 +1190,8 @@ async def test_job_status_details_crud(
             workspace=DEFAULT_WORKSPACE,
             job=job_name,
             step="basic",
-            body=PlatformJobTaskUpdate(
-                status=PlatformJobStatus.ACTIVE,
+            body=HelixJobTaskUpdate(
+                status=HelixJobStatus.ACTIVE,
                 status_details={"message": "Task is now active"},
             ),
         )
@@ -1246,12 +1246,12 @@ async def test_job_status_details_crud(
 async def test_job_list_filter_with_datetime(test_client: AsyncClient, filter_template: str, min_expected_results: int):
     """Test that datetime filters with gte/lte work correctly."""
     # Create a few jobs at different times
-    req1 = CreatePlatformJobRequest(
+    req1 = CreateHelixJobRequest(
         name="test-job-1",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
-            steps=[PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
         ),
     )
     response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req1.model_dump())
@@ -1259,12 +1259,12 @@ async def test_job_list_filter_with_datetime(test_client: AsyncClient, filter_te
     job1 = response.json()
     job1_created_at = job1["created_at"]
 
-    req2 = CreatePlatformJobRequest(
+    req2 = CreateHelixJobRequest(
         name="test-job-2",
         source="test-source",
         spec={"param1": "value2"},
-        platform_spec=PlatformJobSpec(
-            steps=[PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
         ),
     )
     response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req2.model_dump())
@@ -1296,8 +1296,8 @@ class MockRequest:
             "filter[status]=active&filter[status]=pending",
             lambda result: (
                 result.status is not None
-                and PlatformJobStatus.ACTIVE in result.status
-                and PlatformJobStatus.PENDING in result.status
+                and HelixJobStatus.ACTIVE in result.status
+                and HelixJobStatus.PENDING in result.status
             ),
         ),
         # Empty filter
@@ -1325,8 +1325,8 @@ class MockRequest:
             "filter[status]=active&filter[status]=pending",
             lambda result: (
                 result.status is not None
-                and PlatformJobStatus.ACTIVE in result.status
-                and PlatformJobStatus.PENDING in result.status
+                and HelixJobStatus.ACTIVE in result.status
+                and HelixJobStatus.PENDING in result.status
             ),
         ),
     ],
@@ -1356,7 +1356,7 @@ async def test_cancel_job_conflict_hides_internal_transition(
     mock_dispatcher: JobDispatcher,
 ):
     raw_error = (
-        "Invalid status transition from PlatformJobStatus.RESUMING to PlatformJobStatus.CANCELLING for step step-id-123"
+        "Invalid status transition from HelixJobStatus.RESUMING to HelixJobStatus.CANCELLING for step step-id-123"
     )
     with patch.object(
         mock_dispatcher, "cancel_job", new=AsyncMock(side_effect=StateTransitionConflictError(raw_error))
@@ -1366,7 +1366,7 @@ async def test_cancel_job_conflict_hides_internal_transition(
     assert response.status_code == 409
     detail = response.json()["detail"]
     assert "Cannot cancel job 'conflicted-job'" in detail
-    assert "PlatformJobStatus" not in detail
+    assert "HelixJobStatus" not in detail
     assert "step-id-123" not in detail
 
 
@@ -1381,7 +1381,7 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
         "cancel_job",
         new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
     ):
-        with caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"):
+        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
             response = await test_client.post(
                 "/apis/jobs/v2/workspaces/default%0Aforged/jobs/conflicted-job%0D%0Aforged/cancel"
             )
@@ -1395,14 +1395,14 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
 @pytest.mark.asyncio
 async def test_delete_non_terminal_job_returns_409_and_keeps_job(
     test_client: AsyncClient,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    sample_platform_job_request: CreateHelixJobRequest,
     caplog: pytest.LogCaptureFixture,
 ):
     request = sample_platform_job_request.model_copy(update={"name": "non-terminal-delete"})
     create_response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=request.model_dump())
     assert create_response.status_code == 201, create_response.text
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
         delete_response = await test_client.delete("/apis/jobs/v2/workspaces/default/jobs/non-terminal-delete")
 
     assert delete_response.status_code == 409
@@ -1412,7 +1412,7 @@ async def test_delete_non_terminal_job_returns_409_and_keeps_job(
 
     get_response = await test_client.get("/apis/jobs/v2/workspaces/default/jobs/non-terminal-delete")
     assert get_response.status_code == 200
-    assert get_response.json()["status"] == PlatformJobStatus.CREATED.value
+    assert get_response.json()["status"] == HelixJobStatus.CREATED.value
 
 
 @pytest.mark.asyncio
@@ -1453,7 +1453,7 @@ async def test_update_job_step_conflict_sanitizes_log_fields(
             "update_job_status_from_step",
             new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
         ),
-        caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"),
+        caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"),
     ):
         response = await test_client.patch(
             "/apis/jobs/v2/workspaces/default/jobs/job%0Aforged/steps/step%0D%0Aforged/status",
@@ -1467,18 +1467,18 @@ async def test_update_job_step_conflict_sanitizes_log_fields(
 
 
 @pytest.mark.asyncio
-async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: CreatePlatformJobRequest):
+async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: CreateHelixJobRequest):
     """Test that global step listing returns steps from all workspaces while workspaced calls are filtered."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from nmp.common.entities.client import EntityClient
-    from nmp.testing import create_test_client
+    from nhx.common.entities.client import EntityClient
+    from nhx.testing import create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
         # Create mock SDK with patched files client
-        mock_nmp_client = MagicMock()
+        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1486,14 +1486,14 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
             # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
             # Create jobs in "default" workspace
             job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-            job2_request = CreatePlatformJobRequest(
+            job2_request = CreateHelixJobRequest(
                 name="test-job-2",
                 description="Second test job",
                 project="test-project",
@@ -1506,7 +1506,7 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
             job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
 
             # Create jobs in "other-workspace"
-            job3_request = CreatePlatformJobRequest(
+            job3_request = CreateHelixJobRequest(
                 name="test-job-3",
                 description="Third test job in other workspace",
                 project="test-project",
@@ -1518,7 +1518,7 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
             )
             job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
 
-            job4_request = CreatePlatformJobRequest(
+            job4_request = CreateHelixJobRequest(
                 name="test-job-4",
                 description="Fourth test job in other workspace",
                 project="test-project",
@@ -1531,10 +1531,10 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
             job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
 
         # Test global listing with wildcard - should return steps from all workspaces
-        step_filter = PlatformJobStepsListFilter()
+        step_filter = HelixJobStepsListFilter()
         steps_global, count_global = await mock_dispatcher.list_steps(
             filter=step_filter,
-            sort=PlatformJobSortField.CREATED_AT_ASC,
+            sort=HelixJobSortField.CREATED_AT_ASC,
             limit=100,
             offset=0,
             workspace=ALL_WORKSPACES,
@@ -1553,7 +1553,7 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
         # Test workspace-specific listing for "default" - should only return steps from default workspace
         steps_default, count_default = await mock_dispatcher.list_steps(
             filter=step_filter,
-            sort=PlatformJobSortField.CREATED_AT_ASC,
+            sort=HelixJobSortField.CREATED_AT_ASC,
             limit=100,
             offset=0,
             workspace="default",
@@ -1571,7 +1571,7 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
         # Test workspace-specific listing for "other-workspace" - should only return steps from other-workspace
         steps_other, count_other = await mock_dispatcher.list_steps(
             filter=step_filter,
-            sort=PlatformJobSortField.CREATED_AT_ASC,
+            sort=HelixJobSortField.CREATED_AT_ASC,
             limit=100,
             offset=0,
             workspace="other-workspace",
@@ -1599,8 +1599,8 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
 @pytest.mark.asyncio
 async def test_job_status_timestamps(
     test_client: AsyncClient,
-    test_sdk: AsyncNeMoPlatform,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    test_sdk: AsyncNeMoHelix,
+    sample_platform_job_request: CreateHelixJobRequest,
 ):
     """Test that created_at and updated_at are present at job, step, and task levels in status response."""
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
@@ -1621,7 +1621,7 @@ async def test_job_status_timestamps(
             workspace=DEFAULT_WORKSPACE,
             job=job_name,
             step="basic",
-            body=PlatformJobTaskUpdate(status=PlatformJobStatus.ACTIVE),
+            body=HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE),
         )
     ).data()
     assert task_resp is not None

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nmp.common.config import AuthConfig, Configuration
-from nmp.common.config.base import OIDCConfig, TokenSigningConfig
-from nmp.core.auth.api.v2.discovery.endpoints import (
+from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import OIDCConfig, TokenSigningConfig
+from nhx.core.auth.api.v2.discovery.endpoints import (
     AuthDiscoveryResponse,
     OIDCDiscoveryResponse,
     _clear_idp_discovery_cache,
@@ -40,7 +40,7 @@ def oidc_config():
         workload_token_exchange_enabled=True,
         workload_client_id="test-workload-client",
         workload_token_endpoint="https://workload-idp.example.com/token",
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_scope="openid email groups",
     )
 
@@ -51,7 +51,7 @@ def auth_config_oidc_enabled(oidc_config):
     return AuthConfig(
         enabled=True,
         policy_decision_point_base_url="http://localhost:8181",
-        token_signing=TokenSigningConfig(private_key_file="/var/run/secrets/nemo-platform/token-signing/private.pem"),
+        token_signing=TokenSigningConfig(private_key_file="/var/run/secrets/nemo-helix/token-signing/private.pem"),
         oidc=oidc_config,
     )
 
@@ -119,14 +119,14 @@ class TestOIDCDiscoveryResponse:
             workload_token_exchange_enabled=True,
             workload_client_id="test-workload-client",
             workload_token_endpoint="https://workload-idp.example.com/token",
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             workload_scope="openid email groups",
         )
 
         assert response.workload_token_exchange_enabled is True
         assert response.workload_client_id == "test-workload-client"
         assert response.workload_token_endpoint == "https://workload-idp.example.com/token"
-        assert response.workload_audience == "nemo-platform"
+        assert response.workload_audience == "nemo-helix"
         assert response.workload_scope == "openid email groups"
 
 
@@ -182,7 +182,7 @@ class TestGetAuthDiscovery:
             assert result.oidc.workload_token_exchange_enabled is True
             assert result.oidc.workload_client_id == "test-workload-client"
             assert result.oidc.workload_token_endpoint == "https://workload-idp.example.com/token"
-            assert result.oidc.workload_audience == "nemo-platform"
+            assert result.oidc.workload_audience == "nemo-helix"
             assert result.oidc.workload_scope == "openid email groups"
         finally:
             Configuration.clear_overrides()
@@ -214,7 +214,7 @@ class TestGetAuthDiscovery:
             enabled=True,
             policy_decision_point_base_url="http://localhost:8181",
             token_signing=TokenSigningConfig(
-                private_key_file="/var/run/secrets/nemo-platform/token-signing/private.pem"
+                private_key_file="/var/run/secrets/nemo-helix/token-signing/private.pem"
             ),
             oidc=oidc_config,
         )
@@ -409,7 +409,7 @@ class TestIdpDiscoveryCache:
             "token_endpoint": "https://sso.example.com/token",
         }
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True
@@ -429,12 +429,12 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_cache_miss_after_ttl_expiry(self):
         """Test that expired cache triggers a new HTTP call."""
-        import nmp.core.auth.api.v2.discovery.endpoints as mod
+        import nhx.core.auth.api.v2.discovery.endpoints as mod
 
         discovery_v1 = {"token_endpoint": "https://sso.example.com/token-v1"}
         discovery_v2 = {"token_endpoint": "https://sso.example.com/token-v2"}
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True
@@ -459,11 +459,11 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_fetch_failure_returns_stale_cache(self):
         """Test graceful degradation: stale cache is served on fetch failure."""
-        import nmp.core.auth.api.v2.discovery.endpoints as mod
+        import nhx.core.auth.api.v2.discovery.endpoints as mod
 
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True
@@ -489,7 +489,7 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_fetch_failure_without_cache_returns_empty(self):
         """Test that fetch failure with no prior cache returns empty dict."""
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.side_effect = httpx.HTTPError("Connection refused")
             mock_client.__aenter__.return_value = mock_client
@@ -504,7 +504,7 @@ class TestIdpDiscoveryCache:
         """Test that setting TTL to 0 disables caching."""
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True

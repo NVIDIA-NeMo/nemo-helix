@@ -22,9 +22,9 @@ from uuid import uuid4
 import pytest
 from nemo_experimentalist_plugin.entities import ResourceRef, TrialResult
 from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
 
 pytestmark = pytest.mark.integration
 

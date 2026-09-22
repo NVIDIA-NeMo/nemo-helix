@@ -29,7 +29,7 @@ so it can be depended on from anywhere without cycles.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.agent_hardener.types import (
+from nemo_helix_plugin.agent_hardener.types import (
     ANALYSIS_DEFAULT_BASE_URL,
     ANALYSIS_DEFAULT_MODEL,
     ATTACK_DEFAULT_BASE_URL,

@@ -26,9 +26,9 @@ import httpx
 from evaluation import export
 from evaluation.intake_client import build_basic_auth_intake_client
 from evaluation.registry import Subject
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-LOCAL_URL = "http://localhost:8080"  # the local NeMo Platform (the default restore/analyze target)
+LOCAL_URL = "http://localhost:8080"  # the local NeMo Helix (the default restore/analyze target)
 EXPORT_KIND = "evaluation-export"
 LEGACY_EXPORT_KIND = "testbed-export"
 EXPORT_KINDS = frozenset({EXPORT_KIND, LEGACY_EXPORT_KIND})
@@ -54,7 +54,7 @@ def pick_records(tmp_dir: Path, subjects: list[str]) -> list[Path]:
 
 # manifest key -> env var it is sourced from (CI produce job; parity with the old bundle.py)
 _LINEAGE_ENV = {
-    "nemo_platform_sha": "GITHUB_SHA",
+    "nemo_helix_sha": "GITHUB_SHA",
     "tau2_bench_sha": "TAU2_BENCH_REF",
     "github_run_id": "GITHUB_RUN_ID",
     "num_tasks": "NUM_TASKS",
@@ -139,7 +139,7 @@ def workspaces_for_subject(subject: Subject) -> list[str]:
     )
 
 
-def _basic_auth_intake_client_for(subject: Subject, source_url: str) -> AsyncNeMoPlatform | None:
+def _basic_auth_intake_client_for(subject: Subject, source_url: str) -> AsyncNeMoHelix | None:
     """Build this subject's configured basic-auth Intake client, if needed."""
     if subject.config.get("auth") != "basic":
         return None

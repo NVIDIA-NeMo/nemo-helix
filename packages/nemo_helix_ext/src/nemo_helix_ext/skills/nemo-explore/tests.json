@@ -1,0 +1,80 @@
+{
+  "skill": "nemo-explore",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use the nemo-explore skill to figure out what my agent should do.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run nemo-explore on this. I want to design before I build.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Invoke nemo-explore for the support agent idea.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I want to build a NeMo agent but I have not thought through what it needs to do yet.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Help me think through what a sales-research agent on NeMo Helix should actually handle.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Before I write the YAML, can we walk through what the agent should do?",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I have an existing NAT support agent, but before migrating anything I want to revisit its role, tools, and runtime needs.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Following up on yesterday's chat about a customer-support agent on NeMo Helix. Before I write any code, I want the design right. Platform is already running.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Got a vague brief from the CTO: he wants a NeMo agent that helps engineers debug pipelines. Need to pin down what it actually does.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Want to scope a NeMo agent for our HR team. Not sure what categories or tools it needs yet.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I have a NeMo agent in this repo. Explore it and ask me the questions the code cannot answer before we write ETHOS.md.",
+      "expected_skill": "nemo-explore"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Convert this NAT workflow YAML to the new Platform agent.yaml format.",
+      "expected_skill_not": "nemo-explore"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "What questions should I ask in my next user research interview about checkout flow?",
+      "expected_skill_not": "nemo-explore"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Help me write the discovery questions for a new product brief.",
+      "expected_skill_not": "nemo-explore"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "I am exploring AWS Bedrock for a new project. Walk me through agent design over there.",
+      "expected_skill_not": "nemo-explore"
+    }
+  ]
+}

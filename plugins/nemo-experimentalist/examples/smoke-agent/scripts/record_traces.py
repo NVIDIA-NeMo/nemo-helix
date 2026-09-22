@@ -26,12 +26,12 @@ from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_nat
     HarborNativeOutcomeEvaluator,
 )
 from nemo_experimentalist_plugin.experimentalist.otlp import jsonl_to_protobuf, read_trace_id
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
-from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 AGENT_NAME = "smoke-agent"
 AGENT_VERSION = "1.0.0"

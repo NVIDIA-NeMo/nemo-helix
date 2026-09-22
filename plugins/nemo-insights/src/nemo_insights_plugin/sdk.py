@@ -3,7 +3,7 @@
 
 """SDK resources for the insights plugin.
 
-Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.insights`` via
+Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.insights`` via
 the ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
 
 - ``client.insights.analysis_configs.{enable,disable,list_configs,get,update}``
@@ -38,15 +38,15 @@ from nemo_insights_plugin.sdk_resources.insights import (
     _AsyncInsightResource,
     _InsightResource,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
 class InsightsPluginResource:
     """Sync SDK namespace mounted as ``client.insights``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NeMoHelix) -> None:
         self._platform = platform
         self._client = client_from_platform(platform, InsightsClient)
         self._insights: _InsightResource | None = None
@@ -82,7 +82,7 @@ class InsightsPluginResource:
 class AsyncInsightsPluginResource:
     """Async SDK namespace mounted as ``client.insights``."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNeMoHelix) -> None:
         self._platform = platform
         self._client = client_from_platform(platform, AsyncInsightsClient)
         self._insights: _AsyncInsightResource | None = None

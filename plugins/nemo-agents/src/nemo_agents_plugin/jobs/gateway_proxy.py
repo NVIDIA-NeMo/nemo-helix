@@ -17,12 +17,12 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig
-from nemo_platform_plugin.auth import platform_auth_enabled
-from nemo_platform_plugin.client.auth import TokenProviderAuth
-from nemo_platform_plugin.client.auth_proxy import build_auth_proxy_app
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_platform_plugin.client.oidc_factory import resolve_workload_exchange_provider
-from nemo_platform_plugin.sdk_provider import get_forwarding_headers, get_platform_sdk
+from nemo_helix_plugin.auth import platform_auth_enabled
+from nemo_helix_plugin.client.auth import TokenProviderAuth
+from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
+from nemo_helix_plugin.sdk_provider import get_forwarding_headers, get_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,14 @@ def authenticated_gateway_config(config: AgentConfig) -> Iterator[AgentConfig]:
     Other execution modes and explicitly external providers keep their routing.
     """
     token_file = os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR)
-    if not (token_file or os.environ.get("NMP_PRINCIPAL")) or not any(_gateway_models(config)):
+    if not (token_file or os.environ.get("NHX_PRINCIPAL")) or not any(_gateway_models(config)):
         yield config
         return
 
-    base_url = os.environ.get("NMP_BASE_URL", "")
+    base_url = os.environ.get("NHX_BASE_URL", "")
     parsed_base = urlsplit(base_url)
     if parsed_base.scheme not in {"http", "https"} or not parsed_base.hostname:
-        raise ValueError("NMP_BASE_URL must be set to the Platform URL for authenticated agent jobs")
+        raise ValueError("NHX_BASE_URL must be set to the Platform URL for authenticated agent jobs")
     if token_file:
         provider = resolve_workload_exchange_provider(base_url=base_url, subject_token_file=Path(token_file))
         # Fail before starting Fabric if the job cannot authenticate. Subsequent
@@ -64,13 +64,13 @@ def authenticated_gateway_config(config: AgentConfig) -> Iterator[AgentConfig]:
     else:
         with get_platform_sdk() as sdk:
             headers = get_forwarding_headers(sdk)
-        if not any(name.lower() == "x-nmp-principal-id" and value.strip() for name, value in headers.items()):
+        if not any(name.lower() == "x-nhx-principal-id" and value.strip() for name, value in headers.items()):
             # Auth-disabled platforms serialize an anonymous Principal into
             # jobs too. Preserve that existing unauthenticated execution mode.
             if not platform_auth_enabled():
                 yield config
                 return
-            raise ValueError("NMP_PRINCIPAL must provide a principal ID for authenticated agent jobs")
+            raise ValueError("NHX_PRINCIPAL must provide a principal ID for authenticated agent jobs")
         app = build_auth_proxy_app(base_url=base_url, headers=headers)
 
     runtime_config = config.model_copy(deep=True)

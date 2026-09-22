@@ -62,7 +62,7 @@ manifest. The returned Insight dataset points at the experiment-local suite.
 The authoring step does not split, merge, or evaluate that suite. Experimentalist
 currently leaves it unconsumed for downstream integration by its owning team.
 
-Task-template inputs may be local paths, `file://` URIs, or NeMo Platform
+Task-template inputs may be local paths, `file://` URIs, or NeMo Helix
 `fileset://<workspace>/<fileset>` references. Fileset-backed templates are
 downloaded into the experiment-local staging directory before Harbor parses
 them. The staged template is refreshed on every invocation rather than reused.

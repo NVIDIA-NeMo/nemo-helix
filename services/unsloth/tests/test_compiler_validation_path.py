@@ -9,10 +9,10 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
-from nmp.unsloth.app.jobs.compiler import platform_job_config_compiler
-from nmp.unsloth.schemas import (
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
+from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -56,7 +56,7 @@ def _spec(*, validation_path: str | None) -> UnslothJobOutput:
 
 @pytest.mark.asyncio
 async def test_training_step_gets_local_validation_path_for_same_fileset() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -78,7 +78,7 @@ async def test_training_step_gets_local_validation_path_for_same_fileset() -> No
 
 @pytest.mark.asyncio
 async def test_training_step_gets_separate_validation_path_for_different_fileset() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -100,7 +100,7 @@ async def test_training_step_gets_separate_validation_path_for_different_fileset
 
 @pytest.mark.asyncio
 async def test_upload_step_stamps_output_metadata() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -119,7 +119,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_compiler_applies_profile_to_task_steps() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())

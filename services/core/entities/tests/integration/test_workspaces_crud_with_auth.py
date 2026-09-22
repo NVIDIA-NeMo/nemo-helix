@@ -18,27 +18,27 @@ from time import monotonic, sleep
 from typing import Generator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError, PermissionDeniedError
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import EntityCreateInput
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import EntityCreateInput
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import (
     CreateWorkspaceMemberRequest,
     CreateWorkspaceRequest,
     UpdateWorkspaceMemberRequest,
     UpdateWorkspaceRequest,
 )
-from nmp.core.entities.service import EntitiesService
-from nmp.testing import TEST_USER_EMAIL, create_test_client, short_unique_name
+from nhx.core.entities.service import EntitiesService
+from nhx.testing import TEST_USER_EMAIL, create_test_client, short_unique_name
 
 
 @contextmanager
-def as_user(sdk: NeMoPlatform, email: str) -> Generator[None, None, None]:
+def as_user(sdk: NeMoHelix, email: str) -> Generator[None, None, None]:
     """Context manager to temporarily set the SDK's auth headers for a specific user."""
     old_headers = dict(sdk._client.headers)
-    sdk._client.headers["X-NMP-Principal-Id"] = email
+    sdk._client.headers["X-NHX-Principal-Id"] = email
     try:
         yield
     finally:
@@ -47,11 +47,11 @@ def as_user(sdk: NeMoPlatform, email: str) -> Generator[None, None, None]:
 
 
 @contextmanager
-def as_user_with_id_and_email(sdk: NeMoPlatform, principal_id: str, email: str) -> Generator[None, None, None]:
+def as_user_with_id_and_email(sdk: NeMoHelix, principal_id: str, email: str) -> Generator[None, None, None]:
     """Like production OIDC: subject/object id in Principal-Id, email in Principal-Email."""
     old_headers = dict(sdk._client.headers)
-    sdk._client.headers["X-NMP-Principal-Id"] = principal_id
-    sdk._client.headers["X-NMP-Principal-Email"] = email
+    sdk._client.headers["X-NHX-Principal-Id"] = principal_id
+    sdk._client.headers["X-NHX-Principal-Email"] = email
     try:
         yield
     finally:
@@ -60,11 +60,11 @@ def as_user_with_id_and_email(sdk: NeMoPlatform, principal_id: str, email: str) 
 
 
 @contextmanager
-def as_user_id_only(sdk: NeMoPlatform, principal_id: str) -> Generator[None, None, None]:
-    """Principal-Id set without X-NMP-Principal-Email (e.g. token without email claim)."""
+def as_user_id_only(sdk: NeMoHelix, principal_id: str) -> Generator[None, None, None]:
+    """Principal-Id set without X-NHX-Principal-Email (e.g. token without email claim)."""
     old_headers = dict(sdk._client.headers)
-    sdk._client.headers["X-NMP-Principal-Id"] = principal_id
-    sdk._client.headers.pop("X-NMP-Principal-Email", None)
+    sdk._client.headers["X-NHX-Principal-Id"] = principal_id
+    sdk._client.headers.pop("X-NHX-Principal-Email", None)
     try:
         yield
     finally:
@@ -73,12 +73,12 @@ def as_user_id_only(sdk: NeMoPlatform, principal_id: str) -> Generator[None, Non
 
 
 @contextmanager
-def as_user_with_id_and_groups(sdk: NeMoPlatform, principal_id: str, groups: list[str]) -> Generator[None, None, None]:
-    """Subject id with group memberships (comma-separated X-NMP-Principal-Groups)."""
+def as_user_with_id_and_groups(sdk: NeMoHelix, principal_id: str, groups: list[str]) -> Generator[None, None, None]:
+    """Subject id with group memberships (comma-separated X-NHX-Principal-Groups)."""
     old_headers = dict(sdk._client.headers)
-    sdk._client.headers["X-NMP-Principal-Id"] = principal_id
-    sdk._client.headers["X-NMP-Principal-Groups"] = ",".join(groups)
-    sdk._client.headers.pop("X-NMP-Principal-Email", None)
+    sdk._client.headers["X-NHX-Principal-Id"] = principal_id
+    sdk._client.headers["X-NHX-Principal-Groups"] = ",".join(groups)
+    sdk._client.headers.pop("X-NHX-Principal-Email", None)
     try:
         yield
     finally:
@@ -87,10 +87,10 @@ def as_user_with_id_and_groups(sdk: NeMoPlatform, principal_id: str, groups: lis
 
 
 @contextmanager
-def as_service(sdk: NeMoPlatform, service_name: str) -> Generator[None, None, None]:
+def as_service(sdk: NeMoHelix, service_name: str) -> Generator[None, None, None]:
     """Context manager to temporarily set the SDK's auth headers for a service principal."""
     old_headers = dict(sdk._client.headers)
-    sdk._client.headers["X-NMP-Principal-Id"] = f"service:{service_name}"
+    sdk._client.headers["X-NHX-Principal-Id"] = f"service:{service_name}"
     try:
         yield
     finally:
@@ -98,7 +98,7 @@ def as_service(sdk: NeMoPlatform, service_name: str) -> Generator[None, None, No
         sdk._client.headers.update(old_headers)
 
 
-def restrict_workspace_creation_to_named_users(sdk: NeMoPlatform) -> None:
+def restrict_workspace_creation_to_named_users(sdk: NeMoHelix) -> None:
     """Revoke the seeded wildcard WorkspaceCreator binding while preserving Viewer."""
     with as_service(sdk, "auth"):
         client_from_platform(sdk, WorkspacesClient).update_workspace_member(
@@ -109,7 +109,7 @@ def restrict_workspace_creation_to_named_users(sdk: NeMoPlatform) -> None:
 
 
 def wait_for_workspace_create_authz(
-    sdk: NeMoPlatform, principal_id: str, expected: bool, timeout_s: float = 5.0
+    sdk: NeMoHelix, principal_id: str, expected: bool, timeout_s: float = 5.0
 ) -> None:
     """Poll the authz allow endpoint until workspace creation reaches the expected decision."""
     deadline = monotonic() + timeout_s
@@ -135,7 +135,7 @@ def wait_for_workspace_create_authz(
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
+def sdk() -> Generator[NeMoHelix, None, None]:
     """SDK client with EntitiesService (auth enabled)."""
     with create_test_client(
         EntitiesService,
@@ -150,7 +150,7 @@ def sdk() -> Generator[NeMoPlatform, None, None]:
 class TestWorkspaceCRUDWithAuth:
     """Test workspace CRUD operations with authorization enabled."""
 
-    def test_default_workspaces_created_on_startup(self, sdk: NeMoPlatform):
+    def test_default_workspaces_created_on_startup(self, sdk: NeMoHelix):
         """Test that 'default' and 'system' workspaces are created automatically on startup."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         # These workspaces are created by EntitiesService.startup() and are public
@@ -169,7 +169,7 @@ class TestWorkspaceCRUDWithAuth:
             assert "default" in workspace_names, "Regular user should see 'default' workspace in list"
             assert "system" in workspace_names, "Regular user should see 'system' workspace in list"
 
-    def test_create_workspace_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_create_workspace_without_auth_fails(self, sdk: NeMoHelix):
         """Test that creating a workspace without auth headers returns 401."""
         workspace_name = short_unique_name("noauth")
 
@@ -181,7 +181,7 @@ class TestWorkspaceCRUDWithAuth:
 
         assert response.status_code == 401
 
-    def test_create_workspace_with_auth(self, sdk: NeMoPlatform):
+    def test_create_workspace_with_auth(self, sdk: NeMoHelix):
         """Test creating a workspace with proper auth headers."""
         workspace_name = short_unique_name("auth-ws")
 
@@ -197,7 +197,7 @@ class TestWorkspaceCRUDWithAuth:
         assert workspace.created_by == TEST_USER_EMAIL
         assert workspace.updated_by == TEST_USER_EMAIL
 
-    def test_workspace_create_remains_open_by_default(self, sdk: NeMoPlatform):
+    def test_workspace_create_remains_open_by_default(self, sdk: NeMoHelix):
         """Default seeding keeps workspace creation open to authenticated users."""
         creator_email = f"creator-{uuid.uuid4().hex[:8]}@example.com"
         workspace_name = short_unique_name("default-open")
@@ -212,7 +212,7 @@ class TestWorkspaceCRUDWithAuth:
         assert created.name == workspace_name
         assert created.created_by == creator_email
 
-    def test_workspace_create_can_be_restricted_by_rebinding_system_role(self, sdk: NeMoPlatform):
+    def test_workspace_create_can_be_restricted_by_rebinding_system_role(self, sdk: NeMoHelix):
         """Operators can rebind system workspace creation access to specific principals."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         creator_email = f"creator-{uuid.uuid4().hex[:8]}@example.com"
@@ -268,7 +268,7 @@ class TestWorkspaceCRUDWithAuth:
                     body=UpdateWorkspaceMemberRequest(roles=seeded_wildcard_roles),
                 ).data()
 
-    def test_creator_gets_admin_role(self, sdk: NeMoPlatform):
+    def test_creator_gets_admin_role(self, sdk: NeMoHelix):
         """Test that workspace creator automatically gets Admin role."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("admin-ws")
@@ -290,7 +290,7 @@ class TestWorkspaceCRUDWithAuth:
             assert creator_member is not None, "Creator should be listed as a member"
             assert "Admin" in creator_member.roles, "Creator should have Admin role"
 
-    def test_creator_admin_binding_prefers_email_when_id_differs(self, sdk: NeMoPlatform):
+    def test_creator_admin_binding_prefers_email_when_id_differs(self, sdk: NeMoHelix):
         """Admin role binding principal is email when sub/oid differs from email (IdP-style headers)."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("email-bind")
@@ -309,8 +309,8 @@ class TestWorkspaceCRUDWithAuth:
         assert creator_member.principal != principal_id
         assert creator_member.granted_by == principal_id
 
-    def test_creator_admin_binding_uses_id_when_email_header_absent(self, sdk: NeMoPlatform):
-        """Admin role binding falls back to principal id when X-NMP-Principal-Email is not set."""
+    def test_creator_admin_binding_uses_id_when_email_header_absent(self, sdk: NeMoHelix):
+        """Admin role binding falls back to principal id when X-NHX-Principal-Email is not set."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("id-bind")
         principal_id = str(uuid.uuid4())
@@ -323,7 +323,7 @@ class TestWorkspaceCRUDWithAuth:
         assert creator_member is not None
         assert creator_member.principal == principal_id
 
-    def test_member_added_by_email_lists_workspace_when_subject_is_uuid(self, sdk: NeMoPlatform):
+    def test_member_added_by_email_lists_workspace_when_subject_is_uuid(self, sdk: NeMoHelix):
         """Email-keyed role bindings must count for list_workspaces when JWT id is oid/sub, not email."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("invite-email")
@@ -344,7 +344,7 @@ class TestWorkspaceCRUDWithAuth:
 
         assert workspace_name in names
 
-    def test_member_added_by_group_lists_workspace_when_user_in_group(self, sdk: NeMoPlatform):
+    def test_member_added_by_group_lists_workspace_when_user_in_group(self, sdk: NeMoHelix):
         """Group-keyed role bindings must count for list_workspaces when the user carries that group."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("invite-group")
@@ -365,7 +365,7 @@ class TestWorkspaceCRUDWithAuth:
 
         assert workspace_name in names
 
-    def test_list_workspaces_only_shows_accessible(self, sdk: NeMoPlatform):
+    def test_list_workspaces_only_shows_accessible(self, sdk: NeMoHelix):
         """Test that listing workspaces only shows workspaces the user can access."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         user1_email = f"user1-{uuid.uuid4().hex[:8]}@example.com"
@@ -387,7 +387,7 @@ class TestWorkspaceCRUDWithAuth:
             user2_workspaces = [ws.name for ws in result.items()]
             assert workspace_name not in user2_workspaces
 
-    def test_user_without_role_cannot_access_workspace(self, sdk: NeMoPlatform):
+    def test_user_without_role_cannot_access_workspace(self, sdk: NeMoHelix):
         """Test that a user without a role cannot access a workspace."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         owner_email = f"owner-{uuid.uuid4().hex[:8]}@example.com"
@@ -403,7 +403,7 @@ class TestWorkspaceCRUDWithAuth:
             with pytest.raises(PermissionDeniedError):
                 workspaces.get_workspace(name=workspace_name).data()
 
-    def test_admin_can_update_workspace(self, sdk: NeMoPlatform):
+    def test_admin_can_update_workspace(self, sdk: NeMoHelix):
         """Test that an Admin can update their workspace."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         admin_email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
@@ -424,7 +424,7 @@ class TestWorkspaceCRUDWithAuth:
             assert updated.created_by == admin_email
             assert updated.updated_by == admin_email
 
-    def test_updated_by_changes_when_different_user_updates(self, sdk: NeMoPlatform):
+    def test_updated_by_changes_when_different_user_updates(self, sdk: NeMoHelix):
         """Test that updated_by reflects the user who made the update, not the creator."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         creator_email = f"creator-{uuid.uuid4().hex[:8]}@example.com"
@@ -456,7 +456,7 @@ class TestWorkspaceCRUDWithAuth:
             # updated_by should be the user who made the update
             assert updated.updated_by == updater_email
 
-    def test_viewer_cannot_update_workspace(self, sdk: NeMoPlatform):
+    def test_viewer_cannot_update_workspace(self, sdk: NeMoHelix):
         """Test that a Viewer cannot update a workspace."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         owner_email = f"owner-{uuid.uuid4().hex[:8]}@example.com"
@@ -481,7 +481,7 @@ class TestWorkspaceCRUDWithAuth:
                     name=workspace_name, body=UpdateWorkspaceRequest(description="Updated by viewer")
                 ).data()
 
-    def test_delete_workspace_deletes_role_bindings(self, sdk: NeMoPlatform):
+    def test_delete_workspace_deletes_role_bindings(self, sdk: NeMoHelix):
         """Test that workspace deletion automatically deletes role bindings.
 
         Role bindings are system-managed and should not block workspace deletion.
@@ -508,7 +508,7 @@ class TestWorkspaceCRUDWithAuth:
             workspace_names = [ws.name for ws in ws_list.items()]
             assert workspace_name not in workspace_names
 
-    def test_cannot_remove_last_admin_via_member_delete(self, sdk: NeMoPlatform):
+    def test_cannot_remove_last_admin_via_member_delete(self, sdk: NeMoHelix):
         """Test that removing the last Admin via member delete fails."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
 
@@ -525,7 +525,7 @@ class TestWorkspaceCRUDWithAuth:
 
             assert "last admin" in str(exc_info.value).lower()
 
-    def test_cannot_remove_last_admin_via_role_update(self, sdk: NeMoPlatform):
+    def test_cannot_remove_last_admin_via_role_update(self, sdk: NeMoHelix):
         """Test that removing the Admin role via update when they're the last Admin fails."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
 
@@ -546,7 +546,7 @@ class TestWorkspaceCRUDWithAuth:
 
             assert "last admin" in str(exc_info.value).lower()
 
-    def test_can_remove_admin_when_another_admin_exists(self, sdk: NeMoPlatform):
+    def test_can_remove_admin_when_another_admin_exists(self, sdk: NeMoHelix):
         """Test that removing an Admin succeeds when another Admin exists."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         admin1_email = f"admin1-{uuid.uuid4().hex[:8]}@example.com"
@@ -573,7 +573,7 @@ class TestWorkspaceCRUDWithAuth:
             assert admin1_email not in member_principals
             assert admin2_email in member_principals
 
-    def test_delete_workspace_with_entities_marks_for_deletion(self, sdk: NeMoPlatform):
+    def test_delete_workspace_with_entities_marks_for_deletion(self, sdk: NeMoHelix):
         """Test that deleting a workspace with entities marks it for async deletion.
 
         With cascade delete, workspaces are marked for deletion and become inaccessible.
@@ -583,7 +583,7 @@ class TestWorkspaceCRUDWithAuth:
         (workspace marked for deletion). Both indicate the workspace is inaccessible.
         """
         workspaces = client_from_platform(sdk, WorkspacesClient)
-        from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
+        from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 
         admin_email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
         workspace_name = short_unique_name("has-ent")

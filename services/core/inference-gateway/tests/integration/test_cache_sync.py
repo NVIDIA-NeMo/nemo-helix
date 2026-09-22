@@ -13,18 +13,18 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform.types.inference.model_provider import ModelProvider
-from nmp.core.inference_gateway.api.dependencies import global_model_cache, global_virtual_model_cache
-from nmp.core.inference_gateway.api.model_cache import ModelCache, model_provider_getter_from_sdk, refresh_model_cache
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache, refresh_virtual_model_cache
-from nmp.testing import ClientContext
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix.types.inference.model_provider import ModelProvider
+from nhx.core.inference_gateway.api.dependencies import global_model_cache, global_virtual_model_cache
+from nhx.core.inference_gateway.api.model_cache import ModelCache, model_provider_getter_from_sdk, refresh_model_cache
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache, refresh_virtual_model_cache
+from nhx.testing import ClientContext
 
 DEFAULT_WORKSPACE = "default"
 
 
 def _create_provider(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     provider_name: str,
     host_url: str,
 ) -> ModelProvider:
@@ -38,7 +38,7 @@ def _create_provider(
 
 def _run_cache_refresh(
     model_cache: ModelCache,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNeMoHelix,
 ) -> None:
     """Run cache refresh synchronously."""
 
@@ -199,7 +199,7 @@ def test_cache_updates_provider_host_url_on_refresh(test_clients: ClientContext)
 
 def _run_vm_cache_refresh(
     vm_cache: VirtualModelCache,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNeMoHelix,
 ) -> None:
     """Run VirtualModel cache refresh synchronously."""
 

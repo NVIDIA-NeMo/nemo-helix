@@ -14,12 +14,12 @@ from nemo_insights_plugin.analyst.cli import AnalystCLI
 from nemo_insights_plugin.contracts.checks import CheckResult
 from nemo_insights_plugin.contracts.profile import DEFAULT_BASE_URL
 from nemo_insights_plugin.preflight import AnalysisProbes
-from nemo_platform import NeMoPlatformError
+from nemo_helix import NeMoHelixError
 from nooa import GenerationError
 from typer.testing import CliRunner
 
 runner = CliRunner()
-_PROFILE_ENV_KEYS = ("NMP_BASE_URL", "TEST_PROFILE_ENV")
+_PROFILE_ENV_KEYS = ("NHX_BASE_URL", "TEST_PROFILE_ENV")
 
 
 class AnalystRecorder:
@@ -185,8 +185,8 @@ def test_analyze_flags_override_profile(app: typer.Typer, profile_tree: Path, mo
 def test_profile_env_is_loaded_before_base_url_resolution(app: typer.Typer, profile_tree: Path, monkeypatch) -> None:
     recorder = AnalystRecorder()
     monkeypatch.setattr(cli, "run_analyst", recorder)
-    monkeypatch.delenv("NMP_BASE_URL", raising=False)
-    (profile_tree / ".env").write_text("NMP_BASE_URL=https://platform.example\n", encoding="utf-8")
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
+    (profile_tree / ".env").write_text("NHX_BASE_URL=https://platform.example\n", encoding="utf-8")
     monkeypatch.chdir(profile_tree)
 
     result = runner.invoke(app, ["run"])
@@ -275,15 +275,15 @@ def test_doctor_renders_invalid_profile_env_as_command_error(
     [
         (
             ["--base-url", "https://flag.example"],
-            {"NMP_BASE_URL": "https://process.example"},
-            "NMP_BASE_URL=https://profile.example\n",
+            {"NHX_BASE_URL": "https://process.example"},
+            "NHX_BASE_URL=https://profile.example\n",
             "https://flag.example",
         ),
-        ([], {}, "NMP_BASE_URL=https://profile.example\n", "https://profile.example"),
+        ([], {}, "NHX_BASE_URL=https://profile.example\n", "https://profile.example"),
         (
             [],
-            {"NMP_BASE_URL": "https://process.example"},
-            "NMP_BASE_URL=https://profile.example\n",
+            {"NHX_BASE_URL": "https://process.example"},
+            "NHX_BASE_URL=https://profile.example\n",
             "https://process.example",
         ),
         ([], {"NEMO_BASE_URL": "https://legacy.example"}, None, DEFAULT_BASE_URL),
@@ -314,7 +314,7 @@ def test_doctor_resolves_base_url_after_profile_env_loading(
             workspace_ok=record_workspace_probe,
         ),
     )
-    monkeypatch.delenv("NMP_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
@@ -334,18 +334,18 @@ def test_doctor_resolves_base_url_after_profile_env_loading(
     [
         (
             ["--base-url", "https://flag.example"],
-            {"NMP_BASE_URL": "https://nmp.example", "NEMO_BASE_URL": "https://legacy.example"},
+            {"NHX_BASE_URL": "https://nhx.example", "NEMO_BASE_URL": "https://legacy.example"},
             "https://flag.example",
         ),
         (
             [],
-            {"NMP_BASE_URL": "https://nmp.example", "NEMO_BASE_URL": "https://legacy.example"},
-            "https://nmp.example",
+            {"NHX_BASE_URL": "https://nhx.example", "NEMO_BASE_URL": "https://legacy.example"},
+            "https://nhx.example",
         ),
         ([], {"NEMO_BASE_URL": "https://legacy.example"}, DEFAULT_BASE_URL),
     ],
 )
-def test_base_url_precedence_uses_only_nmp_base_url(
+def test_base_url_precedence_uses_only_nhx_base_url(
     app: typer.Typer,
     profile_tree: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -355,7 +355,7 @@ def test_base_url_precedence_uses_only_nmp_base_url(
 ) -> None:
     recorder = AnalystRecorder()
     monkeypatch.setattr(cli, "run_analyst", recorder)
-    monkeypatch.delenv("NMP_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
@@ -526,7 +526,7 @@ def test_analyze_runs_only_the_model_configuration_check(
 @pytest.mark.parametrize(
     "error",
     [
-        NeMoPlatformError("Intake SDK failed"),
+        NeMoHelixError("Intake SDK failed"),
         httpx.ConnectError("Intake unavailable", request=httpx.Request("GET", "https://platform.example")),
     ],
 )
@@ -548,7 +548,7 @@ def test_analyze_renders_expected_platform_failures_without_traceback(
     error_lines = [line for line in result.stderr.splitlines() if line.startswith("Error:")]
     assert len(error_lines) == 1
     assert "analysis failed" in error_lines[0]
-    assert "--base-url/NMP_BASE_URL" in error_lines[0]
+    assert "--base-url/NHX_BASE_URL" in error_lines[0]
     assert "Traceback" not in result.output
 
 
@@ -571,7 +571,7 @@ def test_analyze_renders_generation_error_with_model_and_usage_guidance(
         "Error: analyst run failed: request limit exceeded. "
         "Check inference model access and credentials, then retry or adjust usage limits."
     ]
-    assert "--base-url/NMP_BASE_URL" not in result.stderr
+    assert "--base-url/NHX_BASE_URL" not in result.stderr
     assert "Intake availability" not in result.stderr
     assert "Traceback" not in result.output
 
@@ -600,7 +600,7 @@ def test_analyze_constructor_failure_warns_then_exits_cleanly(
     error_lines = [line for line in result.stderr.splitlines() if line.startswith("Error:")]
     assert error_lines == [
         "Error: analysis failed: invalid remote client context. "
-        "Check --base-url/NMP_BASE_URL, authentication, workspace, and Intake availability."
+        "Check --base-url/NHX_BASE_URL, authentication, workspace, and Intake availability."
     ]
     assert "analyst run failed" not in result.stderr
     assert "Traceback" not in result.output
@@ -836,7 +836,7 @@ class TestAnalyzeWorkspacePrecedence:
 
     @pytest.fixture(autouse=True)
     def _no_env_workspace(self, monkeypatch) -> None:
-        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
 
     def test_context_used_when_no_profile_and_no_flag(self, app, tmp_path: Path, monkeypatch) -> None:
         recorder = AnalystRecorder()

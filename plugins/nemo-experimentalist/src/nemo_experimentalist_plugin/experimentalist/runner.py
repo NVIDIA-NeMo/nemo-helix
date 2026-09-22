@@ -75,7 +75,7 @@ class ExperimentRunner:
         backend: The run's data-access backend. Not shared with the strategy.
         strategy: The optimization strategy to run.
         config: Resolved run configuration.
-        workspace: NeMo Platform workspace.
+        workspace: NeMo Helix workspace.
         root: Working directory for run artifacts.
         agent: Baseline agent — a local directory, a git ``url@ref``, or None to take
             the agent the Insight names.

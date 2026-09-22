@@ -13,10 +13,10 @@ Uses the create_test_client pattern for fast in-memory testing.
 
 import uuid
 
-from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest, PlatformSecretUpdateRequest
-from nmp.common.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.client.errors import NotFoundError, UnprocessableEntityError
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
+from nhx.common.entities import DEFAULT_WORKSPACE
 
 
 def short_secret_name(prefix: str) -> str:
@@ -29,7 +29,7 @@ def test_create_secret(sdk: SecretsClient):
     secret_name = short_secret_name("testsecret")
     secret_value = "supersecret"
     secret = sdk.create_secret(
-        workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name, value=secret_value)
+        workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name, value=secret_value)
     ).data()
     assert secret.name == secret_name
     # Retrieve the secret
@@ -45,10 +45,10 @@ def test_create_and_list_secrets(sdk: SecretsClient):
     secret_name_2 = short_secret_name("secret2")
     secret_data = "somedata"
     sdk.create_secret(
-        workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name_1, value=secret_data)
+        workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name_1, value=secret_data)
     )
     sdk.create_secret(
-        workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name_2, value=secret_data)
+        workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name_2, value=secret_data)
     )
     # List secrets and verify both are present
     secret_names = [secret.name for secret in sdk.list_secrets(workspace=DEFAULT_WORKSPACE).items()]
@@ -66,7 +66,7 @@ def test_create_and_list_secrets_with_pagination(sdk: SecretsClient):
     for i in range(num_secrets):
         secret_name = short_secret_name(f"page{i:02d}")
         sdk.create_secret(
-            workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name, value=secret_data)
+            workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name, value=secret_data)
         )
         created_secret_names.append(secret_name)
 
@@ -81,7 +81,7 @@ def test_create_secret_with_empty_data(sdk: SecretsClient):
     secret_name = short_secret_name("emptydata")
     # An empty value is rejected client-side by the request model validator.
     try:
-        PlatformSecretCreateRequest(name=secret_name, value="")
+        HelixSecretCreateRequest(name=secret_name, value="")
         assert False, "Expected a validation error when creating a secret with empty data"
     except ValueError:
         pass
@@ -90,7 +90,7 @@ def test_create_secret_with_empty_data(sdk: SecretsClient):
 def test_create_secret_with_empty_data_server_side(sdk: SecretsClient):
     """If an empty value reaches the server, it responds 422."""
     secret_name = short_secret_name("emptydata")
-    body = PlatformSecretCreateRequest.model_construct(name=secret_name, value=_EmptySecret())
+    body = HelixSecretCreateRequest.model_construct(name=secret_name, value=_EmptySecret())
     try:
         sdk.create_secret(workspace=DEFAULT_WORKSPACE, body=body)
         assert False, "Expected a 422 when creating a secret with empty data"
@@ -109,7 +109,7 @@ def test_create_and_delete_secret(sdk: SecretsClient):
     secret_name = short_secret_name("secret1")
     secret_value = "deletesecret"
     create_resp = sdk.create_secret(
-        workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name, value=secret_value)
+        workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name, value=secret_value)
     ).data()
     assert secret_name == create_resp.name
     sdk.delete_secret(name=secret_name, workspace=DEFAULT_WORKSPACE)
@@ -124,7 +124,7 @@ def test_update_secret(sdk: SecretsClient):
     secret_name = short_secret_name("update")
     secret_value = "initialvalue"
     create_resp = sdk.create_secret(
-        workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name, value=secret_value)
+        workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name, value=secret_value)
     ).data()
     assert secret_name == create_resp.name
     assert create_resp.description is None
@@ -132,14 +132,14 @@ def test_update_secret(sdk: SecretsClient):
     updated_secret = sdk.update_secret(
         name=secret_name,
         workspace=DEFAULT_WORKSPACE,
-        body=PlatformSecretUpdateRequest(description="Updated description"),
+        body=HelixSecretUpdateRequest(description="Updated description"),
     ).data()
     assert updated_secret.description == "Updated description"
     # Update description and value together
     updated_secret = sdk.update_secret(
         name=secret_name,
         workspace=DEFAULT_WORKSPACE,
-        body=PlatformSecretUpdateRequest(description="", value="newvalue"),
+        body=HelixSecretUpdateRequest(description="", value="newvalue"),
     ).data()
     assert updated_secret.description == ""
     assert updated_secret.name == secret_name
@@ -164,7 +164,7 @@ def test_rotate_encryption_keys(sdk: SecretsClient):
 
     for secret_name, secret_value in secrets_data:
         sdk.create_secret(
-            workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name, value=secret_value)
+            workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name, value=secret_value)
         )
 
     for secret_name, expected_value in secrets_data:
@@ -184,7 +184,7 @@ def test_rotate_encryption_keys_idempotent(sdk: SecretsClient):
     secret_name = short_secret_name("idempotent")
     secret_value = "idempotent-test-value"
     sdk.create_secret(
-        workspace=DEFAULT_WORKSPACE, body=PlatformSecretCreateRequest(name=secret_name, value=secret_value)
+        workspace=DEFAULT_WORKSPACE, body=HelixSecretCreateRequest(name=secret_name, value=secret_value)
     )
 
     for _ in range(3):

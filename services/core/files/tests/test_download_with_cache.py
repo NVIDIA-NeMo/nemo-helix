@@ -5,9 +5,9 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from nmp.core.files.api.endpoint_helpers import CacheContext, download_with_cache
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.exceptions import NotFoundError
+from nhx.core.files.api.endpoint_helpers import CacheContext, download_with_cache
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.exceptions import NotFoundError
 
 
 async def async_iter_from_list(items: list[bytes]):
@@ -68,7 +68,7 @@ async def test_cache_hit_serves_from_cache():
 
 async def test_cache_miss_schedules_background_task():
     """Test that cache misses schedule a background caching task and stream from source."""
-    from nmp.core.files.app.cache import cache_file_directly
+    from nhx.core.files.app.cache import cache_file_directly
 
     # Mock storages
     source_storage = MagicMock()
@@ -140,7 +140,7 @@ async def test_non_cacheable_storage_bypasses_cache():
 
 async def test_byte_range_requests_check_cache_and_schedule_background_task():
     """Test that byte range requests check cache and schedule background caching on miss."""
-    from nmp.core.files.app.cache import cache_file_directly
+    from nhx.core.files.app.cache import cache_file_directly
 
     # Mock storages
     source_storage = MagicMock()

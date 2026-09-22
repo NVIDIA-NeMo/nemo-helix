@@ -11,10 +11,10 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalPrepareStepConfig,
     RetrievalRunJobConfig,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from pydantic import BaseModel
 
 
@@ -33,7 +33,7 @@ class RetrievalRunJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         is_local: bool,
     ) -> BaseModel:
         run = cast(RetrievalRunJobConfig, input_spec)
@@ -68,10 +68,10 @@ class RetrievalRunJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         spec = cast(RetrievalRunJobConfig, spec)
         generate_step = await RetrievalGenerateJob.to_spec(
             spec.generate,
@@ -111,8 +111,8 @@ class RetrievalRunJob(NemoJob):
             profile=profile,
             options=options,
         )
-        return PlatformJobSpec(steps=[*generate_job["steps"], *prepare_job["steps"]])
+        return HelixJobSpec(steps=[*generate_job["steps"], *prepare_job["steps"]])
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix) -> dict:
         del config, ctx, sdk
         raise NotImplementedError("retrieval-run is remote-only; compile emits generate and prepare steps.")

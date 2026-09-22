@@ -22,11 +22,11 @@ Assumes Docker and OpenShell are installed — if not, do [What you need](#what-
 
 ```bash
 export INFERENCE_API_KEY=<your-nvapi-key>
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 # 1. Start the platform (logs to a file — backgrounding alone still prints over your prompt)
 uv run nemo services run --service-group all --controllers models,jobs \
-  --host 0.0.0.0 --port 8080 > /tmp/nemo-platform.log 2>&1 &
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 until curl -sf http://localhost:8080/health/ready >/dev/null; do sleep 2; done; echo ready
 
 # 2. Give it a model provider  (409 "already exists" just means you've run these before)
@@ -77,7 +77,7 @@ Two environment variables. `nemo agent-hardener setup` installs agent-hardener i
 
 ```bash
 export INFERENCE_API_KEY=<your-nvapi-key>
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
 <details>
@@ -187,7 +187,7 @@ openshell status
 ## One-time setup
 
 ```bash
-cd /path/to/nemo-platform
+cd /path/to/nemo-helix
 make bootstrap                       # Python deps + Studio assets
 
 uv run nemo agent-hardener setup         # creates ~/.agent-hardener/venv and ~/.agent-hardener/garak-venv
@@ -202,12 +202,12 @@ Start the platform:
 # 0.0.0.0 → lets the sandbox reach the Inference Gateway via host.docker.internal
 # logs go to a file — backgrounding alone still prints them over your prompt
 uv run nemo services run --service-group all --controllers models,jobs \
-  --host 0.0.0.0 --port 8080 > /tmp/nemo-platform.log 2>&1 &
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 
 until curl -sf http://localhost:8080/health/ready >/dev/null; do sleep 2; done; echo ready
 ```
 
-Watch it with `tail -f /tmp/nemo-platform.log`; stop it with `uv run nemo services stop`.
+Watch it with `tail -f /tmp/nemo-helix.log`; stop it with `uv run nemo services stop`.
 
 Register an inference provider. Both commands fail with `409 already exists` if you've run them
 before — that's harmless, skip to the next step. To start from a clean platform instead, stop it
@@ -265,7 +265,7 @@ Start the platform as usual:
 
 ```bash
 uv run nemo services run --service-group all --controllers models,jobs \
-  --host 0.0.0.0 --port 8080 > /tmp/nemo-platform.log 2>&1 &
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 ```
 
 Open **http://localhost:8080/studio/** → **Governance → Agent Hardener**. If the entry is missing,

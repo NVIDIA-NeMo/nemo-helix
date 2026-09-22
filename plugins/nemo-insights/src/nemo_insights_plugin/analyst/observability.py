@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from nemo_insights_plugin.platform_client import LOOPBACK_HOSTS
-from nemo_platform_ext.config.config import Config
+from nemo_helix_ext.config.config import Config
 from nooa.tracing import enable_tracing, exporters, flush_traces, set_session
 
 ANALYST_OBSERVABILITY_ENV = "NEMO_INSIGHTS_ANALYST_OBSERVABILITY"

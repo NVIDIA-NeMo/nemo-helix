@@ -3,13 +3,13 @@
 
 [project]
 name = "nemo-evaluator-plugin"
-description = "Evaluator plugin scaffold for NeMo Platform."
+description = "Evaluator plugin scaffold for NeMo Helix."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "cloudpickle>=3.1.1",
     "nemo-evaluator-sdk",
-    "nemo-platform-plugin",
+    "nemo-helix-plugin",
     "pydantic>=2.12.0",
     "typer>=0.20.0",
 ]
@@ -42,12 +42,12 @@ packages = ["src/nemo_evaluator"]
 
 [tool.uv.sources]
 nemo-evaluator-sdk = { workspace = true }
-nemo-platform-plugin = { workspace = true }
-nmp-testing = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+nhx-testing = { workspace = true }
 
 
 [dependency-groups]
-dev = ["pytest>=8.3.4", "pytest-asyncio>=0.25.3", "ruff>=0.11.8", "nmp-testing"]
+dev = ["pytest>=8.3.4", "pytest-asyncio>=0.25.3", "ruff>=0.11.8", "nhx-testing"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

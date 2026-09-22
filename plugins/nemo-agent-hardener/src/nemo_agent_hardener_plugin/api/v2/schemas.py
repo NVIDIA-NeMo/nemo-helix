@@ -10,7 +10,7 @@ directly. This module holds the list-endpoint query filters (extending ``NemoFil
 
 from __future__ import annotations
 
-from nemo_platform_plugin.agent_hardener.types import (
+from nemo_helix_plugin.agent_hardener.types import (
     ApplyMitigationRequest,
     ApplyMitigationResponse,
     ComposeDefenseRequest,

@@ -9,16 +9,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from nmp.common.auth import KUBERNETES_POD_UID_REFERENCE_NAME, AuthContext, reference_delegation_name
-from nmp.common.jobs.constants import (
+from nhx.common.auth import KUBERNETES_POD_UID_REFERENCE_NAME, AuthContext, reference_delegation_name
+from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_SECRETS_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.app.constants import (
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import (
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -32,28 +32,28 @@ from nmp.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nmp.core.jobs.app.providers import ComputeResources, ContainerSpec, DistributedGPUExecutionProvider
-from nmp.core.jobs.app.schemas import (
-    PlatformJobEnvironmentVariable,
-    PlatformJobSecretEnvironmentVariableRef,
-    PlatformJobStepSpec,
+from nhx.core.jobs.app.providers import ComputeResources, ContainerSpec, DistributedGPUExecutionProvider
+from nhx.core.jobs.app.schemas import (
+    HelixJobEnvironmentVariable,
+    HelixJobSecretEnvironmentVariableRef,
+    HelixJobStepSpec,
 )
-from nmp.core.jobs.controllers.backends.base import (
+from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.common import (
+from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesJobStorageConfig,
     KubernetesObjectMetadata,
     common_labels_for_step,
     name_for_step,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.volcano_job import (
+from nhx.core.jobs.controllers.backends.kubernetes.volcano_job import (
     VolcanoJobBackend,
     VolcanoJobExecutionProfileConfig,
 )
-from nmp.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
+from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
 
 DEFAULT_STORAGE = KubernetesJobStorageConfig(pvc_name="job-storage-pvc")
@@ -71,11 +71,11 @@ def kubernetes_client_mock():
     custom_v1_mock = MagicMock()
     with (
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CoreV1Api",
             return_value=core_v1_mock,
         ),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.client.CustomObjectsApi",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CustomObjectsApi",
             return_value=custom_v1_mock,
         ),
     ):
@@ -139,22 +139,22 @@ def distributed_gpu_execution_provider():
 
 @pytest.fixture
 def volcano_job(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     volcano_execution_profile_config,
     mock_platform_config,
 ) -> Generator[VolcanoJobBackend, None, None]:
     """Create a namespaced custom object (Volcano Job) instance with mocked clients."""
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         # Convert the Pydantic model to dict format expected by the base class
         volcano_job = VolcanoJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=volcano_execution_profile_config,
             profile_name="default",
         )
@@ -168,14 +168,14 @@ def workload_exchange_auth_config():
     return SimpleNamespace(
         oidc=SimpleNamespace(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             audience=None,
         )
     )
 
 
 @pytest.fixture
-def test_step_pending_with_auth_context(test_step_pending: PlatformJobStepWithContext) -> PlatformJobStepWithContext:
+def test_step_pending_with_auth_context(test_step_pending: HelixJobStepWithContext) -> HelixJobStepWithContext:
     step = test_step_pending.model_copy(deep=True)
     step.auth_context = AuthContext(
         principal_id="creator@example.com",
@@ -186,7 +186,7 @@ def test_step_pending_with_auth_context(test_step_pending: PlatformJobStepWithCo
 
 
 @pytest.fixture
-def test_step_active_with_auth_context(test_step_active: PlatformJobStepWithContext) -> PlatformJobStepWithContext:
+def test_step_active_with_auth_context(test_step_active: HelixJobStepWithContext) -> HelixJobStepWithContext:
     step = test_step_active.model_copy(deep=True)
     step.auth_context = AuthContext(
         principal_id="creator@example.com",
@@ -197,7 +197,7 @@ def test_step_active_with_auth_context(test_step_active: PlatformJobStepWithCont
 
 
 def _volcano_job_for_step(
-    step: PlatformJobStepWithContext,
+    step: HelixJobStepWithContext,
     *,
     phase: str = "Running",
     service_account_name: str = "default",
@@ -267,7 +267,7 @@ def _kubernetes_pod(uid: str, *, phase: str = "Running") -> client.V1Pod:
 
 
 def test_schedule_job_success(
-    volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_pending: PlatformJobStepWithContext
+    volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_pending: HelixJobStepWithContext
 ):
     """Test successful job scheduling."""
     # Mock successful job creation
@@ -380,23 +380,23 @@ def test_schedule_job_success(
         assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
         assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
         assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
-        assert "NMP_BASE_URL" in env_vars
+        assert "NHX_BASE_URL" in env_vars
 
         # Ensure that config warnings are disabled
-        assert env_vars["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+        assert env_vars["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
 
 def test_schedule_job_with_auth_context_mounts_projected_workload_identity_token(
     volcano_job: VolcanoJobBackend,
     distributed_gpu_execution_provider,
-    test_step_pending_with_auth_context: PlatformJobStepWithContext,
+    test_step_pending_with_auth_context: HelixJobStepWithContext,
     workload_exchange_auth_config,
 ):
     volcano_job._custom_v1.create_namespaced_custom_object.return_value = MagicMock()  # ty: ignore[invalid-assignment]
     volcano_job._execution_profile_config.workload_identity.token_expiration_seconds = 600
     volcano_job._execution_profile_config.workload_identity.token_audience = "test-audience"
 
-    with patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config):
+    with patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config):
         volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending_with_auth_context)
 
     call_args = volcano_job._custom_v1.create_namespaced_custom_object.call_args  # ty: ignore[possibly-unbound-attribute]
@@ -420,7 +420,7 @@ def test_schedule_job_with_auth_context_mounts_projected_workload_identity_token
 def test_created_step_does_not_ttl_before_backend_acceptance(
     volcano_job: VolcanoJobBackend,
     distributed_gpu_execution_provider,
-    test_step_pending: PlatformJobStepWithContext,
+    test_step_pending: HelixJobStepWithContext,
 ):
     """CREATED age should not fail a step before the Volcano backend accepts it."""
     volcano_job._custom_v1.create_namespaced_custom_object.return_value = MagicMock()  # ty: ignore[invalid-assignment]
@@ -428,35 +428,35 @@ def test_created_step_does_not_ttl_before_backend_acceptance(
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     test_step_pending.created_at = old_timestamp
     test_step_pending.updated_at = old_timestamp
-    test_step_pending.status = PlatformJobStatus.CREATED
+    test_step_pending.status = HelixJobStatus.CREATED
 
     update = volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     volcano_job._custom_v1.create_namespaced_custom_object.assert_called_once()  # ty: ignore[possibly-unbound-attribute]
 
 
 def test_volcano_job_profile_environment_applied(
     kubernetes_client_mock,
-    mock_nmp_client,
+    mock_nhx_client,
     volcano_execution_profile_config,
     mock_platform_config,
     distributed_gpu_execution_provider,
-    test_step_pending: PlatformJobStepWithContext,
+    test_step_pending: HelixJobStepWithContext,
 ):
     """Profile environment (e.g. HOME=/tmp) is applied to scheduled Volcano job pod containers."""
     profile_config = VolcanoJobExecutionProfileConfig(
         **{**volcano_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         backend = VolcanoJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=profile_config,
             profile_name="default",
         )
@@ -487,7 +487,7 @@ def test_volcano_job_execution_profile_config_rejects_reserved_env_vars():
 
 
 def test_schedule_job_single_node_success(
-    volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
 ):
     """Test successful job scheduling."""
     # Mock successful job creation
@@ -605,10 +605,10 @@ def test_schedule_job_single_node_success(
         assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
         assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
         assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
-        assert "NMP_BASE_URL" in env_vars
+        assert "NHX_BASE_URL" in env_vars
 
         # Ensure that config warnings are disabled
-        assert env_vars["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+        assert env_vars["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
 
 def test_volcano_job_nemo_job_secrets_format_same_and_cross_workspace(
@@ -619,14 +619,14 @@ def test_volcano_job_nemo_job_secrets_format_same_and_cross_workspace(
     Jobs can reference secrets from other workspaces when the user has permissions.
     Format must be ENV_VAR=workspace/secret_name; cross-workspace refs use explicit workspace/secret_name.
     """
-    step_with_secrets = PlatformJobStepWithContext(
+    step_with_secrets = HelixJobStepWithContext(
         id="test-step-id",
         job="test-job-id",
         workspace="default",
         attempt_id="test-job-attempt-id",
         name="test-step",
         fileset="test-logs-fileset",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=DistributedGPUExecutionProvider(
                 provider="gpu_distributed",
@@ -635,19 +635,19 @@ def test_volcano_job_nemo_job_secrets_format_same_and_cross_workspace(
             ),
             config={},
             environment=[
-                PlatformJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/var/test"),
-                PlatformJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/var/test"),
+                HelixJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
+                HelixJobEnvironmentVariable(
                     name="LOCAL_SECRET",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(name="local-secret"),
+                    from_secret=HelixJobSecretEnvironmentVariableRef(name="local-secret"),
                 ),
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(
                     name="CROSS_WORKSPACE_SECRET",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
+                    from_secret=HelixJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
                 ),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     volcano_job._custom_v1.create_namespaced_custom_object.return_value = MagicMock()  # ty: ignore[invalid-assignment]
@@ -672,7 +672,7 @@ def test_volcano_job_nemo_job_secrets_format_same_and_cross_workspace(
 def test_schedule_injects_opensandbox_secret_env_when_cluster_capable(
     volcano_job: VolcanoJobBackend,
     distributed_gpu_execution_provider,
-    test_step_pending: PlatformJobStepWithContext,
+    test_step_pending: HelixJobStepWithContext,
     mock_platform_config,
 ):
     mock_platform_config.sandbox_cluster_capable = True
@@ -695,7 +695,7 @@ def test_schedule_injects_opensandbox_secret_env_when_cluster_capable(
 
 
 def test_schedule_job_with_args(
-    volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_pending: PlatformJobStepWithContext
+    volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_pending: HelixJobStepWithContext
 ):
     """Test job scheduling with custom args."""
 
@@ -728,7 +728,7 @@ def test_schedule_job_api_exception(
 
 
 def test_multi_node_networking_annotations_added(
-    volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
 ):
     """Test that enable-multi-node-networking annotations are added for multi-node jobs."""
     # Mock successful job creation
@@ -768,7 +768,7 @@ def test_multi_node_networking_annotations_added(
 
 
 def test_single_node_no_networking_annotations(
-    volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
 ):
     """Test that networking annotations are NOT added for single-node jobs."""
     # Mock successful job creation
@@ -808,9 +808,9 @@ def test_single_node_no_networking_annotations(
 
 def test_networking_annotations_disabled_via_config(
     kubernetes_client_mock,
-    mock_nmp_client,
+    mock_nhx_client,
     mock_platform_config,
-    test_step_pending: PlatformJobStepWithContext,
+    test_step_pending: HelixJobStepWithContext,
 ):
     """Test that annotations are not added when enable_multi_node_networking=False."""
     # Create execution profile with enable_multi_node_networking disabled
@@ -824,14 +824,14 @@ def test_networking_annotations_disabled_via_config(
     )
 
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         volcano_job = VolcanoJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=volcano_execution_profile_config,
             profile_name="default",
         )
@@ -890,7 +890,7 @@ def test_schedule_job_volcano_not_installed(
     result = volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
 
     # Verify error status is returned
-    assert result.status == PlatformJobStatus.ERROR
+    assert result.status == HelixJobStatus.ERROR
     assert result.error_details is not None
     assert "Volcano is not available" in result.error_details["message"]
     assert "contact your platform administrator" in result.error_details["message"]
@@ -900,7 +900,7 @@ def test_schedule_job_volcano_not_installed(
     volcano_job._core_v1.delete_namespaced_config_map.assert_called_once()  # ty: ignore[possibly-unbound-attribute]
 
 
-def test_sync_job_active(volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext):
+def test_sync_job_active(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
     """Test syncing an active job."""
     # Mock active job status
     mock_job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "test-job"}}
@@ -911,15 +911,15 @@ def test_sync_job_active(volcano_job: VolcanoJobBackend, test_step_pending: Plat
     # Sync the job
     job_update = volcano_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.ACTIVE
+    assert job_update.status == HelixJobStatus.ACTIVE
 
 
 def test_sync_job_active_registers_pod_uid_workload_delegation(
     volcano_job: VolcanoJobBackend,
-    test_step_pending_with_auth_context: PlatformJobStepWithContext,
+    test_step_pending_with_auth_context: HelixJobStepWithContext,
     workload_exchange_auth_config,
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.PENDING
+    test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     ttl_seconds_active = 900
     volcano_job._execution_profile_config.ttl_seconds_active = ttl_seconds_active
     pod = _kubernetes_pod("pod-uid-123")
@@ -929,17 +929,17 @@ def test_sync_job_active_registers_pod_uid_workload_delegation(
     before_sync = datetime.datetime.now(datetime.UTC)
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_register_workload_delegation") as register_delegation,
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
             return_value=False,
         ),
         patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
@@ -947,12 +947,12 @@ def test_sync_job_active_registers_pod_uid_workload_delegation(
     ):
         update = volcano_job.sync(test_step_pending_with_auth_context)
 
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
     register_delegation.assert_called_once()
     delegation = register_delegation.call_args.args[0]
     assert delegation.name == expected_name
     assert delegation.workload_subject == "system:serviceaccount:test-namespace:default"
-    assert delegation.workload_audience == "nemo-platform"
+    assert delegation.workload_audience == "nemo-helix"
     assert delegation.workload_workspace == test_step_pending_with_auth_context.workspace
     assert delegation.workload_kind == "job"
     assert delegation.workload_id == test_step_pending_with_auth_context.job
@@ -974,7 +974,7 @@ def test_sync_job_active_registers_pod_uid_workload_delegation(
     )
 
 
-def test_sync_job_completed(volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext):
+def test_sync_job_completed(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
     """Test syncing a completed job."""
     # Mock completed job status
     mock_job = {"status": {"state": {"phase": "Completed"}}, "metadata": {"name": "test-job"}}
@@ -985,32 +985,32 @@ def test_sync_job_completed(volcano_job: VolcanoJobBackend, test_step_pending: P
     # Sync the job
     job_update = volcano_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.COMPLETED
+    assert job_update.status == HelixJobStatus.COMPLETED
 
 
 def test_sync_job_completed_revokes_pod_uid_workload_delegation(
     volcano_job: VolcanoJobBackend,
-    test_step_active_with_auth_context: PlatformJobStepWithContext,
+    test_step_active_with_auth_context: HelixJobStepWithContext,
     workload_exchange_auth_config,
 ):
-    test_step_active_with_auth_context.status = PlatformJobStatus.ACTIVE
+    test_step_active_with_auth_context.status = HelixJobStatus.ACTIVE
     pod = _kubernetes_pod("pod-uid-123", phase="Succeeded")
     mock_job = _volcano_job_for_step(test_step_active_with_auth_context, phase="Completed")
     volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
     volcano_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])  # ty: ignore[attr-defined]
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
             return_value=False,
         ),
         patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
@@ -1018,11 +1018,11 @@ def test_sync_job_completed_revokes_pod_uid_workload_delegation(
     ):
         update = volcano_job.sync(test_step_active_with_auth_context)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     revoke_delegation.assert_called_once_with(expected_name)
 
 
-def test_sync_job_failed(volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext):
+def test_sync_job_failed(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
     """Test syncing a failed job."""
     # Mock failed job status
     mock_job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "test-job"}}
@@ -1033,10 +1033,10 @@ def test_sync_job_failed(volcano_job: VolcanoJobBackend, test_step_pending: Plat
     # Sync the job
     job_update = volcano_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.ERROR
+    assert job_update.status == HelixJobStatus.ERROR
 
 
-def test_sync_job_not_found(volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext):
+def test_sync_job_not_found(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
     """Test syncing a job that doesn't exist."""
     # Mock job not found (get_volcano_job_by_name uses get_namespaced_custom_object)
     volcano_job._custom_v1.get_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[invalid-assignment]
@@ -1044,23 +1044,23 @@ def test_sync_job_not_found(volcano_job: VolcanoJobBackend, test_step_pending: P
     # Sync the job
     job_update = volcano_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.PENDING
+    assert job_update.status == HelixJobStatus.PENDING
 
 
 def test_sync_active_when_volcano_job_not_found(
-    volcano_job: VolcanoJobBackend, test_step_active: PlatformJobStepWithContext
+    volcano_job: VolcanoJobBackend, test_step_active: HelixJobStepWithContext
 ):
     """Test syncing an ACTIVE step when the Volcano job is already gone (e.g. deleted).
 
     Ensures we do not call enforce_sync_ttl with None; we fall through to
     sync_active(step, None) which returns ERROR with 'Job not found'.
     """
-    test_step_active.status = PlatformJobStatus.ACTIVE
+    test_step_active.status = HelixJobStatus.ACTIVE
     volcano_job._custom_v1.get_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[invalid-assignment]
 
     job_update = volcano_job.sync(test_step_active)
 
-    assert job_update.status == PlatformJobStatus.ERROR
+    assert job_update.status == HelixJobStatus.ERROR
     assert job_update.error_details is not None
     assert "Job not found" in job_update.error_details.get("message", "")
     # Must not attempt to delete a non-existent job
@@ -1069,21 +1069,21 @@ def test_sync_active_when_volcano_job_not_found(
 
 def test_sync_active_when_volcano_job_not_found_revokes_recorded_workload_delegation(
     volcano_job: VolcanoJobBackend,
-    test_step_active_with_auth_context: PlatformJobStepWithContext,
+    test_step_active_with_auth_context: HelixJobStepWithContext,
     workload_exchange_auth_config,
 ):
-    test_step_active_with_auth_context.status = PlatformJobStatus.ACTIVE
+    test_step_active_with_auth_context.status = HelixJobStatus.ACTIVE
     job_key = f"test-namespace/{name_for_step(test_step_active_with_auth_context)}"
     volcano_job._workload_delegations._delegations_by_target_key[job_key] = {"ref:recorded-delegation"}
     volcano_job._custom_v1.get_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[invalid-assignment]
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
     ):
         job_update = volcano_job.sync(test_step_active_with_auth_context)
 
-    assert job_update.status == PlatformJobStatus.ERROR
+    assert job_update.status == HelixJobStatus.ERROR
     revoke_delegation.assert_called_once_with("ref:recorded-delegation")
     assert job_key not in volcano_job._workload_delegations._delegations_by_target_key
 
@@ -1091,23 +1091,23 @@ def test_sync_active_when_volcano_job_not_found_revokes_recorded_workload_delega
 def test_name_for_job_truncation(volcano_job: VolcanoJobBackend):
     """Test job name truncation for very long job IDs."""
     # Create a job with a very long ID
-    long_job = PlatformJobStepWithContext(
+    long_job = HelixJobStepWithContext(
         id="jobstep-a" * 100 + "-",  # Very long ID with trailing dash
         job="test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step-",  # Job name with trailing dash.
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=DistributedGPUExecutionProvider(
                 provider="gpu_distributed", profile="volcano_profile", container=ContainerSpec(image="test-image")
             ),
             config={"command": ["echo", "Hello"]},
-            environment=[PlatformJobEnvironmentVariable(name="TEST_VAR", value="test_value")],
+            environment=[HelixJobEnvironmentVariable(name="TEST_VAR", value="test_value")],
         ),
         status_details={},
-        status=PlatformJobStatus.CREATED,
+        status=HelixJobStatus.CREATED,
     )
 
     job_name = name_for_step(long_job)
@@ -1234,13 +1234,13 @@ def test_cleanup_steps_by_ttl(volcano_job: VolcanoJobBackend, status):
     assert call_args.kwargs["propagation_policy"] == "Foreground"
 
 
-def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pending: PlatformJobStepWithContext):
+def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
     """Test that sync of a PENDING step transitions to an ERROR state when step's created_at exceeds TTL."""
     # Get the TTL configuration (default is 30 minutes)
     ttl_seconds = volcano_job._execution_profile_config.ttl_seconds_before_active
 
     # Set the step to PENDING status
-    test_step_pending.status = PlatformJobStatus.PENDING
+    test_step_pending.status = HelixJobStatus.PENDING
 
     # Create a step with an created_at timestamp that exceeds the TTL (35 minutes ago)
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
@@ -1260,12 +1260,12 @@ def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pendin
     volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
 
     # Mock update_all_tasks
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
         # Call sync which should detect the TTL timeout
         result = volcano_job.sync(test_step_pending)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details["message"] == "Job timed out after reaching max TTL of 1800 seconds"  # type: ignore[index]
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 1800 seconds"}
 
@@ -1286,7 +1286,7 @@ def test_cleanup_active_by_ttl(volcano_job: VolcanoJobBackend, test_step_active)
     ttl_seconds = volcano_job._execution_profile_config.ttl_seconds_active
 
     # Set the step to ACTIVE status
-    test_step_active.status = PlatformJobStatus.ACTIVE
+    test_step_active.status = HelixJobStatus.ACTIVE
 
     # Create a step with an created_at timestamp that exceeds the TTL (25 hours ago)
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 3600)
@@ -1305,12 +1305,12 @@ def test_cleanup_active_by_ttl(volcano_job: VolcanoJobBackend, test_step_active)
     volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
 
     # Mock update_all_tasks
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
         # Call sync which should detect the TTL timeout
         result = volcano_job.sync(test_step_active)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details["message"] == "Job timed out after reaching max TTL of 86400 seconds"  # type: ignore[index]
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 86400 seconds"}
 
@@ -1339,7 +1339,7 @@ def test_terminate_job_skips_delete_when_not_managed_by_jobs_controller(volcano_
 
 def test_terminate_job_revokes_pod_uid_workload_delegation(
     volcano_job: VolcanoJobBackend,
-    test_step_pending_with_auth_context: PlatformJobStepWithContext,
+    test_step_pending_with_auth_context: HelixJobStepWithContext,
     workload_exchange_auth_config,
 ):
     pod = _kubernetes_pod("pod-uid-123", phase="Succeeded")
@@ -1350,14 +1350,14 @@ def test_terminate_job_revokes_pod_uid_workload_delegation(
     )
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
     ):
         volcano_job.terminate_job(mock_job)
@@ -1475,7 +1475,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
     volcano_job._custom_v1.list_namespaced_custom_object.return_value = mock_job_list  # type: ignore[invalid-assignment]
 
     # Mock the cleanup_job_persistent_storage function to track if it's called
-    from nmp.core.jobs.controllers.backends.kubernetes import common as k8s_common
+    from nhx.core.jobs.controllers.backends.kubernetes import common as k8s_common
 
     with patch.object(k8s_common, "cleanup_job_persistent_storage") as mock_cleanup_storage:
         # Run cleanup
@@ -1578,7 +1578,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 
     volcano_job._custom_v1.list_namespaced_custom_object.return_value = {"items": [mock_job]}  # type: ignore[invalid-assignment]
 
-    from nmp.core.jobs.controllers.backends.kubernetes import volcano_job as volcano_job_module
+    from nhx.core.jobs.controllers.backends.kubernetes import volcano_job as volcano_job_module
 
     with patch.object(volcano_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
         volcano_job.cleanup_steps()

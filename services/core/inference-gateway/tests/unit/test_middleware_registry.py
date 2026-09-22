@@ -11,19 +11,19 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform.types.inference.middleware_call import MiddlewareCall as SDKMiddlewareCall
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform.types.inference.virtual_model_inference_config import (
+from nemo_helix.types.inference.middleware_call import MiddlewareCall as SDKMiddlewareCall
+from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix.types.inference.virtual_model_inference_config import (
     VirtualModelInferenceConfig as SDKVirtualModelInferenceConfig,
 )
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     NemoInferenceMiddleware,
 )
-from nemo_platform_plugin.inference_middleware_models import (
+from nemo_helix_plugin.inference_middleware_models import (
     VirtualModel as PluginVirtualModel,
 )
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nhx.core.inference_gateway.api.middleware_registry import (
     InferenceMiddlewareCacheAccessorImpl,
     MiddlewareConfigRef,
     MiddlewareRegistry,
@@ -32,8 +32,8 @@ from nmp.core.inference_gateway.api.middleware_registry import (
     collect_config_refs,
     load_middleware_plugins,
 )
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 skip_flaky_caplog = pytest.mark.skip(reason="Flaky caplog assertions in middleware registry tests")
 
@@ -269,7 +269,7 @@ class TestInferenceMiddlewareCacheAccessorImpl:
 
         accessor = self._make_accessor(virtual_model_cache=vm_cache)
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.get_platform_config", return_value=platform_config
+            "nhx.core.inference_gateway.api.middleware_registry.get_platform_config", return_value=platform_config
         ):
             target = accessor.get_openai_compatible_inference_url_and_model("ws/llama")
 
@@ -580,7 +580,7 @@ class TestFetchMiddlewareConfigResponses:
     @pytest.mark.asyncio
     async def test_partitions_missing_transient_and_fetched(self):
         """Each ref ends up in exactly one bucket based on the plugin's exception."""
-        from nemo_platform_plugin.inference_middleware import MiddlewareConfigNotFoundError
+        from nemo_helix_plugin.inference_middleware import MiddlewareConfigNotFoundError
 
         t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -740,7 +740,7 @@ class TestLoadMiddlewarePlugins:
         plugin_cls.return_value = instance
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"my-plugin": plugin_cls},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -755,7 +755,7 @@ class TestLoadMiddlewarePlugins:
         plugin_cls.return_value = instance
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"my-plugin": plugin_cls},
         ):
             await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -773,11 +773,11 @@ class TestLoadMiddlewarePlugins:
         client = MagicMock()
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"my-plugin": plugin_cls},
         ):
             with patch(
-                "nmp.core.inference_gateway.api.middleware_registry.client_from_platform",
+                "nhx.core.inference_gateway.api.middleware_registry.client_from_platform",
                 return_value=client,
             ) as adapt:
                 await load_middleware_plugins(
@@ -794,7 +794,7 @@ class TestLoadMiddlewarePlugins:
     @skip_flaky_caplog
     @pytest.mark.asyncio
     async def test_load_fault_isolation_broken_import(self, caplog):
-        caplog.set_level(logging.WARNING, logger="nmp.core.inference_gateway.api.middleware_registry")
+        caplog.set_level(logging.WARNING, logger="nhx.core.inference_gateway.api.middleware_registry")
 
         good_cls = MagicMock()
         good_instance = _make_mock_plugin()
@@ -803,7 +803,7 @@ class TestLoadMiddlewarePlugins:
         bad_cls = MagicMock(side_effect=ImportError("bad module"))
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"good-plugin": good_cls, "bad-plugin": bad_cls},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -825,7 +825,7 @@ class TestLoadMiddlewarePlugins:
         bad_cls.return_value = bad_instance
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"good-plugin": good_cls, "bad-plugin": bad_cls},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -836,7 +836,7 @@ class TestLoadMiddlewarePlugins:
     @pytest.mark.asyncio
     async def test_load_returns_empty_registry_when_no_plugins(self):
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())

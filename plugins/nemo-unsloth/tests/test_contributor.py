@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from nemo_platform_plugin.customization_contributor import CustomizationContributor
+from nemo_helix_plugin.customization_contributor import CustomizationContributor
 from typer.testing import CliRunner
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -53,7 +53,7 @@ class TestAuthz:
         ``AuthzScope("customization").child(name, "jobs")``), not a separate
         ``get_authz_contribution`` declaration."""
         from fastapi.routing import APIRoute
-        from nemo_platform_plugin.authz import get_path_rules
+        from nemo_helix_plugin.authz import get_path_rules
 
         try:
             specs = contributor.get_routers()

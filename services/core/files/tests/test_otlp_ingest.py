@@ -16,14 +16,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.auth import AuthClient, get_auth_client
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig
-from nmp.common.entities.client import EntityClient, EntityNotFoundError
-from nmp.common.service.dependencies import get_entity_client, get_sdk_client
-from nmp.core.files.api.v2.otlp.endpoints import router
-from nmp.core.files.app.log_storage import LogEntry, LogStorage, dep_log_storage
-from nmp.core.files.entities import Fileset
+from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
+from nhx.common.entities.client import EntityClient, EntityNotFoundError
+from nhx.common.service.dependencies import get_entity_client, get_sdk_client
+from nhx.core.files.api.v2.otlp.endpoints import router
+from nhx.core.files.app.log_storage import LogEntry, LogStorage, dep_log_storage
+from nhx.core.files.entities import Fileset
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 from opentelemetry.proto.logs.v1 import logs_pb2
 
@@ -107,11 +107,11 @@ def test_client(
     # Patch storage_impl_factory and resolve_storage_secrets before creating the app
     with (
         patch(
-            "nmp.core.files.api.v2.otlp.endpoints.storage_impl_factory",
+            "nhx.core.files.api.v2.otlp.endpoints.storage_impl_factory",
             return_value=mock_storage,
         ),
         patch(
-            "nmp.core.files.api.v2.otlp.endpoints.resolve_storage_secrets_for_user",
+            "nhx.core.files.api.v2.otlp.endpoints.resolve_storage_secrets_for_user",
             return_value={},
         ),
     ):
@@ -653,7 +653,7 @@ async def test_upload_fileset_not_found(
 
     # Create a new test client with the mocked entity client
     with patch(
-        "nmp.core.files.api.v2.otlp.endpoints.storage_impl_factory",
+        "nhx.core.files.api.v2.otlp.endpoints.storage_impl_factory",
         return_value=mock_storage,
     ):
         app = FastAPI()
@@ -1067,11 +1067,11 @@ async def test_benchmark_concurrent_requests(mock_entity_client, mock_log_storag
 
     with (
         patch(
-            "nmp.core.files.api.v2.otlp.endpoints.storage_impl_factory",
+            "nhx.core.files.api.v2.otlp.endpoints.storage_impl_factory",
             return_value=mock_storage,
         ),
         patch(
-            "nmp.core.files.api.v2.otlp.endpoints.resolve_storage_secrets",
+            "nhx.core.files.api.v2.otlp.endpoints.resolve_storage_secrets",
             return_value={},
         ),
     ):

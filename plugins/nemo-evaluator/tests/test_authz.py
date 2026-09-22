@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from nemo_evaluator.service import EvaluatorPluginService
-from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
 
 def test_evaluator_authz_derivation_has_no_problems() -> None:

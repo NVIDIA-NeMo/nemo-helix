@@ -12,7 +12,7 @@ from typing import TypeVar, cast
 
 import httpx
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 T = TypeVar("T")
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)

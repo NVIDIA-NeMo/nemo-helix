@@ -36,7 +36,7 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # Small, widely-cached public images used by the deployment workloads. ``alpine``
 # runs a one-shot job (restart_policy=Never -> SUCCEEDED); ``nginx`` runs a
@@ -50,8 +50,8 @@ from nemo_platform import NeMoPlatform
 # DockerHub pull-through cache today, so if one is ever introduced (it would
 # require the mirror registry to be named explicitly in the ref), CI can point
 # these at it without a code change — exactly as it can for postgres/busybox.
-ALPINE_IMAGE = os.environ.get("NMP_E2E_DEPLOYMENTS_ALPINE_IMAGE", "docker.io/library/alpine:3.20")
-NGINX_IMAGE = os.environ.get("NMP_E2E_DEPLOYMENTS_NGINX_IMAGE", "docker.io/library/nginx:alpine")
+ALPINE_IMAGE = os.environ.get("NHX_E2E_DEPLOYMENTS_ALPINE_IMAGE", "docker.io/library/alpine:3.20")
+NGINX_IMAGE = os.environ.get("NHX_E2E_DEPLOYMENTS_NGINX_IMAGE", "docker.io/library/nginx:alpine")
 
 # Terminal deployment statuses (the reconciler will not transition out of these).
 _TERMINAL_DEPLOYMENT_STATUSES = frozenset({"SUCCEEDED", "FAILED", "LOST"})
@@ -69,7 +69,7 @@ def _base(workspace: str) -> str:
 
 
 def create_deployment_config(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -96,7 +96,7 @@ def create_deployment_config(
 
 
 def create_volume(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -115,7 +115,7 @@ def create_volume(
 
 
 def create_deployment(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -138,19 +138,19 @@ def create_deployment(
     return response.json()
 
 
-def get_deployment(sdk: NeMoPlatform, *, workspace: str, name: str) -> dict[str, Any]:
+def get_deployment(sdk: NeMoHelix, *, workspace: str, name: str) -> dict[str, Any]:
     response = sdk._client.get(f"{_base(workspace)}/deployments/{name}")
     response.raise_for_status()
     return response.json()
 
 
-def get_volume(sdk: NeMoPlatform, *, workspace: str, name: str) -> dict[str, Any]:
+def get_volume(sdk: NeMoHelix, *, workspace: str, name: str) -> dict[str, Any]:
     response = sdk._client.get(f"{_base(workspace)}/volumes/{name}")
     response.raise_for_status()
     return response.json()
 
 
-def list_deployments(sdk: NeMoPlatform, *, workspace: str) -> list[dict[str, Any]]:
+def list_deployments(sdk: NeMoHelix, *, workspace: str) -> list[dict[str, Any]]:
     response = sdk._client.get(f"{_base(workspace)}/deployments", params={"page_size": 100})
     response.raise_for_status()
     data = response.json().get("data", [])
@@ -158,7 +158,7 @@ def list_deployments(sdk: NeMoPlatform, *, workspace: str) -> list[dict[str, Any
     return data
 
 
-def delete_deployment_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> None:
+def delete_deployment_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
     try:
         response = sdk._client.delete(f"{_base(workspace)}/deployments/{name}")
         response.raise_for_status()
@@ -167,7 +167,7 @@ def delete_deployment_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str)
             raise
 
 
-def delete_volume_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> None:
+def delete_volume_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
     try:
         response = sdk._client.delete(f"{_base(workspace)}/volumes/{name}")
         response.raise_for_status()
@@ -176,7 +176,7 @@ def delete_volume_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> 
             raise
 
 
-def delete_deployment_config_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> None:
+def delete_deployment_config_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
     try:
         response = sdk._client.delete(f"{_base(workspace)}/deployment-configs/{name}")
         response.raise_for_status()
@@ -189,7 +189,7 @@ def delete_deployment_config_if_exists(sdk: NeMoPlatform, *, workspace: str, nam
 
 
 def wait_for_deployment_status(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -222,7 +222,7 @@ def wait_for_deployment_status(
 
 
 def wait_for_volume_status(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -243,7 +243,7 @@ def wait_for_volume_status(
 
 
 def wait_for_deployment_deleted(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -264,7 +264,7 @@ def wait_for_deployment_deleted(
 
 
 def wait_for_volume_deleted(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -288,7 +288,7 @@ def wait_for_volume_deleted(
 
 
 def run_service_deployment_lifecycle(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     backend_key: str,
@@ -362,7 +362,7 @@ def run_service_deployment_lifecycle(
 
 
 def run_job_deployment_lifecycle(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     backend_key: str,
@@ -418,7 +418,7 @@ def run_job_deployment_lifecycle(
 
 
 def run_volume_deployment_round_trip(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     backend_key: str,

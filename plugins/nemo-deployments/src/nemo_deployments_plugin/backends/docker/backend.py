@@ -88,14 +88,14 @@ from nemo_deployments_plugin.secrets import (
     resolve_deployment_config_secrets,
 )
 from nemo_deployments_plugin.types import NON_TERMINAL_DEPLOYMENT_STATUSES, Endpoint, RestartPolicy
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import (
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import (
     WorkloadDelegationConflictError,
     WorkloadDelegationEntity,
     WorkloadDelegationStore,
     as_aware_utc,
 )
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_PATH,
     build_docker_opaque_workload_delegation,
@@ -103,15 +103,15 @@ from nemo_platform_plugin.auth.workload_identity import (
     get_workload_delegation_audience,
     workload_identity_env,
 )
-from nemo_platform_plugin.capabilities import docker_from_env_kwargs, probe_docker
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.config import LOOPBACK_ADDRESSES
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.capabilities import docker_from_env_kwargs, probe_docker
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityNotFoundError,
 )
-from nemo_platform_plugin.k8s_naming import k8s_safe_name
+from nemo_helix_plugin.k8s_naming import k8s_safe_name
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ReadTimeout
 from requests.exceptions import Timeout as RequestsTimeout
@@ -377,7 +377,7 @@ class DockerDeploymentBackend(DeploymentBackend):
                 if pull_error is not None:
                     # A pull failure is only fatal if the image is not already
                     # present locally. Locally-built/loaded images (e.g. the LoRA
-                    # adapters sidecar `nmp-api:local`) are not pullable from a
+                    # adapters sidecar `nhx-api:local`) are not pullable from a
                     # registry, so fall back to the local copy when it exists.
                     # Only a genuine "not found locally" is fatal here; other
                     # docker client errors from images.get propagate rather than
@@ -1064,7 +1064,7 @@ class DockerDeploymentBackend(DeploymentBackend):
         # When joining another container's network namespace, docker forbids
         # publishing ports (they belong to the primary) and also forbids
         # ExtraHosts. Only the primary maps host ports / host.docker.internal.
-        # Drop the image HEALTHCHECK on netns-joined sidecars: nmp-api ships a
+        # Drop the image HEALTHCHECK on netns-joined sidecars: nhx-api ships a
         # probe for localhost:8080/health/ready, which fails forever for LoRA
         # adapters (``python -m ...adapters.main`` has no HTTP listener).
         if network is not None and network.startswith("container:"):
@@ -1815,7 +1815,7 @@ class DockerDeploymentBackend(DeploymentBackend):
             return host_url_for_port(target_name, container_port, scheme=scheme)
         if host_port is None:
             return None
-        host = os.environ.get("NMP_LOOPBACK_ADDRESS", LOOPBACK_ADDRESSES[0])
+        host = os.environ.get("NHX_LOOPBACK_ADDRESS", LOOPBACK_ADDRESSES[0])
         return host_url_for_port(host, host_port, scheme=scheme)
 
     def _primary_host_url(self, host_ports: dict[int, int], *, target_name: str) -> str | None:

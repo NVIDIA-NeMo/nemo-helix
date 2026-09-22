@@ -23,7 +23,7 @@ from nemo_evaluator.api.schemas import (
 )
 from nemo_evaluator.api.service.task_service import TaskService
 from nemo_evaluator.api.v2 import tasks as tasks_routes
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 
 class _FakeMetricService:

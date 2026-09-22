@@ -19,8 +19,8 @@ from nemo_experimentalist_plugin.experimentalist import run as experimentalist_r
 from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
 from nemo_experimentalist_plugin.experimentalist.result import ExperimentalistResult
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 
 
 class ClosingClient(AsyncNemoClient):

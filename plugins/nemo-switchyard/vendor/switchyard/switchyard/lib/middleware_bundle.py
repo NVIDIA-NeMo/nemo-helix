@@ -6,7 +6,7 @@
 A :class:`MiddlewareBundle` carries everything a factory contributes to a
 host's chain: the request pipeline, the response pipeline, and
 **optionally** an :class:`LLMBackend` and a :class:`ResponseTranslator`.
-Hosts that own their own backend (NeMo Platform IGW today) ignore the optional
+Hosts that own their own backend (NeMo Helix IGW today) ignore the optional
 slots and slot the request/response pipelines around their own backend.
 Standalone callers (the Switchyard CLI, tests, internal recipes) can
 ask the factory for a full chain by populating all four slots and then
@@ -51,7 +51,7 @@ class MiddlewareBundle:
         response_pipeline: Response-side processors. Always present; may
             be empty.
         backend: Optional :class:`LLMBackend`. ``None`` when the host
-            (e.g. NeMo Platform IGW) supplies its own backend; populated when the
+            (e.g. NeMo Helix IGW) supplies its own backend; populated when the
             factory ships a full chain (e.g. a routing factory that
             picks among its own backends).
         translator: Optional :class:`ResponseTranslator`. ``None`` when
@@ -74,7 +74,7 @@ class MiddlewareBundle:
 
         Use this from standalone-Switchyard call sites (recipes, the
         Switchyard CLI, tests) that want a full chain. Hosts that only
-        need pipelines (NeMo Platform IGW) should call
+        need pipelines (NeMo Helix IGW) should call
         :meth:`MiddlewareFactory.build_request_pipeline` /
         :meth:`MiddlewareFactory.build_response_pipeline` directly so
         they don't pay the cost of constructing a backend they're going

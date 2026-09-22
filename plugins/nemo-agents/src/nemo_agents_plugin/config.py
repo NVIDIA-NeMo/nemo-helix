@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
-from nemo_platform_plugin.config import NemoConfig, nmp_user_data_dir
+from nemo_helix_plugin.config import NemoConfig, nhx_user_data_dir
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -38,14 +38,14 @@ class ControllerConfig(BaseModel):
         return self
 
     workspace_dir: Path = Field(
-        default_factory=lambda: nmp_user_data_dir() / "agents",
+        default_factory=lambda: nhx_user_data_dir() / "agents",
         description=(
             "Root directory used by the in-memory runner backend for storing runtime "
             "artifacts (rendered NAT configs and per-deployment logs) under a "
-            "'system/' subdirectory. Defaults to ``nmp_user_data_dir() / 'agents'`` "
+            "'system/' subdirectory. Defaults to ``nhx_user_data_dir() / 'agents'`` "
             "(typically ``~/.local/share/nemo/agents``), so artifacts survive ``/tmp`` "
             "cleanup on macOS reboots and live in a documented, user-accessible "
-            "location. Override the user-data root via ``NMP_DATA_DIR`` or "
+            "location. Override the user-data root via ``NHX_DATA_DIR`` or "
             "``XDG_DATA_HOME``."
         ),
     )
@@ -85,9 +85,9 @@ class DeploymentsRunnerConfig(BaseModel):
     k8s_internal_base_url: str | None = Field(
         default=None,
         description=(
-            "In-cluster platform base URL (the API Service DNS, e.g. http://<release>-nmp-api:8080) "
+            "In-cluster platform base URL (the API Service DNS, e.g. http://<release>-nhx-api:8080) "
             "used as the inference endpoint for k8s-mode agents. Set automatically by the Helm chart. "
-            "Read from NEMO_INTERNAL_BASE_URL, then NMP_INTERNAL_BASE_URL, when unset."
+            "Read from NEMO_INTERNAL_BASE_URL, then NHX_INTERNAL_BASE_URL, when unset."
         ),
     )
     plugin_wheels_init_image: str | None = Field(
@@ -129,7 +129,7 @@ class AgentsConfig(NemoConfig):
     """Configuration for the Agents plugin."""
 
     plugin_name: ClassVar[str] = "agents"
-    plugin_description: ClassVar[str] = "Configuration for the NeMo Platform agents plugin."
+    plugin_description: ClassVar[str] = "Configuration for the NeMo Helix agents plugin."
 
     controller: ControllerConfig = Field(
         default_factory=ControllerConfig,

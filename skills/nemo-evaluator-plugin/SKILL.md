@@ -3,10 +3,10 @@ name: nemo-evaluator-plugin
 description: Evaluate models, datasets, and agents with the NeMo Evaluator plugin. Use for metric selection, SDK checks, platform jobs, and result retrieval.
 license: Apache-2.0
 metadata:
-  owner: nemo-platform
-  author: nemo-platform
+  owner: nemo-helix
+  author: nemo-helix
   maturity: active
-  tags: [evaluation, metrics, agent-eval, nemo-platform]
+  tags: [evaluation, metrics, agent-eval, nemo-helix]
 allowed-tools: Bash, Read
 ---
 
@@ -17,14 +17,14 @@ The Plugin CLI entrypoint is `uv run nemo evaluator`.
 ## Purpose
 
 Use this skill to choose an evaluation interface and metric, validate a minimal
-example, submit a NeMo Platform evaluation job, and retrieve its results.
+example, submit a NeMo Helix evaluation job, and retrieve its results.
 
 ## Inputs
 
 Establish these inputs before building an evaluation:
 
 - Evaluation interface: [dataset-driven, task-driven, or retrieval-driven evaluation](references/evaluation-shapes.md#difference-summary)
-- Execution interface: standalone SDK evaluation or a durable NeMo Platform job.
+- Execution interface: standalone SDK evaluation or a durable NeMo Helix job.
 - Pass/fail dataset examples: the smallest representative pass and failure cases.
 - Metrics: the behaviors to score and the template fields they consume.
 - Target: no target for offline scoring, or the model, agent, runner, or precomputed trials that produce outputs.
@@ -50,7 +50,7 @@ metric for a rubric, RAG workflow, or tool-calling evaluation.
 
 | Need | Interface |
 | --- | --- |
-| Fast metric iteration without NeMo Platform | `nemo_evaluator_sdk.Evaluator` |
+| Fast metric iteration without NeMo Helix | `nemo_evaluator_sdk.Evaluator` |
 | Dataset-driven platform job | `client.evaluator.submit(...)` or `nemo evaluator evaluate submit` |
 | Multiple inline/stored metric refs in one job | `nemo evaluator evaluate submit` with an `EvaluateInputSpec` |
 | Task-driven platform job | `client.evaluator.submit(tasks=..., target=<runner>)` or `nemo evaluator agent-evaluate submit` |
@@ -87,9 +87,9 @@ result queries.
 ### Prerequisites
 
 All commands in this file assume that the shell's working directory is the root
-of the NVIDIA-NeMo/nemo-platform repository.
+of the NVIDIA-NeMo/nemo-helix repository.
 
-In a NeMo Platform repository checkout, run commands through the workspace:
+In a NeMo Helix repository checkout, run commands through the workspace:
 
 ```bash
 # confirms plugin readiness and lists the registered evaluator jobs.

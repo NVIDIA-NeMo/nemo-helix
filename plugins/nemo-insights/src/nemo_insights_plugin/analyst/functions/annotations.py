@@ -21,8 +21,8 @@ Because annotations hang off spans, each result carries its ``span_id`` /
 interaction the annotation is about.
 
 Schema source of truth (Intake changes often — design against source, not the
-vendored wheel): ``services/intake/src/nmp/intake/spans/api/annotations_schemas.py``
-in ``~/code/nemo-platform`` (``AnnotationFilter``).
+vendored wheel): ``services/intake/src/nhx/intake/spans/api/annotations_schemas.py``
+in ``~/code/nemo-helix`` (``AnnotationFilter``).
 """
 
 from typing import Any

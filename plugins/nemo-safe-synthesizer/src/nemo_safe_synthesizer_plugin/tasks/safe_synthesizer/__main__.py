@@ -25,21 +25,21 @@ from typing import cast
 import pandas as pd
 from datasets import Dataset, DatasetDict, load_dataset
 from filesets import FilesetFileSystem, parse_fileset_ref
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.config import get_platform_config
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.config import get_platform_config
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import (
     DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
 )
-from nemo_platform_plugin.jobs.file_manager import FilesetFileManager, TmpDirPath
-from nemo_platform_plugin.jobs.schemas import FileStorageType, PlatformJobResultCreateRequest
-from nemo_platform_plugin.sdk_provider import get_platform_sdk
+from nemo_helix_plugin.jobs.file_manager import FilesetFileManager, TmpDirPath
+from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
+from nemo_helix_plugin.sdk_provider import get_platform_sdk
 from nemo_safe_synthesizer.config.internal_results import SafeSynthesizerResults
 from nemo_safe_synthesizer.errors import ParameterError
 from nemo_safe_synthesizer.observability import initialize_observability
@@ -190,13 +190,13 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
         _create_job_result(sdk, workspace, job_id, "adapter", artifact_url)
 
 
-def _create_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, result_name: str, artifact_url: str):
+def _create_job_result(sdk: NeMoHelix, workspace: str, job_name: str, result_name: str, artifact_url: str):
     """Create a job result record."""
     client_from_platform(sdk, JobsClient).create_job_result(
         name=result_name,
         job=job_name,
         workspace=workspace,
-        body=PlatformJobResultCreateRequest(artifact_url=artifact_url, artifact_storage_type=FileStorageType.FILESET),
+        body=HelixJobResultCreateRequest(artifact_url=artifact_url, artifact_storage_type=FileStorageType.FILESET),
     )
     logger.info("Created job result: %s", result_name)
 
@@ -205,7 +205,7 @@ def _resolve_pretrained_model(
     job_config: SafeSynthesizerJobConfig,
     *,
     workspace: str,
-    sdk: NeMoPlatform | None = None,
+    sdk: NeMoHelix | None = None,
 ) -> tuple[TmpDirPath | None, Path | None]:
     """Download a prior job's adapter artifact from Files when ``pretrained_model_job`` is set."""
     if not job_config.pretrained_model_job:
@@ -253,10 +253,10 @@ def _setup_classify_endpoint():
     """Set up upstream Safe Synthesizer PII classification env vars from platform env vars."""
     endpoint_path = os.environ.get("CLASSIFY_LLM_ENDPOINT_PATH")
     if endpoint_path:
-        models_url = os.environ.get("NMP_MODELS_URL")
+        models_url = os.environ.get("NHX_MODELS_URL")
         if not models_url:
             logger.warning(
-                "CLASSIFY_LLM_ENDPOINT_PATH is set but NMP_MODELS_URL is not available. "
+                "CLASSIFY_LLM_ENDPOINT_PATH is set but NHX_MODELS_URL is not available. "
                 "Column classification may not work correctly."
             )
             return

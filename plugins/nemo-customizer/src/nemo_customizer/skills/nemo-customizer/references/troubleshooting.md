@@ -11,8 +11,8 @@ Resolve the CLI first per **Pre-flight — CLI resolution** in `SKILL.md` (`nemo
 
 Before working through any section below, confirm:
 
-- **NeMo CLI available** — `nemo` on `PATH`, otherwise `uv run nemo` from the nemo-platform repo root (see **Pre-flight — CLI resolution** in `SKILL.md`).
-- **Platform base URL configured** — via the CLI context, `--base-url`, or `$NMP_BASE_URL`; defaults to `http://localhost:8080`.
+- **NeMo CLI available** — `nemo` on `PATH`, otherwise `uv run nemo` from the nemo-helix repo root (see **Pre-flight — CLI resolution** in `SKILL.md`).
+- **Platform base URL configured** — via the CLI context, `--base-url`, or `$NHX_BASE_URL`; defaults to `http://localhost:8080`.
 - **Workspace access** — authenticated (`nemo auth login`) with access to the target workspace.
 
 ## Platform unreachable (connection error)
@@ -23,8 +23,8 @@ Any `nemo …` call may fail with `Connection error`, timeout, or connection ref
 
 | Situation | Action |
 |-----------|--------|
-| User gave a platform host/URL (e.g. `<remote-host>:8080`) or you set `NMP_BASE_URL` to something other than `http://127.0.0.1:8080` or `http://localhost:8080` | Report that the platform is not reachable at that address. Ask them to confirm the host is up and the URL is correct. **Do not** start local services. |
-| Default URL only — no user override | **Ask** whether to start the platform locally. If they agree, from the **nemo-platform** git root run in the **background**, then poll until healthy and retry the failed command: |
+| User gave a platform host/URL (e.g. `<remote-host>:8080`) or you set `NHX_BASE_URL` to something other than `http://127.0.0.1:8080` or `http://localhost:8080` | Report that the platform is not reachable at that address. Ask them to confirm the host is up and the URL is correct. **Do not** start local services. |
+| Default URL only — no user override | **Ask** whether to start the platform locally. If they agree, from the **nemo-helix** git root run in the **background**, then poll until healthy and retry the failed command: |
 
 ```bash
 nemo services run \
@@ -48,7 +48,7 @@ If the user already has a listener on `:8080` but health fails, see **nemo-statu
 
 ## Backend choice (automodel vs unsloth)
 
-**Do not** run `docker info` on the agent machine. The platform often runs elsewhere (`NMP_BASE_URL`). Ask the **connected platform** what executors it exposes.
+**Do not** run `docker info` on the agent machine. The platform often runs elsewhere (`NHX_BASE_URL`). Ask the **connected platform** what executors it exposes.
 
 List profiles (login first only if auth is enabled — see **Authentication** in `SKILL.md`):
 
@@ -67,7 +67,7 @@ Each entry has `provider`, `profile` (name), and `backend` (e.g. `docker`, `kube
 | Response includes **`provider`: `gpu` or `gpu_distributed`** | **`automodel`** (default) |
 | No GPU profiles (only `subprocess` and/or CPU `provider`) | Report that GPU customization is unavailable |
 
-Automodel and unsloth are **`submit`-only**. After submit, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl is also submit-only but runs on Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NMP_BASE_URL`), not GPU availability in the agent's terminal.
+Automodel and unsloth are **`submit`-only**. After submit, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl is also submit-only but runs on Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NHX_BASE_URL`), not GPU availability in the agent's terminal.
 
 ### Pick execution profile
 
@@ -178,46 +178,46 @@ After secret + fileset are wired, re-submit the same job JSON (use a fresh `outp
 
 ## Missing training images
 
-Job errors like `Failed to pull image … nmp-unsloth-training:… Not Found`, `manifest unknown`, or a missing automodel training image mean the **connected platform's Docker daemon** (the one that runs GPU job steps) does not have the image. With the default `NMP_BASE_URL` (`127.0.0.1:8080` / `localhost:8080`), that daemon is usually on the same machine as the agent; with a user-overridden URL (e.g. `<remote-host>:8080`), it is on the remote target host instead.
+Job errors like `Failed to pull image … nhx-unsloth-training:… Not Found`, `manifest unknown`, or a missing automodel training image mean the **connected platform's Docker daemon** (the one that runs GPU job steps) does not have the image. With the default `NHX_BASE_URL` (`127.0.0.1:8080` / `localhost:8080`), that daemon is usually on the same machine as the agent; with a user-overridden URL (e.g. `<remote-host>:8080`), it is on the remote target host instead.
 
 **Did the user override the base URL?** (same rule as **Platform unreachable** — track this from the start of the workflow.)
 
 | Situation | Action |
 |-----------|--------|
-| **Remote platform** — user gave a host/URL (e.g. `<remote-host>:8080`) or you set `NMP_BASE_URL` to something other than `http://127.0.0.1:8080` or `http://localhost:8080` | **Do not** run `docker build`, `docker pull`, or `docker buildx bake` on the agent machine — that only affects the agent's local daemon, not the remote platform. Tell the user they must build or load the image **on the target host** (the machine whose Docker daemon runs the GPU job steps). Report with the template in `references/reporting.md`, then append **Report follow-up — missing image (remote platform)** below. Stop; do not retry submit until the user confirms the image is available on the target. |
+| **Remote platform** — user gave a host/URL (e.g. `<remote-host>:8080`) or you set `NHX_BASE_URL` to something other than `http://127.0.0.1:8080` or `http://localhost:8080` | **Do not** run `docker build`, `docker pull`, or `docker buildx bake` on the agent machine — that only affects the agent's local daemon, not the remote platform. Tell the user they must build or load the image **on the target host** (the machine whose Docker daemon runs the GPU job steps). Report with the template in `references/reporting.md`, then append **Report follow-up — missing image (remote platform)** below. Stop; do not retry submit until the user confirms the image is available on the target. |
 | **Local platform** — default URL only (`127.0.0.1:8080` / `localhost:8080`) | Build or pull on **that same host** where `nemo services run` and Docker share a daemon. See build commands below and `docker/unsloth/README.md` (unsloth) or automodel docker docs. Set env vars **before** starting/restarting the platform. |
 
 Image env vars are read when the platform starts (not per job):
 
 ```bash
-export NMP_IMAGE_REGISTRY=<registry>
-export NMP_IMAGE_TAG=<tag>
+export NHX_IMAGE_REGISTRY=<registry>
+export NHX_IMAGE_TAG=<tag>
 ```
 
-**Automodel** — also set `NMP_AUTOMODEL_IMAGE_REGISTRY=$NMP_IMAGE_REGISTRY`.
+**Automodel** — also set `NHX_AUTOMODEL_IMAGE_REGISTRY=$NHX_IMAGE_REGISTRY`.
 
-**Unsloth** — set `NMP_UNSLOTH_TRAINING_IMAGE` (and optionally `NMP_UNSLOTH_TASKS_IMAGE`) to the full built ref, then restart platform services so the env var takes effect.
+**Unsloth** — set `NHX_UNSLOTH_TRAINING_IMAGE` (and optionally `NHX_UNSLOTH_TASKS_IMAGE`) to the full built ref, then restart platform services so the env var takes effect.
 
 ### Build on the target host (unsloth)
 
 Run on the **platform host** (SSH, console, or CI on that box — not from the agent when the platform is remote):
 
 ```bash
-cd /path/to/nemo-platform
+cd /path/to/nemo-helix
 
 # Local build (platform and Docker on the same machine)
 docker buildx bake \
   -f docker-bake.hcl \
-  nmp-unsloth-training \
+  nhx-unsloth-training \
   --load \
   --set "*.platform=linux/amd64"
 
-export NMP_UNSLOTH_TRAINING_IMAGE="${IMAGE_REGISTRY:-my-registry/nemo-platform-dev}/nmp-unsloth-training:${BAKE_TAG:-local}"
+export NHX_UNSLOTH_TRAINING_IMAGE="${IMAGE_REGISTRY:-my-registry/nemo-helix-dev}/nhx-unsloth-training:${BAKE_TAG:-local}"
 # Restart platform so the env var is picked up
 nemo services restart
 ```
 
-Or push to a registry the target can pull from — see **Option B** in `docker/unsloth/README.md` — then set `NMP_UNSLOTH_TRAINING_IMAGE` to that full ref before restart.
+Or push to a registry the target can pull from — see **Option B** in `docker/unsloth/README.md` — then set `NHX_UNSLOTH_TRAINING_IMAGE` to that full ref before restart.
 
 After the image is on the target, re-submit the same job JSON (use a fresh `output.name` if a prior partial run already registered an adapter).
 
@@ -225,13 +225,13 @@ After the image is on the target, re-submit the same job JSON (use a fresh `outp
 
 When submit or poll returns a missing-image error and the base URL is **user-overridden**, start with the **Report to user** template in `references/reporting.md` (status `error`, **Output adapter fileset (planned):**, Notes quoting the pull error and naming the target host). Then append these sections:
 
-**What you need to do on the target host** — build or load the training image on the machine running the NeMo platform (where `docker info` works for the platform's daemon), set `NMP_UNSLOTH_TRAINING_IMAGE` or automodel image env vars, and restart platform services. Full steps: `docker/unsloth/README.md` (unsloth) or automodel docker docs.
+**What you need to do on the target host** — build or load the training image on the machine running the NeMo Helix (where `docker info` works for the platform's daemon), set `NHX_UNSLOTH_TRAINING_IMAGE` or automodel image env vars, and restart platform services. Full steps: `docker/unsloth/README.md` (unsloth) or automodel docker docs.
 
 **Re-submit after the image is available:**
 
 ```bash
-export NMP_BASE_URL=<user's platform URL>
-cd /path/to/nemo-platform
+export NHX_BASE_URL=<user's platform URL>
+cd /path/to/nemo-helix
 nemo customization <plugin> submit /tmp/job.json --workspace default [--profile <gpu-profile>]
 ```
 
@@ -243,9 +243,9 @@ Job JSON has `integrations.wandb` (and/or `integrations.mlflow`) but tracking fa
 
 | Symptom / log excerpt | Likely cause | Fix |
 |-----------------------|--------------|-----|
-| Training logs **omit** `[launcher]` lines; entrypoint is the training module directly (e.g. `Running main process: /opt/venv/bin/python [-m nmp.unsloth.tasks.training]` with **no** preceding `Fetching secret wandb-api-key`) | **jobs-launcher** binary missing or `launcher_tool_path` wrong — secrets are never injected | Build launcher on the **platform host**, set absolute `launcher_tool_path`, restart services. See § **jobs-launcher missing** below and `integrations-setup.md` § **jobs-launcher**. |
+| Training logs **omit** `[launcher]` lines; entrypoint is the training module directly (e.g. `Running main process: /opt/venv/bin/python [-m nhx.unsloth.tasks.training]` with **no** preceding `Fetching secret wandb-api-key`) | **jobs-launcher** binary missing or `launcher_tool_path` wrong — secrets are never injected | Build launcher on the **platform host**, set absolute `launcher_tool_path`, restart services. See § **jobs-launcher missing** below and `integrations-setup.md` § **jobs-launcher**. |
 | `wandb: ERROR` / HTTP 401 / `permission denied` after launcher lines present | Platform secret `wandb-api-key` has wrong or placeholder value; local `wandb login` cache is **not** used | `uv run nemo secrets update wandb-api-key --value "$WANDB_API_KEY" --workspace default` (or `--from-file -`). Re-submit. |
-| `RuntimeError: WandbCallback requires wandb to be installed` (unsloth) | `nmp-unsloth-training` image lacks `wandb` | Rebuild image with `nmp-unsloth[integrations]` extra; set `NMP_UNSLOTH_TRAINING_IMAGE`; restart platform. See **Missing training images**. |
+| `RuntimeError: WandbCallback requires wandb to be installed` (unsloth) | `nhx-unsloth-training` image lacks `wandb` | Rebuild image with `nhx-unsloth[integrations]` extra; set `NHX_UNSLOTH_TRAINING_IMAGE`; restart platform. See **Missing training images**. |
 | Compile/submit warning: `integrations.wandb is configured but api_key_secret is missing` | Job JSON has `wandb` block without `api_key_secret` | Add `"api_key_secret": "default/wandb-api-key"` (or your secret ref). |
 | MLflow run never appears; W&B works | `tracking_uri` unreachable from container (`localhost`, wrong port) | Use `docker0` host IP + published port (e.g. `http://${DOCKER_HOST_IP}:5001`). See `integrations-setup.md` § **`tracking_uri`**. |
 
@@ -259,7 +259,7 @@ The Docker executor wraps the training entrypoint with **jobs-launcher** only wh
 [launcher] 2026/06/11 22:03:03 Fetching secret wandb-api-key from workspace default...
 [launcher] 2026/06/11 22:03:03 Successfully fetched secret wandb-api-key and mapped to WANDB_API_KEY
 [launcher] 2026/06/11 22:03:03 Injected 1 secret(s) as environment variables
-[launcher] 2026/06/11 22:03:03 Running main process: /opt/venv/bin/python [-m nmp.unsloth.tasks.training]
+[launcher] 2026/06/11 22:03:03 Running main process: /opt/venv/bin/python [-m nhx.unsloth.tasks.training]
 ...
 wandb: Syncing run my-run
 ```
@@ -275,7 +275,7 @@ wandb: Syncing run my-run
 On the platform host:
 
 ```bash
-cd /path/to/nemo-platform/services/core/jobs/jobs-launcher
+cd /path/to/nemo-helix/services/core/jobs/jobs-launcher
 ./build-manual.sh linux amd64
 ```
 
@@ -287,7 +287,7 @@ Set `jobs.executors.docker.launcher_tool_path` in `~/.nemo/config.yaml` to the *
 |-----------------|-------|-----|
 | `Unsloth training requires platform.runtime: docker` | Platform not configured for Docker GPU jobs | Start platform with Docker runtime and a GPU execution profile |
 | Unknown execution profile | Default `gpu` profile missing or wrong | Re-list profiles; pass `--profile <exact-name>` on submit |
-| Missing `nmp-unsloth-training` image / `Failed to pull image` / `manifest unknown` | Image not on the **platform host's** Docker daemon | **Remote platform** (`NMP_BASE_URL` not localhost): tell user to build on the target — **do not** `docker build` locally. **Local platform**: build on same host; see **Missing training images** above and `docker/unsloth/README.md` |
+| Missing `nhx-unsloth-training` image / `Failed to pull image` / `manifest unknown` | Image not on the **platform host's** Docker daemon | **Remote platform** (`NHX_BASE_URL` not localhost): tell user to build on the target — **do not** `docker build` locally. **Local platform**: build on same host; see **Missing training images** above and `docker/unsloth/README.md` |
 | `torch.cuda.is_available()` False in training step logs | GPU not exposed to the container step | Confirm the execution profile is GPU-backed; check platform Docker GPU setup |
 | Job stuck in `active` after training step completes | Upload / model-entity steps still running | Keep polling top-level status (same as automodel) |
 

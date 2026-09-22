@@ -18,9 +18,9 @@ async def test_authorization_data_merges_plugin_authz_contributions(monkeypatch)
     The bundle derives contributions via ``discover_plugin_authz`` (routes-derived model),
     so the stub returns a clean ``PluginAuthzResult`` rather than a raw contribution dict.
     """
-    from nemo_platform_plugin.authz import AuthzContribution, AuthzEndpointMethod
-    from nemo_platform_plugin.authz_discovery import PluginAuthzResult
-    from nmp.core.auth.app.bundle import _build_authorization_data_internal
+    from nemo_helix_plugin.authz import AuthzContribution, AuthzEndpointMethod
+    from nemo_helix_plugin.authz_discovery import PluginAuthzResult
+    from nhx.core.auth.app.bundle import _build_authorization_data_internal
 
     plugin_path = "/apis/example-plugin/v2/workspaces/{workspace}/jobs"
     result = PluginAuthzResult(
@@ -42,7 +42,7 @@ async def test_authorization_data_merges_plugin_authz_contributions(monkeypatch)
     )
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.authz_discovery.discover_plugin_authz",
+        "nemo_helix_plugin.authz_discovery.discover_plugin_authz",
         lambda: [result],
     )
 
@@ -55,7 +55,7 @@ async def test_authorization_data_merges_plugin_authz_contributions(monkeypatch)
 @pytest.mark.asyncio
 async def test_bundle_generation():
     """Test that bundle can be generated without a database."""
-    from nmp.core.auth.app.bundle import clear_bundle_cache, get_opa_bundle_with_etag
+    from nhx.core.auth.app.bundle import clear_bundle_cache, get_opa_bundle_with_etag
 
     # Clear any cached bundle
     clear_bundle_cache()
@@ -101,7 +101,7 @@ async def test_bundle_generation():
 @pytest.mark.asyncio
 async def test_bundle_caching():
     """Test that bundle is cached correctly."""
-    from nmp.core.auth.app.bundle import clear_bundle_cache, get_opa_bundle_with_etag
+    from nhx.core.auth.app.bundle import clear_bundle_cache, get_opa_bundle_with_etag
 
     # Clear cache
     clear_bundle_cache()
@@ -120,7 +120,7 @@ async def test_bundle_caching():
 @pytest.mark.asyncio
 async def test_bundle_etag_stability():
     """Test that bundle E-Tag is stable for same data."""
-    from nmp.core.auth.app.bundle import clear_bundle_cache, get_opa_bundle_with_etag
+    from nhx.core.auth.app.bundle import clear_bundle_cache, get_opa_bundle_with_etag
 
     # Clear cache
     clear_bundle_cache()
@@ -141,8 +141,8 @@ async def test_bundle_etag_stability():
 
 def _problem_result():
     """A plugin result with one valid route and one unruled (deny) route + a problem."""
-    from nemo_platform_plugin.authz import AuthzContribution, AuthzEndpointMethod
-    from nemo_platform_plugin.authz_discovery import PluginAuthzResult
+    from nemo_helix_plugin.authz import AuthzContribution, AuthzEndpointMethod
+    from nemo_helix_plugin.authz_discovery import PluginAuthzResult
 
     contribution = AuthzContribution(
         permissions={"p.read": "Read"},
@@ -157,9 +157,9 @@ def _problem_result():
 def _patch_failmode(monkeypatch, results, on_invalid):
     from types import SimpleNamespace
 
-    import nmp.core.auth.app.bundle as bundle
+    import nhx.core.auth.app.bundle as bundle
 
-    monkeypatch.setattr("nemo_platform_plugin.authz_discovery.discover_plugin_authz", lambda: results)
+    monkeypatch.setattr("nemo_helix_plugin.authz_discovery.discover_plugin_authz", lambda: results)
     monkeypatch.setattr(
         bundle,
         "get_service_config",
@@ -196,8 +196,8 @@ def test_on_invalid_plugin_hard_fail_raises(monkeypatch):
 
 
 def test_clean_plugin_merges_without_degraded(monkeypatch):
-    from nemo_platform_plugin.authz import AuthzContribution, AuthzEndpointMethod
-    from nemo_platform_plugin.authz_discovery import PluginAuthzResult
+    from nemo_helix_plugin.authz import AuthzContribution, AuthzEndpointMethod
+    from nemo_helix_plugin.authz_discovery import PluginAuthzResult
 
     clean = PluginAuthzResult(
         key="c",
@@ -216,8 +216,8 @@ def test_clean_plugin_merges_without_degraded(monkeypatch):
 def test_degraded_plugin_with_no_routes_is_namespace_fenced(monkeypatch):
     """A plugin that couldn't be enumerated (empty contribution) fences its whole namespace,
     so any route it still mounts can't fall through the service: no-match bypass."""
-    from nemo_platform_plugin.authz import AuthzContribution
-    from nemo_platform_plugin.authz_discovery import PluginAuthzResult
+    from nemo_helix_plugin.authz import AuthzContribution
+    from nemo_helix_plugin.authz_discovery import PluginAuthzResult
 
     degraded = PluginAuthzResult(
         key="bad",
@@ -234,8 +234,8 @@ def test_degraded_plugin_fences_both_key_and_mount_name(monkeypatch):
     """When a degraded plugin's declared mount name diverges from its entry-point key (the
     name==key invariant is only warned, not enforced), the fence must cover both /apis/<key>
     and /apis/<name> — the runner mounts the plugin's real routes at /apis/<name>."""
-    from nemo_platform_plugin.authz import AuthzContribution
-    from nemo_platform_plugin.authz_discovery import PluginAuthzResult
+    from nemo_helix_plugin.authz import AuthzContribution
+    from nemo_helix_plugin.authz_discovery import PluginAuthzResult
 
     degraded = PluginAuthzResult(
         key="bad",

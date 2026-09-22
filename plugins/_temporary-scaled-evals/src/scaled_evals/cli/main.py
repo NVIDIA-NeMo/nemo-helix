@@ -48,7 +48,7 @@ from .client import (
 )
 
 VISIBILITY = ["private", "team", "org", "public"]
-CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nmp", "openshift", "switchyard"]
+CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nhx", "openshift", "switchyard"]
 CONFIG_PROFILE_TYPE = ["harbor", "gym", "switchyard", "intake"]
 FRAMEWORK = ["harbor", "nemo_gym"]
 ORDER = ["asc", "desc"]
@@ -1463,7 +1463,7 @@ def credential() -> None:
     "--provider",
     type=click.Choice(CREDENTIAL_PROVIDER),
     required=True,
-    help="Secret category; model providers carry a key, nmp/openshift carry yaml or key payloads.",
+    help="Secret category; model providers carry a key, nhx/openshift carry yaml or key payloads.",
 )
 @click.option("--key", default=None, help="Single-string secret (model API key).")
 @click.option("--yaml", "yaml_", default=None, help="Structured secret blob, inline or @file.")

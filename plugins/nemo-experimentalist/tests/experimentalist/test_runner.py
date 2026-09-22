@@ -28,7 +28,7 @@ from nemo_experimentalist_plugin.experimentalist.roles import Strategy
 from nemo_experimentalist_plugin.experimentalist.runner import ExperimentRunner
 from nemo_experimentalist_plugin.experimentalist.seam import StrategyContext
 from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.config import Configuration
+from nemo_helix_plugin.config import Configuration
 
 
 class RecordingStrategy(Strategy):

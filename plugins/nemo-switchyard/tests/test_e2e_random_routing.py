@@ -13,12 +13,12 @@ Shows the complete request → route → mocked-backend → response flow:
 from __future__ import annotations
 
 import pytest
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     InferenceMiddlewareContext,
     InferenceRequest,
 )
-from nemo_platform_plugin.inference_middleware_models import (
+from nemo_helix_plugin.inference_middleware_models import (
     MiddlewareCall,
     VirtualModel,
     VirtualModelInferenceConfig,

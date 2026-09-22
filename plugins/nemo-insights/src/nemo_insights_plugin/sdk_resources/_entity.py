@@ -6,7 +6,7 @@
 from datetime import datetime
 from typing import TypeVar
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 
 _EntityT = TypeVar("_EntityT", bound=NemoEntity)
 

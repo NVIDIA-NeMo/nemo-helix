@@ -70,12 +70,12 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 )
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
-from nemo_platform_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
-from nemo_platform_plugin.refs import (
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
+from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
+from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN as FILESET_REF_PATTERN,
 )
-from nemo_platform_plugin.schema import DatetimeFilter, Filter
+from nemo_helix_plugin.schema import DatetimeFilter, Filter
 from pydantic import BaseModel, ConfigDict, Field
 
 #: A stored task's content, discriminated by which runner executes it. Widen with more members as
@@ -89,7 +89,7 @@ class DataFilter(Filter):
     Implements the duck-typed hooks ``make_filter_dep`` looks for, so a custom-field filter (e.g.
     ``metric_type`` or ``job_id``) is rewritten to ``data.<field>`` for the entity store. The plain
     ``Filter`` does no translation, so an un-prefixed custom field reaches the store unresolved and
-    500s. (The richer ``nmp.common`` filter does this, but plugins can't depend on it — minimal port.)
+    500s. (The richer ``nhx.common`` filter does this, but plugins can't depend on it — minimal port.)
     """
 
     @classmethod

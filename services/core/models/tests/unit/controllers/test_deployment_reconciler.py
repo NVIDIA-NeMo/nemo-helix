@@ -9,14 +9,14 @@ from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nmp.core.models.config import ControllerConfig
-from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
-from nmp.core.models.controllers.backends.registry import BackendRegistry
-from nmp.core.models.controllers.context import ModelContext
-from nmp.core.models.controllers.deployment_reconciler import ModelDeploymentReconciler
-from nmp.core.models.controllers.entity_cache import ModelEntityCache
-from nmp.core.models.schemas import ModelDeployment
+from nemo_helix import AsyncNeMoHelix
+from nhx.core.models.config import ControllerConfig
+from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate
+from nhx.core.models.controllers.backends.registry import BackendRegistry
+from nhx.core.models.controllers.context import ModelContext
+from nhx.core.models.controllers.deployment_reconciler import ModelDeploymentReconciler
+from nhx.core.models.controllers.entity_cache import ModelEntityCache
+from nhx.core.models.schemas import ModelDeployment
 
 from .conftest import (
     _ModelResponse,
@@ -63,8 +63,8 @@ def _request_body_call(method: AsyncMock, index: int = -1) -> dict[str, object]:
 
 @pytest.fixture
 def mock_models_sdk():
-    """Create a mock AsyncNeMoPlatform SDK."""
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    """Create a mock AsyncNeMoHelix SDK."""
+    sdk = MagicMock(spec=AsyncNeMoHelix)
     sdk.models_client = make_async_models_client()
     return sdk
 
@@ -75,11 +75,11 @@ def _patch_entity_cache_client_from_platform(mock_models_sdk):
     back to the mock typed client on ``mock_models_sdk.models_client``."""
     with (
         patch(
-            "nmp.core.models.controllers.entity_cache.client_from_platform",
+            "nhx.core.models.controllers.entity_cache.client_from_platform",
             side_effect=lambda sdk, cls: sdk.models_client,
         ),
         patch(
-            "nmp.core.models.controllers.deployment_reconciler.client_from_platform",
+            "nhx.core.models.controllers.deployment_reconciler.client_from_platform",
             side_effect=lambda sdk, cls: sdk.models_client,
         ),
     ):
@@ -220,7 +220,7 @@ async def test_reconcile_individual_deployment_monitor_ready_no_message_logs_deb
     status_update = DeploymentStatusUpdate(status="READY", status_message="", host_url=None)
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
-    with caplog.at_level(logging.DEBUG, logger="nmp.core.models.controllers.deployment_reconciler"):
+    with caplog.at_level(logging.DEBUG, logger="nhx.core.models.controllers.deployment_reconciler"):
         await reconciler._reconcile_individual_deployment(
             deployment,
             AsyncMock(),
@@ -242,7 +242,7 @@ async def test_reconcile_individual_deployment_monitor_ready_with_message_logs_i
     status_update = DeploymentStatusUpdate(status="READY", status_message="NIM loading", host_url=None)
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.models.controllers.deployment_reconciler"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.models.controllers.deployment_reconciler"):
         await reconciler._reconcile_individual_deployment(
             deployment,
             AsyncMock(),
@@ -414,7 +414,7 @@ async def test_ensure_model_provider_creates_when_not_exists(reconciler, make_de
 
 
 @pytest.mark.asyncio
-@patch("nmp.core.models.controllers.deployment_reconciler.uuid.uuid4")
+@patch("nhx.core.models.controllers.deployment_reconciler.uuid.uuid4")
 async def test_ensure_model_provider_handles_name_collision(mock_uuid, reconciler, make_deployment):
     """Test that ensure_model_provider creates provider with UUID suffix when name collision occurs."""
     # Mock UUID to return predictable value
@@ -1205,7 +1205,7 @@ async def test_successful_status_clears_drift_state(reconciler, mock_backend_reg
     )
 
     # Pre-populate drift recovery state via cache internals (acceptable for tests)
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(attempts=2)
 
@@ -1248,7 +1248,7 @@ async def test_pending_status_preserves_drift_state(reconciler, mock_backend_reg
     )
 
     # Pre-populate drift recovery state (simulating a previous recovery attempt)
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(attempts=2)
 
@@ -1292,7 +1292,7 @@ async def test_drift_recovery_max_retries_exceeded(reconciler, mock_backend_regi
     reconciler._drift_recovery_cache._max_attempts = 3
 
     # Pre-populate drift recovery state at max attempts
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(attempts=3)
 
@@ -1344,7 +1344,7 @@ async def test_drift_recovery_respects_backoff(reconciler, mock_backend_registry
     reconciler._drift_recovery_cache._max_delay_seconds = 300
 
     # Pre-populate drift recovery state with recent attempt
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(
         attempts=1,
@@ -1396,7 +1396,7 @@ async def test_drift_recovery_proceeds_after_backoff(reconciler, mock_backend_re
     reconciler._drift_recovery_cache._max_delay_seconds = 300
 
     # Pre-populate drift recovery state with old attempt (backoff expired)
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(
         attempts=1,
@@ -1532,7 +1532,7 @@ async def test_unknown_status_max_retries_sets_error(reconciler, mock_backend_re
     reconciler._drift_recovery_cache._max_attempts = 3
 
     # Pre-populate state at max attempts
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(attempts=3)
 
@@ -1576,7 +1576,7 @@ async def test_unknown_status_respects_backoff(reconciler, mock_backend_registry
     reconciler._drift_recovery_cache._base_delay_seconds = 60
 
     # Pre-populate state with recent attempt
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(
         attempts=1,
@@ -1619,7 +1619,7 @@ async def test_unknown_status_clears_on_recovery(reconciler, mock_backend_regist
     )
 
     # Pre-populate recovery state (from previous UNKNOWN attempts)
-    from nmp.core.models.controllers.deployment_reconciler import DriftRecoveryState
+    from nhx.core.models.controllers.deployment_reconciler import DriftRecoveryState
 
     reconciler._drift_recovery_cache._states["default/test-deployment"] = DriftRecoveryState(attempts=2)
 
@@ -2024,7 +2024,7 @@ async def test_gc_ttl_boundary_parametrized(mock_models_sdk, mock_backend_regist
         updated_at=now - timedelta(seconds=age_seconds),
     )
 
-    with patch("nmp.core.models.controllers.deployment_reconciler.datetime") as mock_datetime:
+    with patch("nhx.core.models.controllers.deployment_reconciler.datetime") as mock_datetime:
         mock_datetime.now.return_value = now
         await reconciler.gc_error_deployments([dep])
 

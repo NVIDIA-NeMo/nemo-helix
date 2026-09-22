@@ -4,7 +4,7 @@
 [project]
 name = "nemo-experimentalist-plugin"
 version = "0.1.0"
-description = "NeMo Experimentalist plugin for NeMo Platform."
+description = "NeMo Experimentalist plugin for NeMo Helix."
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "pydantic>=2",
@@ -16,8 +16,8 @@ dependencies = [
     "nooa>=0.0.9",
     "pyyaml>=6.0.3",
     "nemo-insights-plugin",
-    "nemo-platform",
-    "nemo-platform-plugin",
+    "nemo-helix",
+    "nemo-helix-plugin",
     "tomlkit>=0.13.3",
 ]
 

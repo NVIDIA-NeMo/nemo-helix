@@ -942,7 +942,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1130,7 +1130,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1162,7 +1162,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1194,7 +1194,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -1424,7 +1424,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1612,7 +1612,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1644,7 +1644,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1676,7 +1676,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -1714,7 +1714,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1902,7 +1902,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1934,7 +1934,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1966,7 +1966,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2100,7 +2100,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2288,7 +2288,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -2320,7 +2320,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2352,7 +2352,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2582,7 +2582,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2770,7 +2770,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -2802,7 +2802,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2834,7 +2834,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2872,7 +2872,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3060,7 +3060,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -3092,7 +3092,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3124,7 +3124,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -3258,7 +3258,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3446,7 +3446,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -3478,7 +3478,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3510,7 +3510,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -4572,7 +4572,7 @@ components:
         spec:
           $ref: '#/components/schemas/AnalyzeBatchConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -4652,7 +4652,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -5182,7 +5182,7 @@ components:
         output:
           title: Output
           description: "Where to write eval outputs \u2014 either a local directory\
-            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform\
+            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix\
             \ fileset reference ('name' or 'workspace/name').  Filesets are created\
             \ on demand if missing.  Defaults to <ctx.storage.persistent>/results\
             \ (the platform-injected persistent volume) when not provided."
@@ -5225,7 +5225,7 @@ components:
         \ ``None`` the job writes to ``ctx.storage.persistent /\n        \"results\"\
         `` \u2014 the platform-injected persistent volume in\n        container runs,\
         \ a tempdir under ``$TMPDIR`` for local CLI\n        runs.\n    workspace:\
-        \ NeMo Platform workspace used to scope gateway URL injection,\n        ``--agent``\
+        \ NeMo Helix workspace used to scope gateway URL injection,\n        ``--agent``\
         \ resolution, and ``--output`` fileset creation\n        when those values\
         \ are given as bare names."
     EvaluateJob:
@@ -5256,7 +5256,7 @@ components:
         spec:
           $ref: '#/components/schemas/EvaluateAgentSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5336,7 +5336,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -5492,7 +5492,7 @@ components:
         spec:
           $ref: '#/components/schemas/EvaluateSuiteConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5572,7 +5572,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -5700,7 +5700,7 @@ components:
 
         canonical ``EvaluateSuiteConfig`` fallback to ``Path.cwd()`` would
 
-        silently land in ``/tmp/nmp-subprocess-jobs/.../task-*/``.  Making
+        silently land in ``/tmp/nhx-subprocess-jobs/.../task-*/``.  Making
 
         them required at the schema layer surfaces the requirement as a
 
@@ -5833,7 +5833,7 @@ components:
         spec:
           $ref: '#/components/schemas/ExecuteAgentStepConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5913,7 +5913,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -6002,7 +6002,7 @@ components:
       - timestamp
       - message
       title: LogLine
-      description: One line shaped to match ``PlatformJobLog`` so Studio's LogViewer
+      description: One line shaped to match ``HelixJobLog`` so Studio's LogViewer
         renders it as-is.
     McpFulfillment:
       properties:
@@ -6230,7 +6230,7 @@ components:
         spec:
           $ref: '#/components/schemas/OptimizeSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -6310,7 +6310,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -6467,7 +6467,7 @@ components:
         spec:
           $ref: '#/components/schemas/OptimizeSkillsConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -6547,7 +6547,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -6628,7 +6628,7 @@ components:
           description: "Where to publish the study artifacts (optimized config, trials\
             \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
             \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
+            \ '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
             \  Filesets are created on demand if missing.  This is in addition to\
             \ the per-job artifacts that ``ctx.results.save`` always registers; it\
             \ gives remote clients a stable, addressable location to read from."
@@ -6675,7 +6675,7 @@ components:
           description: "Where to publish the study artifacts (optimized config, trials\
             \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
             \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
+            \ '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
             \  Filesets are created on demand if missing.  This is in addition to\
             \ the per-job artifacts that ``ctx.results.save`` always registers; it\
             \ gives remote clients a stable, addressable location to read from."
@@ -6793,7 +6793,7 @@ components:
         spec:
           $ref: '#/components/schemas/PackageAgentSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -6873,7 +6873,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -7038,18 +7038,18 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PlatformJobListResultResponse:
+    HelixJobListResultResponse:
       properties:
         data:
           items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
+            $ref: '#/components/schemas/HelixJobResultResponse'
           type: array
           title: Data
       type: object
       required:
       - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
+      title: HelixJobListResultResponse
+    HelixJobLog:
       properties:
         timestamp:
           type: string
@@ -7074,12 +7074,12 @@ components:
       - job_step
       - job_task
       - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
+      title: HelixJobLog
+    HelixJobLogPage:
       properties:
         data:
           items:
-            $ref: '#/components/schemas/PlatformJobLog'
+            $ref: '#/components/schemas/HelixJobLog'
           type: array
           title: Data
         total:
@@ -7097,8 +7097,8 @@ components:
       - total
       - next_page
       - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
+      title: HelixJobLogPage
+    HelixJobResultResponse:
       properties:
         name:
           type: string
@@ -7135,8 +7135,8 @@ components:
       - workspace
       - artifact_url
       - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
+      title: HelixJobResultResponse
+    HelixJobStatus:
       type: string
       enum:
       - created
@@ -7149,14 +7149,14 @@ components:
       - paused
       - pausing
       - resuming
-      title: PlatformJobStatus
+      title: HelixJobStatus
       description: 'Enumeration of possible job statuses.
 
 
         This enum represents the various states a job can be in during its lifecycle,
 
         from creation to a terminal state.'
-    PlatformJobStatusResponse:
+    HelixJobStatusResponse:
       properties:
         id:
           type: string
@@ -7165,7 +7165,7 @@ components:
           type: string
           title: Name
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           additionalProperties: true
           type: object
@@ -7176,7 +7176,7 @@ components:
           type: object
         steps:
           items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
           type: array
           title: Steps
         created_at:
@@ -7197,8 +7197,8 @@ components:
       - steps
       - created_at
       - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
       properties:
         id:
           type: string
@@ -7207,7 +7207,7 @@ components:
           type: string
           title: Name
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           additionalProperties: true
           type: object
@@ -7218,7 +7218,7 @@ components:
           type: object
         tasks:
           items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
           type: array
           title: Tasks
         created_at:
@@ -7239,8 +7239,8 @@ components:
       - tasks
       - created_at
       - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
       properties:
         id:
           type: string
@@ -7249,7 +7249,7 @@ components:
           type: string
           title: Name
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           additionalProperties: true
           type: object
@@ -7279,7 +7279,7 @@ components:
       - error_stack
       - created_at
       - updated_at
-      title: PlatformJobTaskStatusResponse
+      title: HelixJobTaskStatusResponse
     ResolvedAgentConfig:
       properties:
         name:

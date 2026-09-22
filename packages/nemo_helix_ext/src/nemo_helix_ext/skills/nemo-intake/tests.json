@@ -1,0 +1,20 @@
+{
+  "skill": "nemo-intake",
+  "tests": [
+    { "type": "explicit", "prompt": "Use nemo-intake to instrument my agent and send its traces to Intake.", "expected_skill": "nemo-intake" },
+    { "type": "explicit", "prompt": "Upload these OpenTelemetry spans to NeMo Intake over OTLP.", "expected_skill": "nemo-intake" },
+    { "type": "implicit", "prompt": "I have OpenAI-compatible request and response logs. Make them queryable as agent telemetry.", "expected_skill": "nemo-intake" },
+    { "type": "implicit", "prompt": "Should I use OTLP, chat completions, or ATIF for these traces?", "expected_skill": "nemo-intake" },
+    { "type": "contextual", "prompt": "Connect my LangChain agent to Intake with an OpenInference exporter.", "expected_skill": "nemo-intake" },
+    { "type": "contextual", "prompt": "My runtime has generic OTel spans but no OpenInference or GenAI semantic conventions. How should I log its model calls?", "expected_skill": "nemo-intake" },
+    { "type": "contextual", "prompt": "Send telemetry from my local agent to a remote NeMo Intake deployment.", "expected_skill": "nemo-intake" },
+    { "type": "contextual", "prompt": "Attach a categorical evaluator result to this Intake span.", "expected_skill": "nemo-intake" },
+    { "type": "implicit", "prompt": "Import my historical MLflow traces and assessments into Intake.", "expected_skill": "nemo-intake" },
+    { "type": "implicit", "prompt": "Move these LangSmith runs and human feedback records into NeMo Intake.", "expected_skill": "nemo-intake" },
+    { "type": "contextual", "prompt": "Copy Phoenix spans and LLM judge annotations into Intake.", "expected_skill": "nemo-intake" },
+    { "type": "contextual", "prompt": "Bring a bounded Braintrust project log export into Intake without losing scores.", "expected_skill": "nemo-intake" },
+    { "type": "negative-control", "prompt": "Create an Experiment and Evaluation and publish my Harbor scores to the leaderboard.", "expected_skill_not": "nemo-intake" },
+    { "type": "negative-control", "prompt": "Author an LLM-as-a-judge metric and run it.", "expected_skill_not": "nemo-intake" },
+    { "type": "negative-control", "prompt": "Show the health of every NeMo Helix service.", "expected_skill_not": "nemo-intake" }
+  ]
+}

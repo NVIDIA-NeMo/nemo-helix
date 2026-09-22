@@ -5,16 +5,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from nemo_experimentalist_plugin.client import make_client
-from nemo_platform_plugin.client.config.models import OAuthUser
-from nemo_platform_plugin.client.oidc import NMPOIDCConfig
+from nemo_helix_plugin.client.config.models import OAuthUser
+from nemo_helix_plugin.client.oidc import NHXOIDCConfig
 from pydantic import SecretStr
 
-REMOTE_URL = "https://nemo-platform.example.com"
+REMOTE_URL = "https://nemo-helix.example.com"
 
 
 def test_no_base_url_uses_active_context() -> None:
     with (
-        patch("nemo_experimentalist_plugin.client.discover_nmp_config") as discover,
+        patch("nemo_experimentalist_plugin.client.discover_nhx_config") as discover,
         patch("nemo_experimentalist_plugin.client.AsyncNemoClient") as client_cls,
     ):
         client = make_client(None)
@@ -32,7 +32,7 @@ def test_loopback_uses_direct_mode_without_auth_discovery(host: str) -> None:
 
     with (
         patch("nemo_experimentalist_plugin.client.Config.get_default_config_path", return_value=config_path),
-        patch("nemo_experimentalist_plugin.client.discover_nmp_config") as discover,
+        patch("nemo_experimentalist_plugin.client.discover_nhx_config") as discover,
         patch("nemo_experimentalist_plugin.client.AsyncNemoClient") as client_cls,
     ):
         client = make_client(base_url)
@@ -48,7 +48,7 @@ def test_remote_without_local_config_uses_direct_mode_without_auth_discovery() -
 
     with (
         patch("nemo_experimentalist_plugin.client.Config.get_default_config_path", return_value=config_path),
-        patch("nemo_experimentalist_plugin.client.discover_nmp_config") as discover,
+        patch("nemo_experimentalist_plugin.client.discover_nhx_config") as discover,
         patch("nemo_experimentalist_plugin.client.AsyncNemoClient") as client_cls,
     ):
         client = make_client(REMOTE_URL)
@@ -65,8 +65,8 @@ def test_remote_no_auth_ignores_unrelated_local_oauth_context() -> None:
     with (
         patch("nemo_experimentalist_plugin.client.Config.get_default_config_path", return_value=config_path),
         patch(
-            "nemo_experimentalist_plugin.client.discover_nmp_config",
-            return_value=NMPOIDCConfig(auth_enabled=False),
+            "nemo_experimentalist_plugin.client.discover_nhx_config",
+            return_value=NHXOIDCConfig(auth_enabled=False),
         ) as discover,
         patch("nemo_experimentalist_plugin.client.AsyncNemoClient") as client_cls,
     ):
@@ -78,15 +78,15 @@ def test_remote_no_auth_ignores_unrelated_local_oauth_context() -> None:
 
 
 def test_remote_auth_rejects_plaintext_http() -> None:
-    base_url = "http://nemo-platform.example.com"
+    base_url = "http://nemo-helix.example.com"
     config_path = MagicMock()
     config_path.exists.return_value = True
 
     with (
         patch("nemo_experimentalist_plugin.client.Config.get_default_config_path", return_value=config_path),
         patch(
-            "nemo_experimentalist_plugin.client.discover_nmp_config",
-            return_value=NMPOIDCConfig(
+            "nemo_experimentalist_plugin.client.discover_nhx_config",
+            return_value=NHXOIDCConfig(
                 auth_enabled=True,
                 client_id="nemo-cli",
                 token_endpoint="https://auth.example.com/token",
@@ -120,8 +120,8 @@ def test_remote_auth_uses_local_oauth_context() -> None:
         patch("nemo_experimentalist_plugin.client.Config.get_default_config_path", return_value=config_path),
         patch("nemo_experimentalist_plugin.client.Config.load", return_value=config) as load_config,
         patch(
-            "nemo_experimentalist_plugin.client.discover_nmp_config",
-            return_value=NMPOIDCConfig(
+            "nemo_experimentalist_plugin.client.discover_nhx_config",
+            return_value=NHXOIDCConfig(
                 auth_enabled=True,
                 client_id="nemo-cli",
                 token_endpoint="https://auth.example.com/token",

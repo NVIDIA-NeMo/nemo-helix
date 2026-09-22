@@ -15,7 +15,7 @@
 #     --aut-agent-config packages/nemo_evaluator_sdk/examples/run_agent_eval/aut_agent.workspace.example.yml \
 #     --agent-model vm-opus-nemotron-random --verify --output-dir ~/rae-workspace
 #
-# Prerequisites: Docker, the `nmp-agentic-base:latest` base image, NVIDIA_API_KEY,
+# Prerequisites: Docker, the `nhx-agentic-base:latest` base image, NVIDIA_API_KEY,
 # and an inference-gateway model entity (set INFERENCE_NVIDIA_API_KEY so
 # providers.yaml seeds `vm-opus-nemotron-random`, then pass it as --agent-model).
 #

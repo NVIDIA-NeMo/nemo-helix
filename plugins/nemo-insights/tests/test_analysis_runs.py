@@ -27,15 +27,15 @@ from nemo_insights_plugin.analysis_runs import (
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.agents.client import AsyncAgentsClient
-from nemo_platform_plugin.agents.types import CreateExecuteJobRequest
-from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
-from nemo_platform_plugin.config import clear_nemo_config_override, set_nemo_config_override
-from nemo_platform_plugin.entities.base import ListResponse, PaginationInfo
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
-from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.agents.types import CreateExecuteJobRequest
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
+from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
+from nemo_helix_plugin.entities.base import ListResponse, PaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from pydantic import ValidationError
 
 DEFAULT_MODEL = "default/big"
@@ -129,7 +129,7 @@ class _TypedModelsClient:
 
 
 class _StubSdk:
-    """Minimal stand-in for the request-scoped ``AsyncNeMoPlatform``."""
+    """Minimal stand-in for the request-scoped ``AsyncNeMoHelix``."""
 
     def __init__(self, jobs: _StubExecuteJobs, models: _StubModels | None = None) -> None:
         self.jobs = jobs
@@ -183,9 +183,9 @@ class _StubEntities:
         )
 
 
-def _sdk(jobs: _StubExecuteJobs, models: _StubModels | None = None) -> AsyncNeMoPlatform:
+def _sdk(jobs: _StubExecuteJobs, models: _StubModels | None = None) -> AsyncNeMoHelix:
     """The route touches ``sdk.agents.jobs.execute`` and ``sdk.models``; cast past the concrete type."""
-    return cast(AsyncNeMoPlatform, _StubSdk(jobs, models))
+    return cast(AsyncNeMoHelix, _StubSdk(jobs, models))
 
 
 def _entities(stub: _StubEntities) -> NemoEntitiesClient:

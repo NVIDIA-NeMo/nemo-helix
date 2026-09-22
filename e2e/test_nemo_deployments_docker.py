@@ -27,13 +27,13 @@ How it runs, and where:
   The harness runs both the deployments service and its reconcile controller.
 - The workloads use small public images (``alpine`` / ``nginx``); the executor
   pulls them on demand (``pull_images: true`` in the config), so no prebuilt
-  ``nmp-api`` image is needed here — hence no ``needs_nmp_api_image`` marker.
+  ``nhx-api`` image is needed here — hence no ``needs_nhx_api_image`` marker.
   The image refs are env-overridable (see ``e2e.deployments_helpers``) to match
   the ``POSTGRES_IMAGE`` / ``BUSYBOX_IMAGE`` knobs the k8s e2e install exposes,
   should a DockerHub mirror ever be introduced.
 - ``subprocess_only``: this module drives its own subprocess-harness platform
   configured with a docker deployments executor. It must NOT run against an
-  external cluster (``NMP_BASE_URL`` set), where its ``e2e_config`` / harness are
+  external cluster (``NHX_BASE_URL`` set), where its ``e2e_config`` / harness are
   ignored and no docker executor exists.
 - Docker-only workloads run on the host daemon directly. Unlike the agents docker
   test, nothing here needs the docker-bridge base-url rewrite (no in-container
@@ -45,7 +45,7 @@ How it runs, and where:
 from __future__ import annotations
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from e2e.deployments_helpers import (
     run_job_deployment_lifecycle,
@@ -99,7 +99,7 @@ def _skip_without_docker() -> None:
         pytest.skip(f"Docker daemon not reachable: {exc}")
 
 
-def test_docker_service_deployment_reaches_ready(sdk: NeMoPlatform, workspace: str) -> None:
+def test_docker_service_deployment_reaches_ready(sdk: NeMoHelix, workspace: str) -> None:
     """A restart_policy=Always nginx service reconciles to READY with an endpoint."""
     _skip_without_docker()
     run_service_deployment_lifecycle(
@@ -110,7 +110,7 @@ def test_docker_service_deployment_reaches_ready(sdk: NeMoPlatform, workspace: s
     )
 
 
-def test_docker_job_deployment_reaches_succeeded(sdk: NeMoPlatform, workspace: str) -> None:
+def test_docker_job_deployment_reaches_succeeded(sdk: NeMoHelix, workspace: str) -> None:
     """A restart_policy=Never alpine job runs to completion (SUCCEEDED, exit 0)."""
     _skip_without_docker()
     run_job_deployment_lifecycle(
@@ -121,7 +121,7 @@ def test_docker_job_deployment_reaches_succeeded(sdk: NeMoPlatform, workspace: s
     )
 
 
-def test_docker_volume_is_provisioned_mounted_and_readable(sdk: NeMoPlatform, workspace: str) -> None:
+def test_docker_volume_is_provisioned_mounted_and_readable(sdk: NeMoHelix, workspace: str) -> None:
     """A named volume is provisioned, mounted into a job, written to, and read back."""
     _skip_without_docker()
     run_volume_deployment_round_trip(

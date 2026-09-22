@@ -17,9 +17,9 @@ from typing import Any
 from nemo_fabric_adapter_contract import models as contract
 from nemo_fabric_adapters.common import lifecycle
 from nemo_insights_plugin.analyst.run import run_analyst_change_set
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
+from nemo_helix_plugin.sdk_provider import get_async_task_sdk
+from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 from nemo_relay import plugin as relay_plugin
 
 logger = logging.getLogger(__name__)
@@ -105,12 +105,12 @@ class InsightsAnalystRuntime:
         workspace = (
             _string_setting(self._settings, "workspace")
             or _string_context(request.context, "job_workspace")
-            or os.environ.get("NMP_WORKSPACE")
+            or os.environ.get("NHX_WORKSPACE")
             or "default"
         )
         base_url = (
             _string_setting(self._settings, "base_url")
-            or os.environ.get("NMP_BASE_URL")
+            or os.environ.get("NHX_BASE_URL")
             or os.environ.get("NEMO_BASE_URL")
         )
         # Every settings read can raise, so resolve them before opening the

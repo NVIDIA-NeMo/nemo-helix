@@ -14,13 +14,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import pytest
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     InferenceMiddlewareContext,
     InferenceRequest,
     InferenceResponse,
 )
-from nemo_platform_plugin.inference_middleware_models import (
+from nemo_helix_plugin.inference_middleware_models import (
     MiddlewareCall,
     VirtualModel,
     VirtualModelInferenceConfig,

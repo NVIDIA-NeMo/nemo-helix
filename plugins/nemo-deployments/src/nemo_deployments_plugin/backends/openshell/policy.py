@@ -54,7 +54,7 @@ DEFAULT_EGRESS_BINARIES: tuple[str, ...] = ("/workspace/.venv/bin/python3.13", "
 
 # Map key for the mandatory platform egress rule. Reserved: injected into every
 # policy, so a user rule at this key is overwritten rather than merged.
-PLATFORM_EGRESS_KEY = "nemo_platform"
+PLATFORM_EGRESS_KEY = "nemo_helix"
 
 
 # Values the supervisor recognises for the two free-form string fields that fail OPEN when
@@ -82,8 +82,8 @@ class SandboxFilesystem:
 
 
 @dataclass(frozen=True)
-class PlatformEgress:
-    """The one egress a sandbox must always be allowed: the NeMo platform (Inference Gateway/entities/files).
+class HelixEgress:
+    """The one egress a sandbox must always be allowed: the NeMo Helix (Inference Gateway/entities/files).
 
     Environment-specific (docker driver -> host.docker.internal:8080; k8s -> the
     platform Service). This is the sole allowed rule in a generated default-deny
@@ -98,7 +98,7 @@ class PlatformEgress:
     access: str = "full"
     enforcement: str = "enforce"
     binaries: tuple[str, ...] = DEFAULT_EGRESS_BINARIES
-    name: str = "nemo-platform-egress"
+    name: str = "nemo-helix-egress"
     key: str = PLATFORM_EGRESS_KEY
 
 
@@ -142,7 +142,7 @@ def load_sandbox_policy(path: str) -> Any:
     return build_sandbox_policy(normalize_loaded_policy(load_policy_dict(path)))
 
 
-def generate_policy_dict(*, filesystem: SandboxFilesystem, egress: PlatformEgress | None) -> dict[str, Any]:
+def generate_policy_dict(*, filesystem: SandboxFilesystem, egress: HelixEgress | None) -> dict[str, Any]:
     """Generate a default-deny policy mapping.
 
     When ``egress`` is given, the platform egress rule is the sole allowed network
@@ -163,7 +163,7 @@ def generate_policy_dict(*, filesystem: SandboxFilesystem, egress: PlatformEgres
     }
 
 
-def inject_platform_egress(policy: dict[str, Any], egress: PlatformEgress) -> dict[str, Any]:
+def inject_platform_egress(policy: dict[str, Any], egress: HelixEgress) -> dict[str, Any]:
     """Ensure the mandatory platform egress rule is present, overwriting any rule at its key.
 
     Applied to every policy (generated, static YAML, or a future user override) so a
@@ -177,7 +177,7 @@ def inject_platform_egress(policy: dict[str, Any], egress: PlatformEgress) -> di
     return policy
 
 
-def generate_sandbox_policy(*, filesystem: SandboxFilesystem, egress: PlatformEgress | None = None) -> Any:
+def generate_sandbox_policy(*, filesystem: SandboxFilesystem, egress: HelixEgress | None = None) -> Any:
     """Generate a default-deny ``SandboxPolicy`` proto from structured inputs.
 
     ``egress=None`` yields a policy with no egress at all (gateway-managed inference).
@@ -258,7 +258,7 @@ def build_sandbox_policy(data: dict[str, Any]) -> Any:
     return policy
 
 
-def _platform_egress_rule(egress: PlatformEgress) -> dict[str, Any]:
+def _platform_egress_rule(egress: HelixEgress) -> dict[str, Any]:
     """The platform egress rule in the policy-YAML dict shape."""
     endpoint: dict[str, Any] = {
         "host": egress.host,

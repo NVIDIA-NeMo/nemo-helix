@@ -22,7 +22,7 @@ from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_nat
 )
 from nemo_experimentalist_plugin.experimentalist.components.trace_analyzer import Diagnostic
 from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.nooa_model_client import (
+from nemo_helix_plugin.nooa_model_client import (
     activate_model_clients,
     configured_model_refs,
     get_fast_model,

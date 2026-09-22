@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceRequest,
@@ -40,7 +40,7 @@ from nemo_switchyard._factory import (
     initialize_factory_map,
 )
 from nemo_switchyard._format import build_chat_request, vm_models_for_switchyard
-from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 from switchyard.lib.proxy_context import (
     CTX_ORIGINAL_REQUEST,
     CTX_PROXY_ACTUAL_MODEL,

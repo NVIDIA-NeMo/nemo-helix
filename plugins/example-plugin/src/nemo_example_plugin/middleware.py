@@ -3,7 +3,7 @@
 
 """Example inference middleware — keyword content filter.
 
-Demonstrates the complete :class:`~nemo_platform_plugin.inference_middleware.NemoInferenceMiddleware`
+Demonstrates the complete :class:`~nemo_helix_plugin.inference_middleware.NemoInferenceMiddleware`
 interface, including both config patterns:
 
 **Inline config** (``MiddlewareCall.config``)
@@ -83,10 +83,10 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
@@ -106,7 +106,7 @@ class ExampleMiddlewareConfigData(BaseModel):
     regardless of whether the source was an inline dict or a stored entity.
 
     :class:`~nemo_example_plugin.middleware_config.ExampleMiddlewareConfig`
-    (a :class:`~nemo_platform_plugin.entity.NemoEntity`) is only used for entity store
+    (a :class:`~nemo_helix_plugin.entity.NemoEntity`) is only used for entity store
     persistence.  :meth:`~ExampleInferenceMiddleware.validate_middleware_config`
     always converts to this type before returning.
     """
@@ -123,7 +123,7 @@ class ExampleInferenceMiddleware(NemoInferenceMiddleware):
 
     **Request phase** (:meth:`process_request`): if any ``blocked_keyword``
     appears in the user's message content, return an
-    :class:`~nemo_platform_plugin.inference_middleware.ImmediateResponse` with a refusal
+    :class:`~nemo_helix_plugin.inference_middleware.ImmediateResponse` with a refusal
     message — the backend is never called.
 
     **Response phase** (:meth:`process_response`): replace any ``blocked_keyword``
@@ -149,7 +149,7 @@ class ExampleInferenceMiddleware(NemoInferenceMiddleware):
         Logs a warning if no model entities are visible — this does not
         prevent the plugin from loading.
         """
-        from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+        from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
         sdk = get_async_platform_sdk(as_service="nemo-example-middleware", internal=True)
         self._entity_client = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
@@ -295,13 +295,13 @@ class ExampleInferenceMiddleware(NemoInferenceMiddleware):
         """Block requests whose message content contains a prohibited keyword.
 
         Extracts text from every ``messages[*].content`` field (Chat Completions
-        format).  Returns an :class:`~nemo_platform_plugin.inference_middleware.ImmediateResponse`
+        format).  Returns an :class:`~nemo_helix_plugin.inference_middleware.ImmediateResponse`
         with a refusal payload if any keyword matches — the backend is never
         called.  Otherwise returns the request unchanged.
 
-        Returning :class:`~nemo_platform_plugin.inference_middleware.ImmediateResponse`
+        Returning :class:`~nemo_helix_plugin.inference_middleware.ImmediateResponse`
         is the idiomatic way to implement a *blocker* — prefer it over raising
-        :class:`~nemo_platform_plugin.inference_middleware.InferenceMiddlewareError` when
+        :class:`~nemo_helix_plugin.inference_middleware.InferenceMiddlewareError` when
         you want the caller to receive a well-formed (non-error) refusal rather
         than an HTTP error status.
         """

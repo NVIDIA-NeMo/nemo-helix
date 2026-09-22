@@ -19,8 +19,8 @@ from nemo_insights_plugin.entities import (
     Insight,
     InsightStatus,
 )
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.schema import NemoListResponse
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.schema import NemoListResponse
 from pydantic import BaseModel, Field, StringConstraints
 
 
@@ -155,7 +155,7 @@ class AnalysisRunResponse(BaseModel):
         failed.
         """
         status = self.job_status
-        return status in {terminal.value for terminal in PlatformJobStatus.terminals()}
+        return status in {terminal.value for terminal in HelixJobStatus.terminals()}
 
 
 class UpdateAnalysisRunStatusRequest(BaseModel):

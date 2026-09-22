@@ -3,13 +3,13 @@
 
 # Tool Calling Evaluation - BFCL (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 
-Set up and run a BFCL-style tool calling evaluation using the `nmp` CLI. This evaluation tests whether a model's tool call predictions match expected ground truth.
+Set up and run a BFCL-style tool calling evaluation using the `nhx` CLI. This evaluation tests whether a model's tool call predictions match expected ground truth.
 
 1. **Create a workspace** named `tool-calling-eval-workspace`
 

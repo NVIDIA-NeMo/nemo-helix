@@ -12,10 +12,10 @@ import pytest
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.controller import InsightsAnalysisController
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
-from nemo_platform_plugin.client.errors import NotFoundError, raise_for_status
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.errors import NotFoundError, raise_for_status
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 NOW = datetime(2026, 9, 18, 12, tzinfo=timezone.utc)
 PREVIOUS = NOW - timedelta(days=1)
@@ -37,7 +37,7 @@ def _pending() -> AnalysisRunStatus:
     )
 
 
-def _controller(job_status: PlatformJobStatus = PlatformJobStatus.COMPLETED):
+def _controller(job_status: HelixJobStatus = HelixJobStatus.COMPLETED):
     controller = InsightsAnalysisController()
     entities = AsyncMock(spec=NemoEntitiesClient)
     entities.update.side_effect = lambda status: status
@@ -77,7 +77,7 @@ async def test_success_without_attempt_timestamp_preserves_cursor(previous_curso
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("job_status", PlatformJobStatus.non_terminals())
+@pytest.mark.parametrize("job_status", HelixJobStatus.non_terminals())
 async def test_active_job_leaves_pending_attempt_unchanged(job_status) -> None:
     controller, entities, _ = _controller(job_status)
     pending = _pending()
@@ -86,7 +86,7 @@ async def test_active_job_leaves_pending_attempt_unchanged(job_status) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("job_status", [PlatformJobStatus.ERROR, PlatformJobStatus.CANCELLED])
+@pytest.mark.parametrize("job_status", [HelixJobStatus.ERROR, HelixJobStatus.CANCELLED])
 async def test_failed_or_cancelled_job_preserves_cursor(job_status) -> None:
     controller, _, _ = _controller(job_status)
     status = await controller._reconcile_run(_config(), _pending())
@@ -189,7 +189,7 @@ async def test_overlap_query_only_reads_active_jobs_and_matches_agent(agent, exp
     jobs.list_jobs.return_value = MagicMock(items=items)
     assert await controller._has_active_job(_config()) is expected
     query = json.loads(jobs.list_jobs.await_args.kwargs["query_params"]["filter"])
-    assert set(query["status"]["$in"]) == {status.value for status in PlatformJobStatus.non_terminals()}
+    assert set(query["status"]["$in"]) == {status.value for status in HelixJobStatus.non_terminals()}
     assert query["source"] == {"$in": ["nemo-agents-plugin-execute", "insights"]}
     jobs.get_job.assert_not_awaited()
 
@@ -202,7 +202,7 @@ async def test_overlap_query_failure_defers_submission() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("job_status", [PlatformJobStatus.COMPLETED, PlatformJobStatus.ACTIVE])
+@pytest.mark.parametrize("job_status", [HelixJobStatus.COMPLETED, HelixJobStatus.ACTIVE])
 @pytest.mark.parametrize("agent_tag", ["another-agent", None])
 async def test_wrong_or_missing_agent_tag_preserves_cursor(job_status, agent_tag) -> None:
     controller, entities, jobs = _controller(job_status)
@@ -232,7 +232,7 @@ async def test_same_prefix_agents_submitted_together_reconcile_only_their_own_jo
         assert attempts[agent].last_submitted_job == name
         assert name not in submitted_jobs
         submitted_jobs[name] = MagicMock(
-            status=PlatformJobStatus.COMPLETED, custom_fields={"insights_analysis_agent": agent}
+            status=HelixJobStatus.COMPLETED, custom_fields={"insights_analysis_agent": agent}
         )
 
     async def get_job(*, workspace, name):

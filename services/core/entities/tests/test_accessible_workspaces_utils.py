@@ -3,8 +3,8 @@
 
 """Unit tests for workspace access helpers in api/v2/utils.py."""
 
-from nmp.common.auth.models import Principal
-from nmp.core.entities.api.v2.utils import _applicable_principal_strings
+from nhx.common.auth.models import Principal
+from nhx.core.entities.api.v2.utils import _applicable_principal_strings
 
 
 def test_applicable_principal_strings_id_only() -> None:

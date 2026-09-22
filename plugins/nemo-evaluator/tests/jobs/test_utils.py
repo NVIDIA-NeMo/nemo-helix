@@ -9,8 +9,8 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 from nemo_evaluator.jobs.utils import async_client_from_sync_client, run_with_isolated_async_client
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from pytest_mock import MockerFixture
 
 type AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
@@ -55,7 +55,7 @@ def test_run_with_isolated_async_client_preserves_request_event_hooks(mocker: Mo
     async_client = AsyncFilesClient(
         base_url="http://platform.test",
         workspace="default",
-        default_headers={"X-NMP-Principal-Id": "principal-123"},
+        default_headers={"X-NHX-Principal-Id": "principal-123"},
         http_client=source_http_client,
     )
     async_client_cls = httpx.AsyncClient
@@ -71,7 +71,7 @@ def test_run_with_isolated_async_client_preserves_request_event_hooks(mocker: Mo
     async def fn(client: AsyncFilesClient) -> int:
         http_client = client._client
         assert isinstance(http_client, async_client_cls)
-        assert client.default_headers == {"X-NMP-Principal-Id": "principal-123"}
+        assert client.default_headers == {"X-NHX-Principal-Id": "principal-123"}
         response = await http_client.get("http://platform.test/ping")
         return response.status_code
 
@@ -93,7 +93,7 @@ def test_async_client_from_sync_client_preserves_headers_and_request_event_hooks
     sync_client = NemoClient(
         base_url="http://platform.test",
         workspace="default",
-        default_headers={"X-NMP-Internal": "true"},
+        default_headers={"X-NHX-Internal": "true"},
         http_client=source_http_client,
     )
     async_client_cls = httpx.AsyncClient
@@ -108,7 +108,7 @@ def test_async_client_from_sync_client_preserves_headers_and_request_event_hooks
 
     with async_client_from_sync_client(sync_client) as async_client:
         assert isinstance(async_client, AsyncNemoClient)
-        assert async_client.default_headers == {"X-NMP-Internal": "true"}
+        assert async_client.default_headers == {"X-NHX-Internal": "true"}
 
         async def fn(client: AsyncNemoClient) -> int:
             http_client = client._client

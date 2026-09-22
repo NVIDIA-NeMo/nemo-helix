@@ -988,13 +988,13 @@ components:
         authProxySidecarIdentity:
           title: Authproxysidecaridentity
           description: 'Service-principal name the auth-proxy sidecar stamps (interpolated
-            into ''X-NMP-Principal-Id: service:<identity>''). Required when auth_proxy_sidecar
+            into ''X-NHX-Principal-Id: service:<identity>''). Required when auth_proxy_sidecar
             is True.'
           type: string
         authProxySidecarOnBehalfOf:
           title: Authproxysidecaronbehalfof
           description: Optional principal id the auth-proxy sidecar delegates to via
-            'X-NMP-Principal-On-Behalf-Of'. When set, the service principal acts on
+            'X-NHX-Principal-On-Behalf-Of'. When set, the service principal acts on
             behalf of this identity so the platform scopes the workload's access to
             what that principal can reach (e.g. the deployment's creator) rather than
             the service principal's full reach. Only meaningful when auth_proxy_sidecar

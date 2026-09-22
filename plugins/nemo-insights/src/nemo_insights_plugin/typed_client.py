@@ -9,9 +9,9 @@ from abc import abstractmethod
 
 from nemo_insights_plugin.entities import Insight
 from nemo_insights_plugin.sdk_resources._entity import entity_from_response
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.client.endpoint import get
-from nemo_platform_plugin.client.method import method
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.endpoint import get
+from nemo_helix_plugin.client.method import method
 
 _INSIGHTS_BASE = "/apis/insights/v2/workspaces/{workspace}"
 

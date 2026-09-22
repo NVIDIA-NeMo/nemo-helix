@@ -16,15 +16,15 @@ from nemo_auditor.api.v2._perms import AuditTargetPerms
 from nemo_auditor.api.v2.schemas import CreateAuditTargetRequest, TargetFilter, UpdateAuditTargetRequest
 from nemo_auditor.authz import scope
 from nemo_auditor.entities import AuditTarget
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
-from nemo_platform_plugin.jobs.openapi_utils import generate_openapi_extra_params
-from nemo_platform_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 

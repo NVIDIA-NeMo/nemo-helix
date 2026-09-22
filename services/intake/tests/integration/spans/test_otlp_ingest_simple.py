@@ -7,8 +7,8 @@ import json
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
-from nmp.intake.spans.clickhouse_client import ClickHouseSpanClient
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
+from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient
 
 
 def test_otlp_ingest_simple_llm_span(client: TestClient, make_otlp_request):

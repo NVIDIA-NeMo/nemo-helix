@@ -11,24 +11,24 @@ from urllib.parse import urlparse
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform.types.inference import ModelProvider, ServedModelMapping
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix.types.inference import ModelProvider, ServedModelMapping
+from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareError,
     InferenceRequest,
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nmp.core.inference_gateway.api.dependencies import (
+from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
     global_model_cache,
     global_virtual_model_cache,
 )
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nmp.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model, resolve_vm_for_model
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
+from nhx.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model, resolve_vm_for_model
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
 def _autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[SDKVirtualModel]:
@@ -1418,7 +1418,7 @@ def test_openai_proxy_passthrough_vm_no_middleware_unchanged(client: TestClient)
 
 
 def test_virtual_model_proxy_mock_provider_keeps_qualified_body_model(app: FastAPI, client: TestClient, mocker):
-    from nmp.core.inference_gateway.api.mock_provider.responses import (
+    from nhx.core.inference_gateway.api.mock_provider.responses import (
         MOCK_RESPONSE_MAP_HEADER,
         MOCK_SERVED_MODELS_HEADER,
     )
@@ -1431,7 +1431,7 @@ def test_virtual_model_proxy_mock_provider_keeps_qualified_body_model(app: FastA
     # resolves through ``Configuration.get_service_config`` to the @cache-d
     # baseline instance (a *different* object), so the attribute patch is lost.
     mocker.patch(
-        "nmp.core.inference_gateway.api.mock_provider.utils._get_mock_provider_prefix",
+        "nhx.core.inference_gateway.api.mock_provider.utils._get_mock_provider_prefix",
         return_value="igw-mock-",
     )
 
@@ -1479,13 +1479,13 @@ def test_virtual_model_proxy_mock_provider_keeps_qualified_body_model(app: FastA
 
 
 def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(app: FastAPI, client: TestClient, mocker):
-    from nmp.core.inference_gateway.api.mock_provider.responses import (
+    from nhx.core.inference_gateway.api.mock_provider.responses import (
         MOCK_RESPONSE_MAP_HEADER,
         MOCK_SERVED_MODELS_HEADER,
     )
 
     mocker.patch(
-        "nmp.core.inference_gateway.api.mock_provider.utils._get_mock_provider_prefix",
+        "nhx.core.inference_gateway.api.mock_provider.utils._get_mock_provider_prefix",
         return_value="igw-mock-",
     )
 

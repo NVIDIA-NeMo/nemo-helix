@@ -54,7 +54,7 @@ def _envoy_config_from_config_map(documents: list[dict]) -> dict:
     config_map = next(
         document
         for document in documents
-        if document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nemo-platform-envoy"
+        if document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nemo-helix-envoy"
     )
     return yaml.safe_load(config_map["data"]["envoy.yaml"])
 
@@ -112,7 +112,7 @@ def _validate_envoy_config(config: dict, tmp_path: Path, image: str) -> None:
             "-v",
             f"{tls_dir}:/etc/envoy/tls:ro",
             "-v",
-            f"{tls_dir}:/etc/nmp/workload-token-tls:ro",
+            f"{tls_dir}:/etc/nhx/workload-token-tls:ro",
             image,
             "--mode",
             "validate",
@@ -134,7 +134,7 @@ def test_authentik_umbrella_envoy_config_validates_with_envoy(tmp_path: Path) ->
         "-n",
         "nemo-authentik",
         "--show-only",
-        "charts/nemo-platform/templates/proxy/envoy-configmap.yaml",
+        "charts/nemo-helix/templates/proxy/envoy-configmap.yaml",
     )
 
     _validate_envoy_config(_envoy_config_from_config_map(documents), tmp_path, AUTHENTIK_UMBRELLA_ENVOY_IMAGE)

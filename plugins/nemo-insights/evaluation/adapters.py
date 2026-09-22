@@ -26,7 +26,7 @@ from evaluation.tau2run import load_tasks, policy_version, read_policy, resolve_
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
 from nemo_insights_plugin.analyst.run import run_analyst
 from nemo_insights_plugin.platform_client import make_client
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -104,7 +104,7 @@ class IntakeAdapter:
             enable_observability=cfg.get("auth") != "basic",
         )
 
-    def _basic_auth_client(self) -> AsyncNeMoPlatform:
+    def _basic_auth_client(self) -> AsyncNeMoHelix:
         """Build the basic-auth client configured for this Intake subject."""
         cfg = self.subject.config
         real_prefix = str(cfg.get("intake_path_prefix", "/api/intake")).rstrip("/") + "/"

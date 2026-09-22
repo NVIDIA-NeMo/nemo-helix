@@ -11,9 +11,9 @@ from urllib.parse import urlparse
 
 from filesets import FilesetPathError, parse_fileset_ref
 from nemo_experimentalist_plugin.entities import Dataset, DatasetRef, local_path_from_uri
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import ListFilesQueryParams
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
 
 
 @dataclass(frozen=True, slots=True)

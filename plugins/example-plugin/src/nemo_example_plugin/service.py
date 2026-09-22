@@ -8,15 +8,15 @@ Demonstrates two patterns side-by-side:
 1. **Minimal route** — the original ``/hello/{name}`` endpoint, showing the
    simplest possible plugin service with a single typed response model.  The
    greeting style is driven by :class:`~nemo_example_plugin.config.ExampleConfig`
-   (``NMP_EXAMPLE_GREETING_STYLE``), showing how config shapes route behaviour.
+   (``NHX_EXAMPLE_GREETING_STYLE``), showing how config shapes route behaviour.
 
 2. **Full entity-backed CRUD** — a complete ``/items`` resource demonstrating:
-   - :class:`~nemo_platform_plugin.entity.NemoEntity` for entity definitions
-   - :class:`~nemo_platform_plugin.schema.NemoListResponse` for paginated list responses
-   - :class:`~nemo_platform_plugin.schema.NemoFilter` for filter query params
-   - :class:`~nemo_platform_plugin.entity_client.NemoEntitiesClient` for CRUD operations
-   - :class:`~nemo_platform_plugin.entity_client.NemoEntityNotFoundError` → 404
-   - :class:`~nemo_platform_plugin.entity_client.NemoEntityConflictError` → 409
+   - :class:`~nemo_helix_plugin.entity.NemoEntity` for entity definitions
+   - :class:`~nemo_helix_plugin.schema.NemoListResponse` for paginated list responses
+   - :class:`~nemo_helix_plugin.schema.NemoFilter` for filter query params
+   - :class:`~nemo_helix_plugin.entity_client.NemoEntitiesClient` for CRUD operations
+   - :class:`~nemo_helix_plugin.entity_client.NemoEntityNotFoundError` → 404
+   - :class:`~nemo_helix_plugin.entity_client.NemoEntityConflictError` → 409
    - Pagination query params (``page``, ``page_size``, ``sort``)
    - deepObject filter syntax (``?filter[tag]=ml``)
    - Entity objects returned directly as API responses (no separate response class)
@@ -46,16 +46,16 @@ from nemo_example_plugin.types.payloads import (
     HelloResponse,
     UpdateExampleItemRequest,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-from nemo_platform_plugin.functions.routes import add_function_routes
-from nemo_platform_plugin.schema import PaginationData
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.functions.routes import add_function_routes
+from nemo_helix_plugin.schema import PaginationData
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class ExampleService(NemoService):
 
     def get_routers(self) -> list[RouterSpec]:
         # Function routers come from the per-class auto-derivation in
-        # ``nemo_platform_plugin.functions.routes``. Mounting them here keeps
+        # ``nemo_helix_plugin.functions.routes``. Mounting them here keeps
         # them alongside the rest of ``/apis/example`` in the OpenAPI
         # tree and lets the existing ExampleService own the URL
         # namespace.
@@ -152,7 +152,7 @@ def _build_hello_router() -> APIRouter:
         - ``"formal"`` (default) → ``"Hello, {name}!"``
         - ``"casual"`` → ``"Hey, {name}!"``
 
-        Override at runtime: ``NMP_EXAMPLE_GREETING_STYLE=casual``.
+        Override at runtime: ``NHX_EXAMPLE_GREETING_STYLE=casual``.
         """
 
         config = ExampleConfig.get()
@@ -206,16 +206,16 @@ def _build_binary_router() -> APIRouter:
 def _get_entity_client() -> NemoEntitiesClient:
     """FastAPI dependency — returns a request-scoped entity client.
 
-    Imported from nemo_platform in real plugin code.  Defined here inline
+    Imported from nemo_helix in real plugin code.  Defined here inline
     so the example plugin is self-contained and easy to read.
     """
     # In a real plugin, import this from the platform SDK:
-    #   from nemo_platform.resources.entities import get_entity_client
+    #   from nemo_helix.resources.entities import get_entity_client
     #   entity_client: NemoEntitiesClient = Depends(get_entity_client)
     #
     # The SDK's get_entity_client wires auth context, workspace scoping, and
     # the shared HTTP client.  This stub is for illustration only.
-    raise NotImplementedError("inject via nemo_platform.resources.entities.get_entity_client")
+    raise NotImplementedError("inject via nemo_helix.resources.entities.get_entity_client")
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +317,7 @@ def _build_items_router() -> APIRouter:
 
             ?filter[tag]=ml
 
-        Response shape (identical to the nmp_common ``Page`` envelope)::
+        Response shape (identical to the nhx_common ``Page`` envelope)::
 
             {
                 "data": [...],
@@ -332,7 +332,7 @@ def _build_items_router() -> APIRouter:
 
         When ``ExampleConfig.log_requests`` is ``True``, emits a structured
         INFO log line for each call (useful for request tracing in dev).
-        Enable with ``NMP_EXAMPLE_LOG_REQUESTS=true``.
+        Enable with ``NHX_EXAMPLE_LOG_REQUESTS=true``.
         """
 
         config = ExampleConfig.get()

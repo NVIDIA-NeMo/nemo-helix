@@ -3,14 +3,14 @@
 
 ## Conventions
 
-Inherited from the NeMo Platform monorepo that now hosts this plugin:
+Inherited from the NeMo Helix monorepo that now hosts this plugin:
 
 - Use `uv` exclusively (`uv add`, `uv sync`, `uv run`). No pip/poetry/conda.
 - No `__init__.py` files — use implicit namespace packages.
 - Concrete type hints, not string-based. Don't hide imports under `TYPE_CHECKING`.
 - Lint/format with `uv run ruff check` and `uv run ruff format`.
 - All files need the SPDX header (`Copyright (c) ... NVIDIA CORPORATION & AFFILIATES`, `Apache-2.0`).
-- Use `nemo_platform_plugin.nooa_model_client` for provider routing, Platform
+- Use `nemo_helix_plugin.nooa_model_client` for provider routing, Platform
   authentication, and configured model selection.
 
 ## Active migrations
@@ -28,7 +28,7 @@ command back to the user.
 
 ### 2026-07-24: Optimizer renamed to Experimentalist
 
-Ahead of the move into the `nemo-platform` monorepo, the plugin was renamed from
+Ahead of the move into the `nemo-helix` monorepo, the plugin was renamed from
 Optimizer to Experimentalist. This is a breaking rename with no compatibility
 aliases:
 

@@ -39,8 +39,8 @@ nemo auditor audit explain
 Read the plugin service status through the platform SDK namespace:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8000")
+client = NeMoHelix(base_url="http://localhost:8000")
 status = client.auditor.plugin_status()
 ```

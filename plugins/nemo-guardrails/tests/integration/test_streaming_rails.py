@@ -12,8 +12,8 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 import pytest
-from nmp.core.inference_gateway.testing.harness import IGWLoopbackHarness
-from nmp.testing.mock_chat_completions import (
+from nhx.core.inference_gateway.testing.harness import IGWLoopbackHarness
+from nhx.testing.mock_chat_completions import (
     ChatCompletion,
     ChatCompletionStream,
     build_chat_completion_stream_from_content,

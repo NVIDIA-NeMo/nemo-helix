@@ -15,7 +15,7 @@ from nemo_evaluator.api.service.taskset_service import (
     TasksetService,
 )
 from nemo_evaluator.revisions import RevisionNotFoundError
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 class _FakeTaskService:

@@ -16,20 +16,20 @@ import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
-from nmp.common.auth import AuthClient, get_auth_client
-from nmp.common.auth.dependencies import auth_client_context
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig
-from nmp.core.entities.api.dependencies import (
+from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
+from nhx.core.entities.api.dependencies import (
     dep_entity_repository_with_session,
     dep_workspace_repository_with_session,
 )
-from nmp.core.entities.api.server import app
-from nmp.core.entities.app.repository import (
+from nhx.core.entities.api.server import app
+from nhx.core.entities.app.repository import (
     SQLAlchemyEntityRepository,
     SQLAlchemyWorkspaceRepository,
 )
-from nmp.core.entities.app.repository.sqlalchemy.models import DBEntity, DBWorkspace  # noqa: F401
+from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity, DBWorkspace  # noqa: F401
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -99,9 +99,9 @@ def repos(request, session_maker):
 def _create_mock_auth_client() -> AuthClient:
     """Create a mock AuthClient for testing.
 
-    TODO: Remove this once tests are updated to use create_test_client() from nmp.testing.
+    TODO: Remove this once tests are updated to use create_test_client() from nhx.testing.
     The mock is only needed because these tests use the raw FastAPI app directly
-    (nmp.core.entities.api.server.app) which doesn't include AuthorizationMiddleware.
+    (nhx.core.entities.api.server.app) which doesn't include AuthorizationMiddleware.
     Using create_test_client() would go through the full middleware stack and properly
     set up auth_client_context, eliminating the need for this mock.
     """
@@ -122,7 +122,7 @@ def _create_auth_client_enabled() -> AuthClient:
     """AuthClient with config.enabled True so get_accessible_workspaces enforces role bindings.
 
     The entities app is mounted without AuthorizationMiddleware; this matches production
-    behavior for authz data scope only when :func:`nmp.common.auth.auth_client_context`
+    behavior for authz data scope only when :func:`nhx.common.auth.auth_client_context`
     is set per request (see ``client_with_auth``).
     """
     principal = Principal(id=TEST_PRINCIPAL, email=TEST_PRINCIPAL, groups=[], on_behalf_of=None)
@@ -143,7 +143,7 @@ def _create_auth_client_service_principal() -> AuthClient:
 
 
 def _create_auth_client_service_on_behalf_of() -> AuthClient:
-    """Auth enabled: service principal with X-NMP-Principal-On-Behalf-Of to the test user (delegated scope)."""
+    """Auth enabled: service principal with X-NHX-Principal-On-Behalf-Of to the test user (delegated scope)."""
     principal = Principal(
         id=TEST_SERVICE_PRINCIPAL,
         email=None,

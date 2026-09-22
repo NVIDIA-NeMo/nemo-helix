@@ -21,10 +21,10 @@ from nemo_insights_plugin.analyst.observability import (
     setup_analyst_observability,
 )
 from nemo_insights_plugin.analyst.result import AnalystResult
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.nooa_model_client import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
     activate_model_clients,
@@ -39,7 +39,7 @@ _VERBOSE_TRUNCATE = 2000
 
 
 class ClientConstructionError(Exception):
-    """The analyst's NeMo Platform client could not be constructed."""
+    """The analyst's NeMo Helix client could not be constructed."""
 
 
 async def run_analyst(
@@ -48,7 +48,7 @@ async def run_analyst(
     ethos: str | None,
     workspace: str,
     base_url: str | None,
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     insights_output: str | Path | None = None,
     local_only: bool = False,
     verbose: bool = False,
@@ -111,7 +111,7 @@ async def run_analyst_change_set(
     ethos: str | None = None,
     workspace: str,
     base_url: str | None,
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     insights_output: str | Path | None = None,
     local_only: bool = False,
     verbose: bool = False,

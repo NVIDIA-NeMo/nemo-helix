@@ -43,9 +43,9 @@ keep in sync with a shipped version.
 
   ```bash
   ENT=nvidia-nemotron-3-nano-30b-a3b
-  SERVED=$(curl -s "$NMP_BASE_URL/apis/models/v2/workspaces/default/providers/nvidia-build" \
+  SERVED=$(curl -s "$NHX_BASE_URL/apis/models/v2/workspaces/default/providers/nvidia-build" \
     | python3 -c "import json,sys;print(next(m['served_model_name'] for m in json.load(sys.stdin)['served_models'] if m['model_entity_id']=='default/$ENT'))")
-  curl -s -X POST "$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/$ENT/-/v1/chat/completions" \
+  curl -s -X POST "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/$ENT/-/v1/chat/completions" \
     -H 'Content-Type: application/json' \
     -d "{\"model\":\"$SERVED\",\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}],\"max_tokens\":5}"
   ```
@@ -68,7 +68,7 @@ keep in sync with a shipped version.
   ```
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
 The target agent (`demo-agent` below) does not need to exist as an Agent
@@ -129,7 +129,7 @@ entity — the Analyst only matches it against each span's normalized
    ```
 
    The model pair is **required** on the request. It lives only in the
-   operator's local CLI config (`~/.config/nmp/config.yaml`), which the
+   operator's local CLI config (`~/.config/nhx/config.yaml`), which the
    Platform process cannot read, so the request has to carry it. The CLI fills
    it in from that config, which is why the equivalent one-liner needs no model
    flags:
@@ -158,8 +158,8 @@ entity — the Analyst only matches it against each span's normalized
    are still fetched from there:
 
    ```bash
-   curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results"
-   curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results/analysis-report/download"
+   curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results"
+   curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results/analysis-report/download"
    ```
 
    The report is what tells you which Insights the run created or updated:

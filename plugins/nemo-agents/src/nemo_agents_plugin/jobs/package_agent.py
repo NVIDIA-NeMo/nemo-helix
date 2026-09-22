@@ -34,21 +34,21 @@ from nemo_agents_plugin.entities import (
     Agent,
     ethos_fileset_name,
 )
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.job_results import ResultRef
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_results import ResultRef
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
+from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -228,12 +228,12 @@ class PackageAgentJob(NemoJob):
         try:
             agent = await client.get(Agent, name=input_spec.agent, workspace=workspace)
         except NemoEntityNotFoundError as exc:
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 f"Agent '{input_spec.agent}' not found in workspace '{workspace}'."
             ) from exc
 
         if agent.config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 f"Agent '{input_spec.agent}' has config_format '{agent.config_format}'; platform-side "
                 f"packaging supports '{NEMO_AGENTS_SPEC_CONFIG_FORMAT}' only. NAT workflows package from "
                 "a source checkout — use `nemo agents package` locally."
@@ -251,8 +251,8 @@ class PackageAgentJob(NemoJob):
         if entity_client is not None:
             return cast(NemoEntitiesClient, entity_client)
         if async_sdk is not None:
-            return NemoEntitiesClient(client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncEntitiesClient))
-        raise PlatformJobCompilationError(
+            return NemoEntitiesClient(client_from_platform(cast(AsyncNeMoHelix, async_sdk), AsyncEntitiesClient))
+        raise HelixJobCompilationError(
             "Packaging requires a platform client to resolve the agent entity, but none was injected."
         )
 
@@ -267,10 +267,10 @@ class PackageAgentJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        """Single-step PlatformJobSpec running ``nemo_agents_plugin.tasks.package`` on the host."""
+    ) -> HelixJobSpec:
+        """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.package`` on the host."""
         del entity_client, job_name, options
-        from nemo_platform_plugin.jobs.api_factory import PlatformJobStep, SubprocessExecutionProviderSpec
+        from nemo_helix_plugin.jobs.api_factory import HelixJobStep, SubprocessExecutionProviderSpec
 
         assert isinstance(spec, PackageAgentSpec), (
             f"PackageAgentJob.compile received unexpected spec type: {type(spec).__name__}"
@@ -283,9 +283,9 @@ class PackageAgentJob(NemoJob):
         # URL workspace is the auth boundary; overwrite whatever to_spec set.
         spec_dict["workspace"] = workspace
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="package",
                     executor=SubprocessExecutionProviderSpec(
                         provider=_SUBPROCESS_PROVIDER,
@@ -301,7 +301,7 @@ class PackageAgentJob(NemoJob):
     def _require_namespaceable_workspace(workspace: str) -> None:
         """Reject a workspace that cannot be spelled as a Docker path component."""
         if not _DOCKER_PATH_COMPONENT.match(workspace):
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 f"Workspace '{workspace}' cannot be used as an image namespace: Docker path "
                 "components allow only lowercase letters, digits, '.', '_' and '-'. Package this "
                 "agent from a workspace with a Docker-safe name, or build locally with "
@@ -312,17 +312,17 @@ class PackageAgentJob(NemoJob):
     async def _require_subprocess_profile(profile: str, async_sdk: object) -> None:
         """Reject the submission unless *profile* resolves to a host subprocess backend."""
         if async_sdk is None:
-            raise PlatformJobDependencyUnavailableError(
+            raise HelixJobDependencyUnavailableError(
                 f"Unable to resolve execution profile '{profile}': no platform client was injected. "
                 "This is a scheduler wiring fault rather than a transient one — resubmitting will not "
                 "help until the Jobs service is restarted with a platform client."
             )
         try:
             profiles = (
-                await client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncJobsClient).get_execution_profiles()
+                await client_from_platform(cast(AsyncNeMoHelix, async_sdk), AsyncJobsClient).get_execution_profiles()
             ).data()
         except Exception as exc:
-            raise PlatformJobDependencyUnavailableError(
+            raise HelixJobDependencyUnavailableError(
                 f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
                 "unavailable. Retry the submission."
             ) from exc
@@ -334,7 +334,7 @@ class PackageAgentJob(NemoJob):
         ):
             return
 
-        raise PlatformJobCompilationError(
+        raise HelixJobCompilationError(
             f"Execution profile '{profile}' does not resolve to a subprocess backend. {_HOST_BUILD_REQUIREMENT}"
         )
 
@@ -343,7 +343,7 @@ class PackageAgentJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext | None = None,
-        async_sdk: AsyncNeMoPlatform | None = None,
+        async_sdk: AsyncNeMoHelix | None = None,
     ) -> dict:
         """Stage the agent's spec fileset into a temp build context, build, and optionally push."""
         from nemo_agents_plugin.container.builder import build_fabric_agent_image, resolve_image_id
@@ -421,7 +421,7 @@ class PackageAgentJob(NemoJob):
         return ctx.results.save(PACKAGE_RESULT_NAME, path)
 
     @staticmethod
-    async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNeMoPlatform | None) -> None:
+    async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNeMoHelix | None) -> None:
         """Download the ``{agent}-ethos`` fileset into *build_dir*.
 
         Must run before ``agent.yaml`` is written — staging clears the tree first.

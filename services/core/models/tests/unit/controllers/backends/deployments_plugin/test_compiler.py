@@ -8,16 +8,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 from nemo_deployments_plugin.entities import SecretRef
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.models.types import K8sNIMOperatorConfig
-from nmp.common.config import Runtime
-from nmp.core.models.app import ModelWeightsType
-from nmp.core.models.controllers.backends.common import DeploymentConfigView
-from nmp.core.models.controllers.backends.deployments_plugin.compiler import _busybox_image, compile_model_deployment
-from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
-from nmp.core.models.controllers.backends.deployments_plugin.nim_compiler import pod_security_context_for_engine
-from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
-from nmp.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.models.types import K8sNIMOperatorConfig
+from nhx.common.config import Runtime
+from nhx.core.models.app import ModelWeightsType
+from nhx.core.models.controllers.backends.common import DeploymentConfigView
+from nhx.core.models.controllers.backends.deployments_plugin.compiler import _busybox_image, compile_model_deployment
+from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
+from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import pod_security_context_for_engine
+from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
+from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
 
 
 def _resolved(engine: str, *, lora: bool = False, runtime: Runtime = Runtime.KUBERNETES) -> ResolvedPluginDeployment:
@@ -176,7 +176,7 @@ def test_nim_gpu_resources_without_override() -> None:
 def test_nim_weighted_chain_sets_model_path_env() -> None:
     secret_ref = SecretRef(workspace="system", name="ngc-api-key")
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
         return_value=secret_ref,
     ):
         compiled = compile_model_deployment(_resolved("nim"), DeploymentsPluginConfig())
@@ -202,7 +202,7 @@ def test_nim_non_legacy_weighted_chain_uses_engine_model_env() -> None:
     resolved = _resolved("nim")
     resolved.view.override_config = {"nimLegacy": False}
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
         return_value=SecretRef(workspace="system", name="ngc-api-key"),
     ):
         compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
@@ -227,7 +227,7 @@ def test_nim_additional_envs_path_overrides_weights_dir_only(runtime: Runtime, p
     resolved.view.override_config = {"nimLegacy": False}
     resolved.view.additional_envs = path_env
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
         return_value=SecretRef(workspace="system", name="ngc-api-key"),
     ):
         compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
@@ -267,7 +267,7 @@ def test_nim_baked_engine_model_name_falls_back_to_model_entity() -> None:
         runtime=resolved.runtime,
     )
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
         return_value=SecretRef(workspace="system", name="ngc-api-key"),
     ):
         compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
@@ -282,7 +282,7 @@ def test_nim_explicit_ngc_env_is_not_persisted_as_plaintext() -> None:
     resolved = _resolved("nim")
     resolved.view.additional_envs = {"NGC_API_KEY": "explicit-value"}
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
         return_value=SecretRef(workspace="system", name="ngc-api-key"),
     ):
         compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
@@ -298,7 +298,7 @@ def test_nim_explicit_ngc_env_fails_without_platform_secret_ref() -> None:
     resolved.view.additional_envs = {"NGC_API_KEY": "explicit-value"}
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
             return_value=None,
         ),
         pytest.raises(ValueError, match="platform.ngc_api_key_secret"),
@@ -477,11 +477,11 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
     platform.base_url = "http://platform.example:8080"
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
-            return_value="registry/nmp-api:tag",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
+            return_value="registry/nhx-api:tag",
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
             return_value=platform,
         ),
     ):
@@ -494,11 +494,11 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
     assert init.image == "docker.io/library/busybox:latest"
     sidecar = k8s.server_config.init_containers[-1]
     assert sidecar.restart_policy == "Always"
-    assert sidecar.image == "registry/nmp-api:tag"
-    assert sidecar.command == ["python", "-m", "nmp.core.models.sidecars.adapters.main"]
+    assert sidecar.image == "registry/nhx-api:tag"
+    assert sidecar.command == ["python", "-m", "nhx.core.models.sidecars.adapters.main"]
     env = {item.name: item.value for item in sidecar.env}
     assert env["NIM_PEFT_SOURCE"] == "/scratch/loras"
-    # Sidecar writes under $XDG_STATE_HOME, $XDG_DATA_HOME (via nmp_user_data_dir), and
+    # Sidecar writes under $XDG_STATE_HOME, $XDG_DATA_HOME (via nhx_user_data_dir), and
     # $XDG_CONFIG_HOME. All three must land on the writable scratch volume, not the image
     # $HOME (unwritable under the pod's vLLM uid). Invoking the adapters module directly
     # (not `nemo services run`) avoids the platform runner's home-dir writes that caused
@@ -507,7 +507,7 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
     assert env["XDG_DATA_HOME"] == "/scratch/.local"
     assert env["XDG_CONFIG_HOME"] == "/scratch/.local"
     assert env["VLLM_LORA_BASE_MODEL_OVERRIDE"] == "/model-store"
-    assert env["NMP_BASE_URL"] == "http://platform.example:8080"
+    assert env["NHX_BASE_URL"] == "http://platform.example:8080"
     assert env["VLLM_ENDPOINT"] == "http://127.0.0.1:8000"
     assert len(docker.server_config.containers) == 2
     # The docker sidecar's command becomes docker's entrypoint (replacing the
@@ -515,7 +515,7 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
     # `-m` fragment (which runc would look up as the executable -> `exec: "-m"`).
     docker_sidecar = docker.server_config.containers[1]
     assert docker_sidecar.name == "lora-adapters"
-    assert docker_sidecar.command == ["python", "-m", "nmp.core.models.sidecars.adapters.main"]
+    assert docker_sidecar.command == ["python", "-m", "nhx.core.models.sidecars.adapters.main"]
     assert docker_sidecar.command[0] != "-m"
 
 
@@ -530,18 +530,18 @@ def test_docker_lora_sidecar_command_is_a_valid_executable_under_override() -> N
     caught in unit tests rather than only on a live docker deployment.
     """
     config = DeploymentsPluginConfig(
-        lora_sidecar_image_name="nmp-customizer-tasks",
-        lora_sidecar_command=["python", "-m", "nmp.core.models.sidecars.adapters.main"],
+        lora_sidecar_image_name="nhx-customizer-tasks",
+        lora_sidecar_command=["python", "-m", "nhx.core.models.sidecars.adapters.main"],
     )
     platform = MagicMock()
     platform.base_url = "http://platform.example:8080"
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
-            return_value="registry/nmp-customizer-tasks:tag",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
+            return_value="registry/nhx-customizer-tasks:tag",
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
             return_value=platform,
         ),
     ):
@@ -553,13 +553,13 @@ def test_docker_lora_sidecar_command_is_a_valid_executable_under_override() -> N
     # must be a real program, not an interpreter flag.
     assert sidecar.command
     assert sidecar.command[0] != "-m"
-    assert sidecar.command == ["python", "-m", "nmp.core.models.sidecars.adapters.main"]
+    assert sidecar.command == ["python", "-m", "nhx.core.models.sidecars.adapters.main"]
 
 
 def _repo_root() -> Path:
     """Walk up from this test file to the repo root (the dir holding ``packages/``)."""
     for parent in Path(__file__).resolve().parents:
-        if (parent / "packages" / "nmp_platform" / "config" / "local.yaml").is_file():
+        if (parent / "packages" / "nhx_platform" / "config" / "local.yaml").is_file():
             return parent
     raise AssertionError("could not locate repo root from test file")
 
@@ -567,8 +567,8 @@ def _repo_root() -> Path:
 @pytest.mark.parametrize(
     "config_rel_path",
     [
-        "packages/nmp_platform/config/local.yaml",
-        "packages/nmp_platform_runner/src/nmp/platform_runner/config/local.yaml",
+        "packages/nhx_platform/config/local.yaml",
+        "packages/nhx_platform_runner/src/nhx/platform_runner/config/local.yaml",
     ],
 )
 def test_shipped_local_yaml_lora_sidecar_command_is_a_valid_executable(config_rel_path: str) -> None:
@@ -594,23 +594,23 @@ def test_shipped_local_yaml_lora_sidecar_command_is_a_valid_executable(config_re
     )
 
 
-def test_lora_sidecar_rewrites_loopback_nmp_base_url_for_docker() -> None:
-    """Docker LoRA sidecars must not keep host loopback as NMP_BASE_URL (jobs/auth-proxy pattern)."""
+def test_lora_sidecar_rewrites_loopback_nhx_base_url_for_docker() -> None:
+    """Docker LoRA sidecars must not keep host loopback as NHX_BASE_URL (jobs/auth-proxy pattern)."""
     config = DeploymentsPluginConfig()
     platform = MagicMock()
     platform.base_url = "http://127.0.0.1:8080"
     platform.loopback_address = None
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
-            return_value="registry/nmp-api:tag",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
+            return_value="registry/nhx-api:tag",
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
             return_value=platform,
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.resolve.determine_loopback_override",
+            "nhx.core.models.controllers.backends.deployments_plugin.resolve.determine_loopback_override",
             return_value=None,
         ),
     ):
@@ -619,23 +619,23 @@ def test_lora_sidecar_rewrites_loopback_nmp_base_url_for_docker() -> None:
 
     k8s_env = {item.name: item.value for item in k8s.server_config.init_containers[-1].env}
     docker_env = {item.name: item.value for item in docker.server_config.containers[1].env}
-    assert k8s_env["NMP_BASE_URL"] == "http://127.0.0.1:8080"
-    assert docker_env["NMP_BASE_URL"] == "http://host.docker.internal:8080"
+    assert k8s_env["NHX_BASE_URL"] == "http://127.0.0.1:8080"
+    assert docker_env["NHX_BASE_URL"] == "http://host.docker.internal:8080"
 
     platform.loopback_address = "172.16.83.1"
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
-            return_value="registry/nmp-api:tag",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_qualified_image",
+            return_value="registry/nhx-api:tag",
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_platform_config",
             return_value=platform,
         ),
     ):
         docker_bridge = compile_model_deployment(_resolved("vllm", lora=True, runtime=Runtime.DOCKER), config)
     bridge_env = {item.name: item.value for item in docker_bridge.server_config.containers[1].env}
-    assert bridge_env["NMP_BASE_URL"] == "http://172.16.83.1:8080"
+    assert bridge_env["NHX_BASE_URL"] == "http://172.16.83.1:8080"
 
 
 def test_compile_model_deployment_adds_workload_identity_when_auth_context_present() -> None:
@@ -645,11 +645,11 @@ def test_compile_model_deployment_adds_workload_identity_when_auth_context_prese
 
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.is_workload_identity_token_exchange_enabled",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.is_workload_identity_token_exchange_enabled",
             return_value=True,
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.compiler.get_workload_identity_token_audience",
+            "nhx.core.models.controllers.backends.deployments_plugin.compiler.get_workload_identity_token_audience",
             return_value="model-audience",
         ),
     ):

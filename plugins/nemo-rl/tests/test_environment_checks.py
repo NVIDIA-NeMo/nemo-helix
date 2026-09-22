@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from nemo_rl_plugin.environment import check_environment_package
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 
 ADAPTER_MANIFEST = b"""
 format: adapter-wheels-v1
@@ -29,13 +29,13 @@ ADAPTER_FILES = [
 ]
 
 
-def _platform(paths: list[str], manifest: bytes = ADAPTER_MANIFEST) -> AsyncCustomizationPlatformClients:
+def _platform(paths: list[str], manifest: bytes = ADAPTER_MANIFEST) -> AsyncCustomizationHelixClients:
     """Stub the Files client down to the two calls the check makes."""
     listing = SimpleNamespace(data=[SimpleNamespace(path=p) for p in paths])
     client = Mock()
     client.list_files = AsyncMock(return_value=SimpleNamespace(data=lambda: listing))
     client.download_file = AsyncMock(return_value=SimpleNamespace(read=AsyncMock(return_value=manifest)))
-    return AsyncCustomizationPlatformClients(files=client, models=Mock())
+    return AsyncCustomizationHelixClients(files=client, models=Mock())
 
 
 @pytest.mark.asyncio

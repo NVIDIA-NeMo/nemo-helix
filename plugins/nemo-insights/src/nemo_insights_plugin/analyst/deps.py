@@ -27,8 +27,8 @@ class AnalystDeps:
     Attributes:
         agent: Agent under test. Used as the default ``agent_name`` filter for
             span/insight tools.
-        workspace: NMP workspace the analyst operates in.
-        base_url: Base URL of the running NMP instance (run metadata; tools go
+        workspace: NHX workspace the analyst operates in.
+        base_url: Base URL of the running NHX instance (run metadata; tools go
             through ``backend``).
         insights_output: When set, the backend also persists insights to this
             local YAML file, mirroring the rows the platform stored (run

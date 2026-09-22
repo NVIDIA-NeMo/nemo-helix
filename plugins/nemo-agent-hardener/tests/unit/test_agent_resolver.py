@@ -322,7 +322,7 @@ def test_shipped_dockerfile_is_read_from_the_agents_ethos_fileset(monkeypatch: p
     """Registration uploads the whole agent directory, so an author's Dockerfile is already stored.
 
     Reading it back is what lets an agent pick its own nemo-relay and build from a source checkout —
-    the rendered Dockerfile pins the packaging machine's nemo-platform version, which no index serves
+    the rendered Dockerfile pins the packaging machine's nemo-helix version, which no index serves
     when the platform is installed from git.
     """
     asked = _fake_ethos(monkeypatch, {"agent.yaml": "x", "Dockerfile": "FROM python:3.12-slim\n"})

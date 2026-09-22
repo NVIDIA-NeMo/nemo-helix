@@ -5,11 +5,11 @@
 
 After the 2026 migration from local run to container submit we no longer
 exercise ``train_sft`` from these tests — that lives in the
-``nmp-unsloth-training`` container's smoke test. Here we just pin:
+``nhx-unsloth-training`` container's smoke test. Here we just pin:
 
 - ``to_spec`` resolves output naming + fileset against a stub SDK.
 - ``compile`` delegates to the service-side compiler (we patch it out)
-  and returns the resulting ``PlatformJobSpec`` after the container
+  and returns the resulting ``HelixJobSpec`` after the container
   runtime check.
 - The container runtime check fires when the platform has no usable
   container runtime (neither Kubernetes nor Docker).
@@ -24,12 +24,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_unsloth_plugin.jobs.jobs import UnslothJob
 from nemo_unsloth_plugin.schema import UnslothJobInput
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
-from nmp.unsloth.schemas import UnslothJobOutput
+from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
+from nhx.unsloth.schemas import UnslothJobOutput
 
 BASE_URL = "http://test"
 
@@ -86,7 +86,7 @@ async def _make_canonical_async(workspace: str = "default", **overrides: Any) ->
         return httpx.Response(404, request=request, json={"detail": "unexpected request"})
 
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    async_sdk = AsyncNeMoPlatform(base_url=BASE_URL, workspace="default", http_client=http_client)
+    async_sdk = AsyncNeMoHelix(base_url=BASE_URL, workspace="default", http_client=http_client)
     try:
         output = await UnslothJob.to_spec(
             spec,
@@ -105,8 +105,8 @@ def _make_canonical(workspace: str = "default", **overrides: Any) -> UnslothJobO
     return asyncio.run(_make_canonical_async(workspace, **overrides))
 
 
-def _compile_sdk() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(
+def _compile_sdk() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(
         base_url=BASE_URL,
         http_client=httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
@@ -164,7 +164,7 @@ class TestCompile:
         kwargs = compile_mock.await_args.kwargs
         assert kwargs["workspace"] == "default"
         assert kwargs["job_name"] == "my-unsloth-job"
-        assert isinstance(kwargs["platform"], AsyncCustomizationPlatformClients)
+        assert isinstance(kwargs["platform"], AsyncCustomizationHelixClients)
         assert "sdk" not in kwargs
         # Profile falls through to the unsloth config default (`gpu`).
         assert kwargs["profile"] == "gpu"
@@ -205,10 +205,10 @@ class TestCompile:
         async_sdk = _compile_sdk()
         with patch(
             "nemo_unsloth_plugin.jobs.jobs.require_container_runtime",
-            side_effect=PlatformJobCompilationError("no container runtime"),
+            side_effect=HelixJobCompilationError("no container runtime"),
         ):
             try:
-                with pytest.raises(PlatformJobCompilationError, match="no container runtime"):
+                with pytest.raises(HelixJobCompilationError, match="no container runtime"):
                     asyncio.run(
                         UnslothJob.compile(
                             workspace="default",
@@ -228,7 +228,7 @@ class TestNoRun:
 
         Pin so a future override doesn't silently re-enable local run —
         Unsloth migrated to container submit in 2026. ``run`` lives in
-        the ``nmp-unsloth-training`` container's ``__main__`` now.
+        the ``nhx-unsloth-training`` container's ``__main__`` now.
         """
         with pytest.raises(TypeError, match="abstract"):
             UnslothJob()

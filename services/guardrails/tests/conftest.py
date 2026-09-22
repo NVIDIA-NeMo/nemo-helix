@@ -5,8 +5,8 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from nmp.guardrails.service import GuardrailsService
-from nmp.testing import create_test_client
+from nhx.guardrails.service import GuardrailsService
+from nhx.testing import create_test_client
 
 # ============================================================================
 # Test Client Fixture

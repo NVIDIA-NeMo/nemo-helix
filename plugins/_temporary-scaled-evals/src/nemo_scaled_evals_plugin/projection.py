@@ -18,11 +18,11 @@ import logging
 from threading import Lock
 from typing import Any
 
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.base import EntityNotFoundError, SyncEntityClient
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
-from nemo_platform_plugin.sdk_provider import get_platform_sdk
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.base import EntityNotFoundError, SyncEntityClient
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.sdk_provider import get_platform_sdk
 from nemo_scaled_evals_plugin.entities import PROJECTED_COLUMNS, ScaledEvaluation, searchable_blob
 from scaled_evals.api.repositories.base_repository import normalize_order, substring_search_pattern
 from scaled_evals.api.schemas.common import decode_cursor

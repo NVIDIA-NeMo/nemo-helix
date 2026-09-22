@@ -33,10 +33,10 @@ import uuid
 from typing import Generator
 
 import pytest
-from nmp.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_STATUS_HEADER
-from nmp.core.inference_gateway.service import InferenceGatewayService
-from nmp.core.models.service import ModelsService
-from nmp.testing import ClientContext, MockProviderResponse, add_mock_provider, create_test_client
+from nhx.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_STATUS_HEADER
+from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.core.models.service import ModelsService
+from nhx.testing import ClientContext, MockProviderResponse, add_mock_provider, create_test_client
 
 DEFAULT_WORKSPACE = "default"
 
@@ -282,7 +282,7 @@ def test_example_simulate_rate_limit_error(mock_provider_test_clients: ClientCon
     - 500: Server errors
     - 503: Service unavailable
     """
-    from nemo_platform import RateLimitError
+    from nemo_helix import RateLimitError
 
     provider = add_mock_provider(
         mock_provider_test_clients.sdk,
@@ -311,7 +311,7 @@ def test_example_simulate_rate_limit_error(mock_provider_test_clients: ClientCon
 
 def test_example_simulate_server_error(mock_provider_test_clients: ClientContext):
     """Example: Simulate a 500 Internal Server Error."""
-    from nemo_platform import InternalServerError
+    from nemo_helix import InternalServerError
 
     provider = add_mock_provider(
         mock_provider_test_clients.sdk,
@@ -1152,9 +1152,9 @@ def test_llm_judge_e2e_use_case(mock_provider_test_clients: ClientContext):
 
 
 # =============================================================================
-# nmp.testing.mock_provider Fixture Tests
+# nhx.testing.mock_provider Fixture Tests
 # =============================================================================
-# These tests verify that the nmp.testing.mock_provider fixture works correctly.
+# These tests verify that the nhx.testing.mock_provider fixture works correctly.
 # Other services can use this fixture to test with IGW in mock provider mode.
 #
 # The mock_provider_test_clients fixture is the recommended way to test services that need
@@ -1219,7 +1219,7 @@ def test_fixture_add_provider_with_error_status(mock_provider_test_clients: Clie
     Use mock_status to configure the HTTP status code returned by the mock.
     This is useful for testing error handling in your service.
     """
-    from nemo_platform import RateLimitError
+    from nemo_helix import RateLimitError
 
     provider = add_mock_provider(
         mock_provider_test_clients.sdk,
@@ -1271,8 +1271,8 @@ def test_fixture_remove_provider(mock_provider_test_clients: ClientContext):
     Note: SDK delete removes from database, but we also need to clear from
     the IGW model cache for immediate effect.
     """
-    from nemo_platform import NotFoundError
-    from nmp.core.inference_gateway.api.dependencies import global_model_cache
+    from nemo_helix import NotFoundError
+    from nhx.core.inference_gateway.api.dependencies import global_model_cache
 
     provider = add_mock_provider(
         mock_provider_test_clients.sdk,
@@ -1316,7 +1316,7 @@ def test_fixture_remove_provider(mock_provider_test_clients: ClientContext):
 def test_fixture_sdk_access(mock_provider_test_clients: ClientContext):
     """Test that ClientContext provides SDK access.
 
-    The sdk property gives you direct access to the NeMoPlatform client.
+    The sdk property gives you direct access to the NeMoHelix client.
     """
     assert mock_provider_test_clients.sdk is not None
     assert mock_provider_test_clients.test_client is not None
@@ -1379,7 +1379,7 @@ def test_fixture_isolation(mock_provider_test_clients: ClientContext):
     Each test using mock_provider_test_clients gets a fresh context. Providers added in
     one test won't be visible in another test.
     """
-    from nemo_platform import NotFoundError
+    from nemo_helix import NotFoundError
 
     # Add a provider in this test
     provider = add_mock_provider(

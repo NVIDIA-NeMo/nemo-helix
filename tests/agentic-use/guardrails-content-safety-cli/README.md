@@ -5,7 +5,7 @@
 
 ## Overview
 
-This eval tests whether a coding agent can use the NeMo Platform CLI to configure guardrails
+This eval tests whether a coding agent can use the NeMo Helix CLI to configure guardrails
 for content safety and verify that harmful content is blocked. The agent must create
 a guardrail configuration with a self-check input rail and send messages through the
 guardrails endpoint.
@@ -20,7 +20,7 @@ This eval uses a **mock inference backend** instead of a real LLM:
   with a blocked guardrail status.
 
 The mock provider setup is handled by `environment/setup-mock.py`, which runs after
-the NeMo Platform API is healthy but before the agent starts. The agent is responsible for
+the NeMo Helix API is healthy but before the agent starts. The agent is responsible for
 creating the guardrail configuration itself.
 
 ## What the Agent Should Do
@@ -41,7 +41,7 @@ The verifier checks:
 
 ```bash
 # Build the base Docker image (from repo root)
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 # Run the eval
 python tests/agentic-use/nat_runner.py guardrails-content-safety-cli \
@@ -54,7 +54,7 @@ python tests/agentic-use/nat_runner.py guardrails-content-safety-cli \
 
 ```
 environment/
-  Dockerfile       - Extends nmp-agentic-base:latest with mock provider env var + setup script
+  Dockerfile       - Extends nhx-agentic-base:latest with mock provider env var + setup script
   setup-mock.py    - Creates mock inference provider after API starts
 instruction.md     - Task description for the agent
 task.toml          - Harbor configuration (timeouts, resources)

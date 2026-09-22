@@ -12,9 +12,9 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_unsloth_plugin.schema import (
     DatasetSpec,
     LoRAParams,
@@ -26,7 +26,7 @@ from nemo_unsloth_plugin.schema import (
     UnslothJobOutput,
 )
 from nemo_unsloth_plugin.transform import transform_input_to_output
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 from pydantic import ValidationError
 
 BASE_URL = "http://test"
@@ -102,7 +102,7 @@ async def _run_transform_async(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         client = AsyncNemoClient(base_url=BASE_URL, workspace="default", http_client=http_client)
-        platform = AsyncCustomizationPlatformClients(
+        platform = AsyncCustomizationHelixClients(
             files=AsyncFilesClient.from_client(client),
             models=AsyncModelsClient.from_client(client),
         )
@@ -120,7 +120,7 @@ class TestCanonicalReexport:
         # Re-exported from the plugin for caller convenience, but the
         # source of truth is the service. Keeps the dependency direction
         # plugin → service.
-        assert UnslothJobOutput.__module__ == "nmp.unsloth.schemas"
+        assert UnslothJobOutput.__module__ == "nhx.unsloth.schemas"
 
 
 # Raw Pydantic payload under mutation in validation tests.

@@ -12,7 +12,7 @@ one-file change.
 Design constraints (see AALGO-289):
 
 * **Pure.** Every function reads SDK types and returns request params. No HTTP,
-  no platform client, no imports from the Intake *service* (``nmp.intake.*``).
+  no platform client, no imports from the Intake *service* (``nhx.intake.*``).
 * **Typed at the boundary.** The returned values are typed-client
   ``TypedDict`` params (``AtifCreateParams`` / ``EvaluatorResultCreateParams``).
   At runtime they are plain dicts the adapter splats into the client
@@ -47,7 +47,7 @@ from nemo_evaluator_sdk.values.otlp import (
     set_span_attributes,
 )
 from nemo_evaluator_sdk.values.protocol import OUTPUT_DETAIL
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.intake.types import (
     AtifAgentParam,
     AtifCreateParams,
     AtifFinalMetricsParam,

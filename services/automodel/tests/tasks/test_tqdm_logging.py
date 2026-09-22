@@ -6,7 +6,7 @@ from __future__ import annotations
 import io
 
 import pytest
-from nmp.automodel.tasks.tqdm_logging import LineTqdm, install_line_tqdm
+from nhx.automodel.tasks.tqdm_logging import LineTqdm, install_line_tqdm
 
 
 def test_line_tqdm_writes_newlines_not_carriage_returns() -> None:
@@ -34,6 +34,6 @@ def test_training_entry_point_installs_line_tqdm() -> None:
     """Training draws tqdm bars too; mining was the only caller for a while."""
     pytest.importorskip("torch", reason="not installed in test env (run in training image CI)")
     pytest.importorskip("nemo_automodel", reason="not installed in test env (run in training image CI)")
-    from nmp.automodel.tasks.training.backends import finetune
+    from nhx.automodel.tasks.training.backends import finetune
 
     assert finetune.install_line_tqdm is install_line_tqdm

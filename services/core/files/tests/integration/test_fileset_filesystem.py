@@ -30,10 +30,10 @@ from filesets import (
     parse_fileset_path,
     parse_fileset_ref,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import FilesetOutput
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import FilesetOutput
 
 
 class TestParseFilesetRef:
@@ -297,7 +297,7 @@ class TestFilesetFileSystem:
     """Test fsspec operations via FilesetFileSystem."""
 
     @pytest.fixture
-    def fs(self, sdk: NeMoPlatform) -> FilesetFileSystem:
+    def fs(self, sdk: NeMoHelix) -> FilesetFileSystem:
         """Create a FilesetFileSystem backed by the test SDK."""
         return FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
 
@@ -530,7 +530,7 @@ class TestFilesetFileSystem:
 
     def test_fsspec_filesystem_registration(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         fileset: FilesetOutput,
     ):
         """Test that FilesetFileSystem can be instantiated via fsspec.filesystem()."""
@@ -1830,7 +1830,7 @@ class TestDuckDBIntegration:
 
     def test_duckdb_parquet_query(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         fileset: FilesetOutput,
     ):
         """Test querying a parquet file with DuckDB via fileset:// protocol."""
@@ -1878,7 +1878,7 @@ class TestDuckDBIntegration:
 
     def test_duckdb_parquet_range_read(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         fileset: FilesetOutput,
     ):
         """Test that DuckDB performs efficient range reads on parquet files.
@@ -1921,7 +1921,7 @@ class TestDuckDBIntegration:
 
     def test_duckdb_legacy_path_format(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         fileset: FilesetOutput,
     ):
         """Test DuckDB queries using legacy workspace/fileset/path format.
@@ -1965,7 +1965,7 @@ class TestDirCache:
     """
 
     @pytest.fixture
-    def fs(self, sdk: NeMoPlatform) -> FilesetFileSystem:
+    def fs(self, sdk: NeMoHelix) -> FilesetFileSystem:
         """Create a FilesetFileSystem backed by the test SDK."""
         return FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
 
@@ -2175,7 +2175,7 @@ class TestDirCache:
 
     def test_cache_disabled(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         fileset: FilesetOutput,
     ):
         """When use_listings_cache=False, cache should not be used."""

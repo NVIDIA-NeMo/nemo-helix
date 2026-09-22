@@ -9,52 +9,52 @@ complete and consistent.
 """
 
 import pytest
-from nmp.core.secrets.api.v2.secrets.schemas import (
-    PlatformSecretAccessResponse,
-    PlatformSecretCreateRequest,
-    PlatformSecretUpdateRequest,
+from nhx.core.secrets.api.v2.secrets.schemas import (
+    HelixSecretAccessResponse,
+    HelixSecretCreateRequest,
+    HelixSecretUpdateRequest,
 )
 from pydantic import ValidationError
 
 
 class TestCreateRequestValueField:
     def test_accepts_value_kwarg(self):
-        model = PlatformSecretCreateRequest(name="test-secret", value="my-secret-value")
+        model = HelixSecretCreateRequest(name="test-secret", value="my-secret-value")
         assert model.value.get_secret_value() == "my-secret-value"
 
     def test_no_data_field_exists(self):
-        assert "data" not in PlatformSecretCreateRequest.model_fields
+        assert "data" not in HelixSecretCreateRequest.model_fields
 
     def test_json_body_with_value(self):
-        model = PlatformSecretCreateRequest.model_validate({"name": "test", "value": "secret"})
+        model = HelixSecretCreateRequest.model_validate({"name": "test", "value": "secret"})
         assert model.value.get_secret_value() == "secret"
 
     def test_json_body_with_data_rejected(self):
         with pytest.raises(ValidationError, match="value"):
-            PlatformSecretCreateRequest.model_validate({"name": "test", "data": "secret"})
+            HelixSecretCreateRequest.model_validate({"name": "test", "data": "secret"})
 
     def test_empty_value_rejected(self):
         with pytest.raises(ValidationError):
-            PlatformSecretCreateRequest(name="test-secret", value="")
+            HelixSecretCreateRequest(name="test-secret", value="")
 
 
 class TestUpdateRequestValueField:
     def test_accepts_value_kwarg(self):
-        model = PlatformSecretUpdateRequest(value="new-value")
+        model = HelixSecretUpdateRequest(value="new-value")
         assert model.value.get_secret_value() == "new-value"
 
     def test_no_data_field_exists(self):
-        assert "data" not in PlatformSecretUpdateRequest.model_fields
+        assert "data" not in HelixSecretUpdateRequest.model_fields
 
     def test_empty_value_rejected(self):
         with pytest.raises(ValidationError):
-            PlatformSecretUpdateRequest.model_validate({"value": ""})
+            HelixSecretUpdateRequest.model_validate({"value": ""})
 
 
 class TestAccessResponseValueField:
     def test_uses_value_field(self):
-        model = PlatformSecretAccessResponse(name="test-secret", workspace="default", value="my-secret-value")
+        model = HelixSecretAccessResponse(name="test-secret", workspace="default", value="my-secret-value")
         assert model.value == "my-secret-value"
 
     def test_no_data_field_exists(self):
-        assert "data" not in PlatformSecretAccessResponse.model_fields
+        assert "data" not in HelixSecretAccessResponse.model_fields

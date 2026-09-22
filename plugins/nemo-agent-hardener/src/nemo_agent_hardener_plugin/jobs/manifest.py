@@ -19,10 +19,10 @@ from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_MANIFEST_TYPE
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, CATEGORY_MANIFEST, AgentHardenerRunError
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import EntityUpdate
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import EntityUpdate
+from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
 

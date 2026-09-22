@@ -20,20 +20,20 @@ import uuid
 import pytest
 from filesets import FilesetFileSystem
 from huggingface_hub import snapshot_download
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError as ClientBadRequestError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest, ListFilesQueryParams
-from nmp.core.files.app.backends.base import StorageImpl
-from nmp.core.files.app.streaming import download_url_streaming
-from nmp.core.files.testing.utils import create_fileset
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError as ClientBadRequestError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, ListFilesQueryParams
+from nhx.core.files.app.backends.base import StorageImpl
+from nhx.core.files.app.streaming import download_url_streaming
+from nhx.core.files.testing.utils import create_fileset
 
 
 class TestHuggingfaceRevisionResolution:
     """Test that mutable revisions are resolved to immutable commit SHAs."""
 
-    def test_fileset_resolves_main_to_commit_sha(self, sdk: NeMoPlatform):
+    def test_fileset_resolves_main_to_commit_sha(self, sdk: NeMoHelix):
         """Test that creating a fileset with revision='main' resolves to a commit SHA.
 
         This verifies the fix for cache staleness: when a user creates a fileset
@@ -76,7 +76,7 @@ class TestHuggingfaceRevisionResolution:
                 f"original_revision should be 'main', got: {storage.original_revision}"
             )
 
-    def test_fileset_with_explicit_sha_preserves_both(self, sdk: NeMoPlatform):
+    def test_fileset_with_explicit_sha_preserves_both(self, sdk: NeMoHelix):
         """Test that creating a fileset with an explicit SHA preserves it correctly."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -125,7 +125,7 @@ class TestHuggingfaceRevisionResolution:
 class TestHuggingfaceStorageBackend:
     """Test Huggingface storage backend with real Huggingface Hub."""
 
-    def test_list_files_from_public_dataset(self, sdk: NeMoPlatform):
+    def test_list_files_from_public_dataset(self, sdk: NeMoHelix):
         """Test listing files from a public Huggingface dataset."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -154,7 +154,7 @@ class TestHuggingfaceStorageBackend:
             file_paths = {f.path for f in files_response}
             assert "config.json" in file_paths
 
-    def test_gated_repo_fails_on_fileset_creation(self, sdk: NeMoPlatform):
+    def test_gated_repo_fails_on_fileset_creation(self, sdk: NeMoHelix):
         """Test that creating a fileset with a gated repo fails during validation.
 
         Gated repos like meta-llama/Llama-4-Scout-17B-16E-Instruct require access approval.
@@ -184,7 +184,7 @@ class TestHuggingfaceStorageBackend:
         assert exc_info.value.status_code == 400
         assert "Access denied" in str(exc_info.value) or "gated" in str(exc_info.value).lower()
 
-    def test_download_file_from_public_dataset(self, sdk: NeMoPlatform):
+    def test_download_file_from_public_dataset(self, sdk: NeMoHelix):
         """Test downloading a file from a public Huggingface dataset."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -208,7 +208,7 @@ class TestHuggingfaceStorageBackend:
             config = json.loads(content)
             assert isinstance(config, dict)
 
-    def test_download_with_range_request(self, sdk: NeMoPlatform):
+    def test_download_with_range_request(self, sdk: NeMoHelix):
         """Test partial download using HTTP Range header."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -236,7 +236,7 @@ class TestHuggingfaceStorageBackend:
             assert len(range_content) == 50
             assert range_content == full_content[:50]
 
-    def test_file_exists_with_file_path(self, sdk: NeMoPlatform):
+    def test_file_exists_with_file_path(self, sdk: NeMoHelix):
         """Test _exists with a file path returns True for existing files.
 
         This tests the fix for HuggingFace's list_repo_tree which expects directory
@@ -266,7 +266,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_file_exists_with_nonexistent_path_returns_false(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
     ):
         """Test _exists with a non-existent path returns False."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
@@ -290,7 +290,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_get_downloads_single_file(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         tmp_path,
     ):
         """Test _get downloads a single file correctly.
@@ -326,7 +326,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_get_downloads_directory_with_trailing_slash(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         tmp_path,
     ):
         """Test _get with trailing slash copies contents directly into dest.
@@ -357,7 +357,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_get_downloads_directory_without_trailing_slash(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         tmp_path,
     ):
         """Test _get for fileset root copies contents directly.
@@ -392,7 +392,7 @@ class TestHuggingfaceStorageBackend:
 class TestHuggingfaceCaching:
     """Test that HuggingFace downloads are properly cached."""
 
-    def test_cache_path_uses_resolved_sha_not_mutable_ref(self, sdk: NeMoPlatform, cache_storage_impl: StorageImpl):
+    def test_cache_path_uses_resolved_sha_not_mutable_ref(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
         """Test that cache paths use resolved commit SHA, not mutable refs like 'main'.
 
         This verifies the fix for cache staleness: cache paths should be based on
@@ -449,7 +449,7 @@ class TestHuggingfaceCaching:
                 f"config.json should be cached under repo path. Found: {[f.path for f in repo_cached]}"
             )
 
-    def test_second_download_uses_cache(self, sdk: NeMoPlatform, cache_storage_impl: StorageImpl, mocker):
+    def test_second_download_uses_cache(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl, mocker):
         """Test that the second download of the same file uses the cache."""
 
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
@@ -457,7 +457,7 @@ class TestHuggingfaceCaching:
         # Spy on the source download function to verify it's only called on cache miss
         # Must patch where it's imported/used, not where it's defined
         download_spy = mocker.patch(
-            "nmp.core.files.app.backends.huggingface.download_url_streaming",
+            "nhx.core.files.app.backends.huggingface.download_url_streaming",
             wraps=download_url_streaming,
         )
 
@@ -507,7 +507,7 @@ class TestHuggingfaceCaching:
             cached_file = config_cached[0]
             assert cached_file.size == len(content1)
 
-    def test_different_files_cached_separately(self, sdk: NeMoPlatform, cache_storage_impl: StorageImpl):
+    def test_different_files_cached_separately(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
         """Test that different files from the same repo are cached separately."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -562,7 +562,7 @@ class TestHuggingfaceCaching:
         )
         assert tokenizer_cached[0].size == len(tokenizer_content)
 
-    def test_byte_range_requests_bypass_cache(self, sdk: NeMoPlatform, cache_storage_impl: StorageImpl):
+    def test_byte_range_requests_bypass_cache(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
         """Test that byte range requests bypass the cache but full downloads use cache."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -611,7 +611,7 @@ class TestHuggingfaceCaching:
             config_after = [f for f in repo_cached_after if "config.json" in f.path]
             assert len(config_after) == 1, "Cache should not duplicate for byte range requests"
 
-    def test_cache_warming_on_create(self, sdk: NeMoPlatform, cache_storage_impl: StorageImpl):
+    def test_cache_warming_on_create(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
         """Test that cache=True warms cache on fileset creation."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -653,7 +653,7 @@ class TestHuggingfaceCaching:
             for f in files_response:
                 assert f.cache_status == "cached", f"File {f.path} should be cached, got {f.cache_status}"
 
-    def test_cache_warming_disabled_by_default(self, sdk: NeMoPlatform, cache_storage_impl: StorageImpl):
+    def test_cache_warming_disabled_by_default(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
         """Test that cache=False (default) does not warm cache."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -696,7 +696,7 @@ class TestHuggingfaceHubClientCompatibility:
     with external HuggingFace storage backends.
     """
 
-    def test_snapshot_download_via_hf_compat_api(self, sdk: NeMoPlatform, tmp_path, hf_asgi_client):
+    def test_snapshot_download_via_hf_compat_api(self, sdk: NeMoHelix, tmp_path, hf_asgi_client):
         """Test downloading a fileset using huggingface_hub's snapshot_download.
 
         This validates that the HF-compat API endpoints (/v2/hf/...) work correctly
@@ -734,7 +734,7 @@ class TestHuggingfaceHubClientCompatibility:
                 config = json.load(f)
             assert isinstance(config, dict)
 
-    def test_snapshot_download_creates_correct_structure(self, sdk: NeMoPlatform, tmp_path, hf_asgi_client):
+    def test_snapshot_download_creates_correct_structure(self, sdk: NeMoHelix, tmp_path, hf_asgi_client):
         """Test that snapshot_download preserves the repository file structure."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
@@ -768,7 +768,7 @@ class TestHuggingfaceHubClientCompatibility:
                 local_path = os.path.join(local_dir, expected_file)
                 assert os.path.exists(local_path), f"Expected file {expected_file} not found at {local_path}"
 
-    def test_download_config_files_excluding_large_model_files(self, sdk: NeMoPlatform, tmp_path):
+    def test_download_config_files_excluding_large_model_files(self, sdk: NeMoHelix, tmp_path):
         """Test downloading only config files from a model repo, excluding large model files.
 
         This test demonstrates:

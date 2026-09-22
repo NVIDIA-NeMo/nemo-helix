@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from tests.auth.integration.jobs_auth_helpers import job_exists_in_pages, managed_admin_workspace
 
@@ -54,7 +54,7 @@ def test_managed_admin_workspace_deletes_workspace_after_success(
 ) -> None:
     stub = _stub_client_from_platform(monkeypatch)
 
-    with managed_admin_workspace(cast(NeMoPlatform, object()), "workspace-a") as workspace_name:
+    with managed_admin_workspace(cast(NeMoHelix, object()), "workspace-a") as workspace_name:
         assert workspace_name == "workspace-a"
 
     assert stub.created == ["workspace-a"]
@@ -67,7 +67,7 @@ def test_managed_admin_workspace_deletes_workspace_after_failure(
     stub = _stub_client_from_platform(monkeypatch)
 
     with pytest.raises(RuntimeError, match="boom"):
-        with managed_admin_workspace(cast(NeMoPlatform, object()), "workspace-b"):
+        with managed_admin_workspace(cast(NeMoHelix, object()), "workspace-b"):
             raise RuntimeError("boom")
 
     assert stub.created == ["workspace-b"]

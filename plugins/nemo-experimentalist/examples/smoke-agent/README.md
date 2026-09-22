@@ -26,7 +26,7 @@ group of Harbor tasks that surfaces it, so a run can be asserted to have
 
 ## Prerequisites
 
-- A local NeMo Platform with default and fast Model Entities selected by `nemo setup`
+- A local NeMo Helix with default and fast Model Entities selected by `nemo setup`
 - Docker Engine and Docker Sandboxes (`sbx`)
 - `uv`
 
@@ -38,7 +38,7 @@ group of Harbor tasks that surfaces it, so a run can be asserted to have
   Experimentalist itself. The `CompletionClient` in `agent.py` points at an
   unroutable address: an accidental model call fails loudly rather than quietly
   making the agent nondeterministic.
-- **Task definitions are local and checked in.** No registry, no NeMo Platform
+- **Task definitions are local and checked in.** No registry, no NeMo Helix
   for Mode 2, no network inside the task container.
 - **One prebuilt image serves every task**, referenced by
   `[environment].docker_image` rather than a per-task Dockerfile. Its tag is a
@@ -103,7 +103,7 @@ with `No module named 'nemo_agents_plugin'`.
 
 ```bash
 sbx exec --workdir "$repo" \
-  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-platform \
+  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-helix \
   nemo-experimentalist \
   bash -lc 'uv run --frozen --python 3.13 \
     --package nemo-experimentalist-plugin --with ./plugins/nemo-agents \

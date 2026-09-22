@@ -26,7 +26,7 @@ not-for:
   - nemo-explore (use to design an agent that does not exist yet; this skill needs a running agent with traces)
   - nemo-evaluator (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
-  nemo-platform >= 0.1.0; requires the Insights plugin, a reachable platform
+  nemo-helix >= 0.1.0; requires the Insights plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call
   on the Analyst's behalf. No Docker or datasets needed.
 maturity: beta
@@ -65,7 +65,7 @@ worth more than ten vague ones, so a run that files nothing is a valid outcome.
 The Analyst reads telemetry; it cannot create it. Confirm all three:
 
 - The target agent already has traces in Intake. No traces means no Insights.
-- The platform is reachable at `NMP_BASE_URL`.
+- The platform is reachable at `NHX_BASE_URL`.
 - The Analyst has a model to run on. It is an LLM agent itself, and how that is
   configured is changing, so let pre-flight tell you whether it is satisfied —
   it names what is missing and how to set it. Don't reach for the
@@ -133,7 +133,7 @@ clear title, an actionable description, and non-empty `trace_refs`. Listing by
 
 ```bash
 curl --fail-with-body \
-  "$NMP_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
+  "$NHX_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
 ```
 
 On an authenticated platform pass the token through curl's config, not argv
@@ -164,4 +164,4 @@ nemo agents experimentalist run
 
 For the full data model, the Analyst's tool set, periodic analysis via
 `nemo insights analysis enable`, and the rest of the loop, see
-[Insight-Driven Optimization](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/docs/agents/insight-driven-optimization.mdx).
+[Insight-Driven Optimization](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/docs/agents/insight-driven-optimization.mdx).

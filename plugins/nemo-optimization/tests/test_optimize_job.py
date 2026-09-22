@@ -16,20 +16,20 @@ import pytest
 import yaml
 from nemo_optimization.jobs.optimize import OptimizeJob
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
 FABRIC_AGENT = {
@@ -100,7 +100,7 @@ async def test_compile_stamps_the_fileset_ref_into_the_step_config() -> None:
 @pytest.mark.asyncio
 async def test_compile_requires_a_staged_fileset() -> None:
     spec = OptimizeSpec(optimize_config="/abs/optimize.yml")
-    with pytest.raises(PlatformJobCompilationError, match="prepare-fileset"):
+    with pytest.raises(HelixJobCompilationError, match="prepare-fileset"):
         await compile_spec(spec)
 
 
@@ -162,14 +162,14 @@ async def test_compile_prefers_the_subprocess_profile() -> None:
 async def test_compile_falls_back_to_the_cpu_profile_with_a_task_image() -> None:
     with (
         profiles(CPU_PROFILE),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nmp-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-cpu-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec())
 
     executor = next(iter(platform_spec["steps"]))["executor"]
     assert executor["provider"] == "cpu"
     assert executor["profile"] == "default"
-    assert executor["container"]["image"] == "reg.example/nmp-cpu-tasks:test"
+    assert executor["container"]["image"] == "reg.example/nhx-cpu-tasks:test"
     assert [*executor["container"]["entrypoint"], *executor["container"]["command"]] == [
         "python",
         "-m",
@@ -185,7 +185,7 @@ async def test_compile_matches_the_requested_profile_name() -> None:
             SUBPROCESS_PROFILE,
             DockerJobExecutionProfile(provider="cpu", profile="high-mem", config=DockerJobExecutionProfileConfig()),
         ),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nmp-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-cpu-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec(), profile="high-mem")
 
@@ -197,14 +197,14 @@ async def test_compile_matches_the_requested_profile_name() -> None:
 @pytest.mark.asyncio
 async def test_compile_reports_available_profiles_when_none_match() -> None:
     with profiles(DockerJobExecutionProfile(provider="gpu", profile="a100", config=DockerJobExecutionProfileConfig())):
-        with pytest.raises(PlatformJobCompilationError, match=r"Available profiles: \['gpu/a100'\]"):
+        with pytest.raises(HelixJobCompilationError, match=r"Available profiles: \['gpu/a100'\]"):
             await compile_spec(staged_spec())
 
 
 @pytest.mark.asyncio
 async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     import httpx
-    from nemo_platform_plugin.client.errors import NemoTransportError
+    from nemo_helix_plugin.client.errors import NemoTransportError
 
     async def _boom() -> Any:
         raise NemoTransportError(httpx.ConnectError("connection refused", request=httpx.Request("GET", "http://x")))
@@ -214,7 +214,7 @@ async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     client.get_execution_profiles = _boom
     with (
         patch("nemo_optimization.jobs.optimize.client_from_platform", return_value=client),
-        pytest.raises(PlatformJobDependencyUnavailableError, match="temporarily unavailable"),
+        pytest.raises(HelixJobDependencyUnavailableError, match="temporarily unavailable"),
     ):
         await compile_spec(staged_spec())
 
@@ -358,11 +358,11 @@ def bundle_sdk(
     *,
     downloaded: dict[str, Any] | None = None,
     uploaded: dict[str, Any] | None = None,
-) -> Iterator[NeMoPlatform]:
+) -> Iterator[NeMoHelix]:
     """Patch fileset staging helpers so typed-manager calls materialize *bundle*."""
 
     bundle = bundle or {}
-    sdk = MagicMock(spec=NeMoPlatform)
+    sdk = MagicMock(spec=NeMoHelix)
     files_client = MagicMock()
 
     def _manager(
@@ -415,7 +415,7 @@ def bundle_sdk(
         patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=files_client),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=_manager),
     ):
-        yield cast(NeMoPlatform, sdk)
+        yield cast(NeMoHelix, sdk)
 
 
 def test_run_stages_the_config_from_the_fileset(ctx: JobContext) -> None:
@@ -523,7 +523,7 @@ def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -
 
 
 def test_run_rejects_a_staged_config_without_an_sdk(ctx: JobContext) -> None:
-    with pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"):
+    with pytest.raises(LocalRunError, match="requires a 'sdk: NeMoHelix'"):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -710,7 +710,7 @@ def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext)
 
     with (
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
-        pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"),
+        pytest.raises(LocalRunError, match="requires a 'sdk: NeMoHelix'"),
     ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},

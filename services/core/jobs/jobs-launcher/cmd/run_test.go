@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/core/jobs/jobs-launcher/nmpclient"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 )
 
 func TestLogLevel(t *testing.T) {
@@ -232,9 +232,9 @@ func TestRunExecWithSecrets(t *testing.T) {
 			// Save and restore environment variables
 			origEnvVars := map[string]envVarState{
 				"NEMO_JOB_SECRETS": getEnvState("NEMO_JOB_SECRETS"),
-				"NMP_SECRETS_URL":  getEnvState("NMP_SECRETS_URL"),
-				"NMP_BASE_URL":     getEnvState("NMP_BASE_URL"),
-				"NMP_PRINCIPAL":    getEnvState("NMP_PRINCIPAL"),
+				"NHX_SECRETS_URL":  getEnvState("NHX_SECRETS_URL"),
+				"NHX_BASE_URL":     getEnvState("NHX_BASE_URL"),
+				"NHX_PRINCIPAL":    getEnvState("NHX_PRINCIPAL"),
 			}
 			defer restoreEnvVars(origEnvVars)
 
@@ -243,19 +243,19 @@ func TestRunExecWithSecrets(t *testing.T) {
 				os.Setenv("NEMO_JOB_SECRETS", tc.secretsEnv)
 			}
 			if tc.apiURL != "" {
-				os.Setenv("NMP_SECRETS_URL", tc.apiURL)
+				os.Setenv("NHX_SECRETS_URL", tc.apiURL)
 			} else {
-				os.Unsetenv("NMP_SECRETS_URL")
+				os.Unsetenv("NHX_SECRETS_URL")
 			}
 			if tc.baseURL != "" {
-				os.Setenv("NMP_BASE_URL", tc.baseURL)
+				os.Setenv("NHX_BASE_URL", tc.baseURL)
 			} else {
-				os.Unsetenv("NMP_BASE_URL")
+				os.Unsetenv("NHX_BASE_URL")
 			}
 			if tc.principalJSON != "" {
-				os.Setenv("NMP_PRINCIPAL", tc.principalJSON)
+				os.Setenv("NHX_PRINCIPAL", tc.principalJSON)
 			} else {
-				os.Unsetenv("NMP_PRINCIPAL")
+				os.Unsetenv("NHX_PRINCIPAL")
 			}
 
 			// Run a simple command - for success cases it should complete,
@@ -299,17 +299,17 @@ func TestRunExecWithSecretsNotFound(t *testing.T) {
 	// Save and restore environment variables
 	origEnvVars := map[string]envVarState{
 		"NEMO_JOB_SECRETS": getEnvState("NEMO_JOB_SECRETS"),
-		"NMP_SECRETS_URL":  getEnvState("NMP_SECRETS_URL"),
-		"NMP_BASE_URL":     getEnvState("NMP_BASE_URL"),
-		"NMP_PRINCIPAL":    getEnvState("NMP_PRINCIPAL"),
+		"NHX_SECRETS_URL":  getEnvState("NHX_SECRETS_URL"),
+		"NHX_BASE_URL":     getEnvState("NHX_BASE_URL"),
+		"NHX_PRINCIPAL":    getEnvState("NHX_PRINCIPAL"),
 	}
 	defer restoreEnvVars(origEnvVars)
 
 	// Set test environment variables
 	os.Setenv("NEMO_JOB_SECRETS", "NONEXISTENT_SECRET=default/nonexistent")
-	os.Setenv("NMP_SECRETS_URL", mockServer.URL)
-	os.Unsetenv("NMP_BASE_URL")
-	os.Setenv("NMP_PRINCIPAL", `{"id":"test-principal"}`)
+	os.Setenv("NHX_SECRETS_URL", mockServer.URL)
+	os.Unsetenv("NHX_BASE_URL")
+	os.Setenv("NHX_PRINCIPAL", `{"id":"test-principal"}`)
 
 	exitCode, err := runExec([]string{"echo", "test"}, nil)
 
@@ -329,7 +329,7 @@ func TestRunExecWithSecretsNotFound(t *testing.T) {
 func TestSecretEndpointHTTPClientSetsBoundedTimeout(t *testing.T) {
 	originalDefaultTimeout := http.DefaultClient.Timeout
 
-	tcpEndpoint, err := nmpclient.ParseEndpoint("http://127.0.0.1:8080")
+	tcpEndpoint, err := nhxclient.ParseEndpoint("http://127.0.0.1:8080")
 	if err != nil {
 		t.Fatalf("ParseEndpoint returned error: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestSecretEndpointHTTPClientSetsBoundedTimeout(t *testing.T) {
 		t.Fatalf("expected http.DefaultClient timeout to remain %s, got %s", originalDefaultTimeout, http.DefaultClient.Timeout)
 	}
 
-	udsEndpoint, err := nmpclient.ParseEndpoint("unix:///tmp/nemo-platform.sock")
+	udsEndpoint, err := nhxclient.ParseEndpoint("unix:///tmp/nemo-helix.sock")
 	if err != nil {
 		t.Fatalf("ParseEndpoint returned error: %v", err)
 	}
@@ -383,16 +383,16 @@ func TestRunExecWithoutSecrets(t *testing.T) {
 
 func TestWorkloadEnvFromParentFiltersLauncherPrivateVars(t *testing.T) {
 	origEnvVars := map[string]envVarState{
-		"NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": getEnvState("NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"),
+		"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": getEnvState("NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"),
 		"OTEL_LOGS_EXPORTER":                  getEnvState("OTEL_LOGS_EXPORTER"),
 	}
 	defer restoreEnvVars(origEnvVars)
 
-	os.Setenv("NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT", "http://platform.example/v1/logs")
+	os.Setenv("NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT", "http://platform.example/v1/logs")
 	os.Setenv("OTEL_LOGS_EXPORTER", "otlp")
 
 	env := strings.Join(workloadEnvFromParent(), "\n")
-	if strings.Contains(env, "NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT=") {
+	if strings.Contains(env, "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT=") {
 		t.Fatal("expected launcher-private env var to be filtered")
 	}
 	if !strings.Contains(env, "OTEL_LOGS_EXPORTER=otlp") {
@@ -570,7 +570,7 @@ func TestFetchSecrets(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			principal := &nmpclient.Principal{ID: "test-principal"}
+			principal := &nhxclient.Principal{ID: "test-principal"}
 			result, err := fetchSecrets(mockServer.URL, principal, tc.secretRefs)
 
 			if tc.expectError {
@@ -602,7 +602,7 @@ func TestFetchSecrets_Error(t *testing.T) {
 	secretRefs := []secretReference{
 		{envVarName: "NONEXISTENT", workspace: "default", secretName: "nonexistent"},
 	}
-	principal := &nmpclient.Principal{ID: "test-principal"}
+	principal := &nhxclient.Principal{ID: "test-principal"}
 	_, err := fetchSecrets(mockServer.URL, principal, secretRefs)
 
 	if err == nil {

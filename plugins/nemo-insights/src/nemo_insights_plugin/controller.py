@@ -21,21 +21,21 @@ from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
 from nemo_insights_plugin.schedule import is_due
 from nemo_insights_plugin.schema import CreateAnalysisRunRequest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.config import get_nemo_config
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import get_nemo_config
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.jobs.types import ListJobsQueryParams, PlatformJobResponse
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import ListJobsQueryParams, HelixJobResponse
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +71,13 @@ class InsightsAnalysisController(NemoController):
     dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "insights"]
 
     def __init__(self) -> None:
-        self._sdk: AsyncNeMoPlatform | None = None
+        self._sdk: AsyncNeMoHelix | None = None
         self._entities: NemoEntitiesClient | None = None
         self._jobs: AsyncJobsClient | None = None
         self._config: InsightsConfig | None = None
 
     @property
-    def sdk(self) -> AsyncNeMoPlatform:
+    def sdk(self) -> AsyncNeMoHelix:
         return _require(self._sdk, "sdk")
 
     @property
@@ -180,7 +180,7 @@ class InsightsAnalysisController(NemoController):
                 updated.last_error = "Reconciled job did not belong to this agent"
             elif not job.status.is_terminal():
                 return status
-            elif job.status == PlatformJobStatus.COMPLETED:
+            elif job.status == HelixJobStatus.COMPLETED:
                 updated.status = AnalysisConfigStatus.IDLE
                 # The pre-submission boundary keeps telemetry arriving during
                 # execution eligible for the next analysis.
@@ -334,5 +334,5 @@ class InsightsAnalysisController(NemoController):
         )
 
 
-def _job_targets_agent(job: PlatformJobResponse, agent: str) -> bool:
+def _job_targets_agent(job: HelixJobResponse, agent: str) -> bool:
     return (job.custom_fields or {}).get("insights_analysis_agent") == agent

@@ -29,9 +29,9 @@ from nemo_agents_plugin.runner.deployments_backend import (
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
 from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentConfig
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 @pytest.mark.parametrize(
@@ -64,12 +64,12 @@ def test_resolve_k8s_uses_internal_base_url_regardless_of_base_url() -> None:
     # k8s always returns internal_base_url, never the platform base_url.
     for base_url in (
         "http://localhost:8080",
-        "http://nemo-platform-envoy.aire-dev.svc.cluster.local:8080",
+        "http://nemo-helix-envoy.aire-dev.svc.cluster.local:8080",
         "http://some-other-host:8080",
     ):
         assert (
-            resolve_agent_gateway_url(base_url, mode="k8s", internal_base_url="http://nmp-api:8080/")
-            == "http://nmp-api:8080"
+            resolve_agent_gateway_url(base_url, mode="k8s", internal_base_url="http://nhx-api:8080/")
+            == "http://nhx-api:8080"
         )
 
 
@@ -105,9 +105,9 @@ def test_rewrite_config_base_urls_rebases_igw_host() -> None:
             }
         }
     }
-    result = rewrite_config_base_urls(config, "http://nmp-api:8080")
+    result = rewrite_config_base_urls(config, "http://nhx-api:8080")
     assert result["llms"]["llm"]["base_url"] == (
-        "http://nmp-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+        "http://nhx-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     )
     # Original not mutated.
     assert "localhost" in config["llms"]["llm"]["base_url"]
@@ -115,7 +115,7 @@ def test_rewrite_config_base_urls_rebases_igw_host() -> None:
 
 def test_rewrite_config_base_urls_leaves_third_party_base_url() -> None:
     config = {"llms": {"llm": {"_type": "openai", "base_url": "https://api.openai.com/v1"}}}
-    result = rewrite_config_base_urls(config, "http://nmp-api:8080")
+    result = rewrite_config_base_urls(config, "http://nhx-api:8080")
     assert result["llms"]["llm"]["base_url"] == "https://api.openai.com/v1"
 
 
@@ -159,13 +159,13 @@ def test_rewrite_fabric_config_base_urls_rebases_igw_host() -> None:
             }
         },
     }
-    result = rewrite_fabric_config_base_urls(config, "http://nmp-api:8080")
-    expected = "http://nmp-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    result = rewrite_fabric_config_base_urls(config, "http://nhx-api:8080")
+    expected = "http://nhx-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     assert result["models"]["default"]["base_url"] == expected
     assert result["harnesses"]["main"]["model"]["base_url"] == expected
     assert result["harnesses"]["legacy"]["model"]["settings"]["base_url"] == expected
     assert result["telemetry"]["atif"]["storage"][0]["endpoint"] == (
-        "http://nmp-api:8080/apis/intake/v2/workspaces/default/ingest/atif"
+        "http://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/atif"
     )
     assert result["telemetry"]["atif"]["storage"][1]["endpoint"] == "https://telemetry.example.com/atif"
     assert "localhost" in config["models"]["default"]["base_url"]
@@ -182,7 +182,7 @@ def test_rewrite_fabric_config_base_urls_leaves_third_party_base_url() -> None:
             }
         }
     }
-    result = rewrite_fabric_config_base_urls(config, "http://nmp-api:8080")
+    result = rewrite_fabric_config_base_urls(config, "http://nhx-api:8080")
     assert result["models"]["default"]["base_url"] == "https://api.openai.com/v1"
 
 
@@ -201,11 +201,11 @@ def test_rewrite_fabric_config_base_urls_preserves_https_atif_endpoint() -> None
         }
     }
 
-    result = rewrite_fabric_config_base_urls(config, "http://nmp-api:8080")
+    result = rewrite_fabric_config_base_urls(config, "http://nhx-api:8080")
 
     assert result["telemetry"]["atif"]["storage"][0] == {
         "type": "http",
-        "endpoint": "https://nmp-api:8080/apis/intake/v2/workspaces/default/ingest/atif",
+        "endpoint": "https://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/atif",
         "header_env": {"Authorization": "ATIF_AUTHORIZATION"},
     }
 
@@ -335,7 +335,7 @@ def test_build_deployment_config_always_single_container() -> None:
     assert container.image == "nat-runtime:latest"
     assert container.command == ["nat", "start", "fastapi"]
     assert not any(e.name == "NAT_CONFIG_YAML" for e in container.env)
-    assert next(e.value for e in container.env if e.name == "NMP_BASE_URL") == "http://host.docker.internal:8080"
+    assert next(e.value for e in container.env if e.name == "NHX_BASE_URL") == "http://host.docker.internal:8080"
     assert container.readiness_probe is not None
     assert cfg.init_containers == []
     assert len(cfg.config_files) == 1
@@ -372,7 +372,7 @@ def test_build_deployment_config_applies_k8s_resources() -> None:
         image="nat-runtime:latest",
         port=8000,
         agent_config={},
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
         resources=ComputeResources(limits={"cpu": "2"}, requests={"cpu": "1"}),
@@ -406,7 +406,7 @@ def test_build_deployment_config_no_resources_is_empty() -> None:
         image="nat-runtime:latest",
         port=8000,
         agent_config={},
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
     )
@@ -421,7 +421,7 @@ def test_build_deployment_config_emits_secret_ref_env_vars() -> None:
         image="nat-runtime:latest",
         port=8000,
         agent_config={},
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
         secrets={"APP_TOKEN": "default/app-token", "OTHER": "prod/other-secret"},
@@ -447,7 +447,7 @@ def test_build_deployment_config_no_secrets_adds_no_secret_env() -> None:
         image="nat-runtime:latest",
         port=8000,
         agent_config={},
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
     )
@@ -465,7 +465,7 @@ def test_build_deployment_config_adds_workload_identity_when_requested() -> None
             image="nat-runtime:latest",
             port=8000,
             agent_config={},
-            platform_base_url="http://nmp-api:8080",
+            platform_base_url="http://nhx-api:8080",
             config_mount_path="/workspace/config.yaml",
             mode="k8s",
             workload_identity_enabled=True,
@@ -481,7 +481,7 @@ def test_build_deployment_config_adds_workload_identity_when_requested() -> None
 @pytest.mark.parametrize("mode", ["docker", "k8s"])
 @pytest.mark.parametrize(
     "reserved_name",
-    ["NMP_WORKSPACE", "NMP_AGENT_NAME", "NMP_BASE_URL", "PYTHONPATH", "AGENT_CONFIG_PATH", "NAT_CONFIG_PATH"],
+    ["NHX_WORKSPACE", "NHX_AGENT_NAME", "NHX_BASE_URL", "PYTHONPATH", "AGENT_CONFIG_PATH", "NAT_CONFIG_PATH"],
 )
 def test_build_deployment_config_rejects_secret_name_colliding_with_reserved(
     reserved_name: str, mode: DeploymentMode
@@ -495,7 +495,7 @@ def test_build_deployment_config_rejects_secret_name_colliding_with_reserved(
             image="nat-runtime:latest",
             port=8000,
             agent_config={},
-            platform_base_url="http://nmp-api:8080",
+            platform_base_url="http://nhx-api:8080",
             config_mount_path="/workspace/config.yaml",
             mode=mode,
             secrets={reserved_name: "default/some-secret"},
@@ -510,7 +510,7 @@ def test_build_deployment_config_rejects_port_secret_when_using_image_entrypoint
             image="custom-agent:latest",
             port=8000,
             agent_config={},
-            platform_base_url="http://nmp-api:8080",
+            platform_base_url="http://nhx-api:8080",
             config_mount_path="/workspace/config.yaml",
             mode="docker",
             secrets={"PORT": "default/some-secret"},
@@ -525,7 +525,7 @@ def test_build_deployment_config_k8s_uses_nat_entrypoint() -> None:
         image="nat-runtime:latest",
         port=8000,
         agent_config={},
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
     )
@@ -541,7 +541,7 @@ def test_build_deployment_config_k8s_option_b_when_image_set() -> None:
         image="nat-runtime:latest",
         port=8000,
         agent_config={},
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
         plugin_wheels_init_image="busybox:1.36",
@@ -605,7 +605,7 @@ def test_build_deployment_config_fabric_docker_uses_fabric_server() -> None:
     assert not any(e.name == "AGENT_CONFIG_YAML" for e in container.env)
     assert not any(e.name == "NAT_CONFIG_YAML" for e in container.env)
     assert any(e.name == "AGENT_CONFIG_PATH" and e.value == "/tmp/nemo/agent.yaml" for e in container.env)
-    assert next(e.value for e in container.env if e.name == "NMP_BASE_URL") == "http://host.docker.internal:8080"
+    assert next(e.value for e in container.env if e.name == "NHX_BASE_URL") == "http://host.docker.internal:8080"
     assert next(e.value for e in container.env if e.name == PLATFORM_IGW_API_KEY_ENV) == (
         PLATFORM_IGW_API_KEY_PLACEHOLDER
     )
@@ -733,7 +733,7 @@ def test_build_deployment_config_fabric_k8s_mounts_multiple_config_files() -> No
         image="fabric-runtime:latest",
         port=8000,
         agent_config=_FABRIC_AGENT_CONFIG,
-        platform_base_url="http://nmp-api:8080",
+        platform_base_url="http://nhx-api:8080",
         config_mount_path="/workspace/config.yaml",
         mode="k8s",
         config_files=staged_files,
@@ -827,7 +827,7 @@ async def test_create_deployment_docker_rewrites_loopback_base_url() -> None:
     assert baked["llms"]["llm"]["base_url"] == (
         "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     )
-    assert next(e.value for e in created_config.containers[0].env if e.name == "NMP_BASE_URL") == (
+    assert next(e.value for e in created_config.containers[0].env if e.name == "NHX_BASE_URL") == (
         "http://host.docker.internal:8080"
     )
 
@@ -837,7 +837,7 @@ async def test_create_deployment_k8s_rewrites_loopback_to_internal() -> None:
     backend = _backend(
         default_image="nat:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities
@@ -857,9 +857,9 @@ async def test_create_deployment_k8s_rewrites_loopback_to_internal() -> None:
     created_config = entities.create.await_args_list[0].args[0]
     baked = yaml.safe_load(created_config.config_files[0].content)
     assert baked["llms"]["llm"]["base_url"] == (
-        "http://nmp-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+        "http://nhx-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     )
-    assert next(e.value for e in created_config.containers[0].env if e.name == "NMP_BASE_URL") == "http://nmp-api:8080"
+    assert next(e.value for e in created_config.containers[0].env if e.name == "NHX_BASE_URL") == "http://nhx-api:8080"
 
 
 @pytest.mark.asyncio
@@ -884,9 +884,9 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
     # Agents layer only sets the DeploymentConfig flags + points the agent at the
     # proxy port; the deployments plugin compiles the actual sidecar container.
     backend = _backend(
-        default_image="nmp-api:latest",
+        default_image="nhx-api:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities
@@ -936,9 +936,9 @@ async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of(
     # When auth is on but the deployment has no known creator, the sidecar still
     # stamps the service principal but cannot delegate — access is unscoped.
     backend = _backend(
-        default_image="nmp-api:latest",
+        default_image="nhx-api:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities
@@ -960,9 +960,9 @@ async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of(
 @pytest.mark.asyncio
 async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
     backend = _backend(
-        default_image="nmp-api:latest",
+        default_image="nhx-api:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities
@@ -988,7 +988,7 @@ async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
     baked = yaml.safe_load(created_config.config_files[0].content)
     # Auth off: agent talks directly to the internal Service DNS (PR #899 behavior).
     assert baked["llms"]["llm"]["base_url"] == (
-        "http://nmp-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+        "http://nhx-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     )
 
 
@@ -1071,7 +1071,7 @@ async def test_create_deployment_fabric_k8s_rewrites_model_base_url() -> None:
     backend = _backend(
         default_image="fabric:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities
@@ -1098,7 +1098,7 @@ async def test_create_deployment_fabric_k8s_rewrites_model_base_url() -> None:
     created_config = entities.create.await_args_list[0].args[0]
     baked = yaml.safe_load(created_config.config_files[0].content)
     assert baked["harnesses"]["main"]["model"]["base_url"] == (
-        "http://nmp-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+        "http://nhx-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     )
     assert created_config.containers[0].command == ["python"]
 
@@ -1108,7 +1108,7 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
     backend = _backend(
         default_image="fabric:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities
@@ -1154,7 +1154,7 @@ async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_ove
     deployment's workspace.
     """
     backend = _backend(
-        default_image="fabric:latest", default_executor="k8s", k8s_internal_base_url="http://nmp-api:8080"
+        default_image="fabric:latest", default_executor="k8s", k8s_internal_base_url="http://nhx-api:8080"
     )
     backend._entities = AsyncMock()
     config = {
@@ -1370,7 +1370,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
     backend = _backend(
         default_image="fabric:latest",
         default_executor="k8s",
-        k8s_internal_base_url="http://nmp-api:8080",
+        k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
     backend._entities = entities

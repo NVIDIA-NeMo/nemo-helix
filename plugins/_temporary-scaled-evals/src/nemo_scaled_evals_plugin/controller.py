@@ -14,15 +14,15 @@ from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entities.base import SyncEntityClient
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entities.base import SyncEntityClient
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -41,18 +41,18 @@ from scaled_evals.dispatch.worker import _retry_delay_seconds
 
 LOG = logging.getLogger(__name__)
 _ACTIVE_JOB_STATUSES = {
-    PlatformJobStatus.CREATED,
-    PlatformJobStatus.PENDING,
-    PlatformJobStatus.ACTIVE,
-    PlatformJobStatus.PAUSED,
-    PlatformJobStatus.PAUSING,
-    PlatformJobStatus.RESUMING,
-    PlatformJobStatus.CANCELLING,
+    HelixJobStatus.CREATED,
+    HelixJobStatus.PENDING,
+    HelixJobStatus.ACTIVE,
+    HelixJobStatus.PAUSED,
+    HelixJobStatus.PAUSING,
+    HelixJobStatus.RESUMING,
+    HelixJobStatus.CANCELLING,
 }
 # Statuses in which no task has executed yet, so no sandbox can exist.
 _PRELAUNCH_JOB_STATUSES = {
-    PlatformJobStatus.CREATED,
-    PlatformJobStatus.PENDING,
+    HelixJobStatus.CREATED,
+    HelixJobStatus.PENDING,
 }
 
 
@@ -246,7 +246,7 @@ class ScaledEvalsJobsController(NemoController):
                 }
             },
         )
-        request = CreatePlatformJobRequest(
+        request = CreateHelixJobRequest(
             name=name,
             description=job_cls.description,
             source=f"scaled-evals.{job_cls.name}",
@@ -270,9 +270,9 @@ class ScaledEvalsJobsController(NemoController):
             if status.status in _ACTIVE_JOB_STATUSES:
                 await asyncio.to_thread(self._heartbeat_build, row)
             elif status.status in {
-                PlatformJobStatus.ERROR,
-                PlatformJobStatus.CANCELLED,
-                PlatformJobStatus.COMPLETED,
+                HelixJobStatus.ERROR,
+                HelixJobStatus.CANCELLED,
+                HelixJobStatus.COMPLETED,
             }:
                 detail = f"Platform build job ended as {status.status.value} without recording a ready task revision"
                 await asyncio.to_thread(self._fail_build_row, row, detail)
@@ -290,7 +290,7 @@ class ScaledEvalsJobsController(NemoController):
         if status.status in _ACTIVE_JOB_STATUSES:
             await asyncio.to_thread(self._release_evaluation_reconcile_claim, row)
             return
-        if status.status == PlatformJobStatus.COMPLETED:
+        if status.status == HelixJobStatus.COMPLETED:
             detail = "Platform evaluation job completed without recording a terminal evaluation status"
         else:
             detail = f"Platform evaluation job ended as {status.status.value}"
@@ -403,7 +403,7 @@ class ScaledEvalsJobsController(NemoController):
             EvaluationRepository(conn).schedule_retry(
                 evaluation_id,
                 execution_number=execution_number,
-                failure_code="PlatformJobSubmissionError",
+                failure_code="HelixJobSubmissionError",
                 failure_category="infrastructure",
                 delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
                 expected_dispatch_owner=self._worker_id,
@@ -435,7 +435,7 @@ class ScaledEvalsJobsController(NemoController):
                 execution_number=execution_number,
                 dispatch_job_name=str(row["dispatch_job_name"]),
                 reconcile_worker_id=self._worker_id,
-                failure_code="PlatformJobInfrastructureError",
+                failure_code="HelixJobInfrastructureError",
                 detail=detail,
                 retry_delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
             )

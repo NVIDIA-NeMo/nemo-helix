@@ -44,8 +44,8 @@ from nemo_insights_plugin.contracts.profile import (
     load_env_file,
     resolve_base_url,
 )
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.client.errors import NemoClientError
 from nooa import GenerationError
 
 DEFAULT_WORKSPACE = "default"
@@ -170,16 +170,16 @@ class ExperimentalistCLI(NemoCLI):
             workspace: str | None = typer.Option(
                 None,
                 "--workspace",
-                help="Intake/NMP workspace for traces and run/candidate metadata. Falls back to the profile.",
+                help="Intake/NHX workspace for traces and run/candidate metadata. Falls back to the profile.",
             ),
             base_url: str | None = typer.Option(
                 None,
                 "--base-url",
                 help=(
-                    "Base URL of the running NMP instance. Default: NMP_BASE_URL "
+                    "Base URL of the running NHX instance. Default: NHX_BASE_URL "
                     "(shell or profile-dir .env), else http://localhost:8080."
                 ),
-                envvar="NMP_BASE_URL",
+                envvar="NHX_BASE_URL",
             ),
             config: Path | None = typer.Option(
                 None,
@@ -209,7 +209,7 @@ class ExperimentalistCLI(NemoCLI):
             async def _flow() -> str:
                 """Resolve inputs (profile + flags) and run the Experimentalist."""
                 profile, profile_load_error = _load_profile_or_error(profile_path)
-                # Resolved AFTER the profile-dir .env load so an NMP_BASE_URL set there
+                # Resolved AFTER the profile-dir .env load so an NHX_BASE_URL set there
                 # takes effect; typer's envvar/flag binding (shell) wins.
                 base_url_resolved = resolve_base_url(base_url)
                 effective_insight = resolve_effective_insight(
@@ -361,10 +361,10 @@ class ExperimentalistCLI(NemoCLI):
                 None,
                 "--base-url",
                 help=(
-                    "Base URL of the running NMP instance. Default: NMP_BASE_URL "
+                    "Base URL of the running NHX instance. Default: NHX_BASE_URL "
                     "(shell or profile-dir .env), else http://localhost:8080."
                 ),
-                envvar="NMP_BASE_URL",
+                envvar="NHX_BASE_URL",
             ),
         ) -> None:
             """Diagnose Experimentalist setup: profile, artifacts, models, platform, runtime."""
@@ -468,7 +468,7 @@ async def _check_platform_client_bootstrap(base_url: str) -> CheckResult:
             status="fail",
             severity="required",
             message=f"Platform client initialization failed ({type(exc).__name__})",
-            hint="check --base-url/NMP_BASE_URL and the active authentication context",
+            hint="check --base-url/NHX_BASE_URL and the active authentication context",
         )
     try:
         await client.close()

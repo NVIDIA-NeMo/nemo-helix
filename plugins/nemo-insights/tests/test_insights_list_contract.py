@@ -11,9 +11,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_insights_plugin.entities import Insight
 from nemo_insights_plugin.service import InsightsService
-from nemo_platform_plugin.entity_client import NemoPaginationInfo, get_entity_client
-from nmp.intake.entities.experiments import ExperimentGroup
-from nmp.intake.spans.api.dependencies import get_spans_service
+from nemo_helix_plugin.entity_client import NemoPaginationInfo, get_entity_client
+from nhx.intake.entities.experiments import ExperimentGroup
+from nhx.intake.spans.api.dependencies import get_spans_service
 
 
 def _insight(name: str, entity_id: str) -> Insight:

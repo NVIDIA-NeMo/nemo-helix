@@ -12,11 +12,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.service import IntakeService
-from nmp.intake.spans.clickhouse_client import ClickHouseSettings, ClickHouseSpanClient, bootstrap_schema
-from nmp.testing import create_test_client
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.service import IntakeService
+from nhx.intake.spans.clickhouse_client import ClickHouseSettings, ClickHouseSpanClient, bootstrap_schema
+from nhx.testing import create_test_client
 
 CLICKHOUSE_VERSION = (
     (Path(__file__).resolve().parents[4] / "services" / "intake" / ".clickhouse-version")

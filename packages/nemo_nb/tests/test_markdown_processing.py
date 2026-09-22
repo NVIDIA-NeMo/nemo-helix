@@ -264,8 +264,8 @@ echo 'hello'
                 "# @nemo-nb: insert\n"
                 "# @nemo-nb: insert :sync: sdk\n"
                 "# @nemo-nb: wrap-cell-end :::\n"
-                "from nemo_platform import NeMoPlatform\n\n"
-                "client = NeMoPlatform(\n"
+                "from nemo_helix import NeMoHelix\n\n"
+                "client = NeMoHelix(\n"
                 '    base_url="http://nemo.test",\n'
                 '    inference_base_url="http://nim.test",\n'
                 ")\n\n"
@@ -315,7 +315,7 @@ echo 'hello'
                 last_pos = pos
 
             # Ensure the main client code is in the same cell
-            assert "from nemo_platform import NeMoPlatform" in source
+            assert "from nemo_helix import NeMoHelix" in source
             assert "deployment = client.deployment.model_deployments.create(" in source
             assert "print(deployment)" in source
 

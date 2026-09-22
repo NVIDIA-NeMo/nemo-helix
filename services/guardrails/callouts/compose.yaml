@@ -11,13 +11,13 @@ services:
       - ./envoy_local.yaml:/etc/envoy/envoy.yaml
     networks:
     - default
-    - nmp
+    - nhx
     depends_on:
       - mock-llm
       - ext_proc_server
 
   mock-llm:
-    image: my-registry/guardrails-callout-mock-llm:local
+    image: my-registry/nhx-guardrails-callout-mock-llm:local
     container_name: mock-llm
     command: /mock-server
     environment:
@@ -28,7 +28,7 @@ services:
       - "8000:8000"
     networks:
       - default
-      - nmp
+      - nhx
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -62,10 +62,10 @@ services:
       - otel-collector
     networks:
       - default
-      - nmp
+      - nhx
 
   ext_proc_server:
-    image: my-registry/guardrails-callout:local
+    image: my-registry/nhx-guardrails-callout:local
     container_name: ext_proc_server
     command: /main
     environment:
@@ -86,12 +86,12 @@ services:
       - ":8181"
     networks:
       - default
-      - nmp
+      - nhx
     depends_on:
       - otel-collector
       - zipkin
 
 networks:
-  nmp:
-    name: nmp
+  nhx:
+    name: nhx
     external: true

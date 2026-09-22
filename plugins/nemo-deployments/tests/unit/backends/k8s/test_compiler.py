@@ -38,13 +38,13 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
     WorkloadIdentitySpec,
 )
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
     WORKLOAD_IDENTITY_VOLUME_PATH,
 )
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_platform_plugin.config import ImagePullSecret
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.config import ImagePullSecret
 
 
 def _serialized(obj: object) -> dict:
@@ -313,7 +313,7 @@ def test_compile_per_entity_wins_over_executor_defaults() -> None:
         }
     )
     executor_defaults = ExecutorK8sDefaults(
-        pod_annotations={"sidecar.istio.io/nativeSidecar": "true", "platform": "nmp"},
+        pod_annotations={"sidecar.istio.io/nativeSidecar": "true", "platform": "nhx"},
         node_selector={"gpu": "a100"},
         tolerations=[{"key": "platform", "operator": "Exists"}],
     )
@@ -332,7 +332,7 @@ def test_compile_per_entity_wins_over_executor_defaults() -> None:
     assert compiled.pod_annotations == {
         "sidecar.istio.io/nativeSidecar": "false",
         "team": "a",
-        "platform": "nmp",
+        "platform": "nhx",
     }
     # node_selector / tolerations: entity wins wholesale.
     assert pod_spec["node_selector"] == {"zone": "us-west1-a"}
@@ -659,7 +659,7 @@ def test_compile_workload_projects_workload_identity_token() -> None:
                 enabled=True,
                 workloadKind="agent_deployment",
                 workloadId="task",
-                tokenAudience="nemo-platform",
+                tokenAudience="nemo-helix",
                 tokenExpirationSeconds=900,
             )
         }
@@ -677,7 +677,7 @@ def test_compile_workload_projects_workload_identity_token() -> None:
     volume = next(item for item in pod_spec["volumes"] if item["name"] == WORKLOAD_IDENTITY_VOLUME_NAME)
     projection = volume["projected"]["sources"][0]["serviceAccountToken"]
     assert projection["path"] == "token"
-    assert projection["audience"] == "nemo-platform"
+    assert projection["audience"] == "nemo-helix"
     assert projection["expirationSeconds"] == 900
 
     main = pod_spec["containers"][0]

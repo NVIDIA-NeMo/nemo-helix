@@ -8,9 +8,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.customization_contributor import CustomizationContributorDiscoveryError
-from nemo_platform_plugin.discovery import (
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.customization_contributor import CustomizationContributorDiscoveryError
+from nemo_helix_plugin.discovery import (
     CUSTOMIZATION_CONTRIBUTORS_GROUP,
     discover_customization_contributors,
 )

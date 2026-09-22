@@ -3,7 +3,7 @@
 
 # yaml-language-server: $schema=https://app.stainlessapi.com/config-internal.schema.json
 organization:
-  name: NeMo Platform
+  name: NeMo Helix
   docs: https://docs.nvidia.com/nemo/microservices/latest/about/index.html
   contact: ""
 
@@ -31,20 +31,20 @@ custom_casings:
 targets:
   #  typescript:
   #    _skip_running_tests: false
-  #    package_name: nemo-platform-v1
+  #    package_name: nemo-helix-v1
   #    publish:
   #      npm: false
   #    skip: false
   #    options:
   #      mcp_server:
-  #        package_name: nemo-platform-v1-mcp
+  #        package_name: nemo-helix-v1-mcp
   #        enable_all_resources: true
 
   python:
     # [docs]: https://www.stainless.com/docs/reference/editions
     edition: python.2025-11-20
-    project_name: nemo-platform-sdk
-    package_name: nemo_platform
+    project_name: nemo-helix-sdk
+    package_name: nemo_helix
     production_repo:
     publish:
       pypi: false
@@ -578,14 +578,14 @@ resources:
       mo_e_config: MoEConfig
       sliding_window_config: SlidingWindowConfig
       model_spec: ModelSpec
-      platform_job_log: PlatformJobLog
-      platform_job_log_page: PlatformJobLogPage
+      platform_job_log: HelixJobLog
+      platform_job_log_page: HelixJobLogPage
       auth_context: AuthContext
       tool_call_config: ToolCallConfig
       model_metadata_content: ModelMetadataContent
       # FilesetMetadata is referenced by multiple resources (files, models) at the source
       # level. Pin both Output and Input variants in $shared so sync-models does not re-home
-      # them under `files`, which would break ``from nemo_platform.types.shared import
+      # them under `files`, which would break ``from nemo_helix.types.shared import
       # FilesetMetadata`` imports downstream (models service tests).
       fileset_metadata: FilesetMetadata
       environment_metadata_content: EnvironmentMetadataContent

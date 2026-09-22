@@ -3,7 +3,7 @@
 
 """Typed permissions for Insights HTTP resources."""
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class InsightPerms(PermissionSet, namespace="insights.insights"):

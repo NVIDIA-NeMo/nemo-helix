@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from nemo_insights_plugin import endpoints
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.client.method import method
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.method import method
 
 
 class _InsightsMethods:

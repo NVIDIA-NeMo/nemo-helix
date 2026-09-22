@@ -12,7 +12,7 @@ from datetime import datetime
 
 import pytest
 from nimservice_spec_types import Spec
-from nmp.core.models.schemas import (
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelDeploymentConfigRequest,
     Engine,

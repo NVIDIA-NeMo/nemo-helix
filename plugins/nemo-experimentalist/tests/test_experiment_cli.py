@@ -11,7 +11,7 @@ from nemo_experimentalist_plugin import cli
 from nemo_experimentalist_plugin.entities import DatasetRef
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
 from nemo_experimentalist_plugin.preflight import Probes
-from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nooa import GenerationError
 from typer.testing import CliRunner
 
@@ -40,7 +40,7 @@ def hermetic_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
 
-class FakePlatformClient(AsyncNemoClient):
+class FakeHelixClient(AsyncNemoClient):
     def __init__(self) -> None:
         transport = httpx.MockTransport(
             lambda request: httpx.Response(500, request=request, json={"detail": "fake client"})
@@ -58,8 +58,8 @@ class FakePlatformClient(AsyncNemoClient):
 
 
 @pytest.fixture(autouse=True)
-def platform_client(monkeypatch: pytest.MonkeyPatch) -> FakePlatformClient:
-    client = FakePlatformClient()
+def platform_client(monkeypatch: pytest.MonkeyPatch) -> FakeHelixClient:
+    client = FakeHelixClient()
     monkeypatch.setattr(cli, "make_client", lambda _base_url: client)
     return client
 
@@ -200,7 +200,7 @@ def test_cli_help_exposes_only_run_and_doctor() -> None:
 def test_experiment_cli_passes_dataset_driven_contract_to_runner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    platform_client: FakePlatformClient,
+    platform_client: FakeHelixClient,
     config_body: str | None,
     expected_config: EvolutionaryOptimizerConfig,
     expected_output: str,
@@ -301,7 +301,7 @@ def test_experiment_cli_reports_expected_errors_without_starting_runner(
 def test_experiment_cli_exits_nonzero_when_evaluation_has_no_scores(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    platform_client: FakePlatformClient,
+    platform_client: FakeHelixClient,
 ) -> None:
     async def fail_no_scores(**_: object) -> str:
         raise ValueError("Evaluation agent-validation produced no scoreable metrics from 3 trial(s)")
@@ -319,7 +319,7 @@ def test_experiment_cli_exits_nonzero_when_evaluation_has_no_scores(
 def test_experiment_cli_reports_a_failed_generation_without_a_traceback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    platform_client: FakePlatformClient,
+    platform_client: FakeHelixClient,
 ) -> None:
     """A step the model cannot finish exits 1 and repeats what the harness reported."""
 

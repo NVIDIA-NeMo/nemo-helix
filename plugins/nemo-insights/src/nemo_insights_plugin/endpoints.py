@@ -24,8 +24,8 @@ from nemo_insights_plugin.types import (
     ListAnalysisRunStatusesQueryParams,
     ListInsightsQueryParams,
 )
-from nemo_platform_plugin.client.endpoint import delete, get, patch, post
-from nemo_platform_plugin.client.types import Paginated
+from nemo_helix_plugin.client.endpoint import delete, get, patch, post
+from nemo_helix_plugin.client.types import Paginated
 
 _INSIGHTS_BASE = "/apis/insights/v2/workspaces/{workspace}"
 

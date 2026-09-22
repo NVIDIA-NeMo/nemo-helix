@@ -5,7 +5,7 @@
 
 Automodel training contributor under `/apis/customization/v2/workspaces/{workspace}/automodel/`.
 
-Requires **`nemo-customizer-plugin`** at runtime (router + `client.customization` SDK) and **`nmp-automodel`** (compiler/tasks). The Automodel plugin does not declare a pyproject dependency on the customizer plugin — install both via root `enabled-plugins`:
+Requires **`nemo-customizer-plugin`** at runtime (router + `client.customization` SDK) and **`nhx-automodel`** (compiler/tasks). The Automodel plugin does not declare a pyproject dependency on the customizer plugin — install both via root `enabled-plugins`:
 
 ```bash
 uv sync --group enabled-plugins
@@ -26,4 +26,4 @@ Other customization backends may still use `nemo customization <backend> jobs su
 
 Job JSON uses the simplified `AutomodelJobInput` schema (see `nemo_automodel_plugin/schema.py`). Submit posts to `/apis/customization/v2/workspaces/{workspace}/automodel/jobs`.
 
-Optional `integrations` (W&B / MLflow) use the shared `IntegrationsSpec` from `nemo_platform_plugin.integrations`. Example: `plugins/nemo-automodel/tests/fixtures/integrations_wandb_mlflow.json`. Field reference: customizer skill `references/hyperparameters.md` § **Integrations (automodel + unsloth)**.
+Optional `integrations` (W&B / MLflow) use the shared `IntegrationsSpec` from `nemo_helix_plugin.integrations`. Example: `plugins/nemo-automodel/tests/fixtures/integrations_wandb_mlflow.json`. Field reference: customizer skill `references/hyperparameters.md` § **Integrations (automodel + unsloth)**.

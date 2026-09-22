@@ -14,7 +14,7 @@ def test_platform_stack_dependencies_resolve_through_the_workspace() -> None:
     workspace = tomllib.loads((WORKSPACE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     sources = workspace["tool"]["uv"]["sources"]
 
-    for package_name in ("nemo-platform", "nemo-platform-plugin", "nemo-insights-plugin"):
+    for package_name in ("nemo-helix", "nemo-helix-plugin", "nemo-insights-plugin"):
         assert project["project"]["dependencies"].count(package_name) == 1
         assert sources[package_name] == {"workspace": True}
 

@@ -12,9 +12,9 @@ new inference deployment before eval.
 entity at ``output.name``. Deploy that entity for inference before chat or eval — full
 weights are not hot-reloaded onto the base model's deployment.
 
-Run from the nemo-platform git root (reads ``$NMP_BASE_URL`` when ``--base-url`` is omitted)::
+Run from the nemo-helix git root (reads ``$NHX_BASE_URL`` when ``--base-url`` is omitted)::
 
-    export NMP_BASE_URL=http://127.0.0.1:8080
+    export NHX_BASE_URL=http://127.0.0.1:8080
     uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \\
         --model-entity <model-entity> --adapter <adapter-a> --adapter <adapter-b> \\
         --provider <provider> --dataset-fileset <dataset-fileset> --split validation.jsonl
@@ -661,7 +661,7 @@ def build_eval_payload(
 
 def default_base_url() -> str:
     """Platform URL from env or localhost default."""
-    return os.environ.get("NMP_BASE_URL") or "http://127.0.0.1:8080"
+    return os.environ.get("NHX_BASE_URL") or "http://127.0.0.1:8080"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -669,7 +669,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-url",
         default=default_base_url(),
-        help="Platform URL (default: $NMP_BASE_URL or http://127.0.0.1:8080)",
+        help="Platform URL (default: $NHX_BASE_URL or http://127.0.0.1:8080)",
     )
     parser.add_argument("--workspace", default="default")
     parser.add_argument("--model-entity", required=True)

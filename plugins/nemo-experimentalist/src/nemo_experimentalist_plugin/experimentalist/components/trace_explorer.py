@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 from nemo_experimentalist_plugin.entities import ResourceRef
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import ListEvaluatorResultsQueryParams, ListSpansQueryParams
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import ListEvaluatorResultsQueryParams, ListSpansQueryParams
 from pydantic import BaseModel, ConfigDict, Field
 
 

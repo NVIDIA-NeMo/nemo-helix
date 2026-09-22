@@ -37,7 +37,7 @@ The Data Designer service generates synthetic datasets using LLMs. It supports s
 4. Save configuration
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Model provider accessible (via IGW)
 
 **Success Criteria**:

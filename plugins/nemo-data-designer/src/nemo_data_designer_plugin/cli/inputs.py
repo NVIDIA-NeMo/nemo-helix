@@ -23,8 +23,8 @@ from data_designer.cli.ui import print_error
 from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
 from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.utils.constants import DEFAULT_NUM_RECORDS
-from nemo_platform_plugin.cli_options import WorkspaceOption
-from nemo_platform_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
 
 _NON_INTERACTIVE_HELP = (
     "Display all records at once instead of browsing interactively. Ignored when --save-results is used."

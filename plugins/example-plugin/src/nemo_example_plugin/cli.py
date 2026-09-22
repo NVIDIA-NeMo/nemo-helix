@@ -15,8 +15,8 @@ from typing import Any, Optional
 import httpx
 import typer
 from nemo_example_plugin.core import say_hello
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 
 
 def _request_json(method: str, url: str, *, json_body: dict | None = None) -> Any:
@@ -64,7 +64,7 @@ class ExampleCLI(NemoCLI):
             block_message: Optional[str] = typer.Option(
                 None, help="Refusal message returned when a request is blocked."
             ),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            base_url: str = typer.Option("http://localhost:8000", envvar="NHX_BASE_URL"),
         ) -> None:
             """Create a new middleware config entity."""
 
@@ -81,7 +81,7 @@ class ExampleCLI(NemoCLI):
         @mw.command("list")
         def list_middleware_configs(
             workspace: str = typer.Option(..., help="Workspace name."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            base_url: str = typer.Option("http://localhost:8000", envvar="NHX_BASE_URL"),
         ) -> None:
             """List middleware configs in a workspace."""
 
@@ -93,7 +93,7 @@ class ExampleCLI(NemoCLI):
         def get_middleware_config(
             workspace: str = typer.Option(..., help="Workspace name."),
             name: str = typer.Option(..., help="Config name."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            base_url: str = typer.Option("http://localhost:8000", envvar="NHX_BASE_URL"),
         ) -> None:
             """Get a single middleware config by name."""
 
@@ -109,7 +109,7 @@ class ExampleCLI(NemoCLI):
                 None, help="Comma-separated keywords (replaces existing list)."
             ),
             block_message: Optional[str] = typer.Option(None, help="New refusal message."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            base_url: str = typer.Option("http://localhost:8000", envvar="NHX_BASE_URL"),
         ) -> None:
             """Partially update a middleware config (omitted fields unchanged)."""
 
@@ -127,7 +127,7 @@ class ExampleCLI(NemoCLI):
         def delete_middleware_config(
             workspace: str = typer.Option(..., help="Workspace name."),
             name: str = typer.Option(..., help="Config name."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            base_url: str = typer.Option("http://localhost:8000", envvar="NHX_BASE_URL"),
             yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
         ) -> None:
             """Delete a middleware config."""

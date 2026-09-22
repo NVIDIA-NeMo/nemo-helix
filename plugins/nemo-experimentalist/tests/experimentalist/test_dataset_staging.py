@@ -14,7 +14,7 @@ from nemo_experimentalist_plugin.experimentalist.components.dataset_staging impo
     stage_task_template,
 )
 from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor import HarborDataset
-from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
 def _write_tree(root: Path, content: str) -> None:

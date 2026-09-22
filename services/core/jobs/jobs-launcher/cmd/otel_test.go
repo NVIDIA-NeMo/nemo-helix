@@ -6,7 +6,7 @@ package cmd
 import "testing"
 
 func TestLauncherOTLPHTTPClientUsesUDSEndpoint(t *testing.T) {
-	t.Setenv("NMP_BASE_URL", "unix:///tmp/nemo-platform.sock")
+	t.Setenv("NHX_BASE_URL", "unix:///tmp/nemo-helix.sock")
 
 	client := launcherOTLPHTTPClient()
 	if client == nil {
@@ -18,7 +18,7 @@ func TestLauncherOTLPHTTPClientUsesUDSEndpoint(t *testing.T) {
 }
 
 func TestLauncherOTLPHTTPClientSkipsTCP(t *testing.T) {
-	t.Setenv("NMP_BASE_URL", "http://127.0.0.1:8080")
+	t.Setenv("NHX_BASE_URL", "http://127.0.0.1:8080")
 
 	if client := launcherOTLPHTTPClient(); client != nil {
 		t.Fatal("expected no custom HTTP client for TCP endpoint")

@@ -50,13 +50,13 @@ async def create_worktree(
         project_root: Path to the main repo.
         branch_name: Name for the new branch.
         worktree_path: Where to create the worktree. Defaults to
-            <project_root>/../nmp-worktrees/<branch_name>
+            <project_root>/../nhx-worktrees/<branch_name>
 
     Returns:
         Path to the created worktree.
     """
     if worktree_path is None:
-        worktrees_dir = project_root.parent / "nmp-worktrees"
+        worktrees_dir = project_root.parent / "nhx-worktrees"
         worktrees_dir.mkdir(parents=True, exist_ok=True)
         worktree_path = worktrees_dir / branch_name
 

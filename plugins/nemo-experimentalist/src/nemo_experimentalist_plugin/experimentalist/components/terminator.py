@@ -22,7 +22,7 @@ from nemo_experimentalist_plugin.experimentalist.components.models import (
     pareto_objectives,
 )
 from nemo_experimentalist_plugin.skills import skills_dir
-from nemo_platform_plugin.nooa_model_client import get_fast_model
+from nemo_helix_plugin.nooa_model_client import get_fast_model
 from nooa import Agent, CodeActStrategy, TextSkill, hidden, strategy
 from nooa.agentdoc import doc
 from nooa.config import CodeActConfig

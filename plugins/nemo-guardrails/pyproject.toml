@@ -6,8 +6,8 @@ name = "nemo-guardrails-plugin"
 description = "NeMo Guardrails Plugin"
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nemo-platform-plugin",
-    "nemo-platform",
+    "nemo-helix-plugin",
+    "nemo-helix",
     "nemoguardrails[tracing]==0.23.0",
     "langchain>=1.3.14",
     "langchain-community>=0.3.31,<0.4",
@@ -38,8 +38,8 @@ nemo-guardrails = "nemo_guardrails_plugin.middleware:GuardrailsMiddleware"
 guardrails = "nemo_guardrails_plugin.skills:get_skills_path"
 
 [tool.uv.sources]
-nemo-platform-plugin = { workspace = true }
-nemo-platform = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+nemo-helix = { workspace = true }
 
 
 [build-system]

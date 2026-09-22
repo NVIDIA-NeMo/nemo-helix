@@ -16,7 +16,7 @@ from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Statu
 from nemo_deployments_plugin.reconciler.drift_recovery import DriftRecoveryCache, DriftRecoveryLimits, RecoveryAction
 from nemo_deployments_plugin.reconciler.prerequisite import PrerequisiteResult, prerequisites_met
 from nemo_deployments_plugin.reconciler.volume_mounts import VolumeMountResult, volume_mounts_ready
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 
 logger = logging.getLogger(__name__)
 

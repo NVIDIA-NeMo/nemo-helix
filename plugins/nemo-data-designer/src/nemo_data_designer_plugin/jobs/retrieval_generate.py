@@ -10,10 +10,10 @@ from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from pydantic import BaseModel
 
 
@@ -32,7 +32,7 @@ class RetrievalGenerateJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         is_local: bool,
     ) -> BaseModel:
         job_config = (
@@ -65,16 +65,16 @@ class RetrievalGenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         canonical_spec = (
             spec
             if isinstance(spec, RetrievalGenerateStepConfig)
             else RetrievalGenerateStepConfig.model_validate(spec.model_dump())
         )
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
                 await retrieval_step(
                     "retrieval-generate",
@@ -87,7 +87,7 @@ class RetrievalGenerateJob(NemoJob):
             ]
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix) -> dict:
         from nemo_data_designer_plugin.retrieval.generation import build_generation_run_config, execute_generation
 
         step = RetrievalGenerateStepConfig.model_validate(config)

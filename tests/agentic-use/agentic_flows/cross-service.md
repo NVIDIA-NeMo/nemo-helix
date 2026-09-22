@@ -3,7 +3,7 @@
 
 # Cross-Service Integration Flows
 
-These flows explicitly test the integration between multiple services and cannot be attributed to a single service. They represent complete ML pipelines and workflows that demonstrate the full value of the NeMo Platform.
+These flows explicitly test the integration between multiple services and cannot be attributed to a single service. They represent complete ML pipelines and workflows that demonstrate the full value of the NeMo Helix.
 
 **PIC**: Aaron Gabow
 **Priority**: Low (but high value for demonstrating platform capabilities)
@@ -19,7 +19,7 @@ These flows explicitly test the integration between multiple services and cannot
 | 36 | Tool Calling Fine-Tuning + Evaluation | Customizer, Evaluator | 4 | No | No | Fine-tune a model on xLAM-format tool calling data, then verify improved tool calling performance through evaluation. | POR |
 | 37 | Guardrails Evaluation Flow | Guardrails, Evaluator | 4 | No | No | Evaluate model responses with and without guardrails applied. Verify guardrails improve safety metrics on content safety test dataset. | POR |
 | 38 | Full E2E Flow | Files, IGW, Evaluator, Customizer, Guardrails | 5 | No | No | Dataset upload → Base model inference → Base model evaluation → LoRA customization → Customized model inference → Customized model evaluation → Compare metrics → Guardrails inference check → Guardrails evaluation. | POR |
-| 39 | Data Flywheel (Full Cycle) | Intake, Files, Evaluator, Customizer, Guardrails | 5 | No | No | Intake collection → Dataset creation → Evaluation → Customization → Deployment → Guardrails → Re-evaluation. Full lifecycle demonstrating the NeMo Platform value proposition. | POR; docs/notebooks/data-flywheel-bp-tutorial.ipynb |
+| 39 | Data Flywheel (Full Cycle) | Intake, Files, Evaluator, Customizer, Guardrails | 5 | No | No | Intake collection → Dataset creation → Evaluation → Customization → Deployment → Guardrails → Re-evaluation. Full lifecycle demonstrating the NeMo Helix value proposition. | POR; docs/notebooks/data-flywheel-bp-tutorial.ipynb |
 
 ---
 
@@ -186,13 +186,13 @@ These flows explicitly test the integration between multiple services and cannot
 8. **Repeat**: Continue flywheel cycle
 
 **Value Proposition**:
-This flow demonstrates the core NeMo Platform value proposition:
+This flow demonstrates the core NeMo Helix value proposition:
 - Continuous improvement from production data
 - Automated model enhancement pipeline
 - Safety-first deployment
 
 **Prerequisites**:
-- Full NeMo Platform deployed
+- Full NeMo Helix deployed
 - Production data collection active
 - Complete pipeline infrastructure
 

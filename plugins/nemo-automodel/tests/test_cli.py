@@ -11,7 +11,7 @@ import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
 from nemo_automodel_plugin.contributor import AutomodelContributor
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler, submit_path_for
+from nemo_helix_plugin.scheduler import NemoJobScheduler, submit_path_for
 from typer.testing import CliRunner
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -39,20 +39,20 @@ def test_jobs_submit_posts_to_automodel_collection(monkeypatch: pytest.MonkeyPat
         return httpx.Response(200, json={"id": "job-1", "status": "queued"})
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_jobs",
+        "nemo_helix_plugin.discovery.discover_jobs",
         lambda: {"customization.automodel.jobs": AutomodelJob},
     )
     scheduler = NemoJobScheduler()
     scheduler.submit_remote(
         AutomodelJob,
         json.loads(load_job_json(FIXTURES / "minimal_sft_lora.json")),
-        base_url="https://nmp.test",
+        base_url="https://nhx.test",
         workspace="ws-a",
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
     assert capture["method"] == "POST"
-    assert capture["url"] == "https://nmp.test/apis/customization/v2/workspaces/ws-a/automodel/jobs"
+    assert capture["url"] == "https://nhx.test/apis/customization/v2/workspaces/ws-a/automodel/jobs"
     assert capture["body"]["spec"]["training"]["training_type"] == "sft"
 
 
@@ -78,11 +78,11 @@ def test_cli_submit_accepts_job_json_file(monkeypatch: pytest.MonkeyPatch) -> No
         return {"id": "job-99"}
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
         fake_submit_remote,
     )
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_jobs",
+        "nemo_helix_plugin.discovery.discover_jobs",
         lambda: {"customization.automodel.jobs": AutomodelJob},
     )
 
@@ -96,12 +96,12 @@ def test_cli_submit_accepts_job_json_file(monkeypatch: pytest.MonkeyPatch) -> No
             "--workspace",
             "acme-corp",
             "--base-url",
-            "https://nmp.test",
+            "https://nhx.test",
         ],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     assert submitted["workspace"] == "acme-corp"
-    assert submitted["base_url"] == "https://nmp.test"
+    assert submitted["base_url"] == "https://nhx.test"
     assert submitted["spec"]["model"] == "default/qwen3-1.7b"
 
 
@@ -128,16 +128,16 @@ def test_cli_submit_prints_studio_link_when_available(monkeypatch: pytest.Monkey
         return {"id": "job-uuid", "name": "my-automodel-run", "status": "queued"}
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
         fake_submit_remote,
     )
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_jobs",
+        "nemo_helix_plugin.discovery.discover_jobs",
         lambda: {"customization.automodel.jobs": AutomodelJob},
     )
     # Report Studio ready without a real /status call.
     monkeypatch.setattr(
-        "nmp.customization_common.cli.renderer.studio_is_available",
+        "nhx.customization_common.cli.renderer.studio_is_available",
         lambda base_url: True,
     )
 
@@ -151,12 +151,12 @@ def test_cli_submit_prints_studio_link_when_available(monkeypatch: pytest.Monkey
             "--workspace",
             "acme-corp",
             "--base-url",
-            "https://nmp.test",
+            "https://nhx.test",
         ],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     # Link + tracking hints go to stderr; stdout stays pure JSON.
-    assert "https://nmp.test/studio/workspaces/acme-corp/customizations/my-automodel-run" in result.stderr
+    assert "https://nhx.test/studio/workspaces/acme-corp/customizations/my-automodel-run" in result.stderr
     assert "nemo jobs list --workspace acme-corp" in result.stderr
     assert '"name": "my-automodel-run"' in result.stdout
     assert "View in Studio" not in result.stdout
@@ -180,15 +180,15 @@ def test_cli_submit_omits_studio_link_when_unavailable(monkeypatch: pytest.Monke
         return {"id": "job-uuid", "name": "my-automodel-run", "status": "queued"}
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
         fake_submit_remote,
     )
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_jobs",
+        "nemo_helix_plugin.discovery.discover_jobs",
         lambda: {"customization.automodel.jobs": AutomodelJob},
     )
     monkeypatch.setattr(
-        "nmp.customization_common.cli.renderer.studio_is_available",
+        "nhx.customization_common.cli.renderer.studio_is_available",
         lambda base_url: False,
     )
 
@@ -202,7 +202,7 @@ def test_cli_submit_omits_studio_link_when_unavailable(monkeypatch: pytest.Monke
             "--workspace",
             "acme-corp",
             "--base-url",
-            "https://nmp.test",
+            "https://nhx.test",
         ],
     )
     assert result.exit_code == 0, result.stdout + result.stderr

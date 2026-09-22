@@ -12,7 +12,7 @@ the catalog from the routes.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class AgentPerms(PermissionSet, namespace="agents.agents"):

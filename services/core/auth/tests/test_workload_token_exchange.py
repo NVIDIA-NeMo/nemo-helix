@@ -8,17 +8,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-import nmp.common.auth.signing_keys as signing_keys_mod
+import nhx.common.auth.signing_keys as signing_keys_mod
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
-from nemo_platform_plugin.auth import AuthContext as PluginAuthContext
-from nmp.common.auth import Principal
-from nmp.common.auth.signing_keys import RSASigningKeyCache
-from nmp.common.auth.workload_delegations import (
+from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
+from nhx.common.auth import Principal
+from nhx.common.auth.signing_keys import RSASigningKeyCache
+from nhx.common.auth.workload_delegations import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
     WorkloadDelegationEntity,
     WorkloadDelegationScope,
@@ -28,10 +28,10 @@ from nmp.common.auth.workload_delegations import (
     kubernetes_pod_uid_delegation_name,
     reference_delegation_name,
 )
-from nmp.common.config import AuthConfig, Configuration
-from nmp.common.config.base import AccessKeyConfig, OIDCConfig, TokenSigningConfig
-from nmp.common.entities import SYSTEM_WORKSPACE, EntityNotFoundError
-from nmp.core.auth.api.v2 import workload_token_exchange as exchange
+from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import AccessKeyConfig, OIDCConfig, TokenSigningConfig
+from nhx.common.entities import SYSTEM_WORKSPACE, EntityNotFoundError
+from nhx.core.auth.api.v2 import workload_token_exchange as exchange
 from pydantic import ValidationError
 
 
@@ -100,7 +100,7 @@ def _exchange_form(
 ) -> dict[str, str]:
     data = {
         "grant_type": exchange.TOKEN_EXCHANGE_GRANT_TYPE,
-        "client_id": "nemo-platform-workload",
+        "client_id": "nemo-helix-workload",
         "subject_token": subject_token,
         "subject_token_type": subject_token_type,
     }
@@ -124,7 +124,7 @@ def _decode_access_token(
     exchange_config: AuthConfig,
     exchange_service: exchange.WorkloadTokenExchangeService,
     *,
-    audience: str = "nemo-platform",
+    audience: str = "nemo-helix",
 ) -> dict[str, Any]:
     signing_key = exchange_service.workload_signing_key(exchange_config)
     return exchange.jwt.decode(token, signing_key.public_key, algorithms=["RS256"], audience=audience)
@@ -145,7 +145,7 @@ def _delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
         name=delegation_name,
         workspace=SYSTEM_WORKSPACE,
         workload_subject=delegation_name,
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_workspace="default",
         job_id="job-123",
         attempt_id="attempt-1",
@@ -175,7 +175,7 @@ def _deployment_delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
         name=delegation_name,
         workspace=SYSTEM_WORKSPACE,
         workload_subject=delegation_name,
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_workspace="default",
         workload_kind="deployment",
         workload_id="deployment-123",
@@ -191,7 +191,7 @@ def _deployment_delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
 def _reference_delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
     values = {
         "name": reference_delegation_name(
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             workload_subject="system:serviceaccount:nemo-runs:job-runner",
             bound_reference_name=exchange.KUBERNETES_POD_UID_REFERENCE_NAME,
             bound_reference_value="pod-uid-123",
@@ -209,13 +209,13 @@ def _deployment_reference_delegation_entity(**overrides: Any) -> WorkloadDelegat
     pod_uid = "deployment-pod-uid-123"
     entity = WorkloadDelegationEntity(
         name=kubernetes_pod_uid_delegation_name(
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             workload_subject=workload_subject,
             pod_uid=pod_uid,
         ),
         workspace=SYSTEM_WORKSPACE,
         workload_subject=workload_subject,
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_workspace="default",
         workload_kind="deployment",
         workload_id="deployment-123",
@@ -252,10 +252,10 @@ def exchange_config(workload_signing_key: rsa.RSAPrivateKey, tmp_path) -> AuthCo
             enabled=True,
             issuer="https://idp.example.com/application/o/nemo-cli/",
             additional_issuers=["https://idp.example.com/application/o/nemo/"],
-            client_id="nemo-platform-cli",
+            client_id="nemo-helix-cli",
             workload_token_exchange_enabled=True,
-            workload_client_id="nemo-platform-workload",
-            workload_audience="nemo-platform",
+            workload_client_id="nemo-helix-workload",
+            workload_audience="nemo-helix",
             workload_scope="openid email groups",
             workload_subject_jwks_uri="https://idp.example.com/application/o/nemo-workload/jwks/",
             workload_subject_issuers=["https://idp.example.com/application/o/nemo-workload/"],
@@ -291,7 +291,7 @@ def test_jwks_publishes_workload_exchange_signing_key(client: TestClient) -> Non
 
     assert response.status_code == 200
     keys = response.json()["keys"]
-    assert keys[0]["kid"] == "nemo-platform-signing"
+    assert keys[0]["kid"] == "nemo-helix-signing"
     assert keys[0]["use"] == "sig"
     assert keys[0]["alg"] == "RS256"
 
@@ -386,7 +386,7 @@ def test_jwks_deduplicates_shared_workload_and_access_key_signing_key(
     response = client.get("/jwks")
 
     assert response.status_code == 200
-    assert [key["kid"] for key in response.json()["keys"]] == ["nemo-platform-signing"]
+    assert [key["kid"] for key in response.json()["keys"]] == ["nemo-helix-signing"]
 
 
 def test_jwks_openapi_documents_jwks_response(client: TestClient) -> None:
@@ -486,7 +486,7 @@ def test_token_exchange_rejects_subject_token_without_subject(
         "/token",
         data={
             "grant_type": exchange.TOKEN_EXCHANGE_GRANT_TYPE,
-            "client_id": "nemo-platform-workload",
+            "client_id": "nemo-helix-workload",
             "subject_token": "subject-token",
             "subject_token_type": exchange.JWT_TOKEN_TYPE,
         },
@@ -515,7 +515,7 @@ def test_token_exchange_rejects_disallowed_audience_before_subject_validation(
         "/token",
         data={
             "grant_type": exchange.TOKEN_EXCHANGE_GRANT_TYPE,
-            "client_id": "nemo-platform-workload",
+            "client_id": "nemo-helix-workload",
             "subject_token": "subject-token",
             "subject_token_type": exchange.JWT_TOKEN_TYPE,
             "audience": "unexpected-audience",
@@ -651,7 +651,7 @@ def test_token_exchange_rejects_unsupported_fields_by_presence(
 def test_token_exchange_rejects_resource_target_before_subject_validation(client: TestClient) -> None:
     response = client.post(
         "/token",
-        data={**_exchange_form("subject-token"), "resource": "https://nmp.example.com/apis/secrets"},
+        data={**_exchange_form("subject-token"), "resource": "https://nhx.example.com/apis/secrets"},
     )
 
     assert response.status_code == 400
@@ -666,7 +666,7 @@ def test_token_exchange_rejects_multiple_audiences_before_subject_validation(cli
         client,
         [
             *_exchange_form("subject-token").items(),
-            ("audience", "nemo-platform"),
+            ("audience", "nemo-helix"),
             ("audience", "extra-audience"),
         ],
     )
@@ -731,7 +731,7 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
         "/token",
         data={
             "grant_type": exchange.TOKEN_EXCHANGE_GRANT_TYPE,
-            "client_id": "nemo-platform-workload",
+            "client_id": "nemo-helix-workload",
             "subject_token": "subject-token",
             "subject_token_type": exchange.JWT_TOKEN_TYPE,
         },
@@ -743,8 +743,8 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
     access_token = response_body["access_token"]
     signing_key = exchange_service.workload_signing_key(exchange_config)
     assert exchange.jwt.get_unverified_header(access_token)["kid"] == signing_key.kid
-    claims = exchange.jwt.decode(access_token, signing_key.public_key, algorithms=["RS256"], audience="nemo-platform")
-    assert captured["subject_audience"] == "nemo-platform-workload"
+    claims = exchange.jwt.decode(access_token, signing_key.public_key, algorithms=["RS256"], audience="nemo-helix")
+    assert captured["subject_audience"] == "nemo-helix-workload"
     assert claims["sub"] == "workload-subject"
     assert claims["email"] == "svc@example.com"
     assert claims["groups"] == "svc-group,system:serviceaccounts"
@@ -772,7 +772,7 @@ def test_token_exchange_ignores_non_string_subject_group_values(
         "/token",
         data={
             "grant_type": exchange.TOKEN_EXCHANGE_GRANT_TYPE,
-            "client_id": "nemo-platform-workload",
+            "client_id": "nemo-helix-workload",
             "subject_token": "subject-token",
             "subject_token_type": exchange.JWT_TOKEN_TYPE,
         },
@@ -1176,21 +1176,21 @@ def test_workload_signing_key_uses_shared_token_signing_when_workload_override_u
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(
-            issuer="https://nmp.example.com/apis/auth",
-            key_id="nemo-platform-signing",
+            issuer="https://nhx.example.com/apis/auth",
+            key_id="nemo-helix-signing",
             private_key_file=str(private_key_file),
         ),
         oidc=OIDCConfig(
             enabled=True,
             issuer="https://idp.example.com/application/o/nemo-cli/",
-            client_id="nemo-platform-cli",
+            client_id="nemo-helix-cli",
             workload_token_exchange_enabled=True,
         ),
     )
 
     signing_key = exchange.WorkloadTokenExchangeService().workload_signing_key(config)
 
-    assert signing_key.kid == "nemo-platform-signing"
+    assert signing_key.kid == "nemo-helix-signing"
 
 
 def test_workload_exchange_requires_resolved_token_signing_key_id() -> None:
@@ -1235,7 +1235,7 @@ def test_workload_exchange_requires_distinct_key_id_for_distinct_access_key_jwks
         AuthConfig(
             enabled=True,
             token_signing=TokenSigningConfig(
-                key_id="nemo-platform-signing",
+                key_id="nemo-helix-signing",
                 private_key_file=str(tmp_path / "access-key.pem"),
             ),
             oidc=OIDCConfig(
@@ -1258,14 +1258,14 @@ def test_workload_signing_key_specific_override_wins_over_shared_token_signing(
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(
-            issuer="https://nmp.example.com/apis/auth",
-            key_id="nemo-platform-signing",
+            issuer="https://nhx.example.com/apis/auth",
+            key_id="nemo-helix-signing",
             private_key_file=str(shared_private_key_file),
         ),
         oidc=OIDCConfig(
             enabled=True,
             issuer="https://idp.example.com/application/o/nemo-cli/",
-            client_id="nemo-platform-cli",
+            client_id="nemo-helix-cli",
             workload_token_exchange_enabled=True,
             workload_token_key_id="nemo-workload-exchange",
             workload_token_private_key_file=str(workload_private_key_file),
@@ -1342,11 +1342,11 @@ def test_auth_jwks_response_uses_async_workload_public_jwk_path(exchange_config:
     response = asyncio.run(exchange.auth_jwks_response(exchange_config, exchange_service))
 
     assert [key.model_dump() for key in response.keys] == [
-        {"kid": "nemo-platform-signing", "use": "sig", "alg": "RS256"}
+        {"kid": "nemo-helix-signing", "use": "sig", "alg": "RS256"}
     ]
     assert signing_key_cache.calls == [
         {
-            "kid": "nemo-platform-signing",
+            "kid": "nemo-helix-signing",
             "private_key_file": exchange_config.oidc.workload_token_private_key_file,
             "missing_private_key_message": "auth.token_signing.private_key_file must be configured for workload token exchange",
             "invalid_private_key_message": "workload token private key must be an RSA private key",
@@ -1432,7 +1432,7 @@ def test_jwt_subject_token_decoder_fetches_configured_jwks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured = _mock_subject_jwks_client(exchange_config, exchange_service, monkeypatch)
-    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-platform-workload")
+    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
 
     claims = asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
 
@@ -1453,15 +1453,15 @@ def test_jwt_subject_token_decoder_does_not_trust_private_bound_reference_claim_
     subject_token = _signed_subject_token(
         exchange_config,
         exchange_service,
-        audience="nemo-platform-workload",
+        audience="nemo-helix-workload",
         extra_claims={
-            "_nmp_bound_reference_name": exchange.KUBERNETES_POD_UID_REFERENCE_NAME,
-            "_nmp_bound_reference_value": "pod-uid-123",
-            "_nmp_bound_reference_trusted_source": "kubernetes",
+            "_nhx_bound_reference_name": exchange.KUBERNETES_POD_UID_REFERENCE_NAME,
+            "_nhx_bound_reference_value": "pod-uid-123",
+            "_nhx_bound_reference_trusted_source": "kubernetes",
         },
     )
 
-    decoded = asyncio.run(exchange_service.decode_subject_token(exchange_config, subject_token, "nemo-platform"))
+    decoded = asyncio.run(exchange_service.decode_subject_token(exchange_config, subject_token, "nemo-helix"))
 
     assert decoded.claims["sub"] == "authentik-user"
     assert decoded.bound_reference is None
@@ -1473,7 +1473,7 @@ def test_jwt_subject_token_decoder_caches_configured_jwks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured = _mock_subject_jwks_client(exchange_config, exchange_service, monkeypatch)
-    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-platform-workload")
+    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
 
     asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
     asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
@@ -1508,7 +1508,7 @@ def test_jwt_subject_token_decoder_does_not_cache_invalid_jwks(
             return _FakeResponse(jwks_responses.pop(0))
 
     monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
-    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-platform-workload")
+    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
 
     with pytest.raises(exchange.jwt.InvalidTokenError, match="valid JWKS"):
         asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
@@ -1528,7 +1528,7 @@ def test_jwt_subject_token_decoder_refreshes_cached_jwks_on_unknown_kid(
     subject_token = _signed_subject_token(
         exchange_config,
         exchange_service,
-        audience="nemo-platform-workload",
+        audience="nemo-helix-workload",
         private_key=rotated_key,
         key_id="rotated-key",
     )
@@ -1582,7 +1582,7 @@ def test_jwt_subject_token_decoder_rejects_unexpected_issuer(
     subject_token = _signed_subject_token(
         exchange_config,
         exchange_service,
-        audience="nemo-platform-workload",
+        audience="nemo-helix-workload",
         issuer="https://idp.example.com/application/o/other/",
     )
 
@@ -1600,7 +1600,7 @@ def test_jwt_subject_token_decoder_requires_explicit_workload_subject_issuers(
     subject_token = _signed_subject_token(
         exchange_config,
         exchange_service,
-        audience="nemo-platform-workload",
+        audience="nemo-helix-workload",
         issuer=exchange_config.oidc.additional_issuers[0],
     )
 
@@ -1613,13 +1613,13 @@ def test_subject_token_decoder_reports_all_validation_failures(
     exchange_service: exchange.WorkloadTokenExchangeService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-platform-workload")
+    subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
     exchange_config.oidc.workload_subject_jwks_uri = None
     exchange_config.oidc.workload_kubernetes_token_review_enabled = True
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
 
     with pytest.raises(exchange.jwt.InvalidTokenError) as exc_info:
-        asyncio.run(exchange_service.decode_subject_token(exchange_config, subject_token, "nemo-platform"))
+        asyncio.run(exchange_service.decode_subject_token(exchange_config, subject_token, "nemo-helix"))
 
     assert str(exc_info.value) == (
         "JWT subject token: JWT subject token validation is disabled; "
@@ -1646,7 +1646,7 @@ def test_subject_token_decoder_does_not_mask_unexpected_decoder_errors(
     monkeypatch.setattr(exchange, "_decode_kubernetes_subject_token", broken_kubernetes_subject_token)
 
     with pytest.raises(RuntimeError, match="Kubernetes decoder broke"):
-        asyncio.run(exchange_service.decode_subject_token(exchange_config, "subject-token", "nemo-platform"))
+        asyncio.run(exchange_service.decode_subject_token(exchange_config, "subject-token", "nemo-helix"))
 
 
 def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
@@ -1689,7 +1689,7 @@ def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
     monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
 
     decoded = asyncio.run(
-        exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-platform")
+        exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
     )
 
     assert decoded == exchange.DecodedSubjectToken(
@@ -1707,7 +1707,7 @@ def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
             "kind": "TokenReview",
             "spec": {
                 "token": "kubernetes-subject-token",
-                "audiences": ["nemo-platform"],
+                "audiences": ["nemo-helix"],
             },
         },
         "headers": {
@@ -1755,7 +1755,7 @@ def test_kubernetes_subject_token_decoder_preserves_single_pod_uid_reference(
     monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
 
     decoded = asyncio.run(
-        exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-platform")
+        exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
     )
 
     assert decoded.claims == {
@@ -1810,5 +1810,5 @@ def test_kubernetes_subject_token_decoder_rejects_ambiguous_pod_uid_reference(
 
     with pytest.raises(exchange._InvalidGrantError):
         asyncio.run(
-            exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-platform")
+            exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
         )

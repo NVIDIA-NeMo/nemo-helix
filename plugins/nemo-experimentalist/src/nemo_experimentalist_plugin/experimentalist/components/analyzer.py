@@ -28,7 +28,7 @@ from nemo_experimentalist_plugin.experimentalist.components.trace_analyzer impor
 )
 from nemo_experimentalist_plugin.experimentalist.components.trace_explorer import TraceExplorer  # noqa: F401
 from nemo_experimentalist_plugin.experimentalist.seam import TraceLoader
-from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
+from nemo_helix_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agentdoc import doc, spec
 from nooa.agents import TokenBudgetSummarizer

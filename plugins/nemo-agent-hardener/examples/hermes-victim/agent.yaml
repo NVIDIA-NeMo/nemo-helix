@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# The war-game victim on the Hermes harness, as a NeMo Platform agent.
+# The war-game victim on the Hermes harness, as a NeMo Helix agent.
 #
 #   nemo agents create --name ledger-hermes --agent-config agent.yaml
 #   nemo agent-hardener init --agent ledger-hermes --name ledger-hermes --harness hermes

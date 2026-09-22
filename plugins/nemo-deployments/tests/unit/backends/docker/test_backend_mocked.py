@@ -48,8 +48,8 @@ from nemo_deployments_plugin.backends.labels import (
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, WorkloadIdentitySpec
 from nemo_deployments_plugin.types import RestartPolicy
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import (
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import (
     WorkloadDelegationConflictError,
     WorkloadDelegationEntity,
     WorkloadDelegationLookupScope,
@@ -57,13 +57,13 @@ from nemo_platform_plugin.auth.workload_delegations import (
     parse_opaque_docker_proof_token,
     verify_opaque_docker_proof_token_hash,
 )
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_PATH,
     build_docker_opaque_workload_delegation,
 )
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ReadTimeout
 
@@ -107,7 +107,7 @@ def _docker_workload_delegation(*, expires_in_seconds: int) -> WorkloadDelegatio
             workload_instance_id=deployment_key("default", "srv"),
             workload_claim_id="logical-srv",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation=CONTAINER_ROLE_SERVER,
         auth_context=_workload_auth_context(),
         ttl_seconds_active=900,
@@ -183,7 +183,7 @@ async def test_create_deployment_mounts_executor_additional_volumes(
                 "additional_volume_mounts": [
                     {
                         "volume_name": "gateway-tls",
-                        "mount_path": "/etc/nmp/gateway-tls",
+                        "mount_path": "/etc/nhx/gateway-tls",
                         "read_only": True,
                     }
                 ],
@@ -204,7 +204,7 @@ async def test_create_deployment_mounts_executor_additional_volumes(
 
     assert update.status == "STARTING"
     _, create_kwargs = mock_docker_client.containers.create.call_args
-    assert create_kwargs["volumes"]["gateway-tls"] == {"bind": "/etc/nmp/gateway-tls", "mode": "ro"}
+    assert create_kwargs["volumes"]["gateway-tls"] == {"bind": "/etc/nhx/gateway-tls", "mode": "ro"}
 
 
 @pytest.mark.asyncio
@@ -735,7 +735,7 @@ async def test_create_deployment_uses_executor_default_network(
     ):
         backend = DockerDeploymentBackend(
             mock_sdk,
-            {"docker_timeout": 60, "pull_images": False, "network": "nmp-e2e-test-network"},
+            {"docker_timeout": 60, "pull_images": False, "network": "nhx-e2e-test-network"},
         )
         backend._client = mock_docker_client
 
@@ -753,7 +753,7 @@ async def test_create_deployment_uses_executor_default_network(
 
     assert update.status == "STARTING"
     _, create_kwargs = mock_docker_client.containers.create.call_args
-    assert create_kwargs["network"] == "nmp-e2e-test-network"
+    assert create_kwargs["network"] == "nhx-e2e-test-network"
 
 
 @pytest.mark.asyncio
@@ -810,7 +810,7 @@ async def test_create_deployment_network_endpoint_mode_reports_container_url(
             {
                 "docker_timeout": 60,
                 "pull_images": False,
-                "network": "nmp-e2e-test-network",
+                "network": "nhx-e2e-test-network",
                 "endpoint_mode": "network",
             },
         )
@@ -1179,7 +1179,7 @@ async def test_create_falls_back_to_local_image_when_pull_fails(
 ) -> None:
     """A pull failure is tolerated when the image is already present locally.
 
-    Local-only images (e.g. the LoRA adapters sidecar ``nmp-api:local``) are not
+    Local-only images (e.g. the LoRA adapters sidecar ``nhx-api:local``) are not
     pullable from a registry; the backend uses the local copy instead of failing.
     """
     from unittest.mock import patch
@@ -1511,7 +1511,7 @@ async def test_read_status_ready_when_running_port_bound(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # No declared probe, published port accepting connections -> READY.
-    monkeypatch.setenv("NMP_LOOPBACK_ADDRESS", "127.0.0.1")
+    monkeypatch.setenv("NHX_LOOPBACK_ADDRESS", "127.0.0.1")
     mock_entities.get.return_value = sample_config()
     with socket.socket() as server:
         server.bind(("127.0.0.1", 0))
@@ -1535,7 +1535,7 @@ async def test_read_status_starting_when_running_port_not_bound(
     # READY does not race the workload's bind(). Hold the port bound-but-not-listening
     # for the whole probe so nothing else can bind and listen on it mid-test; a
     # connect() still gets ECONNREFUSED, the not-yet-bound state under test.
-    monkeypatch.setenv("NMP_LOOPBACK_ADDRESS", "127.0.0.1")
+    monkeypatch.setenv("NHX_LOOPBACK_ADDRESS", "127.0.0.1")
     mock_entities.get.return_value = sample_config()
     with socket.socket() as probe_socket:
         probe_socket.bind(("127.0.0.1", 0))
@@ -1565,7 +1565,7 @@ async def test_read_status_network_endpoint_mode_probes_container_url(
             {
                 "docker_timeout": 60,
                 "pull_images": False,
-                "network": "nmp-e2e-test-network",
+                "network": "nhx-e2e-test-network",
                 "endpoint_mode": "network",
             },
         )

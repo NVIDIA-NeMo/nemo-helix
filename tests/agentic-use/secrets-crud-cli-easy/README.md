@@ -3,7 +3,7 @@
 
 # Secret CRUD Operations - CLI Eval
 
-Harbor eval that tests secret CRUD operations using the NeMo Platform CLI.
+Harbor eval that tests secret CRUD operations using the NeMo Helix CLI.
 
 ## What This Tests
 
@@ -16,7 +16,7 @@ Harbor eval that tests secret CRUD operations using the NeMo Platform CLI.
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest . && \
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest . && \
 export ANTHROPIC_API_KEY='<your-key>' && \
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com' && \
 harbor run -p tests/agentic-use/secrets-crud-cli-easy \

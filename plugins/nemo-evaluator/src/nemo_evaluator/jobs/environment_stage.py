@@ -10,10 +10,10 @@ from pathlib import Path
 
 from filesets import FilesetFileSystem, FilesetPathError, parse_fileset_ref
 from nemo_evaluator.filesets import FilesetRef
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
 from pydantic import BaseModel, ConfigDict
 
 #: Read-only tree the Gym host mounts at ``/job/environment``.
@@ -53,7 +53,7 @@ class EnvironmentStageJob(NemoJob):
 
     name = "stage-environment"
     description = "Stage a Gym environment FileSet into persistent job storage."
-    container = "nmp-cpu-tasks"
+    container = "nhx-cpu-tasks"
     spec_schema = EnvironmentStageSpec
 
     def run(

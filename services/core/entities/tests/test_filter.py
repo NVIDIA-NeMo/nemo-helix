@@ -10,13 +10,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import Request
-from nmp.common.api.filter import (
+from nhx.common.api.filter import (
     ComparisonOperation,
     FilterOperator,
     FilterRepository,
     LogicalOperation,
 )
-from nmp.core.entities.utils.filter import (
+from nhx.core.entities.utils.filter import (
     RelationshipFilterOperation,
     _parse_bracket_params,
     _parse_json_filter,
@@ -281,7 +281,7 @@ class TestRepositoryApply:
 
     def test_relationship_operation_calls_repository(self):
         """Test RelationshipFilterOperation delegates to repository.relationship_exists."""
-        from nmp.core.entities.utils.relationships import Relationship
+        from nhx.core.entities.utils.relationships import Relationship
 
         class MockRepository(FilterRepository):
             def eq(self, field, value):
@@ -478,7 +478,7 @@ class TestRelationshipJsonParsing:
         assert result.value is True
 
     def test_to_dict_exists(self):
-        from nmp.core.entities.utils.relationships import Relationship
+        from nhx.core.entities.utils.relationships import Relationship
 
         op = RelationshipFilterOperation(
             relationship_name="adapters",
@@ -488,7 +488,7 @@ class TestRelationshipJsonParsing:
         assert op.to_dict() == {"adapters": {"$exists": False}}
 
     def test_to_dict_condition(self):
-        from nmp.core.entities.utils.relationships import Relationship
+        from nhx.core.entities.utils.relationships import Relationship
 
         op = RelationshipFilterOperation(
             relationship_name="adapters",

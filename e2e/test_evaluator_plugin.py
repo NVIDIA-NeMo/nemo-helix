@@ -4,7 +4,7 @@
 """Container E2E tests for the nemo-evaluator plugin.
 
 The suite exercises the plugin through the public Platform SDK against an
-external deployment configured through ``NMP_BASE_URL``. Durable evaluator
+external deployment configured through ``NHX_BASE_URL``. Durable evaluator
 jobs execute in CPU task containers, so these tests intentionally do not mock
 the evaluator service or job scheduler.
 """
@@ -46,22 +46,22 @@ from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
 from nemo_evaluator_sdk.metrics.tool_calling import ToolCallingMetric
 from nemo_evaluator_sdk.values.results import EvaluationResult
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_platform import NeMoPlatform
-from nemo_platform.types.inference import ModelProvider
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError
-from nemo_platform_plugin.client.errors import NemoTransportError as APIConnectionError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.inference_middleware import BackendFormat
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import CreateModelEntityRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.testing import add_mock_provider, short_unique_name, wait_for_model_entity
-from nmp.testing.e2e import wait_for_platform_job
-from nmp.testing.utils import ensure_passthrough_virtual_model
+from nemo_helix import NeMoHelix
+from nemo_helix.types.inference import ModelProvider
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client.errors import NemoTransportError as APIConnectionError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing import add_mock_provider, short_unique_name, wait_for_model_entity
+from nhx.testing.e2e import wait_for_platform_job
+from nhx.testing.utils import ensure_passthrough_virtual_model
 
 pytestmark = [
     pytest.mark.container_only,
@@ -72,7 +72,7 @@ EVALUATOR_JOB_TIMEOUT_SECONDS = 900.0
 EVALUATOR_PENDING_TIMEOUT_SECONDS = 600.0
 EVALUATOR_POLL_INTERVAL_SECONDS = 5.0
 EVALUATOR_TRANSIENT_STATUS_CODES = frozenset({502, 503, 504})
-DEFAULT_INTERNAL_PLATFORM_BASE_URL = "http://nemo-platform-api:8080"
+DEFAULT_INTERNAL_PLATFORM_BASE_URL = "http://nemo-helix-api:8080"
 IGW_ROUTE_TIMEOUT_SECONDS = 60.0
 IGW_ROUTE_POLL_INTERVAL_SECONDS = 0.5
 IGW_ROUTE_STABLE_SECONDS = 5.0
@@ -110,7 +110,7 @@ def _chat_completion(content: str) -> dict[str, object]:
 
 
 def _add_mock_provider_or_skip(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -130,7 +130,7 @@ def _add_mock_provider_or_skip(
         if "mock_provider_prefix is not configured" in str(exc):
             pytest.skip(
                 "The running platform does not have mock-provider mode enabled. "
-                "Configure NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX=igw-mock- to run this test."
+                "Configure NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX=igw-mock- to run this test."
             )
         raise
     except NemoHTTPError as exc:
@@ -184,14 +184,14 @@ def _row_score_values(result: EvaluationResult) -> list[float]:
 
 
 def _internal_model_route(workspace: str, model_name: str) -> str:
-    base_url = os.environ.get("NMP_E2E_INTERNAL_BASE_URL", DEFAULT_INTERNAL_PLATFORM_BASE_URL).rstrip("/")
+    base_url = os.environ.get("NHX_E2E_INTERNAL_BASE_URL", DEFAULT_INTERNAL_PLATFORM_BASE_URL).rstrip("/")
     if not base_url.startswith(("http://", "https://")):
         base_url = f"http://{base_url}"
     return f"{base_url}/apis/inference-gateway/v2/workspaces/{workspace}/model/{model_name}/-/v1"
 
 
 def _post_evaluator_payload(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     path: str,
     payload: Mapping[str, object],
@@ -203,7 +203,7 @@ def _post_evaluator_payload(
     )
 
 
-def _wait_for_stable_model_chat_route(sdk: NeMoPlatform, workspace: str, model_name: str) -> None:
+def _wait_for_stable_model_chat_route(sdk: NeMoHelix, workspace: str, model_name: str) -> None:
     """Require stable successful chat completions through the model-entity route."""
     deadline = time.monotonic() + IGW_ROUTE_TIMEOUT_SECONDS
     stable_since: float | None = None
@@ -258,7 +258,7 @@ def _wait_for_stable_model_chat_route(sdk: NeMoPlatform, workspace: str, model_n
 
 
 def _create_ready_mock_model(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -298,7 +298,7 @@ def _create_ready_mock_model(
     _wait_for_stable_model_chat_route(sdk, workspace, name)
 
 
-def _cleanup_evaluator_job(sdk: NeMoPlatform, job_name: str) -> None:
+def _cleanup_evaluator_job(sdk: NeMoHelix, job_name: str) -> None:
     with suppress(Exception):
         jobs = client_from_platform(sdk, JobsClient)
         jobs.cancel_job(name=job_name, workspace=sdk.workspace)
@@ -335,7 +335,7 @@ def _require_job_name(payload: object) -> str:
     return job_name
 
 
-def _submit_input_spec(sdk: NeMoPlatform, spec: EvaluateInputSpec) -> EvaluatorJobResource:
+def _submit_input_spec(sdk: NeMoHelix, spec: EvaluateInputSpec) -> EvaluatorJobResource:
     payload = _post_evaluator_payload(
         sdk,
         str(sdk.workspace),
@@ -356,7 +356,7 @@ def _metric_output_values(result: EvaluationResult, name: str) -> list[float]:
 
 
 @pytest.fixture(scope="module")
-def evaluator_workspace(sdk: NeMoPlatform) -> Iterator[str]:
+def evaluator_workspace(sdk: NeMoHelix) -> Iterator[str]:
     workspaces = client_from_platform(sdk, WorkspacesClient)
     name = short_unique_name("e2e-eval")
     try:
@@ -368,7 +368,7 @@ def evaluator_workspace(sdk: NeMoPlatform) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module")
-def evaluator_sdk(sdk: NeMoPlatform, evaluator_workspace: str) -> Iterator[NeMoPlatform]:
+def evaluator_sdk(sdk: NeMoHelix, evaluator_workspace: str) -> Iterator[NeMoHelix]:
     yield sdk.copy(
         workspace=evaluator_workspace,
         max_retries=2,
@@ -377,7 +377,7 @@ def evaluator_sdk(sdk: NeMoPlatform, evaluator_workspace: str) -> Iterator[NeMoP
 
 
 @pytest.fixture(scope="module")
-def completed_offline_job(evaluator_sdk: NeMoPlatform) -> Iterator[EvaluatorJobResource]:
+def completed_offline_job(evaluator_sdk: NeMoHelix) -> Iterator[EvaluatorJobResource]:
     job = evaluator_sdk.evaluator.submit(
         metric=_exact_match_metric(),
         dataset=_offline_rows(),
@@ -390,7 +390,7 @@ def completed_offline_job(evaluator_sdk: NeMoPlatform) -> Iterator[EvaluatorJobR
         _cleanup_evaluator_job(evaluator_sdk, job.name)
 
 
-def test_health_check(sdk: NeMoPlatform) -> None:
+def test_health_check(sdk: NeMoHelix) -> None:
     status = sdk.evaluator.plugin_status()
 
     assert status["plugin"] == "evaluator"
@@ -398,7 +398,7 @@ def test_health_check(sdk: NeMoPlatform) -> None:
     assert "evaluator.evaluate" in status["jobs"]
 
 
-def test_stored_metric_lifecycle(evaluator_sdk: NeMoPlatform) -> None:
+def test_stored_metric_lifecycle(evaluator_sdk: NeMoHelix) -> None:
     name = short_unique_name("exact")
     try:
         created = evaluator_sdk.evaluator.metrics.create(name, metric=_exact_match_metric())
@@ -457,7 +457,7 @@ def test_offline_evaluate_job_lifecycle(
 
 
 def test_offline_evaluate_job_persists_queryable_eval_result(
-    evaluator_sdk: NeMoPlatform,
+    evaluator_sdk: NeMoHelix,
     completed_offline_job: EvaluatorJobResource,
 ) -> None:
     result = evaluator_sdk.evaluator.eval_results.retrieve(completed_offline_job.name)
@@ -469,7 +469,7 @@ def test_offline_evaluate_job_persists_queryable_eval_result(
     assert any(item.job_id == completed_offline_job.name for item in by_job.data)
 
 
-def test_fileset_fragment_and_glob_datasets(evaluator_sdk: NeMoPlatform) -> None:
+def test_fileset_fragment_and_glob_datasets(evaluator_sdk: NeMoHelix) -> None:
     """Durable plugin jobs can read selected and globbed files from Files."""
     fileset_name = short_unique_name("eval-data")
     workspace = str(evaluator_sdk.workspace)
@@ -525,7 +525,7 @@ def test_fileset_fragment_and_glob_datasets(evaluator_sdk: NeMoPlatform) -> None
             files.delete_fileset(name=fileset_name, workspace=workspace)
 
 
-def test_run_config_limits_samples(evaluator_sdk: NeMoPlatform) -> None:
+def test_run_config_limits_samples(evaluator_sdk: NeMoHelix) -> None:
     rows = [{"expected": str(index), "output": str(index)} for index in range(8)]
     job = evaluator_sdk.evaluator.submit(
         metric=_exact_match_metric(),
@@ -542,7 +542,7 @@ def test_run_config_limits_samples(evaluator_sdk: NeMoPlatform) -> None:
         _cleanup_evaluator_job(evaluator_sdk, job.name)
 
 
-def test_multi_metric_durable_evaluation(evaluator_sdk: NeMoPlatform) -> None:
+def test_multi_metric_durable_evaluation(evaluator_sdk: NeMoHelix) -> None:
     """The unified plugin job supports benchmark-style metric sets."""
     metrics = [
         _exact_match_metric(),
@@ -583,7 +583,7 @@ def test_multi_metric_durable_evaluation(evaluator_sdk: NeMoPlatform) -> None:
         _cleanup_evaluator_job(evaluator_sdk, job.name)
 
 
-def test_stored_metric_ref_executes_in_durable_job(evaluator_sdk: NeMoPlatform) -> None:
+def test_stored_metric_ref_executes_in_durable_job(evaluator_sdk: NeMoHelix) -> None:
     metric_name = short_unique_name("stored-exact")
     job: EvaluatorJobResource | None = None
     try:
@@ -604,7 +604,7 @@ def test_stored_metric_ref_executes_in_durable_job(evaluator_sdk: NeMoPlatform) 
             evaluator_sdk.evaluator.metrics.delete(metric_name)
 
 
-def test_tool_calling_metric_preserves_structured_references(evaluator_sdk: NeMoPlatform) -> None:
+def test_tool_calling_metric_preserves_structured_references(evaluator_sdk: NeMoHelix) -> None:
     rows = [
         {
             "expected_tool_calls": [{"function": {"name": "weather", "arguments": {"city": "Paris"}}}],
@@ -639,8 +639,8 @@ def test_tool_calling_metric_preserves_structured_references(evaluator_sdk: NeMo
 
 
 def test_online_evaluate_job_uses_mock_provider(
-    sdk: NeMoPlatform,
-    evaluator_sdk: NeMoPlatform,
+    sdk: NeMoHelix,
+    evaluator_sdk: NeMoHelix,
     evaluator_workspace: str,
 ) -> None:
     model_name = short_unique_name("eval-model")
@@ -682,8 +682,8 @@ def test_online_evaluate_job_uses_mock_provider(
 
 
 def test_llm_judge_metric_resolves_model_ref(
-    sdk: NeMoPlatform,
-    evaluator_sdk: NeMoPlatform,
+    sdk: NeMoHelix,
+    evaluator_sdk: NeMoHelix,
     evaluator_workspace: str,
 ) -> None:
     model_name = short_unique_name("eval-judge")
@@ -724,7 +724,7 @@ def test_llm_judge_metric_resolves_model_ref(
 
 
 def _assert_runtime_input_failure(
-    evaluator_sdk: NeMoPlatform,
+    evaluator_sdk: NeMoHelix,
     metric: StringCheckMetric | ExactMatchMetric,
     dataset: list[dict[str, object]] | FilesetRef,
 ) -> None:
@@ -741,7 +741,7 @@ def _assert_runtime_input_failure(
         _cleanup_evaluator_job(evaluator_sdk, job.name)
 
 
-def test_invalid_template_reaches_terminal_error(evaluator_sdk: NeMoPlatform) -> None:
+def test_invalid_template_reaches_terminal_error(evaluator_sdk: NeMoHelix) -> None:
     metric = StringCheckMetric(
         operation="equals",
         left_template="{{item.missing}}",
@@ -754,7 +754,7 @@ def test_invalid_template_reaches_terminal_error(evaluator_sdk: NeMoPlatform) ->
     )
 
 
-def test_missing_fileset_reaches_terminal_error(evaluator_sdk: NeMoPlatform) -> None:
+def test_missing_fileset_reaches_terminal_error(evaluator_sdk: NeMoHelix) -> None:
     dataset = FilesetRef(root=f"{evaluator_sdk.workspace}/missing-fileset#dataset.json")
     _assert_runtime_input_failure(evaluator_sdk, _exact_match_metric(), dataset)
 
@@ -764,7 +764,7 @@ def test_missing_fileset_reaches_terminal_error(evaluator_sdk: NeMoPlatform) -> 
 # GymAgentTaskRunner runs inside the Gym task job, not this test process, so this is the only place
 # exercising the real `gym env start`/`gym eval run` subprocess path (the SDK's unit tests use
 # synthetic data). A dedicated Kind CI job runs the platform with the
-# nmp-gym-tasks image. See docker/Dockerfile.nmp-gym-tasks.
+# nhx-gym-tasks image. See docker/Dockerfile.nhx-gym-tasks.
 #
 # Checked-in copy of mcqa's example.jsonl: discover_gym_tasks runs client-side here, where
 # nemo-gym isn't installed (the dedicated task image has it).
@@ -791,8 +791,8 @@ def _gym_task_payloads(limit: int) -> list[dict[str, object]]:
 
 @pytest.mark.gym_e2e
 def test_gym_agent_evaluate_job_completes(
-    sdk: NeMoPlatform,
-    evaluator_sdk: NeMoPlatform,
+    sdk: NeMoHelix,
+    evaluator_sdk: NeMoHelix,
     evaluator_workspace: str,
     tmp_path: Path,
 ) -> None:
@@ -859,7 +859,7 @@ def test_gym_agent_evaluate_job_completes(
 
 @pytest.mark.gym_e2e
 def test_gym_agent_evaluate_job_invalid_config_fails(
-    evaluator_sdk: NeMoPlatform,
+    evaluator_sdk: NeMoHelix,
     evaluator_workspace: str,
 ) -> None:
     """Rejects an invalid Gym selection before starting its environment servers."""

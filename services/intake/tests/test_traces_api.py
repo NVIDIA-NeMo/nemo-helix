@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
-from nmp.common.api.filter import parse_json_filter
-from nmp.common.api.parsed_filter import ParsedFilter
-from nmp.intake.spans.api.traces import _trace_filter
-from nmp.intake.spans.api.traces_schemas import Trace, TraceFilter
-from nmp.intake.spans.domain import IntakeTrace, SpanStatus
+from nhx.common.api.filter import parse_json_filter
+from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.intake.spans.api.traces import _trace_filter
+from nhx.intake.spans.api.traces_schemas import Trace, TraceFilter
+from nhx.intake.spans.domain import IntakeTrace, SpanStatus
 
 
 def test_trace_filter_maps_public_fields_to_repository_filter():
