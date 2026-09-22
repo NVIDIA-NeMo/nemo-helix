@@ -41,8 +41,8 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   const showSuggestions = form.watch('prompt').trim().length === 0 && !isBusy;
 
   return (
-    <form onSubmit={generate} noValidate>
-      <Flex gap="density-xl" className="w-full flex-wrap items-stretch">
+    <form onSubmit={generate} noValidate className="flex min-h-0 flex-1 flex-col">
+      <Flex gap="density-xl" className="min-h-0 w-full flex-1 flex-wrap items-stretch">
         <Stack gap="density-md" className="min-w-[320px] flex-1">
           <FormField
             slotLabel="Model"
@@ -102,7 +102,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
           </Flex>
         </Stack>
 
-        <Stack gap="density-md" className="min-w-[320px] flex-1">
+        <Stack gap="density-md" className="min-h-0 min-w-[320px] flex-1">
           <GeneratedConfigResult
             validation={validation}
             requestError={requestError}
