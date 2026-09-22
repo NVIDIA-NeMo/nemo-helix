@@ -7,8 +7,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock, Mock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import httpx
 import pytest
@@ -34,6 +34,11 @@ from nmp.common.jobs.exceptions import PlatformJobCompilationError
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 
+def _adapter_lookup(platform: AsyncCustomizationPlatformClients) -> AsyncMock:
+    """The mocked ``get_adapter`` on a test platform client."""
+    return cast(AsyncMock, platform.models.get_adapter)
+
+
 def _make_mock_model_entity(
     workspace: str = "default",
     name: str = "test-target",
@@ -53,7 +58,23 @@ def _make_mock_model_entity(
 
 @pytest.fixture
 def platform_clients() -> AsyncCustomizationPlatformClients:
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock())
+    models = AsyncMock()
+    # Default to "no adapter with this output name exists", which is what every test that is
+    # not about adapter re-parenting assumes.
+    models.get_adapter.side_effect = _not_found()
+    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=models)
+
+
+def _not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+
+
+def _adapter_on(model_ref: str | None) -> Any:
+    adapter = MagicMock()
+    adapter.model = model_ref
+    response = MagicMock()
+    response.data.return_value = adapter
+    return response
 
 
 def _output(*, output_type: OutputNameType = OutputNameType.ADAPTER) -> OutputResponse:
@@ -835,3 +856,52 @@ async def test_inline_lora_enabled_false_is_rejected_at_compile(
 
     with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler(_lora_job(DeploymentParams(lora_enabled=False)), "default", platform_clients)
+
+
+def _adapter_retrain_job(model: str = "default/test-target") -> CustomizationJobOutput:
+    return CustomizationJobOutput(
+        model=model,
+        dataset="default/my-dataset",
+        training=SFTTraining(
+            peft=LoRAParams(rank=8, alpha=32, merge=False),
+            batch_size=4,
+            micro_batch_size=1,
+        ),
+        output=_output(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_an_output_name_owned_by_a_different_base_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter names are workspace-unique, so this can never succeed -- fail before training."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    lookup = _adapter_lookup(platform_clients)
+    lookup.side_effect = None
+    lookup.return_value = _adapter_on("default/some-other-model")
+
+    with pytest.raises(PlatformJobCompilationError, match="default/some-other-model"):
+        await platform_job_config_compiler(_adapter_retrain_job(), "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_lora_job_allows_retraining_its_own_adapter(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same base model is the supported retrain path -- the fileset is updated in place."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    lookup = _adapter_lookup(platform_clients)
+    lookup.side_effect = None
+    lookup.return_value = _adapter_on("default/test-target")
+
+    spec = await platform_job_config_compiler(_adapter_retrain_job(), "default", platform_clients)
+    assert spec is not None

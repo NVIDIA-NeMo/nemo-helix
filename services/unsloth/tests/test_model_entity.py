@@ -19,9 +19,11 @@ import types
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
@@ -36,6 +38,15 @@ from nemo_platform_plugin.models.types import (
     UpdateModelDeploymentConfigRequest,
     UpdateModelEntityRequest,
 )
+
+
+def _platform_mock() -> MagicMock:
+    """Platform client whose adapter lookup reports "no such adapter"."""
+    platform = MagicMock()
+    platform.models.get_adapter = AsyncMock(
+        side_effect=NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+    )
+    return platform
 
 
 def _make_job_ctx(workspace: str = "default"):
@@ -1028,7 +1039,7 @@ class TestCompilerDeploymentConfigPlumbing:
             job_spec = await platform_job_config_compiler(
                 workspace="default",
                 job_spec=spec,
-                platform=MagicMock(),
+                platform=_platform_mock(),
             )
         finally:
             compiler_mod.fetch_model_entity = original_fetch
@@ -1068,7 +1079,7 @@ class TestCompilerDeploymentConfigPlumbing:
         from nmp.unsloth.app.jobs import compiler as compiler_mod
 
         # A LoRA job's config must target the base model; the compiler now resolves it.
-        platform = MagicMock()
+        platform = _platform_mock()
         platform.models.get_deployment_config = AsyncMock(
             return_value=_response(
                 _resolved_config(model_entity_id="default/base", model_name="base", model_namespace="default")

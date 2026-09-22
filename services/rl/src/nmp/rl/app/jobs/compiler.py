@@ -631,6 +631,35 @@ def _build_training_step(
     )
 
 
+async def _validate_adapter_base_model(
+    workspace: str,
+    job_spec: RlJobOutput,
+    platform: AsyncCustomizationPlatformClients,
+) -> None:
+    """Reject a GRPO LoRA job whose output name is an adapter of a different base model."""
+    # Adapter names are unique per workspace, so retraining an existing adapter name under a
+    # different base model conflicts on create and cannot be updated. Without this the job
+    # trains to completion first and only fails in the model-entity step.
+    if not (isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora"):
+        return
+
+    output_name = job_spec.output.name
+    try:
+        existing = (await platform.models.get_adapter(name=output_name, workspace=workspace)).data()
+    except NotFoundError:
+        return
+
+    base = parse_entity_ref(job_spec.model, workspace)
+    expected = f"{base.workspace}/{base.name}"
+    if existing.model is not None and existing.model != expected:
+        raise PlatformJobCompilationError(
+            f"Adapter '{workspace}/{output_name}' already exists on base model '{existing.model}', "
+            f"but this job trains against '{expected}'. Adapter names are unique per workspace, so "
+            "the existing adapter cannot be re-parented. Choose a different output.name, or train "
+            f"against '{existing.model}'."
+        )
+
+
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: RlJobOutput,
@@ -662,6 +691,8 @@ async def platform_job_config_compiler(
 
     me = await fetch_model_entity(job_spec.model, workspace, platform)
     trust_remote_code = me.trust_remote_code or False
+
+    await _validate_adapter_base_model(workspace, job_spec, platform)
 
     if job_spec.deployment_config is not None:
         await _validate_deployment_config(workspace, job_spec, platform)

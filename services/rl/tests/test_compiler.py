@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -37,6 +37,11 @@ from nmp.rl.schemas import (
     ParallelismParams,
     RlJobOutput,
 )
+
+
+def _adapter_lookup(platform: AsyncCustomizationPlatformClients) -> AsyncMock:
+    """The mocked ``get_adapter`` on a test platform client."""
+    return cast(AsyncMock, platform.models.get_adapter)
 
 
 def _make_model_entity(fileset: str | None = "default/base-model") -> ModelEntity:
@@ -105,7 +110,11 @@ def _steps(spec: Any) -> list[Any]:
 
 @pytest.fixture
 def platform_clients() -> AsyncCustomizationPlatformClients:
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock())
+    models = AsyncMock()
+    # Default to "no adapter with this output name exists", which is what every test that is
+    # not about adapter re-parenting assumes.
+    models.get_adapter.side_effect = _not_found()
+    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=models)
 
 
 # --------------------------------------------------------------------------- #
@@ -893,3 +902,33 @@ async def test_inline_lora_enabled_false_is_rejected_at_compile(
 
     with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_grpo_lora_rejects_an_output_name_owned_by_a_different_base_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    sandbox_capable: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter names are workspace-unique, so this can never succeed -- fail before training."""
+    from nmp.rl.app.jobs.compiler import _validate_adapter_base_model
+    from nmp.rl.schemas import LoRAParams
+
+    adapter = MagicMock()
+    adapter.model = "default/some-other-model"
+    response = MagicMock()
+    response.data.return_value = adapter
+    lookup = _adapter_lookup(platform_clients)
+    lookup.side_effect = None
+    lookup.return_value = response
+
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(type="grpo", finetuning_type="lora", lora=LoRAParams(rank=8, alpha=16)),
+        output=OutputResponse(name="my-lora", type=OutputNameType.ADAPTER, fileset="my-lora-fs"),
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="default/some-other-model"):
+        await _validate_adapter_base_model("default", job, platform_clients)

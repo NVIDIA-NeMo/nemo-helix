@@ -101,6 +101,10 @@ spec:
               value: {{ dig "automodel" "default_training_execution_profile" "default" $platformConfig | quote }}
             - name: NMP_UNSLOTH_DEFAULT_TRAINING_EXECUTION_PROFILE
               value: {{ dig "unsloth" "default_training_execution_profile" "default" $platformConfig | quote }}
+            - name: NMP_RL_DEFAULT_TRAINING_EXECUTION_PROFILE
+              value: {{ dig "rl" "default_training_execution_profile" "default" $platformConfig | quote }}
+            - name: NMP_RL_DEFAULT_DISTRIBUTED_EXECUTION_PROFILE
+              value: {{ dig "rl" "default_distributed_execution_profile" "gpu_distributed" $platformConfig | quote }}
             {{- if include "nemo-platform.embeddedPdpEnabled" . }}
             - name: NMP_AUTH_POLICY_DECISION_POINT_BASE_URL
               value: {{ include "nemo-platform.apiLoopbackBaseUrl" . | quote }}
