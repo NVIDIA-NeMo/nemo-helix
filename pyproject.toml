@@ -100,6 +100,7 @@ dev = [
   # Needed so the plugin's unit tests can import it. Safe to install: the plugin never imports
   # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
   "nemo-agent-hardener-plugin",
+  "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
   "nemo-platform-sdk-tools",               # Include SDK/license tool migration target for testing
   "nmp-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
@@ -233,15 +234,20 @@ functional-services = [
   "nmp-platform-seed",
 ]
 
+# nmp-api variant used only to deploy DeepAgents in container E2E tests.
+agents-deepagents-e2e-services = [
+  { include-group = "functional-services" },
+  "nemo-agents-plugin[deepagents]",
+]
+
 # CPU task dependencies (for nmp-cpu-tasks container)
 # Services that have CPU-only batch tasks
 cpu-tasks = [
   { include-group = "nmp-base" },
   { include-group = "nmp-task-runtime" },
-  # agents.execute task module plus the bundled Fabric adapters (claude, codex,
-  # deepagents, hermes). Without this the job's declared `container = "cpu-tasks"`
-  # is not true: nemo_agents_plugin.tasks.execute is not importable here.
-  "nemo-agents-plugin",
+  # agents.execute task module plus the harnesses that can coexist in the
+  # managed CPU task environment. Hermes requires a separate execution image.
+  "nemo-agents-plugin[all]",
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
   "nemo-insights-plugin",
   "nemo-evaluator-plugin",

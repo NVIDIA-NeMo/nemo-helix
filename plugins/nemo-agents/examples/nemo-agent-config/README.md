@@ -8,19 +8,21 @@
 This directory contains Platform-managed `nemo-agents-spec-v1` configs for
 NeMo Agents. Run the commands below from the repository root.
 
-The plugin installs Fabric, Relay Python bindings, and supported harness
-adapters. The Relay CLI is separate. Hermes is intentionally split out because the Hermes
-Agent runtime dependencies conflict with the Platform environment.
+The base plugin installs Fabric, Relay support, and the supported harness
+adapters. Install the extra for the harness you want to run; the
+[installation matrix](../../README.md#harness-installation-matrix) lists the
+available package expressions. Hermes is intentionally split out because its
+runtime dependencies conflict with the Platform environment.
 
 Set the credentials required by the selected model provider. The examples use
 `NVIDIA_API_KEY`. Install and authenticate the selected harness CLI when
 required; for example, run `codex login` for Codex or complete the Claude CLI
 login flow.
 
-For Claude or Codex, install and verify the Relay CLI:
+For example, install Codex and its matching Relay CLI from the repository root:
 
 ```bash
-script/dev-install-fabric.sh
+uv sync --package nemo-agents-plugin --extra codex
 nemo-relay --version
 ```
 
@@ -127,16 +129,11 @@ In this example, Claude uses its harness-local Anthropic model config.
 ### Hermes
 
 Hermes Agent has dependencies that conflict with the Platform environment, so
-install it with the Fabric adapter in a separate Python 3.12 environment:
+use the repository helper to install Fabric's pinned Hermes source and matching
+adapter in a separate Python 3.12 environment:
 
 ```bash
-uvx uv@0.9.14 venv --python 3.12 .venv-hermes
-uvx uv@0.9.14 --no-config pip install \
-  --python .venv-hermes/bin/python \
-  "nemo-fabric[relay]>=0.3.0,<0.4.0" \
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0" \
-  "hermes-agent==0.19.0"
-
+script/dev-install-hermes.sh
 export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
 ```
 

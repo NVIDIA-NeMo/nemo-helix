@@ -706,9 +706,7 @@ datasets==4.3.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
 deepagents==0.7.9 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:e62311fe73a752d36b830b2f48352aa63afbd56f47176d924065230d983b248e \
     --hash=sha256:fb5b382cc98ec132a6e30e5be2cacc60888231e358368aadc12f88efdec5d847
-    # via
-    #   nemo-agents-plugin
-    #   nemo-platform
+    # via nemo-fabric-adapters-deepagents
 defusedxml==0.7.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69 \
     --hash=sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61
@@ -1395,6 +1393,7 @@ langchain==1.3.17 ; (platform_machine == 'arm64' and sys_platform == 'darwin') o
     # via
     #   deepagents
     #   langchain-community
+    #   nemo-fabric-adapters-deepagents
     #   nemo-guardrails-plugin
     #   nemo-platform
     #   nvidia-nat-langchain
@@ -1483,6 +1482,7 @@ langgraph==1.2.11 ; (platform_machine == 'arm64' and sys_platform == 'darwin') o
     --hash=sha256:9ecfe11e50d338b34b15cf4d8a442642de103e8ae6971320efba84e4542eb363
     # via
     #   langchain
+    #   nemo-fabric-adapters-deepagents
     #   nvidia-nat-langchain
 langgraph-checkpoint==4.1.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:25d29144b082827218e7bc3f1e9b0566a4bb007895cd6cc26f66a8428739f56e \
@@ -1787,10 +1787,14 @@ nemo-fabric-adapter-contract==0.3.0 ; (platform_machine == 'arm64' and sys_platf
     #   nemo-platform
 nemo-fabric-adapters-claude==0.3.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:a712b14ab5ea0c8cd00fcdcb539337c3bfd1b366382f510fbfdc26312ed5bcf7
-    # via nemo-fabric
+    # via
+    #   nemo-agents-plugin
+    #   nemo-platform
 nemo-fabric-adapters-codex==0.3.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:5a94e0cea504b149ab126251bada549ed79afdda143e5b24d81f375016a87c2a
-    # via nemo-fabric
+    # via
+    #   nemo-agents-plugin
+    #   nemo-platform
 nemo-fabric-adapters-common==0.3.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:1a6777cf8a364f8ae930632154f2f1844f50dde04466b98798be1af600227a8d
     # via

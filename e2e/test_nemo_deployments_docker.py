@@ -27,7 +27,7 @@ How it runs, and where:
   The harness runs both the deployments service and its reconcile controller.
 - The workloads use small public images (``alpine`` / ``nginx``); the executor
   pulls them on demand (``pull_images: true`` in the config), so no prebuilt
-  ``nmp-api`` image is needed here — hence no ``needs_nmp_api_image`` marker.
+  agent E2E image is needed here — hence no ``needs_agents_e2e_image`` marker.
   The image refs are env-overridable (see ``e2e.deployments_helpers``) to match
   the ``POSTGRES_IMAGE`` / ``BUSYBOX_IMAGE`` knobs the k8s e2e install exposes,
   should a DockerHub mirror ever be introduced.

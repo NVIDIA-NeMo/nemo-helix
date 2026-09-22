@@ -8034,7 +8034,7 @@
               },
               "details": "On Linux, if the target of Root.Chmod is replaced with a symlink while the chmod operation is in progress, Chmod can operate on the target of the symlink, even when the target lies outside the root.\n\nThe Linux fchmodat syscall silently ignores the AT_SYMLINK_NOFOLLOW flag, which Root.Chmod uses to avoid symlink traversal. Root.Chmod checks its target before acting and returns an error if the target is a symlink lying outside the root, so the impact is limited to cases where the target is replaced with a symlink between the check and operation.",
               "id": "GO-2026-4864",
-              "modified": "2026-09-17T10:41:36.299382411Z",
+              "modified": "2026-09-22T10:41:47.965946052Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -8134,6 +8134,7 @@
                 "RHSA-2026:66401",
                 "RHSA-2026:67319",
                 "RHSA-2026:68504",
+                "RHSA-2026:69235",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -8398,7 +8399,7 @@
               },
               "details": "If one side of the TLS connection sends multiple key update messages post-handshake in a single record, the connection can deadlock, causing uncontrolled consumption of resources. This can lead to a denial of service.\n\nThis only affects TLS 1.3.",
               "id": "GO-2026-4870",
-              "modified": "2026-09-17T10:41:36.364653973Z",
+              "modified": "2026-09-22T10:41:47.864389838Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -8522,6 +8523,7 @@
                 "RHSA-2026:66401",
                 "RHSA-2026:67319",
                 "RHSA-2026:68504",
+                "RHSA-2026:69235",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -8750,7 +8752,7 @@
               },
               "details": "Validating certificate chains which use policies is unexpectedly inefficient when certificates in the chain contain a very large number of policy mappings, possibly causing denial of service.\n\nThis only affects validation of otherwise trusted certificate chains, issued by a root CA in the VerifyOptions.Roots CertPool, or in the system certificate pool.",
               "id": "GO-2026-4946",
-              "modified": "2026-09-17T10:41:36.412326517Z",
+              "modified": "2026-09-22T10:41:48.567066066Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -8846,6 +8848,7 @@
                 "RHSA-2026:67287",
                 "RHSA-2026:67319",
                 "RHSA-2026:68504",
+                "RHSA-2026:69235",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -8910,7 +8913,7 @@
               },
               "details": "During chain building, the amount of work that is done is not correctly limited when a large number of intermediate certificates are passed in VerifyOptions.Intermediates, which can lead to a denial of service. This affects both direct users of crypto/x509 and users of crypto/tls.",
               "id": "GO-2026-4947",
-              "modified": "2026-09-18T10:41:38.531069804Z",
+              "modified": "2026-09-22T10:41:48.367776747Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -9036,7 +9039,8 @@
                 "RHSA-2026:65886",
                 "RHSA-2026:66401",
                 "RHSA-2026:67319",
-                "RHSA-2026:68504"
+                "RHSA-2026:68504",
+                "RHSA-2026:69235"
               ],
               "schema_version": "1.7.5",
               "summary": "Unexpected work during chain building in crypto/x509"
@@ -10047,7 +10051,7 @@
               },
               "details": "The ToASCII and ToUnicode functions incorrectly accept Punycode-encoded labels that decode to an ASCII-only label. For example, ToUnicode(\"xn--example-.com\") incorrectly returns the name \"example.com\" rather than an error.\n\nThis behavior can lead to privilege escalation in programs using the idna package. For example, a program which performs privilege checks on the ASCII hostname may reject \"example.com\" but permit \"xn--example-.com\". If that program subsequently converts the ASCII hostname to Unicode, it will inadvertently permits access to the Unicode name \"example.com\".",
               "id": "GO-2026-5026",
-              "modified": "2026-09-17T10:41:36.745996073Z",
+              "modified": "2026-09-22T10:41:48.620271986Z",
               "published": "2026-05-22T02:46:43Z",
               "references": [
                 {
@@ -10138,7 +10142,8 @@
                 "RHSA-2026:67287",
                 "RHSA-2026:67319",
                 "RHSA-2026:67517",
-                "RHSA-2026:68504"
+                "RHSA-2026:68504",
+                "RHSA-2026:69235"
               ],
               "schema_version": "1.9.0",
               "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna"
@@ -10323,7 +10328,7 @@
               },
               "details": "Decoding a maliciously-crafted MIME header containing many invalid encoded-words can consume excessive CPU.",
               "id": "GO-2026-5038",
-              "modified": "2026-09-18T10:41:38.257292439Z",
+              "modified": "2026-09-22T10:41:48.352575043Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -10376,7 +10381,9 @@
                 "RHSA-2026:67975",
                 "RHSA-2026:68334",
                 "RHSA-2026:68504",
-                "RHSA-2026:68527"
+                "RHSA-2026:68527",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic complexity in WordDecoder.DecodeHeader in mime"
@@ -10636,7 +10643,7 @@
               },
               "details": "Enforce a recursion limit in Unmarshal to prevent stack exhaustion when parsing deeply-nested, recursive structures.",
               "id": "GO-2026-5972",
-              "modified": "2026-09-21T10:56:39.368219814Z",
+              "modified": "2026-09-22T10:41:48.937362540Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -10722,7 +10729,9 @@
                 "RHSA-2026:69103",
                 "RHSA-2026:69104",
                 "RHSA-2026:69105",
-                "RHSA-2026:69107"
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308"
               ],
               "schema_version": "1.9.0",
               "summary": "Enforce maximum recursion depth in encoding/asn1"
@@ -10794,7 +10803,7 @@
               },
               "details": "Previously, DecodeElement would reset the depth counter causing it to never fire; this could lead to stack exhaustion.",
               "id": "GO-2026-6088",
-              "modified": "2026-09-21T10:56:39.139876587Z",
+              "modified": "2026-09-22T10:41:48.759407834Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -10858,7 +10867,9 @@
                 "RHSA-2026:68335",
                 "RHSA-2026:68504",
                 "RHSA-2026:68527",
-                "RHSA-2026:69099"
+                "RHSA-2026:69099",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308"
               ],
               "schema_version": "1.9.0",
               "summary": "Add recursion depth guard during decode in encoding/xml"
@@ -10930,7 +10941,7 @@
               },
               "details": "When a server is configured to support unencrypted HTTP/2, it reads a few bytes from each new connection to see if they contain the HTTP/2 client preface. ReadHeaderTimeout is unexpectedly not being applied when doing this.",
               "id": "GO-2026-6089",
-              "modified": "2026-09-18T10:41:38.431769103Z",
+              "modified": "2026-09-22T10:41:48.959713711Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -10999,7 +11010,8 @@
                 "RHSA-2026:68334",
                 "RHSA-2026:68335",
                 "RHSA-2026:68504",
-                "RHSA-2026:68527"
+                "RHSA-2026:68527",
+                "RHSA-2026:69235"
               ],
               "schema_version": "1.9.0",
               "summary": "Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http"
@@ -11077,7 +11089,7 @@
               },
               "details": "Handshake messages, such as KeyUpdate, are always considered as state-advancing, regardless of whether a handshake has been completed or not. As a result, a malicious client can keep sending KeyUpdate messages to force the server to keep performing key derivation operations indefinitely.",
               "id": "GO-2026-6090",
-              "modified": "2026-09-21T10:56:39.387438935Z",
+              "modified": "2026-09-22T10:41:48.389768272Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -11160,10 +11172,13 @@
                 "RHSA-2026:68335",
                 "RHSA-2026:68504",
                 "RHSA-2026:68527",
+                "RHSA-2026:68538",
                 "RHSA-2026:69103",
                 "RHSA-2026:69104",
                 "RHSA-2026:69105",
-                "RHSA-2026:69107"
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308"
               ],
               "schema_version": "1.9.0",
               "summary": "Limit handshake messages we are willing to accept post-handshake in crypto/tls"
@@ -11233,7 +11248,7 @@
               },
               "details": "Previously, pathological inputs could close an unescaped '/' early, allowing for attack-controlled data to inject arbitrary content, potentially leading to XSS.",
               "id": "GO-2026-6091",
-              "modified": "2026-09-21T10:56:39.106034250Z",
+              "modified": "2026-09-22T10:41:48.109600729Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -11306,7 +11321,8 @@
                 "RHSA-2026:69103",
                 "RHSA-2026:69104",
                 "RHSA-2026:69105",
-                "RHSA-2026:69107"
+                "RHSA-2026:69107",
+                "RHSA-2026:69235"
               ],
               "schema_version": "1.9.0",
               "summary": "Fix Javascript regexp context tracking in html/template"
@@ -11371,7 +11387,7 @@
               },
               "details": "Previously, resolving relative paths containing parent directory ('..') segments performed string conversions and buffer rewrites on each step, resulting in quadratic time complexity and high memory allocation overhead.\n\nNow, path resolution operates on a byte buffer using index-based backtracking for '..' segments, eliminating the quadratic time complexity and significantly reducing memory allocations.",
               "id": "GO-2026-6218",
-              "modified": "2026-09-21T10:56:39.333700188Z",
+              "modified": "2026-09-22T10:41:48.668175162Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -11458,7 +11474,9 @@
                 "RHSA-2026:69103",
                 "RHSA-2026:69104",
                 "RHSA-2026:69105",
-                "RHSA-2026:69107"
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308"
               ],
               "schema_version": "1.9.0",
               "summary": "Avoid quadratic complexity in resolvePath in net/url"

@@ -555,6 +555,17 @@ jobs:
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
 
+      - name: Pre-pull agent E2E image into Kind
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          NMP_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NMP_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: |
+          e2e/k8s/scripts/prepull_kind_images.sh \
+            "${NMP_E2E_IMAGE_REGISTRY}/nmp-agents-deepagents-e2e:${NMP_E2E_IMAGE_TAG}"
+
       - name: Run jobs and data-designer e2e tests
         shell: bash
         env:
@@ -564,7 +575,7 @@ jobs:
           # Let the k8s-mode agent deployment e2e (test_nemo_agents_k8s.py) learn
           # the agent image ref. The Helm platform is configured with a k8s
           # deployments executor (e2e/k8s/values/kind.yaml) and this same
-          # nmp-api image is pre-pulled into the kind nodes, so the agent pod
+          # nmp-agents-deepagents-e2e image is pre-pulled into the kind nodes, so the agent pod
           # resolves it node-locally under IfNotPresent.
           NMP_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
           NMP_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
@@ -1691,10 +1702,9 @@ jobs:
             report.xml
             ${{ runner.temp }}/e2e-services-logs/
 
-  # E2E tests that run on the subprocess harness but need a prebuilt platform
-  # image available in the local Docker daemon (e.g. docker-mode agent
-  # deployments, which deploy the nmp-api image as a sibling container). Marked
-  # `needs_nmp_api_image`; the plain python-e2e-test job skips them because
+  # E2E tests that run on the subprocess harness but need the prebuilt
+  # DeepAgents image available in the local Docker daemon. Marked
+  # `needs_agents_e2e_image`; the plain python-e2e-test job skips them because
   # NMP_E2E_IMAGE_REGISTRY / NMP_E2E_IMAGE_TAG are unset there.
   python-e2e-image-test:
     name: Python e2e tests (prebuilt image)
@@ -1733,16 +1743,16 @@ jobs:
         env:
           GHCR_TOKEN: ${{ github.token }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Pull nmp-api image (timed)
+      - name: Pull agent E2E image (timed)
         shell: bash
         run: |
-          image="${NMP_E2E_IMAGE_REGISTRY}/nmp-api:${NMP_E2E_IMAGE_TAG}"
+          image="${NMP_E2E_IMAGE_REGISTRY}/nmp-agents-deepagents-e2e:${NMP_E2E_IMAGE_TAG}"
           echo "Pulling ${image}"
           start=$(date +%s)
           docker pull "$image"
-          echo "nmp-api pull took $(( $(date +%s) - start ))s"
-      - name: Run e2e tests (needs_nmp_api_image)
-        run: make test-e2e PYTEST_EXTRA="-m needs_nmp_api_image"
+          echo "agent E2E image pull took $(( $(date +%s) - start ))s"
+      - name: Run e2e tests (needs_agents_e2e_image)
+        run: make test-e2e PYTEST_EXTRA="-m needs_agents_e2e_image"
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs

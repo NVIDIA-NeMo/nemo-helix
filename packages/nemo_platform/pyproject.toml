@@ -180,6 +180,7 @@ guardrails-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 harbor = [
+  "nemo-platform[nemo-evaluator-sdk]",
   "harbor>=0.20,<0.21",
 ]
 
@@ -276,10 +277,29 @@ nemo-agents-plugin = [
   "python-on-whales>=0.60",
   "anthropic>=0.88.0",
   "rich>=13.7.1",
-  "nemo-fabric[claude,codex,relay,streaming]>=0.3.0,<0.4.0",
+  "nemo-fabric[relay,streaming]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
   "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-  "deepagents>=0.7.8,<0.8",
   "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agents-plugin-claude = [
+  "nemo-platform[nemo-agents-plugin]",
+  "nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agents-plugin-codex = [
+  "nemo-platform[nemo-agents-plugin]",
+  "nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agents-plugin-deepagents = [
+  "nemo-platform[nemo-agents-plugin]",
+  "nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -354,6 +374,7 @@ nemo-evaluator-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-evaluator-sdk = [
   "pydantic>=2.10.6",
+  "nemo-sandboxed-gym",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",
@@ -838,7 +859,7 @@ garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi",
 switchyard-vendored = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchyard", module = "switchyard" }
 
 # Default first-party plugins
-nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"] } }
+nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents"] } }
 nemo-anonymizer-plugin = { source = "../../plugins/nemo-anonymizer/src/nemo_anonymizer_plugin", module = "nemo_anonymizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor", inherit = { "entry-points" = ["nemo.*"] } }
 # Customization router plus its backend contributors. Heavy ML stacks stay in the

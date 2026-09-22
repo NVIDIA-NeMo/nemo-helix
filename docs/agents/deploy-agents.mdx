@@ -324,6 +324,12 @@ requires the `container` extra. Install it with:
 uv sync --package nemo-agents-plugin --extra container
 ```
 
+The generated image installs the harness selected by `default_harness`; other
+configured harnesses are not included. Claude, Codex, and DeepAgents use their
+corresponding `nemo-platform` extras. Hermes is installed from its pinned source
+in a fixed Python 3.12 environment so its dependencies do not conflict with the
+Platform runtime. The Hermes Python version is not currently configurable.
+
 The examples below use the calculator agent that ships with the source
 checkout. Run them from the repository root. Its config is located at
 `plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml`.

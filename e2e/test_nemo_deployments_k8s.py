@@ -41,7 +41,7 @@ How it runs, and where:
   module's ``subprocess_only``.
 - The workloads use small public images (``alpine`` / ``nginx``) pulled by the
   kind nodes on demand, so — unlike the agents k8s test — this does not depend on
-  a node-pre-pulled ``nmp-api`` image and carries no ``needs_nmp_api_image``
+  the node-pre-pulled agent E2E image and carries no ``needs_agents_e2e_image``
   marker. Pulling public ``docker.io/library/...`` images at cluster runtime is
   the same pattern the kind e2e job already relies on for postgres / busybox /
   cloud-provider-kind (there is no pull-through cache configured). The refs are

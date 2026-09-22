@@ -8,6 +8,7 @@ ARG NMP_PYTHON_BASE=nmp-python-base
 ARG NMP_API_RUNTIME_BASE=nmp-python-base
 
 FROM ${NMP_PYTHON_BASE} AS builder
+ARG NMP_API_DEPENDENCY_GROUP=functional-services
 COPY --from=nmp-workspace . .
 # Put the generated authorization policy into the source package before uv
 # installs it. This keeps the artifact aligned with the venv's actual Python
@@ -25,7 +26,7 @@ ENV ANNOY_COMPILER_ARGS="-D_CRT_SECURE_NO_WARNINGS,-DANNOYLIB_MULTITHREADED_BUIL
 # over the seed pip without removing stale files, leaving two pip-*.dist-info
 # dirs and a mixed file tree whose `pip` import is broken.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --only-group functional-services --no-editable \
+    uv sync --frozen --only-group "${NMP_API_DEPENDENCY_GROUP}" --no-editable \
     --reinstall-package pip
 
 # annoy must be reinstalled from the committed lockfile without wheel cache reuse: uv's wheel cache
@@ -33,7 +34,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ignores ANNOY_COMPILER_ARGS.
 RUN --mount=type=cache,target=/root/.cache/uv \
     VIRTUAL_ENV=/app/.venv \
-    uv sync --frozen --active --only-group functional-services --no-editable \
+    uv sync --frozen --active --only-group "${NMP_API_DEPENDENCY_GROUP}" --no-editable \
     --reinstall-package annoy --refresh-package annoy --no-binary-package annoy --no-cache
 
 # Fail the build if pip is broken or duplicated (regression guard).

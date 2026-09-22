@@ -31,6 +31,22 @@ def test_all_extra_bundles_default_deployments_backend() -> None:
     assert project["entry-points"]["nemo.skills"]["deployments"].startswith("nemo_deployments_plugin.")
 
 
+def test_harness_extras_include_agents_plugin_dependencies() -> None:
+    pyproject_path = ROOT / "packages/nemo_platform/pyproject.toml"
+    with open(pyproject_path, "rb") as pyproject:
+        project = tomllib.load(pyproject)["project"]
+
+    extras = project["optional-dependencies"]
+    expected = {
+        "nemo-agents-plugin-claude": "nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0",
+        "nemo-agents-plugin-codex": "nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0",
+        "nemo-agents-plugin-deepagents": "nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0",
+    }
+    for extra, dependency in expected.items():
+        assert extras[extra] == ["nemo-platform[nemo-agents-plugin]", dependency]
+    assert not {"claude", "codex", "deepagents"} & extras.keys()
+
+
 def test_bundled_shared_data_is_carried_into_the_wrapper_wheel() -> None:
     """Every bundled package's shared-data must be re-declared on its bundle entry.
 

@@ -26,7 +26,8 @@ Each entry has:
 - **source** — relative path to the source directory to include in the wheel
 - **module** — target module path inside the wheel
 - **deps_group** (optional) — name of the `[project.optional-dependencies]` group where the package's transitive deps are written. Defaults to the bundle key.
-- **inherit** (optional) — structured metadata to re-export from the bundled package. Supported keys are `scripts`, `entry-points`, and `optional-dependencies`; each value is either `true` or a list of wildcard patterns.
+- **inherit** (optional) — structured metadata to re-export from the bundled package. Supported keys are `scripts`, `entry-points`, and `optional-dependencies`; each value is either `true` or a list of wildcard patterns. An inherited optional dependency includes the bundle's generated base extra unless that package is already a wrapper base dependency.
+- **optional-dependencies-prefix** (optional) — prefix applied to inherited optional-dependency names, allowing plugin extras such as `codex` to be exposed as `nemo-agents-plugin-codex` without colliding with other bundled packages.
 - **scripts** (optional) — explicit CLI entrypoints to register on the wrapper. Prefer `inherit.scripts` when copying scripts from the bundled package.
 - **force_include** (optional) — extra source files, directories, or globs to bundle with this package, keyed relative to the entry's `source` path and mapped to their target wheel path. When using a glob, make the target end in `/` to copy each match into that package directory.
 

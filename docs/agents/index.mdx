@@ -89,6 +89,69 @@ NeMo Platform uses Fabric as the runtime wrapper around your agent so the
 platform can deploy it and route its model traffic
 through shared infrastructure.
 
+### Install Harness Support
+
+The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
+DeepAgents, and Hermes adapter implementations. It does not install the
+third-party harness packages. Choose an extra when the harness should share the
+Platform environment:
+
+| Harness selection | `nemo-platform` package expression | Source checkout plugin expression | Harness packages installed |
+|---|---|---|---|
+| Adapters only | `nemo-platform[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
+| Claude Code | `nemo-platform[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
+| Codex | `nemo-platform[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
+| DeepAgents | `nemo-platform[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
+| All installable harnesses | `nemo-platform[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
+| Hermes | `nemo-platform[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
+
+Install the Agents plugin and one harness with its namespaced Platform extra.
+For example, install DeepAgents with:
+
+```bash
+uv tool install "nemo-platform[nemo-agents-plugin-deepagents]"
+```
+
+In an activated virtual environment, install the same package expression with:
+
+```bash
+uv pip install "nemo-platform[nemo-agents-plugin-deepagents]"
+```
+
+Plain `pip install` also works in an environment you manage yourself.
+Add `all` to the extra list only when the environment must also run every local
+Platform service: `nemo-platform[all,nemo-agents-plugin-deepagents]`.
+
+From a source checkout, use the standalone plugin extra instead:
+
+```bash
+uv sync --package nemo-agents-plugin --extra deepagents
+```
+
+Hermes Agent 0.20 and later is not distributed through PyPI and has dependency
+conflicts with the Platform environment. Follow the
+[Hermes Agent installation guide](https://hermes-agent.nousresearch.com/docs/installation)
+to create a separate environment, then install the matching Fabric runtime and
+Hermes adapter into that environment:
+
+```bash
+uv python install 3.12
+uv venv --python 3.12 .venv-hermes
+export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
+
+PLATFORM_PYTHON="$(sed -n '1s/^#!//p' "$(command -v nemo)")"
+FABRIC_VERSION="$("$PLATFORM_PYTHON" -c \
+  'import importlib.metadata as m; print(m.version("nemo-fabric"))')"
+
+uv pip install --python "$ADAPTER_PYTHON" \
+  "nemo-fabric[relay]==$FABRIC_VERSION" \
+  "nemo-fabric-adapters-hermes==$FABRIC_VERSION"
+```
+
+Keep `ADAPTER_PYTHON` set when starting NeMo Platform. Source-checkout users
+can instead run `script/dev-install-hermes.sh`, which performs these steps and
+installs the supported Hermes version in `.venv-hermes`.
+
 Runtime behavior is described by the platform-managed `agent.yaml`:
 
 | Section | Purpose | Example |
