@@ -67,11 +67,11 @@ def _strategies_router() -> APIRouter:
         Each entry is the object its own plugin declared, forwarded as-is: the
         listing describes strategies, and only the plugin shipping one knows
         what it optimizes.
-
-        The first call imports every installed plugin's job modules, so it runs
-        in a worker thread rather than on the event loop; later calls answer
-        from the discovery cache.
         """
+        # FastAPI publishes this docstring as the route's OpenAPI description, so the
+        # implementation note lives here: the first call imports every installed
+        # plugin's job modules, so it runs in a worker thread rather than on the event
+        # loop; later calls answer from the discovery cache.
         return OptimizationStrategyList(data=await asyncio.to_thread(discover_strategies))
 
     return router
