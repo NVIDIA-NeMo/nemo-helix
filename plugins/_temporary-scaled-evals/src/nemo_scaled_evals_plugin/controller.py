@@ -153,7 +153,8 @@ class ScaledEvalsJobsController(NemoController):
             # instead of one. Progress is still one row per pass in that case.
             deadline = time.monotonic() + settings.platform_jobs_phase_budget_seconds
             for _ in range(settings.platform_jobs_phase_batch_size):
-                if not await step() or time.monotonic() >= deadline:
+                claimed = await step()
+                if not claimed or time.monotonic() >= deadline:
                     return
 
         return drained
@@ -308,7 +309,11 @@ class ScaledEvalsJobsController(NemoController):
             await asyncio.to_thread(self._fail_evaluation_job, row, "Platform evaluation job was not found")
             return True
         if status.status in _ACTIVE_JOB_STATUSES:
-            await asyncio.to_thread(self._release_evaluation_reconcile_claim, row)
+            # Hold the lease rather than releasing it. The claim orders by
+            # dispatch_claimed_at, which a release does not change, so a
+            # released row sorts first again and the drain re-claims this same
+            # row instead of advancing. The lease lapses after claim_timeout,
+            # which is soon enough for a job that is running normally.
             return True
         if status.status == PlatformJobStatus.COMPLETED:
             detail = "Platform evaluation job completed without recording a terminal evaluation status"
@@ -435,15 +440,6 @@ class ScaledEvalsJobsController(NemoController):
             return EvaluationRepository(conn).claim_stale_dispatch_job(
                 stale_seconds=settings.dispatch_job_reconcile_stale_seconds,
                 claim_timeout=TaskBuildWorker.claim_timeout,
-                worker_id=self._worker_id,
-            )
-
-    def _release_evaluation_reconcile_claim(self, row: dict[str, Any]) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).release_dispatch_reconcile_claim(
-                str(row["id"]),
-                execution_number=int(row["current_execution"]),
-                dispatch_job_name=str(row["dispatch_job_name"]),
                 worker_id=self._worker_id,
             )
 

@@ -221,12 +221,16 @@ class Settings(BaseSettings):
         le=200,
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BATCH_SIZE",
     )
-    # Wall-clock ceiling for one phase, independent of the row count. The
-    # heartbeat runs only after every phase, and a stale heartbeat marks this
-    # controller unhealthy, so a slow Jobs service must not delay it.
+    # Bounds how many further rows a phase starts, not how long one row takes:
+    # the deadline is checked between rows. The heartbeat runs only after every
+    # phase and a stale heartbeat marks this controller unhealthy, so a busy
+    # queue must not hold the pass open. A single slow row can still overrun
+    # this, exactly as it could before phases were batched.
+    # Infinity satisfies gt=0 and would disable the deadline entirely.
     platform_jobs_phase_budget_seconds: float = Field(
         default=5.0,
         gt=0,
+        allow_inf_nan=False,
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
     )
     # Entity Store migration flags. Projection writes a derived read model while
