@@ -7456,7 +7456,7 @@ nemo agents optimize prepare-fileset [OPTIONS]
 * `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
 * `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize run-strategy --optimize-config`.
 * `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
-* `--workspace`: Workspace for the fileset and for agent / model preflight. [default: default]
+* `--workspace`: Workspace for the fileset and for agent / model preflight. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
 * `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
 * `--dry-run`: Run preflight and print the result without uploading.
@@ -7500,7 +7500,7 @@ nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 ​
