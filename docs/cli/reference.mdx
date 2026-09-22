@@ -7427,6 +7427,10 @@ has it, and vice versa. Answering from this environment instead would
 describe a different machine, so an unreachable platform is an error
 rather than a cue to guess.
 
+Stdout carries names and nothing else, so `for s in $(nemo agents optimize
+list-strategies)` is safe: an empty platform prints nothing there. The
+target is announced once on stderr by the shared base-URL resolver.
+
 **Usage:**
 
 ```shell

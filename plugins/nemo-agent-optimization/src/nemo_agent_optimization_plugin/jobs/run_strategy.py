@@ -11,6 +11,7 @@ job, hands the rest of the spec to that job's own schema, and delegates:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from typing import Any, ClassVar
@@ -66,7 +67,9 @@ class RunStrategyJob(NemoJob):
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
-        target = _resolve_strategy(spec.strategy, error=HelixJobCompilationError)
+        # Resolution imports every installed plugin's job modules the first time it runs,
+        # so it is kept off the event loop; later calls answer from the discovery cache.
+        target = await asyncio.to_thread(_resolve_strategy, spec.strategy, error=HelixJobCompilationError)
         logger.info("Dispatching agents optimize to strategy job %s", target.__qualname__)
         compiled = await target.compile(
             workspace=workspace,
@@ -92,13 +95,21 @@ class RunStrategyJob(NemoJob):
         The router does not know which framework-managed dependencies a
         strategy declares, so it forwards only the ones that strategy's
         ``run`` actually accepts -- the same rule the CLI applies when it
-        invokes a job locally.
+        invokes a job locally.  A strategy whose ``run`` takes ``**kwargs``
+        accepts anything, so it receives every dependency: the signature
+        names only the catch-all, not what it might read from it.
         """
         spec = RunStrategySpec.model_validate(config)
         target = _resolve_strategy(spec.strategy, error=LocalRunError)
-        accepted = inspect.signature(target.run).parameters
-        forwarded = {name: value for name, value in dependencies.items() if name in accepted}
-        return target().run(_strategy_payload(spec), ctx=ctx, **forwarded)
+        return target().run(_strategy_payload(spec), ctx=ctx, **_accepted_dependencies(target, dependencies))
+
+
+def _accepted_dependencies(target: type[NemoJob], dependencies: dict[str, Any]) -> dict[str, Any]:
+    """The subset of *dependencies* that ``target.run`` can be called with."""
+    params = inspect.signature(target.run).parameters
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return dict(dependencies)
+    return {name: value for name, value in dependencies.items() if name in params}
 
 
 def _resolve_strategy(strategy: str, *, error: type[Exception]) -> type[NemoJob]:

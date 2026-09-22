@@ -31,6 +31,7 @@ nothing but pydantic, which is why the declaration type lives there.
 from __future__ import annotations
 
 import logging
+from functools import cache
 
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_helix_plugin.discovery import discover_jobs
@@ -56,6 +57,7 @@ def declared_strategy(job_cls: type[NemoJob]) -> OptimizationStrategy | None:
     return strategy
 
 
+@cache
 def discover_strategy_jobs() -> dict[str, type[NemoJob]]:
     """Every installed optimization strategy job, keyed by strategy name.
 
@@ -63,6 +65,12 @@ def discover_strategy_jobs() -> dict[str, type[NemoJob]]:
     :attr:`~OptimizationStrategy.name` it declares in its :data:`STRATEGY_ATTR`
     class variable, so plugins keep naming their jobs however their own routing
     needs.
+
+    Cached for the lifetime of the process, like the framework discovery it is
+    built on: what is installed cannot change under a running process, and the
+    underlying :func:`~nemo_helix_plugin.discovery.discover_jobs` re-walks
+    every job entry (and repeats its name-mismatch warnings) on each call.
+    Tests that swap ``discover_jobs`` call ``discover_strategy_jobs.cache_clear()``.
     """
     found: dict[str, type[NemoJob]] = {}
     for key, job_cls in discover_jobs().items():

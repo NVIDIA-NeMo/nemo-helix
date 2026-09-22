@@ -46,7 +46,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WRAPPER_PYPROJECT = _REPO_ROOT / "packages" / "nemo_helix" / "pyproject.toml"
 
 _ROUTER_JOB_KEY = "agent-optimization.run-strategy"
-_STRATEGY_JOB_KEYS = {"optimization.optimize"}
+_STRATEGY_JOB_KEYS = {"agent-optimization.optimize"}
 
 _STRATEGIES_INSTALLED = pytest.mark.skipif(
     bool(_MISSING_PLUGINS),

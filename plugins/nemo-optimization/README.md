@@ -53,7 +53,7 @@ Install and QA steps live in that directory's README.
 The platform does not vendor example-agent packages such as the email phishing
 analyzer; MCP servers are declared statically under ``mcp.servers``.
 
-Job registration: ``optimization.optimize``, discovered as the ``nat`` strategy of
+Job registration: ``agent-optimization.optimize``, discovered as the ``nat`` strategy of
 ``nemo agents optimize run-strategy``.  CLI registration: ``prepare-fileset`` under
 ``nemo.cli.agents.optimize``, which hangs that verb off the same shared group.
 ``compile`` selects the ``subprocess`` execution profile when the platform registers

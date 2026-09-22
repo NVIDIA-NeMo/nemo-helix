@@ -15,6 +15,7 @@ import typer
 from nemo_agent_optimization_plugin import cli as cli_module
 from nemo_agent_optimization_plugin.cli import AgentOptimizeCLI
 from nemo_agent_optimization_plugin.schemas.strategies import STRATEGIES_PATH, OptimizationStrategyList
+from nemo_agents_plugin import cli_context
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoTransportError
 from typer.main import get_command
 from typer.testing import CliRunner
@@ -114,7 +115,6 @@ def test_list_strategies_reports_the_platforms_answer(monkeypatch: pytest.Monkey
 
     assert result.exit_code == 0, result.output
     assert _stdout(result) == ["nat", "acme"]
-    assert "installed on http://platform" in result.stderr
 
 
 def test_an_unreachable_platform_is_an_error_not_a_local_listing(
@@ -139,7 +139,17 @@ def test_list_strategies_trusts_an_empty_answer_from_the_platform(monkeypatch: p
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
 
     assert result.exit_code == 0, result.output
-    assert "No optimization strategies are installed." in result.stdout
+    assert "No optimization strategies are installed on http://platform." in result.stderr
+
+
+def test_an_empty_listing_leaves_stdout_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stdout is one name per line and nothing else, so a shell loop over it is safe."""
+    install(monkeypatch)
+    _remote(monkeypatch, [])
+
+    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
+
+    assert result.stdout == ""
 
 
 def test_a_rejected_request_is_reported_and_exits_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,12 +176,18 @@ def test_the_listing_builds_a_client_for_the_resolved_target(monkeypatch: pytest
         def __init__(self, **kwargs: Any) -> None:
             captured.update(kwargs)
 
+        def __enter__(self) -> "_StubClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            captured["closed"] = True
+
         def list_strategies(self) -> Any:
             return SimpleNamespace(data=lambda: OptimizationStrategyList.model_validate(_LISTING))
 
     monkeypatch.setattr(cli_module, "AgentOptimizationClient", _StubClient)
-    monkeypatch.setattr(cli_module, "_resolve_base_url", lambda _base_url: "http://platform")
-    monkeypatch.setattr(cli_module, "_context_headers", lambda: {"Authorization": "Bearer token"})
+    monkeypatch.setattr(cli_context, "resolve_base_url", lambda _base_url: "http://platform")
+    monkeypatch.setattr(cli_context, "resolve_context_headers", lambda: {"Authorization": "Bearer token"})
 
     names, target = cli_module._remote_strategy_names(None)
 
@@ -179,6 +195,8 @@ def test_the_listing_builds_a_client_for_the_resolved_target(monkeypatch: pytest
     assert target == "http://platform"
     assert captured["base_url"] == "http://platform"
     assert captured["default_headers"] == {"Authorization": "Bearer token"}
+    # The client is used as a context manager, so its connection pool is released.
+    assert captured["closed"] is True
 
 
 def test_the_cli_name_matches_its_entry_point_key() -> None:

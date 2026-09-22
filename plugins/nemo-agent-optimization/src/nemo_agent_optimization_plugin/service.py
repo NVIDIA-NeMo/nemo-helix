@@ -16,6 +16,7 @@ endpoint — and its ``agent-optimization.*`` permissions — exist.
 
 from __future__ import annotations
 
+import asyncio
 from typing import ClassVar
 
 from fastapi import APIRouter
@@ -66,8 +67,12 @@ def _strategies_router() -> APIRouter:
         Each entry is the object its own plugin declared, forwarded as-is: the
         listing describes strategies, and only the plugin shipping one knows
         what it optimizes.
+
+        The first call imports every installed plugin's job modules, so it runs
+        in a worker thread rather than on the event loop; later calls answer
+        from the discovery cache.
         """
-        return OptimizationStrategyList(data=discover_strategies())
+        return OptimizationStrategyList(data=await asyncio.to_thread(discover_strategies))
 
     return router
 

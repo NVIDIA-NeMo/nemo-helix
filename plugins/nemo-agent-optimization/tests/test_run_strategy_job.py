@@ -252,6 +252,23 @@ def test_run_delegates_to_the_strategy_job(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured["spec"]["optimize_config"] == "optimize.yml"
 
 
+def test_run_forwards_every_dependency_to_a_strategy_that_takes_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A catch-all names nothing, so filtering by parameter name would drop everything."""
+    captured: dict[str, Any] = {}
+
+    def _run(_self: object, spec: dict, *, ctx: JobContext, **dependencies: Any) -> dict[str, Any]:
+        captured.update(dependencies)
+        return {"delegated": True}
+
+    monkeypatch.setattr(_FakeStrategyJob, "run", _run)
+
+    sdk = MagicMock()
+    client = MagicMock()
+    RunStrategyJob().run(submitted_spec().model_dump(mode="json"), ctx=MagicMock(), sdk=sdk, client=client)
+
+    assert captured == {"sdk": sdk, "client": client}
+
+
 def test_run_rejects_an_uninstalled_strategy() -> None:
     with pytest.raises(LocalRunError, match=r"'nope' is not installed"):
         RunStrategyJob().run(submitted_spec(strategy="nope").model_dump(mode="json"), ctx=MagicMock())
