@@ -21,6 +21,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 import typer
+from nemo_platform_plugin.cli_options import WorkspaceOption
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 
 LoadJobJson = Callable[[Path], str]
 
@@ -63,7 +65,7 @@ def _replace_job_submit(group: typer.Typer, load_job_json: LoadJobJson, job_json
     def submit(
         typer_ctx: typer.Context,
         job_json: Path = typer.Argument(..., metavar="JOB_JSON", help=job_json_help),
-        workspace: str = typer.Option("default", "--workspace", "-w", help="Target workspace."),
+        workspace: WorkspaceOption = None,
         profile: str | None = typer.Option(None, "--profile"),
         cluster: str | None = typer.Option(None, "--cluster"),
         base_url: str | None = typer.Option(
@@ -77,6 +79,7 @@ def _replace_job_submit(group: typer.Typer, load_job_json: LoadJobJson, job_json
         options: list[str] = typer.Option([], "-o", help="Backend option override, 'backend.key=value'."),
         options_file: Path | None = typer.Option(None, "--options-file"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         spec_json = load_job_json(job_json)
         original(
             typer_ctx,

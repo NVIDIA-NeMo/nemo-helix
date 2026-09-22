@@ -30,9 +30,10 @@ import httpx
 import typer
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_platform_plugin.cli_options import WorkspaceOption
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 
 _DEFAULT_BASE_URL = "http://localhost:8080"
-_DEFAULT_WORKSPACE = "default"
 
 
 def _plugin_path(workspace: str, resource: str, name: str | None = None) -> str:
@@ -90,6 +91,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
 
     @sub.command("create")
     def create(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
         data_file: Path | None = typer.Option(
             None,
@@ -101,9 +103,10 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
             dir_okay=False,
         ),
         data: str | None = typer.Option(None, "--data", "-d", help=f"Inline JSON body for the {singular}."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         body = _load_data(data_file, data)
         payload = {"name": name, **body}
         resp = _api_request("POST", base_url, _plugin_path(workspace, resource), json_body=payload)
@@ -111,23 +114,28 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
 
     @sub.command("list")
     def list_cmd(
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        typer_ctx: typer.Context,
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         resp = _api_request("GET", base_url, _plugin_path(workspace, resource))
         typer.echo(json.dumps(resp, indent=2))
 
     @sub.command("get")
     def get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         resp = _api_request("GET", base_url, _plugin_path(workspace, resource, name))
         typer.echo(json.dumps(resp, indent=2))
 
     @sub.command("update")
     def update(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
         data_file: Path | None = typer.Option(
             None,
@@ -139,19 +147,22 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
             dir_okay=False,
         ),
         data: str | None = typer.Option(None, "--data", "-d", help="Inline JSON body."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         body = _load_data(data_file, data)
         resp = _api_request("PUT", base_url, _plugin_path(workspace, resource, name), json_body=body)
         typer.echo(json.dumps(resp, indent=2))
 
     @sub.command("delete")
     def delete(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         _api_request("DELETE", base_url, _plugin_path(workspace, resource, name))
         typer.echo(f"{singular.capitalize()} '{name}' deleted.")
 

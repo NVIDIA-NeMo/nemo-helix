@@ -1,16 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CLI tests for shared-context base-URL resolution and auth-token attachment.
+"""CLI tests for shared-context base-URL, workspace, and auth-token resolution.
 
-These pin the two behaviours that make ``nemo agents`` usable against a
-remote, secured platform:
+These pin the three behaviours that make ``nemo agents`` usable against a
+remote, secured, multi-workspace platform:
 
 - **Base URL** resolves through the shared CLI context the rest of the CLI
   uses (``nemo config set --base-url`` / ``NMP_BASE_URL``), with an explicit
   ``--base-url`` / ``NEMO_BASE_URL`` still taking precedence, and the resolved
   target echoed to stderr so a mis-pointed command is visible instead of
   silently hitting localhost.
+- **Workspace** resolves through the active CLI context (``nemo config
+  use-context`` / ``$NMP_WORKSPACE``) when ``--workspace`` is omitted, instead
+  of silently acting on ``default`` — with an explicit ``--workspace`` still
+  winning and ``default`` preserved when no CLI state is installed.
 - **Auth** headers from the shared context (the ``Authorization: Bearer``
   token behind ``nemo auth login``) are attached to every platform HTTP call,
   so agents commands are not rejected 401/403 on a secured cluster.
@@ -87,8 +91,17 @@ class _FakeSDKContext:
 class _FakeCLIContext:
     """Minimal stand-in for ``CLIContext`` (typer.Context.obj)."""
 
-    def __init__(self, base_url: str = "http://config-host:9999", token: str | None = "cfg-token") -> None:
+    def __init__(
+        self,
+        base_url: str = "http://config-host:9999",
+        token: str | None = "cfg-token",
+        workspace: str | None = None,
+    ) -> None:
         self._sdk = _FakeSDKContext(base_url, token)
+        self._workspace = workspace
+
+    def get_workspace(self) -> str | None:
+        return self._workspace
 
     def get_sdk_context(self) -> _FakeSDKContext:
         return self._sdk
@@ -234,3 +247,90 @@ def test_platform_invoke_attaches_auth_and_targets_context_base_url() -> None:
     assert captured[0].url.host == "config-host"
     assert captured[0].url.port == 9999
     assert captured[0].headers.get("authorization") == "Bearer tkn"
+
+
+# ---------------------------------------------------------------------------
+# Workspace resolution
+# ---------------------------------------------------------------------------
+#
+# The bug these pin: declaring ``--workspace`` with a literal ``"default"``
+# Typer default makes an omitted flag indistinguishable from an explicit
+# ``--workspace default``, so the workspace the user selected (via
+# ``nemo config use-context`` / ``$NMP_WORKSPACE``) was silently discarded and
+# the command acted on ``default`` — potentially the wrong tenant.
+
+
+def _workspace_from(req: httpx.Request) -> str:
+    """Pull the workspace segment out of an agents API URL."""
+    parts = req.url.path.strip("/").split("/")
+    return parts[parts.index("workspaces") + 1]
+
+
+def _invoke_capturing(args: list[str], **kwargs: Any) -> tuple[Any, list[httpx.Request]]:
+    captured: list[httpx.Request] = []
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(_capturing(captured)):
+        result = CliRunner().invoke(app, [*args, "--base-url", "http://h:1"], **kwargs)
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert captured, "expected a request to be issued"
+    return result, captured
+
+
+def test_workspace_falls_back_to_active_context_workspace(monkeypatch) -> None:
+    """With no ``--workspace``, commands act on the active CLI context's workspace."""
+    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    _, captured = _invoke_capturing(["list"], obj=_FakeCLIContext(workspace="team-a"))
+    assert _workspace_from(captured[0]) == "team-a"
+
+
+def test_workspace_flag_overrides_active_context_workspace(monkeypatch) -> None:
+    """An explicit ``--workspace`` still wins over the active context."""
+    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    _, captured = _invoke_capturing(
+        ["list", "--workspace", "flag-ws"],
+        obj=_FakeCLIContext(workspace="team-a"),
+    )
+    assert _workspace_from(captured[0]) == "flag-ws"
+
+
+def test_workspace_defaults_without_cli_state(monkeypatch) -> None:
+    """No CLI state and no flag -> ``default``, preserving direct/unit invocation."""
+    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    _, captured = _invoke_capturing(["list"])
+    assert _workspace_from(captured[0]) == "default"
+
+
+def test_workspace_falls_back_to_env_without_cli_state(monkeypatch) -> None:
+    """``$NMP_WORKSPACE`` applies when no CLI state object is installed."""
+    monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+    _, captured = _invoke_capturing(["list"])
+    assert _workspace_from(captured[0]) == "env-ws"
+
+
+def test_state_workspace_wins_over_the_env_fallback(monkeypatch) -> None:
+    """A reporting CLI state short-circuits the resolver's bare env lookup.
+
+    Internal ordering, not user-facing precedence: a real ``CLIContext``
+    applies ``$NMP_WORKSPACE`` before ``get_workspace()`` answers, so the env
+    var still wins in practice. ``_FakeCLIContext`` ignores the environment
+    on purpose so this isolates the fallback path.
+    """
+    monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+    _, captured = _invoke_capturing(["list"], obj=_FakeCLIContext(workspace="team-a"))
+    assert _workspace_from(captured[0]) == "team-a"
+
+
+def test_workspace_resolution_applies_to_subgroup_commands(monkeypatch) -> None:
+    """Resolution is not list-only: nested groups honour the context too."""
+    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    _, captured = _invoke_capturing(
+        ["deployments", "list"],
+        obj=_FakeCLIContext(workspace="team-a"),
+    )
+    assert _workspace_from(captured[0]) == "team-a"
+
+    _, captured = _invoke_capturing(
+        ["environments", "list", "-w", "flag-ws"],
+        obj=_FakeCLIContext(workspace="team-a"),
+    )
+    assert _workspace_from(captured[0]) == "flag-ws"

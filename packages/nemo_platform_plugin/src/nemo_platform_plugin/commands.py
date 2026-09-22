@@ -94,6 +94,7 @@ from nemo_platform_plugin._spec_flags import (
 )
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_platform_plugin.cli_options import workspace_help, workspace_option
 from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
 from nemo_platform_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks
 from nemo_platform_plugin.errors import LocalRunError
@@ -595,12 +596,9 @@ def _build_job_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signatur
         kw(
             "workspace",
             Optional[str],
-            typer.Option(
-                None,
-                "--workspace",
-                help="Workspace scope for the submission. Defaults to the active CLI context's workspace.",
+            workspace_option(
+                help=workspace_help("Workspace scope for the submission."),
                 rich_help_panel=_PANEL_SUBMISSION,
-                show_default="active context workspace",
             ),
         ),
     ]
@@ -898,15 +896,9 @@ def _build_function_run_signature(leaves: list[SpecLeafField]) -> inspect.Signat
         kw(
             "workspace",
             Optional[str],
-            typer.Option(
-                None,
-                "--workspace",
-                help=(
-                    "Workspace identity passed to the function as ctx.workspace. "
-                    "Defaults to the active CLI context's workspace."
-                ),
+            workspace_option(
+                help=workspace_help("Workspace identity passed to the function as ctx.workspace."),
                 rich_help_panel=_PANEL_SPEC_SOURCE,
-                show_default="active context workspace",
             ),
         ),
     ]
@@ -1124,12 +1116,9 @@ def _build_function_submit_signature(leaves: list[SpecLeafField]) -> inspect.Sig
         kw(
             "workspace",
             Optional[str],
-            typer.Option(
-                None,
-                "--workspace",
-                help=("Workspace path segment used in the submit URL. Defaults to the active CLI context's workspace."),
+            workspace_option(
+                help=workspace_help("Workspace path segment used in the submit URL."),
                 rich_help_panel=_PANEL_SUBMISSION,
-                show_default="active context workspace",
             ),
         ),
         kw(

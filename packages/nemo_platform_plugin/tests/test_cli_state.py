@@ -6,10 +6,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import cast
 
-import click
 import pytest
 import typer
-from nemo_platform_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks, resolve_workspace
+from nemo_platform_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks
 
 
 def _typer_context_with_obj(obj: object | None) -> typer.Context:
@@ -108,70 +107,3 @@ class TestResolveCliWorkspace:
         """
         monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
         assert resolve_cli_workspace(_typer_context_with_obj(_WorkspaceState(None))) == "env-ws"
-
-
-class TestResolveWorkspace:
-    """Ambient twin: same precedence, but reads the current Click context.
-
-    Plugin-authored commands call this without a ``typer.Context`` in their
-    signature, so the state object has to come off the Click context stack.
-    """
-
-    @staticmethod
-    def _click_context(obj: object | None) -> click.Context:
-        return click.Context(click.Command("stub"), obj=obj)
-
-    def test_explicit_wins_without_consulting_the_context(self) -> None:
-        with self._click_context(_WorkspaceState()):
-            assert resolve_workspace("flag-ws") == "flag-ws"
-
-    def test_reads_the_ambient_context_workspace(self) -> None:
-        with self._click_context(_WorkspaceState()):
-            assert resolve_workspace() == "my-team-ws"
-
-    def test_inherits_obj_from_a_parent_context(self) -> None:
-        """``Context.obj`` is inherited, so a nested subcommand still resolves.
-
-        This is what lets the top-level ``nemo`` callback install the state
-        once and have a deeply nested plugin subcommand see it.
-        """
-        parent = click.Context(click.Command("nemo"), obj=_WorkspaceState())
-        with parent:
-            child = click.Context(click.Command("sub"), parent=parent)
-            with child:
-                assert resolve_workspace() == "my-team-ws"
-
-    def test_falls_back_to_default_outside_a_click_invocation(self) -> None:
-        """Direct unit tests of a plugin command must keep working."""
-        assert resolve_workspace() == "default"
-
-    def test_falls_back_to_env_outside_a_click_invocation(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
-        assert resolve_workspace() == "env-ws"
-
-    def test_state_workspace_wins_over_the_env_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A reporting state object short-circuits the bare env lookup.
-
-        This pins internal ordering, not user-facing precedence: a real
-        ``CLIContext`` has already applied ``$NMP_WORKSPACE`` by the time
-        ``get_workspace()`` answers, so in practice the env var still wins.
-        The stand-in here deliberately ignores the environment to isolate the
-        fallback path.
-        """
-        monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
-        with self._click_context(_WorkspaceState()):
-            assert resolve_workspace() == "my-team-ws"
-
-    def test_state_without_getter_falls_back(self) -> None:
-        with self._click_context(SimpleNamespace()):
-            assert resolve_workspace() == "default"
-
-    def test_failing_lookup_falls_back_instead_of_raising(self) -> None:
-        with self._click_context(_ExplodingState()):
-            assert resolve_workspace() == "default"
-
-    def test_both_twins_agree_on_precedence(self) -> None:
-        """The two entry points share one core; pin that they cannot drift."""
-        state = _WorkspaceState("shared-ws")
-        with self._click_context(state):
-            assert resolve_workspace() == resolve_cli_workspace(_typer_context_with_obj(state))

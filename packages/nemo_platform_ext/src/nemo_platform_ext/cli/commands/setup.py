@@ -29,8 +29,10 @@ import httpx
 import typer
 import yaml as _yaml
 from nemo_platform_plugin.capabilities import probe_docker
+from nemo_platform_plugin.cli_options import WORKSPACE_HELP
 from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_platform_plugin.client.types import RetryPolicy
+from nemo_platform_plugin.entities import DEFAULT_WORKSPACE
 from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_platform_plugin.inference_gateway.types import JsonBody
 from nemo_platform_plugin.models.client import ModelsClient
@@ -410,13 +412,11 @@ def _prompt_remote_base_url(*, default_url: str = "", certificate_authority: str
         console.print(f"{CROSS} Unable to connect to NeMo Platform at {base_url}.")
 
 
-def _resolve_setup_workspace(ctx: typer.Context, cli_context: CLIContext, workspace: str) -> str:
+def _resolve_setup_workspace(cli_context: CLIContext, workspace: str | None) -> str:
     """Prefer an explicit ``--workspace``; otherwise keep the active context workspace."""
-    from click.core import ParameterSource
-
-    if ctx.get_parameter_source("workspace") != ParameterSource.DEFAULT:
+    if workspace is not None:
         return workspace
-    return cli_context.get_sdk_context().workspace or workspace
+    return cli_context.get_sdk_context().workspace or DEFAULT_WORKSPACE
 
 
 def _configure_remote_connection(cli_context: CLIContext, base_url: str, workspace: str) -> None:
@@ -2424,9 +2424,9 @@ def setup_command(
         typer.Option("--auto", help="Non-interactive mode: register provider from environment variables"),
     ] = False,
     workspace: Annotated[
-        str,
-        typer.Option("--workspace", "-w", help="Target workspace"),
-    ] = "default",
+        str | None,
+        typer.Option("--workspace", "-w", help=WORKSPACE_HELP),
+    ] = None,
     start_services: Annotated[
         bool | None,
         typer.Option("--start-services/--no-start-services", help="Start local platform services"),
@@ -2539,6 +2539,11 @@ def setup_command(
     if effective_timeout <= 0:
         raise typer.BadParameter("--ready-timeout must be greater than 0", param_hint="--ready-timeout")
     certificate_authority = cli_context.get_sdk_context().cluster.certificate_authority
+    # Resolve once, before any path reads it. Every branch below either writes
+    # a context seeded from this value or provisions into it, so resolving here
+    # (against the context the user is currently on) is both the simplest and
+    # the only non-circular ordering.
+    workspace = _resolve_setup_workspace(cli_context, workspace)
     try:
         configured_base_url = base_url
         service_result = _maybe_start_services(
@@ -2566,7 +2571,6 @@ def setup_command(
             )
             _bootstrap_config_if_missing(base_url, workspace)
             cli_context.reset_sdk_context()
-            workspace = _resolve_setup_workspace(ctx, cli_context, workspace)
             _configure_remote_connection(cli_context, base_url, workspace)
             _ensure_platform_auth(cli_context)
             certificate_authority = cli_context.get_sdk_context().cluster.certificate_authority
