@@ -3,3 +3,8 @@
 uv\.lock
 # This test intentionally exercises redaction with synthetic URL credentials.
 services/core/jobs/tests/test_telemetry\.py
+# osv-scanner output embeds full GitHub advisory text, which can contain
+# placeholder credential URLs quoted from an advisory's proof-of-concept
+# snippet (e.g. GHSA-8wmf-6v46-5gfg). These are generated scan artifacts,
+# never a place real credentials live.
+third_party/osv-licenses.*\.json
