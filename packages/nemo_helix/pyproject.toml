@@ -251,6 +251,9 @@ models-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agent-config-example-email-security-triage = []
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-example-calculator = [
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
   "nvidia-nat-langchain>=1.9.0a20260811,<1.10",
@@ -262,6 +265,7 @@ nemo-agents-plugin = [
   "nemo-deployments-plugin",
   "nemo-optimization-plugin",
   "nemo-agents-example-calculator",
+  "nemo-agent-config-example-email-security-triage",
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
   "nvidia-nat-langchain>=1.9.0a20260811,<1.10",
   "nvidia-nat-atif>=1.9.0a20260811,<1.10",
@@ -567,6 +571,7 @@ platform-seed-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 plugins = [
+    "nemo-helix[nemo-agent-config-example-email-security-triage]",
     "nemo-helix[nemo-agents-example-calculator]",
     "nemo-helix[nemo-agents-plugin]",
     "nemo-helix[nemo-anonymizer-plugin]",
@@ -911,6 +916,18 @@ inherit."entry-points" = ["nemo.*"]
 source = "../../plugins/nemo-agents/examples/calculator-agent/src/calculator_agent"
 module = "calculator_agent"
 inherit."entry-points" = ["nat.*"]
+
+[tool.bundle-package.nemo-agent-config-example-email-security-triage]
+source = "../../plugins/nemo-agents/examples/nemo-agent-config/email-security-triage/src/email_security_triage"
+module = "email_security_triage"
+force_include."../../CUSTOMIZE.md" = "email_security_triage/CUSTOMIZE.md"
+force_include."../../README.md" = "email_security_triage/README.md"
+force_include."../../agent.yaml" = "email_security_triage/agent.yaml"
+force_include."../../dataset.jsonl" = "email_security_triage/dataset.jsonl"
+force_include."../../eval-config.dataset-driven.README.md" = "email_security_triage/eval-config.dataset-driven.README.md"
+force_include."../../eval-config.dataset-driven.yml" = "email_security_triage/eval-config.dataset-driven.yml"
+force_include."../../eval-config.task-driven.README.md" = "email_security_triage/eval-config.task-driven.README.md"
+force_include."../../eval-config.task-driven.json" = "email_security_triage/eval-config.task-driven.json"
 
 [tool.bundle-package.nhx-entities]
 source = "../../services/core/entities/src/nhx/core/entities"
