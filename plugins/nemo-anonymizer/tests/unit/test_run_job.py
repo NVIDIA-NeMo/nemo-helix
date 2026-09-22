@@ -18,6 +18,8 @@ from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
 from anonymizer.engine.replace.strategies import ReplacementApplication
 from data_designer.engine.model_provider import ModelProvider as NDDModelProvider
 from data_designer.engine.model_provider import ModelProviderRegistry
+from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
+from data_designer.engine.observability import runtime_correlation_provider
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_anonymizer_plugin.app import context as context_module
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
@@ -29,6 +31,7 @@ from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_platform_plugin.job_usage import LocalJobUsageReporter
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 
 
@@ -220,6 +223,15 @@ def test_run_step_config_uses_ctx_results(
         def run(self, *, config: AnonymizerConfig, data: object) -> FakeResult:
             captured["config"] = config
             captured["data"] = data
+            emit_token_usage_event(
+                TokenUsageEvent(
+                    model_alias="detector",
+                    model_name="test/model",
+                    input_tokens=13,
+                    output_tokens=5,
+                    correlation=runtime_correlation_provider.current(),
+                )
+            )
             return FakeResult()
 
     step_config = AnonymizerStepConfig(
@@ -256,6 +268,10 @@ def test_run_step_config_uses_ctx_results(
     assert (saved_artifacts_dir / "dataset.parquet").read_text() == "dataset"
     assert captured["dataset_index"] is False
     assert captured["trace_index"] is False
+    assert isinstance(ctx.usage, LocalJobUsageReporter)
+    assert ctx.usage.latest is not None
+    assert ctx.usage.latest.input_tokens == 13
+    assert ctx.usage.latest.output_tokens == 5
 
 
 def test_run_step_config_remote_requires_sdk(tmp_path: Path) -> None:
