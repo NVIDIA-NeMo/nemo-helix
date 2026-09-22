@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import builtins
 import logging
+from collections.abc import Mapping, Sequence
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
-from nemo_platform_plugin.auth import AuthContext
+from nemo_platform_plugin.auth import AuthContext, is_service_principal_id
 from nemo_platform_plugin.auth.workload_identity import (
     DEFAULT_WORKLOAD_AUDIENCE,
     WorkloadIdentityConfigError,
@@ -99,3 +102,35 @@ def test_workload_identity_token_exchange_enabled_raises_distinct_config_error()
     with patch("nmp.common.config.get_auth_config", side_effect=RuntimeError("invalid config")):
         with pytest.raises(WorkloadIdentityConfigError, match="Could not resolve auth config"):
             is_workload_identity_token_exchange_enabled()
+
+
+@pytest.mark.parametrize(
+    ("principal_id", "expected"),
+    [
+        ("service:deployments", True),
+        (" service:jobs-controller ", True),
+        ("user@example.com", False),
+        ("service:", False),
+        ("service:has spaces", False),
+        ("service:/path", False),
+        ("service:*", False),
+        ("service:-starts-with-punctuation", False),
+        ("service-account:deployments", False),
+    ],
+)
+def test_service_principal_id_fallback_without_nmp_common(principal_id: str, expected: bool) -> None:
+    real_import = builtins.__import__
+
+    def import_without_nmp_common(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] | None = (),
+        level: int = 0,
+    ) -> ModuleType:
+        if name == "nmp.common.auth":
+            raise ImportError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    with patch("builtins.__import__", side_effect=import_without_nmp_common):
+        assert is_service_principal_id(principal_id) is expected

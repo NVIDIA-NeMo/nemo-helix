@@ -24,6 +24,7 @@ from .client import AuthClient, AuthorizationResult
 from .dependencies import auth_client_context
 from .exceptions import InvalidPrincipalHeader, InvalidScopeFormatError
 from .models import Principal
+from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
 from .token_resolver import ResolvedBearerToken, resolve_bearer_token
 
 logger = logging.getLogger(__name__)
@@ -80,11 +81,15 @@ def _dedupe_non_empty(values: list[str | None]) -> list[str]:
 
 
 def _service_identity_descriptor(principal_id: str) -> dict[str, Any] | None:
-    if not principal_id.startswith("service:"):
+    principal_id = principal_id.strip()
+    if not principal_id:
         return None
-    service_name = principal_id.removeprefix("service:").strip()
-    if not service_name:
+    parsed = parse_principal_identifier(principal_id, validate=False)
+    if not parsed.is_service_principal():
         return None
+    service_name = parsed.service_name
+    if service_name is None:
+        raise InvalidPrincipalIdentifier("service principal is missing a service name")
     return {
         "kind": "service_principal",
         "issuer": "nemo:service",
@@ -470,7 +475,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if path.startswith("/apis/auth/v2/authz/"):
             headers_dict = dict(request.headers)
             principal_id = headers_dict.get("x-nmp-principal-id", "")
-            if principal_id.startswith("service:"):
+            if is_service_principal(principal_id):
                 return await self._handle_service_principal_request(request, call_next, headers_dict)
             status_code = 401 if not principal_id else 403
             return JSONResponse(
@@ -525,7 +530,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             bearer_token = parse_bearer_authorization_header(headers_dict.get("authorization"))
         except MalformedBearerTokenError:
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-        if bearer_token is not None and bearer_token.startswith("service:"):
+        if bearer_token is not None and is_service_principal(bearer_token):
             headers_dict["x-nmp-principal-id"] = bearer_token
             return await self._handle_principal_headers_request(request, call_next, headers_dict)
 
@@ -697,6 +702,12 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             principal.groups,
         )
 
+        try:
+            identity_resolution = _identity_resolution_from_resolved_token(resolved, self.config)
+        except InvalidPrincipalIdentifier as exc:
+            logger.warning("Bearer token rejected: %s", exc)
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+
         # If auth is disabled, just proceed with the principal
         if not self.config.enabled:
             auth_client = AuthClient(
@@ -705,7 +716,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
                 http_client=self._client,
                 service_name=self.service_name,
                 resolved_bearer_token=resolved,
-                identity_resolution=_identity_resolution_from_resolved_token(resolved, self.config),
+                identity_resolution=identity_resolution,
             )
             return await self._call_next_with_auth_client(request, call_next, auth_client)
 
@@ -716,7 +727,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             http_client=self._get_client(request),
             service_name=self.service_name,
             resolved_bearer_token=resolved,
-            identity_resolution=_identity_resolution_from_resolved_token(resolved, self.config),
+            identity_resolution=identity_resolution,
         )
 
         # Extract scopes from token claims

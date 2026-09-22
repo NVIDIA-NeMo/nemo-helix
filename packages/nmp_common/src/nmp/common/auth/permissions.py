@@ -5,6 +5,8 @@
 
 from typing import List, Literal, Set, Union
 
+from .principal_identifier import is_service_principal
+
 # Type alias for full access indicator
 ALL_WORKSPACES: Literal["-"] = "-"
 
@@ -50,7 +52,7 @@ def compute_accessible_workspaces(
         ```
     """
     # Service principals have full access
-    if principal_id.startswith("service:"):
+    if is_service_principal(principal_id):
         return ALL_WORKSPACES
 
     # Check for platform admin role
@@ -61,6 +63,8 @@ def compute_accessible_workspaces(
             return ALL_WORKSPACES
 
     # Extract unique workspace names from bindings
-    workspaces = {binding.get("workspace") for binding in role_bindings if binding.get("workspace")}
+    workspaces = {
+        workspace for binding in role_bindings if isinstance((workspace := binding.get("workspace")), str) and workspace
+    }
 
     return workspaces

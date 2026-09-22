@@ -5,12 +5,12 @@ package common
 
 import future.keywords.if
 
-import data.authz.extract_method
-import data.authz.extract_path
-import data.authz.extract_caller_kind
-import data.authz.extract_on_behalf_of_principal_id
 import data.authz.extract_actor_account_id
 import data.authz.extract_actor_aliases
+import data.authz.extract_caller_kind
+import data.authz.extract_method
+import data.authz.extract_on_behalf_of_principal_id
+import data.authz.extract_path
 import data.authz.extract_principal_email
 import data.authz.extract_principal_groups
 import data.authz.extract_principal_id
@@ -19,15 +19,20 @@ import data.authz.extract_subject_aliases
 
 # PERMISSIONS HELPERS
 
+valid_service_principal(principal) if {
+	is_string(principal)
+	regex.match("^service:[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", principal)
+}
+
 # Roles bound to a principal in a workspace. Service principals (service:*) default to
 # ServiceSystem when they have no explicit bindings in policy data (see static-authz.yaml).
 effective_roles(principal, workspace) := roles if {
-	startswith(principal, "service:")
+	valid_service_principal(principal)
 	explicit := object.get(object.get(data.authz.principals, principal, {}).workspaces, workspace, [])
 	count(explicit) > 0
 	roles := explicit
 } else := roles if {
-	startswith(principal, "service:")
+	valid_service_principal(principal)
 	roles := ["ServiceSystem"]
 } else := roles if {
 	roles := object.get(object.get(data.authz.principals, principal, {}).workspaces, workspace, [])
@@ -190,7 +195,7 @@ request_caller_kind := caller_kind if {
 	caller_kind := extract_caller_kind
 	caller_kind != ""
 } else := "service_principal" if {
-	startswith(extract_principal_id, "service:")
+	valid_service_principal(extract_principal_id)
 } else := "principal"
 
 # Get all applicable principals (id, actor account/aliases, email, groups, subject identity/account/aliases)

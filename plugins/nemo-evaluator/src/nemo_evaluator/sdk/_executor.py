@@ -11,7 +11,7 @@ from typing import Any
 from models import parse_workspace_name_ref
 from nemo_evaluator.api.schemas import MetricInline, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, TargetSpec
 from nemo_evaluator.jobs.runner_targets import runner_to_target
 from nemo_evaluator.sdk.job_resources import (
@@ -263,9 +263,10 @@ class _SyncEvaluatorPluginExecutor:
         *,
         tasks: TasksetRef,
         target: AgentTaskRunner,
+        placement: GymPlacement | None = None,
         wait_until_done: bool = False,
     ) -> AgentEvaluatorJobResource:
-        """Submit an agent evaluation over a stored taskset, run by ``target``.
+        """Submit an agent evaluation over a stored taskset, run by ``target`` and placed by ``placement``.
 
         ``target`` is a *live* runner — the object someone already ran locally with
         ``AgentEvaluator()``. :func:`runner_to_target` describes it as the spec that reproduces it
@@ -273,7 +274,7 @@ class _SyncEvaluatorPluginExecutor:
         cannot silently run something other than what was tested.
         """
         resolved_workspace = self._client.require_workspace(self._workspace)
-        spec = AgentEvalInputSpec(tasks=tasks, target=runner_to_target(target))
+        spec = AgentEvalInputSpec(tasks=tasks, target=runner_to_target(target, placement))
         return self.create_agent_eval(
             spec=spec,
             workspace=resolved_workspace,

@@ -87,6 +87,68 @@ class TestPrincipalFromHeaders:
         assert principal.caller_kind == "principal"
         assert "X-NMP-Caller-Kind" not in principal.get_headers()
 
+    def test_direct_principal_classifies_extended_non_service_subject_as_principal(self):
+        principal = Principal(id="auth0|abc")
+
+        assert principal.caller_kind == "principal"
+        assert principal.is_privileged() is False
+        assert principal.is_service_identity() is False
+
+    @pytest.mark.parametrize(
+        "principal_id",
+        [
+            "service:",
+            "service:has spaces",
+            "service:bad$name",
+            "service:/path",
+            "service:*",
+        ],
+    )
+    def test_from_headers_rejects_malformed_service_principal_id(self, principal_id: str):
+        with pytest.raises(InvalidPrincipalHeader):
+            Principal.from_headers({"x-nmp-principal-id": principal_id})
+
+    def test_from_headers_rejects_empty_service_account_principal_id(self):
+        with pytest.raises(InvalidPrincipalHeader, match="malformed"):
+            Principal.from_headers({"x-nmp-principal-id": "service-account:"})
+
+    @pytest.mark.parametrize(
+        "on_behalf_of",
+        [
+            "service:",
+            "service:has spaces",
+            "service:bad$name",
+            "service:/path",
+            "service:*",
+        ],
+    )
+    def test_from_headers_rejects_malformed_on_behalf_of_service_principal(self, on_behalf_of: str):
+        with pytest.raises(InvalidPrincipalHeader):
+            Principal.from_headers(
+                {
+                    "x-nmp-principal-id": "service:worker",
+                    "x-nmp-principal-on-behalf-of": on_behalf_of,
+                }
+            )
+
+    def test_from_headers_rejects_malformed_service_principal_alias(self):
+        with pytest.raises(InvalidPrincipalHeader, match="malformed"):
+            Principal.from_headers(
+                {
+                    "x-nmp-principal-id": "user@example.com",
+                    "x-nmp-actor-aliases": "service:",
+                }
+            )
+
+    def test_from_headers_rejects_malformed_service_principal_group(self):
+        with pytest.raises(InvalidPrincipalHeader, match="malformed"):
+            Principal.from_headers(
+                {
+                    "x-nmp-principal-id": "user@example.com",
+                    "x-nmp-principal-groups": "service:",
+                }
+            )
+
     def test_from_headers_rejects_wildcard_alias(self):
         headers = {
             "x-nmp-principal-id": "user@example.com",

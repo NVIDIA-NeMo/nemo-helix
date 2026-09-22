@@ -67,6 +67,7 @@
     #   nmp-common
     #   nmp-customization-common
     #   nmp-inference-gateway
+    #   nmp-intake
     #   nmp-jobs
     #   nmp-models
     #   nmp-platform
@@ -663,9 +664,9 @@ cyclopts==4.22.5 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     # via
     #   fastmcp-slim
     #   nemo-anonymizer
-data-designer==0.9.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:c1b02b11baddd89a9ebdc6105bfdd84ec970dce0cb7079767c53d6995e08475c \
-    --hash=sha256:ce6d4bc9fcd2c10fb59c28fe8f495cfb5fa39952b17b3d0b159b7dfc7fd724c1
+data-designer==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:69540dc492490dda594cb8fa2ff21f9a854a17399b6a091be9eb48126eee082e \
+    --hash=sha256:81c7cb2a76a4e7006ada07a080de125514d261e36ab0194ba8ec360868198536
     # via
     #   data-designer-nemo
     #   data-designer-retrieval-sdg
@@ -673,15 +674,15 @@ data-designer==0.9.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin'
     #   nemo-anonymizer-plugin
     #   nemo-data-designer-plugin
     #   nemo-platform
-data-designer-config==0.9.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:8944578a74f28980b7b06b5b12c5e866da313af3fe6b5cc5d446bedf5756744e \
-    --hash=sha256:d4aca73a5b21284729e6f5b05ed1eba7c6e1b7c77d591c6e4e2f330b508d5c39
+data-designer-config==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:3099871b955e378079835d6f477dc5de05e4a2ee8f3e969a5aa87d8dcab1adac \
+    --hash=sha256:c4ca9fe53ddb03a1617d008e08dcd0d55ffd832ad7c259084c433260b954264b
     # via
     #   data-designer
     #   data-designer-engine
-data-designer-engine==0.9.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:d86822d227335980fb70a993327e1e754216c8181b474c5c58590ac8e465dbdf \
-    --hash=sha256:df6017f4623d696d8075b33fd3ab5b76dfda0e4cd623c109b8497ae46abfb918
+data-designer-engine==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:61aceee9b0984ae54d4ea72be679b40e0b522e2479897a2cd7e66168ed81dde4 \
+    --hash=sha256:8b1489b7dddb7cd84dd3a6c6e66484b9ceb73595f295a650f07c24ad613ba5f2
     # via data-designer
 data-designer-retrieval-sdg==0.2.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:5c2b5d7da3340ed730d03bc0163318fae96656e4e414e8907b295ab72ea6fffd \
@@ -1772,8 +1773,8 @@ narwhals==2.24.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     --hash=sha256:42fdedf44e5b2ca7505630d45b4ac3058f38d8485cba9fe1652ca23152df7489 \
     --hash=sha256:b5c0f684ccd9d7475b564111e319a4964abcf2baf79d3cf6b1003d06ac9b828d
     # via scikit-learn
-nemo-anonymizer==0.3.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:ee5a47c67121ce145c24e42611bcc1671dc60574a6ec779e9f732d3e32418761
+nemo-anonymizer==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:db77c4dbdc5c27a750c6c705d982a22061de666ddf8e0e527e9d265a64986737
     # via
     #   nemo-anonymizer-plugin
     #   nemo-platform
@@ -3037,6 +3038,7 @@ rich==14.3.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   cyclopts
     #   data-designer
     #   data-designer-config
+    #   data-designer-engine
     #   fastmcp-slim
     #   harbor
     #   instructor

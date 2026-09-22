@@ -20,7 +20,13 @@ from backends.k8s.k8s_helpers import (
 from kubernetes.client.rest import ApiException
 from nemo_deployments_plugin.backends.k8s import jobs as job_ops
 from nemo_deployments_plugin.backends.k8s.client import KubernetesClients
-from nemo_deployments_plugin.backends.k8s.jobs import job_backoff_limit, trim_log_text, validate_config_for_job
+from nemo_deployments_plugin.backends.k8s.compiler import ExecutorK8sDefaults
+from nemo_deployments_plugin.backends.k8s.jobs import (
+    job_backoff_limit,
+    resolve_job_ttl_seconds_after_finished,
+    trim_log_text,
+    validate_config_for_job,
+)
 from nemo_deployments_plugin.backends.labels import (
     DEPLOYMENT_WORKSPACE_LABEL,
     MANAGED_BY_KEY,
@@ -60,6 +66,95 @@ def test_job_backoff_limit(restart_policy: RestartPolicy, expected: int) -> None
 def test_validate_config_for_job_rejects_always() -> None:
     with pytest.raises(job_ops.DeploymentConfigError, match="Always"):
         validate_config_for_job(sample_config(restart_policy="Always"))
+
+
+def test_resolve_job_ttl_prefers_per_entity_override() -> None:
+    from nemo_deployments_plugin.entities import K8sDeploymentConfig
+
+    assert (
+        resolve_job_ttl_seconds_after_finished(
+            k8s_config=K8sDeploymentConfig(jobTtlSecondsAfterFinished=15),
+            executor_defaults=ExecutorK8sDefaults(job_ttl_seconds_after_finished=60),
+        )
+        == 15
+    )
+
+
+def test_resolve_job_ttl_falls_back_to_executor_default() -> None:
+    from nemo_deployments_plugin.entities import K8sDeploymentConfig
+
+    assert (
+        resolve_job_ttl_seconds_after_finished(
+            k8s_config=K8sDeploymentConfig(),
+            executor_defaults=ExecutorK8sDefaults(job_ttl_seconds_after_finished=90),
+        )
+        == 90
+    )
+
+
+def test_resolve_job_ttl_none_when_unset_everywhere() -> None:
+    assert (
+        resolve_job_ttl_seconds_after_finished(
+            k8s_config=None,
+            executor_defaults=ExecutorK8sDefaults(job_ttl_seconds_after_finished=None),
+        )
+        is None
+    )
+    assert resolve_job_ttl_seconds_after_finished(k8s_config=None, executor_defaults=None) is None
+
+
+def test_entity_job_ttl_rejects_below_floor() -> None:
+    # A per-deployment TTL below the floor races the reconciler's completion read; rejected.
+    from nemo_deployments_plugin.entities import K8sDeploymentConfig
+
+    for bad in (0, 5, 9):
+        with pytest.raises(ValueError):
+            K8sDeploymentConfig(jobTtlSecondsAfterFinished=bad)
+
+
+def test_entity_job_ttl_accepts_floor_and_none() -> None:
+    from nemo_deployments_plugin.entities import K8sDeploymentConfig
+
+    assert K8sDeploymentConfig(jobTtlSecondsAfterFinished=10).job_ttl_seconds_after_finished == 10
+    assert K8sDeploymentConfig(jobTtlSecondsAfterFinished=None).job_ttl_seconds_after_finished is None
+
+
+@pytest.mark.asyncio
+async def test_create_job_sets_default_ttl_seconds_after_finished(
+    k8s_backend, mock_k8s_clients: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_entities.get.return_value = sample_config(restart_policy="Never")
+    mock_k8s_clients.batch_v1.create_namespaced_job.return_value = mock_job(active=1)
+
+    await k8s_backend.create_deployment(
+        workspace="default",
+        name="task",
+        config_name="config1",
+        labels={},
+        backend_config={},
+    )
+
+    body = mock_k8s_clients.batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert body.spec.ttl_seconds_after_finished == 60
+
+
+@pytest.mark.asyncio
+async def test_create_job_per_entity_ttl_override_wins(
+    k8s_backend, mock_k8s_clients: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_entities.get.return_value = sample_config(restart_policy="Never")
+    mock_k8s_clients.batch_v1.create_namespaced_job.return_value = mock_job(active=1)
+
+    await k8s_backend.create_deployment(
+        workspace="default",
+        name="task",
+        config_name="config1",
+        labels={},
+        backend_config={"k8s": {"jobTtlSecondsAfterFinished": 15}},
+    )
+
+    body = mock_k8s_clients.batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert body.spec.ttl_seconds_after_finished == 15
 
 
 @pytest.mark.asyncio

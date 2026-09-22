@@ -34,7 +34,6 @@ members = [
     "nemo-customizer-plugin",
     "nemo-data-designer-plugin",
     "nemo-deployments-plugin",
-    "nemo-eval-author-plugin",
     "nemo-evaluator-plugin",
     "nemo-evaluator-sdk",
     "nemo-experimentalist-plugin",
@@ -1094,7 +1093,7 @@ wheels = [
 
 [[package]]
 name = "data-designer"
-version = "0.9.1"
+version = "0.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "data-designer-config", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1113,14 +1112,14 @@ dependencies = [
     { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/aa/fb60615233d3e23044ce9cd52a98ebdbdbb19ab0fcc57a0fd7fb19bf581e/data_designer-0.9.1.tar.gz", hash = "sha256:ce6d4bc9fcd2c10fb59c28fe8f495cfb5fa39952b17b3d0b159b7dfc7fd724c1", size = 233997, upload-time = "2026-08-11T20:24:20.853Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/05/db4386dff2bf3d22662d2eb247dd7e8a955525fa1d75824e458429640447/data_designer-0.9.3.tar.gz", hash = "sha256:69540dc492490dda594cb8fa2ff21f9a854a17399b6a091be9eb48126eee082e", size = 238806, upload-time = "2026-09-21T18:16:26.487Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/0d/2bb0d06e554e50d7e3affb41c853fdd31e08413255506e2c87ab02f10362/data_designer-0.9.1-py3-none-any.whl", hash = "sha256:c1b02b11baddd89a9ebdc6105bfdd84ec970dce0cb7079767c53d6995e08475c", size = 158442, upload-time = "2026-08-11T20:24:19.495Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/53/b354a5e5d85677009587a4b5c61ebd83f9ffcbc700d9ecbb941df171ffc0/data_designer-0.9.3-py3-none-any.whl", hash = "sha256:81c7cb2a76a4e7006ada07a080de125514d261e36ab0194ba8ec360868198536", size = 159973, upload-time = "2026-09-21T18:16:25.037Z" },
 ]
 
 [[package]]
 name = "data-designer-config"
-version = "0.9.1"
+version = "0.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1138,14 +1137,14 @@ dependencies = [
     { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "urllib3", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/4c/fb3791f43b5b0abd054ed55f1a4e13e10187090ee43eaf6801cfc8e713b9/data_designer_config-0.9.1.tar.gz", hash = "sha256:d4aca73a5b21284729e6f5b05ed1eba7c6e1b7c77d591c6e4e2f330b508d5c39", size = 151409, upload-time = "2026-08-11T20:24:14.236Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/c4/b8f489a9b853aa89bc1e5e5859673a6f39684bb176fa5e533b9a28afc76e/data_designer_config-0.9.3.tar.gz", hash = "sha256:c4ca9fe53ddb03a1617d008e08dcd0d55ffd832ad7c259084c433260b954264b", size = 151494, upload-time = "2026-09-21T18:16:18.244Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/f8/a12b44092eaabb2fa431474eef069885c6d4aed576677d7c344095051733/data_designer_config-0.9.1-py3-none-any.whl", hash = "sha256:8944578a74f28980b7b06b5b12c5e866da313af3fe6b5cc5d446bedf5756744e", size = 128696, upload-time = "2026-08-11T20:24:12.669Z" },
+    { url = "https://files.pythonhosted.org/packages/91/70/ec685cd515506a76645d240df87bc463792ace4f74bfe281ff96fd110d82/data_designer_config-0.9.3-py3-none-any.whl", hash = "sha256:3099871b955e378079835d6f477dc5de05e4a2ee8f3e969a5aa87d8dcab1adac", size = 128753, upload-time = "2026-09-21T18:16:16.783Z" },
 ]
 
 [[package]]
 name = "data-designer-engine"
-version = "0.9.1"
+version = "0.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyascii", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1173,6 +1172,7 @@ dependencies = [
     { name = "pydantic", extra = ["email"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pyjwt", extra = ["crypto"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "python-multipart", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "ruff", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "scipy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sqlfluff", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1180,9 +1180,9 @@ dependencies = [
     { name = "tiktoken", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "wcwidth", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/a4/9f8f74d0512698ed2013ba3728e92ed7750e231974b4aadb24c46b7bb30e/data_designer_engine-0.9.1.tar.gz", hash = "sha256:d86822d227335980fb70a993327e1e754216c8181b474c5c58590ac8e465dbdf", size = 918436, upload-time = "2026-08-11T20:24:17.621Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/4c/4b04245c5ea39f28153b1470a9c476037daa993a45f8e8d334638c2d5504/data_designer_engine-0.9.3.tar.gz", hash = "sha256:8b1489b7dddb7cd84dd3a6c6e66484b9ceb73595f295a650f07c24ad613ba5f2", size = 919420, upload-time = "2026-09-21T18:16:22.31Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/2b/58240f5eec8d73b47eb204f381f4302447ea1c73b988582caf10a22ad907/data_designer_engine-0.9.1-py3-none-any.whl", hash = "sha256:df6017f4623d696d8075b33fd3ab5b76dfda0e4cd623c109b8497ae46abfb918", size = 706028, upload-time = "2026-08-11T20:24:16.171Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/a5/f0a62dfcaeb51e9211d026132f425e51ecd0d59e23db73ecd83eb58d5634/data_designer_engine-0.9.3-py3-none-any.whl", hash = "sha256:61aceee9b0984ae54d4ea72be679b40e0b522e2479897a2cd7e66168ed81dde4", size = 706611, upload-time = "2026-09-21T18:16:20.917Z" },
 ]
 
 [[package]]
@@ -1206,7 +1206,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
-    { name = "data-designer", specifier = "==0.9.1" },
+    { name = "data-designer", specifier = "==0.9.3" },
     { name = "duckdb" },
     { name = "nemo-platform", editable = "packages/nemo_platform" },
     { name = "pydantic", specifier = ">=2" },
@@ -4045,7 +4045,7 @@ provides-extras = ["container", "test"]
 
 [[package]]
 name = "nemo-anonymizer"
-version = "0.3.3"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4058,7 +4058,7 @@ dependencies = [
     { name = "tiktoken", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/53/6ffa3b05a676b57616e413a682a85958cd9b484fb67d9981cba750e594e5/nemo_anonymizer-0.3.3-py3-none-any.whl", hash = "sha256:ee5a47c67121ce145c24e42611bcc1671dc60574a6ec779e9f732d3e32418761", size = 242626, upload-time = "2026-08-12T22:37:11.138Z" },
+    { url = "https://files.pythonhosted.org/packages/88/01/c2aa1622a3b569c50da0282c92692b2cd33f40da18410d4f51b599db7034/nemo_anonymizer-0.4.0-py3-none-any.whl", hash = "sha256:db77c4dbdc5c27a750c6c705d982a22061de666ddf8e0e527e9d265a64986737", size = 269747, upload-time = "2026-09-18T20:56:01.881Z" },
 ]
 
 [[package]]
@@ -4087,13 +4087,13 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "data-designer", specifier = "==0.9.1" },
+    { name = "data-designer", specifier = "==0.9.3" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
     { name = "fastapi" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
-    { name = "nemo-anonymizer", specifier = "==0.3.3" },
+    { name = "nemo-anonymizer", specifier = "==0.4.0" },
     { name = "nemo-platform", editable = "packages/nemo_platform" },
     { name = "nemo-platform-plugin", editable = "packages/nemo_platform_plugin" },
     { name = "pandas" },
@@ -4267,8 +4267,8 @@ test = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-platform-plugin'", specifier = ">=0.88.0" },
     { name = "anyio", marker = "extra == 'data-designer-nemo'", specifier = ">=4.0" },
-    { name = "data-designer", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.1" },
+    { name = "data-designer", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.3" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
     { name = "data-designer-retrieval-sdg", marker = "extra == 'retrieval-sdg'", specifier = "==0.2.1", index = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/" },
     { name = "duckdb", marker = "extra == 'data-designer-nemo'" },
@@ -4359,21 +4359,6 @@ dev = [
 ]
 
 [[package]]
-name = "nemo-eval-author-plugin"
-version = "0.1.0"
-source = { virtual = "plugins/nemo-eval-author" }
-dependencies = [
-    { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "referencing", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "jsonschema", specifier = ">=4.23" },
-    { name = "referencing", specifier = ">=0.28.4" },
-]
-
-[[package]]
 name = "nemo-evaluator-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-evaluator" }
@@ -4458,7 +4443,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'harbor'", specifier = ">=0.20,<0.21" },
+    { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.20,<0.21" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
@@ -5280,6 +5265,7 @@ nemo-optimization-plugin = [
 nemo-platform-plugin = [
     { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "filesets", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "lark", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5675,12 +5661,12 @@ requires-dist = [
     { name = "cloudpickle", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=3.1.1" },
     { name = "cloudpickle", marker = "extra == 'plugins'", specifier = ">=3.1.1" },
     { name = "cloudpickle", marker = "extra == 'services'", specifier = ">=3.1.1" },
-    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.1" },
-    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.1" },
+    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.3" },
+    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.3" },
     { name = "data-designer-nemo", marker = "extra == 'all'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-anonymizer-plugin'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-data-designer-plugin'", editable = "packages/data_designer_nemo" },
@@ -5755,6 +5741,7 @@ requires-dist = [
     { name = "filesets", marker = "extra == 'all'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'core-service'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'files-service'", editable = "packages/filesets" },
+    { name = "filesets", marker = "extra == 'nemo-platform-plugin'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'nmp-customization-common'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'services'", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'all'", specifier = ">=2024.10.0" },
@@ -5877,10 +5864,10 @@ requires-dist = [
     { name = "nemo-agents-example-calculator", marker = "extra == 'nemo-agents-plugin'", editable = "plugins/nemo-agents/examples/calculator-agent" },
     { name = "nemo-agents-example-calculator", marker = "extra == 'plugins'", editable = "plugins/nemo-agents/examples/calculator-agent" },
     { name = "nemo-agents-example-calculator", marker = "extra == 'services'", editable = "plugins/nemo-agents/examples/calculator-agent" },
-    { name = "nemo-anonymizer", marker = "extra == 'all'", specifier = "==0.3.3" },
-    { name = "nemo-anonymizer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.3.3" },
-    { name = "nemo-anonymizer", marker = "extra == 'plugins'", specifier = "==0.3.3" },
-    { name = "nemo-anonymizer", marker = "extra == 'services'", specifier = "==0.3.3" },
+    { name = "nemo-anonymizer", marker = "extra == 'all'", specifier = "==0.4.0" },
+    { name = "nemo-anonymizer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.4.0" },
+    { name = "nemo-anonymizer", marker = "extra == 'plugins'", specifier = "==0.4.0" },
+    { name = "nemo-anonymizer", marker = "extra == 'services'", specifier = "==0.4.0" },
     { name = "nemo-auditor-plugin", marker = "extra == 'all'", editable = "plugins/nemo-auditor" },
     { name = "nemo-auditor-plugin", marker = "extra == 'platform-seed-service'", editable = "plugins/nemo-auditor" },
     { name = "nemo-auditor-plugin", marker = "extra == 'services'", editable = "plugins/nemo-auditor" },
@@ -6460,6 +6447,7 @@ source = { editable = "packages/nemo_platform_plugin" }
 dependencies = [
     { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "filesets", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "lark", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6517,6 +6505,7 @@ requires-dist = [
     { name = "distro", marker = "extra == 'nemo-platform-sdk'", specifier = ">=1.7.0,<2" },
     { name = "docker", marker = "extra == 'nemo-platform-sdk'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
+    { name = "filesets", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2023.1.0" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
@@ -7269,7 +7258,6 @@ enabled-plugins = [
     { name = "nemo-unsloth-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 experimentalist = [
-    { name = "nemo-eval-author-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-experimentalist-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 functional-services = [
@@ -7502,10 +7490,7 @@ enabled-plugins = [
     { name = "nemo-switchyard", editable = "plugins/nemo-switchyard" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
 ]
-experimentalist = [
-    { name = "nemo-eval-author-plugin", marker = "python_full_version < '3.14'", virtual = "plugins/nemo-eval-author" },
-    { name = "nemo-experimentalist-plugin", marker = "python_full_version < '3.14'", editable = "plugins/nemo-experimentalist" },
-]
+experimentalist = [{ name = "nemo-experimentalist-plugin", marker = "python_full_version < '3.14'", editable = "plugins/nemo-experimentalist" }]
 functional-services = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },

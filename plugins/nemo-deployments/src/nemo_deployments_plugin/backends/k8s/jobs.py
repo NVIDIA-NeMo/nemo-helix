@@ -139,6 +139,24 @@ def _metadata_uid(resource: Any) -> str | None:
     return uid if isinstance(uid, str) and uid else None
 
 
+def resolve_job_ttl_seconds_after_finished(
+    *,
+    k8s_config: K8sDeploymentConfig | None,
+    executor_defaults: ExecutorK8sDefaults | None,
+) -> int | None:
+    """Resolve ttlSecondsAfterFinished for a finite Job.
+
+    A per-entity ``backend_config.k8s.jobTtlSecondsAfterFinished`` wins over the
+    executor default; when neither is set the field is omitted (``None``) and the
+    cluster default applies.
+    """
+    if k8s_config is not None and k8s_config.job_ttl_seconds_after_finished is not None:
+        return k8s_config.job_ttl_seconds_after_finished
+    if executor_defaults is not None:
+        return executor_defaults.job_ttl_seconds_after_finished
+    return None
+
+
 def build_job_body(
     *,
     job_name: str,
@@ -164,12 +182,17 @@ def build_job_body(
         executor_defaults=executor_defaults,
         secret_env=secret_env,
     )
+    ttl_seconds_after_finished = resolve_job_ttl_seconds_after_finished(
+        k8s_config=k8s_config,
+        executor_defaults=executor_defaults,
+    )
     job = k8s.client.V1Job(
         api_version="batch/v1",
         kind="Job",
         metadata=k8s.client.V1ObjectMeta(name=job_name, labels=labels),
         spec=k8s.client.V1JobSpec(
             backoff_limit=job_backoff_limit(config),
+            ttl_seconds_after_finished=ttl_seconds_after_finished,
             template=k8s.client.V1PodTemplateSpec(
                 metadata=k8s.client.V1ObjectMeta(
                     labels=labels,

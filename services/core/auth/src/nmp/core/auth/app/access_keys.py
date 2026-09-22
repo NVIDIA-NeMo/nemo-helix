@@ -238,7 +238,7 @@ class AccessKeyRegistry:
             raise AccessKeyValidationError(
                 f"rotates references a Scoped Access Key that does not exist or is not owned by the caller: {jti}"
             ) from exc
-        if record.is_service_account:
+        if record.is_service_account():
             raise AccessKeyValidationError(
                 "rotates only supports personal Scoped Access Keys without a service account"
             )
@@ -460,7 +460,7 @@ class AccessKeyRegistry:
         self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
     ) -> AccessKeyEntity:
         record = await self._get(jti)
-        if record.is_service_account:
+        if record.is_service_account():
             # Service-bound keys belong to the platform, not to the administrator who
             # created them. Require the caller to be a *current* PlatformAdmin for every
             # lifecycle operation, including when that caller is the recorded creator.

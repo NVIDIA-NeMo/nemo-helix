@@ -70,7 +70,7 @@ async def enforce_delegated_workspace_access(workspace: str, permission: str) ->
     # Only delegated service principals need narrowing. A plain user was already
     # gated by the route gate as themselves; a non-delegated service principal
     # keeps its existing (intended) internal bypass.
-    if not principal.is_privileged or not principal.is_delegated:
+    if not principal.is_privileged() or not principal.is_delegated:
         return
 
     allowed = await _on_behalf_of_has_permission(auth_client, workspace, permission)

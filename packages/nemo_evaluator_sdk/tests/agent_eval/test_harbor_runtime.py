@@ -2034,7 +2034,7 @@ def test_harbor_still_words_its_resume_refusals_the_way_we_match_them() -> None:
     # If Harbor rewords, the predicate stops matching and the refusal propagates as a
     # crash — the safe direction, but a silent loss of the graceful re-run. Catch that
     # at upgrade time here instead of in someone's failed experiment.
-    pytest.importorskip("harbor.job", reason="harbor needs python >= 3.12")
+    pytest.importorskip("harbor.job", reason="needs the harbor extra")
     import inspect
 
     from harbor.job import Job
@@ -2053,7 +2053,7 @@ def test_harbor_job_config_equality_still_behaves_as_the_retry_assumes() -> None
     # The FileExistsError retry exists because Harbor compares its whole JobConfig and
     # ignores only identity/logging fields. Pin that behaviourally, so a Harbor upgrade
     # that changes the rule surfaces here rather than as a mystery re-run in production.
-    job_config = pytest.importorskip("harbor.models.job.config", reason="harbor needs python >= 3.12")
+    job_config = pytest.importorskip("harbor.models.job.config", reason="needs the harbor extra")
 
     baseline = job_config.JobConfig(job_name="a")
     assert baseline == job_config.JobConfig(job_name="b"), "job_name must stay outside Harbor's comparison"
@@ -2067,7 +2067,7 @@ def test_every_harbor_job_config_field_is_classified_against_the_sdk_stamp() -> 
     # comparison, but only in ways we have reasoned about. A Harbor upgrade that adds a
     # compared field would silently widen that gap into unexplained full re-runs, so
     # every field must land in exactly one bucket before it can ship.
-    job_config = pytest.importorskip("harbor.models.job.config", reason="harbor needs python >= 3.12")
+    job_config = pytest.importorskip("harbor.models.job.config", reason="needs the harbor extra")
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
         _CACHE_IRRELEVANT_OPTIONS,
         _HARBOR_EQ_IGNORED_FIELDS,
