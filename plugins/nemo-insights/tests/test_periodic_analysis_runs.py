@@ -196,3 +196,62 @@ async def test_overlap_query_failure_defers_submission() -> None:
     controller, _, jobs = _controller()
     jobs.list_jobs.side_effect = RuntimeError("Jobs unavailable")
     assert await controller._has_active_job(_config())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_status", [PlatformJobStatus.COMPLETED, PlatformJobStatus.ACTIVE])
+@pytest.mark.parametrize("agent_tag", ["another-agent", None])
+async def test_wrong_or_missing_agent_tag_preserves_cursor(job_status, agent_tag) -> None:
+    controller, entities, jobs = _controller(job_status)
+    jobs.get_job.return_value.data().custom_fields = (
+        {"insights_analysis_agent": agent_tag} if agent_tag is not None else None
+    )
+    status = await controller._reconcile_run(_config(), _pending())
+    assert status.status == AnalysisConfigStatus.ERROR
+    assert status.last_successful_run_at == PREVIOUS
+    assert status.last_error == "Reconciled job did not belong to this agent"
+    entities.update.assert_awaited_once_with(status)
+
+
+@pytest.mark.asyncio
+async def test_same_prefix_agents_submitted_together_reconcile_only_their_own_jobs(monkeypatch) -> None:
+    controller, entities, jobs = _controller()
+    attempts = {}
+    submitted_jobs = {}
+
+    async def save(status):
+        attempts[status.agent] = status
+        return status
+
+    async def submit(**kwargs):
+        agent = kwargs["request"].agent
+        name = kwargs["name"]
+        assert attempts[agent].last_submitted_job == name
+        assert name not in submitted_jobs
+        submitted_jobs[name] = MagicMock(
+            status=PlatformJobStatus.COMPLETED, custom_fields={"insights_analysis_agent": agent}
+        )
+
+    async def get_job(*, workspace, name):
+        return MagicMock(data=lambda: submitted_jobs[name])
+
+    entities.create.side_effect = save
+    jobs.get_job.side_effect = get_job
+    monkeypatch.setattr("nemo_insights_plugin.controller.submit_analysis_run", submit)
+    configs = [
+        _config().model_copy(update={"name": agent, "agent": agent})
+        for agent in ("research-agent-shared-v1", "research-agent-shared-v2")
+    ]
+    for config in configs:
+        await controller._submit_analysis_job(config, None, NOW)
+    assert len(submitted_jobs) == 2
+    for config in configs:
+        pending = attempts[config.agent]
+        other = next(value for agent, value in attempts.items() if agent != config.agent)
+        mismatched = pending.model_copy(update={"last_submitted_job": other.last_submitted_job})
+        rejected = await controller._reconcile_run(config, mismatched)
+        assert rejected.status == AnalysisConfigStatus.ERROR
+        assert rejected.last_successful_run_at is None
+        completed = await controller._reconcile_run(config, pending)
+        assert completed.status == AnalysisConfigStatus.IDLE
+        assert completed.last_successful_run_at == NOW

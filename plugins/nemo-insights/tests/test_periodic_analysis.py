@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import yaml
+from nemo_insights_plugin.analysis_runs import mint_analysis_run_name
 from nemo_insights_plugin.analyst.analyst_backend import (
     InsightsFileStore,
     LocalAnalystBackend,
@@ -30,7 +31,7 @@ from nemo_insights_plugin.config import (
     InsightsConfig,
     Weekday,
 )
-from nemo_insights_plugin.controller import InsightsAnalysisController, _job_name
+from nemo_insights_plugin.controller import InsightsAnalysisController
 from nemo_insights_plugin.entities import (
     AnalysisConfig,
     AnalysisRun,
@@ -819,15 +820,8 @@ async def _controller(
 
 
 def test_generated_job_name_fits_derived_fileset_name_limit() -> None:
-    config = AnalysisConfig(
-        name="research-agent-with-a-very-long-name",
-        workspace="default",
-        agent="research-agent-with-a-very-long-name",
-    )
+    name = mint_analysis_run_name()
 
-    name = _job_name(config, datetime(2026, 6, 8, 20, 31, 22, tzinfo=timezone.utc))
-
-    assert name.startswith("opt-analyze-default-")
     assert len(name) <= 63 - len("job-fileset-")
     assert len(f"job-fileset-{name}") <= 63
 

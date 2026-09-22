@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import datetime, timezone
 from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
-from nemo_insights_plugin.analysis_runs import submit_analysis_run
+from nemo_insights_plugin.analysis_runs import mint_analysis_run_name, submit_analysis_run
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
@@ -40,7 +39,6 @@ from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
 
-_SAFE_JOB_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 _ACTIVE_JOB_STATUSES = [
     "created",
     "pending",
@@ -171,9 +169,12 @@ class InsightsAnalysisController(NemoController):
             updated.status = AnalysisConfigStatus.ERROR
             updated.last_error = "Analysis job was not submitted or no longer exists"
         else:
-            if not job.status.is_terminal():
+            if not _job_targets_agent(job, config.agent):
+                updated.status = AnalysisConfigStatus.ERROR
+                updated.last_error = "Reconciled job did not belong to this agent"
+            elif not job.status.is_terminal():
                 return status
-            if job.status == PlatformJobStatus.COMPLETED:
+            elif job.status == PlatformJobStatus.COMPLETED:
                 updated.status = AnalysisConfigStatus.IDLE
                 # The pre-submission boundary keeps telemetry arriving during
                 # execution eligible for the next analysis.
@@ -287,7 +288,7 @@ class InsightsAnalysisController(NemoController):
             default_model=config.default_model,
             fast_model=config.fast_model or config.default_model,
         )
-        job_name = _job_name(config, submitted_at)
+        job_name = mint_analysis_run_name()
         pending = (
             status.model_copy()
             if status
@@ -323,19 +324,3 @@ class InsightsAnalysisController(NemoController):
 
 def _job_targets_agent(job: PlatformJobResponse, agent: str) -> bool:
     return (job.custom_fields or {}).get("insights_analysis_agent") == agent
-
-
-def _job_name(config: AnalysisConfig, submitted_at: datetime) -> str:
-    workspace = _SAFE_JOB_NAME.sub("-", config.workspace).strip("-") or "workspace"
-    agent = _SAFE_JOB_NAME.sub("-", config.agent).strip("-") or "agent"
-    stamp = submitted_at.strftime("%Y%m%d%H%M%S")
-    # The Jobs service also creates a fileset named ``job-fileset-{job_name}``,
-    # and entity names cap at 63 characters. Keep our generated name short
-    # enough for that derived fileset while preserving agent/workspace context.
-    prefix = "opt-analyze"
-    max_name = 63 - len("job-fileset-")
-    suffix = f"-{stamp}"
-    available = max_name - len(prefix) - len(suffix) - 2
-    workspace_part = workspace[: max(1, available // 3)]
-    agent_part = agent[: max(1, available - len(workspace_part))]
-    return f"{prefix}-{workspace_part}-{agent_part}{suffix}"
