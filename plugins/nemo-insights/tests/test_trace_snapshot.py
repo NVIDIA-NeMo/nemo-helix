@@ -88,7 +88,28 @@ async def test_loads_all_pages_and_preserves_complete_traces() -> None:
             )
         assert request.url.path.endswith("/evaluator-results")
         assert selection["session_id"] == "session"
-        return httpx.Response(200, json=_page([], total=0))
+        # Another evaluation's trace shares this session but was not selected.
+        trace_id = f"trace-{page}" if page < 3 else "unselected-trace"
+        return httpx.Response(
+            200,
+            json=_page(
+                [
+                    {
+                        "evaluator_result_id": f"result-{page}",
+                        "span_id": f"{trace_id}-span-1",
+                        "session_id": "session",
+                        "workspace": "test",
+                        "name": "accuracy",
+                        "data_type": "NUMERIC",
+                        "value": page / 10,
+                        "created_at": since.isoformat(),
+                        "ingested_at": since.isoformat(),
+                    }
+                ],
+                page,
+                3,
+            ),
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         client = AsyncIntakeClient(
@@ -110,7 +131,14 @@ async def test_loads_all_pages_and_preserves_complete_traces() -> None:
     pointer = first.attributes["source_pointer"]
     assert isinstance(pointer, dict)
     assert pointer["workspace"] == "test"
-    assert len(requests) == 8
+    for index in (1, 2):
+        trace = snapshot.get_trace_by_id(f"trace-{index}")
+        assert set(trace.evaluator_results) == {"accuracy"}
+        result = trace.evaluator_results["accuracy"]
+        assert isinstance(result, dict)
+        assert result["evaluator_result_id"] == f"result-{index}"
+        assert result["value"] == index / 10
+    assert len(requests) == 12
 
 
 @pytest.mark.asyncio

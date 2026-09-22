@@ -28,8 +28,20 @@ def test_reconciliation_uses_ids_and_preserves_platform_owned_fields():
     changed = _insight(name="Renamed by model", description="Rewritten", trace_refs=["a", "b", "c"])
     new = _insight(None, name="New issue")
     result = to_change_set([changed, new], [original], trace_count=3)
-    assert result.updated_insights[0].model_dump() == {"id": "stored-id", "trace_refs": ["a", "b", "c"]}
+    assert result.updated_insights[0].model_dump() == {"id": "stored-id", "trace_refs": ["c"]}
     assert result.new_insights[0].title == "New issue"
+
+
+@pytest.mark.parametrize("refs", [["b", "a"], ["a", "a"], ["a", "b", "a"]])
+def test_reordered_removed_or_duplicate_refs_are_not_new_evidence(refs):
+    result = to_change_set([_insight(trace_refs=refs)], [_insight()], trace_count=3)
+    assert not result.updated_insights
+    assert "0 existing insights with new evidence" in result.summary
+
+
+def test_new_evidence_is_unique_and_preserves_generated_order():
+    result = to_change_set([_insight(trace_refs=["d", "a", "c", "d"])], [_insight()], trace_count=3)
+    assert result.updated_insights[0].trace_refs == ["d", "c"]
 
 
 @pytest.mark.parametrize("returned", [[_insight("unknown")], [_insight(), _insight()]])

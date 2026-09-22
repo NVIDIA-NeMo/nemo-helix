@@ -97,8 +97,10 @@ def to_change_set(insights: list[Insight], existing: list[Insight], *, trace_cou
             raise ValueError(f"trace-intel returned an unknown or duplicate insight ID: {item.id!r}")
         seen.add(item.id)
         # Storage identity, title, description and lifecycle remain Platform-owned.
-        if item.trace_refs != known[item.id].trace_refs:
-            updates.append(InsightUpdate(id=item.id, trace_refs=item.trace_refs))
+        existing_refs = set(known[item.id].trace_refs)
+        added_refs = [ref for ref in dict.fromkeys(item.trace_refs) if ref not in existing_refs]
+        if added_refs:
+            updates.append(InsightUpdate(id=item.id, trace_refs=added_refs))
     return AnalystResult(
         summary=f"Analyzed {trace_count} traces: {len(new)} new insights, {len(updates)} existing insights with new evidence.",
         new_insights=new,

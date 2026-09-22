@@ -6,7 +6,7 @@
 NeMo Platform plugin for analyzing agent telemetry and persisting actionable insights.
 
 Analysis uses [trace-intel](https://github.com/NVIDIA-NeMo/labs-trace-intel).
-Platform supplies authenticated trace and model access and stores the resulting insights.
+NeMo Platform supplies authenticated trace and model access and stores the resulting insights.
 
 ## Install from the monorepo
 
@@ -28,10 +28,10 @@ uv run nemo agents analyst doctor
 uv run nemo agents analyst run
 ```
 
-Run `nemo setup` first to select the default and fast Platform Model Entities.
-The Analyst uses the default model to compile insights and the fast model for
+Run `nemo setup` first to select the default and fast NeMo Platform Model Entities.
+The NeMo Analyst uses the default model to compile insights and the fast model for
 evidence streams; an existing context without `fast_model` reuses `default_model`.
-Provider credentials remain in Platform Secrets.
+Provider credentials remain in NeMo Platform Secrets.
 
 The profile contract consumed by Insights is deliberately small:
 
@@ -89,7 +89,7 @@ uv run nemo insights analysis status
 uv run nemo insights analysis disable --agent research-agent
 ```
 
-`nemo agents analyst run` runs the Analyst locally, in your shell. To have the
+`nemo agents analyst run` runs the NeMo Analyst locally, in your shell. To have the
 platform run it as a job instead, submit an *analysis run*:
 
 ```bash
@@ -102,7 +102,7 @@ A run and the `agents.execute` job backing it share one name, so `get` returns
 both together. `--wait` polls to a terminal job state and exits non-zero unless
 the job completed. `create` fills the default/fast model pair from your CLI
 config unless you pass `--default-model` / `--fast-model`; the request must
-carry it because the Platform process cannot read that file.
+carry it because the NeMo Platform process cannot read that file.
 
 `analysis enable` stores the effective default/fast pair in the server-side
 analysis config so scheduled jobs do not depend on the operator's local CLI
@@ -143,8 +143,8 @@ environment wins. All settings live under `analyst`, with the
 | — (see below) | `analyst.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
 | — (see below) | `analyst.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
 | — (see below) | `analyst.job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
-| — (see below) | `analyst.base_url` | unset | Platform base URL passed to analyst jobs. When unset, jobs use their active platform context. |
-| — (see below) | `analyst.inference_api_key_secret_name` | unset | Platform secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
+| — (see below) | `analyst.base_url` | unset | NeMo Platform base URL passed to analyst jobs. When unset, jobs use their active platform context. |
+| — (see below) | `analyst.inference_api_key_secret_name` | unset | NeMo Platform secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
 
 ```bash
 export NEMO_INSIGHTS_ANALYST_FREQUENCY=weekly
@@ -165,9 +165,9 @@ object as JSON — unlisted keys keep their defaults:
 export NEMO_INSIGHTS_ANALYST='{"run_at_hour": 17, "run_on_weekday": "friday", "job_profile": "gpu"}'
 ```
 
-### Analyst self-observability
+### NeMo Analyst self-observability
 
-Whenever a platform base URL is available, the Analyst exports its own traces
+Whenever a platform base URL is available, the NeMo Analyst exports its own traces
 to Intake's workspace-scoped OTLP endpoint. No opt-in flag or environment
 variable is required. Set `NEMO_INSIGHTS_ANALYST_OBSERVABILITY=false` to opt
 out. The endpoint must be HTTPS unless it is loopback.
@@ -192,14 +192,14 @@ the analyst produces and uses it to improve the agent against Harbor-compatible
 train and validation datasets:
 
 ```text
-nemo agents analyst run → Platform Insight ID (or --insights-file-output mirror)
+nemo agents analyst run → NeMo Platform Insight ID (or --insights-file-output mirror)
                        → nemo agents experimentalist doctor
                        → nemo agents experimentalist run
 ```
 
-The Experimentalist accepts either a Platform Insight ID or a local mirror
+The Experimentalist accepts either a NeMo Platform Insight ID or a local mirror
 file, so `--insights-file-output` is the option to reach for when you want a
-run that does not have to resolve an ID against Platform. Insights does not
+run that does not have to resolve an ID against NeMo Platform. Insights does not
 propose or evaluate agent changes itself; the Experimentalist does not analyze
 traces or host an Insight API.
 
