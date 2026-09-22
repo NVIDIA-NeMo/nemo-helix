@@ -240,6 +240,9 @@ _CRASH_DUMP_FILE = None
 #: Session-wide per-test timeout, to judge a lost worker's elapsed time against.
 _SESSION_TIMEOUT_SECONDS = None
 
+#: How long before the session timeout the stack dump fires, so it lands before os._exit.
+_TIMEOUT_DUMP_LEAD_SECONDS = 5
+
 #: Start time of each in-flight test, by nodeid. xdist forwards `logstart` to the controller, so a
 #: lost worker's test can still be timed from there.
 _TEST_START_TIMES: dict[str, float] = {}
@@ -257,6 +260,32 @@ def pytest_runtest_logfinish(nodeid, location):
     """Forget a test that finished, so only genuinely in-flight tests are timed."""
     del location
     _TEST_START_TIMES.pop(nodeid, None)
+    if _CRASH_DUMP_FILE is not None:
+        import faulthandler
+
+        faulthandler.cancel_dump_traceback_later()
+
+
+def _effective_timeout_seconds(item) -> float | None:
+    """The pytest-timeout budget for ``item``: its closest ``timeout`` marker, else the session default."""
+    marker = item.get_closest_marker("timeout")
+    if marker is None:
+        return _SESSION_TIMEOUT_SECONDS
+    value = marker.args[0] if marker.args else marker.kwargs.get("timeout")
+    return float(value) if value is not None else _SESSION_TIMEOUT_SECONDS
+
+
+def _arm_timeout_stack_dump(timeout_seconds: float | None) -> None:
+    """Dump every thread's stack into the crash file just before pytest-timeout kills the worker.
+
+    pytest-timeout's thread method prints its stacks to worker stderr, which xdist discards, so a
+    timed-out test otherwise leaves only its name behind.
+    """
+    if not timeout_seconds or timeout_seconds <= _TIMEOUT_DUMP_LEAD_SECONDS:
+        return
+    import faulthandler
+
+    faulthandler.dump_traceback_later(timeout_seconds - _TIMEOUT_DUMP_LEAD_SECONDS, file=_CRASH_DUMP_FILE, exit=False)
 
 
 def pytest_handlecrashitem(crashitem, report, sched):
@@ -387,6 +416,8 @@ def pytest_runtest_setup(item):
     """
     Run before each test to check if it should be skipped based on command-line options.
     """
+    if _CRASH_DUMP_FILE is not None:
+        _arm_timeout_stack_dump(_effective_timeout_seconds(item))
     if "slow" in [marker.name for marker in item.iter_markers()]:
         if not item.config.getoption("--run-slow"):
             skip_test("Skipping slow test (use --run-slow to run)")

@@ -22,6 +22,11 @@ IAM_ROLE_BINDINGS_PATH = "/apis/auth/v2/iam/role-bindings"
 SERVICE_HEADERS = {"X-NMP-Principal-Id": "service:integration-test"}
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
 
+# Each test boots the full platform and reloads policy data on every PDP call
+# (bundle_cache_seconds=0); with coverage on a loaded CI runner that runs past
+# the 120s session default.
+pytestmark = pytest.mark.timeout(300)
+
 
 @dataclass(frozen=True)
 class IdentityRow:
@@ -99,10 +104,6 @@ def _grant_workspace_role(client: TestClient, *, workspace: str, principal: str,
     assert response.status_code in {200, 201}, response.text
 
 
-@pytest.mark.skip(
-    reason="hangs past the 120s CI timeout and kills the xdist worker; "
-    "see https://github.com/NVIDIA-NeMo/nemo-platform/actions/runs/35649117450 (main)"
-)
 def test_first_bearer_request_materializes_account_and_uses_legacy_alias_binding(
     account_migration_client: TestClient,
 ) -> None:
