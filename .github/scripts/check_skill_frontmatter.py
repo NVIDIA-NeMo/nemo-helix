@@ -38,7 +38,7 @@ import yaml
 # skills/) intentionally use a lighter frontmatter and are out of scope.
 CANONICAL_SKILL_GLOBS = [
     "skills/*/SKILL.md",
-    "packages/nemo_platform_ext/src/nemo_platform_ext/skills/*/SKILL.md",
+    "packages/nemo_helix_ext/src/nemo_helix_ext/skills/*/SKILL.md",
     "plugins/*/skills/*/SKILL.md",
     "plugins/*/src/*/skills/*/SKILL.md",
     "plugins/*/framework-skills/*/SKILL.md",

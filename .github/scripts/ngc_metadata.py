@@ -38,7 +38,7 @@ WORD_OVERRIDES = {
     "cpu": "CPU",
     "gpu": "GPU",
     "nemo": "NeMo",
-    "nmp": "NeMo Platform",
+    "nhx": "NeMo Helix",
     "sdk": "SDK",
 }
 
@@ -85,7 +85,7 @@ def load_asset(path: Path, asset_type: Literal["container", "chart"]) -> Asset:
     default_description = (
         f"Deploy {display_name} to Kubernetes"
         if asset_type == "chart"
-        else f"{display_name} is part of the NeMo Platform"
+        else f"{display_name} is part of the NeMo Helix"
     )
     description = str(metadata.get("description") or default_description)
     labels = metadata.get("labels", DEFAULT_LABELS)

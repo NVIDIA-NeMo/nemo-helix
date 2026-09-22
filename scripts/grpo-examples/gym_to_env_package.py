@@ -6,7 +6,7 @@
 
 This is an **example helper**, not part of the customizer's functionality. Nothing in the
 platform calls it: the supported contract is the environment FileSet layout itself, which
-`nmp.rl.tasks.environment.validate` defines and which you can satisfy by hand. Use this to
+`nhx.rl.tasks.environment.validate` defines and which you can satisfy by hand. Use this to
 get a working package quickly, or as a starting point for your own build.
 
     uv run scripts/grpo-examples/gym_to_env_package.py \\
@@ -16,7 +16,7 @@ get a working package quickly, or as a starting point for your own build.
 
 Then validate and upload:
 
-    uv run --package nmp-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+    uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
     nemo files filesets create my-env -w default --purpose environment --exist-ok
     nemo files upload /tmp/mwj-env/ my-env -w default
 
@@ -76,7 +76,7 @@ def resolve_gym_root(raw: str | None) -> Path:
         raise SystemExit(
             "--gym-root is required.\n\n"
             "This script packages a server out of a NeMo Gym source tree, and Gym is not vendored\n"
-            "in nemo-platform. Clone it first, then point --gym-root at the checkout:\n\n"
+            "in nemo-helix. Clone it first, then point --gym-root at the checkout:\n\n"
             f"    git clone {GYM_REPO} ~/workspace/Gym\n"
             "    --gym-root ~/workspace/Gym\n"
         )
@@ -196,7 +196,7 @@ def write_policy_model_config(out_dir: Path, fmt: str) -> Path:
     Reuses the platform's own builder so a hand-built package and pi-to-gym-conversion cannot
     drift on the interpolations, which resolve against the config NeMo-RL injects at spin-up.
     """
-    from nmp.rl.tasks.environment.package import build_policy_model_yaml
+    from nhx.rl.tasks.environment.package import build_policy_model_yaml
 
     target = out_dir / POLICY_MODEL_RELPATH[fmt]
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -556,7 +556,7 @@ def main() -> int:
                 "datasets_blocks_stripped": stripped,
                 "arch": args.arch if wheels else None,
                 "wheel_count": len(list(wheels.glob("*.whl"))) if wheels else 0,
-                "next": [f"uv run --package nmp-rl pi-to-gym-conversion --validate-only {args.out_dir}"],
+                "next": [f"uv run --package nhx-rl pi-to-gym-conversion --validate-only {args.out_dir}"],
             },
             indent=2,
         )

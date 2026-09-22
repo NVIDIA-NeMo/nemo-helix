@@ -81,8 +81,8 @@ def test_is_canonical_skill_matches_top_level_skills_dir():
     assert is_canonical_skill(Path("skills/nemo-evaluator-plugin/SKILL.md"))
 
 
-def test_is_canonical_skill_matches_nemo_platform_ext():
-    path = Path("packages/nemo_platform_ext/src/nemo_platform_ext/skills/nemo-status/SKILL.md")
+def test_is_canonical_skill_matches_nemo_helix_ext():
+    path = Path("packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-status/SKILL.md")
     assert is_canonical_skill(path)
 
 

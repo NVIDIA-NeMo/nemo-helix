@@ -5,7 +5,7 @@
 
 **These are examples.** Nothing in the platform calls them, and they define no behaviour: the
 supported contract is the environment FileSet layout that
-`nmp.rl.tasks.environment.validate` defines. Use them to get a working environment and dataset
+`nhx.rl.tasks.environment.validate` defines. Use them to get a working environment and dataset
 quickly, or as a starting point for your own.
 
 A GRPO job needs three things that no deployment creates for you — a model entity, an
@@ -17,7 +17,7 @@ A GRPO job needs three things that no deployment creates for you — a model ent
 | Requirement | Check | If missing |
 |---|---|---|
 | Platform on `platform.runtime: kubernetes` | `nemo jobs list-execution-profiles -f json` reports `backend: kubernetes_job` | GRPO cannot run; refer to the skill's `rl-kubernetes-runtime.md` |
-| Sandboxed Gym enabled | operator has set `NMP_SANDBOX_CLUSTER_CAPABLE` and `NMP_RL_JOB_STORAGE_PVC_CLAIM` | Submit fails before any GPU is claimed. Operator-only |
+| Sandboxed Gym enabled | operator has set `NHX_SANDBOX_CLUSTER_CAPABLE` and `NHX_RL_JOB_STORAGE_PVC_CLAIM` | Submit fails before any GPU is claimed. Operator-only |
 | A NeMo Gym checkout | `ls $GYM_ROOT/resources_servers` | Gym is **not** vendored here: `git clone https://github.com/NVIDIA-NeMo/Gym ~/workspace/Gym` |
 | Internet on **this** host | — | `wheels-v1` resolves a wheel closure; the dataset script pulls from HuggingFace |
 
@@ -57,7 +57,7 @@ The two differ in exactly two ways, both handled for you:
 |---|---|---|
 | `wheels/` | full closure vendored | absent — resolved from a package index at job start |
 | `policy_model.yaml` | `configs/` | `responses_api_models/vllm_model/configs/` (the format requires a Gym server prefix) |
-| Cluster egress at job start | not needed | **required** (`NMP_RL_SANDBOX_ALLOW_INTERNET`) |
+| Cluster egress at job start | not needed | **required** (`NHX_RL_SANDBOX_ALLOW_INTERNET`) |
 
 `--arch` is ignored for `native-v1`, since it vendors nothing.
 
@@ -78,7 +78,7 @@ For a `verifiers` / Prime Intellect environment use the converter instead, which
 checkout — note it vendors `x86_64` wheels today:
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+uv run --package nhx-rl pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --dataset-dir ./ascii-tree-data --validation-fraction 0.1
 ```
@@ -97,7 +97,7 @@ uv run --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
 ## 3. Validate and upload
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
 
 nemo files filesets create math-with-judge-env -w default --purpose environment --exist-ok
 nemo files upload /tmp/mwj-env/ math-with-judge-env -w default

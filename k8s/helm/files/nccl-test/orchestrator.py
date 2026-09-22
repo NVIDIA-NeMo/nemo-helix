@@ -422,8 +422,8 @@ def config_test(iteration: int, print_logs: bool):
         "helm.sh/hook-delete-policy": hook_delete,
     }
     if _truthy(os.environ.get("NCCL_TEST_KYVERNO_ENABLE_MULTI_NODE", "true")):
-        worker_ann["nmp.nvidia.com/enable-multi-node-networking"] = "true"
-        worker_ann["nmp.nvidia.com/num-nodes"] = str(world_size)
+        worker_ann["nhx.nvidia.com/enable-multi-node-networking"] = "true"
+        worker_ann["nhx.nvidia.com/num-nodes"] = str(world_size)
     if not _truthy(os.environ.get("NCCL_TEST_ALLOW_PLATFORM_INJECTION", "true")):
         worker_ann["disable-rdma-injection"] = "true"
 
@@ -444,7 +444,7 @@ def config_test(iteration: int, print_logs: bool):
             name=name,
             labels={
                 "app.kubernetes.io/instance": release_name,
-                "app.kubernetes.io/name": "nemo-platform",
+                "app.kubernetes.io/name": "nemo-helix",
                 "nccl-helm-test-worker": "true",
                 "iteration": str(iteration),
             },

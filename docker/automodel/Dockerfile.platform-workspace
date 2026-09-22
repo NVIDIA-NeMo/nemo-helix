@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Minimal Platform workspace slice for nmp-automodel container installs.
+# Minimal Platform workspace slice for nhx-automodel container installs.
 # Used as a named build context (platform-workspace).
 # Keep in sync with docker/automodel/pyproject.workspace.toml members.
 
@@ -13,17 +13,17 @@ COPY docker/automodel/pyproject.workspace.toml pyproject.toml
 # (The docker/ tree moved out of services/automodel/, so it no longer rides in
 # via `COPY services/automodel`; copy it explicitly into the workspace slice.)
 COPY docker/automodel/no_override_requirements.txt docker/automodel/no_override_requirements.txt
-# nemo-platform-sdk hatch build force-includes docs/ from repo root.
+# nemo-helix-sdk hatch build force-includes docs/ from repo root.
 # docs/fern/openapi/openapi.yaml is a symlink to ../../../openapi/openapi.yaml.
 COPY docs docs
 COPY openapi openapi
-COPY packages/nmp_build_tools packages/nmp_build_tools
+COPY packages/nhx_build_tools packages/nhx_build_tools
 COPY packages/filesets packages/filesets
 COPY packages/models packages/models
-COPY packages/nmp_common packages/nmp_common
-COPY packages/nmp_customization_common packages/nmp_customization_common
-COPY packages/nemo_platform_plugin packages/nemo_platform_plugin
+COPY packages/nhx_common packages/nhx_common
+COPY packages/nhx_customization_common packages/nhx_customization_common
+COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
 COPY plugins/nemo-deployments plugins/nemo-deployments
-COPY sdk/python/nemo-platform sdk/python/nemo-platform
+COPY sdk/python/nemo-helix sdk/python/nemo-helix
 COPY services/automodel services/automodel
 COPY services/core/models services/core/models

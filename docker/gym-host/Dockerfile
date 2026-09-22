@@ -3,16 +3,16 @@
 
 # Sandboxed Gym host runtime for Evaluator agent-evaluation jobs.
 #
-ARG NMP_PYTHON_BASE=nmp-python-base
-ARG NMP_PYTHON_IMAGE=python:3.13.15-slim-trixie
+ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
 
-FROM ${NMP_PYTHON_BASE} AS builder
+FROM ${NHX_PYTHON_BASE} AS builder
 
 # Copy the host's standalone dependency manifest and lockfile.
-COPY docker/locks/nmp-gym-host /app/docker/locks/nmp-gym-host
+COPY docker/locks/nhx-gym-host /app/docker/locks/nhx-gym-host
 
 # Copy local sources used by the standalone lock, including build-system requirements.
-COPY packages/nmp_build_tools /app/packages/nmp_build_tools
+COPY packages/nhx_build_tools /app/packages/nhx_build_tools
 
 # Copy the complete package inputs at the path used by the lock's local source.
 COPY packages/sandboxed_gym/pyproject.toml /app/packages/sandboxed_gym/pyproject.toml
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/gym-host-venv \
     uv sync \
-        --project /app/docker/locks/nmp-gym-host \
+        --project /app/docker/locks/nhx-gym-host \
         --locked \
         --no-dev \
         --no-install-project \
@@ -64,7 +64,7 @@ RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
     && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
       -path '*/ray/jars/*' -print -quit)"
 
-FROM ${NMP_PYTHON_IMAGE} AS runtime
+FROM ${NHX_PYTHON_IMAGE} AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl \
@@ -84,7 +84,7 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv \
-    NMP_RUNTIME_HTTP_PORT=8080
+    NHX_RUNTIME_HTTP_PORT=8080
 
 # Create the mount points used by the OpenSandbox provider.
 RUN mkdir -p /job/environment /job/work

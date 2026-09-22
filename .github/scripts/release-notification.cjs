@@ -73,8 +73,8 @@ async function sendReleaseNotification({ env, fetchImpl }) {
     if (env.INCLUDE_HELM === "true") {
       const chart =
         releaseType === "stable"
-          ? `<${env.NGC_CATALOG_BASE}/helm-charts/nemo-platform|nemo-platform>`
-          : "nemo-platform";
+          ? `<${env.NGC_CATALOG_BASE}/helm-charts/nemo-helix|nemo-helix>`
+          : "nemo-helix";
       lines.push("*:helm: Helm chart published:*");
       lines.push(`- ${chart}: ${env.CHART_VERSION}`);
     }

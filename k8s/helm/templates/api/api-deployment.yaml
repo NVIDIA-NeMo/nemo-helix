@@ -5,14 +5,14 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.api.enabled }}
 {{- $imagePullSecrets := include "nemo-common.imagepullsecrets" . }}
-{{- $platformConfig := include "nemo-platform.calculatedConfig" . | fromYaml }}
+{{- $platformConfig := include "nemo-helix.calculatedConfig" . | fromYaml }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "nmp-api.api-servicename" . }}
+  name: {{ include "nhx-api.api-servicename" . }}
   labels:
-    app.kubernetes.io/component: nmp-api
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-api
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   annotations:
     {{- with .Values.api.annotations }}
     {{- toYaml . | nindent 4 }}
@@ -23,19 +23,19 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: nmp-api
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nhx-api
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
         {{- with .Values.api.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- include "nemo-platform.podAnnotations" . | nindent 8 }}
+        {{- include "nemo-helix.podAnnotations" . | nindent 8 }}
         checksum/clickhouse-credentials: {{ include "nemo-common.clickhouse.credentialsChecksum" . }}
       labels:
-        app.kubernetes.io/component: nmp-api
-        {{- include "nemo-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: nhx-api
+        {{- include "nemo-helix.labels" . | nindent 8 }}
         {{- with .Values.api.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -44,69 +44,69 @@ spec:
       imagePullSecrets:
 {{- $imagePullSecrets | nindent 8 }}
 {{- end }}
-      serviceAccountName: {{ include "nmp-api.apiServiceAccountName" . }}
+      serviceAccountName: {{ include "nhx-api.apiServiceAccountName" . }}
       securityContext:
         {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.api.podSecurityContext) | nindent 8 }}
       containers:
-        - name: nmp-api
+        - name: nhx-api
           securityContext:
             {{- include "nemo-common.securityContext" (dict "global" .Values.securityContext "local" .Values.api.securityContext) | nindent 12 }}
-          image: {{ include "nmp-api.image" . | quote }}
+          image: {{ include "nhx-api.image" . | quote }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           args:
-            {{ include "nmp-api.serviceSelectionArgs" . | nindent 12 | trim }}
-            - "--host={{ include "nemo-platform.bindHost" . }}"
+            {{ include "nhx-api.serviceSelectionArgs" . | nindent 12 | trim }}
+            - "--host={{ include "nemo-helix.bindHost" . }}"
             - "--port={{ .Values.api.service.port }}"
             - "--keep-alive-timeout-seconds={{ .Values.api.server.keepAliveTimeoutSeconds }}"
             {{- range .Values.api.extraArgs }}
             - {{ . | quote }}
             {{- end }}
-          {{- if not (include "nemo-platform.defaultEncryptionKeyExistingSecretName" .) }}
+          {{- if not (include "nemo-helix.defaultEncryptionKeyExistingSecretName" .) }}
           envFrom:
             - secretRef:
-                name: {{ include "nemo-platform.apiEnvSecretName" . }}
+                name: {{ include "nemo-helix.apiEnvSecretName" . }}
           {{- end }}
           env:
-            {{- if include "nemo-platform.defaultEncryptionKeyExistingSecretName" . }}
-            - name: {{ include "nemo-platform.defaultEncryptionKeyEnvName" . }}
+            {{- if include "nemo-helix.defaultEncryptionKeyExistingSecretName" . }}
+            - name: {{ include "nemo-helix.defaultEncryptionKeyEnvName" . }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "nemo-platform.defaultEncryptionKeyExistingSecretName" . | quote }}
-                  key: {{ include "nemo-platform.defaultEncryptionKeySecretKey" . | quote }}
+                  name: {{ include "nemo-helix.defaultEncryptionKeyExistingSecretName" . | quote }}
+                  key: {{ include "nemo-helix.defaultEncryptionKeySecretKey" . | quote }}
             {{- end }}
-            - name: NMP_CONFIG_FILE_PATH
-              value: /etc/nmp/config.yaml
-            - name: NMP_INTAKE_CLICKHOUSE_URL
+            - name: NHX_CONFIG_FILE_PATH
+              value: /etc/nhx/config.yaml
+            - name: NHX_INTAKE_CLICKHOUSE_URL
               value: {{ include "nemo-common.clickhouse.url" . | quote }}
-            - name: NMP_INTAKE_CLICKHOUSE_USER
+            - name: NHX_INTAKE_CLICKHOUSE_USER
               value: {{ include "nemo-common.clickhouse.user" . | quote }}
-            - name: NMP_INTAKE_CLICKHOUSE_PASSWORD
+            - name: NHX_INTAKE_CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "nemo-common.clickhouse.secretName" . | quote }}
                   key: {{ include "nemo-common.clickhouse.passwordKey" . | quote }}
-            - name: NMP_INTAKE_CLICKHOUSE_DATABASE
+            - name: NHX_INTAKE_CLICKHOUSE_DATABASE
               value: {{ include "nemo-common.clickhouse.database" . | quote }}
-            - name: NMP_BASE_URL
-              {{- if include "nemo-platform.embeddedPdpEnabled" . }}
-              value: {{ include "nemo-platform.apiLoopbackBaseUrl" . | quote }}
+            - name: NHX_BASE_URL
+              {{- if include "nemo-helix.embeddedPdpEnabled" . }}
+              value: {{ include "nemo-helix.apiLoopbackBaseUrl" . | quote }}
               {{- else }}
-              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
               {{- end }}
             # In-cluster API Service DNS. Deployed agents use this as their inference
-            # endpoint, since NMP_BASE_URL may not be reachable from an agent pod.
-            - name: NMP_INTERNAL_BASE_URL
-              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}
-            - name: NMP_AUTOMODEL_DEFAULT_TRAINING_EXECUTION_PROFILE
+            # endpoint, since NHX_BASE_URL may not be reachable from an agent pod.
+            - name: NHX_INTERNAL_BASE_URL
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+            - name: NHX_AUTOMODEL_DEFAULT_TRAINING_EXECUTION_PROFILE
               value: {{ dig "automodel" "default_training_execution_profile" "default" $platformConfig | quote }}
-            - name: NMP_UNSLOTH_DEFAULT_TRAINING_EXECUTION_PROFILE
+            - name: NHX_UNSLOTH_DEFAULT_TRAINING_EXECUTION_PROFILE
               value: {{ dig "unsloth" "default_training_execution_profile" "default" $platformConfig | quote }}
-            {{- if include "nemo-platform.embeddedPdpEnabled" . }}
-            - name: NMP_AUTH_POLICY_DECISION_POINT_BASE_URL
-              value: {{ include "nemo-platform.apiLoopbackBaseUrl" . | quote }}
+            {{- if include "nemo-helix.embeddedPdpEnabled" . }}
+            - name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL
+              value: {{ include "nemo-helix.apiLoopbackBaseUrl" . | quote }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
-              value: {{ include "nmp-api.api-servicename" . }}
+              value: {{ include "nhx-api.api-servicename" . }}
             {{- include "nemo-common.otel-env" (dict "root" $ "local" .Values) | indent 12 }}
             {{- if ( and .Values.externalDatabase.uriSecret.name .Values.externalDatabase.uriSecret.key ) }}
             - name: DATABASE_URL
@@ -136,8 +136,8 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret | default "ngc-api" }}
                   key: NGC_API_KEY
-            {{ include "nemo-platform.env" . | nindent 12 | trim }}
-            {{ include "nemo-platform.api.env" . | nindent 12 | trim }}
+            {{ include "nemo-helix.env" . | nindent 12 | trim }}
+            {{ include "nemo-helix.api.env" . | nindent 12 | trim }}
           ports:
             - name: http
               containerPort: {{ .Values.api.service.port }}
@@ -152,13 +152,13 @@ spec:
             {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
             - name: config
-              mountPath:  /etc/nmp/config.yaml
+              mountPath:  /etc/nhx/config.yaml
               subPath: config.yaml
             - name: data-designer-tmp
               mountPath: /app/data/data-designer
-            {{- if eq ( include "nmp-core.localStorageEnabled" . ) "true" }}
+            {{- if eq ( include "nhx-core.localStorageEnabled" . ) "true" }}
             - name: files-storage
-              mountPath: {{ include "nmp-core.localStoragePath" . }}
+              mountPath: {{ include "nhx-core.localStoragePath" . }}
             {{- end }}
             {{- with .Values.api.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -168,11 +168,11 @@ spec:
           emptyDir: {}
         - name: config
           configMap:
-            name: {{ include "nemo-platform.platform-configmap" . }}
-        {{- if eq ( include "nmp-core.localStorageEnabled" . ) "true" }}
+            name: {{ include "nemo-helix.platform-configmap" . }}
+        {{- if eq ( include "nhx-core.localStorageEnabled" . ) "true" }}
         - name: files-storage
           persistentVolumeClaim:
-            claimName: {{ include "nmp-core.persistentVolumeClaim" . }}
+            claimName: {{ include "nhx-core.persistentVolumeClaim" . }}
         {{- end }}
         {{- with .Values.api.extraVolumes }}
         {{- toYaml . | nindent 8 }}

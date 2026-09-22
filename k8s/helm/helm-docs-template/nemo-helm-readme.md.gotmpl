@@ -5,12 +5,12 @@
 
 {{ template "chart.typeBadge" . }}
 
-Documentation can be found at: https://docs.nvidia.com/nemo-platform.
-For deployment instructions, see https://docs.nvidia.com/nemo-platform/documentation/kubernetes-deployment/setup.
+Documentation can be found at: https://docs.nvidia.com/nemo-helix.
+For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
 
 ## Platform Secrets Encryption Key
 
-The platform secrets service reads `NMP_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
+The platform secrets service reads `NHX_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
 API env Secret. The value must be base64-encoded and decode to at least 32 bytes.
 
 Set `secrets.defaultEncryptionKey.value` to provide your own key. When that value
@@ -28,7 +28,7 @@ Set `envFromSecret` to use a fully user-managed API env Secret. In that mode the
 chart does not create or generate the API env Secret.
 
 On upgrade, the generated Secret must already exist and contain
-`NMP_SECRETS_DEFAULT_ENCRYPTION_KEY`. If it is missing, restore the original
+`NHX_SECRETS_DEFAULT_ENCRYPTION_KEY`. If it is missing, restore the original
 Secret instead of generating a replacement key; existing encrypted platform
 secrets will not decrypt with a new key.
 
@@ -124,7 +124,7 @@ and
 The chart does not install Kyverno. Multi-node NCCL device injection renders
 ClusterPolicies that Kyverno must apply. Enable exactly one cloud provider
 under `multinodeNetworking`.
-How-to: https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/multinode-networking
+How-to: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/multinode-networking
 
 ## Volcano
 
@@ -132,7 +132,7 @@ The chart does not install Volcano. Multi-node `volcano_job` workloads need it.
 `rbac.volcanoEnabled` defaults to true so the core controller can manage Volcano
 CRs. Skip Volcano and set `rbac.volcanoEnabled: false` if you are not running
 those jobs.
-How-to: https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/volcano
+How-to: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/volcano
 
 ## OpenSandbox
 
@@ -144,9 +144,9 @@ already installed server as an HTTP client (`OPEN_SANDBOX_DOMAIN`,
 namespace**. Control plane may stay in `opensandbox-system`. Copy the API-key
 Secret into the job namespace.
 
-Example overlays: [k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/k8s/helm/examples/opensandbox).
-Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
-Kata QEMU: https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata
+Example overlays: [k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox).
+Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
+Kata QEMU: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata
 
 ## NetworkPolicies
 

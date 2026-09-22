@@ -10,11 +10,11 @@ diff --git a/nemo_rl/environments/sandbox/gym_host_runtime.py b/nemo_rl/environm
  import subprocess
  import threading
 @@ -48,6 +49,10 @@
- ENVIRONMENT_PATH_ENV_KEY = "NMP_ENVIRONMENT_PATH"
+ ENVIRONMENT_PATH_ENV_KEY = "NHX_ENVIRONMENT_PATH"
  # Set by the platform, which knows whether the package vendors a complete closure.
- ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
-+DATASET_PATH_ENV_KEY = "NMP_DATASET_PATH"
-+WORK_PATH_ENV_KEY = "NMP_WORK_PATH"
+ ENVIRONMENT_OFFLINE_ENV_KEY = "NHX_ENVIRONMENT_OFFLINE"
++DATASET_PATH_ENV_KEY = "NHX_DATASET_PATH"
++WORK_PATH_ENV_KEY = "NHX_WORK_PATH"
 +# Vendored Hugging Face cache under the dataset FileSet (read-only mount).
 +HF_CACHE_DIRNAME = ".huggingface"
  UV_CACHE_DIR_KEY = "uv_cache_dir"
@@ -32,7 +32,7 @@ diff --git a/nemo_rl/environments/sandbox/gym_host_runtime.py b/nemo_rl/environm
 +    ``load_dataset("org/name")``; pointing the HF caches at a writable copy lets
 +    that resolve from disk. Do not point them at the dataset mount: ``datasets``
 +    writes lock files there and fails on a read-only filesystem. Offline flags
-+    follow ``NMP_ENVIRONMENT_OFFLINE`` so a job that allows internet can still
++    follow ``NHX_ENVIRONMENT_OFFLINE`` so a job that allows internet can still
 +    fetch Hub content missing from the snapshot. No-op when the FileSet has no
 +    ``.huggingface/`` snapshot.
 +    """
