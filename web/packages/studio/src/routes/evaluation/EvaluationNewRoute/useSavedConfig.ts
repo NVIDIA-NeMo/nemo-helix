@@ -18,6 +18,8 @@ import { useQuery } from '@tanstack/react-query';
  * accepts either serialization and reports "unreadable" apart from "absent", and
  * `parseEvalConfig` validates the shape rather than trusting the file.
  */
+export type SavedConfig = ReturnType<typeof useSavedConfig>;
+
 export function useSavedConfig(filesetName: string | null) {
   const workspace = useWorkspaceFromPath();
 

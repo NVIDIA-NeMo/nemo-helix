@@ -18,8 +18,9 @@ import {
   lastExchange,
   useDatasetPreview,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
+import { useMessagesBinding } from '@studio/routes/evaluation/EvaluationNewRoute/useMessagesBinding';
 import { CircleCheck, CircleHelp } from 'lucide-react';
-import { FC, useEffect, useMemo } from 'react';
+import { FC, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
@@ -35,47 +36,21 @@ const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
 
 export const DatasetPanel: FC = () => {
   const workspace = useWorkspaceFromPath();
-  const { control, setError, clearErrors, setValue } = useFormContext<EvaluationFormValues>();
+  const { control, setError, clearErrors } = useFormContext<EvaluationFormValues>();
   const dataset = useWatch({ control, name: 'dataset' });
-  const fieldMapping = useWatch({ control, name: 'fieldMapping' });
   // Row 0 on purpose: key extraction describes the file's shape, not whichever
   // row the Live Test is pointed at.
   const { row, keyOptions, messagesColumn, messageSelectors, isLoading, error } = useDatasetPreview(
     dataset ?? null
   );
 
+  useMessagesBinding();
+
   const exchange = lastExchange(messageSelectors);
   const assistantSelector = exchange.assistant ?? '';
   const userSelector = exchange.user ?? '';
 
   const formatLabel = (dataset?.split('.').pop() ?? '').toUpperCase() || 'File';
-
-  /** An OpenAI messages array binds as a whole column, so bind it automatically:
-   *  there is nothing for the user to decide, and the templates resolve the user
-   *  and assistant turns positionally.
-   *
-   *  The assistant turn is recorded as the reference so validation can tell a
-   *  conversation apart from a prompts-only file. ``toFieldMapping`` drops it
-   *  before submit, because an array path is not a legal column mapping. */
-  useEffect(() => {
-    if (!row) return;
-    const boundMessages = fieldMapping?.messages ?? '';
-    const nextMessages = messagesColumn ?? '';
-    if (boundMessages !== nextMessages) setValue('fieldMapping.messages', nextMessages);
-
-    const boundReference = fieldMapping?.reference ?? '';
-    const boundInput = fieldMapping?.input ?? '';
-    if (messagesColumn) {
-      if (boundReference !== assistantSelector)
-        setValue('fieldMapping.reference', assistantSelector);
-      if (boundInput !== userSelector) setValue('fieldMapping.input', userSelector);
-    } else {
-      // Left over from a messages dataset; a flat file cannot use array paths.
-      if (boundReference && !isSupportedMappingPath(boundReference))
-        setValue('fieldMapping.reference', '');
-      if (boundInput && !isSupportedMappingPath(boundInput)) setValue('fieldMapping.input', '');
-    }
-  }, [row, messagesColumn, assistantSelector, userSelector, fieldMapping, setValue]);
 
   const bindableOptions = useMemo(
     () => keyOptions.filter((option) => isSupportedMappingPath(option.value)),

@@ -33,7 +33,10 @@ import {
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { useCreateEvaluation } from '@studio/routes/evaluation/EvaluationNewRoute/useCreateEvaluation';
 import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
-import { useSavedConfig } from '@studio/routes/evaluation/EvaluationNewRoute/useSavedConfig';
+import {
+  type SavedConfig,
+  useSavedConfig,
+} from '@studio/routes/evaluation/EvaluationNewRoute/useSavedConfig';
 import { Info } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form';
@@ -157,12 +160,18 @@ const ConfigSourceField: FC<{ workspace: string }> = ({ workspace }) => {
 
 /** Seeds the form from the chosen config. A reused config is shown in the real
  *  form, so every control has to be filled from what was saved. */
-const SavedConfigLoader: FC<{ filesetName: string; workspace: string }> = ({
-  filesetName,
-  workspace,
-}) => {
+const SavedConfigLoader: FC<{
+  filesetName: string;
+  workspace: string;
+  saved: SavedConfig;
+}> = ({ filesetName, workspace, saved }) => {
   const { reset, getValues } = useFormContext<EvaluationFormValues>();
-  const { spec, isLoading, error } = useSavedConfig(filesetName);
+  const { spec, isLoading, error } = saved;
+
+  useEffect(() => {
+    const { model } = getValues();
+    reset({ ...EVALUATION_FORM_DEFAULTS, configSource: filesetName, model });
+  }, [filesetName, reset, getValues]);
 
   useEffect(() => {
     if (!spec) return;
@@ -193,7 +202,8 @@ const ModalBody: FC<{
   steps: WizardStep[];
   mode: string;
   onModeChange: (mode: string) => void;
-}> = ({ workspace, step, steps, mode, onModeChange }) => {
+  saved: SavedConfig;
+}> = ({ workspace, step, steps, mode, onModeChange, saved }) => {
   const { control } = useFormContext<EvaluationFormValues>();
   const configSource = useWatch({ control, name: 'configSource' });
   const reusing = mode === EXISTING_CONFIG;
@@ -232,9 +242,9 @@ const ModalBody: FC<{
               user -- the configuration step is skipped -- but the Live Test and
               the submitted spec are both built from these values. */}
           {reusing && configSource ? (
-            <SavedConfigLoader filesetName={configSource} workspace={workspace} />
+            <SavedConfigLoader filesetName={configSource} workspace={workspace} saved={saved} />
           ) : null}
-          <EvaluationStep />
+          {!reusing || saved.spec ? <EvaluationStep /> : null}
         </Stack>
       ) : null}
     </Stack>
@@ -302,8 +312,13 @@ const ModelEvaluationModalInner: FC<{
   const form = useFormContext<EvaluationFormValues>();
   const bindings = useDatasetBindings();
   const { createEvaluation, isPending } = useCreateEvaluation();
+  const configSource = useWatch({ control: form.control, name: 'configSource' });
 
-  const steps = stepsFor(mode === EXISTING_CONFIG);
+  const reusing = mode === EXISTING_CONFIG;
+  const saved = useSavedConfig(reusing && configSource ? configSource : null);
+  const configReady = !reusing || Boolean(saved.spec);
+
+  const steps = stepsFor(reusing);
   const at = steps.indexOf(step);
   const isLast = at === steps.length - 1;
 
@@ -368,7 +383,12 @@ const ModelEvaluationModalInner: FC<{
             </Button>
           )}
           {isLast ? (
-            <LoadingButton color="brand" type="submit" loading={isPending} disabled={isPending}>
+            <LoadingButton
+              color="brand"
+              type="submit"
+              loading={isPending}
+              disabled={isPending || !configReady}
+            >
               Submit
             </LoadingButton>
           ) : (
@@ -385,6 +405,7 @@ const ModelEvaluationModalInner: FC<{
         steps={steps}
         mode={mode}
         onModeChange={onModeChange}
+        saved={saved}
       />
     </FormModal>
   );
