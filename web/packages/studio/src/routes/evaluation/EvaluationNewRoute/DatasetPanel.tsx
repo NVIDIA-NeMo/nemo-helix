@@ -9,6 +9,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   CANONICAL_FIELD_LABELS,
   type CanonicalField,
+  EMPTY_FIELD_MAPPING,
   type EvaluationFormValues,
   isSupportedMappingPath,
   MAPPABLE_FILE_TYPES,
@@ -36,7 +37,7 @@ const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
 
 export const DatasetPanel: FC = () => {
   const workspace = useWorkspaceFromPath();
-  const { control, setError, clearErrors } = useFormContext<EvaluationFormValues>();
+  const { control, setError, clearErrors, setValue } = useFormContext<EvaluationFormValues>();
   const dataset = useWatch({ control, name: 'dataset' });
   // Row 0 on purpose: key extraction describes the file's shape, not whichever
   // row the Live Test is pointed at.
@@ -91,6 +92,10 @@ export const DatasetPanel: FC = () => {
           invalidFileMode="disable"
           filesetPurpose={FilesetPurpose.dataset}
           autoSelectFirstAcceptable
+          // A mapping names columns in the file it was made against, so it
+          // cannot outlive a swap to a different one. Only fires on an explicit
+          // pick, never when a saved configuration seeds the form.
+          onFileSelected={() => setValue('fieldMapping', EMPTY_FIELD_MAPPING)}
         />
 
         {error ? (

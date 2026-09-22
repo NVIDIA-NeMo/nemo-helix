@@ -26,10 +26,12 @@ import { ConfigureStep } from '@studio/routes/evaluation/EvaluationNewRoute/Conf
 import { EvaluationStep } from '@studio/routes/evaluation/EvaluationNewRoute/EvaluationStep';
 import { specToFormValues } from '@studio/routes/evaluation/EvaluationNewRoute/specToFormValues';
 import {
+  COMPARISON_METRICS,
   EVALUATION_FORM_DEFAULTS,
   type EvaluationFormValues,
   evaluationSchema,
   NEW_CONFIG,
+  REFERENCE_METRICS,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { useCreateEvaluation } from '@studio/routes/evaluation/EvaluationNewRoute/useCreateEvaluation';
 import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
@@ -105,7 +107,7 @@ const StartStep: FC<{
   mode: string;
   onModeChange: (mode: string) => void;
 }> = ({ workspace, mode, onModeChange }) => {
-  const { setValue } = useFormContext<EvaluationFormValues>();
+  const { setValue, reset, getValues } = useFormContext<EvaluationFormValues>();
 
   // One row is enough to answer "is there anything to re-run?". Until it
   // resolves the option stays enabled, so a slow list never disables a choice
@@ -127,9 +129,15 @@ const StartStep: FC<{
           value={mode}
           onValueChange={(value) => {
             onModeChange(value);
-            setValue('configSource', value === NEW_CONFIG ? NEW_CONFIG : '', {
-              shouldValidate: false,
-            });
+            if (value === NEW_CONFIG) {
+              // Authoring starts from nothing, so a configuration loaded before
+              // backtracking here cannot leak into it. The model is chosen per
+              // run and survives.
+              const { model } = getValues();
+              reset({ ...EVALUATION_FORM_DEFAULTS, configSource: NEW_CONFIG, model });
+            } else {
+              setValue('configSource', '', { shouldValidate: false });
+            }
           }}
         />
       </FormField>
@@ -316,7 +324,18 @@ const ModelEvaluationModalInner: FC<{
 
   const reusing = mode === EXISTING_CONFIG;
   const saved = useSavedConfig(reusing && configSource ? configSource : null);
-  const configReady = !reusing || Boolean(saved.spec);
+  const metrics = useWatch({ control: form.control, name: 'body.metrics' });
+
+  /** A messages configuration stores no input or reference path -- both are
+   *  array-indexed, so `toFieldMapping` drops them -- and `useMessagesBinding`
+   *  only re-derives them once the preview row lands. Submitting in that window
+   *  fails validation on a field this step does not render. */
+  const needsReference = [...REFERENCE_METRICS, ...COMPARISON_METRICS].some(
+    (metric) => metrics?.[metric]
+  );
+  const bindingsReady =
+    Boolean(bindings.inputPath) && (!needsReference || Boolean(bindings.referencePath));
+  const configReady = !reusing || (Boolean(saved.spec) && bindingsReady);
 
   const steps = stepsFor(reusing);
   const at = steps.indexOf(step);
