@@ -22,10 +22,6 @@ from nmp.testing import create_test_client
 with create_test_client(MyService, client_type=TestClient) as client:
     response = client.get("/api/endpoint")
 
-# Use create_test_client with SDK access
-with create_test_client(MyService) as sdk:
-    sdk.entities.create(...)
-
 # Use create_test_client for service-level tests with EntityClient
 with create_test_client(client_type=EntityClient) as entity_client:
     await entity_client.create(my_entity)

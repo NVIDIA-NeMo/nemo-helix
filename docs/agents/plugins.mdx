@@ -46,7 +46,6 @@ nemo services run
 | Auditor | Red-teaming against deployed agents |
 | Anonymizer | PII handling for training data |
 | Insights | Analyze agent telemetry and persist actionable insights |
-| Experimentalist | Optimize agents |
 
 ## Coding-Agent Skills
 
@@ -66,10 +65,8 @@ The skills that drive the agent lifecycle are:
 | Skill ID | Purpose |
 |----------|---------|
 | `nemo-setup` | Verifies the platform is installed and running. Walks the user through `make bootstrap`, `nemo services run`, the local data directory (`NMP_DATA_DIR` / `XDG_DATA_HOME`), and DB reset. Use this when the user asks to set up the platform or hits a startup issue. |
-| `nemo-explore` | Design conversation that feeds into an [agent Ethos](/documentation/agents/optimize-agents/ethos). Scans the repo, then asks at least three intent questions, always confirming purpose, principles, and vision. |
-| `nemo-ethos` | Writes [ETHOS.md](/documentation/agents/optimize-agents/ethos) at `agents/<agent-name>-ethos/ETHOS.md` from the explore output, then shows a short gut-check of the agent. |
 | `nemo-agent-config` | Writes and validates a Platform-managed agent.yaml using the `nemo-agents-spec-v1` format. |
-| `nemo-build-agent` | Scaffolds a Platform-managed agent.yaml from the Ethos and deploys it. Also helps migration from legacy NAT workflow YAML to agent.yaml |
+| `nemo-build-agent` | Scaffolds a Platform-managed agent.yaml from confirmed requirements and deploys it. Also helps migration from legacy NAT workflow YAML to agent.yaml |
 | `nemo-try-agent` | Sends a query to a deployed agent. |
 | `nemo-status` | Read-only platform health dashboard. |
 | `nemo-teardown` | Guided shutdown with confirmation. |

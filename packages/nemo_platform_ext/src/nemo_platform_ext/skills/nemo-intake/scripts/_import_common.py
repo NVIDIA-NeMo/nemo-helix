@@ -625,8 +625,10 @@ class _SdkSession:
         self.client = client
 
     def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        params = kwargs.pop("params", None)
         options = {
-            "params": kwargs.pop("params", None),
+            # The generated SDK merges query options as mappings, unlike httpx.
+            "params": dict(params) if params is not None else None,
             "headers": kwargs.pop("headers", None),
             "timeout": kwargs.pop("timeout", None),
             "follow_redirects": bool(kwargs.pop("follow_redirects", False)),

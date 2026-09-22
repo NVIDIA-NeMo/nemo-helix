@@ -30,11 +30,14 @@ describe('AgentDetailRoute optimizations tab', () => {
       'aria-selected',
       'true'
     );
-    expect(
-      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
-    ).toBeInTheDocument();
-    expect(screen.getByText('accuracy-sweep-1')).toBeInTheDocument();
-    expect(screen.queryByText('other-agent-sweep')).not.toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(screen.getByText('brevity-sweep-3')).toBeInTheDocument();
+        expect(screen.getByText('accuracy-sweep-1')).toBeInTheDocument();
+        expect(screen.queryByText('other-agent-sweep')).not.toBeInTheDocument();
+      },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
   });
 
   it('scopes the list server-side with a spec.agent filter', async () => {

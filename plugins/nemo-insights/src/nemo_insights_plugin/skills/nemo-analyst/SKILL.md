@@ -9,8 +9,7 @@ description: >-
   across many sessions, clusters similar failures, then files every finding as a
   titled Insight carrying the trace IDs that evidence the problem. Answers why
   an agent keeps failing, where it gets things wrong, and the recurring
-  problems hiding in production traces. Produces the Insight that the
-  Experimentalist later acts on.
+  problems hiding in production traces.
 triggers:
   - nemo-analyst
   - analyze my agent's traces
@@ -20,10 +19,8 @@ triggers:
   - run the analyst
   - my agent keeps getting things wrong
 not-for:
-  - nemo-experimentalist (use to act on an Insight and change the agent; this skill produces the Insight it consumes)
   - nemo-intake (use to instrument an agent, ingest telemetry, or query raw spans; this skill interprets telemetry that already landed)
   - nemo-experiments-upload (use to upload traces and evaluation results into Intake; this skill reads them back out)
-  - nemo-explore (use to design an agent that does not exist yet; this skill needs a running agent with traces)
   - nemo-evaluator (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
   nemo-platform >= 0.1.0; requires the Insights plugin, a reachable platform
@@ -125,15 +122,3 @@ select, and `agent_name` is carried on agent-level spans, not on their model and
 tool children. Volume: too few traces looks the same as a healthy agent. And
 telemetry that captures only the shape of a run, spans without the inputs and
 outputs, leaves nothing to judge however many spans there are.
-
-## Hand off
-
-Once an Insight exists, the Experimentalist acts on it:
-
-```bash
-nemo agents experimentalist run
-```
-
-For the full data model, the Analyst's tool set, periodic analysis via
-`nemo insights analysis enable`, and the rest of the loop, see
-[Insight-Driven Optimization](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/docs/agents/insight-driven-optimization.mdx).

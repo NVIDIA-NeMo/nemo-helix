@@ -214,6 +214,27 @@ class Settings(BaseSettings):
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
     )
+    # A controller pass handles at most this many rows per queue phase. One row
+    # per pass caps a benchmark at ~6 submissions/minute, so fan-out spends
+    # longer submitting than running.
+    platform_jobs_phase_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BATCH_SIZE",
+    )
+    # Bounds how many further rows a phase starts, not how long one row takes:
+    # the deadline is checked between rows. The heartbeat runs only after every
+    # phase and a stale heartbeat marks this controller unhealthy, so a busy
+    # queue must not hold the pass open. A single slow row can still overrun
+    # this, exactly as it could before phases were batched.
+    # Infinity satisfies gt=0 and would disable the deadline entirely.
+    platform_jobs_phase_budget_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
+    )
     # Entity Store migration flags. Projection writes a derived read model while
     # Postgres stays authoritative; reads only flip once parity is established,
     # so the two are deliberately separate switches.

@@ -128,23 +128,3 @@ uv run ruff check plugins/nemo-insights
 
 The analyst-only evaluation is in [`evaluation/`](evaluation/). It can replay pinned
 Intake traces or run Tau2 benchmarks before invoking the shared Python analysis runner.
-
-## What consumes an Insight
-
-Insights is the analysis half of a two-plugin loop. The
-[NeMo Experimentalist](../nemo-experimentalist/README.md) plugin consumes what
-the analyst produces and uses it to improve the agent against Harbor-compatible
-train and validation datasets:
-
-```text
-nemo insights analysis-runs create --agent <agent> --wait → NeMo Platform Insight ID
-                       → nemo agents experimentalist doctor
-                       → nemo agents experimentalist run
-```
-
-The Experimentalist can consume a NeMo Platform Insight ID. Insights does not
-propose or evaluate agent changes itself; the Experimentalist does not analyze
-traces or host an Insight API.
-
-[Insight-driven optimization](../../docs/agents/insight-driven-optimization.mdx)
-walks the full loop end to end.

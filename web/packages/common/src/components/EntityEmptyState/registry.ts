@@ -205,7 +205,6 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   insightExperiments: {
     heading: 'No experiments yet',
     subheading: 'This insight has no linked experiments yet.',
-    createAction: { label: 'Run Experiment' },
   },
   insightTraces: {
     heading: 'No traces yet',

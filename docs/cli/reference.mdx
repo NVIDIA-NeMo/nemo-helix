@@ -5951,10 +5951,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 * `package`: Package a NAT agent -- render -> validate -> build ->...
 
-*Platform agents:*
-
-* `experimentalist`: NeMo Experimentalist commands.
-
 #### nemo agents create
 
 Register an agent on the platform.
@@ -7474,101 +7470,6 @@ nemo agents package [OPTIONS]
 * `--agent-version`: Override agent version OCI label.
 * `--agent-author`: Override agent author OCI label.
 * `--template`: Path to an external Jinja2 Dockerfile template.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agents experimentalist
-
-NeMo Experimentalist commands.
-
-**Usage:**
-
-```shell
-nemo agents experimentalist [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `run`: Run local optimization for a baseline agent (local dir or...
-* `components`: List the components this install can resolve by name.
-* `doctor`: Diagnose Experimentalist setup: profile, artifacts,...
-
-##### nemo agents experimentalist run
-
-Run local optimization for a baseline agent (local dir or git source).
-
-**Usage:**
-
-```shell
-nemo agents experimentalist run [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Baseline agent: a local directory or a git URL with an optional ref (e.g. ssh://git@host/group/repo.git@main). Optional in Mode 1 (the insight supplies the agent) and overrides the insight's agent when given. A git source records provenance and enables --config storage.publish_winner to open a draft PR/MR for the winner against that ref.
-* `--ethos`: URI of a markdown file describing the agent under test (its Ethos).
-* `--insight`: Insight for Mode 1: a local insight file OR a platform insight id (surfaced in Studio). A path that exists on disk is read locally; otherwise it is fetched from the platform. Default: \<profile-dir>/.nemo-optimizer/insights.yaml when it exists. Create Platform insights with `nemo insights analysis-runs create --agent <agent> --wait`.
-* `--insight-id`: Selector for a local multi-insight file: exact id/title first; if none matches, a decimal value is a zero-based index.
-* `--no-insight`: Disable insight use (Mode 2), including the shared profile insight file.
-* `--profile <FILE>`: Path to optimizer.yaml. Default: discovered by walking up from the cwd.
-* `--train-dataset`: Train dataset: local path or harbor registry ref. Falls back to the profile.
-* `--validation-dataset`: Validation dataset: local path or harbor registry ref. Falls back to the profile.
-* `--task-template`: Evaluator-specific task-template URI. Required with --insight.
-* `--experiment-dir, --output, --experiments-output, -o <DIRECTORY>`: Local experiment directory; writes eval-and-optimize/ here. Default: \<profile-dir>/.nemo-optimizer/experiments/\<timestamp> when a profile governs the run, else ./tmp.
-* `--workspace`: Intake/NMP workspace for traces and run/candidate metadata. Falls back to the profile.
-* `--base-url`: Base URL of the running NMP instance. Default: NMP_BASE_URL (shell or profile-dir .env), else http://localhost:8080. [env: NMP_BASE_URL=]
-* `--config <FILE>`: YAML or JSON configuration for the optimizer run.
-* `--framework-skills <DIRECTORY>`: Path to a directory of framework skills to load into the optimizer agents. May be specified multiple times. [default: ]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents experimentalist components
-
-List the components this install can resolve by name.
-
-Includes anything a `pip install`ed package registered, which is how a
-developer checks their own component was picked up.
-
-**Usage:**
-
-```shell
-nemo agents experimentalist components [OPTIONS]
-```
-
-**Options:**
-
-* `--role`: Show only this role.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents experimentalist doctor
-
-Diagnose Experimentalist setup: profile, artifacts, models, platform, runtime.
-
-**Usage:**
-
-```shell
-nemo agents experimentalist doctor [OPTIONS]
-```
-
-**Options:**
-
-* `--insight`: Optional insight ref to verify.
-* `--insight-id`: Select an exact id/title or zero-based index from a local multi-insight file.
-* `--profile <PATH>`: Path to optimizer.yaml.
-* `--base-url`: Base URL of the running NMP instance. Default: NMP_BASE_URL (shell or profile-dir .env), else http://localhost:8080. [env: NMP_BASE_URL=]
 
 **Help:**
 
@@ -9407,9 +9308,9 @@ nemo customization [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `automodel`: Automodel training jobs (SFT, distillation).
-* `rl`: NeMo-RL training on a Ray cluster: DPO (preference pairs)...
-* `unsloth`: Unsloth GPU fine-tuning (container submit).
+* `automodel`: Fine-tune a model with Automodel: SFT, LoRA, or knowledge...
+* `rl`: Align a model with NeMo-RL, using DPO or GRPO.
+* `unsloth`: Fine-tune a model with Unsloth on one GPU: SFT with LoRA...
 
 *Jobs:*
 
@@ -9419,7 +9320,31 @@ nemo customization [OPTIONS] COMMAND [ARGS]...
 
 #### nemo customization automodel
 
-Automodel training jobs (SFT, distillation).
+Fine-tune a model with Automodel: SFT, LoRA, or knowledge distillation.
+
+The platform runs the job on a GPU execution profile. That profile's backend
+is docker or kubernetes_job, depending on how the platform was set up. Run
+'nemo jobs list-execution-profiles' to see the profiles on this platform.
+
+Multi-node training (parallelism.num_nodes above 1) needs a kubernetes_job or
+volcano_job backend. On a single node, set the GPU count with
+parallelism.num_gpus_per_node.
+
+The job JSON follows the AutomodelJobInput schema:
+  model        base model entity, as 'name' or 'workspace/name'
+  dataset      training fileset, plus an optional validation fileset
+  training     sft or distillation, and lora or all_weights
+  schedule     epochs, max_steps, seed, validation interval
+  batch        global_batch_size, micro_batch_size, sequence packing
+  optimizer    learning_rate, weight_decay, warmup_steps, decay shape
+  parallelism  nodes, GPUs per node, tensor and pipeline parallel sizes
+
+Optional blocks: output names the model entity written at the end of the run,
+and integrations enables Weights & Biases reporting.
+
+For DPO or GRPO, use the rl backend.
+
+Run 'nemo customization automodel explain' for the full schema and defaults.
 
 **Usage:**
 
@@ -9434,7 +9359,7 @@ nemo customization automodel [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `submit`
+* `submit`: Submit an Automodel training job to the platform.
 
 ##### nemo customization automodel explain
 
@@ -9457,6 +9382,21 @@ nemo customization automodel explain [OPTIONS]
 
 ##### nemo customization automodel submit
 
+Submit an Automodel training job to the platform.
+
+Pass the path to a job JSON file holding one AutomodelJobInput object: the
+base model, the dataset, and how to train it.
+
+Submit validates the file before creating the job, so an invalid field is
+reported immediately. The platform then creates the job and runs it on the
+execution profile resolved for this backend.
+
+Submit prints the created job as JSON on stdout. The 'name' field is the job
+id. Track the job with 'nemo jobs watch \<job id>', or check its status with
+'nemo jobs get-status \<job id>'.
+
+Run 'nemo customization automodel explain' to print the job JSON schema.
+
 **Usage:**
 
 ```shell
@@ -9470,11 +9410,11 @@ nemo customization automodel submit [OPTIONS] JOB_JSON
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--profile`
-* `--cluster`
+* `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
+* `--cluster`: Name of a cluster in the CLI config. Submits to that cluster's base URL.
 * `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NMP_BASE_URL`, then http://localhost:8080.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
-* `--options-file <PATH>`
+* `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
 **Help:**
 
@@ -9482,7 +9422,32 @@ nemo customization automodel submit [OPTIONS] JOB_JSON
 
 #### nemo customization rl
 
-NeMo-RL training on a Ray cluster: DPO (preference pairs) or GRPO (NeMo Gym environment). Set training.type in the job JSON. Remote Kubernetes only.
+Align a model with NeMo-RL, using DPO or GRPO.
+
+The platform runs the job on the kubernetes_job backend only, starting a Ray
+cluster for it. There is no docker path. Run 'nemo jobs list-execution-profiles'
+to see the profiles on this platform.
+
+A single command covers both algorithms: training.type in the job JSON selects
+between 'dpo' and 'grpo'. DPO trains on preference pairs, full weights only.
+GRPO trains against a NeMo Gym environment, and can also train a LoRA adapter
+through training.finetuning_type.
+
+The job JSON follows the RlJobInput schema:
+  model        base model entity, as 'name' or 'workspace/name'
+  dataset      fileset reference. For DPO, one fileset holding training.jsonl
+and validation.jsonl of prompt, chosen and rejected rows. For
+GRPO, Gym rollout rows in training.jsonl
+  environment  Gym environment fileset. Required for GRPO, unused for DPO
+  training     type 'dpo' or 'grpo', plus that method's hyperparameters
+
+Optional blocks: output names the model entity written at the end of the run,
+and integrations enables Weights & Biases reporting.
+
+For supervised fine-tuning, use the automodel or unsloth backend. GRPO here
+trains LoRA adapters too.
+
+Run 'nemo customization rl explain' for the full schema and defaults.
 
 **Usage:**
 
@@ -9497,7 +9462,7 @@ nemo customization rl [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `submit`
+* `submit`: Submit a NeMo-RL training job to the platform.
 
 ##### nemo customization rl explain
 
@@ -9520,6 +9485,23 @@ nemo customization rl explain [OPTIONS]
 
 ##### nemo customization rl submit
 
+Submit a NeMo-RL training job to the platform.
+
+Pass the path to a job JSON file holding one RlJobInput object: the base
+model, the dataset, and how to align it. Set training.type to 'dpo' or 'grpo';
+GRPO also needs an environment fileset. Submit fails immediately if the
+platform has no kubernetes_job backend.
+
+Submit validates the file before creating the job, so an invalid field is
+reported immediately. The platform then creates the job and runs it on the
+execution profile resolved for this backend.
+
+Submit prints the created job as JSON on stdout. The 'name' field is the job
+id. Track the job with 'nemo jobs watch \<job id>', or check its status with
+'nemo jobs get-status \<job id>'.
+
+Run 'nemo customization rl explain' to print the job JSON schema.
+
 **Usage:**
 
 ```shell
@@ -9533,11 +9515,11 @@ nemo customization rl submit [OPTIONS] JOB_JSON
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--profile`
-* `--cluster`
+* `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
+* `--cluster`: Name of a cluster in the CLI config. Submits to that cluster's base URL.
 * `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NMP_BASE_URL`, then http://localhost:8080.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
-* `--options-file <PATH>`
+* `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
 **Help:**
 
@@ -9545,7 +9527,32 @@ nemo customization rl submit [OPTIONS] JOB_JSON
 
 #### nemo customization unsloth
 
-Unsloth GPU fine-tuning (container submit). SFT only.
+Fine-tune a model with Unsloth on one GPU: SFT with LoRA or full weights.
+
+The platform runs the job on a GPU execution profile. That profile's backend
+is docker or kubernetes_job, depending on how the platform was set up. Run
+'nemo jobs list-execution-profiles' to see the profiles on this platform.
+
+One job trains on a single GPU. hardware.gpus selects which GPU to use; it
+does not split the model across several GPUs.
+
+The job JSON follows the UnslothJobInput schema:
+  model      base model entity, max_seq_length, 4-bit or 8-bit loading
+  dataset    training fileset path, plus an optional validation_path
+  training   lora or all_weights, and the LoRA rank, alpha, dropout
+  schedule   epochs, max_steps, warmup, scheduler, logging cadence
+  batch      per_device_train_batch_size, gradient_accumulation_steps
+  optimizer  learning_rate, weight_decay, optimizer algorithm
+  hardware   which GPU to use, and training precision
+
+Optional blocks: output names the result and selects save_method (lora,
+merged_16bit, merged_4bit), deployment_config deploys the trained model, and
+integrations enables Weights & Biases reporting.
+
+For tensor, pipeline, or multi-node parallelism, use the automodel backend.
+For DPO or GRPO, use the rl backend.
+
+Run 'nemo customization unsloth explain' for the full schema and defaults.
 
 **Usage:**
 
@@ -9560,7 +9567,7 @@ nemo customization unsloth [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `submit`
+* `submit`: Submit an Unsloth training job to the platform.
 
 ##### nemo customization unsloth explain
 
@@ -9583,6 +9590,21 @@ nemo customization unsloth explain [OPTIONS]
 
 ##### nemo customization unsloth submit
 
+Submit an Unsloth training job to the platform.
+
+Pass the path to a job JSON file holding one UnslothJobInput object: the base
+model, the dataset, and how to train it.
+
+Submit validates the file before creating the job, so an invalid field is
+reported immediately. The platform then creates the job and runs it on the
+execution profile resolved for this backend.
+
+Submit prints the created job as JSON on stdout. The 'name' field is the job
+id. Track the job with 'nemo jobs watch \<job id>', or check its status with
+'nemo jobs get-status \<job id>'.
+
+Run 'nemo customization unsloth explain' to print the job JSON schema.
+
 **Usage:**
 
 ```shell
@@ -9596,11 +9618,11 @@ nemo customization unsloth submit [OPTIONS] JOB_JSON
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--profile`
-* `--cluster`
+* `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
+* `--cluster`: Name of a cluster in the CLI config. Submits to that cluster's base URL.
 * `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NMP_BASE_URL`, then http://localhost:8080.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
-* `--options-file <PATH>`
+* `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
 **Help:**
 

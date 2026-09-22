@@ -26,7 +26,7 @@ class _InsightsMethods:
 
 
 class InsightsClient(_InsightsMethods, NemoClient):
-    """Sync client for the Insights API subset Experimentalist uses."""
+    """Sync client for the Insights API."""
 
     def get_insight(self, *, workspace: str | None = None, insight_id: str) -> Insight:
         response = self.get_insight_response(workspace=workspace, insight_id=insight_id)
@@ -34,7 +34,7 @@ class InsightsClient(_InsightsMethods, NemoClient):
 
 
 class AsyncInsightsClient(_InsightsMethods, AsyncNemoClient):
-    """Async client for the Insights API subset Experimentalist uses."""
+    """Async client for the Insights API."""
 
     async def get_insight(self, *, workspace: str | None = None, insight_id: str) -> Insight:
         response = await self.get_insight_response(workspace=workspace, insight_id=insight_id)

@@ -3211,7 +3211,7 @@ def _create_agent_from_validated_config(
 
 
 def _spec_package_warning(agent: str, agent_config: Path) -> tuple[str, ...]:
-    """Return skill guidance when *agent_config* lives in a spec package."""
+    """Return migration guidance when *agent_config* lives in a spec package."""
     if not agent or agent in {".", ".."} or "\0" in agent:
         return ()
     if "/" in agent or "\\" in agent or Path(agent).is_absolute() or Path(agent).name != agent:
@@ -3223,7 +3223,7 @@ def _spec_package_warning(agent: str, agent_config: Path) -> tuple[str, ...]:
         return ()
     return (
         f"Warning: This package uses {AGENT_SPEC_FILENAME}.",
-        f"Run the nemo-ethos skill to write {ETHOS_FILENAME}, then delete the {agent}-spec package.",
+        f"Provide an existing {ETHOS_FILENAME}, then delete the {agent}-spec package.",
     )
 
 
@@ -3282,8 +3282,8 @@ def _delete_agent_entity(*, agent_name: str, workspace: str, base_url: str) -> N
     """Delete the agent entity, leaving the ``{agent}-ethos`` fileset in place.
 
     The fileset outlives the agent on purpose: it is the canonical home of
-    ``ETHOS.md`` (see ``ethos_file_ref``), which ``nemo-ethos`` writes
-    before the agent exists and ``nemo-build-agent`` reads on every rebuild.
+    ``ETHOS.md`` (see ``ethos_file_ref``), which may be supplied
+    before the agent exists and Analyst reads during analysis.
     Deleting the fileset here would destroy that durable contract, so the
     executable artifacts it also carries are left behind instead.
     """

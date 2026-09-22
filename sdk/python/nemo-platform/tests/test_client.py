@@ -426,16 +426,6 @@ class TestNeMoPlatform:
         )
         assert request.url.raw_path == b"/files/a%2Fb?beta=true&limit=10"
 
-    @pytest.mark.skip(reason="Mock server tests are disabled")
-    def test_workspace_client_params(self, client: NeMoPlatform) -> None:
-        # Test with base client (no custom params)
-        with pytest.raises(ValueError, match="Missing workspace argument;"):
-            client.entities.create(entity_type="entity_type", data={"foo": "bar"})
-
-        client = NeMoPlatform(base_url=base_url, _strict_response_validation=True, workspace="My Workspace")
-        with client as c2:
-            c2.entities.create(entity_type="entity_type", data={"foo": "bar"})
-
     def test_request_extra_json(self, client: NeMoPlatform) -> None:
         request = client._build_request(
             FinalRequestOptions(
@@ -1312,16 +1302,6 @@ class TestAsyncNeMoPlatform:
             )
         )
         assert request.url.raw_path == b"/files/a%2Fb?beta=true&limit=10"
-
-    @pytest.mark.skip(reason="Mock server tests are disabled")
-    async def test_workspace_client_params(self, async_client: AsyncNeMoPlatform) -> None:
-        # Test with base client (no custom params)
-        with pytest.raises(ValueError, match="Missing workspace argument;"):
-            await async_client.entities.create(entity_type="entity_type", data={"foo": "bar"})
-
-        client = AsyncNeMoPlatform(base_url=base_url, _strict_response_validation=True, workspace="My Workspace")
-        async with client as c2:
-            await c2.entities.create(entity_type="entity_type", data={"foo": "bar"})
 
     def test_request_extra_json(self, client: NeMoPlatform) -> None:
         request = client._build_request(

@@ -8,7 +8,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "cloudpickle>=3.1.1",
-    "nemo-evaluator-sdk",
+    "nemo-evaluator-sdk[harbor]",
     "nemo-platform-plugin",
     "pydantic>=2.12.0",
     "typer>=0.20.0",

@@ -91,7 +91,7 @@ def test_is_canonical_skill_matches_plugin_skills():
 
 
 def test_is_canonical_skill_matches_framework_skills():
-    path = Path("plugins/nemo-experimentalist/framework-skills/langchain-framework/SKILL.md")
+    path = Path("plugins/example-plugin/framework-skills/langchain-framework/SKILL.md")
     assert is_canonical_skill(path)
 
 

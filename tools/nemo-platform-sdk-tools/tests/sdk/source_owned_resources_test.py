@@ -19,6 +19,13 @@ AUTH = SourceOwnedResource(resource_name="auth", path_prefixes=("/apis/auth/auth
 ACCESS_KEYS = SourceOwnedResource(resource_name="access_keys", path_prefixes=("/apis/auth/v2/access-keys",))
 IAM = SourceOwnedResource(resource_name="iam", path_prefixes=("/apis/auth/v2/iam", "/apis/auth/v2/authz"))
 SECRETS = SourceOwnedResource(resource_name="secrets", path_prefixes=("/apis/secrets/v2",))
+ENTITIES = SourceOwnedResource(
+    resource_name="entities",
+    path_prefixes=(
+        "/apis/entities/v2/workspaces/{workspace}/entities",
+        "/apis/entities/v2/entities",
+    ),
+)
 WIDGETS = SourceOwnedResource(resource_name="widgets", path_prefixes=("/apis/widgets/v2",))
 
 
@@ -32,6 +39,7 @@ def test_default_source_owned_resource_registry_contains_migrated_resources() ->
     assert IAM in SOURCE_OWNED_RESOURCE_EXCLUSIONS
     assert JOBS in SOURCE_OWNED_RESOURCE_EXCLUSIONS
     assert SECRETS in SOURCE_OWNED_RESOURCE_EXCLUSIONS
+    assert ENTITIES in SOURCE_OWNED_RESOURCE_EXCLUSIONS
 
 
 def test_active_source_owned_resources_only_includes_absent_resources() -> None:
@@ -51,6 +59,17 @@ def test_endpoint_is_source_owned_uses_path_boundaries() -> None:
     assert endpoint_is_source_owned(_endpoint("/apis/widgets/v2"), (WIDGETS,))
     assert not endpoint_is_source_owned(_endpoint("/apis/widgets/v20/workspaces/default/widgets"), (WIDGETS,))
     assert not endpoint_is_source_owned(_endpoint("/apis/files/v2/workspaces/default/files"), (WIDGETS,))
+
+
+def test_entities_source_owned_paths_do_not_claim_workspaces_or_projects() -> None:
+    assert endpoint_is_source_owned(
+        _endpoint("/apis/entities/v2/workspaces/{workspace}/entities/{entity_type}"),
+        (ENTITIES,),
+    )
+    assert endpoint_is_source_owned(_endpoint("/apis/entities/v2/entities/{id}"), (ENTITIES,))
+    assert not endpoint_is_source_owned(_endpoint("/apis/entities/v2/workspaces"), (ENTITIES,))
+    assert not endpoint_is_source_owned(_endpoint("/apis/entities/v2/workspaces/{workspace}/projects"), (ENTITIES,))
+    assert not endpoint_is_source_owned(_endpoint("/apis/entities/v2/workspaces/{workspace}/members"), (ENTITIES,))
 
 
 def test_derive_source_owned_schema_names_excludes_shared_schemas() -> None:
