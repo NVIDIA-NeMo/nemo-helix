@@ -24,8 +24,9 @@ mutating one a consumer may have pinned.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Signature
@@ -36,6 +37,7 @@ from nemo_builder_plugin.registry import (
     ResolvedImage,
     signature_tag,
 )
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.controller import NemoController
 from nemo_platform_plugin.entities import ListResponse
 from nemo_platform_plugin.entity_client import NemoEntitiesClient
@@ -67,6 +69,18 @@ class _Registry(Protocol):
     def exists(self, registry: str, repository: str, reference: str) -> bool: ...
 
     def close(self) -> None: ...
+
+
+class _JobStatusResponse(Protocol):
+    def data(self) -> Any: ...
+
+
+class _Jobs(Protocol):
+    """The one Jobs call this loop makes. Narrow for the same reason as `_Registry`."""
+
+    # `def ... -> Awaitable`, not `async def`: the generated client's method returns an Awaitable,
+    # and a protocol declaring a coroutine would reject it.
+    def get_job_status(self, *, workspace: str, name: str) -> Awaitable[_JobStatusResponse]: ...
 
 
 class _EntityStore(Protocol):
@@ -110,7 +124,7 @@ class BuilderController(NemoController):
 
     def __init__(self) -> None:
         self._entities: _EntityStore | None = None
-        self._jobs = None
+        self._jobs: _Jobs | None = None
         self._registry: _Registry | None = None
         self._attempts: dict[str, int] = {}
         self._interval_seconds: float = 10.0
@@ -161,18 +175,32 @@ class BuilderController(NemoController):
     async def _job_outcome(self, row: ContainerImage, origin: JobOrigin) -> _JobOutcome:
         """What the producing job did, as three explicit facts rather than a message to re-parse.
 
-        A job that cannot be found at all counts as terminal *and* failed. The only way to reach
-        that state is a job creation that never landed, and a row whose producer will never run
-        must not sit `pending` forever -- exactly one writer owns this row's observed state, and
-        it has to answer eventually.
+        **Only a 404 means "not found".** A job that genuinely does not exist counts as terminal
+        *and* failed: the only way to reach that state is a job creation that never landed, and a
+        row whose producer will never run must not sit `pending` forever.
+
+        **Every other error means "don't know yet", not "failed".** An earlier version caught
+        every exception and called it not-found. A single 503, network blip or token hiccup while
+        the build was still running then met an image not yet pushed, and the row was failed --
+        terminally, since `failed` is never re-selected. Over hours of polling that is not an edge
+        case. Now such a row simply waits for the next cycle; a Jobs service that stays down keeps
+        rows `pending`, which is the truthful state and is what health alerting is for.
         """
         workspace, _, name = origin.job.partition("/")
         assert self._jobs is not None
         try:
             status = (await self._jobs.get_job_status(workspace=workspace, name=name)).data()
-        except Exception:
+        except NotFoundError:
             logger.warning("job %s not found for image %s; treating as terminal", origin.job, row.name)
             return _JobOutcome(terminal=True, succeeded=False, detail="build job not found")
+        except Exception:
+            logger.warning(
+                "could not read status of job %s for image %s; retrying next cycle",
+                origin.job,
+                row.name,
+                exc_info=True,
+            )
+            return _JobOutcome(terminal=False, succeeded=False, detail=None)
 
         value = getattr(status.status, "value", str(status.status)).lower()
         if value not in _TERMINAL:

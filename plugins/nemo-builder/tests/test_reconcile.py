@@ -9,10 +9,14 @@ below is one a real build reaches. The registry protocol itself is exercised sep
 
 from __future__ import annotations
 
+from typing import Any
+
+import httpx
 import pytest
 from nemo_builder_plugin.controller import MAX_ATTEMPTS, BuilderController, _JobOutcome
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance, RegisteredOrigin
 from nemo_builder_plugin.registry import ReferenceNotFound, RegistryError, ResolvedImage, signature_tag
+from nemo_platform_plugin.client.errors import InternalServerError, NotFoundError
 from nemo_platform_plugin.entities import ListResponse, PaginationInfo
 
 DIGEST = "sha256:" + "c" * 64
@@ -223,3 +227,59 @@ class TestFailures:
         controller, entities = _controller(FakeRegistry(error=RegistryError("503")), job_status="completed")
         await controller.reconcile_one(_row())
         assert entities.updated == []
+
+
+class FakeJobs:
+    """A Jobs client whose status read fails in a chosen way."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def get_job_status(self, *, workspace: str, name: str) -> Any:
+        raise self._error
+
+
+def _real_controller(registry: FakeRegistry, jobs: FakeJobs) -> tuple[BuilderController, FakeEntities]:
+    """The REAL `_job_outcome`, unlike `StubbedController`, which replaces it."""
+    controller = BuilderController()
+    entities = FakeEntities()
+    controller._registry = registry
+    controller._entities = entities
+    controller._jobs = jobs
+    return controller, entities
+
+
+def _http_error(cls: type[Exception], status: int) -> Exception:
+    return cls(httpx.Response(status, request=httpx.Request("GET", "http://jobs.invalid/status")))
+
+
+class TestJobStatusErrorsAreClassifiedHonestly:
+    """Found by adversarial review: every exception used to mean "job not found".
+
+    A single transient error while the build was still running then met an image not yet pushed,
+    and a healthy build's row was failed -- terminally.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RuntimeError("connection reset"),
+            _http_error(InternalServerError, 503),
+        ],
+        ids=["network", "http-503"],
+    )
+    async def test_a_transient_error_leaves_an_in_flight_build_pending(self, error: Exception) -> None:
+        controller, entities = _real_controller(FakeRegistry(resolves=None), FakeJobs(error))
+        row = _row()
+        await controller.reconcile_one(row)
+        assert row.status == "pending"
+        assert entities.updated == [], "a transient error must not write a verdict"
+
+    @pytest.mark.asyncio
+    async def test_a_genuinely_missing_job_still_fails_the_row(self) -> None:
+        """A job creation that never landed must not leave a row pending forever."""
+        controller, entities = _real_controller(FakeRegistry(resolves=None), FakeJobs(_http_error(NotFoundError, 404)))
+        await controller.reconcile_one(_row())
+        assert entities.updated[0].status == "failed"
+        assert "not found" in (entities.updated[0].status_detail or "")
