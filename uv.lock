@@ -5605,6 +5605,7 @@ nemo-evaluator-sdk = [
     { name = "langchain-openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-sandboxed-gym", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "opentelemetry-proto", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pandas", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6396,6 +6397,7 @@ requires-dist = [
     { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = "==0.1.7" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", specifier = "==0.1.7" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'services'", specifier = "==0.1.7" },
+    { name = "nemo-sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "packages/sandboxed_gym" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.23.0" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'guardrails-service'", specifier = "==0.23.0" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'nemo-guardrails-plugin'", specifier = "==0.23.0" },
@@ -7069,7 +7071,7 @@ pydantic-v2 = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", marker = "extra == 'aiohttp'" },
+    { name = "aiohttp", marker = "extra == 'aiohttp'", specifier = ">=3.14.1" },
     { name = "anyio", specifier = ">=4.0.0,<5" },
     { name = "distro", specifier = ">=1.7.0,<2" },
     { name = "docker", specifier = ">=7.0.0" },

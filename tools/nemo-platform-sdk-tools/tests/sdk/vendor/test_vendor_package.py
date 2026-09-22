@@ -823,6 +823,10 @@ members = ["packages/nemo_platform"]
 name = "nemo-platform"
 
 [project.optional-dependencies]
+manual = ["keep-me"]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-switchyard-aiohttp = ["stale-dependency"]
 
 [tool.bundle-package]
 nemo-switchyard = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", optional-dependencies-prefix = "nemo-switchyard-", inherit = { "entry-points" = ["nemo.*"], "optional-dependencies" = ["aio*"], scripts = ["switchyard-*"] } }
@@ -860,6 +864,7 @@ switchyard = "nemo_switchyard.plugins:plugin"
 
     assert list(optional["nemo-switchyard"]) == ["httpx>=0.28"]
     assert list(optional["nemo-switchyard-aiohttp"]) == ["nemo-platform[nemo-switchyard]", "aiohttp"]
+    assert list(optional["manual"]) == ["keep-me"]
     assert "aiohttp" not in optional
     assert "safe-synthesizer" not in optional
     assert "test" not in optional

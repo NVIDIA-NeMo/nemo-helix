@@ -131,9 +131,23 @@ uv sync --package nemo-agents-plugin --extra deepagents
 Hermes Agent 0.20 and later is not distributed through PyPI and has dependency
 conflicts with the Platform environment. Follow the
 [Hermes Agent installation guide](https://hermes-agent.nousresearch.com/docs/installation)
-for a separate environment. Source-checkout users can run
-`script/dev-install-hermes.sh`, then set `ADAPTER_PYTHON` to
-`.venv-hermes/bin/python`.
+to create a separate environment, then install the matching Fabric runtime and
+Hermes adapter into that environment:
+
+```bash
+export ADAPTER_PYTHON=/path/to/hermes-environment/bin/python
+PLATFORM_PYTHON="$(sed -n '1s/^#!//p' "$(command -v nemo)")"
+FABRIC_VERSION="$("$PLATFORM_PYTHON" -c \
+  'import importlib.metadata as m; print(m.version("nemo-fabric"))')"
+
+uv pip install --python "$ADAPTER_PYTHON" \
+  "nemo-fabric[relay]==$FABRIC_VERSION" \
+  "nemo-fabric-adapters-hermes==$FABRIC_VERSION"
+```
+
+Keep `ADAPTER_PYTHON` set when starting NeMo Platform. Source-checkout users
+can instead run `script/dev-install-hermes.sh`, which performs these steps and
+installs the supported Hermes version in `.venv-hermes`.
 
 Runtime behavior is described by the platform-managed `agent.yaml`:
 

@@ -781,6 +781,7 @@ def _merge_matching_project_optional_dependencies(
 
     target_project_name = target_project.get("name")
     target_optional = target_project.setdefault("optional-dependencies", tomlkit.table())
+    generated_optional_groups = _generated_optional_dependency_groups(target_optional)
     target_dependencies = {
         canonicalize_name(Requirement(dependency).name) for dependency in target_project.get("dependencies", [])
     }
@@ -798,7 +799,7 @@ def _merge_matching_project_optional_dependencies(
         if not _should_copy_optional_dependency_extra(extra_name, target_project_name):
             continue
         inherited_extra_name = f"{extra_prefix}{extra_name}"
-        if inherited_extra_name not in target_optional:
+        if inherited_extra_name not in target_optional or inherited_extra_name in generated_optional_groups:
             inherited = ([base_requirement] if base_requirement else []) + list(deps)
             target_optional[inherited_extra_name] = _build_dependency_array(inherited)
 
