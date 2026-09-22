@@ -95,7 +95,7 @@ from nemo_platform_plugin._spec_flags import (
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
-from nemo_platform_plugin.cli_state import resolve_local_cli_sdks
+from nemo_platform_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks
 from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
@@ -413,7 +413,8 @@ def _add_submit_command(
         profile: str | None = cast("str | None", kwargs.pop("profile", None))
         cluster: str | None = cast("str | None", kwargs.pop("cluster", None))
         base_url: str | None = cast("str | None", kwargs.pop("base_url", None))
-        workspace: str = cast(str, kwargs.pop("workspace", "default"))
+        workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
+        original_kwargs["workspace"] = workspace
         config: str | None = cast("str | None", kwargs.pop("config", None))
         config_file: Path | None = cast("Path | None", kwargs.pop("config_file", None))
 
@@ -593,12 +594,13 @@ def _build_job_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signatur
         ),
         kw(
             "workspace",
-            str,
+            Optional[str],
             typer.Option(
-                "default",
+                None,
                 "--workspace",
-                help="Workspace scope for the submission.",
+                help="Workspace scope for the submission. Defaults to the active CLI context's workspace.",
                 rich_help_panel=_PANEL_SUBMISSION,
+                show_default="active context workspace",
             ),
         ),
     ]
@@ -811,7 +813,8 @@ def _add_function_run_command(
         original_kwargs = dict(kwargs)
         spec_str: str = cast(str, kwargs.pop("spec", "{}"))
         spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
-        workspace: str = cast(str, kwargs.pop("workspace", "default"))
+        workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
+        original_kwargs["workspace"] = workspace
 
         base = _load_spec(spec_str, spec_file)
         overlay = build_overlay(leaves, kwargs, unset_sentinel=UNSET)
@@ -894,12 +897,16 @@ def _build_function_run_signature(leaves: list[SpecLeafField]) -> inspect.Signat
         ),
         kw(
             "workspace",
-            str,
+            Optional[str],
             typer.Option(
-                "default",
+                None,
                 "--workspace",
-                help="Workspace identity passed to the function as ctx.workspace.",
+                help=(
+                    "Workspace identity passed to the function as ctx.workspace. "
+                    "Defaults to the active CLI context's workspace."
+                ),
                 rich_help_panel=_PANEL_SPEC_SOURCE,
+                show_default="active context workspace",
             ),
         ),
     ]
@@ -1014,7 +1021,8 @@ def _add_function_submit_command(
         spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
         cluster: str | None = cast("str | None", kwargs.pop("cluster", None))
         base_url: str | None = cast("str | None", kwargs.pop("base_url", None))
-        workspace: str = cast(str, kwargs.pop("workspace", "default"))
+        workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
+        original_kwargs["workspace"] = workspace
         request_id: str | None = cast("str | None", kwargs.pop("request_id", None))
 
         base = _load_spec(spec_str, spec_file)
@@ -1115,12 +1123,13 @@ def _build_function_submit_signature(leaves: list[SpecLeafField]) -> inspect.Sig
         ),
         kw(
             "workspace",
-            str,
+            Optional[str],
             typer.Option(
-                "default",
+                None,
                 "--workspace",
-                help="Workspace path segment used in the submit URL.",
+                help=("Workspace path segment used in the submit URL. Defaults to the active CLI context's workspace."),
                 rich_help_panel=_PANEL_SUBMISSION,
+                show_default="active context workspace",
             ),
         ),
         kw(
