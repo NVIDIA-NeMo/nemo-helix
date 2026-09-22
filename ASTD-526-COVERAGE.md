@@ -91,6 +91,7 @@ been exercised against a shared model.
 | Area | Status | Notes |
 | --- | --- | --- |
 | Model pickers, customization UI, agent config | **Not started** | Studio has no awareness of shared entities. Since listings stay workspace-pure, a shared model will not appear in any picker — a user can only reach one by typing a qualified reference. This is the main gap between "works" and "usable" |
+| Model chat availability | **Broken for merged / full-SFT models** | `useModelChatAvailability.ts` checks the base model's deployment instead of the model's own, and looks the base up in the model's workspace with the qualified `base_model` as a name (`404`). A `marcus` merged model with a `READY` deployment in `marcus` shows *Chat Unavailable*; the gateway serves it fine. See the brief's results section |
 
 ## What to do on GPU, in order
 

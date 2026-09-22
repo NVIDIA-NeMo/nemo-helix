@@ -47,8 +47,33 @@ weights in `marcus`. Consequences, none yet tested: with auth on, a caller who c
 not write `default` likely fails at the final step after training; adapter names from
 different workspaces collide, and on conflict the task *updates* the existing adapter, so one
 workspace can silently replace another's; adapter names and fileset refs are visible to every
-workspace that sees the shared model; and a `lora_enabled` deployment in `default` would try
-to hot-load weights from `marcus`, which filesets (not shared, ASTD-640) should refuse.
+workspace that sees the shared model; and a `lora_enabled` deployment in `default` hot-loads
+weights from `marcus`. With auth off that **works**: the adapter sidecar read each adapter's
+fileset from `marcus` (`200`) and vLLM served it. Whether the sidecar may do so with auth on
+is untested; filesets are not shared (ASTD-640), so expect a denial there.
+
+**Customized models actually work.** On prompts outside the training set, all four
+adapters on the `default` LoRA deployment answered in the trained `a + b = c.` format,
+correctly (including 3-digit sums not seen in training), where the base model worked
+step by step; general answers were unchanged. The bare-fileset model's adapters were not
+chatted with (the GPU fits one vLLM deployment).
+
+**Customized model owned by `marcus`, end to end.** A LoRA adapter cannot live in `marcus`
+today (see above), but a merged checkpoint can: unsloth with `save_method: merged_16bit`,
+run from `marcus` against the shared base, registered `marcus/p2-us-merged` with its
+weights in `marcus` and `base_model: default/qwen3-p1-180943`, and added nothing to
+`default`. Deployed in `marcus` with vLLM, it is listed in `marcus`'s gateway catalogue and
+serves chat through `marcus`'s gateway; nothing is deployed in `default`. Its fine-tuning
+shows (`43 + 76` switches to the trained format) but less strongly than the adapters.
+
+**Studio cannot chat with that model.** It shows *"Chat Unavailable — This model does not
+have an active deployment"* although the deployment is `READY`.
+`web/packages/studio/src/hooks/useModelChatAvailability.ts` has two faults: for any model
+with a `base_model` it checks the **base** model's deployment, not the model's own — wrong
+for merged and full-SFT models, and not specific to sharing; and it fetches the base with
+`useModelsGetModel(model.workspace, model.base_model)`, passing the qualified ref
+`default/qwen3-p1-180943` as a name in the model's own workspace, which returns `404`. The
+second is this PR's bug class on the Studio side. Chat works through the gateway directly.
 
 **Local setup that is not in SETUP.md** — each cost a failed run:
 
