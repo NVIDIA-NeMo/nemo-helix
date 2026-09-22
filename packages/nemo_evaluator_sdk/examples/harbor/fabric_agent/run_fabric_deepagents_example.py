@@ -55,7 +55,7 @@ def api_key_env_for(model: str, override: str | None) -> str:
 async def _main(jobs_dir: Path, *, model: str, api_key_env: str, job_name: str | None) -> None:
     agent_kwargs: dict[str, JsonValue] = {
         "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-        "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+        "fabric_package": "nemo-fabric[deepagents]==0.3.0",
         # The task image's working directory; Fabric's default `/testbed` does not exist there.
         "fabric_workspace": "/app",
     }
