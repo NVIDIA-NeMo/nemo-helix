@@ -40,8 +40,12 @@ SLOW_SECONDS="${SLOW_SECONDS:-240}"
 # Enough members to see a ramp and to exceed the member cap below, small enough
 # that one run fits in a coffee break.
 MEMBERS="${MEMBERS:-10}"
-# Deliberately below MEMBERS so the cap actually has to bind.
+# The per-run cap sent with the request. Deliberately below MEMBERS so it binds.
 MEMBER_CAP="${MEMBER_CAP:-3}"
+# What in-flight count the run is asserted against. Separate from MEMBER_CAP so
+# the settings-level caps can be isolated: raise MEMBER_CAP out of the way and
+# set this to the limit under test, or the run cannot say which cap bound.
+ASSERT_CAP="${ASSERT_CAP:-$MEMBER_CAP}"
 SCENARIO="${1:-happy}"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -423,11 +427,11 @@ print(json.dumps({
     -o "$WORK/run.json" || fail "benchmark run create"
   local run_id
   run_id="$(json "$WORK/run.json" id)"
-  note "benchmark_run_id: $run_id   member cap: $MEMBER_CAP"
+  note "benchmark_run_id: $run_id   run cap: $MEMBER_CAP   asserting: $ASSERT_CAP"
 
   step "watching the fan-out"
   python3 "$(dirname "$0")/fanout-probe.py" "$BASE" "$run_id" \
-    --expect-members "$MEMBERS" --member-cap "$MEMBER_CAP" \
+    --expect-members "$MEMBERS" --member-cap "$ASSERT_CAP" \
     | tee "$WORK/fanout.json" || fail "fan-out probe reported a violation"
 
   local per_min settled
@@ -437,13 +441,13 @@ import json, sys
 counts = json.load(open(sys.argv[1]))["final_status_counts"]
 print(counts.get("succeeded", 0))' "$WORK/fanout.json")"
   [ "$settled" = "$MEMBERS" ] || fail "only $settled/$MEMBERS members succeeded"
-  pass "all $MEMBERS members succeeded, cap held at $MEMBER_CAP, no status regressed"
+  pass "all $MEMBERS members succeeded, cap held at $ASSERT_CAP, no status regressed"
 
   # The caps gate the *claim*, and submission follows the claim, so a binding
   # cap paces submissions by completions. Measuring the controller's drain rate
   # under one measures the cap instead: run `MEMBER_CAP=$MEMBERS` for that.
-  if [ "$MEMBER_CAP" -lt "$MEMBERS" ]; then
-    note "submit rate not asserted: the cap of $MEMBER_CAP paced submissions (${per_min}/min)"
+  if [ "$ASSERT_CAP" -lt "$MEMBERS" ]; then
+    note "submit rate not asserted: the cap of $ASSERT_CAP paced submissions (${per_min}/min)"
     return 0
   fi
   # One submission per reconcile pass at the 10s default is ~6/min. Anything at
