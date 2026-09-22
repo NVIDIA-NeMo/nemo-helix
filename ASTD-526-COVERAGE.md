@@ -45,15 +45,19 @@ their own workspace resolves nothing from it.
 All three go through `fetch_model_entity`, so all three inherit path 3 and the weights fix.
 Only automodel has been exercised.
 
-| Plugin | Status | GPU | What is left |
+| Plugin | Resolution | Training | Notes |
 | --- | --- | --- | --- |
-| `nemo-automodel` | **Verified (submission)** | **Yes, for training** | Job submission and base-model + weights resolution confirmed across four ref combinations. Training itself never ran |
-| `nemo-unsloth` | **Inherits (untested)** | **Yes** | Same `fetch_model_entity` call in `transform.py:68`; confirm submission, then train |
-| `nemo-rl` | **Inherits (untested)** | **Yes — Ray cluster** | Same call in `transform.py:47`; DPO and GRPO paths both |
+| `nemo-automodel` | **Verified** | Needs GPU | Four combinations of qualified/unqualified model and fileset refs all submit; model in an unrelated workspace rejected. Found and fixed the weights-workspace bug |
+| `nemo-unsloth` | **Verified** | Needs GPU | Three shared-model refs submit `201`; `private-llm` from an unrelated workspace rejected `422` |
+| `nemo-rl` | **Verified** | Needs Kubernetes + Ray + GPU | Valid refs pass `transform` and stop at the runtime gate (*"requires platform.runtime: kubernetes"*), which is downstream of resolution. Invalid refs fail earlier in `transform` with *"Model entity not found: 'marcus/private-llm'"*. The differing stage is what makes this conclusive |
 
-The submission path is testable **without** GPU — it validates the model reference and the
-weights fileset before any scheduling, which is exactly where the automodel bug appeared.
-Worth doing for unsloth and rl before booking GPU time.
+All three resolve through `fetch_model_entity`, and all three are now confirmed to resolve a
+shared base model. What is untested for each is whether training then **loads the weights** —
+that needs hardware.
+
+Note for reading `nemo-rl` results: a `422` alone proves nothing there, because it cannot
+compile a spec locally at all. The error text distinguishes a resolution failure
+(`Failed to transform...`) from the runtime gate (`Failed to compile...`).
 
 ## Inference consumers
 
@@ -85,9 +89,8 @@ been exercised against a shared model.
 
 **Before booking hardware — none of these need GPU:**
 
-1. **Training submissions for `nemo-unsloth` and `nemo-rl`.** Submission validates the model
-   reference and the weights fileset before anything is scheduled, which is exactly where
-   automodel's bug appeared. Cheapest place to find the next one.
+1. ~~Training submissions for `nemo-unsloth` and `nemo-rl`.~~ **Done** — both resolve a
+   shared base model correctly; see the training-backends table.
 2. **One real inference call per inference consumer** against a shared model, using an
    external provider credential rather than a local GPU deployment. Start with
    `nemo-switchyard` (routes *between* models, so most likely to carry a workspace
