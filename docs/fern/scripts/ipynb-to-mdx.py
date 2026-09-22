@@ -65,6 +65,30 @@ _LINK_REWRITES: list[tuple[re.Pattern[str], str]] = [
         "](/documentation/customizer-reference/tutorials/embedding-customization-job)",
     ),
     (
+        re.compile(r"\]\(\./embedding-triplet-dataset(?:\.ipynb)?\)"),
+        "](/documentation/customizer-reference/tutorials/embedding-triplet-dataset)",
+    ),
+    (
+        re.compile(r"\]\(\.\./\.\./data-designer/tutorials/retrieval-generate(?:\.ipynb)?\)"),
+        "](/documentation/design-synthetic-data/tutorials/retrieval-generate)",
+    ),
+    (
+        re.compile(r"\]\(\.\./\.\./customizer/tutorials/embedding-customization-job(?:\.ipynb)?\)"),
+        "](/documentation/customizer-reference/tutorials/embedding-customization-job)",
+    ),
+    (
+        re.compile(r"\]\(\.\./retrieval-sdg(?:\.mdx)?\)"),
+        "](/documentation/design-synthetic-data/retrieval-sdg)",
+    ),
+    (
+        re.compile(r"\]\(\.\./\.\./data-designer/retrieval-sdg(?:\.mdx)?\)"),
+        "](/documentation/design-synthetic-data/retrieval-sdg)",
+    ),
+    (
+        re.compile(r"\]\(\.\./models/data-format(?:\.md)?\)"),
+        "](/documentation/customizer-reference/models/dataset-format)",
+    ),
+    (
         re.compile(r"\]\(\./lora-customization-job(?:\.ipynb)?\)"),
         "](/documentation/customizer-reference/tutorials/lora-customization-job)",
     ),
@@ -91,7 +115,12 @@ CUSTOMIZER_TUTORIALS: list[tuple[str, str]] = [
     ("lora-customization-job.ipynb", "LoRA Model Customization"),
     ("distillation-customization-job.ipynb", "Knowledge Distillation Customization"),
     ("embedding-customization-job.ipynb", "Embedding Model Customization"),
+    ("embedding-triplet-dataset.ipynb", "Train on SPECTER or Triplet JSONL"),
     ("optimize-throughput.ipynb", "Optimize for Tokens/GPU Throughput"),
+]
+
+DATA_DESIGNER_TUTORIALS: list[tuple[str, str]] = [
+    ("retrieval-generate.ipynb", "Generate Retrieval Training Data"),
 ]
 
 
@@ -118,6 +147,8 @@ def convert_notebook_to_mdx(ipynb_path: Path, *, title: str) -> str:
 
     return (
         "---\n"
+        "# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\n"
+        "# SPDX-License-Identifier: Apache-2.0\n"
         f'title: "{title}"\n'
         'description: ""\n'
         "---\n"
@@ -142,6 +173,20 @@ def convert_all_customizer_tutorials(tutorials_dir: Path) -> int:
     return rc
 
 
+def convert_all_data_designer_tutorials(tutorials_dir: Path) -> int:
+    rc = 0
+    for notebook_name, title in DATA_DESIGNER_TUTORIALS:
+        ipynb = tutorials_dir / notebook_name
+        mdx = tutorials_dir / notebook_name.replace(".ipynb", ".mdx")
+        if not ipynb.exists():
+            print(f"Error: {ipynb} not found", file=sys.stderr)
+            rc = 1
+            continue
+        mdx.write_text(convert_notebook_to_mdx(ipynb, title=title), encoding="utf-8")
+        print(f"Wrote {mdx}")
+    return rc
+
+
 def main() -> int:
     args = sys.argv[1:]
     if not args or "-h" in args or "--help" in args:
@@ -151,7 +196,10 @@ def main() -> int:
     if "--all-customizer-tutorials" in args:
         repo_root = Path(__file__).resolve().parents[3]
         tutorials_dir = repo_root / "docs" / "customizer" / "tutorials"
-        return convert_all_customizer_tutorials(tutorials_dir)
+        rc = convert_all_customizer_tutorials(tutorials_dir)
+        dd_dir = repo_root / "docs" / "data-designer" / "tutorials"
+        dd_rc = convert_all_data_designer_tutorials(dd_dir)
+        return rc or dd_rc
 
     input_path = Path(args[0])
     output_path: Path | None = None

@@ -1,7 +1,6 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
 title: "Optimize for Tokens/GPU Throughput"
 description: ""
 ---
@@ -63,6 +62,7 @@ Required packages:
 - `nvidia-ml-py` - Collect GPU VRAM and compute utilization metrics during training
 
 ```sh
+%%bash
 if command -v uv >/dev/null 2>&1 && [ -n "$VIRTUAL_ENV" ]; then
     uv pip install datasets pandas matplotlib nvidia-ml-py
 else
@@ -166,11 +166,13 @@ If you plan to use NGC or Hugging Face models, you will need to configure authen
 - **NGC models** (`ngc://` URIs): Requires NGC API key
 - **Hugging Face models** (`hf://` URIs): Requires HF token for gated/private models
 
+
 Configure these as secrets in your platform. Refer to [Managing Secrets](/documentation/get-started/core-concepts/manage-secrets) for detailed instructions.
 
 Get your credentials to access base models:
 - [NGC API Key](https://ngc.nvidia.com/) (Setup → Generate API Key)
 - [Hugging Face Token](https://huggingface.co/settings/tokens) (Create token with Read access)
+
 
 ---
 
@@ -189,6 +191,7 @@ This tutorial uses the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co
 HF_TOKEN = os.getenv("HF_TOKEN")
 NGC_API_KEY = os.getenv("NGC_API_KEY")
 
+
 def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
         raise ValueError(f"{label} environment variable is not set. Set it and try again.")
@@ -203,6 +206,7 @@ def create_or_get_secret(name: str, value: str | None, label: str):
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
         return client.secrets.retrieve(name=name, workspace="default")
+
 
 # Create Hugging Face token secret
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
@@ -340,6 +344,7 @@ The elapsed time printed below reflects progress of the entire job. We compare t
 
 #### Define Helper Functions
 
+
 ```python
 # Helpers to draw GPU VRAM Utilization and Validation Loss
 import matplotlib.pyplot as plt
@@ -371,6 +376,7 @@ def _get_gpu_snapshot() -> tuple[list[float], list[float]]:
     finally:
         pynvml.nvmlShutdown()
 
+
 # ---------------------------------------------------------------------------
 # Dashboard drawing helpers
 # ---------------------------------------------------------------------------
@@ -387,6 +393,7 @@ _PALETTE = {
     "tick":       "#666666",
 }
 
+
 def _style_axis(ax):
     """Apply shared cosmetic styling to a subplot axis."""
     ax.set_facecolor("white")
@@ -396,6 +403,7 @@ def _style_axis(ax):
     ax.spines["left"].set_color(_PALETTE["spine"])
     ax.spines["bottom"].set_color(_PALETTE["spine"])
     ax.tick_params(colors=_PALETTE["tick"], labelsize=9)
+
 
 def _plot_line(ax, xs, ys, color, label, fill=True):
     """Plot a time series, gracefully skipping None values."""
@@ -411,6 +419,7 @@ def _plot_line(ax, xs, ys, color, label, fill=True):
     )
     if fill:
         ax.fill_between(px, py, alpha=0.08, color=color)
+
 
 def _plot_gpu_panel(ax, xs, history, colors, fallback_label):
     """Plot per-GPU time series with area fill."""
@@ -429,6 +438,7 @@ def _plot_gpu_panel(ax, xs, history, colors, fallback_label):
         ax.fill_between(xs[: len(vals)], vals, alpha=0.08, color=c)
     if n_gpus > 1:
         ax.legend(fontsize=9, framealpha=0.9, edgecolor="#DDD")
+
 
 def _draw_dashboard(
     elapsed_mins, val_losses, train_losses,
@@ -497,6 +507,7 @@ TIMEOUT_SECONDS = 30 * 60  # 30 minutes
 VAL_LOSS_KEY = "val_loss"
 TRAIN_LOSS_KEY = "train_loss"
 
+
 def get_training_metric(
     status: PlatformJobStatusResponse,
     metric_key: str,
@@ -509,6 +520,7 @@ def get_training_metric(
                 if value is not None:
                     return float(value)
     return None
+
 
 # ---------------------------------------------------------------------------
 # Job polling with live dashboard
@@ -676,6 +688,7 @@ def wait_for_job(
             raise Exception(f"Job finished with status: {status.status}")
 
         time.sleep(poll_interval)
+
 
 # Wait for the job to complete
 job_with_sequence_packing_status = wait_for_job(
