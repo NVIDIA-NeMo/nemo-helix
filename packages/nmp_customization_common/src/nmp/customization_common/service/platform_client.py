@@ -139,6 +139,22 @@ async def check_gym_dataset_layout(
         )
 
 
+def model_weights_ref(model: ModelEntity) -> FileSetRef:
+    """Return a model's weights fileset, qualified with the workspace it lives in.
+
+    An unqualified fileset reference on a model names a fileset in the model's own
+    workspace. Left unqualified, the file_io task would resolve it against the job's
+    workspace instead, which differs whenever the model is shared from the global
+    workspace.
+    """
+    if not model.fileset:
+        raise ValueError(f"Model '{model.workspace}/{model.name}' has no fileset.")
+    ref = FileSetRef.model_validate(model.fileset)
+    if ref.workspace is None:
+        ref = ref.model_copy(update={"workspace": model.workspace})
+    return ref
+
+
 async def fetch_model_entity(
     model_ref: str,
     default_workspace: str,

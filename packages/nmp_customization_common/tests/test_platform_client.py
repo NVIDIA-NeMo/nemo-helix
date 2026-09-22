@@ -1,18 +1,21 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.models.types import ModelEntity
 from nmp.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     check_dataset_access,
     check_environment_access,
     check_gym_dataset_layout,
     fetch_model_entity,
+    model_weights_ref,
 )
 
 
@@ -140,3 +143,25 @@ async def test_fetch_model_entity_names_the_owning_workspace_when_weights_are_mi
 
     with pytest.raises(ValueError, match="Weights for model 'default/llama'"):
         await fetch_model_entity("llama", "marcus", platform)
+
+
+def _model(fileset: str | None) -> ModelEntity:
+    now = datetime.now()
+    return ModelEntity(
+        id="model-llama", workspace="default", name="llama", fileset=fileset, created_at=now, updated_at=now
+    )
+
+
+def test_model_weights_ref_qualifies_a_bare_fileset_with_the_models_own_workspace() -> None:
+    ref = model_weights_ref(_model("weights#hf"))
+
+    assert (ref.workspace, ref.name, ref.path) == ("default", "weights", "hf/")
+
+
+def test_model_weights_ref_keeps_an_explicit_workspace() -> None:
+    assert model_weights_ref(_model("team/weights")).workspace == "team"
+
+
+def test_model_weights_ref_rejects_a_model_without_weights() -> None:
+    with pytest.raises(ValueError, match="'default/llama' has no fileset"):
+        model_weights_ref(_model(None))

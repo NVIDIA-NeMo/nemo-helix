@@ -56,7 +56,11 @@ from nmp.customization_common.schemas.file_io import (
     UploadItem,
 )
 from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    fetch_model_entity,
+    model_weights_ref,
+)
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.rl.app.constants import (
     BASE_LOG_DIR_ENVVAR,
@@ -133,13 +137,13 @@ def _require_fileset(name: str | None, *, label: str) -> str:
 
 
 def _build_download_config(job_spec: RlJobOutput, me: ModelEntity, *, workspace: str) -> FileIOTaskConfig:
-    model_fileset = _require_fileset(me.fileset, label=f"Model '{me.workspace}/{me.name}'")
+    _require_fileset(me.fileset, label=f"Model '{me.workspace}/{me.name}'")
     dataset_ref = FileSetRef.model_validate(job_spec.dataset)
     if dataset_ref.workspace is None:
         dataset_ref = FileSetRef(workspace=workspace, name=dataset_ref.name)
 
     downloads = [
-        DownloadItem(src=FileSetRef.model_validate(model_fileset), dest=DEFAULT_MODEL_PATH),
+        DownloadItem(src=model_weights_ref(me), dest=DEFAULT_MODEL_PATH),
         DownloadItem(src=dataset_ref, dest=DEFAULT_DATASET_PATH),
     ]
 

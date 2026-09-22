@@ -47,6 +47,7 @@ from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig,
 from nmp.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     fetch_model_entity,
+    model_weights_ref,
 )
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.unsloth.app.constants import (
@@ -150,13 +151,13 @@ def _build_file_download_config(
     workspace: str,
 ) -> FileIOTaskConfig:
     """Compile the download step: model fileset + dataset fileset."""
-    model_fileset = _require_fileset(
+    _require_fileset(
         me.fileset,
         label=f"Model '{me.workspace}/{me.name}'",
     )
     downloads = [
         DownloadItem(
-            src=FileSetRef.model_validate(model_fileset),
+            src=model_weights_ref(me),
             dest=DEFAULT_MODEL_PATH,
         ),
         DownloadItem(
