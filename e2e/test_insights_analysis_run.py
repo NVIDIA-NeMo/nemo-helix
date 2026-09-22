@@ -11,9 +11,9 @@ can run ``nemo agents analyst run`` locally.
 The Analyst's model is mocked, deliberately. What is under test is the wiring —
 run recorded, job submitted under the run's name, Fabric runs the inline
 Analyst, the ``insights.analysis`` extension persists the change-set and saves
-the report — not whether a real model reaches a good conclusion. The Analyst is
-a Nooa CodeAct agent, so one mocked ``execute_python`` tool call carrying a
-``return_result(...)`` cell drives a complete, deterministic run.
+the report — not whether a real model reaches a good conclusion. Two seeded
+Intake traces pass through trace-intel's evidence streams and compilation,
+with deterministic Nooa model responses.
 """
 
 from __future__ import annotations
@@ -21,12 +21,15 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.inference_middleware import BackendFormat
+from nemo_platform_plugin.intake.client import IntakeClient
+from nemo_platform_plugin.intake.types import DirectSpanInput, DirectSpansIngestRequest
 from nemo_platform_plugin.jobs.client import JobsClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import CreateModelEntityRequest
@@ -51,13 +54,14 @@ FABRIC_RUN_RESULT_NAME = "fabric_run_result"
 FABRIC_ERROR_RESULT_NAME = "fabric_error"
 JOB_TIMEOUT_SECONDS = 600.0
 
-ANALYST_SUMMARY = "Filed one insight from the deterministic e2e change-set."
+ANALYST_SUMMARY = "Analyzed 2 traces: 1 new insights, 0 existing insights with new evidence."
 INSIGHT_TITLE = "Knowledge search returns no documents and the agent answers anyway"
 INSIGHT_DESCRIPTION = (
     "The retrieval tool returns an empty document set, and the agent produces a "
     "confident answer instead of saying it could not find supporting context."
 )
 TRACE_REF = "trace-insights-analysis-run-e2e"
+TRACE_REFS = [f"{TRACE_REF}-1", f"{TRACE_REF}-2"]
 # Sent inline on the run so the whole ethos chain — request, harness settings,
 # adapter, prompt — is exercised by a real job. We can't assert this makes it
 # in to the model prompt here, but we at least ensure it isn't rejected anywhere
@@ -68,20 +72,15 @@ ETHOS = "# Ethos\n\nAnswer only from retrieved context; say so when there is non
 def _return_result_cell() -> str:
     """The Python cell the mocked model 'writes' to end the CodeAct run.
 
-    ``return_result`` is the Analyst's single terminal call: Nooa validates the
-    value against ``AnalystResult`` and ends the run, so one cell is a whole
-    analysis.
+    Compilation returns the package's list of Insights; the Platform adapter
+    translates it to the persisted change-set.
     """
     return (
-        "return_result(result={"
-        f"'summary': {ANALYST_SUMMARY!r}, "
-        "'new_insights': [{"
-        f"'title': {INSIGHT_TITLE!r}, "
+        "return_result(result=[{"
+        f"'name': {INSIGHT_TITLE!r}, "
         f"'description': {INSIGHT_DESCRIPTION!r}, "
-        "'status': 'open', "
-        f"'trace_refs': [{TRACE_REF!r}]"
-        "}], "
-        "'updated_insights': []})"
+        f"'trace_refs': {TRACE_REFS!r}"
+        "}])"
     )
 
 
@@ -150,10 +149,14 @@ def _mock_analyst_models(sdk: NeMoPlatform, workspace: str) -> tuple[str, str]:
             f"{workspace}/{default_model}": [
                 MockProviderResponse(response_body=_execute_python_response(default_model, _return_result_cell()))
             ],
-            # The fast model is only used for context summarization, which a
-            # single-turn run never reaches. It still has to resolve.
+            # The ethos stream returns evidence; the default model compiles it.
             f"{workspace}/{fast_model}": [
-                MockProviderResponse(response_body=_plain_response(fast_model, "unused summary"))
+                MockProviderResponse(
+                    response_body=_execute_python_response(
+                        fast_model,
+                        f"return_result(result=[{{'description': {INSIGHT_DESCRIPTION!r}, 'supporting_trace_ids': {TRACE_REFS!r}}}])",
+                    )
+                )
             ],
         },
         served_models={default_model: default_model, fast_model: fast_model},
@@ -251,6 +254,40 @@ def _created_insight_id(report: str) -> str:
 def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoPlatform, workspace: str) -> None:
     """One analysis run, end to end, through the supported API surface."""
     target_agent = unique_name("analyzed-agent")
+    intake = client_from_platform(sdk, IntakeClient)
+    now = datetime.now(timezone.utc) - timedelta(seconds=5)
+    intake.create_spans(
+        workspace=workspace,
+        body=DirectSpansIngestRequest(
+            source="insights-e2e",
+            spans=[
+                DirectSpanInput(
+                    span_id=f"{ref}-root",
+                    trace_id=ref,
+                    session_id=ref,
+                    name="search",
+                    kind="TOOL",
+                    status="error",
+                    started_at=now,
+                    ended_at=now + timedelta(seconds=1),
+                    input={"query": "knowledge"},
+                    output={"documents": []},
+                    attributes={"gen_ai.agent.name": target_agent, "gen_ai.tool.name": "search"},
+                )
+                for ref in TRACE_REFS
+            ],
+        ),
+    ).data()
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        traces = list(
+            intake.list_traces(workspace=workspace, query_params={"filter": {"agent_name": target_agent}}).items()
+        )
+        if len(traces) == 2:
+            break
+        time.sleep(1)
+    else:
+        pytest.fail("Seeded traces did not become queryable")
     default_model, fast_model = _mock_analyst_models(sdk, workspace)
 
     created = sdk.insights.analysis_runs.create(
@@ -306,4 +343,4 @@ def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoPlatform, 
     assert filed.title == INSIGHT_TITLE
     assert filed.description == INSIGHT_DESCRIPTION
     assert filed.agent == target_agent
-    assert filed.trace_refs == [TRACE_REF]
+    assert filed.trace_refs == TRACE_REFS

@@ -1,20 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The analyst's single terminal result — a pure, storage-agnostic change-set.
+"""Platform persistence contract for trace-intel's reconciled insights.
 
-Instead of mutating platform state through a series of tool calls
-(``create_insight`` / ``update_insight``) while it
-reasons, the analyst reads observability data only, then emits one
-:class:`AnalystResult` struct that captures *every* change it wants to make.
-That struct is the agent's typed output: Nooa validates the value passed to
-``return_result``, which ends the run and hands the whole change-set back to
-the CLI.
-
-These models intentionally know nothing about how the change-set is persisted.
-Each :class:`~nemo_insights_plugin.analyst.analyst_backend.AnalystBackend`
-decides that: the remote backend writes Insight rows to the DB, while the local
-backend writes the result to a YAML file verbatim.
+The adapter translates package Insights into this change-set after validating
+their storage IDs. Both the CLI and the Fabric execute extension persist it
+through the same backend.
 """
 
 from nemo_insights_plugin.entities import InsightStatus
@@ -74,12 +65,7 @@ class InsightUpdate(BaseModel):
 
 
 class AnalystResult(BaseModel):
-    """The analyst's complete, final change-set for one run.
-
-    The model populates this once, at the end of its analysis, in place of the
-    old mutating tool calls. Calling ``return_result`` with this struct ends
-    the run; the CLI then hands it to the backend to persist.
-    """
+    """Validated creations and evidence updates for one analysis run."""
 
     model_config = ConfigDict(extra="forbid")
 

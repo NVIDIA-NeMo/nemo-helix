@@ -7,7 +7,6 @@ from typing import Any, cast
 
 import pytest
 from nemo_insights_plugin.analyst import run as run_module
-from nemo_insights_plugin.analyst.deps import AnalystDeps
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.nooa_model_client import ConfiguredModelClients
@@ -32,6 +31,8 @@ class FakeModelClient:
 
 
 class FakeBackend:
+    intake = object()
+
     async def persist_result(self, *, workspace: str, agent: str, result: object) -> str:
         return "REPORT"
 
@@ -68,18 +69,23 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]) -> 
         seen["local_only"] = local_only
         return FakeBackend()
 
-    async def fake_run_agent(analyst: object, *, verbose: bool) -> object:
-        return object()
-
     monkeypatch.setattr(run_module, "make_analyst_backend", fake_make_backend)
     monkeypatch.setattr(run_module, "resolve_model_clients", fake_resolve_model_clients)
 
-    def fake_build_agent(**kwargs: object) -> object:
+    async def fake_analyze_snapshot(snapshot: object, **kwargs: object) -> object:
         seen["build_kwargs"] = kwargs
         return object()
 
-    monkeypatch.setattr(run_module, "build_analyst_agent", fake_build_agent)
-    monkeypatch.setattr(run_module, "_run_agent", fake_run_agent)
+    async def fake_load_existing(*args: object, **kwargs: object) -> list:
+        return []
+
+    async def fake_load_snapshot(*args: object, **kwargs: object) -> object:
+        seen["snapshot_kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(run_module, "analyze_snapshot", fake_analyze_snapshot)
+    monkeypatch.setattr(run_module, "load_existing_insights", fake_load_existing)
+    monkeypatch.setattr(run_module, "load_trace_snapshot", fake_load_snapshot)
 
     class Observability:
         def shutdown(self) -> None:
@@ -104,7 +110,7 @@ async def test_injected_client_is_used_and_closed(monkeypatch: pytest.MonkeyPatc
     assert report == "REPORT"
     assert seen["backend_client"] is client
     build_kwargs = cast(dict[str, object], seen["build_kwargs"])
-    assert cast(AnalystDeps, build_kwargs["deps"]).backend is not None
+    assert build_kwargs["existing"] == []
     assert seen["platform_client"] is client
     assert seen["models_client_cls"] is run_module.AsyncModelsClient
     assert seen["model_client"] is seen["adapted_model_client"]
