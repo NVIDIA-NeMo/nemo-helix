@@ -22,12 +22,12 @@ from typing import Annotated, Any, Optional
 
 import typer
 from nemo_agents_plugin.cli_context import (
-    WORKSPACE_HELP,
     BaseUrlOption,
     resolve_base_url,
     resolve_context_headers,
 )
 from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset
+from nemo_platform_plugin.cli_options import workspace_help
 from nemo_platform_plugin.cli_state import resolve_workspace
 from nemo_platform_plugin.client.client import NemoClient
 
@@ -70,7 +70,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             Optional[str],
             typer.Option(
                 "--workspace",
-                help=f"Workspace for the fileset and for agent / model preflight. {WORKSPACE_HELP}",
+                help=workspace_help("Workspace for the fileset and for agent / model preflight."),
             ),
         ] = None,
         agent: Annotated[

@@ -50,6 +50,7 @@ from nemo_insights_plugin.sdk_resources.analysis_runs import (
 )
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatformError
 from nemo_platform_plugin.cli import NemoCLI
+from nemo_platform_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
 from nemo_platform_plugin.cli_state import resolve_workspace
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.nooa_model_client import configured_model_refs
@@ -262,8 +263,8 @@ def analyze(
     ),
     workspace: str | None = typer.Option(
         None,
-        "--workspace",
-        help="Workspace the analyst should operate in.",
+        *WORKSPACE_FLAGS,
+        help=workspace_help("Workspace the analyst should operate in."),
     ),
     base_url: str | None = typer.Option(
         None,
@@ -403,8 +404,8 @@ class InsightsCLI(NemoCLI):
             ),
             workspace: str | None = typer.Option(
                 None,
-                "--workspace",
-                help="Workspace the agent belongs to. Defaults to the active CLI context's workspace.",
+                *WORKSPACE_FLAGS,
+                help=workspace_help("Workspace the agent belongs to."),
             ),
             base_url: str = typer.Option(
                 os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
@@ -435,8 +436,8 @@ class InsightsCLI(NemoCLI):
             ),
             workspace: str | None = typer.Option(
                 None,
-                "--workspace",
-                help="Workspace the agent belongs to. Defaults to the active CLI context's workspace.",
+                *WORKSPACE_FLAGS,
+                help=workspace_help("Workspace the agent belongs to."),
             ),
             base_url: str = typer.Option(
                 os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
@@ -467,8 +468,8 @@ class InsightsCLI(NemoCLI):
             ),
             workspace: str | None = typer.Option(
                 None,
-                "--workspace",
-                help="Workspace to inspect. Defaults to the active CLI context's workspace.",
+                *WORKSPACE_FLAGS,
+                help=workspace_help("Workspace to inspect."),
             ),
             base_url: str = typer.Option(
                 os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
@@ -505,8 +506,8 @@ class InsightsCLI(NemoCLI):
             ),
             workspace: str | None = typer.Option(
                 None,
-                "--workspace",
-                help="Workspace the agent belongs to. Defaults to the active CLI context's workspace.",
+                *WORKSPACE_FLAGS,
+                help=workspace_help("Workspace the agent belongs to."),
             ),
             base_url: str = typer.Option(
                 os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
@@ -595,8 +596,8 @@ class InsightsCLI(NemoCLI):
             ),
             workspace: str | None = typer.Option(
                 None,
-                "--workspace",
-                help="Workspace to inspect. Defaults to the active CLI context's workspace.",
+                *WORKSPACE_FLAGS,
+                help=workspace_help("Workspace to inspect."),
             ),
             base_url: str = typer.Option(
                 os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
@@ -632,8 +633,8 @@ class InsightsCLI(NemoCLI):
             name: str = typer.Argument(..., help="Name of the analysis run."),
             workspace: str | None = typer.Option(
                 None,
-                "--workspace",
-                help="Workspace the run belongs to. Defaults to the active CLI context's workspace.",
+                *WORKSPACE_FLAGS,
+                help=workspace_help("Workspace the run belongs to."),
             ),
             base_url: str = typer.Option(
                 os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),

@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import typer
+from nemo_platform_plugin.cli_options import WorkspaceOption
 from nemo_platform_plugin.cli_state import resolve_cli_workspace
 
 LoadJobJson = Callable[[Path], str]
@@ -64,12 +65,7 @@ def _replace_job_submit(group: typer.Typer, load_job_json: LoadJobJson, job_json
     def submit(
         typer_ctx: typer.Context,
         job_json: Path = typer.Argument(..., metavar="JOB_JSON", help=job_json_help),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help="Target workspace. Defaults to the active CLI context's workspace.",
-        ),
+        workspace: WorkspaceOption = None,
         profile: str | None = typer.Option(None, "--profile"),
         cluster: str | None = typer.Option(None, "--cluster"),
         base_url: str | None = typer.Option(

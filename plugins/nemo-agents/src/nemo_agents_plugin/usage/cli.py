@@ -21,7 +21,6 @@ from typing import Optional
 import typer
 from nemo_agents_plugin.cli_context import (
     BaseUrlOption,
-    WorkspaceOption,
     resolve_base_url,
     resolve_context_headers,
 )
@@ -34,6 +33,7 @@ from nemo_agents_plugin.usage.models import (
 )
 from nemo_agents_plugin.usage.sources.fileset import FilesetDownloadError, FilesetRefError, fileset_path
 from nemo_agents_plugin.usage.sources.local import UsageSourceError, local_path
+from nemo_platform_plugin.cli_options import WorkspaceOption
 from nemo_platform_plugin.cli_state import resolve_workspace
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.refs import FilesetRef, LocalDir, classify_output_target

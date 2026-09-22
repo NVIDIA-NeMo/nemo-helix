@@ -30,10 +30,10 @@ import httpx
 import typer
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_platform_plugin.cli_options import WorkspaceOption
 from nemo_platform_plugin.cli_state import resolve_workspace
 
 _DEFAULT_BASE_URL = "http://localhost:8080"
-_WORKSPACE_HELP = "Target workspace. Defaults to the active CLI context's workspace."
 
 
 def _plugin_path(workspace: str, resource: str, name: str | None = None) -> str:
@@ -102,13 +102,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
             dir_okay=False,
         ),
         data: str | None = typer.Option(None, "--data", "-d", help=f"Inline JSON body for the {singular}."),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help=_WORKSPACE_HELP,
-            show_default="active context workspace",
-        ),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
         workspace = resolve_workspace(workspace)
@@ -119,13 +113,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
 
     @sub.command("list")
     def list_cmd(
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help=_WORKSPACE_HELP,
-            show_default="active context workspace",
-        ),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
         workspace = resolve_workspace(workspace)
@@ -135,13 +123,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
     @sub.command("get")
     def get(
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help=_WORKSPACE_HELP,
-            show_default="active context workspace",
-        ),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
         workspace = resolve_workspace(workspace)
@@ -161,13 +143,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
             dir_okay=False,
         ),
         data: str | None = typer.Option(None, "--data", "-d", help="Inline JSON body."),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help=_WORKSPACE_HELP,
-            show_default="active context workspace",
-        ),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
         workspace = resolve_workspace(workspace)
@@ -178,13 +154,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
     @sub.command("delete")
     def delete(
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help=_WORKSPACE_HELP,
-            show_default="active context workspace",
-        ),
+        workspace: WorkspaceOption = None,
         base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
     ) -> None:
         workspace = resolve_workspace(workspace)

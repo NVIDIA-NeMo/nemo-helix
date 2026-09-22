@@ -23,6 +23,7 @@ from data_designer.cli.ui import print_error
 from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
 from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.utils.constants import DEFAULT_NUM_RECORDS
+from nemo_platform_plugin.cli_options import WorkspaceOption
 from nemo_platform_plugin.cli_state import resolve_cli_workspace
 
 _NON_INTERACTIVE_HELP = (
@@ -123,12 +124,7 @@ def _replace_function_submit(group: typer.Typer) -> None:
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
         num_records: int = typer.Option(DEFAULT_NUM_RECORDS, "--num-records", "-n", min=1),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help="Target workspace. Defaults to the active CLI context's workspace.",
-        ),
+        workspace: WorkspaceOption = None,
         cluster: str | None = typer.Option(None, "--cluster"),
         base_url: str | None = typer.Option(None, "--base-url"),
         request_id: str | None = typer.Option(None, "--request-id"),
@@ -169,12 +165,7 @@ def _replace_job_submit(group: typer.Typer) -> None:
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
         num_records: int = typer.Option(DEFAULT_NUM_RECORDS, "--num-records", "-n", min=1),
-        workspace: str | None = typer.Option(
-            None,
-            "--workspace",
-            "-w",
-            help="Target workspace. Defaults to the active CLI context's workspace.",
-        ),
+        workspace: WorkspaceOption = None,
         profile: str | None = typer.Option(None, "--profile"),
         cluster: str | None = typer.Option(None, "--cluster"),
         base_url: str | None = typer.Option(None, "--base-url"),

@@ -62,7 +62,6 @@ from nemo_agents_plugin.cli_context import (
 )
 from nemo_agents_plugin.cli_context import (
     BaseUrlOption,
-    WorkspaceOption,
 )
 from nemo_agents_plugin.cli_context import (
     resolve_base_url as _resolve_base_url,
@@ -109,6 +108,7 @@ from nemo_platform_plugin.agents.types import (
 )
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_platform_plugin.cli_options import WorkspaceOption
 from nemo_platform_plugin.cli_progress import request_progress
 from nemo_platform_plugin.cli_state import resolve_workspace
 from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
