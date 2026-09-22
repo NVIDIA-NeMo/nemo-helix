@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from nemo_agents_plugin.cli_context import BaseUrlOption, resolve_base_url, resolve_context_headers
+from nemo_agents_plugin.cli_context import (
+    BaseUrlOption,
+    WorkspaceOption,
+    resolve_base_url,
+    resolve_context_headers,
+)
 from nemo_agents_plugin.usage import compute, render
 from nemo_agents_plugin.usage import parser as parser_module
 from nemo_agents_plugin.usage.models import (
@@ -30,11 +35,10 @@ from nemo_agents_plugin.usage.models import (
 from nemo_agents_plugin.usage.sources.fileset import FilesetDownloadError, FilesetRefError, fileset_path
 from nemo_agents_plugin.usage.sources.local import UsageSourceError, local_path
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.cli_state import resolve_workspace
 from nemo_platform_plugin.refs import FilesetRef, LocalDir, classify_output_target
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_WORKSPACE = "default"
 
 
 def _validate_total_params(value: Optional[float]) -> Optional[float]:
@@ -72,10 +76,11 @@ def register_usage_commands(app: typer.Typer) -> None:
             "compute_units = total_tokens × total_params.  Closed-source models have no "
             "public number — leave unset and compute_units stays null.",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Show a usage report for *ref*."""
+        workspace = resolve_workspace(workspace)
         _show(
             ref,
             total_params=total_params,

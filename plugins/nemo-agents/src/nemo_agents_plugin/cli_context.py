@@ -44,6 +44,24 @@ BaseUrlOption = Annotated[
     typer.Option("--base-url", envvar="NEMO_BASE_URL", help=BASE_URL_HELP),
 ]
 
+WORKSPACE_HELP = (
+    "Target workspace. Resolution order: "
+    "(1) this --workspace flag; "
+    "(2) NMP_WORKSPACE; "
+    "(3) the active CLI context's workspace (`nemo config use-context`); "
+    "(4) 'default'."
+)
+
+# Reusable ``--workspace`` option shared across every ``nemo agents`` command.
+# The Typer default **must** stay ``None`` ("unset"): a literal ``"default"``
+# would make an omitted flag indistinguishable from an explicit
+# ``--workspace default``, so the active CLI context could never win and the
+# command would silently act on the wrong workspace.
+WorkspaceOption = Annotated[
+    Optional[str],
+    typer.Option("--workspace", "-w", help=WORKSPACE_HELP),
+]
+
 
 def current_cli_state() -> Any:
     """Return the shared CLI context object (``typer.Context.obj``) if present.

@@ -21,8 +21,14 @@ from pathlib import Path
 from typing import Annotated, Any, Optional
 
 import typer
-from nemo_agents_plugin.cli_context import BaseUrlOption, resolve_base_url, resolve_context_headers
+from nemo_agents_plugin.cli_context import (
+    WORKSPACE_HELP,
+    BaseUrlOption,
+    resolve_base_url,
+    resolve_context_headers,
+)
 from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset
+from nemo_platform_plugin.cli_state import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +66,12 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             typer.Option("--fileset", help="Fileset to upload into ('name' or 'workspace/name'). Created if missing."),
         ],
         workspace: Annotated[
-            str,
-            typer.Option("--workspace", help="Workspace for the fileset and for agent / model preflight."),
-        ] = "default",
+            Optional[str],
+            typer.Option(
+                "--workspace",
+                help=f"Workspace for the fileset and for agent / model preflight. {WORKSPACE_HELP}",
+            ),
+        ] = None,
         agent: Annotated[
             Optional[str],
             typer.Option(
@@ -84,6 +93,8 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         ] = False,
         base_url: BaseUrlOption = None,
     ) -> None:
+        workspace = resolve_workspace(workspace)
+
         from nemo_optimization.bundle import BundlePreflightError, preflight_bundle
 
         try:

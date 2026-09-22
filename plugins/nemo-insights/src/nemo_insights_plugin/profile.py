@@ -16,7 +16,7 @@ class AnalysisProfile(BaseModel):
 
     agent: str = Field(min_length=1)
     ethos: str | None = None
-    workspace: str = "default"
+    workspace: str | None = None
     profile_dir: Path
 
 

@@ -10,6 +10,7 @@ import shlex
 
 import typer
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalPrepareJobConfig
+from nemo_platform_plugin.cli_state import resolve_workspace
 
 retrieval_app = typer.Typer(
     name="retrieval",
@@ -28,10 +29,16 @@ def retrieval_generate(
     provider: str = typer.Option(..., "--provider", help="Inference Gateway provider (workspace/name)."),
     chat_model: str = typer.Option(..., "--chat-model", help="Chat model for artifact extraction, Q&A, and judging."),
     embed_model: str = typer.Option(..., "--embed-model", help="Embedding model."),
-    workspace: str = typer.Option("default", "--workspace", "-w"),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Target workspace. Defaults to the active CLI context's workspace.",
+    ),
     spec_out: bool = typer.Option(False, "--print-spec", help="Print JSON spec instead of a submission command."),
 ) -> None:
     """Build a spec for the auto-generated ``retrieval-generate`` job command."""
+    workspace = resolve_workspace(workspace)
     spec = RetrievalGenerateJobConfig(
         corpus=corpus,
         provider=provider,
@@ -65,9 +72,15 @@ def retrieval_prepare(
         "--mine/--no-mine",
         help="Run GPU hard-negative mining after conversion. Conversion-only is the default.",
     ),
-    workspace: str = typer.Option("default", "--workspace", "-w"),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Target workspace. Defaults to the active CLI context's workspace.",
+    ),
 ) -> None:
     """Build a spec for the auto-generated ``retrieval-prepare`` job command."""
+    workspace = resolve_workspace(workspace)
     if (sdg_input is None) == (train_input_file is None):
         raise typer.BadParameter("Provide exactly one of --sdg-input or --train-input-file.")
     if generation_file is None:
@@ -92,9 +105,15 @@ def retrieval_preview(
     provider: str = typer.Option(..., "--provider", help="Inference Gateway provider (workspace/name)."),
     chat_model: str = typer.Option(..., "--chat-model", help="Chat model for artifact extraction, Q&A, and judging."),
     embed_model: str = typer.Option(..., "--embed-model", help="Embedding model."),
-    workspace: str = typer.Option("default", "--workspace", "-w"),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Target workspace. Defaults to the active CLI context's workspace.",
+    ),
 ) -> None:
     """Build a spec for the auto-generated ``retrieval-preview`` function command."""
+    workspace = resolve_workspace(workspace)
     generate = RetrievalGenerateJobConfig(
         corpus=corpus,
         provider=provider,

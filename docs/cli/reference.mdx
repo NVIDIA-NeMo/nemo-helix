@@ -5971,7 +5971,7 @@ nemo agents create [OPTIONS]
 * `--name, -n`: Agent name.
 * `--agent-config, -c <FILE>`: Path to an agent YAML config file.
 * `--description`: [default: ]
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -5990,7 +5990,7 @@ nemo agents list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6018,7 +6018,7 @@ nemo agents get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6041,7 +6041,7 @@ nemo agents delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -6083,7 +6083,7 @@ nemo agents deploy [OPTIONS]
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass --no-wait for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6122,7 +6122,7 @@ nemo agents redeploy [OPTIONS]
 * `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass --no-wait to return the pending deployment immediately as JSON.
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
 * `--yes, -y`: Skip confirmation prompt.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6161,7 +6161,7 @@ nemo agents logs [OPTIONS] [NAME]
 * `--follow, -f`: Tail the log file and stream new output as it is written.
 * `--tail, -n <INTEGER>`: Print only the last N lines before exiting (or before following). Default: print full log.
 * `--path`: Print only the absolute log file path and exit (useful for scripting).
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6185,7 +6185,7 @@ nemo agents undeploy [OPTIONS] [NAME]
 **Options:**
 
 * `--agent, --all, -a`: Remove all deployments for this agent.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -6226,7 +6226,7 @@ nemo agents deployments list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6254,7 +6254,7 @@ nemo agents deployments get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6277,7 +6277,7 @@ nemo agents deployments delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -6310,7 +6310,7 @@ nemo agents deployments wait [OPTIONS] [NAME]
 * `--agent, -a`: Wait for the latest active deployment of this agent (alternative to passing a name directly).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait. [default: 300]
 * `--interval <FLOAT>`: Poll interval in seconds. [default: 2.0]
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6356,7 +6356,7 @@ nemo agents environment-specs create [OPTIONS] NAME
 
 * `--spec-file, -f <PATH>`: Path to a JSON/YAML EnvironmentSpec body (without 'name').
 * `--spec`: Inline EnvironmentSpec body as a JSON object string.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6375,7 +6375,7 @@ nemo agents environment-specs list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6403,7 +6403,7 @@ nemo agents environment-specs get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6426,7 +6426,7 @@ nemo agents environment-specs delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -6479,7 +6479,7 @@ nemo agents environments create [OPTIONS] NAME
 * `--compute-spec`: 'workspace/name' ref to a stored AgentComputeSpec.
 * `--spec-file, -f <PATH>`: Path to a JSON/YAML AgentEnvironment body (without 'name').
 * `--spec`: Inline AgentEnvironment body as a JSON object string.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6498,7 +6498,7 @@ nemo agents environments list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6526,7 +6526,7 @@ nemo agents environments get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6549,7 +6549,7 @@ nemo agents environments delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -6596,7 +6596,7 @@ nemo agents compute-specs create [OPTIONS] NAME
 
 * `--spec-file, -f <PATH>`: Path to a JSON/YAML ComputeSpec body (without 'name').
 * `--spec`: Inline ComputeSpec body as a JSON object string.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6615,7 +6615,7 @@ nemo agents compute-specs list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6643,7 +6643,7 @@ nemo agents compute-specs get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6666,7 +6666,7 @@ nemo agents compute-specs delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -6690,7 +6690,7 @@ nemo agents chat [OPTIONS]
 * `--agent-deployment, -d`: Deployment to start a new persisted session against.
 * `--session, -s`: Name of an existing persisted session to resume.
 * `--session-name`: Name for a new session; valid only with --agent-deployment.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--timeout, -t <FLOAT RANGE>`: Request timeout in seconds for each streamed agent turn. [default: 300] [env: NEMO_AGENTS_INVOKE_TIMEOUT=]
 
@@ -6731,7 +6731,7 @@ nemo agents sessions list [OPTIONS]
 **Options:**
 
 * `--agent-deployment, -d`: Limit results to sessions bound to this deployment.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6759,7 +6759,7 @@ nemo agents sessions get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -6782,7 +6782,7 @@ nemo agents sessions close [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
@@ -7130,7 +7130,7 @@ nemo agents optimize prepare-fileset [OPTIONS]
 * `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
 * `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --optimize-config`.
 * `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
-* `--workspace`: Workspace for the fileset and for agent / model preflight. [default: default]
+* `--workspace`: Workspace for the fileset and for agent / model preflight. Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
 * `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
 * `--dry-run`: Run preflight and print the result without uploading.
@@ -7300,7 +7300,7 @@ nemo agents invoke [OPTIONS]
 * `--input-file <PATH>`: JSON file containing a list of input queries for batch invocation.
 * `--agent, -a`: Name of a platform-deployed agent to invoke (platform required).
 * `--agent-deployment, -d`: Name of a specific deployment to invoke (platform required).
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--timeout, -t <FLOAT>`: Request timeout in seconds for platform invocation. [default: 300] [env: NEMO_AGENTS_INVOKE_TIMEOUT=]
 * `--no-progress`: Suppress the stderr spinner while waiting for the response.
@@ -7419,7 +7419,7 @@ nemo agents usage show [OPTIONS] <PATH | FILESET_REF>
 **Options:**
 
 * `--total-params <FLOAT>`: Model's total parameter count, in billions (e.g. 8.0 for Llama-3.1-8B, 70.0 for Llama-3.1-70B).  When set with non-null tokens, compute_units = total_tokens × total_params.  Closed-source models have no public number — leave unset and compute_units stays null.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
@@ -7718,7 +7718,7 @@ nemo data-designer preview [OPTIONS] [CONFIG_SOURCE]
 **Options:**
 
 * `--num-records, -n <INTEGER RANGE>`: [default: 10]
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--cluster`
 * `--base-url`
 * `--request-id`
@@ -7804,7 +7804,7 @@ nemo data-designer retrieval generate [OPTIONS]
 * `--provider`: Inference Gateway provider (workspace/name).
 * `--chat-model`: Chat model for artifact extraction, Q&A, and judging.
 * `--embed-model`: Embedding model.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--print-spec`: Print JSON spec instead of a submission command.
 
 **Help:**
@@ -7827,7 +7827,7 @@ nemo data-designer retrieval prepare [OPTIONS]
 * `--generation-file`: Relative Stage 0 filename inside sdg_input when the ref is a directory.
 * `--train-input-file`
 * `--mine, --no-mine`: Run GPU hard-negative mining after conversion. Conversion-only is the default.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 
 **Help:**
 
@@ -7849,7 +7849,7 @@ nemo data-designer retrieval preview [OPTIONS]
 * `--provider`: Inference Gateway provider (workspace/name).
 * `--chat-model`: Chat model for artifact extraction, Q&A, and judging.
 * `--embed-model`: Embedding model.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 
 **Help:**
 
@@ -8025,7 +8025,7 @@ nemo data-designer create [OPTIONS] [CONFIG_SOURCE] [COMMAND] [ARGS]...
 **Options:**
 
 * `--num-records, -n <INTEGER RANGE>`: [default: 10]
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--profile`
 * `--cluster`
 * `--base-url`
@@ -8703,7 +8703,7 @@ nemo auditor configs create [OPTIONS] NAME
 
 * `--data-file, -f <FILE>`: JSON file with the config body (without name/workspace).
 * `--data, -d`: Inline JSON body for the config.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8720,7 +8720,7 @@ nemo auditor configs list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8741,7 +8741,7 @@ nemo auditor configs get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8764,7 +8764,7 @@ nemo auditor configs update [OPTIONS] NAME
 
 * `--data-file, -f <FILE>`: JSON file with the new config body.
 * `--data, -d`: Inline JSON body.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8785,7 +8785,7 @@ nemo auditor configs delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8830,7 +8830,7 @@ nemo auditor targets create [OPTIONS] NAME
 
 * `--data-file, -f <FILE>`: JSON file with the target body (without name/workspace).
 * `--data, -d`: Inline JSON body for the target.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8847,7 +8847,7 @@ nemo auditor targets list [OPTIONS]
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8868,7 +8868,7 @@ nemo auditor targets get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8891,7 +8891,7 @@ nemo auditor targets update [OPTIONS] NAME
 
 * `--data-file, -f <FILE>`: JSON file with the new target body.
 * `--data, -d`: Inline JSON body.
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -8912,7 +8912,7 @@ nemo auditor targets delete [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace, -w`: [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--base-url`: [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -9493,7 +9493,7 @@ nemo customization automodel submit [OPTIONS] JOB_JSON
 
 **Options:**
 
-* `--workspace, -w`: Target workspace. [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--profile`
 * `--cluster`
 * `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NMP_BASE_URL`, then http://localhost:8080.
@@ -9556,7 +9556,7 @@ nemo customization rl submit [OPTIONS] JOB_JSON
 
 **Options:**
 
-* `--workspace, -w`: Target workspace. [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--profile`
 * `--cluster`
 * `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NMP_BASE_URL`, then http://localhost:8080.
@@ -9619,7 +9619,7 @@ nemo customization unsloth submit [OPTIONS] JOB_JSON
 
 **Options:**
 
-* `--workspace, -w`: Target workspace. [default: default]
+* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace.
 * `--profile`
 * `--cluster`
 * `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NMP_BASE_URL`, then http://localhost:8080.
@@ -10042,7 +10042,7 @@ nemo insights analysis enable [OPTIONS]
 **Options:**
 
 * `--agent`: Name of the agent to opt in to periodic analysis.
-* `--workspace`: Workspace the agent belongs to. [default: default]
+* `--workspace`: Workspace the agent belongs to. Defaults to the active CLI context's workspace.
 * `--base-url`: Base URL of the running NMP instance. [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -10062,7 +10062,7 @@ nemo insights analysis disable [OPTIONS]
 **Options:**
 
 * `--agent`: Name of the agent to opt out of periodic analysis.
-* `--workspace`: Workspace the agent belongs to. [default: default]
+* `--workspace`: Workspace the agent belongs to. Defaults to the active CLI context's workspace.
 * `--base-url`: Base URL of the running NMP instance. [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -10082,7 +10082,7 @@ nemo insights analysis status [OPTIONS]
 **Options:**
 
 * `--agent`: Optional agent name. Omit to list all analysis configs.
-* `--workspace`: Workspace to inspect. [default: default]
+* `--workspace`: Workspace to inspect. Defaults to the active CLI context's workspace.
 * `--base-url`: Base URL of the running NMP instance. [default: http://localhost:8080] [env: NMP_BASE_URL=]
 
 **Help:**
@@ -10125,7 +10125,7 @@ nemo insights analysis-runs create [OPTIONS]
 **Options:**
 
 * `--agent`: Name of the agent whose telemetry should be analyzed.
-* `--workspace`: Workspace the agent belongs to. [default: default]
+* `--workspace`: Workspace the agent belongs to. Defaults to the active CLI context's workspace.
 * `--base-url`: Base URL of the running NMP instance. [default: http://localhost:8080] [env: NMP_BASE_URL=]
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
@@ -10154,7 +10154,7 @@ nemo insights analysis-runs list [OPTIONS]
 **Options:**
 
 * `--agent`: Only list runs that analyzed this agent.
-* `--workspace`: Workspace to inspect. [default: default]
+* `--workspace`: Workspace to inspect. Defaults to the active CLI context's workspace.
 * `--base-url`: Base URL of the running NMP instance. [default: http://localhost:8080] [env: NMP_BASE_URL=]
 * `--page <INTEGER>`: Page number (1-indexed). [default: 1]
 * `--page-size <INTEGER>`: Items per page. [default: 20]
@@ -10183,7 +10183,7 @@ nemo insights analysis-runs get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace`: Workspace the run belongs to. [default: default]
+* `--workspace`: Workspace the run belongs to. Defaults to the active CLI context's workspace.
 * `--base-url`: Base URL of the running NMP instance. [default: http://localhost:8080] [env: NMP_BASE_URL=]
 * `--wait`: Poll until the run's backing job reaches a terminal state.
 * `--poll-timeout <FLOAT>`: How long --wait polls before giving up. [default: 900.0]
