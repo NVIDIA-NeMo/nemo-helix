@@ -301,10 +301,6 @@ def create_test_client(
         with create_test_client(FilesService) as sdk:
             secret = sdk.secrets.create(workspace="default", name="test", value="value")
 
-    Example (multi-service):
-        with create_test_client(FilesService, EntitiesService) as sdk:
-            sdk.entities.create(...)
-
     Example (TestClient):
         with create_test_client(FilesService, client_type=TestClient) as client:
             response = client.get("/v1/files")

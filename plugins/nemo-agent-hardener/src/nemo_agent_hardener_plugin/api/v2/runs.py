@@ -4,7 +4,7 @@
 """Read-only routes over the ``AgentHardenerRun`` entity.
 
 Mounted by the plugin service at ``/apis/agent-hardener/v2/workspaces/{workspace}``. War-game
-runs are created by the job (``client.entities.create``), so the plugin only exposes reads:
+runs are created by the job through the typed entity client, so the plugin only exposes reads:
 list the agent's runs (Studio's Hardening tab) and fetch one. The entity is the same shape
 on the wire as at rest, so it is returned directly.
 """

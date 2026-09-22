@@ -199,23 +199,24 @@ def _build_binary_router() -> APIRouter:
 
 
 # ---------------------------------------------------------------------------
-# Helper: build a request-scoped EntityClient from the platform SDK
+# Helper: receive the platform-managed EntityClient dependency
 # ---------------------------------------------------------------------------
 
 
 def _get_entity_client() -> NemoEntitiesClient:
     """FastAPI dependency — returns a request-scoped entity client.
 
-    Imported from nemo_platform in real plugin code.  Defined here inline
+    Imported from nemo_platform_plugin in real plugin code. Defined here inline
     so the example plugin is self-contained and easy to read.
     """
-    # In a real plugin, import this from the platform SDK:
-    #   from nemo_platform.resources.entities import get_entity_client
+    # In a real plugin, import this from the plugin package:
+    #   from nemo_platform_plugin.entity_client import get_entity_client
     #   entity_client: NemoEntitiesClient = Depends(get_entity_client)
     #
-    # The SDK's get_entity_client wires auth context, workspace scoping, and
-    # the shared HTTP client.  This stub is for illustration only.
-    raise NotImplementedError("inject via nemo_platform.resources.entities.get_entity_client")
+    # The platform overrides get_entity_client with a request-scoped client that
+    # wires auth context, workspace scoping, and the shared HTTP client. This
+    # stub is for illustration only.
+    raise NotImplementedError("inject via nemo_platform_plugin.entity_client.get_entity_client")
 
 
 # ---------------------------------------------------------------------------

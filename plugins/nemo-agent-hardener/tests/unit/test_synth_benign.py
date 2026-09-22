@@ -43,7 +43,7 @@ def test_from_agent_resolution_builds_agent_source_entity() -> None:
     assert manifest.agent == "ws1/chatbot"
     assert manifest.port == 8000
     assert manifest.secrets == ["OPENAI_API_KEY"]
-    # _get_data_fields carries only domain fields (what the CLI persists via sdk.entities.create).
+    # _get_data_fields carries only domain fields persisted through the typed entity client.
     assert "benign_suite" in manifest._get_data_fields()
     assert "name" not in manifest._get_data_fields()
 

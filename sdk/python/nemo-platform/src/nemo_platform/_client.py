@@ -19,9 +19,16 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING, Any, Mapping
+from pathlib import Path
 from typing_extensions import Self, override
 
 import httpx
+from nemo_platform_plugin.client.tls import client_verify_from_env
+from nemo_platform_plugin.jobs.client import JobsClient, AsyncJobsClient
+from nemo_platform_plugin.secrets.compat import SecretsResource, AsyncSecretsResource
+from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+
+from nemo_platform._base_client import DefaultHttpxClient, DefaultAsyncHttpxClient
 
 from . import _exceptions
 from ._qs import Querystring
@@ -35,8 +42,6 @@ from ._types import (
     not_given,
 )
 from ._utils import (
-    is_given,
-    is_mapping_t,
     get_async_library,
 )
 from ._compat import cached_property
@@ -48,20 +53,14 @@ from ._base_client import (
     SyncAPIClient,
     AsyncAPIClient,
 )
-from nemo_platform._base_client import DefaultAsyncHttpxClient, DefaultHttpxClient
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_platform_plugin.client.tls import client_verify_from_env
-from nemo_platform_plugin.jobs.client import AsyncJobsClient, JobsClient
-from nemo_platform_plugin.secrets.compat import AsyncSecretsResource, SecretsResource
-from pathlib import Path
 
 if TYPE_CHECKING:
+    from .models import ModelsResource, AsyncModelsResource
     from .resources import (
         files,
         intake,
         models,
         adapters,
-        entities,
         projects,
         guardrail,
         inference,
@@ -71,9 +70,7 @@ if TYPE_CHECKING:
     )
     from .filesets.resources import FilesResource, AsyncFilesResource
     from .resources.intake.intake import IntakeResource, AsyncIntakeResource
-    from .models import ModelsResource, AsyncModelsResource
     from .resources.adapters.adapters import AdaptersResource, AsyncAdaptersResource
-    from .resources.entities.entities import EntitiesResource, AsyncEntitiesResource
     from .resources.projects.projects import ProjectsResource, AsyncProjectsResource
     from .resources.guardrail.guardrail import GuardrailResource, AsyncGuardrailResource
     from .resources.inference.inference import InferenceResource, AsyncInferenceResource
@@ -133,6 +130,7 @@ def _copy_requires_bootstrap(
 class NeMoPlatform(SyncAPIClient):
     # client options
     workspace: str | None
+
     def __init__(
         self,
         *,
@@ -174,6 +172,7 @@ class NeMoPlatform(SyncAPIClient):
         .. code-block:: python
 
             from nemo_platform import NeMoPlatform
+
             client = NeMoPlatform()
 
         Example — explicit token for automation:
@@ -182,6 +181,7 @@ class NeMoPlatform(SyncAPIClient):
 
             import os
             from nemo_platform import NeMoPlatform
+
             client = NeMoPlatform(
                 base_url=os.environ["NMP_BASE_URL"],
                 access_token=os.environ["NMP_ACCESS_TOKEN"],
@@ -274,12 +274,6 @@ class NeMoPlatform(SyncAPIClient):
 
         # TODO: needs to be removed
         self.inference_base_url = self._enforce_trailing_slash(httpx.URL(inference_base_url or base_url))
-
-    @cached_property
-    def entities(self) -> EntitiesResource:
-        from .resources.entities import EntitiesResource
-
-        return EntitiesResource(self)
 
     @cached_property
     def files(self) -> FilesResource:
@@ -544,11 +538,13 @@ class AsyncNeMoPlatform(AsyncAPIClient):
             from nemo_platform_plugin.client.adapter import client_from_platform
             from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 
+
             async def main() -> None:
                 client = AsyncNeMoPlatform()
                 workspaces = await client_from_platform(client, AsyncWorkspacesClient).list_workspaces()
                 async for ws in workspaces.items():
                     print(ws.name)
+
 
             asyncio.run(main())
 
@@ -561,6 +557,7 @@ class AsyncNeMoPlatform(AsyncAPIClient):
             from nemo_platform_plugin.client.adapter import client_from_platform
             from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 
+
             async def main() -> None:
                 client = AsyncNeMoPlatform(
                     base_url=os.environ["NMP_BASE_URL"],
@@ -570,6 +567,7 @@ class AsyncNeMoPlatform(AsyncAPIClient):
                 workspaces = await client_from_platform(client, AsyncWorkspacesClient).list_workspaces()
                 async for ws in workspaces.items():
                     print(ws.name)
+
 
             asyncio.run(main())
 
@@ -662,12 +660,6 @@ class AsyncNeMoPlatform(AsyncAPIClient):
         # If no inference_base_url is provided, use base_url
         # TODO: needs to be removed
         self.inference_base_url = self._enforce_trailing_slash(httpx.URL(inference_base_url or base_url))
-
-    @cached_property
-    def entities(self) -> AsyncEntitiesResource:
-        from .resources.entities import AsyncEntitiesResource
-
-        return AsyncEntitiesResource(self)
 
     @cached_property
     def files(self) -> AsyncFilesResource:
@@ -890,12 +882,6 @@ class NeMoPlatformWithRawResponse:
         self._client = client
 
     @cached_property
-    def entities(self) -> entities.EntitiesResourceWithRawResponse:
-        from .resources.entities import EntitiesResourceWithRawResponse
-
-        return EntitiesResourceWithRawResponse(self._client.entities)
-
-    @cached_property
     def files(self) -> files.FilesResourceWithRawResponse:
         from .resources.files import FilesResourceWithRawResponse
 
@@ -961,12 +947,6 @@ class AsyncNeMoPlatformWithRawResponse:
 
     def __init__(self, client: AsyncNeMoPlatform) -> None:
         self._client = client
-
-    @cached_property
-    def entities(self) -> entities.AsyncEntitiesResourceWithRawResponse:
-        from .resources.entities import AsyncEntitiesResourceWithRawResponse
-
-        return AsyncEntitiesResourceWithRawResponse(self._client.entities)
 
     @cached_property
     def files(self) -> files.AsyncFilesResourceWithRawResponse:
@@ -1036,12 +1016,6 @@ class NeMoPlatformWithStreamedResponse:
         self._client = client
 
     @cached_property
-    def entities(self) -> entities.EntitiesResourceWithStreamingResponse:
-        from .resources.entities import EntitiesResourceWithStreamingResponse
-
-        return EntitiesResourceWithStreamingResponse(self._client.entities)
-
-    @cached_property
     def files(self) -> files.FilesResourceWithStreamingResponse:
         from .resources.files import FilesResourceWithStreamingResponse
 
@@ -1107,12 +1081,6 @@ class AsyncNeMoPlatformWithStreamedResponse:
 
     def __init__(self, client: AsyncNeMoPlatform) -> None:
         self._client = client
-
-    @cached_property
-    def entities(self) -> entities.AsyncEntitiesResourceWithStreamingResponse:
-        from .resources.entities import AsyncEntitiesResourceWithStreamingResponse
-
-        return AsyncEntitiesResourceWithStreamingResponse(self._client.entities)
 
     @cached_property
     def files(self) -> files.AsyncFilesResourceWithStreamingResponse:
