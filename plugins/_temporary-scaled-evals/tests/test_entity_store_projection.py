@@ -13,7 +13,7 @@ pytest.importorskip("scaled_evals")
 pytest.importorskip("nemo_scaled_evals_plugin")
 
 from nemo_platform_plugin.entities.base import EntityNotFoundError
-from nemo_scaled_evals_plugin.entities import ScaledEvaluation
+from nemo_scaled_evals_plugin.entities import ScaledEvaluation, evaluation_sort_key
 from nemo_scaled_evals_plugin.projection import (
     EvaluationProjectionReader,
     EvaluationProjectionWriter,
@@ -135,6 +135,48 @@ class FakeEntityClient:
         )()
 
 
+def _matches(spec: dict[str, Any], entity: ScaledEvaluation) -> bool:
+    """Evaluate the filter operations the reader emits against one entity."""
+    for key, condition in spec.items():
+        if key == "$and":
+            if not all(_matches(item, entity) for item in condition):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches(item, entity) for item in condition):
+                return False
+            continue
+        value = getattr(entity, key.removeprefix("data."))
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        for operator, operand in condition.items():
+            comparison = {
+                "$eq": value == operand,
+                "$lt": value < operand,
+                "$gt": value > operand,
+            }[operator]
+            if not comparison:
+                return False
+    return True
+
+
+class SortingEntityClient(FakeEntityClient):
+    """Fake that really filters, sorts and pages, the way the store does.
+
+    Entities are held in insertion order, which the tests deliberately make
+    disagree with id order: when the sort field ties, insertion order is all a
+    store promises, and that is the condition the defect needs.
+    """
+
+    def list(self, entity_type: Any, **kwargs: Any) -> Any:
+        self.list_calls.append(kwargs)
+        spec = kwargs["filter_operation"].to_dict()
+        rows = [entity for entity in self.stored.values() if _matches(spec, entity)]
+        sort = str(kwargs["sort"])
+        rows.sort(key=lambda entity: getattr(entity, sort.lstrip("-")), reverse=sort.startswith("-"))
+        return type("Page", (), {"data": rows[: kwargs["page_size"]], "pagination": None})()
+
+
 def test_projection_round_trips_into_the_existing_response_schemas() -> None:
     row = _row()
 
@@ -207,7 +249,9 @@ def test_reader_reproduces_the_sql_list_predicates_and_ordering() -> None:
     call = client.list_calls[0]
     # limit + 1 mirrors the SQL fetch-one-extra that drives next_cursor.
     assert call["page_size"] == 21
-    assert call["sort"] == "-row_created_at"
+    # Ordering is delegated to the store on a field that is a total order, so
+    # the page it picks is the page SQL would have picked.
+    assert call["sort"] == "-sort_key"
     spec = json.dumps(call["filter_operation"].to_dict())
     for expected in (
         '"data.deleted": {"$eq": false}',
@@ -219,20 +263,56 @@ def test_reader_reproduces_the_sql_list_predicates_and_ordering() -> None:
         '"data.search_blob": {"$like": "%nightly%"}',
     ):
         assert expected in spec
-    # The keyset must be the row comparison (created_at, id) < (C, I), not a
-    # bare timestamp filter, or equal timestamps would repeat or skip a page.
-    assert '"$or"' in spec and '"data.row_created_at": {"$lt"' in spec
-    assert '"data.evaluation_id": {"$lt": "eval_z"}' in spec
+    # The keyset says what SQL's (created_at, id) < (C, I) says, as one bound
+    # on the same total order the sort uses.
+    assert '"data.sort_key": {"$lt": "2026-09-14T13:00:00.000000|eval_z"}' in spec
+    assert '"data.row_created_at"' not in spec
 
-    # The store sorts on one field, so the id tiebreaker is reapplied locally.
-    assert [row["id"] for row in rows] == ["eval_c", "eval_b", "eval_a"]
+    # The store's order is taken as given rather than re-sorted locally, which
+    # could only have reordered a page, never changed which rows were in it.
+    assert [row["id"] for row in rows] == ["eval_b", "eval_a", "eval_c"]
 
     # Default listing hides benchmark members; drilling in targets the run.
     reader.list(limit=5, cursor=None, order="asc", status=None, task_id=None, shared=False, benchmark_run_id="run_1")
     drill = json.dumps(client.list_calls[1]["filter_operation"].to_dict())
     assert '"data.benchmark_run_id": {"$eq": "run_1"}' in drill
     assert '"data.standalone"' not in drill
-    assert client.list_calls[1]["sort"] == "row_created_at"
+    assert client.list_calls[1]["sort"] == "sort_key"
+
+
+def test_evaluations_sharing_a_created_at_page_without_skipping_or_repeating() -> None:
+    ids = ["eval_1", "eval_2", "eval_3", "eval_4", "eval_5"]
+
+    # Lexicographic order of the key is the order SQL's (created_at, id) gives.
+    assert sorted(evaluation_sort_key(CREATED, name) for name in reversed(ids)) == [
+        evaluation_sort_key(CREATED, name) for name in ids
+    ]
+    # Microseconds are always present, so a whole second does not sort ahead of
+    # a fraction of it, and a naive timestamp is read as the UTC that Postgres
+    # would have stored rather than as local time.
+    assert evaluation_sort_key(CREATED, "eval_1") < evaluation_sort_key(CREATED + timedelta(microseconds=1), "eval_0")
+    assert evaluation_sort_key(CREATED.replace(tzinfo=None), "eval_1") == evaluation_sort_key(CREATED, "eval_1")
+
+    # All five share an instant, as a benchmark fan-out creates them, and are
+    # stored against id order so a tie leaves the page contents undefined.
+    client = SortingEntityClient()
+    for evaluation_id in reversed(ids):
+        client.create(row_to_entity(_row(id=evaluation_id), workspace=WORKSPACE))
+    reader = EvaluationProjectionReader(client, workspace=WORKSPACE)
+
+    # Page through exactly as the router does: fetch limit + 1, keep limit, and
+    # take the next cursor from the last row kept.
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(len(ids)):
+        rows = reader.list(limit=2, cursor=cursor, order="asc", status=None, task_id=None, shared=False)
+        page = rows[:2]
+        seen.extend(str(row["id"]) for row in page)
+        if len(rows) <= 2:
+            break
+        cursor = encode_cursor(page[-1]["created_at"], str(page[-1]["id"]))
+
+    assert seen == ids
 
 
 def test_reader_get_hides_missing_and_soft_deleted_rows() -> None:
