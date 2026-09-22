@@ -30,7 +30,7 @@ nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-syn
 
 Model roles resolve through Inference Gateway (`provider` + served model names). Do not set `NVIDIA_API_KEY` on the job.
 
-The Nemotron embed recipe uses `nvidia/nemotron-3-ultra-550b-a55b` for all three chat roles. Examples here use `nvidia/nemotron-3-nano-30b-a3b` only because that is the model most Platform deployments already serve. Tell the user the swap changes query quality and downstream nDCG; prefer 550B when the provider serves it, and treat Nano as a cost/latency choice confirmed by a 50–100 document pilot.
+The Nemotron embed recipe uses [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) for all three chat roles. Examples here use `nvidia/nemotron-3-nano-30b-a3b` only so they can run on a typical already-deployed IGW model. Outside of examples, always use a larger model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Nano in an example is not a recommendation for a real run.
 
 Stage 0 quality controls are fields on the generate spec:
 `file_extensions` (default `.txt`, `.md`, `.text`, and no extension),

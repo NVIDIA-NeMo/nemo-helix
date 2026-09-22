@@ -25,19 +25,16 @@ NeMo Platform exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
 
 Platform has no default Stage 0 chat model: you pass the names Inference Gateway
 serves. The [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md)
-uses `nvidia/nemotron-3-ultra-550b-a55b` for artifact extraction, Q&A
+uses [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) for artifact extraction, Q&A
 generation, and quality judging. That choice is first-order for retrieval
 accuracy, because those queries and answers become the embedding training set.
 The published NVDocs dump was generated with that pipeline.
 
-The examples below use `nvidia/nemotron-3-nano-30b-a3b` because it is the
-model most Platform deployments already serve and it is cheaper and faster.
-Copying them as-is produces shallower queries and lower judge scores than the
-recipe, and a weaker fine-tune than NVDocs. Use the 550B model when the
-provider serves it. Downgrade only when median quality scores stay below 7/10,
-queries are shallow, or cost and latency dominate; then run a 50–100 document
-pilot and compare Stage 4 nDCG on a frozen `eval_beir` split before adopting
-the smaller model.
+The examples below use `nvidia/nemotron-3-nano-30b-a3b` so they can run on a
+typical already-deployed IGW model. Outside of examples, always use a larger
+model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Copying the examples
+as-is produces shallower queries and lower judge scores than the recipe, and a
+weaker fine-tune than NVDocs.
 
 ```bash
 nemo data-designer retrieval-generate --workspace default --spec '{
