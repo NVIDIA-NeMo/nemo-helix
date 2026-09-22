@@ -1,7 +1,6 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
 title: "LoRA Model Customization"
 description: ""
 ---
@@ -44,12 +43,14 @@ from nemo_platform import NeMoPlatform, ConflictError
 from nemo_platform.types.secrets import PlatformSecretResponse
 from nemo_platform.types.files import HuggingfaceStorageConfigParam
 
+
 def sanitize_name(prefix: str, name: str):
     """Sanitize model_name for deployment/config naming. Compatible with platform naming rules."""
     name = name.split("/")[-1]
     sanitized = re.sub(r"[^a-z0-9@.+_-]", "-", name.lower())
     sanitized = re.sub(r"-+", "-", sanitized).strip("-")
     return f"{prefix}-{sanitized}"[:59].rstrip("-")
+
 
 def max_wait_time_checker(seconds: int, job_name: str = ""):
     """Return a check() that raises TimeoutError if called after `seconds` have elapsed."""
@@ -60,6 +61,7 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
             raise TimeoutError(f"{job_name} took longer than {seconds} seconds")
 
     return check
+
 
 NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
 client = NeMoPlatform(
@@ -187,6 +189,7 @@ def create_or_get_secret(name: str, value: str | None, label: str) -> PlatformSe
         secret = client.secrets.retrieve(name=name, workspace="default")
         print(secret.model_dump_json(indent=2))
         return secret
+
 
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
 ```
