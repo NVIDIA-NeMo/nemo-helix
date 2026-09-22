@@ -58,6 +58,7 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 from nemo_agents_plugin.telemetry.intake_export import (
     configure_intake_atif_export,
     supports_intake_atif_export,
+    wants_intake_atif_export,
 )
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
@@ -453,8 +454,12 @@ class ExecuteAgentJob(NemoJob):
         # own calls -- staging a workdir, saving results -- need none of it; they
         # go through an SDK that authenticates them. The proxy stays open through
         # result saving, so an export posted as the agent exits still lands.
-        exports_telemetry = step_config.request.auto_telemetry and supports_intake_atif_export(
-            step_config.agent.config, base_dir=fabric_dirs.base
+        # A job that opted out of ATIF, or already named its own destination, should 
+        # not pay for the Fabric plan probe, nor for the proxy that probe would justify.
+        exports_telemetry = (
+            step_config.request.auto_telemetry
+            and wants_intake_atif_export(step_config.agent.config)
+            and supports_intake_atif_export(step_config.agent.config, base_dir=fabric_dirs.base)
         )
         # Starting a proxy nothing would use is not free: it resolves the job's
         # credentials up front, failing a run that never needed them. And a job

@@ -190,8 +190,8 @@ def test_real_agent_exports_its_trajectory_through_the_proxy(
     real exporter, posts it -- so this also covers the assumption that the POST
     lands before the proxy shuts down.
 
-    The expiring variant is AIRCORE-1152 itself: the access token dies between
-    the agent's last model call and its export. Pinning one token at job start
+    The expiring variant reproduces the access token expiring between the
+    agent's last model call and its export. Pinning one token at job start
     is what used to make that export arrive expired and be dropped; because the
     proxy exchanges on demand, the export here goes out under a token that did
     not exist when the job began.

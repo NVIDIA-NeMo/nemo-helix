@@ -2182,6 +2182,52 @@ def test_a_telemetry_only_job_runs_untraced_rather_than_failing(
     assert "without credentials" in caplog.text
 
 
+def test_a_telemetry_only_job_completes_when_the_proxy_cannot_start(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The headline behavior of the optional proxy, driven through ``run``.
+
+    ``test_a_telemetry_only_job_runs_untraced_rather_than_failing`` proves the
+    context manager yields ``None`` when the proxy cannot start; this drives the
+    same failure through ``run`` so a regression that made a dead proxy abort the
+    run is caught directly, not only by composition. The export degrades to the
+    platform origin unauthenticated -- what a failed token exchange used to
+    produce -- and the run still completes. (Auth-disabled runs hit a different
+    path: no identity at all yields ``None`` cleanly. This one has an identity
+    whose credential discovery raises, the case the optional proxy exists for.)
+    """
+    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    token_file = tmp_path / "subject-token"
+    token_file.write_text("subject", encoding="utf-8")
+    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
+
+    def explode(**_kwargs: Any) -> Any:
+        raise RuntimeError("auth discovery unavailable")
+
+    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", explode)
+    agent = _resolved_agent()
+    assert not gateway_proxy.routes_inference_through_gateway(AgentConfig.model_validate(agent.config))
+    spec = ExecuteAgentStepConfig(request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=agent)
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["telemetry"] = request.agent_config.telemetry.model_dump(exclude_none=True)
+        return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
+
+    with caplog.at_level(logging.WARNING):
+        with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+            result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=MagicMock())
+
+    assert result["status"] == "completed", result
+    # The proxy never started: its credential discovery raised, the optional
+    # wrapper degraded, and the export fell back to the platform origin instead
+    # of a 127.0.0.1 loopback. The run completing is the point of the test.
+    assert "without credentials" in caplog.text
+    storage = seen["telemetry"]["atif"]["storage"][0]
+    assert urlsplit(storage["endpoint"]).hostname == "nemo-platform-api"
+    assert "header_env" not in storage
+
+
 def test_an_atif_block_turned_on_without_a_destination_is_filled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
