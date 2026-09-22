@@ -1149,7 +1149,6 @@ def test_deployment_crud_lifecycle(test_clients: ClientContext):
     # First create a deployment config (required dependency)
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1163,7 +1162,6 @@ def test_deployment_crud_lifecycle(test_clients: ClientContext):
         # CREATE deployment
         deployment_data = {
             "name": deployment_name,
-            "workspace": DEFAULT_WORKSPACE,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1222,7 +1220,6 @@ def test_deployment_duplicate_returns_409(test_clients: ClientContext):
     # Create config first
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1236,7 +1233,6 @@ def test_deployment_duplicate_returns_409(test_clients: ClientContext):
         # Create first deployment
         deployment_data = {
             "name": deployment_name,
-            "workspace": DEFAULT_WORKSPACE,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1282,7 +1278,6 @@ def test_deployment_invalid_input_returns_422(test_clients: ClientContext):
     # Missing required 'config' field
     invalid_data = {
         "name": "test-deployment-invalid",
-        "workspace": DEFAULT_WORKSPACE,
         # Missing 'config' - required field
     }
     response = test_clients.test_client.post(
@@ -1300,7 +1295,6 @@ def test_deployment_status_lifecycle(test_clients: ClientContext):
     # Create deployment config first
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1314,7 +1308,6 @@ def test_deployment_status_lifecycle(test_clients: ClientContext):
         # Create deployment - starts in CREATED status
         deployment_data = {
             "name": deployment_name,
-            "workspace": DEFAULT_WORKSPACE,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1382,7 +1375,6 @@ def test_deployment_list_pagination(test_clients: ClientContext):
     # Create deployment config first
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1397,7 +1389,6 @@ def test_deployment_list_pagination(test_clients: ClientContext):
         for name in deployment_names:
             deployment_data = {
                 "name": name,
-                "workspace": DEFAULT_WORKSPACE,
                 "config": config_name,
             }
             response = test_clients.test_client.post(
@@ -1454,7 +1445,6 @@ def test_deployment_workspace_isolation(test_clients: ClientContext):
     # Create config in workspace1
     config_data = {
         "name": config_name,
-        "workspace": workspace1,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1468,7 +1458,6 @@ def test_deployment_workspace_isolation(test_clients: ClientContext):
         # Create deployment in workspace1
         deployment_data = {
             "name": deployment_name,
-            "workspace": workspace1,
             "config": config_name,
         }
         response = test_clients.test_client.post(
