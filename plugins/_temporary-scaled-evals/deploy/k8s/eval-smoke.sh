@@ -130,11 +130,16 @@ build_task() {
   note "image_ref: $(json "$WORK/task_now.json" "image_ref")"
 }
 
-# clone_task <label>  ->  echoes a task id already `ready` on $IMAGE_REF
+# clone_task <label>  ->  echoes a task id finalized against $IMAGE_REF
 #
 # Finalize accepts an already-signed image instead of building the uploaded
 # pack. The pack still has to be uploaded -- finalize rejects a revision with
 # no object behind it -- but nothing rebuilds it.
+#
+# Reuse is still asynchronous: finalize returns `building` and the revision
+# reaches `ready` once the control plane has resolved the image's digest. So
+# this only submits; wait_tasks_ready waits for the whole set at once rather
+# than paying that latency ten times over.
 clone_task() {
   local label="$1" tid out="$WORK/clone-$1.json"
   curl -sf -X POST "$BASE/v1/tasks" -H 'content-type: application/json' \
@@ -146,12 +151,30 @@ clone_task() {
     -o /dev/null || fail "clone $label: pack upload"
   curl -sf -X POST "$BASE/v1/tasks/$tid/finalize" -H 'content-type: application/json' \
     -d "{\"image_ref\":\"$IMAGE_REF\",\"image_digest\":\"$IMAGE_DIGEST\"}" \
-    -o "$WORK/clone-$label-final.json" \
+    -o /dev/null \
     || fail "clone $label: finalize did not accept the reused image"
-  local status
-  status="$(json "$WORK/clone-$label-final.json" status)"
-  [ "$status" = ready ] || fail "clone $label finalized as '$status', expected ready"
   printf '%s' "$tid"
+}
+
+# wait_tasks_ready <task_id>...
+wait_tasks_ready() {
+  local ids=("$@") pending status tid i
+  for i in $(seq 1 120); do
+    pending=()
+    for tid in "${ids[@]}"; do
+      status="$(curl -sf "$BASE/v1/tasks/$tid" -o "$WORK/t_now.json" && json "$WORK/t_now.json" status)"
+      case "$status" in
+        ready) ;;
+        failed) fail "task $tid failed: $(json "$WORK/t_now.json" build_error)" ;;
+        *) pending+=("$tid") ;;
+      esac
+    done
+    printf '  [%03d] %d/%d ready\n' "$i" "$((${#ids[@]} - ${#pending[@]}))" "${#ids[@]}"
+    [ "${#pending[@]}" -eq 0 ] && return 0
+    ids=("${pending[@]}")
+    sleep 5
+  done
+  fail "${#ids[@]} member tasks never reached ready"
 }
 
 # create_eval <suffix>  ->  sets EV_ID
@@ -374,8 +397,10 @@ scenario_fanout() {
   local members="$TASK_ID" i
   for i in $(seq 2 "$MEMBERS"); do
     members="$members $(clone_task "m$i")"
-    printf '  [%03d/%03d] registered\n' "$i" "$MEMBERS"
+    printf '  [%03d/%03d] submitted\n' "$i" "$MEMBERS"
   done
+  # shellcheck disable=SC2086 -- $members is a deliberate word-split list.
+  wait_tasks_ready $members
   pass "$MEMBERS member tasks ready without $((MEMBERS - 1)) extra builds"
 
   step "creating the benchmark and running it"
@@ -413,6 +438,14 @@ counts = json.load(open(sys.argv[1]))["final_status_counts"]
 print(counts.get("succeeded", 0))' "$WORK/fanout.json")"
   [ "$settled" = "$MEMBERS" ] || fail "only $settled/$MEMBERS members succeeded"
   pass "all $MEMBERS members succeeded, cap held at $MEMBER_CAP, no status regressed"
+
+  # The caps gate the *claim*, and submission follows the claim, so a binding
+  # cap paces submissions by completions. Measuring the controller's drain rate
+  # under one measures the cap instead: run `MEMBER_CAP=$MEMBERS` for that.
+  if [ "$MEMBER_CAP" -lt "$MEMBERS" ]; then
+    note "submit rate not asserted: the cap of $MEMBER_CAP paced submissions (${per_min}/min)"
+    return 0
+  fi
   # One submission per reconcile pass at the 10s default is ~6/min. Anything at
   # or below that means the drain loop is not draining.
   python3 -c "import sys; sys.exit(0 if float('${per_min:-0}') > 6.0 else 1)" \
