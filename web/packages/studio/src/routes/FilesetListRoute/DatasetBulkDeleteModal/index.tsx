@@ -24,6 +24,14 @@ interface TriggerProps {
 interface DatasetBulkDeleteModalProps {
   selectedDatasets: FilesetOutput[];
   onConfirmSuccess: () => void;
+  /**
+   * Called once the batch settles, whether it fully succeeded, partially
+   * succeeded, or failed entirely. Individual deletes run in parallel
+   * (`useMutateMany`), so some may have already landed even when the batch
+   * as a whole throws — refresh the list here so those datasets don't
+   * linger in the table.
+   */
+  onSettled: () => void;
   /** Custom trigger element; when provided, used instead of the default Button */
   slotTrigger?: ReactNode;
 }
@@ -31,12 +39,13 @@ interface DatasetBulkDeleteModalProps {
 export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
   selectedDatasets,
   onConfirmSuccess,
+  onSettled,
   slotTrigger,
 }) => {
   const [open, setOpen] = useState(false);
 
-  // Cache invalidation happens once for the whole batch, in `onConfirmSuccess`, rather
-  // than per item here — invalidating the list query after each delete resolves would
+  // Cache invalidation happens once for the whole batch, in `onSettled`, rather than
+  // per item here — invalidating the list query after each delete resolves would
   // refetch and reshuffle rows mid-batch while selection state still reflects the full
   // original selection, making unrelated rows flash as selected.
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset();
@@ -64,10 +73,14 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
     if (datasetsToDelete.length !== datasets.length) {
       throw new Error('Cannot delete datasets without workspace and name.');
     }
-    await deleteDatasets(
-      datasetsToDelete.map((dataset) => ({ workspace: dataset.workspace, name: dataset.name }))
-    );
-    onConfirmSuccess();
+    try {
+      await deleteDatasets(
+        datasetsToDelete.map((dataset) => ({ workspace: dataset.workspace, name: dataset.name }))
+      );
+      onConfirmSuccess();
+    } finally {
+      onSettled();
+    }
   };
 
   const openTrigger = () => setOpen(true);

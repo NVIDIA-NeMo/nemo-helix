@@ -187,11 +187,15 @@ export function useDatasetsTable({
   const handleBulkDeleteSuccess = useCallback(() => {
     onDatasetsSelected?.([]);
     dataViewState.rowSelection.set({});
-    // Invalidate once for the whole batch (see DatasetBulkDeleteModal), after selection
-    // is already cleared, so other list views pick up the deletions too.
+  }, [dataViewState.rowSelection, onDatasetsSelected]);
+
+  // Runs once per batch regardless of outcome (see DatasetBulkDeleteModal's `onSettled`).
+  // On success this fires after selection is already cleared; on a partial/full failure
+  // it still refreshes the list, since some deletes in the batch may have landed.
+  const handleBulkDeleteSettled = useCallback(() => {
     invalidateDatasetCaches(workspace, undefined, ['list']);
     refetch();
-  }, [dataViewState.rowSelection, onDatasetsSelected, refetch, workspace]);
+  }, [refetch, workspace]);
 
   const handleModalClose = () => setModalOpen('none');
 
@@ -214,6 +218,7 @@ export function useDatasetsTable({
     handleDatasetDeleted,
     handleDeleteDataset,
     handleBulkDeleteSuccess,
+    handleBulkDeleteSettled,
     handleModalClose,
   };
 }
