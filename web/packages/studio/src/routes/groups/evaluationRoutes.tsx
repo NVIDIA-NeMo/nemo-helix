@@ -74,8 +74,7 @@ export const getEvaluationSideNavItems = (workspace: string) =>
         {
           id: 'evaluation-results',
           slotIcon: <NavIcon className={iconColorClass} />,
-          // Qualified: the rail hoists this out of Models, next to the agent evaluations link.
-          slotLabel: 'Model Evaluations',
+          slotLabel: 'Evaluations',
           href: getEvaluationResultsRoute(workspace),
         },
       ]
