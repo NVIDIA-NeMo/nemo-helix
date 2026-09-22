@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
+import yaml
 from click.exceptions import Exit as ClickExit
 from nemo_agents_plugin.container.errors import AgentConfigValidationError, ManagedFileConflictError
 
@@ -501,12 +502,14 @@ class TestRenderFabricDockerfile:
         configs.mkdir()
         agent_config = configs / "agent.yaml"
         agent_config.write_text(
-            "config_format: nemo-agents-spec-v1\n"
-            "name: fabric-agent\n"
-            "default_harness: codex\n"
-            "harnesses:\n"
-            "  codex:\n"
-            "    kind: codex\n"
+            yaml.safe_dump(
+                {
+                    "config_format": "nemo-agents-spec-v1",
+                    "name": "fabric-agent",
+                    "default_harness": "codex",
+                    "harnesses": {"codex": {"kind": "codex"}},
+                }
+            )
         )
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text('[project]\nname = "fabric-agent"\nversion = "1.0.0"\n')
