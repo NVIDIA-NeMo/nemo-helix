@@ -3,8 +3,11 @@
 
 # Gym status and timing contract
 
-For import commands, refer to [Import Gym rollout evidence](import-gym.md). For span relationships
-and evidence preservation, refer to the [Gym mapping contract](gym-mapping.md).
+## Prerequisites
+
+A completed Gym rollout artifact with `ng_trajectory` version `1.0` and the available invocation,
+model-call, tool-call, and turn evidence is required. When the trajectory has no absolute timestamps,
+supply a known, timezone-aware run timestamp through `--started-at`.
 
 ## Anchor selection
 
@@ -43,3 +46,9 @@ Recorded `ng_perf.total_latency_ms` is retained separately as `gym.observed_dura
 `gym.duration_source=ng_perf.total_latency_ms`; it never manufactures an absolute timestamp.
 Studio shows this as **Recorded rollout duration**, alongside the observed window used by the
 trace summary.
+
+## Next Steps
+
+- Follow [Import Gym rollout evidence](import-gym.md) to preview, upload, and verify the artifact.
+- Refer to the [Gym mapping contract](gym-mapping.md) for span relationships and evidence
+  preservation.
