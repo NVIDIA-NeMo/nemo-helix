@@ -94,7 +94,7 @@ class InsightsAnalystRuntime:
         # FABRIC_RELAY_CONFIG_PATH is the ambient-config hazard the bundled
         # adapters have a named guard against.
         with _applied_environment(telemetry.env):
-            async with relay_plugin.plugin(_relay_plugin_config(telemetry)):
+            async with relay_plugin.activate(_relay_plugin_config(telemetry)):
                 return await self._run_analysis(request, relay_scope_name=ANALYST_RELAY_SCOPE)
 
     async def _run_analysis(self, request: contract.AgentRunRequest, *, relay_scope_name: str | None = None):
