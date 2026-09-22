@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from nemo_builder_plugin.compile import compile_build_set, image_name_for, job_name_for, resolve_registry
+from nemo_builder_plugin.compile import compile_build_set, image_name_for, job_name_for, resolve_destinations
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance
 from nemo_builder_plugin.identity import compose_system_tag
@@ -75,14 +75,14 @@ def _rows_for(build_set: BuildSet, config: BuilderConfig, workspace: str) -> lis
     """The desired state, before anything is built."""
     job_name = job_name_for(build_set)
     system_tag = compose_system_tag(workspace, build_set.name, build_set.revision)
-    registries = resolve_registry(build_set, config)
+    destinations = resolve_destinations(build_set, config)
 
     return [
         ContainerImage(
             name=image_name_for(job_name, index),
             workspace=workspace,
-            registry=registries[index],
-            repository=spec.output.repository,
+            registry=destinations[index][0],
+            repository=destinations[index][1],
             platform=spec.platform,
             provenance=Provenance(
                 backend="execution",

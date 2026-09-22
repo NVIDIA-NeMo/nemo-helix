@@ -93,9 +93,15 @@ def image_name_for(job_name: str, index: int) -> str:
     return f"{job_name}-{index}"
 
 
-def resolve_registry(build_set: BuildSet, config: BuilderConfig) -> list[str]:
-    """Registry per spec, falling back to the deployment default. Raises if neither exists."""
-    registries: list[str] = []
+def resolve_destinations(build_set: BuildSet, config: BuilderConfig) -> list[tuple[str, str]]:
+    """``(registry_host, repository)`` per spec. Raises if a spec has no registry anywhere.
+
+    The two are kept apart deliberately. `registry` is a HOST -- it is what a registry client
+    opens a connection to -- and `repository` is a path within it. An earlier version carried
+    `<host>/<project>/<repo>` in one string, which reads fine in a log and produces the URL
+    `https://host/project/repo/v2/...` the moment anything tries to resolve it.
+    """
+    destinations: list[tuple[str, str]] = []
     for spec in build_set.build_specs:
         registry = spec.output.registry or config.default_registry
         if not registry:
@@ -104,8 +110,13 @@ def resolve_registry(build_set: BuildSet, config: BuilderConfig) -> list[str]:
                 "default_registry configured. Set builder.default_registry, or name a registry "
                 "on the output."
             )
-        registries.append(registry)
-    return registries
+        repository = spec.output.repository
+        # The prefix applies only to the deployment default; a spec that named its own registry
+        # names its own full path too.
+        if not spec.output.registry and config.repository_prefix:
+            repository = f"{config.repository_prefix.strip('/')}/{repository}"
+        destinations.append((registry, repository))
+    return destinations
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +188,12 @@ def _fetch_step(build_set: BuildSet, config: BuilderConfig) -> PlatformJobStepSp
     return PlatformJobStepSpec(
         name="fetch",
         executor=CPUExecutionProvider(
+            # `provider` is explicit even though "cpu" is its default. The Jobs client serializes
+            # with `exclude_unset`, so a defaulted discriminator is DROPPED from the wire payload
+            # and the server then rejects the union with "Unable to extract tag using
+            # discriminator 'provider'". Measured, not theorised -- it is what the first real
+            # submit returned. `test_the_compiled_spec_survives_exclude_unset` guards it.
+            provider="cpu",
             profile=config.fetch_profile,
             container=ContainerSpec(command=["nmp-build", "fetch"]),
         ),
@@ -218,6 +235,7 @@ def _build_step(build_set: BuildSet, config: BuilderConfig, job_name: str) -> Pl
     return PlatformJobStepSpec(
         name="build",
         executor=CPUExecutionProvider(
+            provider="cpu",  # see _fetch_step
             profile=config.control_profile,
             container=ContainerSpec(command=["nmp-build", "supervise"]),
         ),
@@ -242,7 +260,7 @@ def _push_step(
     resolved: _Resolved,
     job_name: str,
     system_tag: str,
-    registries: list[str],
+    destinations: list[tuple[str, str]],
 ) -> PlatformJobStepSpec:
     """Trusted. Holds the registry credential and the signing key. Runs no caller code."""
 
@@ -254,8 +272,8 @@ def _push_step(
             # The caller's tag AND the system tag. A build that pushed only the first would be
             # invisible to the reconciler, which resolves the second.
             tags=[
-                f"{registries[index]}/{spec.output.repository}:{spec.output.tag}",
-                f"{registries[index]}/{spec.output.repository}:{system_tag}",
+                f"{destinations[index][0]}/{destinations[index][1]}:{spec.output.tag}",
+                f"{destinations[index][0]}/{destinations[index][1]}:{system_tag}",
             ],
         )
         for index, spec in enumerate(build_set.build_specs)
@@ -264,6 +282,7 @@ def _push_step(
     return PlatformJobStepSpec(
         name="push",
         executor=CPUExecutionProvider(
+            provider="cpu",  # see _fetch_step
             profile=config.push_profile,
             container=ContainerSpec(command=["nmp-build", "push"]),
         ),
@@ -295,14 +314,14 @@ def compile_build_set(
     drift bug whose only symptom is a reconciler resolving a tag nothing ever pushed.
     """
     resolved = _require_configured(config)
-    registries = resolve_registry(build_set, config)
+    destinations = resolve_destinations(build_set, config)
     job_name = job_name_for(build_set)
 
     return PlatformJobSpec(
         steps=[
             _fetch_step(build_set, config),
             _build_step(build_set, config, job_name),
-            _push_step(build_set, config, resolved, job_name, system_tag, registries),
+            _push_step(build_set, config, resolved, job_name, system_tag, destinations),
         ],
         # Declared on the job, consumed by exactly one step.
         secrets=[PlatformJobSecret(name=resolved.push_secret)],

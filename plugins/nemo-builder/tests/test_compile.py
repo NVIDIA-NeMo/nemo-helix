@@ -19,12 +19,15 @@ from nemo_builder_plugin.compile import (
     compile_build_set,
     image_name_for,
     job_name_for,
+    resolve_destinations,
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
 from nemo_builder_plugin.steps import PushStepConfig, SuperviseStepConfig
 from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_platform_plugin.jobs.providers import CPUExecutionProvider
+from nemo_platform_plugin.jobs.spec import PlatformJobSpec
+from pydantic import ValidationError
 
 SYSTEM_TAG = "default--demo-1"
 
@@ -32,12 +35,14 @@ SYSTEM_TAG = "default--demo-1"
 def _config(
     *,
     default_registry: str | None = "reg.example.com",
+    repository_prefix: str = "",
     push_secret: str | None = "my-reg-secret",
     signing_key: str | None = "k8s://nmp-builds/cosign-key",
     execution_enabled: bool = True,
 ) -> BuilderConfig:
     return BuilderConfig(
         default_registry=default_registry,
+        repository_prefix=repository_prefix,
         push_secret=push_secret,
         signing_key=signing_key,
         execution_enabled=execution_enabled,
@@ -79,6 +84,29 @@ class TestShape:
             ["nmp-build", "supervise"],
             ["nmp-build", "push"],
         ]
+
+
+class TestItSurvivesTheWire:
+    """The compiled spec has to validate after the client serializes it, not just in memory."""
+
+    def test_the_compiled_spec_survives_exclude_unset(self) -> None:
+        """The Jobs client serializes with `exclude_unset`, which DROPS defaulted fields.
+
+        `CPUExecutionProvider.provider` is `Literal["cpu"] = "cpu"` -- the discriminator of the
+        executor union. Leaving it defaulted means it never reaches the wire, and the server
+        answers 422 "Unable to extract tag using discriminator 'provider'". That is exactly what
+        the first real submit returned, and an in-memory assertion cannot see it.
+        """
+        spec = compile_build_set(_set(), config=_config(), system_tag=SYSTEM_TAG)
+        on_the_wire = spec.model_dump(exclude_unset=True)
+
+        for step in on_the_wire["steps"]:
+            assert step["executor"].get("provider") == "cpu", (
+                f"step {step['name']!r} lost its executor discriminator when serialized"
+            )
+
+        # And it round-trips back into the type the Jobs API validates against.
+        PlatformJobSpec.model_validate(on_the_wire)
 
 
 class TestTheCredentialAppearsOnce:
@@ -200,6 +228,32 @@ class TestGrouping:
             {"fileset": "fs-a", "context_path": None},
             {"fileset": "fs-b", "context_path": "tests"},
         ]
+
+
+class TestRegistryIsAHostNotAPath:
+    """A registry host and a repository path are different things.
+
+    Conflating them reads fine in a log and produces `https://host/project/repo/v2/...` the
+    moment a registry client tries to resolve the result -- which is exactly how this was found,
+    on the first real end-to-end submit.
+    """
+
+    def test_a_registry_with_a_path_is_rejected_at_config_time(self) -> None:
+        with pytest.raises(ValidationError, match="without a path"):
+            _config(default_registry="us-central1-docker.pkg.dev/proj/repo")
+
+    def test_the_prefix_goes_on_the_repository(self) -> None:
+        config = _config(repository_prefix="proj/artifacts")
+        registry, repository = resolve_destinations(_set(), config)[0]
+        assert registry == "reg.example.com"
+        assert repository == "proj/artifacts/team/main"
+
+    def test_a_spec_naming_its_own_registry_gets_no_prefix(self) -> None:
+        """It named a full destination; prepending a deployment default would corrupt it."""
+        spec = _spec("main")
+        spec.output.registry = "other.example.com"
+        registry, repository = resolve_destinations(_set(spec), _config(repository_prefix="proj/artifacts"))[0]
+        assert (registry, repository) == ("other.example.com", "team/main")
 
 
 class TestPublishing:

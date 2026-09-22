@@ -1,0 +1,139 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Platform config for running the builder against a real cluster with the control plane on your
+# laptop. Point the platform at it:
+#
+#   export NMP_CONFIG_FILE_PATH=$PWD/plugins/nemo-builder/deploy/platform-config.example.yaml
+#   export NMP_BASE_URL=http://localhost:8080
+#   export POD_NAMESPACE=nmp-builds   # the jobs controller's DEFAULT k8s profile carries no
+#                                     # namespace of its own and falls back to this. The three
+#                                     # build profiles below name theirs explicitly.
+#   uv run --no-sync nemo services run --service-group all --controller-group all --port 8080
+#
+# The Jobs Kubernetes backend falls back to `load_kube_config()` when it is not in a cluster, so
+# job pods land in whatever your current kubectl context points at. **The trust split is
+# unaffected by running the control plane locally**: a pod's ServiceAccount comes from the
+# execution profile below, not from whoever created the Job object.
+#
+# Replace every `CHANGE ME` before use.
+
+platform:
+  runtime: "kubernetes"
+  base_url: "http://0.0.0.0:8080"
+
+service: {}
+
+auth:
+  enabled: false
+  allow_unsigned_jwt: true
+  policy_decision_point_provider: embedded
+  policy_decision_point_base_url: "http://127.0.0.1:8080"
+  admin_email: "admin@example.com"
+
+entities: {}
+
+# The Secrets encryptor persists a local key. Its default lives under the platform data dir,
+# which is /data in a container image and read-only on a laptop. Named explicitly here rather
+# than relying on NMP_DATA_DIR, because the failure mode is a 500 on secret creation with the
+# real cause several frames down a traceback.
+secrets:
+  allow_key_creation: true
+  local_key_creation_path: "${HOME}/.local/share/nemo/nmp-encryption-key.txt"
+
+# Files defaults to /data/files_storage, which does not exist when the control plane runs on a
+# laptop. The build context is uploaded here and `fetch` reads it back out as the submitter.
+files:
+  default_storage_config:
+    type: local
+    path: "${HOME}/.local/share/nemo/files_storage"
+
+jobs:
+  executors:
+    # ---- THE TRUST SPLIT. Three profiles, three ServiceAccounts, one job. ----
+    #
+    # This is the entire mechanism. `PlatformJobStepSpec.executor` is per step, so per-step
+    # identity needed no Jobs schema change -- the compiler just names a different profile for
+    # each step and each profile resolves to a different SA. See deploy/10-serviceaccounts.yaml.
+    #
+    # `merge_executor_profiles` keys on (provider, profile), so these ADD to whatever the
+    # deployment already has rather than replacing its `default`.
+
+    # 1. fetch -- may read Files as the submitter. May NOT create pods. No registry credential.
+    - provider: cpu
+      profile: build-fetch
+      backend: kubernetes_job
+      config: &build_profile
+        namespace: nmp-builds
+        service_account_name: nmp-build-fetch
+        launcher_image: us-central1-docker.pkg.dev/CHANGE_ME/nmp-buildkitlab/nmp-jobs-launcher:poc
+        default_task_image: us-central1-docker.pkg.dev/CHANGE_ME/nmp-buildkitlab/nmp-build:poc
+        image_pull_secrets:
+          - name: gar-auth
+        storage:
+          pvc_name: nmp-build-work
+        # PoC-only. The work volume is ReadWriteOnce on this cluster -- no RWX StorageClass
+        # exists -- so every build pod must land on one node. See deploy/40-work-volume.yaml.
+        node_selector:
+          nmp.nvidia.com/build-node: "true"
+        cleanup_completed_jobs_immediately: false
+        ttl_seconds_after_finished: 3600
+
+    # 2. build -- the control plane for the sandbox. Holds NO credential of any kind.
+    #    Its SA is the only one bound to the pod-create Role (deploy/20-rbac.yaml).
+    #    It gets no work-volume mount, and that is decided by the COMPILER emitting no storage
+    #    env var for this step -- not by anything here. The pvc_name below is inert for it.
+    - provider: cpu
+      profile: build-control
+      backend: kubernetes_job
+      config:
+        <<: *build_profile
+        service_account_name: nmp-build-control
+
+    # 3. push -- holds the registry credential and the signing key. Runs no caller code.
+    - provider: cpu
+      profile: build-push
+      backend: kubernetes_job
+      config:
+        <<: *build_profile
+        service_account_name: nmp-build-push
+
+  executor_defaults:
+    kubernetes_job:
+      cleanup_completed_jobs_immediately: false
+      ttl_seconds_after_finished: 3600
+
+# ---- The builder plugin's own settings ----
+#
+# Everything about HOW a build runs lives here rather than in the request. A caller picks a
+# fileset and a Dockerfile; it does not pick egress, the executor image, or whether its image
+# gets signed.
+builder:
+  namespace: nmp-builds
+  work_pvc: nmp-build-work
+  sandbox_image: gcr.io/kaniko-project/executor:debug
+
+  # A HOST, not a path. The project/repository path goes in `repository_prefix` -- putting it
+  # here produces `https://host/project/repo/v2/...` the moment the reconciler resolves
+  # anything, and it is rejected at config load rather than discovered then.
+  default_registry: us-central1-docker.pkg.dev
+  repository_prefix: CHANGE_ME/nmp-buildkitlab
+  push_secret: gar-auth
+  signing_key: k8s://nmp-builds/cosign-key
+  signature_storage: tag
+
+  # Read-only credential for the reconciler, which resolves digests and looks for signatures.
+  # PoC shape: a production deployment resolves this from Secrets as the platform.
+  #   registry_username: oauth2accesstoken
+  #   registry_password: $(gcloud auth print-access-token)
+  registry_username: "CHANGE_ME"
+  registry_password: "CHANGE_ME"
+
+  reconcile_interval_seconds: 10
+
+  # Unset deliberately:
+  #   registry_mirror -- the pull-through mirror is M2-1 and not built. While it is unset,
+  #     Requirement 9 is unmet: base images resolve upstream and nothing at the network bounds
+  #     what a Dockerfile may pull FROM.
+  #   runtime_class -- gVisor exists on the lab cluster but its nodes are tainted and in
+  #     separate pools, which fights the single-node pinning RWO requires.

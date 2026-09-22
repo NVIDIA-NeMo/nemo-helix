@@ -42,3 +42,45 @@ subjects:
   - kind: ServiceAccount
     name: nmp-build-control
     namespace: nmp-builds
+---
+# The signing key, readable by the one step that signs.
+#
+# `builder.signing_key` is a `k8s://<namespace>/<secret>` reference, which cosign resolves
+# through the Kubernetes API using the pod's own ServiceAccount. So `nmp-build-push` needs `get`
+# on exactly that Secret and nothing else -- not `list`, which would let it enumerate every
+# secret in the namespace including the registry credential's Kubernetes copy.
+#
+# `nmp-build-fetch` and `nmp-build-control` get no such binding. A caller cannot choose whether
+# its image is signed, and the steps that run closest to caller input cannot reach the key that
+# does the signing.
+#
+# A KMS-backed key (`gcpkms://`) removes this Role entirely, because the private half never
+# materialises anywhere a pod could read it. That is `M1-7`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nmp-build-read-signing-key
+  namespace: nmp-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["cosign-key"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nmp-build-read-signing-key
+  namespace: nmp-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nmp-build-read-signing-key
+subjects:
+  - kind: ServiceAccount
+    name: nmp-build-push
+    namespace: nmp-builds

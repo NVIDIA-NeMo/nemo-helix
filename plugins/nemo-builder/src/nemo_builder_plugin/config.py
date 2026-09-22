@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import ClassVar, Literal
 
 from nemo_platform_plugin.config import NemoConfig
-from pydantic import Field
+from pydantic import Field, field_validator
 
 
 class BuilderConfig(NemoConfig):
@@ -109,8 +109,40 @@ class BuilderConfig(NemoConfig):
 
     default_registry: str | None = Field(
         default=None,
-        description="Registry used when a BuildOutput omits one. No safe default; unset fails the compile.",
+        description=(
+            "Registry HOST used when a BuildOutput omits one -- `us-central1-docker.pkg.dev`, "
+            "not `us-central1-docker.pkg.dev/project/repo`. A host and a repository path are "
+            "different things, and conflating them produces a reference that looks right in a "
+            "log and builds the URL `https://host/project/repo/v2/...` when anything tries to "
+            "resolve it. Validated below rather than trusted.\n\n"
+            "No safe default; unset fails the compile."
+        ),
     )
+    repository_prefix: str = Field(
+        default="",
+        description=(
+            "Path prepended to every `BuildOutput.repository`. This is where a registry's "
+            "project/repo path belongs -- for GAR, `<project>/<artifact-repo>`. Kept separate "
+            "from `default_registry` so `ContainerImage.registry` stays a host that a registry "
+            "client can actually connect to."
+        ),
+    )
+
+    @field_validator("default_registry")
+    @classmethod
+    def _registry_is_a_host(cls, value: str | None) -> str | None:
+        """A registry is a host, optionally with a port. It is not a path.
+
+        Checked here because the failure is otherwise silent until a reconciler builds a URL,
+        and at that point the error reads as a registry problem rather than a config one.
+        """
+        if value and "/" in value:
+            raise ValueError(
+                f"default_registry must be a host without a path, got {value!r}. "
+                "Put the project/repository path in `repository_prefix` instead."
+            )
+        return value
+
     push_secret: str | None = Field(
         default=None,
         description=(

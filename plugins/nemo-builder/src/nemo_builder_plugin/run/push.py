@@ -28,7 +28,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from nemo_builder_plugin.run.context import read_step_config
@@ -39,6 +41,46 @@ logger = logging.getLogger(__name__)
 #: Read in chunks: a layer blob is routinely hundreds of megabytes and a build that OOMs the
 #: trusted step because a caller shipped a large layer is a denial of service with extra steps.
 _CHUNK = 1024 * 1024
+
+#: The env var the compiler wires the registry credential into. The jobs launcher resolves the
+#: secret in-pod, as the submitting principal -- the value never enters the job spec or etcd.
+CREDENTIAL_ENVVAR = "NMP_REGISTRY_AUTH"
+
+
+def _materialize_credential() -> str | None:
+    """Write the injected credential where crane and cosign will look for it.
+
+    Both read a Docker config, so the value has to land on a filesystem somewhere -- there is no
+    "pass a credential on the command line" for either, and doing so would put it in the process
+    table anyway. It goes to a 0600 file in a private temp directory rather than to the default
+    `~/.docker/config.json`, so its lifetime is this process and its reach is this step.
+
+    Accepts either a full dockerconfigjson or a bare `user:password`, because a deployment's
+    Secrets entry is more likely to hold whichever its operator already had.
+    """
+    raw = os.environ.get(CREDENTIAL_ENVVAR)
+    if not raw:
+        logger.warning("%s is not set; pushing anonymously", CREDENTIAL_ENVVAR)
+        return None
+
+    raw = raw.strip()
+    if raw.startswith("{"):
+        config = raw
+    else:
+        import base64
+
+        username, _, password = raw.partition(":")
+        registry = os.environ.get("NMP_REGISTRY_HOST", "")
+        auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+        config = json.dumps({"auths": {registry: {"auth": auth}}})
+
+    directory = tempfile.mkdtemp(prefix="nmp-docker-")
+    path = Path(directory) / "config.json"
+    path.write_text(config)
+    path.chmod(0o600)
+    os.environ["DOCKER_CONFIG"] = directory
+    logger.info("registry credential materialized at %s", directory)
+    return directory
 
 
 class LayoutRejected(Exception):
@@ -156,6 +198,7 @@ def _push_one(image: PushImage, signing: SigningConfig) -> None:
 
 def main() -> int:
     config = PushStepConfig.model_validate(read_step_config())
+    _materialize_credential()
 
     published = 0
     failures = 0
