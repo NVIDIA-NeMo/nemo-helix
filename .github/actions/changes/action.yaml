@@ -116,11 +116,29 @@ runs:
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
           evaluator-integration:
-            # What the evaluator integration suite actually drives: the plugin (jobs, spec, SDK
-            # surface), the SDK runtimes it submits, and the platform pieces those run against.
+            # What the evaluator integration suite actually drives. The harness starts a real
+            # platform (`nemo services run --service-group all`), so a change to a service it calls
+            # can break these tests without touching evaluator code at all -- and because the job is
+            # required, a filter that missed those paths would let the skip count as a pass.
+            #
+            # The services listed are the ones the suite calls, not everything `--service-group all`
+            # happens to start: entities (workspaces, tasks, tasksets, metrics), jobs (submission and
+            # reconciliation), files (filesets, derived metrics), models + inference-gateway (model
+            # targets via the IGW mock provider), secrets (env_secrets references), auth (the
+            # auth-enabled platform fixture) and intake (result publishing). Extend it deliberately
+            # when the suite starts calling something new.
             - 'plugins/nemo-evaluator/**'
             - 'packages/nemo_evaluator_sdk/**'
             - 'packages/nemo_platform_plugin/**'
+            - 'packages/nmp_common/**'  # shared contracts every service above is built on
+            - 'services/core/entities/**'
+            - 'services/core/jobs/**'
+            - 'services/core/files/**'
+            - 'services/core/models/**'
+            - 'services/core/inference-gateway/**'
+            - 'services/core/secrets/**'
+            - 'services/core/auth/**'
+            - 'services/intake/**'
             - '.github/workflows/ci.yaml'  # the job definition itself
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
