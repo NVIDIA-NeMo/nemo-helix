@@ -17,8 +17,6 @@ from nemo_platform_ext.cli.core.types import ListOutputFormat as OutputFormat
 from nemo_platform_ext.cli.core.types import TimestampFormat
 
 if typing.TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-
     from nemo_platform_ext.config.config import ConfigParams, Context
     from nemo_platform_ext.quickstart import QuickstartConfig
 
@@ -36,9 +34,9 @@ class CLIContext:
     Holds CLI overrides (via ConfigParams) and lazy-loads SDK config.
     Priority resolution is handled by SDK Config: CLI > env_var > config file > default.
 
-    Hand-written commands derive service clients from the platform client with
-    :meth:`typed_client` (for example ``state.typed_client(SecretsClient)``); the
-    typed client shares the CLI's auth and transport.
+    ``get_client()`` returns a :class:`~nemo_platform_plugin.client.client.NemoClient`
+    sharing the CLI's auth and transport; commands derive service clients from it
+    with :meth:`typed_client` (for example ``state.typed_client(SecretsClient)``).
     """
 
     # CLI overrides passed to SDK Config.load()
@@ -54,10 +52,10 @@ class CLIContext:
     _sdk_context: Context | None = field(default=None, repr=False)
 
     # Lazy-created client
-    _client: NeMoPlatform | None = field(default=None, repr=False)
+    _client: NemoClient | None = field(default=None, repr=False)
 
     # Lazy-created async client
-    _async_client: AsyncNeMoPlatform | None = field(default=None, repr=False)
+    _async_client: AsyncNemoClient | None = field(default=None, repr=False)
 
     # Additional settings loaded at startup
     quickstart_config: QuickstartConfig | None = None
@@ -109,7 +107,7 @@ class CLIContext:
 
         return ctx.user.get_client_config() if ctx.user else {}
 
-    def get_client(self, timeout: float = 60.0) -> NeMoPlatform:
+    def get_client(self, timeout: float = 60.0) -> NemoClient:
         """
         Get or create the NeMo Platform client.
 
@@ -117,27 +115,34 @@ class CLIContext:
             timeout: Request timeout in seconds (default: 60.0)
 
         Returns:
-            Initialized NeMoPlatform client
+            Initialized NemoClient sharing the CLI's configured auth
         """
-        from nemo_platform import NeMoPlatform
-
         if self._client is None:
+            from nemo_platform_ext.client.bootstrap import build_direct_nemo_client, build_nemo_client
+
             ctx = self.get_sdk_context()
             base_url = str(ctx.cluster.base_url)
-            logger.debug(
-                f"Creating NeMoPlatform client with base_url={base_url}, workspace={ctx.workspace}, timeout={timeout}"
-            )
+            logger.debug(f"Creating NemoClient with base_url={base_url}, workspace={ctx.workspace}, timeout={timeout}")
 
             auth_config = self._client_auth_config(ctx)
-            self._client = NeMoPlatform(
-                base_url=base_url,
-                timeout=timeout,
-                workspace=ctx.workspace,
-                **auth_config,
-            )
+            if self._requires_bootstrap(auth_config):
+                self._client = build_nemo_client(
+                    base_url=base_url,
+                    context_name=typing.cast("str | None", auth_config.get("context_name")),
+                    workspace=ctx.workspace,
+                    timeout=timeout,
+                )
+            else:
+                self._client = build_direct_nemo_client(
+                    base_url=base_url,
+                    workspace=ctx.workspace,
+                    default_headers=typing.cast("dict[str, str] | None", auth_config.get("default_headers")),
+                    timeout=timeout,
+                    certificate_authority=ctx.cluster.certificate_authority,
+                )
         return self._client
 
-    def get_async_client(self, timeout: float = 60.0) -> AsyncNeMoPlatform:
+    def get_async_client(self, timeout: float = 60.0) -> AsyncNemoClient:
         """
         Get or create the async NeMo Platform client.
 
@@ -145,37 +150,56 @@ class CLIContext:
             timeout: Request timeout in seconds (default: 60.0)
 
         Returns:
-            Initialized AsyncNeMoPlatform client
+            Initialized AsyncNemoClient sharing the CLI's configured auth
         """
-        from nemo_platform import AsyncNeMoPlatform
-
         if self._async_client is None:
+            from nemo_platform_ext.client.bootstrap import build_async_nemo_client, build_direct_async_nemo_client
+
             ctx = self.get_sdk_context()
             base_url = str(ctx.cluster.base_url)
             logger.debug(
-                f"Creating AsyncNeMoPlatform client with base_url={base_url}, workspace={ctx.workspace}, timeout={timeout}"
+                f"Creating AsyncNemoClient with base_url={base_url}, workspace={ctx.workspace}, timeout={timeout}"
             )
 
             auth_config = self._client_auth_config(ctx)
-            self._async_client = AsyncNeMoPlatform(
-                base_url=base_url,
-                timeout=timeout,
-                workspace=ctx.workspace,
-                **auth_config,
-            )
+            if self._requires_bootstrap(auth_config):
+                self._async_client = build_async_nemo_client(
+                    base_url=base_url,
+                    context_name=typing.cast("str | None", auth_config.get("context_name")),
+                    workspace=ctx.workspace,
+                    timeout=timeout,
+                )
+            else:
+                self._async_client = build_direct_async_nemo_client(
+                    base_url=base_url,
+                    workspace=ctx.workspace,
+                    default_headers=typing.cast("dict[str, str] | None", auth_config.get("default_headers")),
+                    timeout=timeout,
+                    certificate_authority=ctx.cluster.certificate_authority,
+                )
         return self._async_client
+
+    @staticmethod
+    def _requires_bootstrap(auth_config: dict[str, object]) -> bool:
+        """Return whether the client must go through the config/OIDC bootstrap.
+
+        A stored OAuth context needs the refreshing token provider, and a
+        workload identity token file needs the token-exchange provider. Static
+        headers (API key or explicit access token) and no-auth use direct mode.
+        """
+        from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+
+        if "context_name" in auth_config:
+            return True
+        return "default_headers" not in auth_config and bool(os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR))
 
     def typed_client(self, client_cls: type[TypedClientT], timeout: float = 60.0) -> TypedClientT:
         """Return a service client of *client_cls* sharing the CLI client's transport and auth."""
-        from nemo_platform_plugin.client.adapter import client_from_platform
-
-        return client_from_platform(self.get_client(timeout=timeout), client_cls)
+        return client_cls.from_client(self.get_client(timeout=timeout))
 
     def async_typed_client(self, client_cls: type[AsyncTypedClientT], timeout: float = 60.0) -> AsyncTypedClientT:
         """Async twin of :meth:`typed_client`."""
-        from nemo_platform_plugin.client.adapter import client_from_platform
-
-        return client_from_platform(self.get_async_client(timeout=timeout), client_cls)
+        return client_cls.from_client(self.get_async_client(timeout=timeout))
 
     def get_workspace(self) -> str | None:
         """Return the configured default workspace, if any."""

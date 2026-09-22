@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { useState } from 'react';
 
 export interface BulkDeleteModalProps<T> {
   /** Items to delete. */
@@ -11,7 +10,7 @@ export interface BulkDeleteModalProps<T> {
   open: boolean;
   /**
    * Called when the user confirms. Should perform all deletions and throw on
-   * failure — the generic surfaces the thrown message as inline error text.
+   * failure — the confirmation modal surfaces the thrown message to the user.
    */
   onDelete: (items: T[]) => Promise<void>;
   /**
@@ -30,25 +29,12 @@ export const BulkDeleteModal = <T,>({
   title,
   onClose,
 }: BulkDeleteModalProps<T>) => {
-  const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
-
   const resolvedTitle = typeof title === 'function' ? title(items.length) : title;
 
   const handleDelete = async (): Promise<boolean> => {
-    setDeleteError(undefined);
-    try {
-      await onDelete(items);
-      onClose();
-      return true;
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Failed to delete');
-      return false;
-    }
-  };
-
-  const handleClose = () => {
-    setDeleteError(undefined);
+    await onDelete(items);
     onClose();
+    return true;
   };
 
   if (!open) return null;
@@ -59,8 +45,7 @@ export const BulkDeleteModal = <T,>({
       onDelete={handleDelete}
       simpleConfirm
       title={resolvedTitle}
-      errorText={deleteError}
-      onClose={handleClose}
+      onClose={onClose}
     />
   );
 };

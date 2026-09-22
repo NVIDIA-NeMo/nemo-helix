@@ -133,7 +133,7 @@ async def validate_workspace_not_deleting(
         raise HTTPException(status_code=missing_workspace_status, detail=detail)
 
     # Service principals can access workspaces being deleted (for cleanup)
-    if ws._deletion_stage is not None and not auth_client.principal.id.startswith("service:"):
+    if ws._deletion_stage is not None and auth_client.principal.caller_kind != "service_principal":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workspace '{workspace}' not found",

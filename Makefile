@@ -93,20 +93,6 @@ update-sdk: build-policy refresh-openapi stainless update-web-sdk update-cli ## 
 vendor-nemo-platform-ext:
 	$(FLOX_EXEC) $(MAKE) -C packages/nemo_platform_ext vendor
 
-.PHONY: generate-cli-commands
-generate-cli-commands: ## Run generation of the CLI commands
-	$(UV) run --frozen nemo-platform-sdk-tools generate-cli $(ARGS)
-
-	# auto-generated code can be cleaned up more aggressively (in this case, we want to remove unused imports in __init__.py files)
-	# Every API group is now plugin-hosted, so there may be no generated commands/api directory; only lint it when it exists.
-	# ARG001 catches unused function arguments which indicates variable shadowing bugs (no auto-fix)
-	if [ -d packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api ]; then \
-		$(UV) run --frozen ruff check --fix --preview --unsafe-fixes --extend-select F401,E402 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/; \
-		$(UV) run --frozen ruff check --select ARG001 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/; \
-		$(UV) run --frozen ruff check --fix --unsafe-fixes packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/; \
-	fi
-	$(UV) run --frozen ruff format packages/nemo_platform_ext
-
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
 	NMP_CONFIG_FILE_PATH="$(NMP_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py all
@@ -175,7 +161,7 @@ docs-publish: ## Trigger the Publish Fern Docs workflow (normally runs on push t
 	gh workflow run publish-fern-docs.yaml
 
 .PHONY: update-cli
-update-cli: generate-cli-commands vendor-nemo-platform-ext generate-cli-reference-docs
+update-cli: vendor-nemo-platform-ext generate-cli-reference-docs
 
 .PHONY: clean-python
 clean-python: ## remove python virtual environment

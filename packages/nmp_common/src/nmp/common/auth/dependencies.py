@@ -128,7 +128,7 @@ def build_service_principal_headers(service_name: str) -> Dict[str, str]:
         return headers
 
     effective = auth_client.principal.effective_principal
-    if effective.id.startswith("service:"):
+    if effective.caller_kind == "service_principal":
         return headers
 
     headers["X-NMP-Principal-On-Behalf-Of"] = effective.id

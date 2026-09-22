@@ -46,6 +46,40 @@ def test_to_k8s_defaults_bundles_executor_pod_defaults() -> None:
     assert defaults.topology_spread_constraints[0]["topologyKey"] == "kubernetes.io/hostname"
 
 
+def test_to_k8s_defaults_job_ttl_defaults_to_60s() -> None:
+    assert K8sExecutorConfig().to_k8s_defaults().job_ttl_seconds_after_finished == 60
+
+
+def test_to_k8s_defaults_job_ttl_override() -> None:
+    config = K8sExecutorConfig(default_job_ttl_seconds_after_finished=120)
+    assert config.to_k8s_defaults().job_ttl_seconds_after_finished == 120
+
+
+def test_to_k8s_defaults_job_ttl_null_opts_out() -> None:
+    config = K8sExecutorConfig(default_job_ttl_seconds_after_finished=None)
+    assert config.to_k8s_defaults().job_ttl_seconds_after_finished is None
+
+
+def test_default_job_ttl_rejects_negative() -> None:
+    with pytest.raises(ValueError):
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=-1)
+
+
+def test_default_job_ttl_rejects_below_floor() -> None:
+    # A set TTL below the floor races the reconciler's completion read; rejected.
+    with pytest.raises(ValueError):
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=0)
+    with pytest.raises(ValueError):
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=5)
+
+
+def test_default_job_ttl_accepts_floor() -> None:
+    assert (
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=10).to_k8s_defaults().job_ttl_seconds_after_finished
+        == 10
+    )
+
+
 def test_to_k8s_defaults_empty_by_default() -> None:
     defaults = K8sExecutorConfig().to_k8s_defaults()
     assert defaults.pod_annotations == {}

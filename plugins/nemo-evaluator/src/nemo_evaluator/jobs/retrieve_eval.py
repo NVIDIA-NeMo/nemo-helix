@@ -45,7 +45,7 @@ from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient, NimRankin
 from nemo_evaluator_sdk.values.models import Model, ModelRef
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.retrieval import Retrieval, Truncation
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -57,7 +57,6 @@ from nemo_platform_plugin.jobs.api_factory import (
 )
 from nemo_platform_plugin.jobs.image import get_qualified_image
 from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EVAL_RESULTS_FILE_NAME = "eval_results.json"
@@ -163,7 +162,7 @@ class _RetrieveEvalJobBase(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve a platform model reference before the job is compiled."""
@@ -183,7 +182,7 @@ class _RetrieveEvalJobBase(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient | None,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -337,7 +336,7 @@ class AsyncRetrieveEvalJob(_RetrieveEvalJobBase):
 
 async def _resolve_retrieval(
     value: RetrievalInputSpec | Model | ModelRef,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncPlatformClient | None,
 ) -> Retrieval:
     if isinstance(value, ModelRef):
         models_client = client_from_platform(async_sdk, AsyncModelsClient)

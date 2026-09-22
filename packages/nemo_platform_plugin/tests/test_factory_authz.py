@@ -8,7 +8,6 @@ from __future__ import annotations
 import pytest
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.authz import (
     AuthzScope,
     CallerKind,
@@ -16,6 +15,7 @@ from nemo_platform_plugin.authz import (
     get_path_scope,
 )
 from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.entities import EntityClient
 from nemo_platform_plugin.function import NemoFunction
 from nemo_platform_plugin.functions.routes import add_function_routes
@@ -44,7 +44,7 @@ async def _compiler(
     output_spec: _Spec,
     entity_client: EntityClient,
     job_name: str | None,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncPlatformClient,
     /,
 ) -> PlatformJobSpec:
     del workspace, input_spec, output_spec, entity_client, job_name, sdk

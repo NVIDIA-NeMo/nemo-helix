@@ -668,6 +668,17 @@ components:
           items:
             type: string
           type: array
+        excluded_entity_labels:
+          title: Excluded Entity Labels
+          description: Entity labels to never detect, even if present in entity_labels
+            or the default set. Excluded labels are removed before GLiNER and LLM
+            prompts run, and are also filtered from the final entity output as a safety
+            net. If this entirely overlaps the effective allowlist (entity_labels
+            if set, otherwise the default label set), leaving an empty effective detection
+            set, Detect raises a ValueError at config time.
+          items:
+            type: string
+          type: array
         gliner_threshold:
           type: number
           maximum: 1.0
@@ -1378,6 +1389,12 @@ components:
           title: Max Repair Iterations
           description: Maximum repair rounds. Set to 0 to disable repair.
           default: 3
+        use_combined_graph:
+          type: boolean
+          title: Use Combined Graph
+          description: Run rewrite and conditional repair iterations in one Data Designer
+            graph.
+          default: false
         strict_entity_protection:
           type: boolean
           title: Strict Entity Protection

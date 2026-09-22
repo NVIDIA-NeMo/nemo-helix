@@ -212,7 +212,7 @@ async def get_accessible_workspaces(
     # (e.g. EntityClient from a microservice). Otherwise the raw principal id is
     # "service:platform" and compute_accessible_workspaces would return all workspaces.
     principal = auth_client.principal
-    if principal.is_privileged:
+    if principal.is_privileged():
         if not principal.is_delegated:
             return None
 

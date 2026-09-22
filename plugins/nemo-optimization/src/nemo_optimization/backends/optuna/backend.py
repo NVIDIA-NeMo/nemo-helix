@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, ClassVar
 
-from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient
 from nemo_platform_plugin.job_context import JobContext
 
 from nemo_optimization.backends.optuna.atif_metadata import resolve_experiment_id
@@ -37,7 +37,7 @@ class OptunaBackend:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
+        sdk: SyncPlatformClient | None = None,
     ) -> dict[str, Any]:
         del sdk
         output_dir = ctx.storage.persistent / "results" / RESULT_NAME

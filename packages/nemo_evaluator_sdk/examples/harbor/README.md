@@ -6,14 +6,16 @@
 Run a Harbor **local dataset directory**,
 [`hello_world_dataset/`](hello_world_dataset), natively through the SDK. The
 example scores with Harbor's deterministic **oracle** agent, so it needs no model
-or API key — only the `harbor` extra installed and a working Docker daemon.
+or API key — only Python ≥ 3.12, the `harbor` extra installed, and a working
+Docker daemon.
 
 ## Install
 
-The base SDK supports Python ≥ 3.11, while Harbor-backed execution and result
-adaptation require Python ≥ 3.12. The SDK is not published as a standalone PyPI
-package. Use a NeMo Platform source checkout; see [SETUP.md](../../../../SETUP.md)
-for toolchain prerequisites. From the repository root, install the optional extra:
+Harbor stays an optional extra because it is heavy, not because of the
+interpreter — the SDK's floor already matches Harbor's own. The SDK is not
+published as a standalone PyPI package. Use a NeMo Platform source checkout; see
+[SETUP.md](../../../../SETUP.md) for toolchain prerequisites. From the repository
+root, install the optional extra:
 
 ```bash
 uv sync --frozen --package nemo-evaluator-sdk --extra harbor
@@ -115,6 +117,24 @@ endpoint from the `provider/model` slug. The key reaches the container through `
 directory's `config.json` records `${NVIDIA_API_KEY}` rather than the value. See
 [Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
 for the platform job form.
+
+### On a task image you do not control
+
+That example needs a `python:3.12-slim` task image, which you only get to choose when the dataset is
+yours. `fabric_agent/run_fabric_installed_example.py` is the same run against
+`fabric_agent/bare_hello_world_dataset/` — a deliberately bare `ubuntu:24.04` with no Python, no pip,
+and no curl:
+
+```bash
+export NVIDIA_API_KEY=...   # https://build.nvidia.com
+uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_installed_example
+```
+
+The only difference is the agent:
+`nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent`, which is
+built on Harbor's `BaseInstalledAgent` and provisions curl, `uv`, and a uv-managed CPython before
+installing Fabric. Pass `--dataset-dir` to point it at your own Harbor task. The image does need to be
+glibc-based: `nemo-fabric-runtime` ships no musllinux wheels, so Alpine tasks fail at `uv pip install`.
 
 ## Custom (wrapped) agents
 

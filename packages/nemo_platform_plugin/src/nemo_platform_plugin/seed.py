@@ -8,8 +8,9 @@ Plugin authors subclass :class:`NemoSeedJob` and register the class under the
 start up. This is useful to automatically create entities that should always
 exist in the system.
 
-An `AsyncNeMoPlatform` SDK instance and a `NemoEntitiesClient` instance are available as
-attributes on every `NemoSeedJob` instance. Any services called with these objects
+An async platform SDK handle (``sdk``, see
+:class:`~nemo_platform_plugin.client.adapter.AsyncPlatformClient`) and a `NemoEntitiesClient`
+instance are available as attributes on every `NemoSeedJob` instance. Any services called with these objects
 must be running and responding to requests; to indicate these services are
 required, add them to the `dependencies` ClassVar.
 
@@ -47,8 +48,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import ClassVar
 
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin._base import _NamedPlugin
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient
 
 
@@ -63,7 +64,7 @@ class NemoSeedJob(_NamedPlugin):
     description: ClassVar[str] = ""
     dependencies: ClassVar[list[str]] = []
 
-    sdk: AsyncNeMoPlatform
+    sdk: AsyncPlatformClient
     entities_client: NemoEntitiesClient
 
     @abstractmethod

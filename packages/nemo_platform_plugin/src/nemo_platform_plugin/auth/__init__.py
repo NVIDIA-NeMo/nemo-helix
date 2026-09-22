@@ -13,12 +13,16 @@ environments without it.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from typing import Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
+_SERVICE_PRINCIPAL_PREFIX = "service:"
+_SERVICE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 
 
 class RuntimePrincipal(Protocol):
@@ -228,4 +232,21 @@ def platform_auth_enabled() -> bool:
         return False
 
 
-__all__ = ["AuthContext", "current_auth_context", "platform_auth_enabled"]
+def is_service_principal_id(principal_id: str) -> bool:
+    """Return True for a well-formed platform service principal.
+
+    When running in the platform process this delegates to the shared parser.
+    Standalone plugin installs use the same reserved ``service:<name>`` shape
+    validation without requiring ``nmp-common`` to be installed.
+    """
+    try:
+        from nmp.common.auth import is_service_principal
+    except ImportError:
+        principal = principal_id.strip()
+        if not principal.startswith(_SERVICE_PRINCIPAL_PREFIX):
+            return False
+        return bool(_SERVICE_NAME_RE.fullmatch(principal.removeprefix(_SERVICE_PRINCIPAL_PREFIX)))
+    return is_service_principal(principal_id)
+
+
+__all__ = ["AuthContext", "current_auth_context", "is_service_principal_id", "platform_auth_enabled"]
