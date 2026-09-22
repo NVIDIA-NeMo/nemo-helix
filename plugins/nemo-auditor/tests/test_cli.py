@@ -321,7 +321,8 @@ def _app_with_state(app: typer.Typer, state: object | None) -> typer.Typer:
     """Wrap *app* in a parent group whose callback seeds ``ctx.obj`` with *state*.
 
     Mirrors how the top-level ``nemo`` CLI installs its state object, which is
-    what ``resolve_workspace`` reads off the ambient Click context.
+    what ``resolve_cli_workspace`` reads off the ``typer.Context`` the command
+    receives.
     """
     parent = typer.Typer()
 

@@ -17,11 +17,10 @@ bug -- wrong workspace, no error, no failing unit test. These tests drive the
 commands with a real :class:`CLIContext` over a real config file on disk so
 that regression surfaces.
 
-Both resolver entry points are covered: ``resolve_cli_workspace`` (a
-``typer.Context`` passed explicitly, used by the generated verbs) and
-``resolve_workspace`` (the ambient Click context, used by the hand-written
-plugin commands). They read the state object differently, so exercising only
-one would leave the other's real-config path untested.
+Both command surfaces are covered: the generated verbs and the hand-written
+plugin commands. They are built differently -- programmatic signatures versus
+an ``Annotated`` option alias -- so exercising only one would leave the
+other's real-config path untested.
 """
 
 import json
@@ -238,18 +237,18 @@ def test_falls_back_to_default_when_config_has_no_workspace(
 
 
 # ---------------------------------------------------------------------------
-# Hand-written plugin commands — the ambient ``resolve_workspace`` path
+# Hand-written plugin commands
 # ---------------------------------------------------------------------------
 
 
 def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Path) -> None:
-    """A real plugin command resolves via the ambient Click context.
+    """A real hand-written plugin command resolves from the config file.
 
-    ``nemo auditor configs list`` is hand-written (not a generated verb) and
-    calls ``resolve_workspace()`` with no ``typer.Context`` in its signature,
-    so it exercises ``click.get_current_context()`` against the state object
-    the top-level ``nemo`` callback installed — a different code path from the
-    generated verbs above.
+    ``nemo auditor configs list`` is hand-written (not a generated verb): it
+    declares the flag with the shared ``WorkspaceOption`` alias rather than a
+    programmatic signature, so it exercises a different construction path from
+    the generated verbs above against the same state object the top-level
+    ``nemo`` callback installs.
     """
     del config_file
     import httpx
