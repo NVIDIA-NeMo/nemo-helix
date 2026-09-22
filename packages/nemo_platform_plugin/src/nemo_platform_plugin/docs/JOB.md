@@ -203,6 +203,8 @@ The platform calls `get_cli()` once at startup and mounts the result as `nemo <n
 ### Organizing commands
 
 ```python
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
+
 def get_cli(self) -> typer.Typer:
     app = typer.Typer(help=self.description, no_args_is_help=True)
 
@@ -226,12 +228,20 @@ def get_cli(self) -> typer.Typer:
     deps_app = typer.Typer(name="deployments", help="Manage deployments.", no_args_is_help=True)
 
     @deps_app.command()
-    def list(workspace: str = typer.Option("default")) -> None:
+    def list(typer_ctx: typer.Context, workspace: str | None = typer.Option(None)) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         ...
 
     app.add_typer(deps_app, rich_help_panel="Platform-managed")
     return app
 ```
+
+Default ``--workspace`` to ``None`` and resolve it through
+:func:`~nemo_platform_plugin.cli_state.resolve_cli_workspace`, never to a
+literal ``"default"``. A literal default is indistinguishable from an omitted
+flag, so the command silently discards the workspace the user selected with
+``nemo config use-context`` (or ``$NMP_WORKSPACE``) and writes to the wrong
+workspace. The generated commands already do this for you.
 
 ### Environment-based defaults
 

@@ -45,7 +45,7 @@ from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient, NimRankin
 from nemo_evaluator_sdk.values.models import Model, ModelRef
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.retrieval import Retrieval, Truncation
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -57,7 +57,6 @@ from nemo_platform_plugin.jobs.api_factory import (
 )
 from nemo_platform_plugin.jobs.image import get_qualified_image
 from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EVAL_RESULTS_FILE_NAME = "eval_results.json"
@@ -88,6 +87,14 @@ class RetrievalInputSpec(BaseModel):
         default=None,
         gt=0,
         description="Expected embedding width. Omit to accept the model's native width.",
+    )
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
 
 
@@ -155,7 +162,7 @@ class _RetrieveEvalJobBase(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve a platform model reference before the job is compiled."""
@@ -175,7 +182,7 @@ class _RetrieveEvalJobBase(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient | None,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -237,7 +244,7 @@ class _RetrieveEvalJobBase(NemoJob):
             ignore_patterns=RESULT_IGNORE_PATTERNS,
         )
 
-        eval_results = _project_eval_results(result)
+        eval_results = _project_eval_results(result, dropped_qrel_rows=dataset.dropped_qrel_rows)
         eval_results_path = Path(ctx.storage.persistent) / EVAL_RESULTS_FILE_NAME
         eval_results_path.write_text(json.dumps(eval_results, indent=2), encoding="utf-8")
         ctx.results.save(EVAL_RESULTS_RESULT_NAME, eval_results_path)
@@ -247,7 +254,7 @@ class _RetrieveEvalJobBase(NemoJob):
             "eval_results": eval_results,
         }
         if baseline_result is not None:
-            baseline_scores = _project_eval_results(baseline_result)
+            baseline_scores = _project_eval_results(baseline_result, dropped_qrel_rows=dataset.dropped_qrel_rows)
             relative = {
                 name: _relative_change(eval_results.get(name), baseline_scores.get(name))
                 for name in ("ndcg_cut_10", "recall_10")
@@ -329,7 +336,7 @@ class AsyncRetrieveEvalJob(_RetrieveEvalJobBase):
 
 async def _resolve_retrieval(
     value: RetrievalInputSpec | Model | ModelRef,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncPlatformClient | None,
 ) -> Retrieval:
     if isinstance(value, ModelRef):
         models_client = client_from_platform(async_sdk, AsyncModelsClient)
@@ -364,6 +371,8 @@ async def _resolve_retrieval(
         batch_size=value.batch_size,
         embedding_in_flight=value.embedding_in_flight,
         embedding_dimensions=value.embedding_dimensions,
+        query_prefix=value.query_prefix,
+        passage_prefix=value.passage_prefix,
     )
 
 
@@ -376,16 +385,17 @@ def _metric_cutoffs(spec: RetrieveEvalSpec) -> list[int]:
     return cutoffs
 
 
-def _project_eval_results(result: BenchmarkEvaluationResult) -> dict[str, float]:
-    projected: dict[str, float] = {}
+def _project_eval_results(result: BenchmarkEvaluationResult, *, dropped_qrel_rows: int) -> dict[str, float | int]:
+    projected: dict[str, float | int] = {}
     for score in result.aggregate_scores.scores:
         short = score.name.rsplit(".", 1)[-1]
         if short.startswith(_PROJECTED_SUFFIXES) and score.mean is not None:
             projected[short] = score.mean
+    projected["dropped_qrel_rows"] = dropped_qrel_rows
     return projected
 
 
-def _relative_change(current: float | None, baseline: float | None) -> float | None:
+def _relative_change(current: float | int | None, baseline: float | int | None) -> float | None:
     if current is None or baseline in (None, 0):
         return None
     return (current - baseline) / baseline

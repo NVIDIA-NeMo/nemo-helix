@@ -138,15 +138,22 @@ by constraint. Install it into its own environment and put its `bin` on `PATH`.
 It can also be submitted as a platform job from the live runner object, via
 `client.evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
 
-Platform job specifications use `GymRunnerTarget`. It adds fields that a live local runner cannot
-carry:
+Platform job specifications use `GymRunnerTarget`. A submission builds one from two places, split by
+what the setting is *about*:
 
-- `environment` references a complete custom environment FileSet and requires sandboxed execution.
-- `env_secrets` maps environment variable names to NeMo Platform secret references.
-- `agent_ref_name` selects the registered Gym agent instance when it differs from `agent`.
+- **The runner** carries the evaluation — including `env_secrets`, which names environment variables
+  whose values come from a secret reference. That means the same thing wherever the runner runs;
+  only the resolver differs, so a local run resolves it from your environment.
+- **A `GymPlacement`**, passed to `submit`, carries what the deployment decides: `environment` (a
+  staged FileSet, requiring sandboxed execution) and `agent_ref_name` (the agent instance a
+  sandboxed host routes rollouts to).
 
-`agent_config` is required for `GymRuntimeConfig` and for a platform target without an environment
-FileSet. A FileSet-backed target can omit it when the package declares the selected agent instance.
+```python
+client.evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
+```
+
+The overloads accept a `GymPlacement` only with a `GymAgentTaskRunner`, so a placement cannot be
+paired with a runner that has no use for it.
 
 Full setup, configuration reference, and caveats:
 [Evaluate a NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner).

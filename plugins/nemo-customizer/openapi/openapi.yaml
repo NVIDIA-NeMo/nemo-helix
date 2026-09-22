@@ -1209,7 +1209,8 @@ components:
         training:
           type: string
           title: Training
-          description: Training fileset as 'name' or 'workspace/name'.
+          description: Training fileset as 'name', 'workspace/name', or either form
+            with a '#path/' directory.
         validation:
           title: Validation
           type: string
@@ -1741,13 +1742,15 @@ components:
         query_prefix:
           type: string
           title: Query Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'query:'
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'passage:'
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
         export:
           allOf:
           - $ref: '#/components/schemas/AutomodelExportSpec'
@@ -2444,6 +2447,7 @@ components:
           description: Validation interval. Float <= 1.0 is fraction of epoch; > 1.0
             is step count.
           type: number
+          minimum: 0.0
         val_at_end:
           type: boolean
           title: Val At End
@@ -2607,6 +2611,7 @@ components:
           description: Validation interval. Float <= 1.0 is fraction of epoch; > 1.0
             is step count.
           type: number
+          minimum: 0.0
         val_at_end:
           type: boolean
           title: Val At End
@@ -2882,12 +2887,12 @@ components:
           default: 10
         batch_multiplier:
           type: number
-          exclusiveMinimum: 0.0
+          minimum: 1.0
           title: Batch Multiplier
           description: Over-generate each step by this factor so dynamic sampling
-            has candidates to filter. Set it near `1 / pct_mixed`. Rejected above
-            1.0 unless `use_dynamic_sampling` is true, which is what NeMo-RL asserts
-            at startup.
+            has candidates to filter. Set it near `1 / pct_mixed`. Must be >= 1.0
+            (NeMo-RL's DAPO contract). Rejected above 1.0 unless `use_dynamic_sampling`
+            is true, which is what NeMo-RL asserts at startup.
           default: 1.0
         reward_shaping:
           allOf:
@@ -2914,7 +2919,9 @@ components:
           title: Train Mb Tokens
           description: Token budget per training micro-batch, read by `dynamic` and
             `sequence_packing`. Defaults to max_seq_length * micro_batch_size, the
-            peak `static` already provisions for. Lower it if you OOM.
+            peak `static` already provisions for. Must be at least max_seq_length
+            so a full-length rollout still fits. Lower it if you OOM, but not below
+            that floor.
           type: integer
           exclusiveMinimum: 0.0
         sequence_length_round:

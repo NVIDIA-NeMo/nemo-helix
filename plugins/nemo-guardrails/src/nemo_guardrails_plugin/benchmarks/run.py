@@ -44,6 +44,7 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     IGW_CHAT_PATH,
     NMP_BASE_URL,
     NMP_HEALTH_PATH,
+    SCALED_EVALS_CREDENTIALS_ENCRYPTION_KEY,
     VARIANT_WITH_GUARDRAILS,
     VARIANT_WITHOUT_GUARDRAILS,
     WORKSPACE,
@@ -169,7 +170,11 @@ def _build_nmp_process(paths: RunPaths) -> SupervisedProcess:
         ],
         log_path=paths.log_dir / "nmp-services.log",
         cwd=paths.nmp_repo_root,
-        env={"NMP_BASE_URL": NMP_BASE_URL, "NMP_DATA_DIR": str(paths.nmp_data_dir)},
+        env={
+            "NMP_BASE_URL": NMP_BASE_URL,
+            "NMP_DATA_DIR": str(paths.nmp_data_dir),
+            "CREDENTIALS_ENCRYPTION_KEY": SCALED_EVALS_CREDENTIALS_ENCRYPTION_KEY,
+        },
         health_url=f"{NMP_BASE_URL}{NMP_HEALTH_PATH}",
         health_timeout_seconds=_NMP_HEALTH_TIMEOUT_SECONDS,
     )

@@ -4,7 +4,7 @@
 # Canonical Experimentalist benchmarks
 
 These benchmarks measure M2 Experimentalist optimization on unmodified Harbor Hub
-packages. They do not cover M1 Insight → Eval Author behavior.
+packages. They do not cover M1 Insight-driven suite authoring.
 
 Five suites ship today. All store only task IDs and download task definitions into
 a local cache; no task content is vendored here.

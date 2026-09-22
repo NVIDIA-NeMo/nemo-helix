@@ -17,6 +17,7 @@ import data.common.req_callers
 import data.common.req_deny
 import data.common.req_permissions
 import data.common.request_caller_kind
+import data.common.valid_service_principal
 
 # Main entry point - returns result with X-NMP-Authorized header
 #
@@ -64,7 +65,7 @@ allow_request if {
 # Known paths are authorized via the ServiceSystem role (wildcard permission) and has_permissions.
 allow_request if {
 	principal_id := extract_principal_id
-	startswith(principal_id, "service:")
+	valid_service_principal(principal_id)
 	endpoint_scan == ""
 }
 
@@ -113,7 +114,7 @@ allow_request if {
 	method in ["POST", "PUT", "PATCH", "DELETE"]
 
 	some principal in applicable_principals
-	startswith(principal, "service:")
+	valid_service_principal(principal)
 	has_permissions(principal, workspace, required_permissions)
 }
 

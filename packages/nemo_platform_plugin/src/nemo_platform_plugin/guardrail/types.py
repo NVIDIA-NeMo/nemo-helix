@@ -189,7 +189,7 @@ class GuardrailConfig(_GuardrailValue):
     workspace: str
     project: str | None = None
     description: str | None = None
-    data: RailsConfig = Field(default_factory=RailsConfig, description="Guardrail configuration data")
+    data: RailsConfig | None = Field(default=None, description="Guardrail configuration data")
     id: str
     created_at: datetime
     created_by: str | None = None

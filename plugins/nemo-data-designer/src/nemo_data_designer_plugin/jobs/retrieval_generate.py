@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from data_designer_nemo.context import create_validation_context
+from data_designer_nemo.context.validation import create_validation_context
 from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work_dir
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus

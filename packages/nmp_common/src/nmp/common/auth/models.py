@@ -15,19 +15,26 @@ from urllib.parse import quote
 from pydantic import BaseModel, Field, ValidationError
 
 from .exceptions import InvalidPrincipalHeader
+from .principal_identifier import (
+    MAX_PRINCIPAL_ID_LENGTH as MAX_PRINCIPAL_ID_LENGTH,
+)
+from .principal_identifier import (
+    PRINCIPAL_ID_ALLOWED_CHARACTERS,
+    InvalidPrincipalIdentifier,
+    parse_principal_identifier,
+    validate_principal_identifier,
+)
 
 logger = logging.getLogger(__name__)
 
 NMP_PRINCIPAL_ENVVAR = "NMP_PRINCIPAL"
 
-MAX_PRINCIPAL_ID_LENGTH = 256
 MAX_EMAIL_LENGTH = 320
 MAX_GROUP_LENGTH = 256
 MAX_GROUPS_COUNT = 100
 MAX_AUTHZ_ALIAS_LENGTH = 256
 MAX_AUTHZ_ALIASES_COUNT = 100
 
-_PRINCIPAL_ID_RE = re.compile(r"^[a-zA-Z0-9@._\-:+/]+$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
 
 CallerKind = Literal["principal", "service_principal"]
@@ -39,12 +46,17 @@ def _normalize_headers(headers: Dict[str, str]) -> dict[str, str]:
 
 def _validate_principal_id(value: str, header_name: str) -> None:
     """Validate a principal identifier value (used for principal-id and on-behalf-of)."""
-    if len(value) > MAX_PRINCIPAL_ID_LENGTH:
-        raise InvalidPrincipalHeader(f"{header_name} exceeds maximum length of {MAX_PRINCIPAL_ID_LENGTH} characters")
-    if not _PRINCIPAL_ID_RE.match(value):
-        raise InvalidPrincipalHeader(
-            f"{header_name} contains invalid characters; allowed: alphanumeric, @, ., -, _, :, +, /"
-        )
+    try:
+        validate_principal_identifier(value, label=header_name)
+    except InvalidPrincipalIdentifier as exc:
+        raise InvalidPrincipalHeader(str(exc)) from exc
+
+
+def _parse_principal_id(value: str, header_name: str) -> str:
+    try:
+        return parse_principal_identifier(value, label=header_name).raw
+    except InvalidPrincipalIdentifier as exc:
+        raise InvalidPrincipalHeader(str(exc)) from exc
 
 
 def _principal_email_from_headers(headers: Dict[str, str], header_key: str, header_label: str) -> Optional[str]:
@@ -73,10 +85,14 @@ def _principal_groups_from_headers(headers: Dict[str, str], header_key: str, hea
     for group in groups:
         if len(group) > MAX_GROUP_LENGTH:
             raise InvalidPrincipalHeader(f"{header_label} contains a group exceeding {MAX_GROUP_LENGTH} characters")
-        if not _PRINCIPAL_ID_RE.match(group):
+        try:
+            parse_principal_identifier(group, label=f"{header_label} group")
+        except InvalidPrincipalIdentifier as exc:
+            if "contains invalid characters" not in str(exc):
+                raise InvalidPrincipalHeader(str(exc)) from exc
             raise InvalidPrincipalHeader(
-                f"{header_label} contains a group with invalid characters; allowed: alphanumeric, @, ., -, _, :, +, /"
-            )
+                f"{header_label} contains a group with invalid characters; allowed: {PRINCIPAL_ID_ALLOWED_CHARACTERS}"
+            ) from exc
     return groups
 
 
@@ -107,10 +123,14 @@ def _principal_aliases_from_headers(headers: Dict[str, str], header_key: str, he
             raise InvalidPrincipalHeader(
                 f"{header_label} contains an alias exceeding {MAX_AUTHZ_ALIAS_LENGTH} characters"
             )
-        if not _PRINCIPAL_ID_RE.match(alias):
+        try:
+            parse_principal_identifier(alias, label=f"{header_label} alias")
+        except InvalidPrincipalIdentifier as exc:
+            if "contains invalid characters" not in str(exc):
+                raise InvalidPrincipalHeader(str(exc)) from exc
             raise InvalidPrincipalHeader(
-                f"{header_label} contains an alias with invalid characters; allowed: alphanumeric, @, ., -, _, :, +, /"
-            )
+                f"{header_label} contains an alias with invalid characters; allowed: {PRINCIPAL_ID_ALLOWED_CHARACTERS}"
+            ) from exc
         if alias not in aliases:
             aliases.append(alias)
 
@@ -157,7 +177,9 @@ class Principal(BaseModel):
     @property
     def caller_kind(self) -> CallerKind:
         """Whether the caller is a service principal, derived from the trusted principal id."""
-        return "service_principal" if self.id.startswith("service:") else "principal"
+        if not self.id:
+            return "principal"
+        return parse_principal_identifier(self.id, validate=False).caller_kind
 
     @property
     def effective_id(self) -> str:
@@ -208,14 +230,17 @@ class Principal(BaseModel):
         """Whether the principal is delegated."""
         return self.on_behalf_of is not None
 
-    @property
     def is_privileged(self) -> bool:
         """Whether the principal is privileged."""
-        return self.id.startswith("service:")
+        if not self.id:
+            return False
+        return parse_principal_identifier(self.id, validate=False).is_privileged()
 
     def is_service_identity(self) -> bool:
         """Whether the principal is an internal service or service account."""
-        return self.is_privileged or self.id.startswith("service-account:")
+        if not self.id:
+            return False
+        return parse_principal_identifier(self.id, validate=False).is_service_identity()
 
     @classmethod
     def from_headers(cls, headers: Dict[str, str]) -> Optional[Principal]:
@@ -235,7 +260,7 @@ class Principal(BaseModel):
         if not principal_id:
             return None
 
-        _validate_principal_id(principal_id, "X-NMP-Principal-Id")
+        principal_id = _parse_principal_id(principal_id, "X-NMP-Principal-Id")
 
         email = _principal_email_from_headers(headers, "x-nmp-principal-email", "X-NMP-Principal-Email")
         groups = _principal_groups_from_headers(headers, "x-nmp-principal-groups", "X-NMP-Principal-Groups")
@@ -258,7 +283,7 @@ class Principal(BaseModel):
         if on_behalf_of is not None:
             on_behalf_of = on_behalf_of.strip()
             if on_behalf_of:
-                _validate_principal_id(on_behalf_of, "X-NMP-Principal-On-Behalf-Of")
+                on_behalf_of = _parse_principal_id(on_behalf_of, "X-NMP-Principal-On-Behalf-Of")
             else:
                 on_behalf_of = None
 

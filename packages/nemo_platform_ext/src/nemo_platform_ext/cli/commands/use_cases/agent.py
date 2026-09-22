@@ -83,7 +83,10 @@ def _build_plugin_surfaces() -> dict[str, list[str]]:
 
 def _all_top_level_entries() -> list[tuple[str, str, str]]:
     """Return (name, panel, help_first_line) for every registered top-level command."""
-    from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
+    try:
+        from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
+    except ImportError:
+        API_TOP_LEVEL_ENTRIES = ()
     from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 
     plugin_entry_points: dict[str, EntryPoint] = {}

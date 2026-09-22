@@ -4239,11 +4239,13 @@ components:
             \ travel in the spec."
         agent_ref_name:
           title: Agent Ref Name
-          description: Gym agent instance rollouts are routed to when running against
-            a sandboxed host, stamped as each row's `agent_ref`. Defaults to `agent`.
-            Set it when the environment's config defines the agent under a different
-            name -- `mcqa` registers `mcqa_simple_agent`, and routing to `simple_agent`
-            there does not answer.
+          description: 'Gym agent *instance*, as distinct from the `agent` component
+            it configures. Defaults to `agent`. Set it whenever the two differ, which
+            is common in stock Gym: `rewoo_agent` is an instance of the `langgraph_agent`
+            component, as are the whole `anyswe_*` and `anyterminal_*` families of
+            theirs. It keys the resources-server binding, decides whether an environment
+            package declares the agent, and is stamped as each row''s `agent_ref`.
+            Requires sandboxed execution.'
           type: string
         env_secrets:
           additionalProperties:
@@ -5550,6 +5552,18 @@ components:
             width.
           type: integer
           exclusiveMinimum: 0.0
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
       additionalProperties: false
       type: object
       required:
@@ -5604,6 +5618,18 @@ components:
             width.
           type: integer
           exclusiveMinimum: 0.0
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
       additionalProperties: false
       type: object
       required:

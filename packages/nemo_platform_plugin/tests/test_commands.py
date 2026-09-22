@@ -19,6 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, ClassVar, cast
 
+import click
 import httpx
 import pytest
 import typer
@@ -1475,3 +1476,180 @@ class TestJobAutoSpecFlags:
         # The flag follows ``input_spec_schema``, not ``spec_schema``.
         assert "--target-name" in plain
         assert "--resolved-id" not in plain
+
+
+# ---------------------------------------------------------------------------
+# Workspace resolution — generated verbs honor the active CLI context
+# ---------------------------------------------------------------------------
+
+
+class _ContextState:
+    """Minimal stand-in for ``CLIContext`` with a non-'default' workspace."""
+
+    def __init__(self, workspace: str | None = "my-team-ws") -> None:
+        self._workspace = workspace
+
+    def get_base_url(self, default: str | None = None) -> str:
+        del default
+        return "http://my-platform:9090"
+
+    def get_workspace(self) -> str | None:
+        return self._workspace
+
+
+def _app_with_state(app: typer.Typer, state: object | None) -> typer.Typer:
+    """Wrap *app* in a parent group whose callback seeds ``ctx.obj`` with *state*."""
+    parent = typer.Typer()
+
+    @parent.callback()
+    def _root(ctx: typer.Context) -> None:
+        ctx.obj = state
+
+    parent.add_typer(app, name="plugin")
+    return parent
+
+
+def _collect_workspace_params(app: typer.Typer) -> dict[str, click.Parameter]:
+    """Map ``"<command path>"`` -> the ``--workspace`` param of every subcommand.
+
+    Walks the resolved Click tree rather than the Typer app so generated
+    callbacks (flat jobs/functions register ``--workspace`` on the group
+    callback, not on a subcommand) are covered too.
+    """
+    found: dict[str, click.Parameter] = {}
+
+    def _walk(command: click.Command, path: str) -> None:
+        for param in command.params:
+            if "--workspace" in getattr(param, "opts", []):
+                found[path or command.name or "<root>"] = param
+        if isinstance(command, click.Group):
+            for name, sub in command.commands.items():
+                _walk(sub, f"{path} {name}".strip())
+
+    _walk(typer.main.get_command(app), "")
+    return found
+
+
+class TestWorkspaceResolution:
+    """The generated verbs must not fall back to a hardcoded 'default'.
+
+    Regression guard: ``--workspace`` used to be declared with a literal
+    ``"default"`` Typer default, so the command body could never tell an
+    omitted flag from an explicit one and the active context's workspace
+    (and ``$NMP_WORKSPACE``) were silently discarded.
+    """
+
+    def test_function_run_uses_context_workspace(self) -> None:
+        app = _app_with_state(_app_with_functions(_WorkspaceFunction), _ContextState())
+        result = runner.invoke(app, ["plugin", "echo-workspace", "run", "--spec", "{}"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"workspace": "my-team-ws"}
+
+    def test_function_run_explicit_flag_wins_over_context(self) -> None:
+        app = _app_with_state(_app_with_functions(_WorkspaceFunction), _ContextState())
+        result = runner.invoke(
+            app,
+            ["plugin", "echo-workspace", "run", "--spec", "{}", "--workspace", "team-alpha"],
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"workspace": "team-alpha"}
+
+    def test_function_run_falls_back_to_default_without_state(self, monkeypatch) -> None:
+        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+        app = _app_with_state(_app_with_functions(_WorkspaceFunction), None)
+        result = runner.invoke(app, ["plugin", "echo-workspace", "run", "--spec", "{}"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"workspace": "default"}
+
+    def test_function_run_falls_back_to_env_without_state(self, monkeypatch) -> None:
+        monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+        app = _app_with_state(_app_with_functions(_WorkspaceFunction), None)
+        result = runner.invoke(app, ["plugin", "echo-workspace", "run", "--spec", "{}"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"workspace": "env-ws"}
+
+    def test_function_submit_url_uses_context_workspace(self, monkeypatch) -> None:
+        captured_url: list[str] = []
+
+        def _fake_post(url: str, body: dict, *, headers: dict, timeout: float = 30.0, **_kwargs) -> None:
+            del body, headers, timeout
+            captured_url.append(url)
+            typer.echo(json.dumps({"message": "ok"}))
+
+        monkeypatch.setattr("nemo_platform_plugin.commands._post_function_submit", _fake_post)
+
+        app = _app_with_state(_app_with_functions(_GreetFunction), _ContextState())
+        result = runner.invoke(app, ["plugin", "greet", "submit", "--spec", '{"name": "Ada"}'])
+        assert result.exit_code == 0, result.output
+        assert captured_url[0].endswith("/v2/workspaces/my-team-ws/greet")
+
+    def test_function_submit_explicit_flag_wins_over_context(self, monkeypatch) -> None:
+        captured_url: list[str] = []
+
+        def _fake_post(url: str, body: dict, *, headers: dict, timeout: float = 30.0, **_kwargs) -> None:
+            del body, headers, timeout
+            captured_url.append(url)
+            typer.echo(json.dumps({"message": "ok"}))
+
+        monkeypatch.setattr("nemo_platform_plugin.commands._post_function_submit", _fake_post)
+
+        app = _app_with_state(_app_with_functions(_GreetFunction), _ContextState())
+        result = runner.invoke(
+            app,
+            ["plugin", "greet", "submit", "--spec", '{"name": "Ada"}', "--workspace", "team-alpha"],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured_url[0].endswith("/v2/workspaces/team-alpha/greet")
+
+    def test_job_submit_uses_context_workspace(self, monkeypatch) -> None:
+        captured: list[str | None] = []
+
+        def _fake_submit(self, job_cls, spec, **kwargs):
+            del self, job_cls, spec
+            captured.append(kwargs.get("workspace"))
+            return {"id": "job-1"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _fake_submit)
+
+        app = _app_with_state(_app_with_jobs(_GreetJob), _ContextState())
+        result = runner.invoke(app, ["plugin", "greet", "submit", "--spec", "{}"])
+        assert result.exit_code == 0, result.output
+        assert captured[0] == "my-team-ws"
+
+    def test_job_submit_explicit_flag_wins_over_context(self, monkeypatch) -> None:
+        captured: list[str | None] = []
+
+        def _fake_submit(self, job_cls, spec, **kwargs):
+            del self, job_cls, spec
+            captured.append(kwargs.get("workspace"))
+            return {"id": "job-1"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _fake_submit)
+
+        app = _app_with_state(_app_with_jobs(_GreetJob), _ContextState())
+        result = runner.invoke(app, ["plugin", "greet", "submit", "--spec", "{}", "--workspace", "team-alpha"])
+        assert result.exit_code == 0, result.output
+        assert captured[0] == "team-alpha"
+
+    @pytest.mark.parametrize(
+        "build_app",
+        [
+            pytest.param(lambda: _app_with_jobs(_GreetJob), id="job-legacy-subgroup"),
+            pytest.param(lambda: _app_with_jobs(_FlatGreetJob), id="job-flat-callback"),
+            pytest.param(lambda: _app_with_functions(_GreetFunction), id="function-subgroup"),
+            pytest.param(lambda: _app_with_functions(_FlatGreetFunction), id="function-flat"),
+        ],
+    )
+    def test_no_generated_verb_declares_a_literal_default_workspace(self, build_app) -> None:
+        """Backstop across every generated verb shape, not just the ones above.
+
+        A literal Typer default for ``--workspace`` is the bug: it makes an
+        omitted flag indistinguishable from an explicit one, so the command
+        can never consult the active context. Assert the *declaration* is
+        ``None`` everywhere rather than asserting on help text, which varies
+        with the rich formatter.
+        """
+        found = _collect_workspace_params(build_app())
+        assert found, "no --workspace option found; this guard would be vacuous"
+        offenders = {path: param.default for path, param in found.items() if param.default is not None}
+        assert not offenders, f"--workspace must default to None so the CLI context can win: {offenders}"

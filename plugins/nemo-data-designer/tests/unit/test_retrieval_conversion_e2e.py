@@ -86,6 +86,8 @@ def test_conversion_produces_eval_beir_and_training_json(stage0_jsonl: Path, tmp
     qrels = (eval_dir / "qrels" / "test.tsv").read_text(encoding="utf-8").splitlines()
     assert qrels[0].split("\t") == ["query-id", "corpus-id", "score"]
     assert len(qrels) > 1
+    qrel_pairs = [tuple(row.split("\t")[:2]) for row in qrels[1:]]
+    assert len(qrel_pairs) == len(set(qrel_pairs)), "qrels must be unique by (query-id, corpus-id)"
 
     train_file = Path(result.train_file)
     assert train_file.exists()

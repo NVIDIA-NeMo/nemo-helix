@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 instances:
-- url: nemo-platform.docs.buildwithfern.com/nemo-platform
-  custom-domain: docs.nvidia.com/nemo-platform
+- url: nemo-helix.docs.buildwithfern.com/nemo-helix
+  custom-domain: docs.nvidia.com/nemo-helix
   multi-source: true
 title: NVIDIA NeMo Platform
 global-theme: nvidia

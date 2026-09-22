@@ -10,8 +10,7 @@ from typing import Any, ClassVar
 from urllib.parse import urlparse
 
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_platform import AsyncNeMoPlatform, NotFoundError, PermissionDeniedError
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_platform_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_platform_plugin.files.client import AsyncFilesClient
@@ -79,7 +78,7 @@ class GenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -118,19 +117,18 @@ class GenerateJob(NemoJob):
                     "Expected 'workspace/provider_name' format."
                 )
             provider_workspace, provider_name = parts
+            models = client_from_platform(async_sdk, AsyncModelsClient)
             try:
-                provider = await async_sdk.inference.providers.retrieve(provider_name, workspace=provider_workspace)
-            except NotFoundError as e:
+                provider = (await models.get_provider(name=provider_name, workspace=provider_workspace)).data()
+            except ClientNotFoundError as e:
                 raise PlatformJobCompilationError(
                     f"Could not find model provider {provider_name!r} in workspace {provider_workspace!r}"
                 ) from e
-            except PermissionDeniedError as e:
+            except ClientPermissionDeniedError as e:
                 raise PlatformJobCompilationError(
                     f"Failed to retrieve model provider {classify_model_provider!r}: Access denied to workspace {provider_workspace!r}"
                 ) from e
-            nim_endpoint_url = client_from_platform(async_sdk, AsyncModelsClient).get_provider_route_openai_url(
-                provider
-            )
+            nim_endpoint_url = models.get_provider_route_openai_url(provider)
             parsed_url = urlparse(nim_endpoint_url)
             environment.append(EnvironmentVariable(name="CLASSIFY_LLM_ENDPOINT_PATH", value=parsed_url.path))
             logger.info("Configured NIM endpoint URL: %s (provider: %s)", nim_endpoint_url, classify_model_provider)

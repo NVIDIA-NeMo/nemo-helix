@@ -40,6 +40,14 @@ class Retrieval(BaseModel):
         gt=0,
         description="Expected embedding width. Omit to accept the model's native width.",
     )
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
     rankings: dict[str, dict[str, float]] | None = Field(
         default=None,
         exclude=True,

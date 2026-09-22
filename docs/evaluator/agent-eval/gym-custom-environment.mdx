@@ -147,12 +147,59 @@ environment variables.
 
 ## 4. Submit the job
 
+<Tabs>
+
+<Tab title="CLI">
+
 ```bash
 nemo evaluator agent-evaluate submit \
   --spec-file gym-custom-environment.yaml \
   --workspace default \
   --profile default
 ```
+
+</Tab>
+
+<Tab title="Python SDK">
+
+Submit the runner object rather than the spec file. The runner carries the evaluation and a
+`GymPlacement` carries the deployment, so the configuration is written once and
+`client.evaluator.submit` returns a job handle that polls itself:
+
+```python
+from nemo_evaluator.api.schemas import TasksetRef
+from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_spec import GymPlacement
+from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.values import SecretRef
+from nemo_platform import NeMoPlatform
+
+client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+
+runner = GymAgentTaskRunner(
+    config=GymRuntimeConfig(
+        agent="simple_agent",
+        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        resources_server="custom_greeting",
+        env_secrets={"EXTERNAL_MODEL_API_KEY": SecretRef("default/my-model-api-key")},
+    )
+)
+
+job = client.evaluator.submit(
+    tasks=TasksetRef("my-gym-taskset"),
+    target=runner,
+    placement=GymPlacement(environment=FilesetRef(root="default/my-gym-environment")),
+)
+job.wait_until_done()
+```
+
+The same runner runs locally under `AgentEvaluator()` without change — `env_secrets` resolves from
+your own environment there. Only the placement is specific to the platform, which is why it is not
+part of the runner.
+
+</Tab>
+
+</Tabs>
 
 Evaluator compiles two ordered steps:
 

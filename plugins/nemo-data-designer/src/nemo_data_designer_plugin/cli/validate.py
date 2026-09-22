@@ -5,19 +5,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, cast
+from typing import Annotated
 
 import typer
 from data_designer.cli.ui import print_error, print_header, print_success
-from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
-from nemo_data_designer_plugin.sdk.validation import (
-    ValidationReport,
-    validate_config_sync,
+from nemo_data_designer_plugin.cli._context import (
+    OutputFormat,
+    load_builder_or_exit,
+    resolve_sdks_or_exit,
+    resolve_workspace,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.cli_state import resolve_local_cli_sdks
-
-OutputFormat = Literal["text", "json"]
+from nemo_data_designer_plugin.sdk.validation import ValidationReport, validate_config_sync
 
 
 def validate_command(
@@ -49,30 +47,19 @@ def validate_command(
         ),
     ] = "text",
 ) -> None:
-    """Validate a Data Designer configuration."""
-    try:
-        config_builder = load_config_builder(config_source)
-    except ConfigLoadError as e:
-        print_error(f"Could not load config: {e}")
-        raise typer.Exit(code=1) from e
+    """Validate a Data Designer configuration.
 
-    sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-    sdk = cast("NeMoPlatform | None", sdk)
-    async_sdk = cast("AsyncNeMoPlatform | None", async_sdk)
+    Checks that the configuration is well-formed and that the platform
+    resources it names resolve: Inference Gateway providers, Files service seed
+    sources, and Nemotron Personas filesets.
 
-    if sdk is None and async_sdk is None:
-        print_error(
-            "No NeMo Platform SDK is available. Run `nemo` from a configured environment "
-            "or supply credentials via the top-level CLI."
-        )
-        raise typer.Exit(code=1)
-
-    resolved_workspace = (
-        workspace
-        or (getattr(sdk, "workspace", None) if sdk is not None else None)
-        or (getattr(async_sdk, "workspace", None) if async_sdk is not None else None)
-        or "default"
-    )
+    Does not check whether those models actually respond — a provider can
+    resolve while still refusing to serve the model named alongside it. Run
+    `nemo data-designer check-models` for that.
+    """
+    config_builder = load_builder_or_exit(config_source)
+    sdk, async_sdk = resolve_sdks_or_exit(typer_ctx)
+    resolved_workspace = resolve_workspace(workspace, sdk=sdk, async_sdk=async_sdk)
 
     report = validate_config_sync(
         config_builder,

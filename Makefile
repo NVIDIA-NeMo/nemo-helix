@@ -98,10 +98,13 @@ generate-cli-commands: ## Run generation of the CLI commands
 	$(UV) run --frozen nemo-platform-sdk-tools generate-cli $(ARGS)
 
 	# auto-generated code can be cleaned up more aggressively (in this case, we want to remove unused imports in __init__.py files)
-	$(UV) run --frozen ruff check --fix --preview --unsafe-fixes --extend-select F401,E402 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
+	# Every API group is now plugin-hosted, so there may be no generated commands/api directory; only lint it when it exists.
 	# ARG001 catches unused function arguments which indicates variable shadowing bugs (no auto-fix)
-	$(UV) run --frozen ruff check --select ARG001 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
-	$(UV) run --frozen ruff check --fix --unsafe-fixes packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
+	if [ -d packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api ]; then \
+		$(UV) run --frozen ruff check --fix --preview --unsafe-fixes --extend-select F401,E402 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/; \
+		$(UV) run --frozen ruff check --select ARG001 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/; \
+		$(UV) run --frozen ruff check --fix --unsafe-fixes packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/; \
+	fi
 	$(UV) run --frozen ruff format packages/nemo_platform_ext
 
 .PHONY: generate-cli-reference-docs

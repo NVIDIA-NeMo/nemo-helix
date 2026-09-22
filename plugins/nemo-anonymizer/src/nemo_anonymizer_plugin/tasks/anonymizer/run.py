@@ -10,6 +10,8 @@ import logging
 import os
 from pathlib import Path
 
+import pandas as pd
+from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
 from anonymizer.interface.anonymizer import Anonymizer
 from data_designer.config.models import ModelProvider as DDModelProvider
 from data_designer_nemo.model_provider import (
@@ -101,7 +103,7 @@ def _run_with_step_config(
     artifacts_dir = storage_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     result.dataframe.to_parquet(artifacts_dir / "dataset.parquet", index=False)
-    result.trace_dataframe.to_parquet(artifacts_dir / "trace.parquet", index=False)
+    _encode_skipped_span_label_counts(result.trace_dataframe).to_parquet(artifacts_dir / "trace.parquet", index=False)
     with open(artifacts_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(
             {"original_text_column": _get_original_text_column(result.trace_dataframe, request.data.text_column)},
@@ -174,6 +176,38 @@ def _get_task_log_handler(module_logger: logging.Logger) -> logging.Handler | No
         if getattr(handler, _TASK_LOG_HANDLER_MARKER, False):
             return handler
     return None
+
+
+def _encode_skipped_span_label_counts(trace_dataframe: pd.DataFrame) -> pd.DataFrame:
+    """JSON-encode the nested ``skipped_span_label_counts`` mapping for Parquet.
+
+    ``ReplacementApplication`` carries ``skipped_span_label_counts`` as a nested dict.
+    When no spans were skipped it is ``{}`` on every row, and Arrow infers a struct
+    with no child fields, which Parquet cannot write ("Cannot write struct type ...
+    with no child field"). Encoding to a JSON string yields the same Arrow type
+    regardless of content.
+
+    This mirrors the encoding the upstream library applies in
+    ``anonymizer.engine.rewrite.rewrite_generation._prepare_rewrite_tagged_text``.
+    Upstream exposes the decode half as a reusable function but keeps the encode half
+    inline in a private row function, so the one ``json.dumps`` line is duplicated
+    here. ``AnonymizerJobResults.load_trace`` undoes it with upstream's
+    ``restore_empty_skipped_span_label_counts``; keep the two sides in step.
+    """
+    if COL_REPLACEMENT_APPLICATION not in trace_dataframe.columns:
+        return trace_dataframe
+
+    def _encode(value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        counts = value.get("skipped_span_label_counts")
+        if isinstance(counts, str):
+            return value
+        return {**value, "skipped_span_label_counts": json.dumps(counts, sort_keys=True)}
+
+    encoded = trace_dataframe.copy(deep=False)
+    encoded[COL_REPLACEMENT_APPLICATION] = trace_dataframe[COL_REPLACEMENT_APPLICATION].map(_encode)
+    return encoded
 
 
 def _get_original_text_column(trace_dataframe: object, fallback: str) -> str:

@@ -71,6 +71,65 @@ export const DATASET_FIELD_BY_BACKEND: Record<CustomizationBackend, DatasetField
   rl: 'rl.dataset',
 };
 
+/**
+ * The subset of the form these predicates read.
+ *
+ * Stated structurally rather than as `Partial<CustomizationFormFields>` so that
+ * callers watching two or three individual fields can pass what they have —
+ * `Partial` only loosens the top level, which would force a cast at every call
+ * site. `CustomizationFormFields` satisfies this shape.
+ */
+export interface FinetuningTypeSource {
+  backend: CustomizationBackend;
+  automodel?: { training?: { finetuning_type?: string } };
+  unsloth?: { training?: { finetuning_type?: string }; output?: { save_method?: string } };
+  grpo?: { trainingType?: string; finetuning_type?: string };
+}
+
+/**
+ * The active backend's `finetuning_type`, or undefined when it has none.
+ *
+ * The field lives at a different path per backend, and RL keeps it in the
+ * form-only `grpo` namespace rather than on `rl.training` (see `GrpoFormFields`).
+ * DPO has no `finetuning_type` at all — it is always full-weight.
+ */
+export const getActiveFinetuningType = (fields: FinetuningTypeSource): string | undefined => {
+  switch (fields.backend) {
+    case 'automodel':
+      return fields.automodel?.training?.finetuning_type;
+    case 'unsloth':
+      return fields.unsloth?.training?.finetuning_type;
+    case 'rl':
+      return fields.grpo?.trainingType === 'grpo' ? fields.grpo?.finetuning_type : undefined;
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Whether the run's **output** is a separately deployable LoRA adapter.
+ *
+ * Deliberately narrower than "trains with LoRA": `lora_merged` uses LoRA during
+ * training but merges the result into full weights, so its output is a normal
+ * model, not an adapter. Anything reasoning about how the output gets *served*
+ * wants this predicate; anything deciding whether to show LoRA hyperparameter
+ * controls wants the broader test and must not use it.
+ *
+ * `finetuning_type` alone is not enough for unsloth. Automodel spends a separate
+ * `finetuning_type` on the distinction (`lora` vs `lora_merged`), but unsloth
+ * expresses it at save time instead: `finetuning_type: 'lora'` with
+ * `save_method: 'merged_16bit' | 'merged_4bit'` trains an adapter and then merges
+ * it into the base, emitting full weights. Mirrors `is_lora_adapter` in
+ * `nemo_unsloth_plugin/schema.py`, which is the authority the job itself uses.
+ */
+export const producesAdapter = (fields: FinetuningTypeSource): boolean => {
+  if (getActiveFinetuningType(fields) !== 'lora') return false;
+  if (fields.backend !== 'unsloth') return true;
+  // Absent means the API default, which is `lora` — an unmerged adapter.
+  const saveMethod = fields.unsloth?.output?.save_method;
+  return saveMethod === undefined || saveMethod === 'lora';
+};
+
 type ModelFieldName = 'automodel.model' | 'unsloth.model.name' | 'rl.model';
 
 /** Likewise for the base model reference. */
@@ -251,28 +310,53 @@ export const customizationFormSchema = z
     }
   });
 
-export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobsJobRequest => {
+/**
+ * `deployment_config` on a job spec: the name of a `ModelDeploymentConfig` the job's
+ * model_entity task resolves and deploys from once training finishes.
+ *
+ * Every builder below sets this **unconditionally**, including to `undefined`, rather
+ * than spreading it in only when present. `jobToFormFields` clones a job by copying its
+ * whole spec into the form (`automodel: stripNulls(job.spec)`, and the same for RL and
+ * unsloth), so a cloned job arrives carrying whatever `deployment_config` it ran with.
+ * A conditional spread leaves that value in place when the user opts out — the job then
+ * deploys a model they declined to deploy.
+ *
+ * Assigning `undefined` is safe against `extra="forbid"`: `JSON.stringify` drops
+ * undefined-valued keys, so the field is absent on the wire exactly as if it had never
+ * been set, while still overriding the spread.
+ */
+export const formToAutomodelCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): AutomodelJobsJobRequest => {
   const { training } = f.automodel;
   const usesLora =
     training.finetuning_type === 'lora' || training.finetuning_type === 'lora_merged';
   const isDistillation = training.training_type === 'distillation';
+  const spec: AutomodelJobInput = {
+    ...f.automodel,
+    integrations: cleanIntegrations(f.automodel.integrations),
+    training: {
+      ...training,
+      // The backend merges when `finetuning_type` is lora_merged *or* `lora.merge` is
+      // set, so the two say the same thing. The form only offers the first, and sends
+      // the second to match rather than letting a cloned job's stale flag decide.
+      lora: usesLora
+        ? { ...training.lora, merge: training.finetuning_type === 'lora_merged' }
+        : undefined,
+      teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
+      teacher_precision: isDistillation ? training.teacher_precision : undefined,
+      distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
+      distillation_temperature: isDistillation ? training.distillation_temperature : undefined,
+      offload_teacher: isDistillation ? training.offload_teacher : undefined,
+    },
+    output: { name: f.outputName, description: f.description || undefined },
+    deployment_config: deploymentConfig,
+  };
   return {
     name: f.outputName || undefined,
     description: f.description || undefined,
-    spec: {
-      ...f.automodel,
-      integrations: cleanIntegrations(f.automodel.integrations),
-      training: {
-        ...training,
-        lora: usesLora ? training.lora : undefined,
-        teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
-        teacher_precision: isDistillation ? training.teacher_precision : undefined,
-        distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
-        distillation_temperature: isDistillation ? training.distillation_temperature : undefined,
-        offload_teacher: isDistillation ? training.offload_teacher : undefined,
-      },
-      output: { name: f.outputName, description: f.description || undefined },
-    },
+    spec,
   };
 };
 
@@ -312,91 +396,96 @@ const omitIfEmpty = <T extends object>(group: T | undefined | null): T | undefin
 /** An empty list is not a filter — send nothing so the backend keeps its own default. */
 const emptyToUndefined = (v: string[] | undefined | null) => (v && v.length > 0 ? v : undefined);
 
-export const formToRlCreate = (f: CustomizationFormFields): RlJobsJobRequest => {
+export const formToRlCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): RlJobsJobRequest => {
   if (f.grpo.trainingType === 'grpo') {
     const t = f.rl.training;
     const isLora = f.grpo.finetuning_type === RlGRPOTrainingFinetuningType.lora;
+    const spec: RlJobInput = {
+      model: f.rl.model,
+      dataset: f.rl.dataset,
+      environment: f.grpo.environmentFileset || undefined,
+      integrations: cleanIntegrations(f.rl.integrations),
+      training: {
+        type: 'grpo',
+        optimizer_type: t.optimizer_type,
+        learning_rate: t.learning_rate,
+        min_learning_rate: t.min_learning_rate,
+        weight_decay: t.weight_decay,
+        adam_beta1: t.adam_beta1,
+        adam_beta2: t.adam_beta2,
+        adam_eps: t.adam_eps,
+        warmup_steps: t.warmup_steps,
+        max_steps: t.max_steps,
+        val_check_interval: t.val_check_interval,
+        val_at_end: t.val_at_end,
+        keep_top_k: t.keep_top_k,
+        batch_size: t.batch_size,
+        micro_batch_size: t.micro_batch_size,
+        activation_checkpointing: t.activation_checkpointing,
+        max_seq_length: t.max_seq_length,
+        seed: t.seed,
+        parallelism: t.parallelism,
+        max_grad_norm: t.max_grad_norm,
+        finetuning_type: f.grpo.finetuning_type,
+        lora: isLora
+          ? {
+              ...f.grpo.lora,
+              target_modules: emptyToUndefined(f.grpo.lora?.target_modules),
+              exclude_modules: emptyToUndefined(f.grpo.lora?.exclude_modules),
+            }
+          : undefined,
+        num_generations_per_prompt: f.grpo.num_generations_per_prompt,
+        num_prompts_per_step: f.grpo.num_prompts_per_step,
+        overlong_filtering: f.grpo.overlong_filtering,
+        temperature: f.grpo.temperature,
+        max_new_tokens: f.grpo.max_new_tokens,
+        val_at_start: f.grpo.val_at_start,
+        normalize_rewards: f.grpo.normalize_rewards,
+        max_rollout_turns: f.grpo.max_rollout_turns,
+        ref_policy_kl_penalty: t.ref_policy_kl_penalty,
+        ratio_clip_min: f.grpo.ratio_clip_min,
+        ratio_clip_max: f.grpo.ratio_clip_max,
+        epochs: t.epochs,
+        execution_profile: t.execution_profile || undefined,
+        ratio_clip_c: f.grpo.ratio_clip_c,
+        advantage_clip_low: f.grpo.advantage_clip_low,
+        advantage_clip_high: f.grpo.advantage_clip_high,
+        use_dynamic_sampling: f.grpo.use_dynamic_sampling,
+        // The backend rejects a multiplier other than 1.0 unless dynamic sampling is on,
+        // so the two always travel together.
+        batch_multiplier: f.grpo.use_dynamic_sampling ? f.grpo.batch_multiplier : undefined,
+        dynamic_sampling_max_gen_batches: f.grpo.use_dynamic_sampling
+          ? f.grpo.dynamic_sampling_max_gen_batches
+          : undefined,
+        use_leave_one_out_baseline: f.grpo.use_leave_one_out_baseline,
+        use_importance_sampling_correction: f.grpo.use_importance_sampling_correction,
+        use_on_policy_kl_approximation: f.grpo.use_on_policy_kl_approximation,
+        truncated_importance_sampling_type: f.grpo.truncated_importance_sampling_type,
+        truncated_importance_sampling_ratio: f.grpo.truncated_importance_sampling_ratio,
+        truncated_importance_sampling_ratio_min: f.grpo.truncated_importance_sampling_ratio_min,
+        reward_scaling: omitIfEmpty(f.grpo.reward_scaling),
+        reward_shaping: omitIfEmpty(f.grpo.reward_shaping),
+        policy_backend: f.grpo.policy_backend,
+        batching_strategy: f.grpo.batching_strategy,
+        sequence_length_round: f.grpo.sequence_length_round,
+        top_k: f.grpo.top_k,
+        train_mb_tokens: f.grpo.train_mb_tokens,
+        router_aux_loss_coef: f.grpo.router_aux_loss_coef,
+        vllm_tensor_parallel_size: f.grpo.vllm_tensor_parallel_size,
+        vllm_gpu_memory_utilization: f.grpo.vllm_gpu_memory_utilization,
+        hf_config_overrides: f.grpo.hf_config_overrides,
+        automodel_kwargs: f.grpo.automodel_kwargs,
+      },
+      output: { name: f.outputName || undefined },
+      deployment_config: deploymentConfig,
+    };
     return {
       name: f.outputName || undefined,
       description: f.description || undefined,
-      spec: {
-        model: f.rl.model,
-        dataset: f.rl.dataset,
-        environment: f.grpo.environmentFileset || undefined,
-        integrations: cleanIntegrations(f.rl.integrations),
-        training: {
-          type: 'grpo',
-          optimizer_type: t.optimizer_type,
-          learning_rate: t.learning_rate,
-          min_learning_rate: t.min_learning_rate,
-          weight_decay: t.weight_decay,
-          adam_beta1: t.adam_beta1,
-          adam_beta2: t.adam_beta2,
-          adam_eps: t.adam_eps,
-          warmup_steps: t.warmup_steps,
-          max_steps: t.max_steps,
-          val_check_interval: t.val_check_interval,
-          val_at_end: t.val_at_end,
-          keep_top_k: t.keep_top_k,
-          batch_size: t.batch_size,
-          micro_batch_size: t.micro_batch_size,
-          activation_checkpointing: t.activation_checkpointing,
-          max_seq_length: t.max_seq_length,
-          seed: t.seed,
-          parallelism: t.parallelism,
-          max_grad_norm: t.max_grad_norm,
-          finetuning_type: f.grpo.finetuning_type,
-          lora: isLora
-            ? {
-                ...f.grpo.lora,
-                target_modules: emptyToUndefined(f.grpo.lora?.target_modules),
-                exclude_modules: emptyToUndefined(f.grpo.lora?.exclude_modules),
-              }
-            : undefined,
-          num_generations_per_prompt: f.grpo.num_generations_per_prompt,
-          num_prompts_per_step: f.grpo.num_prompts_per_step,
-          overlong_filtering: f.grpo.overlong_filtering,
-          temperature: f.grpo.temperature,
-          max_new_tokens: f.grpo.max_new_tokens,
-          val_at_start: f.grpo.val_at_start,
-          normalize_rewards: f.grpo.normalize_rewards,
-          max_rollout_turns: f.grpo.max_rollout_turns,
-          ref_policy_kl_penalty: t.ref_policy_kl_penalty,
-          ratio_clip_min: f.grpo.ratio_clip_min,
-          ratio_clip_max: f.grpo.ratio_clip_max,
-          epochs: t.epochs,
-          execution_profile: t.execution_profile || undefined,
-          ratio_clip_c: f.grpo.ratio_clip_c,
-          advantage_clip_low: f.grpo.advantage_clip_low,
-          advantage_clip_high: f.grpo.advantage_clip_high,
-          use_dynamic_sampling: f.grpo.use_dynamic_sampling,
-          // The backend rejects a multiplier other than 1.0 unless dynamic sampling is on,
-          // so the two always travel together.
-          batch_multiplier: f.grpo.use_dynamic_sampling ? f.grpo.batch_multiplier : undefined,
-          dynamic_sampling_max_gen_batches: f.grpo.use_dynamic_sampling
-            ? f.grpo.dynamic_sampling_max_gen_batches
-            : undefined,
-          use_leave_one_out_baseline: f.grpo.use_leave_one_out_baseline,
-          use_importance_sampling_correction: f.grpo.use_importance_sampling_correction,
-          use_on_policy_kl_approximation: f.grpo.use_on_policy_kl_approximation,
-          truncated_importance_sampling_type: f.grpo.truncated_importance_sampling_type,
-          truncated_importance_sampling_ratio: f.grpo.truncated_importance_sampling_ratio,
-          truncated_importance_sampling_ratio_min: f.grpo.truncated_importance_sampling_ratio_min,
-          reward_scaling: omitIfEmpty(f.grpo.reward_scaling),
-          reward_shaping: omitIfEmpty(f.grpo.reward_shaping),
-          policy_backend: f.grpo.policy_backend,
-          batching_strategy: f.grpo.batching_strategy,
-          sequence_length_round: f.grpo.sequence_length_round,
-          top_k: f.grpo.top_k,
-          train_mb_tokens: f.grpo.train_mb_tokens,
-          router_aux_loss_coef: f.grpo.router_aux_loss_coef,
-          vllm_tensor_parallel_size: f.grpo.vllm_tensor_parallel_size,
-          vllm_gpu_memory_utilization: f.grpo.vllm_gpu_memory_utilization,
-          hf_config_overrides: f.grpo.hf_config_overrides,
-          automodel_kwargs: f.grpo.automodel_kwargs,
-        },
-        output: { name: f.outputName || undefined },
-      },
+      spec,
     };
   }
 
@@ -446,7 +535,10 @@ export const formToRlCreate = (f: CustomizationFormFields): RlJobsJobRequest => 
   };
 };
 
-export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobRequest => {
+export const formToUnslothCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): UnslothJobsJobRequest => {
   const { training } = f.unsloth;
   const usesLora = training?.finetuning_type === 'lora';
   return {
@@ -460,7 +552,19 @@ export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobR
         : { ...f.unsloth.model, load_in_4bit: false, load_in_8bit: false },
       hardware: { ...f.unsloth.hardware, gpus: f.unsloth.hardware?.gpus || undefined },
       training: training && { ...training, lora: usesLora ? training.lora : undefined },
-      output: { name: f.outputName || undefined, description: f.description || undefined },
+      // `save_method` is carried through rather than dropped: `producesAdapter` reads it
+      // to decide whether the output is an adapter, and a value the predicate honours but
+      // the request discards would let Studio and the job disagree about what a run emits.
+      output: {
+        name: f.outputName || undefined,
+        description: f.description || undefined,
+        save_method: f.unsloth.output?.save_method,
+      },
+      // Unconditional, overriding the `...f.unsloth` spread above — see the note on
+      // `formToAutomodelCreate`. Unsloth's is the one that can also carry an inline
+      // `DeploymentParams` object rather than a config name, which a clone would
+      // otherwise replay in full.
+      deployment_config: deploymentConfig,
     },
   };
 };
@@ -478,12 +582,20 @@ const stripNulls = <T>(value: T): T => {
 
 export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields => {
   if (isAutomodelJob(job)) {
+    const spec = stripNulls(job.spec) as AutomodelJobInput;
+    // A job submitted outside Studio can ask to merge either way round. Both merge, and
+    // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
+    // back as lora_merged or it would replay as an unmerged adapter.
+    const merges = spec.training?.lora?.merge === true;
     return {
       ...FORM_DEFAULTS,
       outputName: generateDefaultName(),
       description: job.description ?? '',
       backend: 'automodel',
-      automodel: stripNulls(job.spec) as AutomodelJobInput,
+      automodel:
+        merges && spec.training.finetuning_type === 'lora'
+          ? { ...spec, training: { ...spec.training, finetuning_type: 'lora_merged' } }
+          : spec,
     };
   }
   if (isRlJob(job)) {
