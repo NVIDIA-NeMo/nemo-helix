@@ -8,6 +8,7 @@ Usage:
     python -m nmp.customization_common.tasks.model_entity --service-name customizer
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -41,6 +42,7 @@ from nemo_platform_plugin.models.types import (
     ToolCallConfig,
     UpdateAdapterRequest,
     UpdateModelDeploymentConfigRequest,
+    UpdateModelDeploymentRequest,
     UpdateModelEntityRequest,
 )
 from nemo_platform_plugin.models.types import (
@@ -78,13 +80,32 @@ def get_config(config_path: Path) -> ModelEntityTaskConfig:
 
 
 MAX_RESOURCE_NAME_LEN = 59
-MAX_DISCRIMINATOR_LEN = 16
+MAX_DISCRIMINATOR_LEN = 24
+TEMPLATE_DIGEST_LEN = 8
 
 
 def _sanitize_segment(value: str) -> str:
     """Reduce one free-form segment to the deployment-safe character set."""
     segment = re.sub(r"[^a-z0-9@.+_-]", "-", value.lower())
     return re.sub(r"-+", "-", segment).strip("-")
+
+
+def template_discriminator(workspace: str, name: str) -> str:
+    """Build a collision-resistant discriminator for a deployment template.
+
+    The template's ``name`` alone will not do. Configs are keyed by workspace *and*
+    name, so ``teamA/prod`` and ``teamB/prod`` share a name; and the readable part is
+    length-capped, so two long names with a common prefix truncate together. Either
+    way two distinct templates would map to one derived config -- the exact failure
+    this discriminator exists to prevent.
+
+    A short digest of the full ``workspace/name`` identity is appended, and the
+    readable label gives up room for it, so the digest cannot be truncated away. The
+    label is kept only so the resulting resource is recognisable to a human.
+    """
+    digest = hashlib.sha256(f"{workspace}/{name}".encode()).hexdigest()[:TEMPLATE_DIGEST_LEN]
+    label = _sanitize_segment(name)[: MAX_DISCRIMINATOR_LEN - TEMPLATE_DIGEST_LEN - 1].strip("-")
+    return f"{label}-{digest}" if label else digest
 
 
 def sanitize_name(prefix: str, name: str, discriminator: str | None = None) -> str:
@@ -337,7 +358,7 @@ class ModelEntityRunner:
             logger.info(f"Resolving deployment config reference: {dc}")
             referenced = self._resolve_config_ref(dc, me.workspace)
             if is_unbound_deployment_config(referenced):
-                template_name = referenced.name
+                template_name = template_discriminator(referenced.workspace, referenced.name)
                 deployment_config = self._bind_deployment_config(referenced, me)
             else:
                 deployment_config = referenced
@@ -437,7 +458,7 @@ class ModelEntityRunner:
             engine=template.engine,
             model_spec=model_spec,
             executor_config=template.executor_config,
-            discriminator=template.name,
+            discriminator=template_discriminator(template.workspace, template.name),
         )
 
     def _create_or_update_config(
@@ -506,10 +527,18 @@ class ModelEntityRunner:
             ).data()
             logger.info(f"Deployment created: {deployment.workspace}/{deployment.name}")
         except ConflictError:
-            logger.info(f"Deployment {deployment_config.workspace}/{deployment_name} already exists")
-            deployment = self.models.get_deployment(
+            # Re-running the same model and template updates the derived config, which
+            # creates a new version. A deployment pins the version it was created with,
+            # so simply reusing this one would keep serving the old engine and executor
+            # settings and the template edit would silently not take effect.
+            logger.info(
+                f"Deployment {deployment_config.workspace}/{deployment_name} already exists, "
+                f"repointing it at {deployment_config.name} (latest version)"
+            )
+            deployment = self.models.update_deployment(
                 workspace=deployment_config.workspace,
                 name=deployment_name,
+                body=UpdateModelDeploymentRequest(config=deployment_config.name),
             ).data()
 
         deployment_status = self.models.get_deployment(
