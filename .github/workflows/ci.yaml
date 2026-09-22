@@ -1099,7 +1099,7 @@ jobs:
         #
         # It must satisfy uv.lock's `requires-python` (currently >=3.12,<3.14) because this job runs
         # `uv sync` on the WORKSPACE. That ceiling is the intersection across workspace members —
-        # nemo-rl, automodel, unsloth, deployments and experimentalist still cap at <3.14 — so it is
+        # nemo-rl, automodel, unsloth, and deployments still cap at <3.14 — so it is
         # narrower than the root pyproject's <3.15, and a 3.14 leg would fail at `uv sync` before
         # installing anything.
         python-version: ["3.12"]

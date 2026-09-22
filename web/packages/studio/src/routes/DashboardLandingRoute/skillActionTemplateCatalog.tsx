@@ -9,7 +9,6 @@ import {
   GitBranch,
   Hammer,
   KeyRound,
-  Search,
   SearchCheck,
   ShieldCheck,
   Sliders,
@@ -130,14 +129,6 @@ export const SKILL_ACTION_TEMPLATES = {
     icon: <BarChart3 size={18} />,
     requiredFeatureFlags: ['evaluatorEnabled'],
   },
-  'nemo-explore': {
-    title: 'Explore an agent idea',
-    description: 'Capture the job, audience, tools, model, and constraints.',
-    prompt:
-      'Use the nemo-explore skill to guide an agent design conversation and capture the important decisions before writing a spec.',
-    icon: <Search size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
-  },
   'nemo-files': {
     title: 'Manage filesets',
     description: 'Upload, download, and inspect datasets or JSONL artifacts.',
@@ -184,14 +175,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-skill-selection skill to route this NeMo Platform task to the right specialized skill before taking action.',
     icon: <GitBranch size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
-  },
-  'nemo-ethos': {
-    title: 'Write an agent Ethos',
-    description: 'Turn exploration notes into a durable agent contract.',
-    prompt:
-      'Use the nemo-ethos skill to turn the current agent design notes into a durable NeMo Platform agent Ethos.',
-    icon: <Hammer size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-status': {

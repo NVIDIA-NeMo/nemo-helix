@@ -24,7 +24,6 @@ triggers:
 not-for:
   - setup (use to verify install or to be told how to run the CLI install)
   - nemo-build-agent (use for the actual scaffold/deploy flow)
-  - nemo-explore (use to reason about agent design)
   - superpowers:brainstorming (use for design work unrelated to NeMo Platform)
   - running downstream workflow or state-changing platform commands (each downstream skill owns its own commands)
   - loading multiple downstream skills in one turn
@@ -61,8 +60,6 @@ Match the user's intent to one downstream skill. Pick exactly one.
 | The user says or implies | Hand off to | Why |
 |---|---|---|
 | "set up", "install", "get started", "try NeMo", "first time" | `setup` | Verify the platform is installed and running. If not, the skill tells the user how to run the CLI install (`make bootstrap` + `nemo setup`). Install itself is CLI-only. |
-| "design an agent", "I want an agent that handles X", "what should my agent do" | `nemo-explore` | Capture the agent's job, audience, categories, tools, model, constraints before any code |
-| "write the ethos", "save the design", "capture what we agreed" | `nemo-ethos` | Persist the explore answers as `agents/<name>-ethos/ETHOS.md` |
 | "write agent.yaml", "validate agent.yaml", "choose a harness", "migrate this NAT YAML", "convert to nemo-agents-spec-v1" | `nemo-agent-config` | Author or migrate the Platform-managed machine-readable config without running the full build |
 | "build the agent", "create the agent", "deploy", "scaffold from ethos" | `nemo-build-agent` | Build from the approved Ethos, default to Platform `agent.yaml`, register, deploy, evaluate, and optionally apply guardrails |
 | "ask my agent", "try the agent", "test it", "invoke this agent.yaml" | `nemo-try-agent` | Invoke a named deployment or run a local agent YAML config once |
@@ -72,13 +69,12 @@ Match the user's intent to one downstream skill. Pick exactly one.
 | "shut down", "stop NeMo", "tear down", "clean up" | `nemo-teardown` | Stop the cluster (keep data, delete platform data, or full cleanup) |
 | "fine-tune embedding", "fine-tune rerank", "retrieval recipe", "domain corpus retrieval", "Nemotron embed", "Nemotron rerank", "retrieve-eval", "nDCG on my documents" | `nemo-retrieval-recipes` | Cross-plugin embed/rerank recipe: Data Designer retrieval jobs, Automodel `bi_encoder`/`cross_encoder`, Evaluator `retrieve-eval`. Not chat SFT. |
 | "fine-tune", "customize the model", "train on my data", "SFT", "LoRA" | `nemo-customizer` | Chat/SFT/LoRA/DPO/GRPO via customization contributor plugins. Embedding/rerank domain pipelines go to `nemo-retrieval-recipes` first. |
-| "why does my agent keep failing", "analyze my agent's traces", "find recurring failure patterns", "generate insights for my agent" | `nemo-analyst` (plugin-owned, in `plugins/nemo-insights`) | Reads an agent's existing telemetry and files each recurring failure pattern as an Insight citing the traces that evidence it. Requires the Insights plugin; produces the Insight `nemo-experimentalist` acts on. |
-| "improve the agent's own code", "fix my agent harness", "candidate code change", "optimize from an Insight", "improve on train and validation datasets" | `nemo-experimentalist` (plugin-owned, in `plugins/nemo-experimentalist`) | Source/harness optimization: generate and validate candidate code changes against Harbor-compatible evaluation data. Requires the Experimentalist plugin; use after `agents analyst` has created an Insight, or with explicit datasets. |
+| "why does my agent keep failing", "analyze my agent's traces", "find recurring failure patterns", "generate insights for my agent" | `nemo-analyst` (plugin-owned, in `plugins/nemo-insights`) | Reads an agent's existing telemetry and files each recurring failure pattern as an Insight citing the traces that evidence it. Requires the Insights plugin. |
 | "optimize my agent", "make it cheaper", "reduce latency", "smaller model", "switchyard", "routing split", "compare against a newer model" | `agents-optimize` (plugin-owned, in `plugins/nemo-agents`) | Cost / latency / quality optimization for a **deployed** agent. Routing splits, skill tuning, prompt tuning, new-model scans. |
 | "secure my agent", "harden my agent", "check for PII", "leaked secrets", "guardrail coverage" | `agents-secure` (plugin-owned, in `plugins/nemo-agents`) | Safety and security audit for a **deployed** agent. Guardrails, PII, secrets scan. |
 | "evaluate my agent", "run a benchmark", "eval suite" | `nemo-evaluator` (plugin-owned, in `plugins/nemo-evaluator`) | Evaluation metrics, LLM-judge, benchmark jobs against a deployed agent or model. |
 
-**Optimize vs build:** Do NOT route optimize asks to `nemo-build-agent`. Build is for creating new agents from a spec. Use `agents-optimize` for a deployed agent's routing, prompts, skills, cost, or latency; use `nemo-experimentalist` when the requested improvement changes the agent's own source or harness and is evaluated with candidate code changes. If the user says "make my agent faster" or "use a cheaper model," that is `agents-optimize`, not `nemo-build-agent`.
+**Optimize vs build:** Do NOT route optimize asks to `nemo-build-agent`. Build is for creating new agents from a spec. Use `agents-optimize` for a deployed agent's routing, prompts, skills, cost, or latency. If the user says "make my agent faster" or "use a cheaper model," that is `agents-optimize`, not `nemo-build-agent`.
 
 If a request includes both config authoring and deployment, choose
 `nemo-build-agent`; it delegates the config portion to `nemo-agent-config`.
@@ -129,8 +125,6 @@ If the user's intent doesn't fit any row, do not guess. Read out the available s
 ```
 NeMo Platform skills I can route to:
   setup           verify install or get the CLI install command
-  nemo-explore    design conversation: capture goal, audience, tools, constraints
-  nemo-ethos      write the design to agents/<name>-ethos/ETHOS.md
   nemo-agent-config  author, validate, or migrate Platform agent.yaml
   nemo-build-agent  build from the Ethos, register, deploy, evaluate, and sign off
   nemo-try-agent  invoke a named deployment or local agent YAML config
@@ -146,7 +140,6 @@ Plugin-owned skills:
   nemo-evaluator-plugin  evaluation metrics, LLM-judge, retrieve-eval, benchmark jobs
   nemo-customizer   fine-tuning of chat/SFT/RL models (not the retrieval recipe)
   nemo-analyst      analyze agent telemetry and file recurring problems as Insights
-  nemo-experimentalist  source/harness optimization from Insights or evaluation datasets
   guardrails        content-safety middleware via virtual models
   auditor           red-team vulnerability scanning (garak)
   nemo-data-designer-plugin  synthetic dataset generation (tabular `create`; retrieval SDG is the retrieval recipe)

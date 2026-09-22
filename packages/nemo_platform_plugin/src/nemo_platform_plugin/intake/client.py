@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Typed HTTP clients for the Intake APIs used by evaluator, Experimentalist, and Insights."""
+"""Typed HTTP clients for the Intake APIs used by evaluator and Insights."""
 
 from __future__ import annotations
 
@@ -314,7 +314,7 @@ class _AsyncAnnotationsCompat:
 
 
 class IntakeClient(_IntakeMethods, NemoClient):
-    """Sync client for the Intake API subset evaluator, Experimentalist, and Insights use."""
+    """Sync client for the Intake API subset evaluator and Insights use."""
 
     @cached_property
     def spans(self) -> _SpansCompat:
@@ -326,7 +326,7 @@ class IntakeClient(_IntakeMethods, NemoClient):
 
 
 class AsyncIntakeClient(_IntakeMethods, AsyncNemoClient):
-    """Async client for the Intake API subset evaluator, Experimentalist, and Insights use."""
+    """Async client for the Intake API subset evaluator and Insights use."""
 
     @cached_property
     def spans(self) -> _AsyncSpansCompat:

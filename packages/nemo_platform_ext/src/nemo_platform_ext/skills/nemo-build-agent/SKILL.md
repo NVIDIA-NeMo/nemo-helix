@@ -13,8 +13,6 @@ triggers:
   - build from the agent Ethos
   - onboard the new agent through Fabric
 not-for:
-  - nemo-explore (use for design-only discovery)
-  - nemo-ethos (use to persist a design without implementation)
   - nemo-agent-config (use for focused agent.yaml authoring or validation)
   - nemo-try-agent (use to query an existing deployment)
   - existing agent onboarding through another Fabric adapter
@@ -51,9 +49,8 @@ Before writing implementation files:
    records who the agent serves, what it should accomplish, the tools and data
    it may use, required approvals, forbidden actions, failure behavior and the
    examples that will become tests. It is not code or deployment config.
-2. Explain that the Ethos will be drafted from the user's answers, shown for
-   review and revised until the user explicitly approves it. No implementation
-   begins before that approval.
+2. Ask the user to provide an approved Ethos describing the agent. Review it
+   together before implementation begins.
 3. Explain that the supported build path uses the external LangChain Deep
    Agents runtime. NeMo Platform does not vendor the customer's agent. The
    optional NeMo Agents plugin installs the supported Fabric adapter and its
@@ -67,24 +64,13 @@ Before writing implementation files:
 If the user declines, stop. Offer onboarding of an existing agent through an
 available Fabric adapter. Do not fall back to NAT.
 
-## Approve and persist the design
+## Confirm the supplied design
 
-Use `agents/<agent-name>-ethos/ETHOS.md` as the canonical design and package
-root. If an Ethos exists, summarize it in plain language and confirm that it is
-approved for this build. If it is absent or needs changes, gather the design
-inputs conversationally. Ask about the customer's work first and translate the
-answers into NeMo artifacts yourself:
-
-- concrete role, users and outcomes;
-- tools, data, credentials and side effects;
-- constraints, approvals, forbidden actions and sensitive data handling;
-- five to ten representative tasks with expected outcomes;
-- mandatory ordering or transactional invariants.
-
-Route unresolved design questions to `nemo-explore`. Then invoke `nemo-ethos`
-to render, validate and save `agents/<agent-name>-ethos/ETHOS.md`. Show the
-result and wait for explicit approval. Do not create implementation files before
-the Ethos is approved.
+Use the user-provided `agents/<agent-name>-ethos/ETHOS.md` as the design and
+package root. Summarize it in plain language and confirm it is approved for
+this build. If it is absent or incomplete, ask the user to supply the missing
+role, outcomes, tools, constraints and representative tasks before creating
+implementation files.
 
 ## Confirm the build environment
 

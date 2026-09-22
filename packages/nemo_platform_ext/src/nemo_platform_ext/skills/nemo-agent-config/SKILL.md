@@ -20,8 +20,6 @@ triggers:
   - NeMo agent.yaml config
 not-for:
   - nemo-build-agent (use for full Ethos-to-deployed-agent build flows)
-  - nemo-explore (use to design what the agent should do before writing config)
-  - nemo-ethos (use to write ETHOS.md before implementation)
   - nemo-model-selection (use when the user only wants model recommendation)
   - generic YAML editing unrelated to NeMo Platform agents
 preconditions:

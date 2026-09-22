@@ -5954,7 +5954,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 *Platform agents:*
 
 * `analyst`: Analyze agent telemetry and record what the agent gets...
-* `experimentalist`: NeMo Experimentalist commands.
 
 #### nemo agents create
 
@@ -7545,101 +7544,6 @@ nemo agents analyst doctor [OPTIONS]
 
 * `--profile <FILE>`: Path to optimizer.yaml. Default: discovered by walking up from cwd.
 * `--base-url`: Base URL of the running NMP instance to check.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agents experimentalist
-
-NeMo Experimentalist commands.
-
-**Usage:**
-
-```shell
-nemo agents experimentalist [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `run`: Run local optimization for a baseline agent (local dir or...
-* `components`: List the components this install can resolve by name.
-* `doctor`: Diagnose Experimentalist setup: profile, artifacts,...
-
-##### nemo agents experimentalist run
-
-Run local optimization for a baseline agent (local dir or git source).
-
-**Usage:**
-
-```shell
-nemo agents experimentalist run [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Baseline agent: a local directory or a git URL with an optional ref (e.g. ssh://git@host/group/repo.git@main). Optional in Mode 1 (the insight supplies the agent) and overrides the insight's agent when given. A git source records provenance and enables --config storage.publish_winner to open a draft PR/MR for the winner against that ref.
-* `--ethos`: URI of a markdown file describing the agent under test (its Ethos).
-* `--insight`: Insight for Mode 1: a local insight file OR a platform insight id (surfaced in Studio). A path that exists on disk is read locally; otherwise it is fetched from the platform. Default: \<profile-dir>/.nemo-optimizer/insights.yaml when it exists (where `nemo agents analyst run` writes by default).
-* `--insight-id`: Selector for a local multi-insight file: exact id/title first; if none matches, a decimal value is a zero-based index.
-* `--no-insight`: Disable insight use (Mode 2), including the shared profile insight file.
-* `--profile <FILE>`: Path to optimizer.yaml. Default: discovered by walking up from the cwd.
-* `--train-dataset`: Train dataset: local path or harbor registry ref. Falls back to the profile.
-* `--validation-dataset`: Validation dataset: local path or harbor registry ref. Falls back to the profile.
-* `--task-template`: Evaluator-specific task-template URI. Required with --insight.
-* `--experiment-dir, --output, --experiments-output, -o <DIRECTORY>`: Local experiment directory; writes eval-and-optimize/ here. Default: \<profile-dir>/.nemo-optimizer/experiments/\<timestamp> when a profile governs the run, else ./tmp.
-* `--workspace`: Intake/NMP workspace for traces and run/candidate metadata. Falls back to the profile.
-* `--base-url`: Base URL of the running NMP instance. Default: NMP_BASE_URL (shell or profile-dir .env), else http://localhost:8080. [env: NMP_BASE_URL=]
-* `--config <FILE>`: YAML or JSON configuration for the optimizer run.
-* `--framework-skills <DIRECTORY>`: Path to a directory of framework skills to load into the optimizer agents. May be specified multiple times. [default: ]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents experimentalist components
-
-List the components this install can resolve by name.
-
-Includes anything a `pip install`ed package registered, which is how a
-developer checks their own component was picked up.
-
-**Usage:**
-
-```shell
-nemo agents experimentalist components [OPTIONS]
-```
-
-**Options:**
-
-* `--role`: Show only this role.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents experimentalist doctor
-
-Diagnose Experimentalist setup: profile, artifacts, models, platform, runtime.
-
-**Usage:**
-
-```shell
-nemo agents experimentalist doctor [OPTIONS]
-```
-
-**Options:**
-
-* `--insight`: Optional insight ref to verify.
-* `--insight-id`: Select an exact id/title or zero-based index from a local multi-insight file.
-* `--profile <PATH>`: Path to optimizer.yaml.
-* `--base-url`: Base URL of the running NMP instance. Default: NMP_BASE_URL (shell or profile-dir .env), else http://localhost:8080. [env: NMP_BASE_URL=]
 
 **Help:**
 

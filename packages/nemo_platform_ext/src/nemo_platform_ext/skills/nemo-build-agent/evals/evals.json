@@ -4,13 +4,13 @@
     "question": "Build a NeMo Platform helpdesk agent from these answers: employees use it for password resets and VPN access; account changes require approval; it must never expose credentials; representative cases are a successful reset, an unauthorized reset and an unavailable identity provider. Persist the design first. Do not implement until I approve it.",
     "expected_skill": "nemo-build-agent",
     "expected_script": null,
-    "ground_truth": "The agent explains the supported Fabric Deep Agents path, creates one canonical agents/helpdesk-ethos/ETHOS.md through nemo-ethos, shows it for review and creates no implementation artifacts before explicit approval.",
+    "ground_truth": "The agent explains the supported Fabric Deep Agents path, asks for a user-provided agents/helpdesk-ethos/ETHOS.md, reviews it and creates no implementation artifacts before explicit approval.",
     "expected_behavior": [
       "The agent reads nemo-build-agent before acting",
       "The agent explains Ethos as a plain-language design contract and does not assume the user knows NeMo Platform terminology",
       "The agent explains the supported LangChain Deep Agents and Fabric path and asks whether to continue",
-      "The agent records representative successful and unsuccessful cases in the Ethos",
-      "The agent keeps the Ethos under agents/helpdesk-ethos/ETHOS.md",
+      "The agent asks the user to include representative successful and unsuccessful cases in the supplied Ethos",
+      "The agent requests the Ethos at agents/helpdesk-ethos/ETHOS.md",
       "The agent stops for explicit Ethos approval before creating agent.yaml, Python source or deployment resources",
       "The agent does not create a NAT workflow"
     ]

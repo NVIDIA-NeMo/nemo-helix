@@ -504,7 +504,7 @@ def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest
     assert uploaded["sdk_base_url"] == "http://test"
 
 
-def test_spec_package_warning_points_at_nemo_ethos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec_package_warning_requests_ethos_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     package = tmp_path / "agents" / "acme-bot-spec"
     package.mkdir(parents=True)
     config = package / "agent.yaml"
@@ -514,7 +514,7 @@ def test_spec_package_warning_points_at_nemo_ethos(tmp_path: Path, monkeypatch: 
 
     assert _spec_package_warning("acme-bot", config) == (
         "Warning: This package uses AGENT-SPEC.md.",
-        "Run the nemo-ethos skill to write ETHOS.md, then delete the acme-bot-spec package.",
+        "Provide ETHOS.md, then delete the acme-bot-spec package.",
     )
     assert _spec_package_warning("acme-bot", tmp_path / "agent.yaml") == ()
     escaped = tmp_path / "escaped-spec"

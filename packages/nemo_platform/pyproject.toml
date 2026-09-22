@@ -366,21 +366,6 @@ nemo-evaluator-sdk = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-experimentalist-plugin = [
-  "pydantic>=2",
-  "httpx",
-  "harbor>=0.20,<0.21",
-  "nemo-evaluator-sdk",
-  "opentelemetry-proto>=1.42.1",
-  "protobuf>=6.0.0",
-  "nooa>=0.0.9",
-  "pyyaml>=6.0.3",
-  "nemo-insights-plugin",
-  "nemo-platform-plugin",
-  "tomlkit>=0.13.3",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-guardrails-plugin = [
   "nemo-platform-plugin",
   "nemoguardrails[tracing]==0.23.0",
@@ -561,7 +546,6 @@ plugins = [
     "nemo-platform[nemo-data-designer-plugin]",
     "nemo-platform[nemo-deployments-plugin]",
     "nemo-platform[nemo-evaluator-plugin]",
-    "nemo-platform[nemo-experimentalist-plugin]",
     "nemo-platform[nemo-guardrails-plugin]",
     "nemo-platform[nemo-insights-plugin]",
     "nemo-platform[nemo-optimization-plugin]",
@@ -675,7 +659,6 @@ experiments = "nmp.intake.cli:ExperimentsCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli.agents"]
-experimentalist = "nemo_experimentalist_plugin.cli:ExperimentalistCLI"
 analyst = "nemo_insights_plugin.analyst.cli:AnalystCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
@@ -697,19 +680,6 @@ unsloth = "nemo_unsloth_plugin.contributor:UnslothContributor"
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.docs"]
 auditor = "nemo_auditor.docs:get_docs_path"
-
-# Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.experimentalist.components"]
-"strategy.evolutionary" = "nemo_experimentalist_plugin.experimentalist.strategies.evolutionary"
-"builder.code-edit" = "nemo_experimentalist_plugin.experimentalist.components.coder"
-"builder.import" = "nemo_experimentalist_plugin.experimentalist.components.importer"
-"selector.pareto-diversity" = "nemo_experimentalist_plugin.experimentalist.components.selector"
-"proposer.code-change" = "nemo_experimentalist_plugin.experimentalist.components.proposer"
-"terminator.convergence" = "nemo_experimentalist_plugin.experimentalist.components.terminator"
-"root-cause-analyzer.trace" = "nemo_experimentalist_plugin.experimentalist.components.analyzer"
-"trajectory-scorer.goal-tree" = "nemo_experimentalist_plugin.experimentalist.components.trace_scorer"
-"outcome-evaluator.harbor-native" = "nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_native"
-"outcome-evaluator.harbor-runner" = "nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_evaluator"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.functions"]
@@ -800,7 +770,6 @@ anonymizer = "nemo_anonymizer_plugin.skills:get_skills_path"
 guardrails = "nemo_guardrails_plugin.skills:get_skills_path"
 platform = "nemo_platform.skills:skills_dir"
 safe-synthesizer = "nemo_safe_synthesizer_plugin.skills:get_skills_path"
-experimentalist = "nemo_experimentalist_plugin.skills:skills_dir"
 insights = "nemo_insights_plugin.skills:skills_dir"
 deployments = "nemo_deployments_plugin.skills:skills_dir"
 customizer = "nemo_customizer.skills:get_skills_path"
@@ -868,7 +837,6 @@ nemo-customizer-plugin = { source = "../../plugins/nemo-customizer/src/nemo_cust
 nemo-data-designer-plugin = { source = "../../plugins/nemo-data-designer/src/nemo_data_designer_plugin", module = "nemo_data_designer_plugin", inherit = { "entry-points" = ["nemo.*", "data_designer.plugins"] } }
 nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_deployments_plugin", module = "nemo_deployments_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator", inherit = { "entry-points" = ["nemo.*"] } }
-nemo-experimentalist-plugin = { source = "../../plugins/nemo-experimentalist/src/nemo_experimentalist_plugin", module = "nemo_experimentalist_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 # shared_data mirrors the standalone plugin's wheel shared-data: Fabric resolves
 # adapter descriptors from <sys.prefix>/share/nemo-fabric/adapters at runtime.
 nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] }, shared_data = { "../../insights-analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json" } }

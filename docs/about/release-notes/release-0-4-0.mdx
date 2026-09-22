@@ -5,27 +5,21 @@
 title: "v0.4.0 - 2026-08-12"
 description: ""
 ---
-NeMo Platform v0.4.0 introduces a research-preview optimization loop for
-improving agents from real telemetry. Agent owners can send traces to Intake,
-use agents to diagnose recurring issues, create targeted evaluation coverage,
-experiment against a local code base, and review validated candidate changes.
+NeMo Platform v0.4.0 introduces research-preview analysis of agent telemetry.
+Agent owners can send traces to Intake and use Analyst to diagnose recurring
+issues and record evidence-backed Insights.
 The release also moves new agent workflows toward `agent.yaml` packages backed
 by [Fabric](https://github.com/NVIDIA/nemo-fabric/) while keeping NAT workflows
 available as a legacy path.
 
 ## Highlights
 
-- **Research-preview agent optimization.** Analyst and Experimentalist
-  workflows now support the observe, diagnose, experiment, and evaluate loop for
-  agents under active development.
+- **Research-preview analysis.** Analyst produces evidence-backed Insights
+  from recurring problems in agent telemetry.
 - **Trace-driven diagnosis.** NeMo Intake ingests OTLP, chat-completions, and
   ATIF telemetry, stores traces in ClickHouse, and attaches annotations and
   evaluator results so agents and humans can investigate failures from the same
   evidence.
-- **Validated candidate changes.** Experimentalist can run against a local
-  agent source tree or git source, evaluate candidates with Harbor, write
-  optimization artifacts locally, and open a draft PR when a changed
-  winner is found.
 - **Fabric-first agents.** New Platform-managed agents use the
   `nemo-agents-spec-v1` `agent.yaml` contract. Fabric-backed agents can run
   through supported harnesses and route model traffic through the Inference
@@ -40,18 +34,14 @@ available as a legacy path.
 
 ## What's included
 
-### Insight-Driven Optimization
+### Analyst
 
 - `nemo agents analyst` scans Intake traces, evaluator scores, and reviewer
   annotations to produce evidence-backed Insights.
-- `nemo agents experimentalist` turns an Insight, or a dataset-only objective,
-  into candidate code changes, train/validation evaluations, local artifacts,
-  and an optional draft PR or MR.
-- `optimizer.yaml` provides the shared per-agent profile for the loop, including
-  the agent name, workspace, agent source, `ETHOS.md`, datasets, task
-  template, and experiment configuration.
+- `optimizer.yaml` configures Analyst with the agent name, workspace, and
+  optional `ETHOS.md` path.
 - `ETHOS.md` is the durable Markdown contract for intended agent behavior. It
-  can be consumed by the Analyst and Experimentalist when present. It records
+  can be consumed by the Analyst when present. It records
   `Principles`, `Trade-offs`, `Constraints`, `Metric Semantics`, and `Vision`
   alongside the original inventory sections. Every canonical body section is
   required. Parsing fails if a required heading is missing. Write `_(none)_`
@@ -71,21 +61,9 @@ available as a legacy path.
   consumer's configuration, not durable intent. How a consumer reads evidence
   belongs in that consumer. `Purpose` merged into `Purpose & Outcomes`.
 - Coding agents that find `agents/<name>-spec/AGENT-SPEC.md` read it as
-  prior answers, write `ETHOS.md` with `nemo-ethos`, and delete the spec
+  prior answers, provide `ETHOS.md`, and delete the spec
   package after the user confirms the Ethos. `nemo agents create` prints the
   same instruction when the config still lives in a spec package.
-- `ETHOS.md` records durable intent, so run-scoped optimizer settings such as a
-  per-experiment spend ceiling belong in the optimizer's own configuration.
-  State a standing production cost ceiling in `Constraints` instead.
-- `nemo-explore` scans the repository first, then asks at least three intent
-  questions, one at a time. It always confirms `Purpose & Outcomes`,
-  `Principles`, and `Vision` with the user, even when the scan produced a
-  plausible draft, before handing off to `nemo-ethos`. After `nemo-ethos`
-  writes `ETHOS.md`, it states a short gut-check of the agent so the user can
-  judge the write before reading the full file.
-- The `nemo-spec` skill is `nemo-ethos`, matching the contract it writes.
-- Benchmark and proof assets include Terminal-Bench 2.1, Tau3 Airline, Banking,
-  Retail, and Telecom suites, plus a guided Tau3 example-agent walkthrough.
 
 ### Intake and Experiments
 
@@ -215,16 +193,9 @@ workflows against the upgraded checkout.
 
 ## Current constraints
 
-- **Research-preview optimizer.** Analyst and Experimentalist are early agentic
-  workflows. They are useful for guided optimization, but quality and autonomy
+- **Research-preview optimizer.** Analyst is an early agentic
+  workflow. It is useful for guided analysis, but quality and autonomy
   are still research-preview and require developer review.
-- **Local-first issue-driven loop.** The full Insight to Experimentalist loop
-  runs from a local developer environment against local paths or a git source.
-  A remote platform can provide Intake and entity APIs, but the issue-driven
-  optimization agents do not yet run as a horizontally scaled cluster service.
-- **Evaluation backend scope.** The Experimentalist loop validates candidates
-  with Harbor-compatible train and validation datasets. Other evaluator
-  backends are not the validated path for this loop yet.
 - **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
   from a developer workstation. It is not available as a horizontally scaled
   cluster service in this release.

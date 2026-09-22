@@ -30,14 +30,12 @@ User-facing skills in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`
 
 - `nemo-skill-selection`: entry point. Use when the user's intent is broad or unclear ("help me with nemo," "I want to try this," "what does this repo do?").
 - `setup`: verifies that NeMo Platform is installed and running. Hands off if it is; tells the user how to run the CLI install (`make bootstrap` + `nemo setup`) if it isn't. **Install is CLI-only.** Do not attempt skill-driven installation; it has been tried and consistently fails on workspace dependency resolution, credential handling, and Python version friction inside a sandbox.
-- `nemo-explore`: design conversation. Use before `nemo-ethos`. Always confirms purpose, principles, and vision.
-- `nemo-ethos`: writes `agents/<name>-ethos/ETHOS.md` from the explore output, then shows a gut-check of the agent.
 - `nemo-build-agent`: scaffolds NAT workflow YAML from the Ethos and deploys.
 - `nemo-try-agent`: test a deployed agent or chat with a model.
 - `nemo-status`: read-only health dashboard. Run this before assuming the platform is up.
 - `nemo-teardown`: guided shutdown with confirmation.
 
-Plugin-owned skills live under `plugins/*/src/*/skills/` and handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, Experimentalist source/harness improvement, and Analyst telemetry analysis.
+Plugin-owned skills live under `plugins/*/src/*/skills/` and handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, and Analyst telemetry analysis.
 
 ### Working in a sandboxed coding-agent environment
 

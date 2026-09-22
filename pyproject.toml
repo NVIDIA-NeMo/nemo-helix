@@ -71,10 +71,6 @@ version = "0.0.0"
 [dependency-groups]
 # Insights analyst plugin convenience group.
 insights = ["nemo-insights-plugin"]
-# Experimentalist supports Python 3.12 and 3.13.
-experimentalist = [
-  "nemo-experimentalist-plugin ; python_full_version < '3.14'",
-]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin stays out of `enabled-plugins` so a platform install does not
 # pick it up. CI still has to see it, so the lint and pytest entry points ask for this
@@ -107,9 +103,7 @@ dev = [
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
   "nemo-platform-sdk-tools",               # Include SDK/license tool migration target for testing
   "nmp-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
-  # Out-of-tree Experimentalist strategy. Without it installed, the tests proving a third-party
-  # package can ship a component skip silently -- which is how a broken one went unnoticed.
-  "acme-strategies ; python_full_version < '3.14'",
+  "nemo-evaluator-sdk[harbor]",             # Harbor adapter tests and type checking
   "nmp-dev-mcp",                                    # Include MCP dev tools
   # These are the dev dependencies from `sdk/python/nemo-platform`.
   # Including here until we find a better way to include them.
@@ -190,7 +184,6 @@ enabled-plugins = [
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-evaluator-plugin",
   "nemo-insights-plugin",
-  "nemo-experimentalist-plugin ; python_full_version < '3.14'",
   "nemo-guardrails-plugin",
   "nemo-auditor-plugin",
   "nemo-safe-synthesizer-plugin",
@@ -409,7 +402,6 @@ models = { workspace = true }
 nemo-platform-sdk = { workspace = true }
 nemo-platform = { workspace = true }
 nemo-platform-ext = { workspace = true }
-acme-strategies = { workspace = true }
 nemo-platform-sdk-tools = { workspace = true }
 nmp-core-mcp = { workspace = true }
 nemo-nb = { workspace = true }
@@ -426,7 +418,6 @@ nmp-testing = { workspace = true }
 nmp-build-tools = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
-nemo-experimentalist-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { workspace = true }
@@ -499,10 +490,6 @@ members = [
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
-  "plugins/nemo-experimentalist",
-  # Not shipped. An out-of-tree component package, installed so the tests that prove the
-  # plugin mechanism actually run instead of being skipped by `importorskip`.
-  "plugins/nemo-experimentalist/examples/acme-strategies",
   "plugins/nemo-agents/examples/calculator-agent",
   "plugins/nemo-agents/examples/email-phishing-analyzer",
   "plugins/nemo-agents/examples/email-security-analyst",
@@ -634,8 +621,6 @@ extra-paths = [
   "plugins/nemo-evaluator/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
-  # Source path for Experimentalist; its tests also import the benchmark runner.
-  "plugins/nemo-experimentalist/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
@@ -708,10 +693,6 @@ exclude = [
   # root `ty` until that cleanup lands in a focused follow-up.
   "plugins/nemo-switchyard/",
 
-  # Standalone agents-under-test: each resolves from its own lockfile inside the
-  # benchmark's task containers, so its imports are absent from the workspace env.
-  "plugins/nemo-experimentalist/examples/",
-
   # Source injected into the evaluation harness image at build time, where it
   # replaces modules of the sandbox library it imports. Nothing imports it from
   # the control plane, so that library is absent from the workspace env.
@@ -724,15 +705,6 @@ exclude = [
   "tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk",
   "tools/nemo-platform-sdk-tools/tests/sdk",
 ]
-
-# nooa agents declare their LLM-generated methods as annotated signatures with an
-# ellipsis body; the framework fills them in at runtime. ty reads that as a missing
-# return, so the rule is off for the Experimentalist agent classes only.
-[[tool.ty.overrides]]
-include = ["plugins/nemo-experimentalist/src/**"]
-
-[tool.ty.overrides.rules]
-empty-body = "ignore"
 
 # TEMPORARY — remove together with the fix in #1237, which is where this file is
 # already corrected.

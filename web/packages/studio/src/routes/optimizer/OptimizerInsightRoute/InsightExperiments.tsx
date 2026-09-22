@@ -46,16 +46,9 @@ const makeColumns: ComponentProps<typeof DataView.Root<ExperimentResponse>>['mak
 interface InsightExperimentsProps {
   workspace: string;
   insightId: string;
-  onRunExperiment: () => void;
-  runExperimentDisabled: boolean;
 }
 
-export const InsightExperiments: FC<InsightExperimentsProps> = ({
-  workspace,
-  insightId,
-  onRunExperiment,
-  runExperimentDisabled,
-}) => {
+export const InsightExperiments: FC<InsightExperimentsProps> = ({ workspace, insightId }) => {
   const navigate = useNavigate();
   const dataViewState = DataView.useDataViewState({
     pagination: { paginationOptions: DEFAULT_PAGE_SIZE_OPTIONS },
@@ -98,11 +91,7 @@ export const InsightExperiments: FC<InsightExperimentsProps> = ({
           className={`min-h-0 flex-1 overflow-auto bg-transparent [&_td]:!bg-transparent [&_thead]:!bg-transparent [&_thead_th]:!bg-transparent ${className}`}
           onClick={onClick}
           renderEmptyState={() => (
-            <EntityEmptyState
-              entity="insightExperiments"
-              variant="first-use"
-              onCreate={runExperimentDisabled ? undefined : onRunExperiment}
-            />
+            <EntityEmptyState entity="insightExperiments" variant="first-use" />
           )}
           renderErrorState={() => (
             <ErrorMessage

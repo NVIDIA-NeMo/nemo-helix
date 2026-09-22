@@ -58,12 +58,10 @@
 {"name": "datasets", "license": "APACHE-2.0", "compatible": true}
 {"name": "deepagents", "license": "MIT", "compatible": true}
 {"name": "defusedxml", "license": "PSF-2.0", "compatible": true}
-{"name": "deprecation", "license": "APACHE-2.0", "compatible": true}
 {"name": "detect-installer", "license": "0BSD", "compatible": true}
 {"name": "diff-cover", "license": "APACHE-2.0", "compatible": true}
 {"name": "diffusers", "license": "APACHE-2.0", "compatible": true}
 {"name": "dill", "license": "BSD-3-CLAUSE", "compatible": true}
-{"name": "dirhash", "license": "MIT", "compatible": true}
 {"name": "distro", "license": "APACHE-2.0", "compatible": true}
 {"name": "dnspython", "license": "ISC", "compatible": true}
 {"name": "docker", "license": "APACHE-2.0", "compatible": true}
@@ -150,11 +148,8 @@
 {"name": "grpcio", "license": "APACHE-2.0", "compatible": true}
 {"name": "gunicorn", "license": "MIT", "compatible": true}
 {"name": "h11", "license": "MIT", "compatible": true}
-{"name": "h2", "license": "MIT", "compatible": true}
-{"name": "harbor", "license": "APACHE-2.0", "compatible": true}
 {"name": "hf-transfer", "license": "APACHE-2.0", "compatible": true}
 {"name": "hf-xet", "license": "APACHE-2.0", "compatible": true}
-{"name": "hpack", "license": "MIT", "compatible": true}
 {"name": "httpcore", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "httptools", "license": "MIT", "compatible": true}
 {"name": "httpx", "license": "BSD-3-CLAUSE", "compatible": true}
@@ -162,7 +157,6 @@
 {"name": "httpx-sse", "license": "MIT", "compatible": true}
 {"name": "huggingface-hub", "license": "APACHE-2.0", "compatible": true}
 {"name": "hvac", "license": "APACHE-2.0", "compatible": true}
-{"name": "hyperframe", "license": "MIT", "compatible": true}
 {"name": "idna", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "importlib-metadata", "license": "APACHE-2.0", "compatible": true}
 {"name": "instructor", "license": "MIT", "compatible": true}
@@ -325,7 +319,6 @@
 {"name": "pluggy", "license": "MIT", "compatible": true}
 {"name": "polling2", "license": "MIT", "compatible": true}
 {"name": "portalocker", "license": "BSD-3-CLAUSE", "compatible": true}
-{"name": "postgrest", "license": "MIT", "compatible": true}
 {"name": "prettytable", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "prometheus-client", "license": "APACHE-2.0 AND BSD-2-CLAUSE", "compatible": true}
 {"name": "prometheus-fastapi-instrumentator", "license": "ISC", "compatible": true}
@@ -360,7 +353,6 @@
 {"name": "pytz", "license": "MIT", "compatible": true}
 {"name": "pyyaml", "license": "MIT", "compatible": true}
 {"name": "ragas", "license": "APACHE-2.0", "compatible": true}
-{"name": "realtime", "license": "MIT", "compatible": true}
 {"name": "referencing", "license": "MIT", "compatible": true}
 {"name": "regex", "license": "APACHE-2.0 AND CNRI-PYTHON", "compatible": true}
 {"name": "requests", "license": "APACHE-2.0", "compatible": true}
@@ -377,7 +369,6 @@
 {"name": "s3transfer", "license": "APACHE-2.0", "compatible": true}
 {"name": "sacrebleu", "license": "APACHE-2.0", "compatible": true}
 {"name": "safetensors", "license": "APACHE-2.0", "compatible": true}
-{"name": "scantree", "license": "MIT", "compatible": true}
 {"name": "scikit-learn", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "scikit-network", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "scipy", "license": "BSD-3-CLAUSE", "compatible": true}
@@ -403,13 +394,8 @@
 {"name": "sse-starlette", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "starlette", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "stdlib", "license": "BSD-3-CLAUSE", "compatible": true}
-{"name": "storage3", "license": "MIT", "compatible": true}
 {"name": "streaming-form-data", "license": "MIT", "compatible": true}
-{"name": "strenum", "license": "MIT", "compatible": true}
 {"name": "structlog", "license": "APACHE-2.0 OR MIT", "compatible": true}
-{"name": "supabase", "license": "MIT", "compatible": true}
-{"name": "supabase-auth", "license": "MIT", "compatible": true}
-{"name": "supabase-functions", "license": "MIT", "compatible": true}
 {"name": "sympy", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "tabulate", "license": "MIT", "compatible": true}
 {"name": "tblib", "license": "BSD-2-CLAUSE", "compatible": true}
@@ -417,7 +403,6 @@
 {"name": "threadpoolctl", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "tiktoken", "license": "MIT", "compatible": true}
 {"name": "tokenizers", "license": "APACHE-2.0", "compatible": true}
-{"name": "toml", "license": "MIT", "compatible": true}
 {"name": "tomli-w", "license": "MIT", "compatible": true}
 {"name": "tomlkit", "license": "MIT", "compatible": true}
 {"name": "torch", "license": "APACHE-2.0 AND APACHE-2.0 WITH LLVM-EXCEPTION AND BSD-2-CLAUSE AND BSD-3-CLAUSE AND BSL-1.0 AND MIT", "compatible": true}

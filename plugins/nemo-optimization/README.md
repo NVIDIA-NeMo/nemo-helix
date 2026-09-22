@@ -58,8 +58,7 @@ Trials execute the Agent under Test in the study's own process tree; see
 [docs/trial-sandboxing.md](docs/trial-sandboxing.md) for the proposed per-trial
 container isolation (not implemented).
 
-This package is intentionally not a Customizer contributor. A future
-Experimentalist / Customizer agent may call the same library.
+This package is intentionally not a Customizer contributor.
 
 ## Next Steps
 

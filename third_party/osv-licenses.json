@@ -801,16 +801,6 @@
         },
         {
           "package": {
-            "name": "deprecation",
-            "version": "2.1.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "Apache-2.0"
-          ]
-        },
-        {
-          "package": {
             "name": "detect-installer",
             "version": "0.1.0",
             "ecosystem": "PyPI"
@@ -847,16 +837,6 @@
           },
           "licenses": [
             "BSD-3-Clause"
-          ]
-        },
-        {
-          "package": {
-            "name": "dirhash",
-            "version": "0.5.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
           ]
         },
         {
@@ -1201,26 +1181,6 @@
         },
         {
           "package": {
-            "name": "h2",
-            "version": "4.4.1",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
-            "name": "harbor",
-            "version": "0.20.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "Apache-2.0"
-          ]
-        },
-        {
-          "package": {
             "name": "hf-transfer",
             "version": "0.1.9",
             "ecosystem": "PyPI"
@@ -1237,16 +1197,6 @@
           },
           "licenses": [
             "Apache-2.0"
-          ]
-        },
-        {
-          "package": {
-            "name": "hpack",
-            "version": "4.2.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
           ]
         },
         {
@@ -1317,16 +1267,6 @@
           },
           "licenses": [
             "Apache-2.0"
-          ]
-        },
-        {
-          "package": {
-            "name": "hyperframe",
-            "version": "6.1.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "non-standard"
           ]
         },
         {
@@ -3141,16 +3081,6 @@
         },
         {
           "package": {
-            "name": "postgrest",
-            "version": "2.31.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
             "name": "prettytable",
             "version": "3.18.0",
             "ecosystem": "PyPI"
@@ -3742,16 +3672,6 @@
         },
         {
           "package": {
-            "name": "realtime",
-            "version": "2.31.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
             "name": "referencing",
             "version": "0.37.0",
             "ecosystem": "PyPI"
@@ -3908,16 +3828,6 @@
           },
           "licenses": [
             "non-standard"
-          ]
-        },
-        {
-          "package": {
-            "name": "scantree",
-            "version": "0.0.4",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
           ]
         },
         {
@@ -4152,28 +4062,8 @@
         },
         {
           "package": {
-            "name": "storage3",
-            "version": "2.31.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
             "name": "streaming-form-data",
             "version": "2.1.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
-            "name": "strenum",
-            "version": "0.4.15",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -4188,36 +4078,6 @@
           },
           "licenses": [
             "Apache-2.0 OR MIT"
-          ]
-        },
-        {
-          "package": {
-            "name": "supabase",
-            "version": "2.31.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
-            "name": "supabase-auth",
-            "version": "2.31.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
-          ]
-        },
-        {
-          "package": {
-            "name": "supabase-functions",
-            "version": "2.31.0",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
           ]
         },
         {
@@ -4288,16 +4148,6 @@
           },
           "licenses": [
             "non-standard"
-          ]
-        },
-        {
-          "package": {
-            "name": "toml",
-            "version": "0.10.2",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "MIT"
           ]
         },
         {

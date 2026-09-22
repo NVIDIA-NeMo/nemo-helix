@@ -31,8 +31,6 @@ User-facing skills in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`
 
 - `nemo-skill-selection`: entry point when the user's intent is broad or unclear.
 - `nemo-setup`: first-time install and platform startup.
-- `nemo-explore`: design conversation that feeds into an Ethos. Always confirms purpose, principles, and vision.
-- `nemo-ethos`: writes an agent Ethos at `agents/<name>-ethos/ETHOS.md` from explore output, then shows a gut-check of the agent.
 - `nemo-build-agent`: scaffolds NAT workflow YAML from the Ethos and deploys.
 - `nemo-try-agent`: test a deployed agent or chat with a model.
 - `nemo-status`: read-only health dashboard. Run this before assuming the platform is up.

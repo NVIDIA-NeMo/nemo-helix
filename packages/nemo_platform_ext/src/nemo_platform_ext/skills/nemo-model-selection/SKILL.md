@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: nemo-model-selection
-description: Recommends an LLM for a NeMo Platform agent based on what the agent actually has to do, explained in plain English before any benchmark name appears. Use when the user is choosing a model for a new agent, assessing a model they already selected, or deciding what belongs in ETHOS.md or Platform agent.yaml. Invoked by nemo-explore at the model question; also runs standalone when the user starts mid-flow.
+description: Recommends an LLM for a NeMo Platform agent based on what the agent actually has to do, explained in plain English before any benchmark name appears. Use when the user is choosing a model for a new agent, assessing a model they already selected, or deciding what belongs in ETHOS.md or Platform agent.yaml.
 triggers:
   - which model should I use
   - what model is best for this
@@ -13,8 +13,6 @@ triggers:
   - model selection
   - which LLM
 not-for:
-  - nemo-explore (use first to capture the agent's job, audience, and tools)
-  - nemo-ethos (use to persist the design once model is chosen)
   - nemo-build-agent (use to scaffold the YAML once the Ethos is signed off)
 compatibility: nemo-platform >= 0.1.0; read-only; loads references/benchmark_cache.json if present; works offline; safe under any sandbox.
 maturity: active
@@ -98,7 +96,7 @@ If the user picks **B** → continue to Step 1 with the assess flow:
 
 ## Step 1 — Profile the agent
 
-Ask all three questions in a single message. Skip any that the conversation has already answered (for example, `nemo-explore` already captured tools and deployment).
+Ask all three questions in a single message. Skip any that the conversation has already answered.
 
 ```txt
 Before I recommend a model, three quick things about what the agent will do:
@@ -342,12 +340,6 @@ Platform `agent.yaml`. **When the chosen model's primary-axis score has
 include an explicit evidence caveat in the human-readable recommendation.** Do
 not encode benchmark commentary as unsupported config fields.
 
-If they're authoring an Ethos for `nemo-ethos`, do not emit a `## Model`
-section. Ethos has no such heading. Return the choice to `nemo-explore` with
-family/size, NIM model id, reason, evidence, and deployment mode so explore
-can record permitted providers and model families in `Constraints`. The
-selected model itself belongs in `agent.yaml`.
-
 If they are authoring Platform `agent.yaml`, emit a default model block:
 
 ```yaml
@@ -457,7 +449,7 @@ Raw leaderboards:
 
 This skill writes nothing. Verification is conversational: summarize the recommendation in 3 lines (capability that mattered most, model chosen, one tradeoff) and ask "Does this match what you need?" Do not hand off until the user confirms.
 
-If `nemo-explore` invoked this skill, return control to `nemo-explore` with the chosen model so it can continue to the constraints question. If the user invoked standalone, hand off to `nemo-ethos` if they want to persist the design.
+Return the chosen model to the calling workflow. Use `nemo-agent-config` for focused `agent.yaml` authoring.
 
 ## If verification fails
 
@@ -482,13 +474,13 @@ If `nemo-explore` invoked this skill, return control to `nemo-explore` with the 
 - Never emit a model identifier without showing the plain-English reason alongside it.
 - **When the primary candidate's evidence is anything other than `direct`, the model name does not appear in your response until the user has resolved the trade-off in Pattern B.** Anchoring is the failure mode this guards against — users default to the first model named regardless of caveats. The withhold is non-negotiable.
 - When returning a model choice for Ethos, include the evidence so
-  `nemo-explore` can put it in `Constraints`. Never write a `## Model`
+  it can be recorded in `Constraints`. Never write a `## Model`
   heading. For `agent.yaml`, present the evidence next to the YAML rather
   than inventing a config field.
 
 ## Gotchas
 
-- **"You decide" needs a committed default, not a silent fill-in.** Same rule as `nemo-explore`. Pick something, name it, tell the user.
+- **"You decide" needs a committed default, not a silent fill-in.** Pick something, name it, tell the user.
 - **Do not transform model IDs by punctuation convention.** Use the identifier
   returned by the selected live provider or Platform model listing and pair it
   with the correct `provider`. Legacy NAT components and Data Designer may use

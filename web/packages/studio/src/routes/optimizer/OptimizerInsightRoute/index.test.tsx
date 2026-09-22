@@ -198,4 +198,25 @@ describe('OptimizerInsightRoute experiments', () => {
 
     expect(await screen.findByText('Failed to update insight.')).toBeInTheDocument();
   });
+
+  it('reopens a resolved insight directly without offering an experiment launch', async () => {
+    const update = vi.fn();
+    server.use(
+      http.get(INSIGHT_URL, () => HttpResponse.json({ ...insight, status: 'resolved' })),
+      http.patch(INSIGHT_URL, async ({ request }) => {
+        update(await request.json());
+        return HttpResponse.json(insight);
+      })
+    );
+    renderInsight();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Reopen' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ status: 'open' }));
+    expect(
+      await screen.findByText(ENTITY_EMPTY_STATES.insightExperiments.subheading)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run experiment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });

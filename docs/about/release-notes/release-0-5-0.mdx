@@ -76,7 +76,7 @@ operations for the 0.5 release line.
 
 - The durable agent-intent document is now `ETHOS.md`. The old
   `AGENT-SPEC.md` contract is replaced by Ethos terminology across agent
-  creation, analysis, experimentalist, and packaging workflows.
+  creation, analysis and packaging workflows.
 - `nemo agents ethos migrate` provides a guided migration for platform-owned
   legacy spec packages, Filesets, and optimizer profiles.
 - The Ethos schema records `Purpose & Outcomes`, `Principles`, `Trade-offs`,
@@ -98,8 +98,6 @@ operations for the 0.5 release line.
   `AgentEvaluator` result model and use the built-in Harbor reward metric.
 - Result summaries expose per-task metric values and task outcomes, making it
   easier to identify which tasks or trials drove aggregate scores.
-- Eval Author is now represented as coding-agent skills for Harbor discovery
-  and Intake trace inspection, rather than a standalone CLI command group.
 
 ### Studio
 
@@ -198,8 +196,8 @@ nemo agents ethos migrate --name <agent-name>
 
 - **Self-managed scope.** v0.5.0 documents local setup and user-managed
   Kubernetes deployment. It is not a managed hosted-service release.
-- **Research-preview optimizer.** Analyst and Experimentalist are early agentic
-  workflows. They are useful for guided optimization, but quality and autonomy
+- **Research-preview optimizer.** Analyst is an early agentic
+  workflow. It is useful for guided analysis, but quality and autonomy
   are still research-preview and require developer review.
 - **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed
   Gym configuration. They do not have a local Docker fallback.
@@ -209,8 +207,6 @@ nemo agents ethos migrate --name <agent-name>
   Python and node architecture.
 - **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
   have a local Docker fallback. DPO remains full-weight only.
-- **Eval Author migration.** Eval Author discovery is now skill-driven. The
-  old `nemo agents eval-author` CLI group is no longer the supported surface.
 - **Agent intent migration.** `AGENT-SPEC.md` is legacy. Use `ETHOS.md` for
   new work and run `nemo agents ethos migrate` for platform-owned legacy
   packages before relying on optimizer workflows.
