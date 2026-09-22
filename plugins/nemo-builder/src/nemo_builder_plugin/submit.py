@@ -71,10 +71,19 @@ class SubmitResult:
     images: list[ContainerImage]
 
 
-def _rows_for(build_set: BuildSet, config: BuilderConfig, workspace: str) -> list[ContainerImage]:
+def system_tags_for(build_set: BuildSet, workspace: str) -> list[str]:
+    """One system tag per spec, in order. Called exactly once per submit; see `submit_build_set`."""
+    return [
+        compose_system_tag(workspace, build_set.name, build_set.revision, index)
+        for index in range(len(build_set.build_specs))
+    ]
+
+
+def _rows_for(
+    build_set: BuildSet, config: BuilderConfig, workspace: str, system_tags: list[str]
+) -> list[ContainerImage]:
     """The desired state, before anything is built."""
     job_name = job_name_for(build_set)
-    system_tag = compose_system_tag(workspace, build_set.name, build_set.revision)
     destinations = resolve_destinations(build_set, config)
 
     return [
@@ -90,7 +99,7 @@ def _rows_for(build_set: BuildSet, config: BuilderConfig, workspace: str) -> lis
                     build_set=build_set.name,
                     revision=build_set.revision,
                     job=f"{workspace}/{job_name}",
-                    system_tag=system_tag,
+                    system_tag=system_tags[index],
                 ),
             ),
         )
@@ -108,14 +117,17 @@ async def submit_build_set(
 ) -> SubmitResult:
     """Compile, write the rows, create the job. In that order."""
     job_name = job_name_for(build_set)
-    system_tag = compose_system_tag(workspace, build_set.name, build_set.revision)
+    # Composed ONCE and handed to both the compiler and the rows. An earlier version composed it
+    # separately in each place -- harmless while the function was deterministic, but it is
+    # precisely the drift this parameter exists to rule out.
+    system_tags = system_tags_for(build_set, workspace)
 
     # Compile FIRST. It is pure and it is the only step that can reject the request for a reason
     # the caller can act on, so it should run before anything is written.
-    platform_spec = compile_build_set(build_set, config=config, system_tag=system_tag)
+    platform_spec = compile_build_set(build_set, config=config, system_tags=system_tags)
 
     images: list[ContainerImage] = []
-    for row in _rows_for(build_set, config, workspace):
+    for row in _rows_for(build_set, config, workspace, system_tags):
         try:
             images.append(await entity_client.create(row))
         except EntityConflictError:

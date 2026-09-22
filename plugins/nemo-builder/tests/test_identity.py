@@ -92,9 +92,19 @@ class TestParsing:
 
 class TestSystemTag:
     def test_composes_and_splits(self) -> None:
-        tag = compose_system_tag("scaled-evals", "freight-dispatch-shift", 1)
-        assert tag == "scaled-evals--freight-dispatch-shift-1"
-        assert split_system_tag(tag) == ("scaled-evals", "freight-dispatch-shift", 1)
+        tag = compose_system_tag("scaled-evals", "freight-dispatch-shift", 1, 2)
+        assert tag == "scaled-evals--freight-dispatch-shift-1-2"
+        assert split_system_tag(tag) == ("scaled-evals", "freight-dispatch-shift", 1, 2)
+
+    def test_each_image_in_a_set_gets_its_own_tag(self) -> None:
+        """The regression for the collision the adversarial review found.
+
+        The tag was per SET, so two specs publishing to one repository both pushed
+        `<repo>:<system-tag>`, the second push replaced the first, and both rows resolved the same
+        digest -- one row recording the identity of an image it did not describe.
+        """
+        tags = {compose_system_tag("ws", "app", 1, index) for index in range(10)}
+        assert len(tags) == 10
 
     def test_the_double_dash_is_what_makes_the_split_unambiguous(self) -> None:
         """A single `-` separator would collide these two; `--` does not.
@@ -103,11 +113,15 @@ class TestSystemTag:
         `scaled` + `evals-freight` compose identically under a single dash. This is the whole
         reason for the separator, so it gets a test rather than a comment.
         """
-        a = compose_system_tag("scaled-evals", "freight", 1)
-        b = compose_system_tag("scaled", "evals-freight", 1)
+        a = compose_system_tag("scaled-evals", "freight", 1, 0)
+        b = compose_system_tag("scaled", "evals-freight", 1, 0)
         assert a != b
-        assert split_system_tag(a) == ("scaled-evals", "freight", 1)
-        assert split_system_tag(b) == ("scaled", "evals-freight", 1)
+        assert split_system_tag(a) == ("scaled-evals", "freight", 1, 0)
+        assert split_system_tag(b) == ("scaled", "evals-freight", 1, 0)
+
+    def test_a_set_name_ending_in_digits_still_splits(self) -> None:
+        """Revision and index are the last two numeric fields, so a set name like `app-2` is safe."""
+        assert split_system_tag(compose_system_tag("ws", "app-2", 3, 4)) == ("ws", "app-2", 3, 4)
 
     def test_rejects_names_that_are_legal_entities_but_illegal_tags(self) -> None:
         """NAME_PATTERN admits `@` and `+`; an OCI tag forbids both.
@@ -115,14 +129,16 @@ class TestSystemTag:
         Caught at composition, not at push twenty minutes later.
         """
         with pytest.raises(ImageIdentityError):
-            compose_system_tag("ws", "build+set", 1)
+            compose_system_tag("ws", "build+set", 1, 0)
         with pytest.raises(ImageIdentityError):
-            compose_system_tag("ws", "build@set", 1)
+            compose_system_tag("ws", "build@set", 1, 0)
 
     def test_rejects_a_name_already_containing_the_separator(self) -> None:
         with pytest.raises(ImageIdentityError):
-            compose_system_tag("we--ird", "set", 1)
+            compose_system_tag("we--ird", "set", 1, 0)
 
-    def test_revision_is_one_based(self) -> None:
+    def test_revision_is_one_based_and_index_zero_based(self) -> None:
         with pytest.raises(ImageIdentityError):
-            compose_system_tag("ws", "set", 0)
+            compose_system_tag("ws", "set", 0, 0)
+        with pytest.raises(ImageIdentityError):
+            compose_system_tag("ws", "set", 1, -1)

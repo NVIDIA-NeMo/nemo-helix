@@ -164,19 +164,29 @@ def normalize_reference(image_ref: str) -> ImageReference:
     return parse_reference(value)
 
 
-def compose_system_tag(workspace: str, build_set: str, revision: int) -> str:
-    """``<workspace>--<build_set>-<revision>`` -- the tag the reconciler resolves.
+def compose_system_tag(workspace: str, build_set: str, revision: int, index: int) -> str:
+    """``<workspace>--<build_set>-<revision>-<index>`` -- the tag the reconciler resolves.
 
     The build pushes this alongside whatever the caller asked for, and the reconciler looks it
     up. It is generated once at submit and handed to both the ``ContainerImage`` row and the
     compiler, because composing it twice is a drift bug whose only symptom is resolving a tag
     nothing ever pushed.
 
+    **One tag per IMAGE, not per set -- that is what ``index`` is for.** An earlier version was
+    ``<workspace>--<build_set>-<revision>``, shared by every spec in the set. Two specs publishing
+    to one repository -- ``team/app:staging`` and ``team/app:prod`` from different Dockerfiles --
+    then both pushed ``team/app:<system-tag>``, the second push replaced the first, and both rows
+    resolved the same digest. One of them recorded the identity of an image it did not describe,
+    which is the one thing this system exists to get right. The index is the spec's position in
+    ``build_specs``, the same number that makes ``ContainerImage.name`` unique, so the tag is
+    unique wherever the row is.
+
     **The separator is ``--`` and that is load-bearing.** The platform's ``NAME_PATTERN`` admits
     ``-`` inside both a workspace and a set name, so with a single ``-`` the pair
     (``scaled-evals``, ``freight``) and the pair (``scaled``, ``evals-freight``) compose to the
     same string. ``NAME_PATTERN`` forbids ``--`` outright and forbids a trailing ``-``, so
-    exactly one ``--`` appears here and the split stays recoverable.
+    exactly one ``--`` appears here, and revision and index are the last two ``-``-separated
+    fields and both numeric, so the split stays recoverable.
 
     **Validated here, not assumed.** ``NAME_PATTERN`` admits ``@`` and ``+``; an OCI tag forbids
     both. A name that is legal as a platform entity can be illegal as a tag, so the check belongs
@@ -184,12 +194,14 @@ def compose_system_tag(workspace: str, build_set: str, revision: int) -> str:
     """
     if revision < 1:
         raise ImageIdentityError("revision must be >= 1")
+    if index < 0:
+        raise ImageIdentityError("index must be >= 0")
     if "--" in workspace or "--" in build_set:
         raise ImageIdentityError(
             f"workspace and build_set must not contain '--' (got {workspace!r}, {build_set!r}); "
             "it is the separator that makes the system tag splittable"
         )
-    tag = f"{workspace}--{build_set}-{revision}"
+    tag = f"{workspace}--{build_set}-{revision}-{index}"
     if not _TAG.fullmatch(tag):
         raise ImageIdentityError(
             f"composed system tag is not a legal OCI tag: {tag!r}. A workspace or build set name "
@@ -198,15 +210,16 @@ def compose_system_tag(workspace: str, build_set: str, revision: int) -> str:
     return tag
 
 
-def split_system_tag(tag: str) -> tuple[str, str, int]:
+def split_system_tag(tag: str) -> tuple[str, str, int, int]:
     """Inverse of :func:`compose_system_tag`. Exists to prove the composition is recoverable."""
     if tag.count("--") != 1:
         raise ImageIdentityError(f"not a system tag: {tag!r}")
     workspace, rest = tag.split("--", 1)
+    rest, _, index = rest.rpartition("-")
     set_name, _, revision = rest.rpartition("-")
-    if not set_name or not revision.isdigit():
+    if not set_name or not revision.isdigit() or not index.isdigit():
         raise ImageIdentityError(f"not a system tag: {tag!r}")
-    return workspace, set_name, int(revision)
+    return workspace, set_name, int(revision), int(index)
 
 
 # --- Registry policy is NOT here yet, and that is a gap rather than an omission. ---

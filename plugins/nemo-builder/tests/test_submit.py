@@ -143,9 +143,13 @@ class TestTheJobRequest:
         assert request.custom_fields == {"images": ["demo-1-0", "demo-1-1"]}
 
     @pytest.mark.asyncio
-    async def test_the_system_tag_on_the_rows_matches_the_one_the_build_pushes(self) -> None:
-        """Composed once and handed to both. Composing it twice is a drift bug whose only
-        symptom is a reconciler resolving a tag nothing ever pushed."""
+    async def test_each_row_resolves_the_tag_its_own_image_pushes_and_no_other(self) -> None:
+        """Composed once, handed to both, and distinct per image.
+
+        Row i's system tag must appear among image i's push targets, and among NO other image's.
+        The second half is the collision the adversarial review found: with a per-set tag every
+        row resolved the same string, so two images in one repository recorded one digest.
+        """
         client = FakeEntityClient()
         captured: list[CreatePlatformJobRequest] = []
 
@@ -154,16 +158,16 @@ class TestTheJobRequest:
             return request
 
         result = await submit_build_set(
-            _set(1),
+            _set(3),
             config=_config(),
             workspace="default",
             entity_client=client,
             create_job=create_job,
         )
-        origin = result.images[0].provenance.built_by
-        assert isinstance(origin, JobOrigin)
+        pushed = [image["tags"] for image in captured[0].platform_spec.steps[2].config["images"]]
 
-        pushed_tags = captured[0].platform_spec.steps[2].config["images"][0]["tags"]
-        assert any(t.endswith(f":{origin.system_tag}") for t in pushed_tags), (
-            f"row says {origin.system_tag!r}, build pushes {pushed_tags!r}"
-        )
+        for index, row in enumerate(result.images):
+            origin = row.provenance.built_by
+            assert isinstance(origin, JobOrigin)
+            owners = [i for i, tags in enumerate(pushed) if any(t.endswith(f":{origin.system_tag}") for t in tags)]
+            assert owners == [index], f"row {row.name} tag {origin.system_tag!r} is pushed by images {owners}"

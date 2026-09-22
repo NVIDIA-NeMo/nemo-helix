@@ -261,7 +261,7 @@ def _push_step(
     config: BuilderConfig,
     resolved: _Resolved,
     job_name: str,
-    system_tag: str,
+    system_tags: list[str],
     destinations: list[tuple[str, str]],
 ) -> PlatformJobStepSpec:
     """Trusted. Holds the registry credential and the signing key. Runs no caller code."""
@@ -275,7 +275,7 @@ def _push_step(
             # invisible to the reconciler, which resolves the second.
             tags=[
                 f"{destinations[index][0]}/{destinations[index][1]}:{spec.output.tag}",
-                f"{destinations[index][0]}/{destinations[index][1]}:{system_tag}",
+                f"{destinations[index][0]}/{destinations[index][1]}:{system_tags[index]}",
             ],
         )
         for index, spec in enumerate(build_set.build_specs)
@@ -304,27 +304,60 @@ def _push_step(
     )
 
 
+def _require_distinct_destinations(build_set: BuildSet, destinations: list[tuple[str, str]]) -> None:
+    """Reject a set in which two specs would publish to the same caller reference.
+
+    Once each image has its own system tag the reconciler's record is correct regardless, but two
+    specs sharing `<registry>/<repository>:<tag>` still leave the caller's own tag pointing at
+    whichever image was pushed last -- a request that cannot be honoured, and one that is cheap to
+    refuse at submit rather than discover in a registry. Checked after defaults are resolved,
+    because a spec that names the default registry explicitly and one that omits it are the same
+    destination.
+
+    A plain ``ValueError``, not a ``BuildCompileError``: this is a malformed request (400), not a
+    deployment that cannot currently satisfy a well-formed one (409).
+    """
+    seen: dict[str, str] = {}
+    for spec, (registry, repository) in zip(build_set.build_specs, destinations, strict=True):
+        ref = f"{registry}/{repository}:{spec.output.tag}"
+        if ref in seen:
+            raise ValueError(
+                f"build specs {seen[ref]!r} and {spec.name!r} both publish {ref}; the tag could point "
+                "at only one of them"
+            )
+        seen[ref] = spec.name
+
+
 def compile_build_set(
     build_set: BuildSet,
     *,
     config: BuilderConfig,
-    system_tag: str,
+    system_tags: list[str],
 ) -> PlatformJobSpec:
     """Compile a ``BuildSet`` into the job that builds it.
 
-    ``system_tag`` is passed in rather than composed here: it is generated once at submit and
-    handed to both the ``ContainerImage`` rows and this function, because composing it twice is a
-    drift bug whose only symptom is a reconciler resolving a tag nothing ever pushed.
+    ``system_tags`` -- one per spec, in order -- is passed in rather than composed here: it is
+    generated once at submit and handed to both the ``ContainerImage`` rows and this function,
+    because composing it twice is a drift bug whose only symptom is a reconciler resolving a tag
+    nothing ever pushed.
     """
+    if len(system_tags) != len(build_set.build_specs):
+        raise ValueError(f"expected {len(build_set.build_specs)} system tags, got {len(system_tags)}")
+    if len(set(system_tags)) != len(system_tags):
+        # The invariant the per-image tag exists for. Checked rather than trusted, because the
+        # failure it prevents is silent: two rows recording one digest.
+        raise ValueError(f"system tags must be distinct per image, got {system_tags}")
+
     resolved = _require_configured(config)
     destinations = resolve_destinations(build_set, config)
+    _require_distinct_destinations(build_set, destinations)
     job_name = job_name_for(build_set)
 
     return PlatformJobSpec(
         steps=[
             _fetch_step(build_set, config),
             _build_step(build_set, config, job_name),
-            _push_step(build_set, config, resolved, job_name, system_tag, destinations),
+            _push_step(build_set, config, resolved, job_name, system_tags, destinations),
         ],
         # Declared on the job, consumed by exactly one step.
         secrets=[PlatformJobSecret(name=resolved.push_secret)],
