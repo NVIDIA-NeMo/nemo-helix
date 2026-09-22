@@ -179,6 +179,11 @@ guardrails-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+harbor = [
+  "harbor>=0.20,<0.21",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 hello-world-service = [
   "fastapi[standard]>=0.115.4",
   "uvicorn[standard]>=0.12.0",
@@ -340,7 +345,7 @@ nemo-deployments-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-evaluator-plugin = [
   "cloudpickle>=3.1.1",
-  "nemo-evaluator-sdk",
+  "nemo-evaluator-sdk[harbor]",
   "nemo-platform-plugin",
   "pydantic>=2.12.0",
   "typer>=0.20.0",
@@ -826,7 +831,7 @@ nemo-platform-plugin = { source = "../../packages/nemo_platform_plugin/src/nemo_
 nemo-platform-ext = { source = "../../packages/nemo_platform_ext/src/nemo_platform_ext", module = "nemo_platform_ext", deps_group = "nemo-platform-sdk", force_include = { "../../../../docs" = "nemo_platform_ext/cli/docs" } }
 models = { source = "../../packages/models/src/models", module = "models", deps_group = "nemo-platform-sdk" }
 filesets = { source = "../../packages/filesets/src/filesets", module = "filesets", deps_group = "nemo-platform-sdk" }
-nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk" }
+nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk", inherit = { "optional-dependencies" = ["harbor"] } }
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }
 nmp-platform-runner = { source = "../../packages/nmp_platform_runner/src/nmp/platform_runner", module = "nmp/platform_runner", deps_group = "services" }
 garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi", deps_group = "auditor-service" }
