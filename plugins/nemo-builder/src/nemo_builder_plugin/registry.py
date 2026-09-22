@@ -93,6 +93,7 @@ class RegistryClient:
         password: str | None = None,
         insecure: bool = False,
         timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._username = username
         self._password = password
@@ -101,7 +102,8 @@ class RegistryClient:
         # this client exists to establish -- so it is opt-in, off by default, and never a
         # fallback after an HTTPS attempt fails.
         self._scheme = "http" if insecure else "https"
-        self._client = httpx.Client(timeout=timeout, follow_redirects=True)
+        # `transport` is a test seam: an httpx.MockTransport stands in for a registry.
+        self._client = httpx.Client(timeout=timeout, follow_redirects=True, transport=transport)
         self._tokens: dict[str, str] = {}
 
     def close(self) -> None:
@@ -115,12 +117,12 @@ class RegistryClient:
 
     # -- auth ---------------------------------------------------------------
 
-    def _token_for(self, registry: str, repository: str, challenge: str) -> str | None:
-        """Exchange the basic credential for a scoped bearer token, per the challenge."""
-        cache_key = f"{registry}/{repository}"
-        if cache_key in self._tokens:
-            return self._tokens[cache_key]
+    def _exchange_token(self, registry: str, repository: str, challenge: str) -> str | None:
+        """Exchange the basic credential for a fresh, scoped bearer token, per the challenge.
 
+        Always a fresh exchange -- caching is `_get`'s job, because only `_get` sees the 401 that
+        says a cached token has gone stale.
+        """
         params = dict(_CHALLENGE.findall(challenge))
         realm = params.get("realm")
         if not realm:
@@ -136,19 +138,40 @@ class RegistryClient:
         token = payload.get("token") or payload.get("access_token")
         if not token:
             raise RegistryError(f"token endpoint {realm} returned no token")
-        self._tokens[cache_key] = token
         return token
 
     def _get(self, registry: str, repository: str, path: str, *, accept: str) -> httpx.Response:
+        """GET with bearer auth, recovering once from a stale token.
+
+        **A 401 invalidates the cached token.** An earlier version cached one token per
+        repository for the life of the process and never dropped it. Bearer tokens are
+        short-lived, so once one expired every lookup presented it, the single retry 401'd again,
+        and the reconciler could no longer resolve anything -- against a real registry, within
+        the hour. Now a 401 drops the cache entry and triggers exactly one fresh exchange; a
+        second 401 is returned to the caller as a real authorization failure rather than retried.
+
+        The cached token is also sent on the FIRST request, which removes the unauthenticated
+        round trip every call used to make just to be told to authenticate.
+        """
         url = f"{self._scheme}://{registry}/v2/{repository}/{path}"
+        cache_key = f"{registry}/{repository}"
         headers = {"Accept": accept}
+
+        cached = self._tokens.get(cache_key)
+        if cached:
+            headers["Authorization"] = f"Bearer {cached}"
         response = self._client.get(url, headers=headers)
-        if response.status_code == 401:
-            token = self._token_for(registry, repository, response.headers.get("WWW-Authenticate", ""))
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-                response = self._client.get(url, headers=headers)
-        return response
+        if response.status_code != 401:
+            return response
+
+        # Stale, revoked, or never had one. Either way the cached value is no longer trusted.
+        self._tokens.pop(cache_key, None)
+        token = self._exchange_token(registry, repository, response.headers.get("WWW-Authenticate", ""))
+        if not token:
+            return response
+        self._tokens[cache_key] = token
+        headers["Authorization"] = f"Bearer {token}"
+        return self._client.get(url, headers=headers)
 
     # -- reads --------------------------------------------------------------
 
