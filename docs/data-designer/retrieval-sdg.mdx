@@ -23,6 +23,19 @@ NeMo Platform exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
 
 ## Generate (Stage 0, CPU)
 
+Platform has no default Stage 0 chat model: you pass the names Inference Gateway
+serves. The [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md)
+uses [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) for artifact extraction, Q&A
+generation, and quality judging. That choice is first-order for retrieval
+accuracy, because those queries and answers become the embedding training set.
+The published NVDocs dump was generated with that pipeline.
+
+The examples below use `nvidia/nemotron-3-nano-30b-a3b` so they can run on a
+typical already-deployed IGW model. Outside of examples, always use a larger
+model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Copying the examples
+as-is produces shallower queries and lower judge scores than the recipe, and a
+weaker fine-tune than NVDocs.
+
 ```bash
 nemo data-designer retrieval-generate --workspace default --spec '{
   "corpus": "default/my-docs",
@@ -30,13 +43,48 @@ nemo data-designer retrieval-generate --workspace default --spec '{
   "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
   "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
   "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
-  "embed_model": "nvidia/nemotron-3-embed-1b"
+  "embed_model": "nvidia/nemotron-3-embed-1b",
+  "file_extensions": [".txt", ".md", ".text", ""],
+  "sentences_per_chunk": 5,
+  "max_artifacts_per_type": 2,
+  "num_pairs": 7,
+  "multi_doc": false,
+  "max_parallel_requests_for_gen": null
 }'
 ```
 
 Pass the chat and embedding model names served by Inference Gateway. All four
 model roles call IGW through `provider` (workspace/name), with optional
 `chat_provider` / `embed_provider` overrides. Do not pass raw `NVIDIA_API_KEY`.
+
+### Corpus and runtime
+
+Corpus files must be UTF-8 text. Stage 0 walks directories recursively and, by
+default, reads `.txt`, `.md`, `.text`, and files with no extension. Use
+`file_extensions` to replace that list. Aim for documents of 200–2,000 tokens
+that represent the target domain. Start with at least 50–100 documents; 500 or
+more usually gives better domain coverage.
+
+Stage 0 makes approximately four model calls per document for artifact
+extraction, Q&A generation, deduplication, and quality judging. As planning
+estimates, the recipe takes about 30 minutes for its roughly 70-file sample and
+tens of hours to 1–2 days for 10,000 or more files. The served model, provider
+rate limits, chunk and pair counts, and `max_parallel_requests_for_gen` can move
+those numbers substantially.
+
+### Stage 0 quality controls
+
+| Field | Default | Guidance |
+| --- | --- | --- |
+| `file_extensions` | `[".txt", ".md", ".text", ""]` | Corpus files to process recursively. |
+| `sentences_per_chunk` | `5` | About 100–150 tokens for typical prose. Match production chunk size as closely as practical; larger chunks cost more context. |
+| `max_artifacts_per_type` | `2` | Entities, terms, concepts, and relationships retained per chunk. Raise it when rare identifiers matter. |
+| `num_pairs` | `7` | Q&A pairs per chunk. Raise it for more query diversity on multifaceted content. `query_counts` and `reasoning_counts` must each sum to this value. |
+| `multi_doc` | `false` | Bundle chunks for questions whose evidence spans sections or documents. Tune `bundle_size`, `bundle_strategy`, and `max_docs_per_bundle` when enabled. |
+| `max_parallel_requests_for_gen` | Provider default (`null`) | Cap concurrent generation calls. Raise cautiously for throughput; lower it when the provider rate-limits or responses become unreliable. |
+
+Preview 1–5 records after changing these fields. Inspect identifier coverage,
+query depth, and judge scores before paying for a full corpus run.
 
 Equivalent helper:
 
@@ -61,6 +109,9 @@ nemo data-designer retrieval-preview --spec '{"generate":{"corpus":"default/my-d
 Conversion produces `eval_beir/` and training JSON. Automodel needs hard
 negatives, so run with `enable_mining: true` and a fileset-backed encoder
 `model`. Without mining, rows keep `neg_doc: []`, which training rejects.
+`quality_threshold` belongs to this conversion step, not Stage 0: it defaults
+to `7.0` and removes Q&A pairs whose judge score is lower. Lower it only after
+checking why too few pairs survive.
 
 Skip live Stage 0 by pointing `sdg_input` at a fileset holding an existing
 `generation_result.json`, or at the published NVDocs dump. For a differently
@@ -75,6 +126,7 @@ JSON files.
 nemo data-designer retrieval-prepare --spec '{
   "sdg_input": "default/stage0-out",
   "enable_mining": true,
+  "quality_threshold": 7.0,
   "model": "default/nemotron-3-embed-1b"
 }'
 
@@ -141,6 +193,7 @@ nemo data-designer retrieval-run --spec '{
   },
   "prepare": {
     "enable_mining": true,
+    "quality_threshold": 7.0,
     "model": "default/nemotron-3-embed-1b"
   }
 }'
@@ -155,12 +208,28 @@ Stage 1 saves one `artifacts` fileset containing `training.jsonl`, `eval_beir/`
 (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`), and the wrapped `train.json`
 that hard-negative mining consumes.
 
-Pass that fileset to both downstream consumers without repackaging it:
+Automodel `dataset.training` and retrieve-eval `dataset` take a fileset name
+with no path fragment. Copy `training.jsonl` and `eval_beir/` to the root of a
+dataset fileset, and drop duplicate `(query-id, corpus-id)` rows from
+`eval_beir/qrels/test.tsv` before upload. Stage 1 unique-keys qrels when it
+writes them; unique-key again if you are uploading an older dump, because the
+BEIR loader still rejects duplicates. The copy-and-dedup cell in
+[Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job)
+does that procedure.
 
 - Automodel `dataset.training` — dataset discovery selects `training.jsonl` and
-  ignores the non-JSONL `train.json` beside it.
+  ignores the non-JSONL `train.json` beside it. Stage 1 does not produce a
+  training-validation file, so Automodel creates a deterministic holdout from
+  `training.jsonl` using `schedule.validation_split`, which defaults to `0.1`.
+  If you add `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` at the fileset
+  root, Automodel uses that optional validation data instead.
 - `nemo evaluator retrieve-eval` `dataset` — the BEIR loader accepts either the
-  BEIR directory or a fileset root containing `eval_beir`.
+  BEIR directory or a fileset root containing `eval_beir`. It still rejects
+  duplicate `(query-id, corpus-id)` rows in `qrels/test.tsv`.
+
+The Automodel holdout is used for validation loss and checkpoint selection.
+The frozen `eval_beir/` split is separate and remains the dataset for comparing
+base and tuned retrieval quality.
 
 Prepare without mining (`enable_mining: false`) writes `neg_doc: []` on every
 training row. Encoder fine-tuning still samples `train_n_passages - 1` negatives
