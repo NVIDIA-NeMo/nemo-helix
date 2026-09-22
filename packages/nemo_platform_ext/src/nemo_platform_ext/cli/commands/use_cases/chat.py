@@ -246,9 +246,7 @@ def chat(
         raise click.UsageError("One-shot chat requires a prompt. Provide PROMPT or pipe text on stdin.")
     client = state.typed_client(InferenceGatewayClient)
     chat_output_format = _resolve_chat_output_format(state, output_format) if run_once else "text"
-
-    # Get workspace from client config if available
-    workspace_from_config: str | None = client.workspace
+    workspace_from_config = state.get_workspace()
 
     if provider:
         # Provider routing: pass model directly to the provider
@@ -268,9 +266,9 @@ def chat(
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
             return client.stream_provider(
-                trailing_uri="v1/chat/completions",
                 workspace=resolved_workspace,
                 name=provider,
+                trailing_uri="v1/chat/completions",
                 body=JsonBody(body),
             )
 
@@ -282,8 +280,8 @@ def chat(
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
             return client.stream_openai(
-                trailing_uri="v1/chat/completions",
                 workspace=resolved_workspace,
+                trailing_uri="v1/chat/completions",
                 body=JsonBody(body),
             )
 

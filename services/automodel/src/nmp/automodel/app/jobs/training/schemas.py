@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.app.constants import (
@@ -10,7 +10,13 @@ from nmp.automodel.app.constants import (
     DEFAULT_SEED,
     DEFAULT_TRAINING_OUTPUT_PATH,
 )
-from nmp.automodel.entities.values import CheckpointFormat, FinetuningType, Precision, TrainingType
+from nmp.automodel.entities.values import (
+    CheckpointFormat,
+    CheckpointSelection,
+    FinetuningType,
+    Precision,
+    TrainingType,
+)
 from nmp.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import BaseModel, Field
 
@@ -123,19 +129,35 @@ class DistillationConfig(BaseModel):
     offload_teacher: bool = Field(default=False, description="Offload teacher model to CPU for memory efficiency")
 
 
-class EmbeddingConfig(BaseModel):
-    """Internal Embedding/Biencoder model finetuning configuration.
+class ExportConfig(BaseModel):
+    """ONNX export and fileset layout. ``primary`` is the artifact at the root; the other is under ``alternates/``."""
 
-    This is used internally when a model is detected as an embedding model
-    by its name. The defaults here match the recommended settings for
-    NeMo embedding models.
+    primary: Literal["onnx", "hf"] = Field(
+        default="onnx",
+        description="Artifact at the fileset root. Use 'hf' when the NIM loads the PyTorch checkpoint.",
+    )
+    opset: int = Field(default=17, gt=0, description="ONNX opset version.")
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
+    )
+    attn_implementation: str = Field(
+        default="eager",
+        description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
+    )
+    pooling: Literal["avg", "cls", "last"] = Field(
+        default="avg",
+        description="Embedding pooling over hidden states. Ignored for cross_encoder.",
+    )
+    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
+    dimensions: bool = Field(
+        default=False,
+        description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
+    )
 
-    Note: Embedding models are detected by model name (e.g., contains 'embed'),
-    not by a separate training type. They use standard SFT training type.
 
-    Model architecture parameters (share_encoder, pooling, l2_normalize, temperature,
-    add_linear_pooler, out_dimension) use sensible defaults and are not exposed here.
-    """
+class RetrievalConfig(BaseModel):
+    """Collator, dataset, and export knobs for ``bi_encoder`` / ``cross_encoder``."""
 
     # Training configuration
     train_n_passages: int = Field(
@@ -163,11 +185,29 @@ class EmbeddingConfig(BaseModel):
         ),
     )
 
+    # Contrastive objective
+    do_distributed_inbatch_negative: bool = Field(
+        default=False,
+        description=("Use other queries' passages in the global batch as extra negatives. Ignored for cross_encoder."),
+    )
+
     # Tokenization configuration
     query_max_length: int = Field(default=512, description="Maximum token length for query tokenization")
     passage_max_length: int = Field(default=512, description="Maximum token length for passage tokenization")
-    query_prefix: str = Field(default="query:", description="Prefix to prepend to queries before tokenization")
-    passage_prefix: str = Field(default="passage:", description="Prefix to prepend to passages before tokenization")
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
+
+    # Post-training export
+    export: Optional[ExportConfig] = Field(
+        default=None,
+        description="Output artifact layout and ONNX export knobs. Defaults are applied when omitted.",
+    )
 
 
 class TrainingStepConfig(BaseModel):
@@ -190,6 +230,11 @@ class TrainingStepConfig(BaseModel):
         epochs: int = 1
         max_steps: Optional[int] = None
         val_check_interval: Optional[float] = None
+        validation_split: Optional[float] = Field(default=0.1, gt=0, lt=1)
+        checkpoint_selection: CheckpointSelection = Field(
+            default=CheckpointSelection.BEST,
+            description="Checkpoint(s) published after training: lowest validation loss, last, or both.",
+        )
         progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 
     class BatchConfig(BaseModel):
@@ -239,10 +284,12 @@ class TrainingStepConfig(BaseModel):
         default=DEFAULT_SEED, description="Random seed for ensuring reproducibility in all random processes."
     )
     training_timeout: Optional[int] = None
-    embedding: Optional[EmbeddingConfig] = Field(
+    retrieval: Optional[RetrievalConfig] = Field(
         default=None,
-        description="Retrieval collator and dataset knobs for bi_encoder / cross_encoder recipes.",
+        description="Retrieval dataset, collator, and export knobs for bi_encoder / cross_encoder recipes.",
     )
+
+    model_config = {"populate_by_name": True}
 
 
 class GPUInfo(BaseModel):

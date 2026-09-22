@@ -8,11 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import TypeAdapter
-
 from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags
-
-_BOOL = TypeAdapter(bool)
 
 
 def filter_query_value(value: str | dict[str, Any] | None) -> str | None:
@@ -61,10 +57,3 @@ def pop_workspace(payload: dict[str, Any]) -> str | None:
     """Remove and return the ``workspace`` key, which is a path parameter rather than a body field."""
     workspace = payload.pop("workspace", None)
     return str(workspace) if workspace is not None else None
-
-
-def pop_exist_ok(payload: dict[str, Any]) -> bool | None:
-    """Remove and return the ``exist_ok`` client option, which is never sent on the wire."""
-    exist_ok = payload.pop("exist_ok", None)
-    # --input-data may carry it as a JSON/YAML string; parse it like the server would.
-    return _BOOL.validate_python(exist_ok) if exist_ok is not None else None

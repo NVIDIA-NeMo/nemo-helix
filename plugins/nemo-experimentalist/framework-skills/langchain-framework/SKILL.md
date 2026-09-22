@@ -5,6 +5,9 @@
 name: langchain-framework
 description: "Guidance for building LLM-powered agents with LangChain, LangGraph, or Deep Agents. Use when building agents with any of these frameworks, implementing tool-calling agents, stateful graph workflows, or multi-step orchestration. Read this skill before writing any LangChain/LangGraph agent code."
 compatibility: Python ≥ 3.10, uv for install, API keys in .env. langchain >= 1.0,<2.0; langgraph >= 1.0,<2.0; langsmith >= 0.3.0; deepagents latest.
+allowed-tools: Read
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->

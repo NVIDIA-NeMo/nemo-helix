@@ -20,10 +20,11 @@ from .access_key_lifecycle import (
     AccessKeyLifecycleUnavailableError,
 )
 from .bearer import MalformedBearerTokenError, parse_bearer_authorization_header
-from .client import AuthClient
+from .client import AuthClient, AuthorizationResult
 from .dependencies import auth_client_context
 from .exceptions import InvalidPrincipalHeader, InvalidScopeFormatError
 from .models import Principal
+from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
 from .token_resolver import ResolvedBearerToken, resolve_bearer_token
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,122 @@ def _embedded_pdp_base_url_hint(config: AuthConfig) -> str:
         "this process serves /apis/auth (same as platform base_url / NMP_BASE_URL; HTTP(S) or unix://). "
         f"Absolute PDP URLs ignore the injected ASGI client base_url. Current auth.policy_decision_point_base_url={base!r}."
     )
+
+
+def _dedupe_non_empty(values: list[str | None]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value is None:
+            continue
+        stripped = value.strip()
+        if stripped and stripped not in result:
+            result.append(stripped)
+    return result
+
+
+def _service_identity_descriptor(principal_id: str) -> dict[str, Any] | None:
+    principal_id = principal_id.strip()
+    if not principal_id:
+        return None
+    parsed = parse_principal_identifier(principal_id, validate=False)
+    if not parsed.is_service_principal():
+        return None
+    service_name = parsed.service_name
+    if service_name is None:
+        raise InvalidPrincipalIdentifier("service principal is missing a service name")
+    return {
+        "kind": "service_principal",
+        "issuer": "nemo:service",
+        "subject": service_name,
+        "subject_claim": "service",
+        "account_type": "service",
+        "display_name": service_name,
+        "authz_aliases": [principal_id],
+    }
+
+
+def _trusted_header_identity_descriptor(principal: Principal) -> dict[str, Any] | None:
+    service_descriptor = _service_identity_descriptor(principal.id)
+    if service_descriptor is not None:
+        return service_descriptor
+    if not principal.id:
+        return None
+    return {
+        "kind": "trusted_header",
+        "issuer": "nemo:trusted-header",
+        "subject": principal.id,
+        "subject_claim": "x-nmp-principal-id",
+        "account_type": "user",
+        "display_name": principal.email or principal.id,
+        "primary_email": principal.email,
+        "authz_aliases": _dedupe_non_empty([principal.id, principal.email]),
+    }
+
+
+def _identity_resolution_from_principal_headers(principal: Principal) -> dict[str, Any] | None:
+    descriptor = _trusted_header_identity_descriptor(principal)
+    if descriptor is None:
+        return None
+    resolution: dict[str, Any] = {"principal": descriptor}
+    if principal.on_behalf_of:
+        obo = Principal(
+            id=principal.on_behalf_of,
+            email=principal.on_behalf_of_email,
+            groups=list(principal.on_behalf_of_groups or []),
+        )
+        obo_descriptor = _trusted_header_identity_descriptor(obo)
+        if obo_descriptor is not None:
+            resolution["on_behalf_of"] = obo_descriptor
+    return resolution
+
+
+def _issuer_from_claims(resolved: ResolvedBearerToken, config: AuthConfig) -> str:
+    issuer = resolved.claims.raw_claims.get("iss")
+    if isinstance(issuer, str) and issuer.strip():
+        return issuer.strip()
+    if resolved.token_kind in ("oidc_access_token", "workload_subject_token") and config.oidc.issuer:
+        return config.oidc.issuer
+    return f"nemo:{resolved.token_kind}"
+
+
+def _token_subject_claim(resolved: ResolvedBearerToken, config: AuthConfig) -> str:
+    if resolved.token_kind in ("oidc_access_token", "workload_subject_token"):
+        return config.oidc.subject_claim
+    return "sub"
+
+
+def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, config: AuthConfig) -> dict[str, Any]:
+    principal = resolved.principal
+    service_descriptor = _service_identity_descriptor(principal.id)
+    if service_descriptor is not None:
+        descriptor = service_descriptor
+    else:
+        descriptor = {
+            "kind": resolved.token_kind,
+            "issuer": _issuer_from_claims(resolved, config),
+            "subject": principal.id,
+            "subject_claim": "act.sub" if resolved.claims.actor is not None else _token_subject_claim(resolved, config),
+            "account_type": "user",
+            "display_name": principal.email or principal.id,
+            "primary_email": principal.email,
+            "authz_aliases": _dedupe_non_empty([principal.id, principal.email]),
+            "claims_snapshot": {},
+        }
+
+    resolution: dict[str, Any] = {"principal": descriptor}
+    if principal.on_behalf_of:
+        resolution["on_behalf_of"] = {
+            "kind": resolved.token_kind,
+            "issuer": _issuer_from_claims(resolved, config),
+            "subject": principal.on_behalf_of,
+            "subject_claim": _token_subject_claim(resolved, config),
+            "account_type": "user",
+            "display_name": principal.on_behalf_of_email or principal.on_behalf_of,
+            "primary_email": principal.on_behalf_of_email,
+            "authz_aliases": _dedupe_non_empty([principal.on_behalf_of, principal.on_behalf_of_email]),
+            "claims_snapshot": {},
+        }
+    return resolution
 
 
 # Health/metrics check endpoints - always allowed without authentication
@@ -200,8 +317,19 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if app_ctx is not None and app_ctx.auth_ctx is not None:
             auth_ctx = app_ctx.auth_ctx
             auth_ctx.principal_id = principal.id
+            auth_ctx.account_id = principal.account_id
             auth_ctx.email = principal.email
             auth_ctx.groups = ",".join(principal.groups) if principal.groups else None
+            auth_ctx.authz_aliases = ",".join(principal.authz_aliases) if principal.authz_aliases else None
+            auth_ctx.on_behalf_of = principal.on_behalf_of
+            auth_ctx.on_behalf_of_groups = (
+                ",".join(principal.on_behalf_of_groups) if principal.on_behalf_of_groups else None
+            )
+            auth_ctx.on_behalf_of_email = principal.on_behalf_of_email
+            auth_ctx.on_behalf_of_account_id = principal.on_behalf_of_account_id
+            auth_ctx.on_behalf_of_authz_aliases = (
+                ",".join(principal.on_behalf_of_authz_aliases) if principal.on_behalf_of_authz_aliases else None
+            )
             # Invalidate the cached_property so updated values are used in logs
             if "_fields" in auth_ctx.__dict__:
                 del auth_ctx.__dict__["_fields"]
@@ -289,6 +417,9 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             )
 
         if result.allowed:
+            if isinstance(result, AuthorizationResult):
+                auth_client.principal = result.apply_to_principal(auth_client.principal)
+                self._update_auth_context(auth_client.principal)
             return None
 
         principal_id = auth_client.principal.id
@@ -344,7 +475,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if path.startswith("/apis/auth/v2/authz/"):
             headers_dict = dict(request.headers)
             principal_id = headers_dict.get("x-nmp-principal-id", "")
-            if principal_id.startswith("service:"):
+            if is_service_principal(principal_id):
                 return await self._handle_service_principal_request(request, call_next, headers_dict)
             status_code = 401 if not principal_id else 403
             return JSONResponse(
@@ -399,7 +530,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             bearer_token = parse_bearer_authorization_header(headers_dict.get("authorization"))
         except MalformedBearerTokenError:
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-        if bearer_token is not None and bearer_token.startswith("service:"):
+        if bearer_token is not None and is_service_principal(bearer_token):
             headers_dict["x-nmp-principal-id"] = bearer_token
             return await self._handle_principal_headers_request(request, call_next, headers_dict)
 
@@ -433,7 +564,11 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             return error_response
         principal = _require_principal(principal)
         auth_client = AuthClient(
-            principal=principal, config=self.config, http_client=self._client, service_name=self.service_name
+            principal=principal,
+            config=self.config,
+            http_client=self._client,
+            service_name=self.service_name,
+            identity_resolution=_identity_resolution_from_principal_headers(principal),
         )
         return await self._call_next_with_auth_client(request, call_next, auth_client)
 
@@ -462,7 +597,11 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if not self.config.enabled:
             # Auth disabled - just extract principal and proceed
             auth_client = AuthClient(
-                principal=principal, config=self.config, http_client=self._client, service_name=self.service_name
+                principal=principal,
+                config=self.config,
+                http_client=self._client,
+                service_name=self.service_name,
+                identity_resolution=_identity_resolution_from_principal_headers(principal),
             )
             return await self._call_next_with_auth_client(request, call_next, auth_client)
 
@@ -563,10 +702,21 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             principal.groups,
         )
 
+        try:
+            identity_resolution = _identity_resolution_from_resolved_token(resolved, self.config)
+        except InvalidPrincipalIdentifier as exc:
+            logger.warning("Bearer token rejected: %s", exc)
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+
         # If auth is disabled, just proceed with the principal
         if not self.config.enabled:
             auth_client = AuthClient(
-                principal=principal, config=self.config, http_client=self._client, service_name=self.service_name
+                principal=principal,
+                config=self.config,
+                http_client=self._client,
+                service_name=self.service_name,
+                resolved_bearer_token=resolved,
+                identity_resolution=identity_resolution,
             )
             return await self._call_next_with_auth_client(request, call_next, auth_client)
 
@@ -576,6 +726,8 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             config=self.config,
             http_client=self._get_client(request),
             service_name=self.service_name,
+            resolved_bearer_token=resolved,
+            identity_resolution=identity_resolution,
         )
 
         # Extract scopes from token claims
@@ -628,7 +780,11 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         )
 
         auth_client = AuthClient(
-            principal=principal, config=self.config, http_client=self._client, service_name=self.service_name
+            principal=principal,
+            config=self.config,
+            http_client=self._client,
+            service_name=self.service_name,
+            identity_resolution=_identity_resolution_from_principal_headers(principal),
         )
         return await self._call_next_with_auth_client(request, call_next, auth_client)
 
@@ -675,6 +831,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             config=self.config,
             http_client=self._get_client(request),
             service_name=self.service_name,
+            identity_resolution=_identity_resolution_from_principal_headers(principal),
         )
 
         # Perform authorization check - only catch errors from the PDP call itself.

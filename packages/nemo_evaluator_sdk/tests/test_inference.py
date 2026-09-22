@@ -112,7 +112,7 @@ class TestMakeInferenceRequest:
 
     @pytest.mark.asyncio
     async def test_uses_model_default_headers_as_request_extra_headers(self, mocker: MockerFixture):
-        model = self._make_model(default_headers={"X-NMP-Principal-Id": "service:evaluator"})
+        model = self._make_model(default_headers={"X-Trace-Id": "trace-123"})
 
         mock_chat = mocker.patch("nemo_evaluator_sdk.inference.AsyncOpenAI.chat")
         mock_chat.completions.create = AsyncMock(return_value=mock_chat_completion())
@@ -120,7 +120,7 @@ class TestMakeInferenceRequest:
         await make_inference_request(model, {"messages": [{"role": "user", "content": "hi"}]})
 
         request_body = get_mock_args(mock_chat.completions.create)
-        assert request_body["extra_headers"] == {"X-NMP-Principal-Id": "service:evaluator"}
+        assert request_body["extra_headers"] == {"X-Trace-Id": "trace-123"}
 
     @pytest.mark.asyncio
     async def test_redacts_extra_headers_from_persisted_request_log(self, mocker: MockerFixture):

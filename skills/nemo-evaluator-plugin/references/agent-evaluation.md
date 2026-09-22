@@ -230,9 +230,11 @@ Set `agent_ref_name` when the package registers that agent under a different
 instance name. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
 jobs reject credential-shaped plaintext environment variables.
 
-A live `GymAgentTaskRunner` cannot carry the wire-only `environment`,
-`agent_ref_name`, or `env_secrets` fields. Build `GymRunnerTarget` explicitly
-and submit it in an agent-evaluate spec for those cases.
+From a live runner, `client.evaluator.submit(tasks=..., target=runner,
+placement=GymPlacement(...))` builds this target without rebuilding it by hand.
+`env_secrets` lives on `GymRuntimeConfig` (it means the same locally, resolved
+from your environment); `environment` and `agent_ref_name` live on the
+`GymPlacement`, because only a deployment can honor them.
 
 `max_concurrent_tasks` limits tasks evaluated concurrently. Target-specific
 settings such as inference parallelism or Harbor

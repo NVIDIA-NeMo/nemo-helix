@@ -41,13 +41,12 @@ Golden-path agent shape: Fabric Hermes (``nvidia.fabric.hermes``). See
 * ``optimize-chatonly.yaml`` — chat-only Hermes smoke
 * ``optimize-chatonly-via-agent.yaml`` — same study with a platform ``--agent``
 * ``optimize-mcp.yaml`` — phishing analyzer via MCP (separate agent checkout)
+* ``optimize-mcp-mock.yaml`` — same study against a bundled mock analyzer
 
 Install and QA steps live in that directory's README.
 
-Per-task Fabric lifecycle hooks are author-supplied via string references
-(``eval.run_hook.ref``, ``path``+``attr``, or ``nemo.fabric.task_hooks``
-entry points). The platform does not vendor example-agent packages such as
-email phishing analyzer.
+The platform does not vendor example-agent packages such as the email phishing
+analyzer; MCP servers are declared statically under ``mcp.servers``.
 
 Job registration: ``agents.optimize`` (mounted by the agents plugin, which also
 owns the ``prepare-fileset`` CLI command).  ``compile`` selects the ``subprocess``

@@ -63,7 +63,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
+from nemo_platform_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_platform_plugin.dependencies import get_sdk_client, get_sync_sdk_client
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
@@ -111,7 +111,8 @@ def add_function_routes(
             Lower values are useful in tests; production callers
             usually leave the default.
         authz: The plugin's :class:`~nemo_platform_plugin.authz.AuthzScope`.
-            When set, a PRINCIPAL ``@path_rule`` is stamped on the route with
+            When set, a ``@path_rule`` is stamped on the route — callers
+            :data:`~nemo_platform_plugin.authz.GENERATED_ROUTE_CALLERS`, with
             an invoke permission minted from it (``<namespace>.<function-name>``,
             a write action). When omitted the route is left unruled — denied
             fail-closed at bundle time.
@@ -183,7 +184,7 @@ def add_function_routes(
             or function_cls.description
             or f"Invoke the {function_cls.name} function",
         )
-        path_rule(callers=[CallerKind.PRINCIPAL], permissions=[permission])(handler)
+        path_rule(callers=GENERATED_ROUTE_CALLERS, permissions=[permission])(handler)
         # Invoking a function is a write action; the scope rides on the route via @AuthzScope.write.
         authz.write(handler)
 

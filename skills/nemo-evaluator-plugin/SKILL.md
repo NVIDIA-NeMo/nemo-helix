@@ -7,6 +7,7 @@ metadata:
   author: nemo-platform
   maturity: active
   tags: [evaluation, metrics, agent-eval, nemo-platform]
+allowed-tools: Bash, Read
 ---
 
 # Evaluator Plugin
@@ -33,6 +34,8 @@ Establish these inputs before building an evaluation:
 1. Clarify whether the input is [dataset-driven rows](references/evaluation-shapes.md#dataset-driven-evaluation),
    [task-driven agent work](references/evaluation-shapes.md#task-driven-evaluation), or a
    [BEIR retrieval corpus](references/evaluation-shapes.md#retrieval-driven-evaluation).
+   If the user wants the full embed/rerank fine-tune recipe, hand off to `nemo-retrieval-recipes`
+   and use this skill only for retrieve-eval submit/debug.
 2. Choose the simplest metric that measures the requested behavior. Prefer deterministic metrics when possible.
 3. Build a tiny smoke case with one expected pass and one expected failure.
 4. Validate metric behavior with the standalone SDK. Inspect row-level output, aggregate `count` and

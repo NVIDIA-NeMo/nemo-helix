@@ -106,7 +106,7 @@ class TrainingRunner:
                 training_duration_seconds=time.time() - start_time,
             )
             if self._dist_ctx.is_coordinator:
-                self._progress.report_error(error_details)
+                self._progress.report_error(dict(error_details))
         finally:
             self._write_result(result)
 
@@ -195,9 +195,13 @@ class TrainingRunner:
             )
 
         self._progress.report_running("processing_checkpoint")
-        checkpoint_path = self._backend.find_best_checkpoint(self._workspace_path, self._config, library_config)
-        checkpoint_info = self._backend.process_checkpoint(
-            checkpoint_path, self._output_path, self._config, library_config
+        checkpoints = self._backend.find_checkpoints(self._workspace_path, self._config)
+        checkpoint_info = self._backend.process_checkpoints(
+            checkpoints,
+            self._output_path,
+            self._workspace_path,
+            self._config,
+            library_config,
         )
 
         result = TrainingResult(

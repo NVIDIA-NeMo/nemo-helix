@@ -46,7 +46,9 @@ compatibility: >-
 maturity: experimental
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write, Edit]
+allowed-tools: Bash, Read, Write, Edit
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Deploy an agent as a governed OpenShell sandbox

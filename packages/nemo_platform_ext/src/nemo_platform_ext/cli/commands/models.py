@@ -33,6 +33,7 @@ from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_t
 from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
 from nemo_platform_ext.cli.core.stdin_utils import (
     build_request_body,
+    pop_exist_ok,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
@@ -255,9 +256,9 @@ def create_models(
     )
 
     request_workspace = cast(str | None, input_payload.get("workspace"))
-    request_exist_ok = bool(input_payload.get("exist_ok", False))
+    request_exist_ok = pop_exist_ok(input_payload)
     body = build_request_body(
-        CreateModelEntityRequest, input_payload, exclude={"workspace", "exist_ok"}, command_name="models create"
+        CreateModelEntityRequest, input_payload, exclude={"workspace"}, command_name="models create"
     )
 
     state: CLIContext = ctx.obj

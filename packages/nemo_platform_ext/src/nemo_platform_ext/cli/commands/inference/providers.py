@@ -19,7 +19,6 @@ from nemo_platform_plugin.models.types import (
 from nemo_platform_ext.cli.commands.inference._common import (
     filter_query_value,
     offset_query_params,
-    pop_exist_ok,
     pop_workspace,
     read_input_payload,
 )
@@ -35,7 +34,12 @@ from nemo_platform_ext.cli.core.formatters import (
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
 from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import build_request_body, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
+    pop_exist_ok,
+    read_payload,
+    validate_required_fields,
+)
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -206,12 +210,12 @@ def create_providers(
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(workspace=request_workspace, body=body, exist_ok=request_exist_ok)
+    kwargs = build_kwargs(workspace=request_workspace, body=body, exist_ok=request_exist_ok or None)
     if handle_code_generation(ModelsClient, "create_provider", kwargs, resolved_output_format, state):
         return
 
     result = state.typed_client(ModelsClient).create_provider(
-        workspace=request_workspace, body=body, exist_ok=bool(request_exist_ok)
+        workspace=request_workspace, body=body, exist_ok=request_exist_ok
     )
 
     format_output(
@@ -289,6 +293,7 @@ def list_providers(
 
     default_columns = [
         Column("name", None),
+        Column("status", None),
         Column("description", None),
         Column("created_at", None),
     ]

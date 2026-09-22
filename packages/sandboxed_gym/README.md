@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# sandboxed-gym
+# nemo-sandboxed-gym
 
 Trusted **episode broker** + **job-level Gym host** orchestrator for running NeMo-Gym
 inside an OpenSandbox (or compatible) isolation boundary.

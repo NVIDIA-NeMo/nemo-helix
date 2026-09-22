@@ -19,16 +19,18 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Iterator
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from click import UsageError
 from nemo_platform_ext.cli.app import app
 from nemo_platform_ext.cli.commands.use_cases.chat import _parse_model_and_workspace
+from nemo_platform_plugin.client.response import NemoBinaryResponse
 from typer.testing import CliRunner
 
 REMOTE_ERROR_EXIT_CODE = 3
@@ -100,38 +102,33 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     config_file.touch()
     monkeypatch.setenv("NMP_CONFIG_FILE", str(config_file))
     monkeypatch.setenv("NMP_BASE_URL", "http://localhost:9999")
+    monkeypatch.setenv("NMP_WORKSPACE", "default")
 
     return CliRunner()
 
 
-def _streaming_response(chunks: list[bytes], status_code: int | None = None) -> MagicMock:
-    """Fake typed ``BinaryContent`` response: ``stream()`` yields *chunks*."""
-    response = MagicMock()
-
+def _binary_response(body: bytes, status_code: int = 200) -> NemoBinaryResponse:
     @contextmanager
-    def _stream():
-        yield iter(chunks)
+    def stream_ctx():
+        yield httpx.Response(status_code, stream=httpx.ByteStream(body), request=httpx.Request("POST", "http://test"))
 
-    response.stream = MagicMock(side_effect=_stream)
-    response.http_response = SimpleNamespace(status_code=status_code) if status_code is not None else SimpleNamespace()
-    return response
+    return NemoBinaryResponse(stream_ctx(), MagicMock())
 
 
-def _mock_streaming_response(*chunks: str, usage: dict | None = None) -> MagicMock:
+def _mock_streaming_response(*chunks: str, usage: dict | None = None) -> NemoBinaryResponse:
     events = [json.dumps({"choices": [{"delta": {"content": chunk}}]}) for chunk in chunks]
     if usage is not None:
         events.append(json.dumps({"choices": [], "usage": usage}))
     events.append("[DONE]")
-    return _streaming_response([("".join(f"data: {event}\n\n" for event in events)).encode()])
+    return _binary_response("".join(f"data: {event}\n\n" for event in events).encode())
 
 
-def _mock_streaming_error_response(message: str, status_code: int | None = None) -> MagicMock:
-    return _streaming_response([f"event: error\ndata: {message}\n\n".encode()], status_code=status_code)
+def _mock_streaming_error_response(message: str) -> NemoBinaryResponse:
+    return _binary_response(f"event: error\ndata: {message}\n\n".encode())
 
 
-def _mock_client_with_openai_response(response: MagicMock) -> MagicMock:
+def _mock_client_with_openai_response(response: object) -> MagicMock:
     mock_client = MagicMock()
-    mock_client.workspace = "default"
     mock_client.stream_openai.return_value = response
     return mock_client
 
@@ -332,15 +329,15 @@ def test_chat_stream_error_event_fails(runner: CliRunner) -> None:
 
 
 def test_chat_empty_stream_error_event_includes_status_code(runner: CliRunner) -> None:
-    """Empty SSE error events should include HTTP status when available."""
-    response = _mock_streaming_error_response("", status_code=503)
+    """Empty SSE error events should include the HTTP status of the stream."""
+    response = _binary_response(b"event: error\ndata: \n\n", status_code=207)
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi"])
 
     assert result.exit_code == 1
-    assert "Streaming chat request failed (HTTP 503)" in result.output
+    assert "Streaming chat request failed (HTTP 207)" in result.output
 
 
 def test_chat_prompt_takes_precedence_over_piped_stdin(runner: CliRunner) -> None:
@@ -389,8 +386,12 @@ def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner:
 def test_chat_interactive_interrupt_during_initial_response_exits_gracefully(
     runner: CliRunner, exception: type[BaseException]
 ) -> None:
-    response = _mock_streaming_response("unused")
-    response.stream.side_effect = exception
+    def interrupted_stream() -> Iterator[bytes]:
+        raise exception
+        yield b""
+
+    response = MagicMock()
+    response.stream.return_value = nullcontext(interrupted_stream())
     mock_client = _mock_client_with_openai_response(response)
 
     with (
@@ -509,7 +510,6 @@ def test_chat_json_output_includes_content_thinking_model_and_usage(runner: CliR
 def test_chat_non_tty_without_prompt_requires_prompt(runner: CliRunner) -> None:
     """Non-TTY mode fails fast instead of entering the prompt loop with no input."""
     mock_client = MagicMock()
-    mock_client.workspace = "default"
 
     with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model"])
@@ -535,7 +535,7 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
     captured_trailing_uri = None
     captured_kwargs = None
 
-    def mock_post(trailing_uri: str, **kwargs) -> MagicMock:
+    def mock_post(trailing_uri: str, **kwargs) -> NemoBinaryResponse:
         nonlocal captured_trailing_uri
         nonlocal captured_kwargs
         captured_trailing_uri = trailing_uri
@@ -543,7 +543,6 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
         return _mock_streaming_response("Hello")
 
     mock_client = MagicMock()
-    mock_client.workspace = "default"
     mock_client.stream_provider = mock_post
 
     with patch(

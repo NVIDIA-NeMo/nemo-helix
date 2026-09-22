@@ -5,6 +5,9 @@
 name: safe-synthesizer
 description: "Use NeMo Safe Synthesizer from the NMP plugin through platform job creation, configuration, troubleshooting, artifacts, privacy settings, PII replacement, and evaluation reports. Use when the user asks about safe-synthesizer, NeMo Safe Synthesizer, synthetic tabular data, DP settings, generation failures, filesets, model filesets, or Safe Synthesizer jobs."
 license: Apache-2.0
+allowed-tools: Bash, Read
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Safe Synthesizer

@@ -531,6 +531,10 @@ components:
           type: string
           title: Principal Id
           description: The principal's unique identifier
+        principal_account_id:
+          title: Principal Account Id
+          description: Stable NeMo account identifier for the principal
+          type: string
         principal_email:
           title: Principal Email
           description: The principal's email address
@@ -541,6 +545,12 @@ components:
           type: array
           title: Principal Groups
           description: Groups the principal belongs to
+        principal_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal Authz Aliases
+          description: Alternate trusted identifiers for the principal
         principal_on_behalf_of:
           title: Principal On Behalf Of
           description: If acting on behalf of another principal, their principal ID
@@ -555,6 +565,16 @@ components:
           title: Principal On Behalf Of Email
           description: The on-behalf-of principal's email address
           type: string
+        principal_on_behalf_of_account_id:
+          title: Principal On Behalf Of Account Id
+          description: Stable NeMo account identifier for the on-behalf-of principal
+          type: string
+        principal_on_behalf_of_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal On Behalf Of Authz Aliases
+          description: Alternate trusted identifiers for the on-behalf-of principal
       type: object
       required:
       - principal_id
@@ -1210,6 +1230,16 @@ components:
             Job/Deployment pod rendered from this config (e.g. an Istio native-sidecar
             annotation so a mesh-injected proxy terminates when a puller Job's main
             container exits). k8s-only; ignored on docker/openshell backends.
+        jobTtlSecondsAfterFinished:
+          title: Jobttlsecondsafterfinished
+          description: Per-deployment override for ttlSecondsAfterFinished on a finite
+            (Never/OnFailure) Job, such as the weight-puller. When set, wins over
+            the executor default; when unset, the executor default applies. Controls
+            how quickly a completed Job's pod (and its ReadWriteOnce volume attachment)
+            is reaped. A set value must be at least 10s so the reconciler can observe
+            Job completion before the pod is reaped. k8s-only.
+          type: integer
+          minimum: 10.0
       type: object
       title: K8sDeploymentConfig
     K8sVolumeConfig:

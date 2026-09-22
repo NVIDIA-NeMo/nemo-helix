@@ -14,6 +14,7 @@ target (e.g. Fabric) carries no endpoint secret of its own.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from nemo_evaluator.config import config, platform_config
 from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentTarget, GymRunnerTarget, HarborRunnerTarget, ModelTarget
@@ -44,6 +45,19 @@ ENVIRONMENT_STAGE_STEP_NAME = "stage-environment"
 ENVIRONMENT_STAGE_COMMAND = ["nemo_evaluator.tasks.stage_environment"]
 
 
+@dataclass(frozen=True)
+class _AgentEvalCPUStep:
+    step: PlatformJobStep
+    executor: CPUExecutionProviderSpec
+
+
+@dataclass(frozen=True)
+class _AgentEvalCPUCompilation:
+    platform_spec: PlatformJobSpec
+    eval_step: PlatformJobStep
+    executor: CPUExecutionProviderSpec
+
+
 def compile_agent_eval_job(
     spec: AgentEvalSpec,
     *,
@@ -51,6 +65,9 @@ def compile_agent_eval_job(
     use_subprocess: bool = False,
 ) -> PlatformJobSpec:
     """Compile a canonical agent-evaluation spec into a plugin-native platform job."""
+    if not use_subprocess:
+        return _compile_agent_eval_cpu_job(spec, profile=profile).platform_spec
+
     sandbox_plan = _sandbox_plan(spec)
     steps = []
     # FileSet environments are downloaded onto job storage; that step must finish before the
@@ -68,6 +85,26 @@ def compile_agent_eval_job(
     )
 
     return PlatformJobSpec(steps=steps)
+
+
+def _compile_agent_eval_cpu_job(
+    spec: AgentEvalSpec,
+    *,
+    profile: str | None = None,
+) -> _AgentEvalCPUCompilation:
+    """Compile agent evaluation with a CPU executor and return the final step's executor."""
+    sandbox_plan = _sandbox_plan(spec)
+    steps = []
+    if isinstance(spec.target, GymRunnerTarget) and spec.target.environment is not None:
+        steps.append(_environment_stage_step(spec.target, profile, use_subprocess=False))
+
+    eval_step = _agent_eval_cpu_step(spec, profile, sandbox_plan=sandbox_plan)
+    steps.append(eval_step.step)
+    return _AgentEvalCPUCompilation(
+        platform_spec=PlatformJobSpec(steps=steps),
+        eval_step=eval_step.step,
+        executor=eval_step.executor,
+    )
 
 
 def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
@@ -100,6 +137,9 @@ def _agent_eval_step(
     sandbox_plan: SandboxPlan | None,
 ) -> PlatformJobStep:
     """Build the evaluation step, including the sandbox plan when Gym runs sandboxed."""
+    if not use_subprocess:
+        return _agent_eval_cpu_step(spec, profile, sandbox_plan=sandbox_plan).step
+
     is_gym_target = isinstance(spec.target, GymRunnerTarget)
     is_colocated_gym = is_gym_target and sandbox_plan is None
     image = (
@@ -120,6 +160,38 @@ def _agent_eval_step(
         config=spec.model_dump(mode="json"),
         environment=_environment(spec, sandbox_plan=sandbox_plan),
     )
+
+
+def _agent_eval_cpu_step(
+    spec: AgentEvalSpec,
+    profile: str | None,
+    *,
+    sandbox_plan: SandboxPlan | None,
+) -> _AgentEvalCPUStep:
+    """Build the CPU-backed evaluation step and keep its concrete executor type."""
+    is_gym_target = isinstance(spec.target, GymRunnerTarget)
+    is_colocated_gym = is_gym_target and sandbox_plan is None
+    image = (
+        config.gym_tasks_image
+        if is_colocated_gym and config.gym_tasks_image is not None
+        else get_qualified_image(GYM_AGENT_EVAL_IMAGE if is_colocated_gym else AGENT_EVAL_IMAGE)
+    )
+    executor = CPUExecutionProviderSpec(
+        profile=profile or "default",
+        provider="cpu",
+        container=ContainerSpec(
+            image=image,
+            entrypoint=GYM_AGENT_EVAL_ENTRYPOINT if is_colocated_gym else AGENT_EVAL_ENTRYPOINT,
+            command=AGENT_EVAL_COMMAND,
+        ),
+    )
+    step = PlatformJobStep(
+        name=AGENT_EVAL_STEP_NAME,
+        executor=executor,
+        config=spec.model_dump(mode="json"),
+        environment=_environment(spec, sandbox_plan=sandbox_plan),
+    )
+    return _AgentEvalCPUStep(step=step, executor=executor)
 
 
 def _sandbox_plan(spec: AgentEvalSpec) -> SandboxPlan | None:

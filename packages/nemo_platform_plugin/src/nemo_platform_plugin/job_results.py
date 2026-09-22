@@ -10,7 +10,7 @@ sync library protocols, so ``ctx.results.save(...)`` is sync.
 Concrete impls living in this codebase:
 
 - :class:`LocalJobResults` — copies the artefact under a local directory
-  rooted at ``<persistent>/results/``. Used for laptop ``run_local`` and
+  rooted at ``<persistent>/results/``. Used by programmatic callers and
   any context where no NeMo Platform Files / Jobs SDK is configured.
 - :class:`PlatformJobResults` — thin adapter over
   :class:`nemo_platform_plugin.jobs.result_manager.ResultManager` that registers
@@ -28,11 +28,12 @@ import logging
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Protocol
 
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.result_manager import result_manager_factory
+from nemo_platform_plugin.jobs.schemas import PlatformJobResultResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,34 @@ class ResultRef(BaseModel):
 
     name: str
     artifact_url: str
+
+
+class _ResultManager(Protocol):
+    def create_result(
+        self,
+        result_name: str,
+        artifact_local_path: str | Path,
+        ignore_patterns: list[str] | str | None = None,
+    ) -> PlatformJobResultResponse: ...
+
+
+def result_manager_factory(
+    job_name: str,
+    *,
+    attempt_id: str | None = None,
+    workspace: str | None = None,
+    files_client: FilesClient,
+    jobs_client: JobsClient | None = None,
+) -> _ResultManager:
+    from nemo_platform_plugin.jobs.result_manager import result_manager_factory as create_result_manager
+
+    return create_result_manager(
+        job_name=job_name,
+        attempt_id=attempt_id,
+        workspace=workspace,
+        files_client=files_client,
+        jobs_client=jobs_client,
+    )
 
 
 class JobResults(ABC):
@@ -170,6 +199,7 @@ class PlatformJobResults(JobResults):
         client: NemoClient,
         attempt_id: str | None = None,
     ) -> None:
+        self._manager: _ResultManager
         self._configure_manager(
             job_name=job_name,
             workspace=workspace,

@@ -10,6 +10,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
@@ -32,7 +33,6 @@ import { iconColorClass } from '@studio/routes/constants';
 import { keepPreviousData } from '@tanstack/react-query';
 import { ChartBar, Cog, LayoutList, Sliders, Sparkles } from 'lucide-react';
 import { ComponentProps, type ReactNode, useRef } from 'react';
-import { useNavigate } from 'react-router';
 
 const SOURCE_DISPLAY: Record<string, { label: string; icon: ReactNode }> = {
   [JOB_SOURCE.CUSTOMIZATION]: {
@@ -57,10 +57,11 @@ const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_O
 
 export const JobsDataView = () => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
 
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
+    defaultPageSize: 10,
   });
 
   const userFilter = { ...(dataViewState.apiFilter.filter ?? {}) };
@@ -78,7 +79,8 @@ export const JobsDataView = () => {
 
   const {
     data: jobsData,
-    isFetching,
+    isLoading,
+    isPlaceholderData,
     error,
   } = useJobsListJobs(
     workspace,
@@ -212,9 +214,9 @@ export const JobsDataView = () => {
       dataViewState={dataViewState}
       searchField="name"
       makeColumns={makeColumns}
-      onRowClick={(row: PlatformJobResponse) => {
-        navigate(getJobDetailRoute(row, workspace));
-      }}
+      onRowClick={(row: PlatformJobResponse, _index, event) =>
+        openRow(event, getJobDetailRoute(row, workspace))
+      }
       attributes={{
         DataViewSearchBar: {
           placeholder: 'Search by name',
@@ -222,7 +224,7 @@ export const JobsDataView = () => {
         DataViewRoot: {
           data: jobs,
           totalCount: CUSTOMIZER_ENABLED ? jobsData?.pagination?.total_results || 0 : jobs.length,
-          requestStatus: isFetching ? 'loading' : undefined,
+          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

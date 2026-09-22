@@ -123,10 +123,13 @@ const renderModal = () =>
     ],
   });
 
-/** Upload tests have to switch tabs before the form exists. */
 const openUploadTab = async (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Upload agent' }));
   await screen.findByTestId('agent-directory-input');
+};
+
+const openPromptTab = (dialog: HTMLElement) => {
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Coding agent prompt' }));
 };
 
 const openGitHubTab = async (dialog: HTMLElement) => {
@@ -151,19 +154,6 @@ const submit = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.set
 };
 
 describe('NewAgentModal coding agent prompt tab', () => {
-  it('opens on the prompt, so an agent already in a repository needs no upload', async () => {
-    mockPlatform();
-
-    renderModal();
-    const dialog = await screen.findByRole('dialog');
-
-    expect(within(dialog).getByRole('tab', { name: 'Coding agent prompt' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-    expect(within(dialog).queryByTestId('agent-directory-input')).not.toBeInTheDocument();
-  });
-
   it('copies the integration prompt, left open for the name nothing has assigned yet', async () => {
     // `userEvent.setup()` stubs `navigator.clipboard`, so the prompt is readable back from it.
     const user = userEvent.setup();
@@ -171,6 +161,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
+    openPromptTab(dialog);
     // The prompt editor is a lazily imported chunk, so it can miss the default find timeout.
     await user.click(
       await within(dialog).findByRole('button', { name: 'Copy to clipboard' }, { timeout: 10_000 })
@@ -188,8 +179,11 @@ describe('NewAgentModal coding agent prompt tab', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
+    openPromptTab(dialog);
 
-    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument()
+    );
     expect(within(dialog).queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
   });
 
@@ -214,6 +208,19 @@ describe('NewAgentModal coding agent prompt tab', () => {
 });
 
 describe('NewAgentModal upload tab', () => {
+  it('opens on upload, the primary way to create an agent', async () => {
+    mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).getByRole('tab', { name: 'Upload agent' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(await within(dialog).findByTestId('agent-directory-input')).toBeInTheDocument();
+  });
+
   it('uploads the picked directory, then creates the agent', async () => {
     const user = userEvent.setup();
     const { uploaded, created } = mockPlatform();

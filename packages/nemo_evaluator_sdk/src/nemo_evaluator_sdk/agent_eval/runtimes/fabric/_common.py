@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared helpers for the host and containerized NeMo Fabric agent-eval runtimes.
+"""Shared pieces of the NeMo Fabric agent-eval runtime.
 
-:class:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime.FabricAgentRuntime` (host) and
-:class:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime.FabricContainerRuntime`
-(sandbox) map a Fabric ``RunResult`` to the *same* trial/evidence contract, so the pieces they share
-live here — one definition, so the two runtimes cannot drift apart.
+:class:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime.FabricAgentRuntime` runs a Fabric
+config either in-process on the host or inside a sandbox
+(:mod:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric._sandbox_execution`). Both paths hand their
+outcome back through the types here, so one trial-mapping step serves both.
 
 Trajectory capture is built from ``nemo_fabric``'s own typed config objects (a hard dependency), so
 Fabric owns the schema: a breaking Fabric change fails construction here rather than silently
@@ -16,23 +16,46 @@ producing a block Fabric ignores.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import otlp_endpoint_fields
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import SkillProvenance
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
-from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialMeasurements
+from nemo_evaluator_sdk.values.evidence import (
+    EVIDENCE_FORMAT_ATIF,
+    EVIDENCE_FORMAT_OTLP,
+    EVIDENCE_TRACE,
+    CandidateEvidence,
+    EvidenceDescriptor,
+    final_agent_message,
+    read_atif,
+    read_otlp_spans,
+)
+from nemo_evaluator_sdk.values.otlp import final_output_text
+from pydantic import JsonValue
 
-# The file-exporter output names we choose (Relay accepts these as inputs). Shared so both runtimes
-# emit the trajectory under identical names.
+# The file-exporter output names we choose (Relay accepts these as inputs).
 ATIF_FILENAME_TEMPLATE = "trajectory-{session_id}.atif.json"
 ATOF_FILENAME = "events.atof.jsonl"
-#: ATIF ``agent.version``. Both runtimes report the agent *framework* here so a consumer can group
-#: host and container traces together; ``agent.name`` is what distinguishes them. Not a real version
-#: yet — reporting the resolved nemo-fabric version would be the better answer.
+#: ATIF ``agent.version``. Reports the agent *framework* rather than a real version; the resolved
+#: nemo-fabric version would be the better answer.
 FABRIC_AGENT_VERSION = "fabric"
+#: ``kind`` Fabric stamps on the promoted Relay ATIF artifact.
+ATIF_ARTIFACT_KIND = "atif"
+
+
+def to_mapping(config: Any) -> dict[str, Any]:
+    """Normalize a typed Fabric config or a plain mapping to a plain dict."""
+    # A typed Fabric config exposes ``to_mapping()``; a plain mapping is used as-is. Both are
+    # str-keyed at runtime, but the getattr + optional (unresolved) ``FabricConfig`` type defeat static
+    # narrowing, so cast the known-good source before building the dict.
+    to_mapping_method = getattr(config, "to_mapping", None)
+    source = to_mapping_method() if callable(to_mapping_method) else config
+    return dict(cast(Mapping[str, Any], source))
 
 
 def safe_path_name(value: str) -> str:
@@ -41,9 +64,13 @@ def safe_path_name(value: str) -> str:
 
 
 def task_subdir_name(index: int, task_id: str) -> str:
-    """Deterministic per-task evidence subdir name (``000000-<safe-id>``) shared by both runtimes."""
+    """Deterministic per-task evidence subdir name (``000000-<safe-id>``)."""
     safe = safe_path_name(task_id)
     return f"{index:06d}-{safe}" if safe else f"task-{index:06d}"
+
+
+#: Mapping keys a Fabric adapter puts its final message under, in precedence order.
+_TEXT_KEYS = ("response", "output_text", "text", "message")
 
 
 def extract_output_text(output: object) -> str | None:
@@ -51,17 +78,208 @@ def extract_output_text(output: object) -> str | None:
 
     Harness outputs vary; adapters commonly nest the final message under ``response`` (the codex-cli
     adapter does). Prefer a string ``response``/``output_text``/``text``/``message``, else stringify.
+
+    An envelope carrying no text at all yields ``None`` rather than its own serialization: an
+    adapter that always emits ``{"response": null}`` has produced no answer, and returning
+    ``'{"response": null}'`` would both read as an answer and mask the trace evidence that holds
+    the real one. A payload with no text key (``{"answer": 42}``) still stringifies, since that is
+    the whole of what the harness returned.
     """
     if output is None:
         return None
     if isinstance(output, str):
         return output
     if isinstance(output, Mapping):
-        for key in ("response", "output_text", "text", "message"):
+        if not output:
+            return None
+        explicitly_absent = False
+        for key in _TEXT_KEYS:
             value = output.get(key)
             if isinstance(value, str):
                 return value
+            if value is None and key in output:
+                explicitly_absent = True
+        if explicitly_absent:
+            return None
     return json.dumps(output, default=str)
+
+
+def trace_answer_text(descriptors: Mapping[str, EvidenceDescriptor]) -> str | None:
+    """The agent's answer read back from a trial's trace evidence, OTLP first and ATIF second.
+
+    The harness ``RunResult`` is the primary source; this is the fallback for adapters that report
+    the answer only through Relay telemetry, so a Fabric trial fills ``output.output_text`` on the
+    same terms as a Harbor one.
+
+    A blank answer is no answer, in either format. The format readers return a trace's last agent
+    text verbatim, whitespace included, because "what did the agent say" and "did the agent answer"
+    are different questions; this asks the second, and holds the trace to the same presence rule the
+    caller applies to the harness output.
+    """
+    otlp = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}")
+    if otlp is not None and otlp.ref is not None:
+        spans = read_otlp_spans(Path(otlp.ref))
+        if spans is not None:
+            answer = _nonblank(final_output_text(spans))
+            if answer is not None:
+                return answer
+    atif = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}")
+    if atif is None or atif.ref is None:
+        return None
+    return _nonblank(final_agent_message(read_atif(Path(atif.ref))))
+
+
+def _nonblank(text: str | None) -> str | None:
+    """``text`` unchanged when it carries visible characters, else ``None``."""
+    return text if text is not None and text.strip() else None
+
+
+def normalize_output(output: Any) -> JsonValue:
+    """Unwrap a Fabric ``RunResult.output`` into the plain JSON value the trial response stores.
+
+    Fabric wraps object outputs in a ``RunOutput`` mapping; copy it into a plain dict. Raw JSON
+    outputs pass through unchanged.
+    """
+    if isinstance(output, Mapping):
+        return dict(output)
+    return cast(JsonValue, output)
+
+
+@dataclass(frozen=True)
+class ArtifactView:
+    """One entry of a Fabric artifact manifest, with ``path`` already on the host filesystem."""
+
+    name: str
+    kind: str | None
+    path: str
+    media_type: str | None
+
+
+@dataclass(frozen=True)
+class ResultView:
+    """A Fabric ``RunResult`` read the same way however it arrived.
+
+    On the host the result is the SDK object; in a sandbox it is the JSON the in-sandbox driver
+    printed. Trial mapping only ever sees this view, so both modes produce one trial shape.
+    """
+
+    payload: Mapping[str, Any]
+    status: str
+    output: JsonValue
+    error: Mapping[str, Any] | None
+    harness: str | None
+    adapter_id: str | None
+    adapter_kind: str | None
+    invocation_id: str | None
+    artifacts: tuple[ArtifactView, ...]
+    telemetry: tuple[dict[str, Any], ...]
+    events: tuple[dict[str, Any], ...]
+
+    @classmethod
+    def from_result(cls, result: Any) -> ResultView:
+        """View a ``nemo_fabric.RunResult`` (or anything with its attributes)."""
+        error = result.error
+        return cls(
+            payload=result.to_mapping(),
+            status=str(result.status),
+            output=normalize_output(result.output),
+            error=None if error is None else {"stage": error.stage, "code": error.code, "message": error.message},
+            harness=result.harness,
+            adapter_id=result.adapter_id,
+            adapter_kind=result.adapter_kind,
+            invocation_id=result.invocation_id,
+            artifacts=tuple(
+                ArtifactView(
+                    name=artifact.name, kind=artifact.kind, path=str(artifact.path), media_type=artifact.media_type
+                )
+                for artifact in result.artifacts.artifacts
+            ),
+            telemetry=tuple(
+                {"provider": ref.provider, "kind": ref.kind, "uri": ref.uri, "trace_id": ref.trace_id}
+                for ref in result.telemetry
+            ),
+            events=tuple({"kind": event.kind, "message": event.message} for event in result.events),
+        )
+
+    @classmethod
+    def from_mapping(
+        cls, payload: Mapping[str, Any], *, artifact_path: Callable[[str], str | None] = lambda path: path
+    ) -> ResultView:
+        """View the ``RunResult.to_mapping()`` JSON a sandbox driver printed.
+
+        ``artifact_path`` maps each artifact's in-sandbox path to where it now lives on the host;
+        returning ``None`` drops an artifact that was not brought across.
+        """
+        error = payload.get("error")
+        artifacts: list[ArtifactView] = []
+        manifest = payload.get("artifacts")
+        entries = manifest.get("artifacts") if isinstance(manifest, Mapping) else None
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, Mapping) or not entry.get("name") or not entry.get("path"):
+                continue
+            path = artifact_path(str(entry["path"]))
+            if path is None:
+                continue
+            artifacts.append(
+                ArtifactView(
+                    name=str(entry["name"]),
+                    kind=_optional_str(entry.get("kind")),
+                    path=path,
+                    media_type=_optional_str(entry.get("media_type")),
+                )
+            )
+        return cls(
+            payload=payload,
+            status=str(payload.get("status")),
+            output=normalize_output(payload.get("output")),
+            error={"stage": error.get("stage"), "code": error.get("code"), "message": error.get("message")}
+            if isinstance(error, Mapping)
+            else None,
+            harness=_optional_str(payload.get("harness")),
+            adapter_id=_optional_str(payload.get("adapter_id")),
+            adapter_kind=_optional_str(payload.get("adapter_kind")),
+            invocation_id=_optional_str(payload.get("invocation_id")),
+            artifacts=tuple(artifacts),
+            telemetry=tuple(
+                {key: ref.get(key) for key in ("provider", "kind", "uri", "trace_id")}
+                for ref in _mapping_list(payload.get("telemetry"))
+            ),
+            events=tuple(
+                {key: event.get(key) for key in ("kind", "message")} for event in _mapping_list(payload.get("events"))
+            ),
+        )
+
+    def failure(self) -> Mapping[str, Any]:
+        """The error mapping a non-``succeeded`` result is graded from."""
+        if self.error is None:
+            return {"code": self.status, "message": "Fabric run did not succeed"}
+        return self.error
+
+
+@dataclass
+class TaskRun:
+    """What one execution mode hands back for one task: a result, or the exception that stopped it.
+
+    Paths are on the host. The sandbox mode downloads its ``/out`` tree into the evidence dir first,
+    so ``workspace_dir`` and ``relay_dir`` sit in the same place for both modes.
+    """
+
+    workspace_dir: Path
+    relay_dir: Path
+    skill_provenances: list[SkillProvenance] = field(default_factory=list)
+    result: ResultView | None = None
+    error: Exception | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _optional_str(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _mapping_list(value: object) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [cast(Mapping[str, Any], item) for item in value if isinstance(item, Mapping)]
 
 
 def build_failed_trial(
@@ -72,6 +290,7 @@ def build_failed_trial(
     runtime_name: str,
     trial_id_suffix: str,
     extra_metadata: Mapping[str, Any] | None = None,
+    measurements: TrialMeasurements | None = None,
 ) -> AgentEvalTrial:
     """Persist ``error.json`` and build a FAILED trial with the standard error evidence + metadata.
 
@@ -94,13 +313,14 @@ def build_failed_trial(
             descriptors={"error": EvidenceDescriptor(kind="error", format="json", ref=str(error_path))},
             metadata={"runtime": runtime_name},
         ),
+        measurements=measurements if measurements is not None else TrialMeasurements(),
         metadata={
             **(dict(extra_metadata) if extra_metadata else {}),
             "runtime": runtime_name,
             "error_type": error_type,
             "error": error_message,
-            # A failed trial did not complete its agent phase; stamp it explicitly (matching the host
-            # Fabric/Codex runtimes) so AgentPhaseSuccessMetric scores it False rather than by omission.
+            # A failed trial did not complete its agent phase; stamp it explicitly so
+            # AgentPhaseSuccessMetric scores it False rather than by omission.
             "agent_ok": False,
         },
     )
@@ -166,6 +386,7 @@ def relay_telemetry_fragment(
     relay_dir: str,
     agent_name: str,
     agent_version: str,
+    extra: Mapping[str, Any] | None = None,
     otlp_endpoint: str | None = None,
 ) -> dict[str, Any]:
     """The Fabric config keys that enable Relay's file exporter, serialized by Fabric itself.
@@ -185,6 +406,7 @@ def relay_telemetry_fragment(
             relay_dir=relay_dir,
             agent_name=agent_name,
             agent_version=agent_version,
+            extra=extra,
             otlp_endpoint=otlp_endpoint,
         ),
     )

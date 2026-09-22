@@ -5,13 +5,13 @@
 
 A provider-neutral sandbox contract for running agent-eval harnesses **inside a container**,
 injecting context and retrieving artifacts across the boundary. Built for
-[`FabricContainerRuntime`](../fabric/container_runtime.py) but usable by any runtime.
+[`FabricAgentRuntime(..., sandbox=provider)`](../fabric/_sandbox_execution.py) but usable by any runtime.
 
 ## Why an owned seam (not `nemo_gym.sandbox` directly)
 
 `nemo_gym.sandbox` ships the same *shape* (exec + programmatic file I/O + async/sync facades), and
 this seam deliberately mirrors it so a Gym backend could be adapted later. We do **not** depend on
-the package because: it requires Python ≥3.12 (nemo-platform is 3.11) and pulls `ray`/`wandb`/`mlflow`;
+the package because it pulls `ray`/`wandb`/`mlflow`;
 importing it monkeypatches builtin `print` and mutates `sys.path`/HF env; and neither shipped Gym
 backend (Apptainer, OpenSandbox) matches nemo-platform's Docker-local / Kubernetes-scale target — so
 we write the providers ourselves regardless. See AALGO-321 for the full analysis.
@@ -83,4 +83,5 @@ NVIDIA OpenShell (once it exposes a programmatic file-I/O API; CLI/SSH-only toda
 - `tests/agent_eval/test_sandbox_compose_provider_live.py` — real image-first/build/profile Compose
   flows; skipped without a Compose-capable daemon.
 
-- `tests/agent_eval/test_fabric_container_runtime.py` — evidence-contract mapping over a fake provider.
+- `tests/agent_eval/test_fabric_container_runtime.py` — `FabricAgentRuntime` sandbox mode: evidence-contract
+  mapping over a fake provider.

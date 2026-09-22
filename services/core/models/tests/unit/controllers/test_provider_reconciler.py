@@ -501,10 +501,15 @@ async def test_query_available_models_gateway_404_provider_not_in_cache_is_trans
 
 
 @pytest.mark.asyncio
-async def test_query_available_models_502_backend_404_is_non_compliant(reconciler, mock_models_sdk):
-    """502 with 'Backend returned 404' means backend has no GET /v1/models — non-compliant."""
+async def test_query_available_models_424_upstream_rejected_is_non_compliant(reconciler, mock_models_sdk):
+    """424 whose detail carries the upstream-rejection marker means the backend rejected
+    GET /v1/models (no such route) — non-compliant."""
     mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
-        side_effect=_status_error(502, "Backend returned 404: Not Found")
+        side_effect=_status_error(
+            424,
+            "Model provider 'p' at upstream 'https://x' rejected the request for model 'ws/m' "
+            "with HTTP status 404. This is a client-side error and will not resolve by retrying.",
+        )
     )
 
     model_provider = ModelProvider(
@@ -520,8 +525,30 @@ async def test_query_available_models_502_backend_404_is_non_compliant(reconcile
 
 
 @pytest.mark.asyncio
-async def test_query_available_models_502_other_detail_is_transient(reconciler, mock_models_sdk):
-    """502 with detail other than 'Backend returned 404' is treated as transient."""
+async def test_query_available_models_424_unresolved_secret_is_transient(reconciler, mock_models_sdk):
+    """A 424 WITHOUT the upstream-rejection marker is the platform-side unresolved-secret
+    case (not a backend rejection) and must be treated as transient, not non-compliant."""
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(
+            424, "Could not fetch secret for provider test-ns/test-provider; secret not found or unreachable"
+        )
+    )
+
+    model_provider = ModelProvider(
+        name="test-provider",
+        workspace="test-ns",
+        host_url="https://test-provider.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    result = await reconciler._discover_models(model_provider)
+
+    assert isinstance(result, DiscoveryTransientError)
+
+
+@pytest.mark.asyncio
+async def test_query_available_models_502_is_transient(reconciler, mock_models_sdk):
+    """A 502 from the gateway (e.g. a networking error) is treated as transient."""
     mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         side_effect=_status_error(502, "Backend networking error: Connection refused")
     )
@@ -3297,3 +3324,400 @@ async def test_provider_pass_emits_heartbeats(reconciler, mock_models_sdk, heart
 
     # One per entity ensured, one per VirtualModel ensured, one per provider.
     assert len(heartbeat_calls) >= 7
+
+
+@pytest.mark.asyncio
+async def test_dropped_model_unlinks_provider_from_entity(reconciler, mock_models_sdk, entity_cache):
+    """A model removed from a still-alive provider's discovered set is unlinked from its entity.
+
+    Regression for the reconciler leaving a stale ``model_providers`` back-reference
+    on a Model Entity after the model disappeared from its provider — the entity kept
+    advertising a provider that no longer served it (NMP-177: ``gliner`` lingered).
+    """
+    # ``dropped`` was served last cycle (entity links this provider); ``kept`` stays.
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "kept",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "kept", "format": "openai"},
+            ),
+            _existing_entity(
+                "test-ns",
+                "dropped",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "dropped", "format": "openai"},
+            ),
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.served_models = [
+        ServedModelMapping(model_entity_id="test-ns/kept", served_model_name="kept"),
+        ServedModelMapping(model_entity_id="test-ns/dropped", served_model_name="dropped"),
+    ]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    # This cycle only ``kept`` is discovered — ``dropped`` is gone from the provider.
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoverySuccess(_discovery_models_from_ids(["kept"])),
+    ):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    # The only entity write is ``dropped`` losing its provider link; ``kept`` is unchanged.
+    update = mock_models_sdk.models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["workspace"] == "test-ns"
+    assert call.kwargs["name"] == "dropped"
+    assert call.kwargs["body"].model_providers == []
+
+
+@pytest.mark.asyncio
+async def test_dropped_model_still_served_by_other_provider_keeps_that_link(reconciler, mock_models_sdk, entity_cache):
+    """When one provider drops a model another still serves, only the dropping provider is unlinked.
+
+    ``stage_provider_unlink`` removes a single provider id, never clears the list, so a
+    model served by two providers keeps the surviving link when just one provider drops it.
+    """
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "shared",
+                model_providers=["test-ns/provider-a", "test-ns/provider-b"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "shared", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+
+    # provider-a served ``shared`` last cycle but drops it this cycle (serves nothing).
+    provider_a = MagicMock()
+    provider_a.workspace = "test-ns"
+    provider_a.name = "provider-a"
+    provider_a.model_deployment_id = None
+    provider_a.enabled_models = None
+    provider_a.served_models = [ServedModelMapping(model_entity_id="test-ns/shared", served_model_name="shared")]
+
+    # provider-b keeps serving ``shared``.
+    provider_b = MagicMock()
+    provider_b.workspace = "test-ns"
+    provider_b.name = "provider-b"
+    provider_b.model_deployment_id = None
+    provider_b.enabled_models = None
+    provider_b.served_models = [ServedModelMapping(model_entity_id="test-ns/shared", served_model_name="shared")]
+
+    ctx_a = ModelContext(
+        model_provider=provider_a, model_deployment=None, model_deployment_config=None, model_entity=None
+    )
+    ctx_b = ModelContext(
+        model_provider=provider_b, model_deployment=None, model_deployment_config=None, model_entity=None
+    )
+
+    def _discover(provider):
+        # provider-a discovers nothing; provider-b still discovers ``shared``.
+        if provider.name == "provider-b":
+            return DiscoverySuccess(_discovery_models_from_ids(["shared"]))
+        return DiscoverySuccess(_discovery_models_from_ids([]))
+
+    with patch.object(reconciler, "_discover_models", side_effect=_discover):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx_a, ctx_b])
+
+    # ``shared`` is written once with provider-a removed and provider-b retained.
+    update = mock_models_sdk.models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["name"] == "shared"
+    assert call.kwargs["body"].model_providers == ["test-ns/provider-b"]
+
+
+@pytest.mark.asyncio
+async def test_non_compliant_provider_unlinks_previously_served_entities(reconciler, mock_models_sdk, entity_cache):
+    """A provider that goes non-compliant unlinks every entity it served last cycle.
+
+    The non-compliant transition clears the served_models mapping (pruning routing) and
+    must also drop the entity model_providers back-references, or they would be
+    permanently orphaned: the persisted served_models is wiped to [], so a later cycle
+    has nothing to diff against.
+    """
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "m1",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "m1", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="test-ns/m1", served_model_name="m1")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoveryNonCompliant()):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    update = mock_models_sdk.models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["name"] == "m1"
+    assert call.kwargs["body"].model_providers == []
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_does_not_unlink_entities(reconciler, mock_models_sdk, entity_cache):
+    """A transient discovery failure early-returns and must NOT unlink any entity.
+
+    Preserving served_models on a transient error is existing behavior; the unlink
+    diff must not run in that case or a flaky backend would strip live routing links.
+    """
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "m1",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "m1", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="test-ns/m1", served_model_name="m1")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoveryTransientError("boom")):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    # Early return before the unlink diff — the entity link is untouched.
+    mock_models_sdk.models_client.update_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deployment_backed_dropped_base_entity_is_unlinked(reconciler, mock_models_sdk, entity_cache):
+    """A deployment-backed provider that stops serving its base entity unlinks it."""
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "ws",
+                "base-entity",
+                model_providers=["ws/deploy-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "base-entity", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    config = MagicMock()
+    config.model_entity_id = "ws/base-entity"
+    provider = MagicMock()
+    provider.workspace = "ws"
+    provider.name = "deploy-provider"
+    provider.model_deployment_id = "ws/my-deployment"
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="ws/base-entity", served_model_name="ws/base-entity")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=MagicMock(),
+        model_deployment_config=config,
+        model_entity=None,
+    )
+
+    # Discovery now returns nothing matching the base — the base entity is dropped.
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess([])):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    update = mock_models_sdk.models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["name"] == "base-entity"
+    assert call.kwargs["body"].model_providers == []
+
+
+@pytest.mark.asyncio
+async def test_dropped_lora_composite_id_is_not_unlinked(reconciler, mock_models_sdk, entity_cache):
+    """A LoRA composite id in the previous served set is skipped by the unlink diff.
+
+    Composite ids (``...&adapters/...``) have no standalone Model Entity, so there is
+    nothing to unlink and parse_entity_ref must never be called on them.
+    """
+    # No entities seeded — a composite id must never reach parse_entity_ref / an entity write.
+    await seed_entity_cache(mock_models_sdk, entity_cache, [])
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    config = MagicMock()
+    config.model_entity_id = "ws/base-entity"
+    provider = MagicMock()
+    provider.workspace = "ws"
+    provider.name = "deploy-provider"
+    provider.model_deployment_id = "ws/my-deployment"
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    # Previously served ONLY a LoRA composite; this cycle serves nothing.
+    provider.served_models = [
+        ServedModelMapping(
+            model_entity_id="ws/base-entity&adapters/ws/pirate-speak",
+            served_model_name="ws--pirate-speak",
+        )
+    ]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=MagicMock(),
+        model_deployment_config=config,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess([])):
+        with patch("nmp.core.models.controllers.provider_reconciler.parse_entity_ref") as mock_parse:
+            await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    # The composite id was skipped before any parse/unlink — no entity write, no parse.
+    mock_parse.assert_not_called()
+    mock_models_sdk.models_client.update_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unlink_skipped_when_provider_update_fails(reconciler, mock_models_sdk, entity_cache):
+    """If the served_models write fails, do NOT unlink — the persisted mapping is unchanged.
+
+    Unlinking after a failed provider update would leave the entity dropping its provider
+    link while the provider's persisted served_models still lists the model, i.e. the
+    inverse of the staleness this fix targets. A later successful cycle re-runs the unlink.
+    """
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "dropped",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "dropped", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    # The provider status write FAILS this cycle.
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="test-ns/dropped", served_model_name="dropped")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    # ``dropped`` is gone from discovery this cycle, but the provider write fails.
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_discovery_models_from_ids([]))):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    # Provider write failed → the entity link must be left intact for a later cycle.
+    mock_models_sdk.models_client.update_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_compliant_unlink_skipped_when_provider_update_fails(reconciler, mock_models_sdk, entity_cache):
+    """Same guard on the non-compliant path: a failed status write must not unlink."""
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "m1",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "m1", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="test-ns/m1", served_model_name="m1")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoveryNonCompliant()):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    mock_models_sdk.models_client.update_model.assert_not_awaited()

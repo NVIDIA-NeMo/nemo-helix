@@ -10,6 +10,7 @@ from typing import Any
 
 from nemo_data_designer_plugin.config import get_config
 from nemo_data_designer_plugin.retrieval.corpus import HF_TOKEN_ENVVAR
+from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -96,6 +97,7 @@ def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | N
             *_persistent_storage_environment(),
             EnvironmentVariable(name="HF_HUB_OFFLINE", value="1"),
             EnvironmentVariable(name="TRANSFORMERS_OFFLINE", value="1"),
+            EnvironmentVariable(name="PYTHONUNBUFFERED", value="1"),
         ],
     )
 
@@ -105,7 +107,7 @@ async def retrieval_step(
     module: str,
     spec: BaseModel,
     profile: str | None,
-    async_sdk: object,
+    async_sdk: AsyncNeMoPlatform,
     gpu: bool = False,
     hf_token_secret: str | None = None,
 ) -> PlatformJobStep:
@@ -119,7 +121,7 @@ async def retrieval_step(
 async def model_download_step(
     fileset: str,
     profile: str | None,
-    async_sdk: object,
+    async_sdk: AsyncNeMoPlatform,
 ) -> PlatformJobStep:
     """Download a model fileset into the job's shared ``model`` directory."""
     del async_sdk

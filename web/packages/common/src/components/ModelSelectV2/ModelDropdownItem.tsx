@@ -85,11 +85,13 @@ const AdapterItem: FC<{
       <DropdownSubTrigger
         slotEnd={false}
         data-testid="model-dropdown-adapter-option"
-        onSelect={() => onSelect({ model: modelUrn, adapter: adapter.name, entity: model })}
+        onClick={() => onSelect({ model: modelUrn, adapter: adapter.name, entity: model })}
       >
         <Flex className="w-full" align="center" justify="between" gap="density-md">
           <Flex align="center" gap="density-sm" className="min-w-0">
-            {isSelected && <Check size={14} className="shrink-0" />}
+            {isSelected && (
+              <Check size={14} className="shrink-0" data-testid="model-dropdown-selected-check" />
+            )}
             <Text className="truncate">{adapter.name}</Text>
           </Flex>
           {adapter.created_at && (
@@ -159,7 +161,13 @@ const ModelDropdownItemImpl: FC<ModelDropdownItemProps> = ({
               onSelect={() => onSelect({ model: modelUrn, entity: model })}
             >
               <Flex align="center" gap="density-sm">
-                {isBaseSelected && <Check size={14} className="shrink-0" />}
+                {isBaseSelected && (
+                  <Check
+                    size={14}
+                    className="shrink-0"
+                    data-testid="model-dropdown-selected-check"
+                  />
+                )}
                 <Text>{modelUrn}</Text>
               </Flex>
             </DropdownItem>

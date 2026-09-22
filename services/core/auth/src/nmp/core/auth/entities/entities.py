@@ -9,8 +9,9 @@ from typing import Any, Literal, Self
 from nemo_platform_plugin.auth.access_keys.types import AccessKeyEntityType
 from nmp.common.auth.access_keys import SERVICE_ACCOUNT_PRINCIPAL_PREFIX
 from nmp.common.auth.models import Principal
+from nmp.common.auth.principal_identifier import InvalidPrincipalIdentifier, parse_principal_identifier
 from nmp.common.entities import EntityBase
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 
 class RoleBindingEntity(EntityBase):
@@ -54,6 +55,7 @@ class AccessKeyEntity(EntityBase):
     entity_type: AccessKeyEntityType = "USER"
     issuer: str
     audiences: list[str]
+    scope: list[str] = Field(default_factory=list)
     issued_at: datetime
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
@@ -78,18 +80,17 @@ class AccessKeyEntity(EntityBase):
             data["status"] = "REVOKED"
         return data
 
-    @property
     def is_service_account(self) -> bool:
         return self.entity_type == "SERVICE_ACCOUNT"
 
     @model_validator(mode="after")
     def _validate_identity_binding(self) -> Self:
-        if self.is_service_account:
-            if (
-                self.subject_principal is None
-                or self.subject_principal == SERVICE_ACCOUNT_PRINCIPAL_PREFIX
-                or not self.subject_principal.startswith(SERVICE_ACCOUNT_PRINCIPAL_PREFIX)
-            ):
+        if self.is_service_account():
+            try:
+                parsed_subject = parse_principal_identifier(self.subject_principal or "")
+            except InvalidPrincipalIdentifier as exc:
+                raise ValueError("service-account access keys require a service-account subject principal") from exc
+            if parsed_subject.kind != "service_account" or parsed_subject.raw == SERVICE_ACCOUNT_PRINCIPAL_PREFIX:
                 raise ValueError("service-account access keys require a service-account subject principal")
             if Principal(id=self.principal).is_service_identity():
                 raise ValueError("service-account access keys require a human creator principal")

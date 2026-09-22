@@ -51,7 +51,7 @@ from nmp.automodel.tasks.training.backends.config import (  # noqa: E402
     resolve_warmup_steps,
 )
 from nmp.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
-from nmp.automodel.tasks.training.schemas import EmbeddingConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
+from nmp.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
 CONFIG_MODULE = "nmp.automodel.tasks.training.backends.config"
 AUTOCONFIG_PATCH = "transformers.AutoConfig"
@@ -194,7 +194,7 @@ class TestConfigureRetrievalDataset:
             train_file,
             val_file,
             seed=42,
-            embedding_config=EmbeddingConfig(),
+            retrieval_config=RetrievalConfig(),
             recipe=TrainingRecipe.BI_ENCODER,
         )
 
@@ -218,7 +218,7 @@ class TestConfigureRetrievalDataset:
             train_file,
             val_file,
             seed=42,
-            embedding_config=EmbeddingConfig(),
+            retrieval_config=RetrievalConfig(),
             recipe=TrainingRecipe.CROSS_ENCODER,
         )
 
@@ -243,7 +243,7 @@ class TestConfigureRetrievalDataset:
             train_file,
             val_file,
             seed=42,
-            embedding_config=EmbeddingConfig(
+            retrieval_config=RetrievalConfig(
                 train_n_passages=7,
                 query_max_length=256,
                 passage_max_length=384,
@@ -574,6 +574,7 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
         "time_series_metrics": ["*_loss"],
         "min_report_interval_seconds": 30,
     }
+    assert compiled["_recipe"] == "sft"
 
 
 def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path) -> None:
@@ -602,6 +603,7 @@ def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path
 
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["model"]["num_labels"] == 1
+    assert compiled["_recipe"] == "cross_encoder"
     assert "loss_fn" not in compiled
 
 
@@ -642,6 +644,7 @@ def test_auto_recipe_maps_cross_encoder_head_to_cross_encoder_model(tmp_path: Pa
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
     assert resolve_compiled_recipe(config) == TrainingRecipe.CROSS_ENCODER
+    assert compiled["_recipe"] == "cross_encoder"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["optimizer"]["_target_"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
     assert compiled["model"]["attn_implementation"] == "sdpa"
@@ -665,13 +668,14 @@ def test_auto_recipe_prefers_cross_encoder_head_over_stale_embedding_alias(tmp_p
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
     assert resolve_compiled_recipe(config) == TrainingRecipe.CROSS_ENCODER
+    assert compiled["_recipe"] == "cross_encoder"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
 
 
-def test_bi_encoder_compile_uses_fused_adam_and_job_embedding_config(tmp_path: Path) -> None:
+def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: Path) -> None:
     config, prepared = _embed_training_config(
         tmp_path,
-        embedding=EmbeddingConfig(query_prefix="query: ", passage_prefix="passage: ", train_n_passages=6),
+        retrieval=RetrievalConfig(query_prefix="query: ", passage_prefix="passage: ", train_n_passages=6),
     )
     config.training.recipe = TrainingRecipe.BI_ENCODER
 
@@ -680,6 +684,35 @@ def test_bi_encoder_compile_uses_fused_adam_and_job_embedding_config(tmp_path: P
     assert compiled["optimizer"]["_target_"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
     assert compiled["model"]["attn_implementation"] == "sdpa"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelBiEncoder.from_pretrained")
+    assert compiled["_recipe"] == "bi_encoder"
+
+
+@pytest.mark.parametrize("requested", [False, True])
+def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path, requested: bool) -> None:
+    config, prepared = _embed_training_config(
+        tmp_path,
+        retrieval=RetrievalConfig(do_distributed_inbatch_negative=requested),
+    )
+    config.training.recipe = TrainingRecipe.BI_ENCODER
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    # Emitted either way: the trainer reads the attribute off the model, so
+    # writing it explicitly keeps the objective readable in the compiled config
+    # rather than leaving it to the upstream default.
+    assert compiled["model"]["do_distributed_inbatch_negative"] is requested
+
+
+def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:
+    config, prepared = _embed_training_config(
+        tmp_path,
+        retrieval=RetrievalConfig(do_distributed_inbatch_negative=True),
+    )
+    config.training.recipe = TrainingRecipe.CROSS_ENCODER
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert "do_distributed_inbatch_negative" not in compiled["model"]
 
 
 @pytest.mark.parametrize(

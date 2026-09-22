@@ -1,21 +1,15 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Eval Author
+# Insight suite authoring
 
-> **Eval Author is in active development and is not intended for external use.**
->
-> **WARNING:** Use Eval Author only with a trusted repository.
+> **WARNING:** Use Experimentalist only with a trusted repository.
 > An agent import executes module top-level code.
 
-The top-level `nemo_experimentalist_plugin.eval_author` package is the canonical Eval Author
-implementation. It turns an Experimentalist Insight and its production trace refs into
-evaluator dataset changes, creating or augmenting regression signals that
-capture the failure mode before optimization begins.
-
-This package lives inside the Experimentalist plugin and uses its evaluator, staging,
-and trace helpers directly. Experimentalist insight mode imports and runs Eval Author
-before optimization begins.
+Experimentalist turns an Insight and its production trace references into
+evaluator dataset changes before optimization begins. The
+`nemo_experimentalist_plugin.eval_author` package implements this step using the
+plugin's evaluator, staging, and trace helpers.
 
 ## Current Files
 
@@ -40,32 +34,32 @@ The preset includes the run inputs needed by `run_eval_author(...)`:
 - `train_dataset`: evaluator training dataset URI.
 - `validation_dataset`: evaluator validation dataset URI.
 - `task_template`: local or `fileset://` evaluator task template URI for production traces.
-- `experiment_dir`: local Eval Author working directory.
+- `experiment_dir`: local suite-authoring working directory.
 - `workspace`, `base_url`, `mode`, and `evaluator_type`: platform and evaluator routing.
 - `eval_author.max_summary_tokens` and `eval_author.max_traces`: agent tuning parameters.
 
 ## Materialized Insight Suite
 
-For an Insight with trace references, Eval Author copies and fills one local Harbor
+For an Insight with trace references, Experimentalist copies and fills one local Harbor
 task template per trace beneath its experiment working directory:
 
 ```text
 eval-and-optimize/eval_author/<insight-slug>/insight-suite/
 ```
 
-Each Eval Author invocation fills a fresh candidate suite from the current template
+Each authoring invocation fills a fresh candidate suite from the current template
 and traces. The complete suite is Harbor-validated locally, promoted to the
 experiment-local working copy with backup-and-restore failure handling, and
-analyzed for the Insight's root cause. Eval Author then adds normalized
+analyzed for the Insight's root cause. Experimentalist then adds normalized
 Insight-specific verifier metric keys to every task in the staged train,
 validation, and generated Insight datasets while preserving existing task
 metrics. All three datasets must pass static Harbor validation before they are
 returned.
 
-After authoring and validation, Eval Author hashes every task file and verifier
+After authoring and validation, Experimentalist hashes every task file and verifier
 file and persists deterministic suite and scorer identities in the local suite's
 manifest. The returned Insight dataset points at the experiment-local suite.
-Eval Author does not split, merge, or evaluate that suite. Experimentalist
+The authoring step does not split, merge, or evaluate that suite. Experimentalist
 currently leaves it unconsumed for downstream integration by its owning team.
 
 Task-template inputs may be local paths, `file://` URIs, or NeMo Platform
@@ -74,7 +68,7 @@ downloaded into the experiment-local staging directory before Harbor parses
 them. The staged template is refreshed on every invocation rather than reused.
 
 The returned Python contract is documented in the
-[Eval Author Python Reference](REFERENCE.md#evalauthorresult).
+[Suite authoring Python reference](REFERENCE.md#evalauthorresult).
 
 ## Intended Python Invocation
 
@@ -107,12 +101,12 @@ asyncio.run(main())
 ## Agent models
 
 Run `nemo setup` and select the default and fast models for the active Platform
-context. Eval Author uses the default model for authoring and the fast model for
+context. Experimentalist uses the default model for authoring and the fast model for
 summarization. Press Enter at the fast-model prompt to reuse the default model.
 
 The selections are workspace-qualified Platform Model Entity IDs. The Platform
 routes each request to the provider registered for that entity and reads its
-credential from Platform Secrets; Eval Author does not accept separate provider,
+credential from Platform Secrets; Experimentalist does not accept separate provider,
 endpoint, key, or model environment variables.
 
 For non-interactive and isolated environments, `NEMO_DEFAULT_MODEL` and

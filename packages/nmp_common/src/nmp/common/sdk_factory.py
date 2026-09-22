@@ -14,7 +14,7 @@ from nemo_platform_plugin.client.constants import is_workload_identity_token_fil
 from nmp.common.auth import Principal, get_principal_auth_headers, principal_from_env
 from nmp.common.config import Configuration, PlatformConfig
 from nmp.common.immutable_http_client import ImmutableDefaultAsyncHttpxClient, ImmutableDefaultHttpxClient
-from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
+from nmp.common.observability import INTERNAL_REQUEST_HEADER, MARK_INTERNAL_REQUEST_HEADERS
 from nmp.common.observability.otel import get_otel_headers
 from nmp.common.platform_endpoint import PlatformEndpoint, resolve_platform_endpoint
 
@@ -225,6 +225,15 @@ def _workload_identity_extra_headers(*, internal: bool) -> dict[str, str]:
     return MARK_INTERNAL_REQUEST_HEADERS.copy() if internal else {}
 
 
+def _forwardable_otel_headers() -> dict[str, str]:
+    internal_header = INTERNAL_REQUEST_HEADER.lower()
+    return {
+        name: value
+        for name, value in get_otel_headers().items()
+        if name.lower() == internal_header or not name.lower().startswith("x-nmp-")
+    }
+
+
 def _get_default_headers(
     as_service: str | None = None, internal: bool = False, on_behalf_of: str | Principal | None = None
 ) -> dict[str, str]:
@@ -249,6 +258,7 @@ def _get_default_headers(
     if as_service is not None:
         # Use service principal
         headers["X-NMP-Principal-Id"] = f"service:{as_service}"
+        headers["X-NMP-Actor-Aliases"] = f"service:{as_service}"
 
         if on_behalf_of is not None:
             if isinstance(on_behalf_of, Principal):
@@ -258,6 +268,10 @@ def _get_default_headers(
                     headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
                 if effective_principal.email:
                     headers["X-NMP-Principal-On-Behalf-Of-Email"] = effective_principal.email
+                if effective_principal.account_id:
+                    headers["X-NMP-Subject-Account-Id"] = effective_principal.account_id
+                if effective_principal.authz_aliases:
+                    headers["X-NMP-Subject-Aliases"] = ",".join(effective_principal.authz_aliases)
             else:
                 headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of
     else:
@@ -273,6 +287,8 @@ def _get_default_headers(
         if on_behalf_of is not None:
             headers.pop("X-NMP-Principal-On-Behalf-Of-Groups", None)
             headers.pop("X-NMP-Principal-On-Behalf-Of-Email", None)
+            headers.pop("X-NMP-Subject-Account-Id", None)
+            headers.pop("X-NMP-Subject-Aliases", None)
             if isinstance(on_behalf_of, Principal):
                 effective_principal = on_behalf_of.effective_principal
                 headers["X-NMP-Principal-On-Behalf-Of"] = effective_principal.id
@@ -280,6 +296,10 @@ def _get_default_headers(
                     headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
                 if effective_principal.email:
                     headers["X-NMP-Principal-On-Behalf-Of-Email"] = effective_principal.email
+                if effective_principal.account_id:
+                    headers["X-NMP-Subject-Account-Id"] = effective_principal.account_id
+                if effective_principal.authz_aliases:
+                    headers["X-NMP-Subject-Aliases"] = ",".join(effective_principal.authz_aliases)
             else:
                 headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of
 
@@ -466,7 +486,7 @@ def get_request_scoped_sdk(
     """
 
     # Combine OTEL headers (tracing) + auth headers (user identity)
-    headers = get_otel_headers().copy()
+    headers = _forwardable_otel_headers()
     headers.update(get_principal_auth_headers())
 
     # If we have headers to add, create a new SDK with them
@@ -482,7 +502,7 @@ def get_request_scoped_sync_sdk(
 ) -> NeMoPlatform:
     """Create a request-scoped sync SDK with current auth and observability headers."""
 
-    headers = get_otel_headers().copy()
+    headers = _forwardable_otel_headers()
     headers.update(get_principal_auth_headers())
 
     if headers:
@@ -529,16 +549,23 @@ def get_sdk_on_behalf_of(
     """
     # Merge existing headers with the new on-behalf-of header
     merged_headers: dict[str, str | Omit] = dict(base_sdk._custom_headers)
+    merged_headers.pop("X-NMP-Principal-On-Behalf-Of-Groups", None)
+    merged_headers.pop("X-NMP-Principal-On-Behalf-Of-Email", None)
+    merged_headers.pop("X-NMP-Subject-Account-Id", None)
+    merged_headers.pop("X-NMP-Subject-Aliases", None)
     if isinstance(on_behalf_of, Principal):
-        merged_headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of.effective_principal.id
-        if on_behalf_of.effective_principal.email:
-            merged_headers["X-NMP-Principal-On-Behalf-Of-Email"] = on_behalf_of.effective_principal.email
-        if on_behalf_of.effective_principal.groups:
-            merged_headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(on_behalf_of.effective_principal.groups)
+        effective_principal = on_behalf_of.effective_principal
+        merged_headers["X-NMP-Principal-On-Behalf-Of"] = effective_principal.id
+        if effective_principal.email:
+            merged_headers["X-NMP-Principal-On-Behalf-Of-Email"] = effective_principal.email
+        if effective_principal.groups:
+            merged_headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
+        if effective_principal.account_id:
+            merged_headers["X-NMP-Subject-Account-Id"] = effective_principal.account_id
+        if effective_principal.authz_aliases:
+            merged_headers["X-NMP-Subject-Aliases"] = ",".join(effective_principal.authz_aliases)
     else:
         merged_headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of
-        merged_headers.pop("X-NMP-Principal-On-Behalf-Of-Groups", None)
-        merged_headers.pop("X-NMP-Principal-On-Behalf-Of-Email", None)
     return base_sdk.with_options(set_default_headers=merged_headers)
 
 

@@ -101,7 +101,8 @@ Every skill ships with the following YAML frontmatter at the top of `SKILL.md`. 
 | `maturity` | Yes | `alpha`, `beta`, `active`, or `deprecated`. Makes lifecycle explicit to users. |
 | `license` | Yes | Default `Apache-2.0`. |
 | `user-invocable` | Yes | `true` for skills users invoke directly; `false` for internal helpers. Distinguishes user-facing skills from internal helpers. |
-| `allowed-tools` | Yes | List of tool names this skill is permitted to use (e.g. `[Bash, Read, Write, Edit]`). Real safety signal: the agent harness honors this. |
+| `allowed-tools` | Yes | Comma-separated string of tool names this skill is permitted to use (e.g. `Bash, Read, Write, Edit`). Real safety signal: the agent harness honors this. |
+| `metadata.author` | Yes | Who to contact about this skill (e.g. `NeMo Helix Team <nemo-helix@nvidia.com>`). Enforced by `.github/scripts/check_skill_frontmatter.py` in CI. |
 
 Library-prefix naming (`nemo-*`) is required for user-invocable skills (skills install into shared agent catalogs alongside skills from other plugins; the prefix prevents collisions). It's optional for internal helpers.
 
@@ -132,7 +133,9 @@ compatibility: nemo-platform >= 0.1.0; macOS or Linux; requires `agents/<name>-e
 maturity: active
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write, Edit]
+allowed-tools: Bash, Read, Write, Edit
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 ```
 
@@ -171,7 +174,8 @@ Required fields:
 - `maturity` (alpha | beta | active | deprecated)
 - `license` (Apache-2.0 unless overridden)
 - `user-invocable` (true or false)
-- `allowed-tools` (list of tools the skill expects to invoke)
+- `allowed-tools` (comma-separated string of tools the skill expects to invoke)
+- `metadata.author` (who to contact about this skill)
 
 Optional:
 - `compatibility` (only when there are real environment constraints)

@@ -53,6 +53,15 @@ AGENT_AUTH_PLATFORM_BASE_URL = os.environ.get("NMP_AGENT_AUTH_BASE_URL", "http:/
 # one worker to avoid cross-worker startup/teardown races. ``tryfirst`` matters:
 # xdist reads these markers during collection to build its scheduling groups.
 
+#: Platform fixtures, each grouped onto one xdist worker: they bind fixed ports, and a
+#: session-scoped fixture is per *worker*, so ungrouped they fight over the port. One group each
+#: rather than one shared, since the three use different ports and can run concurrently.
+PLATFORM_XDIST_FIXTURES = (
+    "subprocess_platform",
+    "auth_subprocess_platform",
+    "docker_platform",
+)
+
 
 def _docker_available() -> bool:
     try:
@@ -85,8 +94,20 @@ def _port_in_use(host: str, port: int) -> bool:
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
-        if CLICKHOUSE_XDIST_FIXTURE in item.fixturenames:
+        # Includes fixtures requested indirectly, so a wrapper fixture still lands its test in the
+        # right group.
+        requested = getattr(item, "fixturenames", ())
+        if CLICKHOUSE_XDIST_FIXTURE in requested:
             item.add_marker(pytest.mark.xdist_group(CLICKHOUSE_XDIST_GROUP))
+        for fixture in PLATFORM_XDIST_FIXTURES:
+            if fixture in requested:
+                item.add_marker(pytest.mark.xdist_group(fixture))
+
+
+#: Controllers these tests need. Not ``--controller-group all``: that also starts
+#: ``scaled-evals-jobs``, which wants a Fernet ``CREDENTIALS_ENCRYPTION_KEY`` and its own Postgres
+#: on 5432, and without them ``/health/ready`` never returns 200 and every fixture below times out.
+REQUIRED_CONTROLLERS = ("jobs", "entities", "models")
 
 
 @contextmanager
@@ -208,7 +229,7 @@ def subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[st
     work_root = tmp_path_factory.mktemp("platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_PLATFORM_BASE_URL)
     with running_platform(
-        run_args=["--service-group", "all", "--controller-group", "all"],
+        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
         base_url=AGENT_PLATFORM_BASE_URL,
         env_vars={
             "NMP_CONFIG_FILE_PATH": str(config_path),
@@ -230,7 +251,7 @@ def auth_subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterat
     work_root = tmp_path_factory.mktemp("auth-platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_AUTH_PLATFORM_BASE_URL, auth_enabled=True)
     with running_platform(
-        run_args=["--service-group", "all", "--controller-group", "all"],
+        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
         base_url=AGENT_AUTH_PLATFORM_BASE_URL,
         env_vars={
             "NMP_CONFIG_FILE_PATH": str(config_path),
@@ -297,7 +318,7 @@ def docker_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     work_root = tmp_path_factory.mktemp("docker-platform")
     config_path = _materialize_docker_config(work_root, base_url=AGENT_DOCKER_PLATFORM_BASE_URL)
     with running_platform(
-        run_args=["--service-group", "all", "--controller-group", "all"],
+        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
         base_url=AGENT_DOCKER_PLATFORM_BASE_URL,
         env_vars={"NMP_CONFIG_FILE_PATH": str(config_path), DATA_DIR_ENVVAR: str(work_root / "data")},
     ) as base_url:

@@ -12,7 +12,14 @@ from enum import Enum
 
 from nmp.customization_common.schemas.values import FinetuningType, OutputNameType
 
-__all__ = ["CheckpointFormat", "FinetuningType", "OutputNameType", "Precision", "TrainingType"]
+__all__ = [
+    "CheckpointFormat",
+    "CheckpointSelection",
+    "FinetuningType",
+    "OutputNameType",
+    "Precision",
+    "TrainingType",
+]
 
 
 class CheckpointFormat(str, Enum):
@@ -21,6 +28,14 @@ class CheckpointFormat(str, Enum):
     HF = "hf"  # Standard HuggingFace format
     HF_PEFT = "hf-peft"  # HuggingFace PEFT adapter (LoRA, etc.)
     NEMO = "nemo"  # NeMo checkpoint format
+
+
+class CheckpointSelection(str, Enum):
+    """Checkpoint(s) to publish after training."""
+
+    BEST = "best"
+    LAST = "last"
+    BOTH = "both"
 
 
 class Precision(str, Enum):

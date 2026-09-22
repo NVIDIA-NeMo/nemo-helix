@@ -3,10 +3,22 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import httpx
-from nemo_guardrails_plugin.benchmarks.run import _smoke_test
+from nemo_guardrails_plugin.benchmarks.paths import RunPaths, build_run_paths
+from nemo_guardrails_plugin.benchmarks.run import _build_nmp_process, _smoke_test
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources
 from nemo_platform import NeMoPlatform
+
+
+def _run_paths(tmp_path: Path) -> RunPaths:
+    return build_run_paths(
+        nmp_repo_root=tmp_path / "nemo-platform",
+        nemoguardrails_repo_root=tmp_path / "NeMo-Guardrails",
+        run_id="test-run",
+    )
 
 
 def _seeded_resources() -> SeededResources:
@@ -20,6 +32,16 @@ def _seeded_resources() -> SeededResources:
         vm_name="guardrails-vm",
         no_guardrails_vm_name="control-vm",
     )
+
+
+def test_nmp_process_uses_benchmark_service_subset(tmp_path: Path) -> None:
+    process = _build_nmp_process(_run_paths(tmp_path))
+
+    assert process.cmd == [
+        sys.executable,
+        "-m",
+        "nemo_guardrails_plugin.benchmarks.platform_runner",
+    ]
 
 
 def test_smoke_test_retries_until_virtual_model_route_is_ready(monkeypatch) -> None:

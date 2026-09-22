@@ -533,6 +533,60 @@ async def test_create_or_update_task_ignores_invalid_terminal_transition(
 
 
 @pytest.mark.asyncio
+async def test_create_or_update_task_records_progress_reported_after_error(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+):
+    """A workload still running past an errored task keeps reporting; the status stays terminal."""
+    _, job_name, _, step_id, task_id, _ = await create_test_job_data(mock_store, "errored-task-job")
+    step = await mock_store.get_by_id(PlatformJobStep, step_id)
+    task = await mock_store.get_by_id(PlatformJobTask, task_id)
+    task.status = PlatformJobStatus.ERROR
+    await mock_store.update(task)
+
+    updated = await mock_dispatcher.create_or_update_task(
+        job_name,
+        task.name,
+        DEFAULT_WORKSPACE,
+        PlatformJobTaskUpdate(
+            status=PlatformJobStatus.ACTIVE,
+            status_details={"phase": "training", "step": 2000},
+        ),
+        step,
+    )
+
+    assert updated.status == PlatformJobStatus.ERROR
+    assert updated.status_details["phase"] == "training"
+    assert updated.status_details["step"] == 2000
+
+    stored_task = await mock_store.get_by_id(PlatformJobTask, task_id)
+    assert stored_task.status == PlatformJobStatus.ERROR
+    assert stored_task.status_details["step"] == 2000
+
+
+@pytest.mark.asyncio
+async def test_create_or_update_task_ignores_statusless_poll_after_error(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+):
+    """A rejected transition carrying no progress leaves the task untouched."""
+    _, job_name, _, step_id, task_id, _ = await create_test_job_data(mock_store, "errored-task-noop-job")
+    step = await mock_store.get_by_id(PlatformJobStep, step_id)
+    task = await mock_store.get_by_id(PlatformJobTask, task_id)
+    task.status = PlatformJobStatus.ERROR
+    await mock_store.update(task)
+
+    updated = await mock_dispatcher.create_or_update_task(
+        job_name,
+        task.name,
+        DEFAULT_WORKSPACE,
+        PlatformJobTaskUpdate(status=PlatformJobStatus.ACTIVE),
+        step,
+    )
+
+    assert updated.status == PlatformJobStatus.ERROR
+    assert updated.status_details == {}
+
+
+@pytest.mark.asyncio
 async def test_delete_job_missing_fileset_succeeds(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
     """Test that delete succeeds even if the job fileset was already deleted.
 

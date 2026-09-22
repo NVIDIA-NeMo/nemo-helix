@@ -9,7 +9,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from nmp.automodel.tasks.training.errors.parser import (
     MAX_OUTPUT_LINES,
@@ -28,7 +28,11 @@ from nmp.automodel.tasks.training.utils import generate_torchrun_flags_from_env
 from nmp.customization_common.service.context import NMPJobContext
 from nmp.customization_common.training.nccl import get_nccl_ib_env
 
-from .checkpoints import ModelType, find_best_checkpoint, process_checkpoint
+from .checkpoints import (
+    ModelType,
+    find_selected_checkpoints,
+    process_selected_checkpoints,
+)
 from .config import compile_automodel_config, resolve_compiled_recipe
 
 logger = logging.getLogger(__name__)
@@ -169,34 +173,33 @@ class AutomodelBackend:
         # TODO: Consider parsing training logs or checkpoints to extract final metrics.
         return TrainingMetrics(total_steps=0, total_epochs=0)
 
-    def find_best_checkpoint(
+    def find_checkpoints(
         self,
         workspace_dir: Path,
         customizer_config: TrainingStepConfig,
-        library_config: Optional[LibraryConfig] = None,
-    ) -> Path:
-        """Find best Automodel checkpoint."""
+    ) -> dict[str, Path]:
+        """Find the checkpoint(s) selected for publication."""
         model_type = _checkpoint_model_type(customizer_config)
-        return find_best_checkpoint(workspace_dir, customizer_config, model_type=model_type)
+        return find_selected_checkpoints(workspace_dir, customizer_config, model_type=model_type)
 
-    def process_checkpoint(
+    def process_checkpoints(
         self,
-        checkpoint_path: Path,
+        checkpoints: dict[str, Path],
         output_path: Path,
+        workspace_dir: Path,
         customizer_config: TrainingStepConfig,
         library_config: LibraryConfig | None = None,
     ) -> CheckpointInfo:
-        """Process Automodel checkpoint."""
+        """Process the selected checkpoint(s) into the output fileset."""
         model_type = _checkpoint_model_type(customizer_config)
-
-        # Extract resolved chat template from library config if available (LLM only)
         resolved_template = None
         if model_type == ModelType.LLM and library_config and library_config.config_dict:
             resolved_template = library_config.config_dict.get("_resolved_chat_template")
 
-        return process_checkpoint(
-            checkpoint_path,
+        return process_selected_checkpoints(
+            checkpoints,
             output_path,
+            workspace_dir,
             customizer_config,
             model_type=model_type,
             resolved_chat_template=resolved_template,

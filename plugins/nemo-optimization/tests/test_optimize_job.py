@@ -18,6 +18,7 @@ from nemo_optimization.jobs.optimize import OptimizeJob
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.exceptions import (
     PlatformJobCompilationError,
@@ -29,8 +30,6 @@ from nemo_platform_plugin.jobs.execution_profiles import (
     SubprocessJobExecutionProfile,
 )
 from nemo_platform_plugin.refs import FilesetRef
-from nemo_platform_plugin.run_dependencies import LocalRunError
-from nemo_platform_plugin.scheduler import NemoJobScheduler
 from pydantic import ValidationError
 
 FABRIC_AGENT = {
@@ -239,7 +238,7 @@ def test_run_dispatches_a_local_fabric_config(tmp_path: Path, ctx: JobContext) -
     assert kwargs["optimize_config"]["optimizer"]["numeric"]["enabled"] is True
 
 
-def test_scheduler_run_local_preserves_workspace_for_absolute_config_without_fileset(tmp_path: Path) -> None:
+def test_run_uses_workspace_from_spec_for_absolute_config_without_fileset(tmp_path: Path, ctx: JobContext) -> None:
     optimize_config = write_config(tmp_path, {**FABRIC_AGENT, **MINIMAL_CONFIG})
     observed: dict[str, str] = {}
 
@@ -251,11 +250,7 @@ def test_scheduler_run_local_preserves_workspace_for_absolute_config_without_fil
         patch("nemo_optimization.jobs.optimize.preflight_validate_llm_models", side_effect=_preflight),
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}),
     ):
-        result = NemoJobScheduler().run_local(
-            OptimizeJob,
-            {"optimize_config": optimize_config},
-            workspace="research",
-        )
+        result = OptimizeJob().run({"optimize_config": optimize_config, "workspace": "research"}, ctx=ctx)
 
     assert result["status"] == "completed"
     assert observed["workspace"] == "research"

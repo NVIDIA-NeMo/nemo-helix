@@ -15,9 +15,53 @@ import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
+from nemo_platform_plugin.client.auth import StaticToken, TokenProviderAuth
+from nmp.common.auth.principal_identifier import InvalidPrincipalIdentifier
 from nmp.common.auth.workload_proxy import main as workload_proxy_main
 from nmp.common.auth.workload_proxy.main import build_app
 from nmp.common.controller import ControllerManager, Loop
+
+
+@pytest.mark.parametrize("status", [200, 401, 403, 307])
+@respx.mock
+def test_transport_auth_replaces_inbound_identity_and_preserves_response(status: int) -> None:
+    route = respx.post(
+        "https://platform.test/apis/inference-gateway/v2/workspaces/test/openai/-/v1/responses?stream=1"
+    ).mock(
+        return_value=httpx.Response(
+            status,
+            content=b'data: {"output":"hello"}\n\ndata: [DONE]\n\n',
+            headers={"content-type": "text/event-stream", "location": "https://other.test/"},
+        )
+    )
+    app = build_app(base_url="https://platform.test", auth=TokenProviderAuth(StaticToken("workload-token")))
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/apis/inference-gateway/v2/workspaces/test/openai/-/v1/responses?stream=1",
+            headers={
+                "authorization": "Bearer not-used",
+                "x-nmp-principal-id": "service:admin",
+                "x-nmp-principal-on-behalf-of": "attacker",
+                "x-nmp-subject-aliases": "admin",
+            },
+            json={"stream": True},
+        )
+    assert route.call_count == 1
+    sent = route.calls.last.request
+    assert sent.headers["authorization"] == "Bearer workload-token"
+    assert not any(name.startswith("x-nmp-") for name in sent.headers)
+    assert response.status_code == status
+    assert response.content == b'data: {"output":"hello"}\n\ndata: [DONE]\n\n'
+    assert response.headers["content-type"] == "text/event-stream"
+
+
+def test_proxy_requires_exactly_one_auth_mode() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        build_app(base_url="https://platform.test")
+    with pytest.raises(ValueError, match="exactly one"):
+        build_app(base_url="https://platform.test", principal="agents", auth=httpx.BasicAuth("a", "b"))
+    with pytest.raises(ValueError, match="on_behalf_of"):
+        build_app(base_url="https://platform.test", auth=httpx.BasicAuth("a", "b"), on_behalf_of="user")
 
 
 @respx.mock
@@ -49,11 +93,55 @@ def test_forward_stamps_service_principal_and_preserves_path() -> None:
     sent = route.calls.last.request
     # The proxy sets the service-principal identity and drops the placeholder auth.
     assert sent.headers["x-nmp-principal-id"] == "service:agents"
+    assert sent.headers["x-nmp-actor-aliases"] == "service:agents"
     assert "authorization" not in {k.lower() for k in sent.headers}
     assert "x-client-hop" not in {k.lower() for k in sent.headers}
     assert "connection" not in resp.headers
     assert "x-upstream-hop" not in resp.headers
     assert sent.content == b'{"model":"m","messages":[]}'
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "DELETE", "OPTIONS"])
+@respx.mock
+def test_forward_keeps_bodyless_requests_bodyless(method: str) -> None:
+    route = respx.request(method, "http://platform.test/inference").mock(return_value=httpx.Response(200))
+    app = build_app(base_url="http://platform.test", principal="agents")
+    with TestClient(app) as client:
+        response = client.request(method, "/inference")
+    assert response.status_code == 200
+    sent = route.calls.last.request
+    assert sent.content == b""
+    assert "transfer-encoding" not in sent.headers
+    assert "content-length" not in sent.headers
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@respx.mock
+def test_forward_preserves_request_body_framing(chunked: bool) -> None:
+    body = b'{"model":"m","messages":[]}'
+    route = respx.post("http://platform.test/inference").mock(return_value=httpx.Response(200, json={}))
+    app = build_app(base_url="http://platform.test", principal="agents")
+    with TestClient(app) as client:
+        response = client.post(
+            "/inference",
+            content=iter([body[:10], body[10:]]) if chunked else body,
+            headers={"transfer-encoding": "chunked", "content-length": "999"} if chunked else {},
+        )
+    assert response.status_code == 200
+    sent = route.calls.last.request
+    assert sent.content == body
+    if chunked:
+        assert sent.headers["transfer-encoding"] == "chunked"
+        assert "content-length" not in sent.headers
+    else:
+        assert sent.headers["content-length"] == str(len(body))
+        assert "transfer-encoding" not in sent.headers
+
+
+@pytest.mark.parametrize("principal", ["service:", "service:/path", "service:*", "has spaces"])
+def test_build_app_rejects_malformed_service_principal(principal: str) -> None:
+    with pytest.raises(InvalidPrincipalIdentifier):
+        build_app(base_url="http://nemo-platform-api:8080", principal=principal)
 
 
 @respx.mock
@@ -68,7 +156,9 @@ def test_forward_stamps_on_behalf_of_when_configured() -> None:
     sent = route.calls.last.request
     # Service principal clears the route gate; on-behalf-of narrows access to the creator.
     assert sent.headers["x-nmp-principal-id"] == "service:agents"
+    assert sent.headers["x-nmp-actor-aliases"] == "service:agents"
     assert sent.headers["x-nmp-principal-on-behalf-of"] == "user:alice"
+    assert sent.headers["x-nmp-subject-aliases"] == "user:alice"
 
 
 @respx.mock
@@ -97,24 +187,32 @@ def test_forward_strips_inbound_on_behalf_of_to_prevent_spoofing() -> None:
         "/apis/entities/v2/workspaces",
         headers={
             "x-nmp-principal-id": "service:platform",
+            "x-nmp-actor-account-id": "account-attacker",
             "x-nmp-principal-email": "attacker@evil.test",
             "x-nmp-principal-groups": "platform-admins",
+            "x-nmp-actor-aliases": "attacker-alias",
             "x-nmp-principal-on-behalf-of": "user:attacker",
             # Companion metadata must not be smuggled onto our stamped OBO id:
             # the platform derives effective groups/email from these and feeds
             # them to the PDP, so attacker-chosen values would escalate.
             "x-nmp-principal-on-behalf-of-email": "attacker@evil.test",
             "x-nmp-principal-on-behalf-of-groups": "platform-admins",
+            "x-nmp-subject-account-id": "account-attacker",
+            "x-nmp-subject-aliases": "attacker-alias",
         },
     )
 
     sent = route.calls.last.request
     sent_keys = {k.lower() for k in sent.headers}
     assert sent.headers["x-nmp-principal-id"] == "service:agents"
+    assert sent.headers["x-nmp-actor-aliases"] == "service:agents"
     assert sent.headers["x-nmp-principal-on-behalf-of"] == "user:alice"
+    assert sent.headers["x-nmp-subject-aliases"] == "user:alice"
     # Inbound companion metadata cannot be attached to either stamped identity.
+    assert "x-nmp-actor-account-id" not in sent_keys
     assert "x-nmp-principal-email" not in sent_keys
     assert "x-nmp-principal-groups" not in sent_keys
+    assert "x-nmp-subject-account-id" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-email" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-groups" not in sent_keys
 
@@ -132,12 +230,16 @@ def test_forward_strips_inbound_on_behalf_of_when_none_configured() -> None:
             "x-nmp-principal-on-behalf-of": "user:attacker",
             "x-nmp-principal-on-behalf-of-email": "attacker@evil.test",
             "x-nmp-principal-on-behalf-of-groups": "platform-admins",
+            "x-nmp-subject-account-id": "account-attacker",
+            "x-nmp-subject-aliases": "attacker-alias",
         },
     )
 
     sent = route.calls.last.request
     sent_keys = {k.lower() for k in sent.headers}
     assert "x-nmp-principal-on-behalf-of" not in sent_keys
+    assert "x-nmp-subject-account-id" not in sent_keys
+    assert "x-nmp-subject-aliases" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-email" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-groups" not in sent_keys
 

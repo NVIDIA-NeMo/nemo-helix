@@ -6,19 +6,15 @@ set -euo pipefail
 # Run all auto-fix commands in dependency order:
 #   1. OpenAPI spec regeneration (other steps depend on this)
 #   2. Web SDK regeneration (Orval reads openapi/ga/individual/platform.openapi.yaml)
-#   3. Stainless sync (pulls updated Python SDK from Stainless; openapi already done in step 1)
-#   4. Python style (ruff; run before vendoring so generated files aren't re-linted)
-#   5. CLI command generation (the vendoring and docs are handled by the next step)
-#   6. Vendor all packages (covers nemo_platform_ext too) + CLI reference docs
-#   7. Copyright headers (after generated files are in place)
-#   8. License update (may change after vendoring)
-#   9. Config reference docs (independent, but run after structural changes)
-#  10. Auth docs (regenerate permissions reference from static-authz.yaml)
-#  11. Verification (optional) — run the same checks as CI (tools/lint/lint-all.sh)
+#   3. Python style (ruff; run before vendoring so generated files aren't re-linted)
+#   4. Vendor all packages (covers nemo_platform_ext too) + CLI reference docs
+#   5. Copyright headers (after generated files are in place)
+#   6. License update (may change after vendoring)
+#   7. Config reference docs (independent, but run after structural changes)
+#   8. Auth docs (regenerate permissions reference from static-authz.yaml)
+#   9. Verification (optional) — run the same checks as CI (tools/lint/lint-all.sh)
 #      Enable with LINT_FIX_VERIFY=1.
 #
-# Note: update-sdk = build-policy + refresh-openapi + stainless + update-cli, so we use
-# stainless directly here to avoid re-running refresh-openapi and update-cli redundantly.
 # Note: update-cli = vendor-nemo-platform-ext + generate-cli-reference-docs, but
 # vendor-nemo-platform-ext is a subset of make vendor, so we let make vendor cover
 # all vendoring and then regenerate the CLI reference docs once.
@@ -34,7 +30,6 @@ fi
 declare -a steps=(
   "refresh-openapi:make refresh-openapi"
   "web-sdk:bash tools/lint/lint-fix-web-sdk.sh"
-  "stainless:uv run --frozen nemo-platform-sdk-tools is-up-to-date --output-dir \"${TMPDIR:-/tmp}/nmp-sdk-lint\" || make stainless"
   "python-style:uv run ruff format && uv run ruff check --fix"
   "vendor+cli-reference-docs:make vendor && make generate-cli-reference-docs"
   "copyright-headers:make update-copyright-headers"

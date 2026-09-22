@@ -1,9 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# --optimize-config: Hermes + phishing analyzer MCP (separate agent checkout).
+# --optimize-config: Hermes + the phishing-analyzer MCP server (separate agent checkout).
 # Broader search space than chat-only — temperature + top_p, several trials.
-# Dataset: full phishing-agent eval set (email-phishing-analyzer-harnesses data/smaller_test.csv).
+# The analyzer is declared statically: its console script as `url`, its
+# credential in `env`; nothing per task. Set PHISHING_MCP_BIN to the
+# email-phishing-analyzer-harnesses checkout's .venv/bin/email-phishing-analyzer-mcp;
+# the optimizer expands ${VAR} when it loads the config. Scores the
+# classification, that the tool was called exactly once, and that the email
+# reached it verbatim. optimize-mcp-mock.yaml is the same study against a
+# bundled fixture that replays results recorded from this server.
 schema_version: fabric.agent/v1alpha1
 metadata:
   name: hermes-optimize-mcp
@@ -45,10 +51,12 @@ mcp:
   servers:
     email-phishing-analyzer:
       transport: stdio
-      url: email-phishing-analyzer-mcp
-      exposure: harness_native
+      url: ${PHISHING_MCP_BIN}
       env:
-        NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+        # The analyzer calls integrate.api.nvidia.com (build.nvidia.com keys); the coordinator and
+        # judge above use inference-api.nvidia.com, so the analyzer gets its own key variable.
+        NVIDIA_API_KEY: ${PHISHING_ANALYZER_API_KEY}
+      exposure: harness_native
 tools:
   enabled:
     - mcp-email-phishing-analyzer
@@ -57,8 +65,7 @@ runtime:
   input_schema: chat
   output_schema: message
   # Budget for: 1 tool call + final reply / empty-response retries.
-  # Too low (3) starves the loop; too high (8) lets some models re-call the
-  # analyzer until verify_exactly_once fails.
+  # Too low (3) starves the loop; too high (8) lets some models re-call the analyzer.
   max_turns: 6
   timeout_seconds: 300
   artifacts: ./artifacts
@@ -74,6 +81,14 @@ optimizer:
   eval_metrics:
     average_score:
       evaluator_name: average_score
+      direction: maximize
+      weight: 1.0
+    tool_call_count_matches:
+      evaluator_name: tool_call_count_matches
+      direction: maximize
+      weight: 1.0
+    tool_argument_matches_input:
+      evaluator_name: tool_argument_matches_input
       direction: maximize
       weight: 1.0
   search_space:
@@ -93,21 +108,19 @@ eval:
     max_concurrency: 1
   fabric:
     base_dir: .
-    capture_trajectory: false
+    # The exactly-once evaluator reads the ATIF trajectory, so capture stays on.
+    capture_trajectory: true
     timeout_s: 300
-  run_hook:
-    type: mcp_run_binding
-    agent_src: ${PHISHING_AGENT_SRC}
-    bindings:
-      - server: email-phishing-analyzer
-        binding: email_phishing_analyzer.audit:AnalyzerRunBinding
-        executable: ${PHISHING_MCP_BIN}
-        config_paths:
-          - analyzer-inference-api.yaml
-        handoff:
-          env: NVIDIA_API_KEY
-          ref: email_phishing_analyzer.credential_handoff:CredentialHandoff
   evaluators:
+    exactly_once:
+      _type: tool_call_count
+      # Exactly as Hermes records the MCP tool in the trajectory: mcp__<server>__<tool>.
+      tool_name: mcp__email_phishing_analyzer__email_phishing_analyzer
+      expected_calls: 1
+    verbatim_input:
+      _type: tool_argument_matches_input
+      tool_name: mcp__email_phishing_analyzer__email_phishing_analyzer
+      argument: text
     accuracy:
       _type: tunable_rag_evaluator
       llm_name: judge

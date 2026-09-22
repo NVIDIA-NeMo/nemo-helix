@@ -16,6 +16,8 @@ import data.common.has_permissions
 import data.common.req_callers
 import data.common.req_deny
 import data.common.req_permissions
+import data.common.request_caller_kind
+import data.common.valid_service_principal
 
 # Main entry point - returns result with X-NMP-Authorized header
 #
@@ -46,10 +48,13 @@ allow := result if {
 # Default deny
 default allow_request := false
 
-# Platform admin bypass - has access to everything (if any principal is a platform admin)
+# Platform admin bypass - has access to everything, but must still pass scope_check_passed
+# first so a PlatformAdmin's own scoped Access Key stays scoped down.
 allow_request if {
 	applicable_principals := get_applicable_principals
 	count(applicable_principals) > 0
+
+	scope_check_passed
 
 	# Check if any principal is a platform admin
 	some principal in applicable_principals
@@ -60,7 +65,7 @@ allow_request if {
 # Known paths are authorized via the ServiceSystem role (wildcard permission) and has_permissions.
 allow_request if {
 	principal_id := extract_principal_id
-	startswith(principal_id, "service:")
+	valid_service_principal(principal_id)
 	endpoint_scan == ""
 }
 
@@ -109,7 +114,7 @@ allow_request if {
 	method in ["POST", "PUT", "PATCH", "DELETE"]
 
 	some principal in applicable_principals
-	startswith(principal, "service:")
+	valid_service_principal(principal)
 	has_permissions(principal, workspace, required_permissions)
 }
 
@@ -274,8 +279,7 @@ deny_request if {
 	path_parts[6] == "secrets"
 	path_parts[8] == "access"
 
-	principal_id := extract_principal_id
-	not startswith(principal_id, "service:")
+	request_caller_kind != "service_principal"
 }
 
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).
@@ -310,8 +314,7 @@ nested_entities_internal_only if {
 
 deny_request if {
 	nested_entities_internal_only
-	principal_id := extract_principal_id
-	not startswith(principal_id, "service:")
+	request_caller_kind != "service_principal"
 	not platform_admin_in_system
 }
 
@@ -340,8 +343,7 @@ service_only_route if {
 # retains access to every route, service-only routes included.
 deny_request if {
 	service_only_route
-	principal_id := extract_principal_id
-	not startswith(principal_id, "service:")
+	request_caller_kind != "service_principal"
 	not platform_admin_in_system
 }
 
@@ -365,8 +367,7 @@ principal_only_route if {
 # ServiceSystem "*" wildcard), so `callers` could not actually scope a route to human users.
 deny_request if {
 	principal_only_route
-	principal_id := extract_principal_id
-	startswith(principal_id, "service:")
+	request_caller_kind == "service_principal"
 }
 
 # True when any applicable principal has PlatformAdmin in the system workspace (see allow_request).

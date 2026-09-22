@@ -6,7 +6,7 @@ name = "nemo-evaluator-sdk"
 description = "NeMo Evaluator SDK"
 readme = "README.md"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.12,<3.15"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -15,7 +15,6 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Human Machine Interfaces",
   "Topic :: Software Development",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
@@ -23,9 +22,11 @@ classifiers = [
 dependencies = [
   "pydantic>=2.10.6",
   # The broker sandbox provider imports the wire contract at module scope. Cheap to depend on
-  # directly: sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
+  # directly: nemo-sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
   # pieces are extras -- so this adds request/response models, not a web stack.
-  "sandboxed-gym",
+  # Workspace member for now; becomes an exact PyPI pin once published, per the note on
+  # `[tool.bundle-package]` in packages/nemo_platform/pyproject.toml.
+  "nemo-sandboxed-gym",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",
@@ -57,18 +58,19 @@ agent-runtimes = [
   "openai-agents[docker]>=0.17.3,<0.18",
 ]
 engine = []
-# Native Harbor execution and result adaptation need `harbor`, which requires Python >=3.12 while
-# the SDK floor remains >=3.11. The marker scopes the dependency to compatible interpreters.
-# Harbor is imported lazily, so importing the SDK and constructing Harbor configuration remain
-# valid on Python 3.11; invoking either execution or result adaptation requires this extra.
+# Native Harbor execution and result adaptation need `harbor`. It stays optional because it is
+# heavy, not because of the interpreter: the SDK floor now matches Harbor's own >=3.12, so the
+# `python_version` marker this entry used to carry is gone. Harbor is imported lazily, so importing
+# the SDK and constructing Harbor configuration work without the extra; execution and result
+# adaptation do not.
 harbor = [
-  "harbor>=0.20,<0.21; python_version >= '3.12'",
+  "harbor>=0.20,<0.21",
 ]
 nemo-platform = [
   "nemo-platform-sdk",
 ]
-# NeMo Fabric HARNESS ADAPTERS for the agent-eval runtimes (FabricAgentRuntime /
-# FabricContainerRuntime). The Fabric SDK itself is a base dependency above; this extra adds the
+# NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or
+# sandbox mode). The Fabric SDK itself is a base dependency above; this extra adds the
 # adapters needed to resolve and run a harness.
 #
 # WHY THE ADAPTERS ARE SPLIT OUT: they are the entire weight. Measured against the base SDK,
@@ -95,9 +97,6 @@ fabric = [
   "nemo-fabric[claude,codex]>=0.3.0,<0.4.0",
   "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
 ]
-
-[project.entry-points."nemo.fabric.task_hooks"]
-mcp_run_binding = "nemo_evaluator_sdk.agent_eval.runtimes.fabric.hooks_mcp_binding:McpRunBindingHook"
 
 [build-system]
 requires = ["hatchling"]

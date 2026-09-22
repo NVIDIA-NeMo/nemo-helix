@@ -27,7 +27,7 @@ from nmp.core.inference_gateway.api.dependencies import (
 )
 from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
 from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nmp.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model
+from nmp.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model, resolve_vm_for_model
 from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
@@ -259,13 +259,13 @@ def test_get_model_lora_compound_name_in_path(app: FastAPI, client: TestClient):
     """LoRA-style composite names (base&adapters/ws/adapter) resolve via GET /v1/models/{name:path}.
 
     The URL contains two "/" characters after the base workspace prefix, so FastAPI delivers
-    ``name="ws/base&adapters/ws/adder"`` to the handler. The handler must strip only the first
-    segment ("ws/") and look up the VirtualModel cache under ``(ws, "base&adapters/ws/adder")``.
-    Operators associate composite LoRA ids with an explicit VirtualModel, so the VM cache is
-    the source of truth here.
+    ``name="ws/base&adapters/ws/adder"`` to the handler. The handler strips only the first
+    segment ("ws/") then routes through the **base model's** VirtualModel (keyed ``(ws, "base")``)
+    via ``resolve_vm_for_model`` — no per-adapter VM is created. The adapter existence check
+    succeeds because the base VM is served.
     """
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_custom_vm("ws", "base&adapters/ws/adder")])
+    vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.get("/v2/workspaces/ws/openai/-/v1/models/ws/base&adapters/ws/adder")
@@ -276,9 +276,12 @@ def test_get_model_lora_compound_name_in_path(app: FastAPI, client: TestClient):
 
 
 def test_get_model_lora_compound_bare_name_in_path(app: FastAPI, client: TestClient):
-    """Bare LoRA composite ``{base}&adapters/{ws}/{adapter}`` resolves via ``GET /v1/models/{name:path}``."""
+    """Bare LoRA composite ``{base}&adapters/{ws}/{adapter}`` resolves via ``GET /v1/models/{name:path}``.
+
+    Routes through the base model's VM (keyed ``(ws, "base")``); no per-adapter VM exists.
+    """
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_custom_vm("ws", "base&adapters/ws/adder")])
+    vm_cache.rebuild([_custom_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.get("/v2/workspaces/ws/openai/-/v1/models/base&adapters/ws/adder")
@@ -435,22 +438,25 @@ def test_proxy_body_mismatched_workspace_prefix_rejected(client: TestClient):
     assert response.status_code == 422
 
 
-def _make_lora_vm(workspace: str, name: str) -> SDKVirtualModel:
-    """Build a VirtualModel whose name is a LoRA composite, default_model_entity points to itself.
+def _make_base_vm(workspace: str, base_name: str) -> SDKVirtualModel:
+    """Build the base model's VirtualModel that LoRA-adapter requests route through.
 
-    LoRA composite VMs are the manual escape-hatch today (the autoprovisioned-VM
-    reconciler skips composites at provider_reconciler.py:440).
+    Under the adapter-through-base-VM design there is NO per-adapter VM: a request for
+    ``base&adapters/{ws}/{adapter}`` resolves the VM named ``base`` (see
+    ``resolve_vm_for_model``) and inherits its middleware. ``default_model_entity`` is the
+    plain base entity ``{workspace}/{base_name}``; the ``&adapters/...`` suffix is spliced
+    back on at proxy time so model-entity resolution still hits the adapter's served model.
     """
     return SDKVirtualModel(
-        id=f"{workspace}/{name}",
-        entity_id=f"{workspace}/{name}",
-        name=name,
+        id=f"{workspace}/{base_name}",
+        entity_id=f"{workspace}/{base_name}",
+        name=base_name,
         workspace=workspace,
         parent=workspace,
         db_version=1,
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
-        default_model_entity=f"{workspace}/{name}",
+        default_model_entity=f"{workspace}/{base_name}",
     )
 
 
@@ -458,12 +464,13 @@ def test_proxy_body_bare_lora_composite_routes(
     app: FastAPI, client: TestClient, mock_proxy_client, mock_proxy_response
 ):
     """Bare LoRA composite ``{base}&adapters/{ws}/{adapter}`` in ``body.model`` routes
-    via the path workspace without the embedded ``/`` tripping the prefix-strip.
+    through the **base model's** VM without the embedded ``/`` tripping the prefix-strip.
 
-    Requires a manual VirtualModel for the LoRA composite (controller skips them).
-    Verifies the IGW's composite-aware ``parse_model_entity_ref`` (split on first '/')
-    plus ``ModelCache``'s same convention combine to route the request without any
-    string mangling along the way.
+    No per-adapter VM exists; ``resolve_vm_for_model`` keys the VM by the base segment
+    (``base``) and the ``default_model_entity`` splice preserves the ``&adapters/...``
+    suffix. Verifies the IGW's composite-aware ``parse_model_entity_ref`` (split on first
+    '/') plus ``ModelCache``'s same convention combine to route the request to the adapter's
+    served model without any string mangling along the way.
     """
     mock_proxy_response._body = [b'{"choices": []}']
     cache = ModelCache()
@@ -487,7 +494,7 @@ def test_proxy_body_bare_lora_composite_routes(
     cache.rebuild_model_entity_map()
     app.dependency_overrides[global_model_cache] = lambda: cache
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_lora_vm("ws", "base&adapters/ws/adder")])
+    vm_cache.rebuild([_make_base_vm("ws", "base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     request_body = {
@@ -511,9 +518,10 @@ def test_proxy_body_cross_workspace_lora_routes(
     base workspace's provider, leaving ``adapter_ws`` segment intact in the key.
 
     Given ``provider.workspace = "ws-a"``, ``base_ws = "ws-a"``, and ``adapter_ws = "ws-b"``,
-    all three roles are decoupled in a single fixture. Regression guard: any code
-    that silently clamps ``adapter_ws`` to ``provider.workspace`` (or ``base_ws``)
-    would fail to find the entity under ``("ws-a", "base&adapters/ws-b/adapter")``.
+    all three roles are decoupled in a single fixture. The request routes through the base
+    model's VM (keyed ``("ws-a", "base")``); regression guard: any code that silently clamps
+    ``adapter_ws`` to ``provider.workspace`` (or ``base_ws``) would fail to find the entity
+    under ``("ws-a", "base&adapters/ws-b/adapter")`` after the splice.
     """
     mock_proxy_response._body = [b'{"choices": []}']
     cache = ModelCache()
@@ -537,7 +545,7 @@ def test_proxy_body_cross_workspace_lora_routes(
     cache.rebuild_model_entity_map()
     app.dependency_overrides[global_model_cache] = lambda: cache
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_lora_vm("ws-a", "base&adapters/ws-b/adapter")])
+    vm_cache.rebuild([_make_base_vm("ws-a", "base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     request_body = {
@@ -561,13 +569,13 @@ def test_proxy_body_bare_cross_workspace_lora_routes(
     app: FastAPI, client: TestClient, mock_proxy_client, mock_proxy_response
 ):
     """Cross-workspace LoRA in bare ``body.model`` form (``base&adapters/ws-b/adapter``)
-    routes via the path workspace without the prefix-strip eating the ``ws-b/`` segment.
+    routes through the base model's VM without the prefix-strip eating the ``ws-b/`` segment.
 
     Confirms that when the body model is not prefixed with the path workspace
     (``ws-a/``), the prefix-strip is a no-op and the bare composite
-    ``base&adapters/ws-b/adapter`` flows through to the cache key
-    ``("ws-a", "base&adapters/ws-b/adapter")`` intact. As elsewhere, requires a
-    manual VirtualModel for the composite.
+    ``base&adapters/ws-b/adapter`` routes through the base VM (keyed ``("ws-a", "base")``)
+    and, after the splice, flows through to the cache key
+    ``("ws-a", "base&adapters/ws-b/adapter")`` intact.
     """
     mock_proxy_response._body = [b'{"choices": []}']
     cache = ModelCache()
@@ -591,7 +599,7 @@ def test_proxy_body_bare_cross_workspace_lora_routes(
     cache.rebuild_model_entity_map()
     app.dependency_overrides[global_model_cache] = lambda: cache
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_lora_vm("ws-a", "base&adapters/ws-b/adapter")])
+    vm_cache.rebuild([_make_base_vm("ws-a", "base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     request_body = {
@@ -608,17 +616,220 @@ def test_proxy_body_bare_cross_workspace_lora_routes(
     assert body_data["model"] == "ws-b--adapter"
 
 
+def test_proxy_adapter_routes_through_base_vm_middleware_and_splices_suffix(
+    app: FastAPI, client: TestClient, mock_proxy_client, mock_proxy_response
+):
+    """An adapter request runs the **base** VM's request middleware, and the splice
+    replaces only the base segment of the composite — preserving the ``&adapters/...`` suffix.
+
+    The base VM ``base`` has ``default_model_entity="ws/base"`` and a request-middleware
+    plugin. A request for ``base&adapters/ws/adder`` must: (1) resolve the ``base`` VM,
+    (2) run its plugin (proving adapters inherit base-VM middleware), and (3) splice to
+    ``ws/base&adapters/ws/adder`` so model-entity resolution hits the adapter's served name.
+    """
+    mock_proxy_response._body = [b'{"choices": []}']
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id="ws/base&adapters/ws/adder",
+                        served_model_name="adder-backend-id",
+                    ),
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    app.dependency_overrides[global_model_cache] = lambda: cache
+
+    # The base VM carries middleware; the adapter request must inherit it.
+    plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.process_request = AsyncMock(side_effect=lambda ctx, req, cfg: req)
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_make_base_vm("ws", "base")])
+    registry = _make_registry_with_plugin("ws", "base", plugin, phase="request")
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_middleware_registry] = lambda: registry
+
+    response = client.post(
+        "/v2/workspaces/ws/openai/-/v1/chat/completions",
+        json={"model": "base&adapters/ws/adder", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+
+    # The base VM's request middleware ran, keyed by the base VM name.
+    plugin.process_request.assert_awaited_once()
+    ctx_arg = plugin.process_request.await_args.args[0]
+    assert ctx_arg.virtual_model_name == "base"
+    # The plugin saw the spliced composite (base segment replaced, adapter suffix preserved),
+    # NOT the plain base entity.
+    seeded_model = plugin.process_request.await_args.args[1].body["model"]
+    assert seeded_model == "ws/base&adapters/ws/adder"
+
+    # Served-model-name rewrite writes the *adapter's* served name upstream.
+    body_data = json.loads(mock_proxy_client.request.call_args.kwargs["data"])
+    assert body_data["model"] == "adder-backend-id"
+
+
+def test_proxy_adapter_served_name_restored_in_response(
+    app: FastAPI, client: TestClient, mock_proxy_client, mock_proxy_response
+):
+    """The response body's ``model`` is rewritten from the adapter's served name back to the
+    composite entity ref, so the caller never sees the upstream served name.
+    """
+    # Upstream echoes back the served name it was called with.
+    mock_proxy_response._body = [json.dumps({"model": "adder-backend-id", "choices": []}).encode()]
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id="ws/base&adapters/ws/adder",
+                        served_model_name="adder-backend-id",
+                    ),
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    app.dependency_overrides[global_model_cache] = lambda: cache
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_make_base_vm("ws", "base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/ws/openai/-/v1/chat/completions",
+        json={"model": "base&adapters/ws/adder", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    # Upstream saw the served name; the caller sees the composite entity ref restored.
+    assert json.loads(mock_proxy_client.request.call_args.kwargs["data"])["model"] == "adder-backend-id"
+    assert response.json()["model"] == "ws/base&adapters/ws/adder"
+
+
+def test_proxy_adapter_missing_base_vm_returns_404(app: FastAPI, client: TestClient):
+    """An adapter request whose base model has no VM returns 404 (base isn't served)."""
+    vm_cache = VirtualModelCache()  # empty
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/ws/openai/-/v1/chat/completions",
+        json={"model": "base&adapters/ws/adder", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 404
+    assert "No VirtualModel" in response.json()["detail"]
+
+
+def test_proxy_adapter_entity_missing_returns_adapter_form_error(app: FastAPI, client: TestClient):
+    """When the base VM resolves but the spliced composite entity is absent from the
+    ModelCache, the 404 uses the improved adapter-form message naming base + adapter.
+
+    Exercises D3's ``raise_model_entity_not_found`` adapter branch end-to-end: the base VM
+    seeds/splices ``ws/base&adapters/ws/adder``, model-entity resolution misses, and the
+    error reads ``Routing table lookup failed: ... base model ws/base with adapter ws/adder``.
+    """
+    cache = ModelCache()  # no served models → composite entity absent
+    app.dependency_overrides[global_model_cache] = lambda: cache
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_make_base_vm("ws", "base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/ws/openai/-/v1/chat/completions",
+        json={"model": "base&adapters/ws/adder", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail.startswith("Routing table lookup failed:")
+    assert "base model ws/base with adapter ws/adder" in detail
+
+
+def test_proxy_plain_model_entity_missing_returns_plain_form_error(app: FastAPI, client: TestClient):
+    """A plain (non-adapter) missing entity uses the plain ``Routing table lookup failed`` form."""
+    cache = ModelCache()
+    app.dependency_overrides[global_model_cache] = lambda: cache
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "router", default_model_entity="ws/ghost-entity")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/ws/openai/-/v1/chat/completions",
+        json={"model": "router", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail == "Routing table lookup failed: Model entity not found for ws/ghost-entity"
+
+
+def test_proxy_custom_vm_pointed_at_adapter_composite_escape_hatch(
+    app: FastAPI, client: TestClient, mock_proxy_client, mock_proxy_response
+):
+    """Escape hatch (non-issue, regression guard): a custom plain-named VM whose
+    ``default_model_entity`` IS an adapter composite still works unchanged.
+
+    The request model is the plain VM name (not a composite), so ``resolve_vm_for_model``
+    exact-matches the VM and the seed step wholesale-replaces ``body["model"]`` with the
+    composite default — which then resolves to the adapter's served name. This is the
+    "custom VM points at an adapter" path the design preserves.
+    """
+    mock_proxy_response._body = [b'{"choices": []}']
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id="ws/base&adapters/ws/adder",
+                        served_model_name="adder-backend-id",
+                    ),
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    app.dependency_overrides[global_model_cache] = lambda: cache
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "adder-router", default_model_entity="ws/base&adapters/ws/adder")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/ws/openai/-/v1/chat/completions",
+        json={"model": "adder-router", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    body_data = json.loads(mock_proxy_client.request.call_args.kwargs["data"])
+    assert body_data["model"] == "adder-backend-id"
+
+
 def test_get_model_cross_workspace_lora(app: FastAPI, client: TestClient):
     """``GET /v1/models/ws-a/base&adapters/ws-b/adapter`` resolves a cross-workspace LoRA
     via the path workspace (``ws-a``), with ``owned_by`` reflecting the *base* workspace.
 
     Complements the same-workspace tests at ``test_get_model_lora_compound_name_in_path``
-    and ``test_get_model_lora_compound_bare_name_in_path``. The handler must strip
-    only the leading ``ws-a/`` segment and look up ``("ws-a", "base&adapters/ws-b/adapter")``
-    in the VirtualModel cache.
+    and ``test_get_model_lora_compound_bare_name_in_path``. The handler strips only the
+    leading ``ws-a/`` segment then routes through the base model's VM (keyed
+    ``("ws-a", "base")``) via ``resolve_vm_for_model`` — no per-adapter VM exists.
     """
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_custom_vm("ws-a", "base&adapters/ws-b/adapter")])
+    vm_cache.rebuild([_custom_vm("ws-a", "base", default_model_entity="ws-a/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.get("/v2/workspaces/ws-a/openai/-/v1/models/ws-a/base&adapters/ws-b/adapter")
@@ -871,6 +1082,53 @@ def test_parse_invalid_model(invalid_model_id):
     """Test parsing invalid model IDs raises ParseOpenAIModelError."""
     with pytest.raises(ParseOpenAIModelError):
         parse_igw_openai_model(invalid_model_id)
+
+
+# ---------------------------------------------------------------------------
+# resolve_vm_for_model (LoRA-composite-aware VM resolution) unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_vm_for_model_plain_name_exact_match():
+    """A plain (non-composite) model name resolves the VM by exact match, unchanged."""
+    vm_cache = VirtualModelCache()
+    vm = _custom_vm("ws", "my-model", default_model_entity="ws/my-model")
+    vm_cache.rebuild([vm])
+
+    assert resolve_vm_for_model(vm_cache, "ws", "my-model") is vm
+
+
+def test_resolve_vm_for_model_composite_keys_by_base_segment():
+    """A LoRA composite resolves the VM named by the pre-``&adapters/`` base segment.
+
+    No per-adapter VM exists, so ``base&adapters/aws/aname`` must key the VM ``base``.
+    """
+    vm_cache = VirtualModelCache()
+    base_vm = _custom_vm("ws", "base", default_model_entity="ws/base")
+    vm_cache.rebuild([base_vm])
+
+    assert resolve_vm_for_model(vm_cache, "ws", "base&adapters/aws/aname") is base_vm
+    # A composite whose base has no VM does not resolve.
+    assert resolve_vm_for_model(vm_cache, "ws", "other&adapters/aws/aname") is None
+
+
+def test_resolve_vm_for_model_composite_does_not_match_composite_named_vm():
+    """The helper keys strictly by base segment; it never resolves a composite-named VM.
+
+    Composite ids are not legal VM entity names, so this guards against accidentally
+    depending on one existing.
+    """
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_custom_vm("ws", "base&adapters/aws/aname")])
+
+    assert resolve_vm_for_model(vm_cache, "ws", "base&adapters/aws/aname") is None
+
+
+def test_resolve_vm_for_model_misses_when_uncached():
+    """Returns ``None`` when neither the base nor the plain name is cached."""
+    vm_cache = VirtualModelCache()
+    assert resolve_vm_for_model(vm_cache, "ws", "nope") is None
+    assert resolve_vm_for_model(vm_cache, "ws", "nope&adapters/aws/aname") is None
 
 
 # ---------------------------------------------------------------------------

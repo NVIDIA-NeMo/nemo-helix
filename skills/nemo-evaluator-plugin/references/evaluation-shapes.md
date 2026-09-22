@@ -51,6 +51,10 @@ for a set of queries. The dataset must use the BEIR test layout:
 This is not row-based RAG answer scoring. Do not convert qrels into artificial
 answer rows or use an LLM judge for deterministic retrieval quality.
 
+`query_prefix` and `passage_prefix` default to `query: ` / `passage: ` — the same
+literal values as Automodel bi-encoder training and Stage 1 mining. Set them on
+`target` and `baseline` to match training. Empty string disables prefixing.
+
 Submit the fileset and embedding target as references:
 
 ```bash
@@ -61,3 +65,13 @@ uv run nemo evaluator retrieve-eval submit --spec \
 The `eval_results.json` artifact contains `ndcg_cut_k`, `recall_k`, `P_k`, and `map_cut_k`.
 An optional `baseline` model reference adds relative `ndcg_cut_10` and `recall_10` to the job
 output.
+
+## Previous / Next / artifacts
+
+| Direction | Skill or job | Artifact |
+|---|---|---|
+| Previous | Data Designer `retrieval-prepare` (frozen) and customizer output model entity or embed/ranking NIM | `eval_beir` fileset; tuned + base model refs |
+| This stage | `nemo evaluator retrieve-eval submit` | `eval_results.json` |
+| Next | `nemo-retrieval-recipes` deploy step, or stop after metrics | Optional NIM deploy (embed and rerank ONNX from Automodel) |
+
+End-to-end domain recipes live in `nemo-retrieval-recipes`. Do not use an LLM judge for qrels.

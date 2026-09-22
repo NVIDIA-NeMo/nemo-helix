@@ -91,7 +91,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [sourceLabel, setSourceLabel] = useState('');
   const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
-  const [tab, setTab] = useState<NewAgentTab>('coding-agent-prompt');
+  const [tab, setTab] = useState<NewAgentTab>('upload');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
@@ -182,7 +182,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
-    setTab('coding-agent-prompt');
+    setTab('upload');
     setTracedAgent('');
     onClose();
   };
@@ -379,17 +379,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
       >
         <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
           <TabsList aria-label="Ways to instrument an agent">
-            <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
             <TabsTrigger value="upload">Upload agent</TabsTrigger>
             <TabsTrigger value="github">GitHub repository</TabsTrigger>
             <TabsTrigger value="imported-traces">Create from traces</TabsTrigger>
+            <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
           </TabsList>
-
-          <TabsContent value="coding-agent-prompt" className="items-stretch p-0 pt-density-lg">
-            <CodingAgentPromptEditor
-              prompt={agentIntegrationPrompt({ workspace, baseUrl: PLATFORM_BASE_URL })}
-            />
-          </TabsContent>
 
           <TabsContent value="upload" className="items-stretch p-0 pt-density-lg">
             <Stack gap="density-md">
@@ -508,6 +502,12 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 />
               </Stack>
             )}
+          </TabsContent>
+
+          <TabsContent value="coding-agent-prompt" className="items-stretch p-0 pt-density-lg">
+            <CodingAgentPromptEditor
+              prompt={agentIntegrationPrompt({ workspace, baseUrl: PLATFORM_BASE_URL })}
+            />
           </TabsContent>
         </TabsRoot>
       </FormModal>

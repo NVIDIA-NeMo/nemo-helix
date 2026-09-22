@@ -14,7 +14,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from nmp.common.auth.access_key_lifecycle import ACCESS_KEY_LIFECYCLE_CIRCUIT_FAILURE_THRESHOLD
-from nmp.common.auth.client import AuthClient
+from nmp.common.auth.client import AuthClient, AuthorizationResult
 from nmp.common.auth.dependencies import get_auth_client
 from nmp.common.auth.jwt import UnsignedJWTRejectedError
 from nmp.common.auth.middleware import (
@@ -826,6 +826,32 @@ class TestBearerTokenAuth:
         resolver.assert_awaited_once()
         mock_authorize.assert_called_once()
 
+    def test_bearer_token_rejects_malformed_service_principal_subject(self, auth_config_enabled):
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+        claims = TokenClaims(
+            subject="service:",
+            email=None,
+            groups=[],
+            scopes=["models:read"],
+            raw_claims={},
+        )
+        resolved = ResolvedBearerToken(claims=claims, token_kind="oidc_access_token")
+
+        with (
+            patch(
+                "nmp.common.auth.middleware.resolve_bearer_token",
+                new=AsyncMock(return_value=resolved),
+            ) as resolver,
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
+            response = client.get("/test", headers={"Authorization": "Bearer oidc-token"})
+
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Invalid or expired token"}
+        resolver.assert_awaited_once()
+        mock_authorize.assert_not_called()
+
     def test_access_key_bearer_uses_authenticate_callout_without_local_resolver(self, auth_config_oidc_disabled):
         app = FastAPI()
 
@@ -1016,6 +1042,31 @@ class TestBearerTokenAuth:
         }
         resolver.assert_awaited_once()
         mock_authorize.assert_called_once()
+        auth_client = mock_authorize.call_args.args[0]
+        assert auth_client.identity_resolution == {
+            "principal": {
+                "kind": "workload_access_token",
+                "issuer": "nemo:workload_access_token",
+                "subject": "system:serviceaccount:nemo-runs:job-runner",
+                "subject_claim": "act.sub",
+                "account_type": "user",
+                "display_name": "system:serviceaccount:nemo-runs:job-runner",
+                "primary_email": None,
+                "authz_aliases": ["system:serviceaccount:nemo-runs:job-runner"],
+                "claims_snapshot": {},
+            },
+            "on_behalf_of": {
+                "kind": "workload_access_token",
+                "issuer": "nemo:workload_access_token",
+                "subject": "creator@example.com",
+                "subject_claim": "sub",
+                "account_type": "user",
+                "display_name": "creator@example.com",
+                "primary_email": "creator@example.com",
+                "authz_aliases": ["creator@example.com"],
+                "claims_snapshot": {},
+            },
+        }
         assert mock_authorize.call_args.kwargs["scopes"] == ["models:read"]
 
     def test_oidc_bearer_token_with_actor_uses_direct_auth_client_context(self, auth_config_enabled):
@@ -1198,6 +1249,55 @@ class TestPrincipalHeadersAuth:
         # Should succeed because auth is disabled
         assert response.status_code == 200
 
+    def test_pdp_account_context_reaches_downstream_auth_client(self, auth_config_enabled):
+        """PDP-resolved account context is applied before downstream handlers run."""
+        app = FastAPI()
+
+        @app.get("/whoami")
+        async def whoami(auth_client: AuthClient = Depends(get_auth_client)):
+            principal = auth_client.principal
+            return {
+                "principal": principal.id,
+                "account_id": principal.account_id,
+                "authz_aliases": principal.authz_aliases,
+                "caller_kind": principal.caller_kind,
+                "on_behalf_of": principal.on_behalf_of,
+                "on_behalf_of_account_id": principal.on_behalf_of_account_id,
+                "on_behalf_of_authz_aliases": principal.on_behalf_of_authz_aliases,
+            }
+
+        Configuration.set_override(auth_config_enabled)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
+            mock_authorize.return_value = AuthorizationResult(
+                allowed=True,
+                actor_account_id="account-user",
+                actor_aliases=["legacy-user", "user@example.com"],
+                subject_account_id="account-delegate",
+                subject_aliases=["legacy-delegate"],
+            )
+
+            response = client.get(
+                "/whoami",
+                headers={
+                    "X-NMP-Principal-Id": "user@example.com",
+                    "X-NMP-Principal-On-Behalf-Of": "delegate@example.com",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "principal": "user@example.com",
+            "account_id": "account-user",
+            "authz_aliases": ["legacy-user", "user@example.com"],
+            "caller_kind": "principal",
+            "on_behalf_of": "delegate@example.com",
+            "on_behalf_of_account_id": "account-delegate",
+            "on_behalf_of_authz_aliases": ["legacy-delegate"],
+        }
+
 
 class TestServicePrincipalAuth:
     """Tests for service principal authentication."""
@@ -1217,6 +1317,33 @@ class TestServicePrincipalAuth:
 
             assert response.status_code == 200
             mock_authorize.assert_called_once()
+
+    def test_malformed_service_principal_header_is_rejected_before_pdp(self, auth_config_enabled):
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch("nmp.common.auth.client.AuthClient.authorize_request") as mock_authorize:
+            response = client.get(
+                "/test",
+                headers={"X-NMP-Principal-Id": "service:"},
+            )
+
+        assert response.status_code == 400
+        mock_authorize.assert_not_called()
+
+    def test_malformed_pdp_entrypoint_service_principal_is_forbidden(self, auth_config_enabled):
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch("nmp.common.auth.client.AuthClient.authorize_request") as mock_authorize:
+            response = client.post(
+                "/apis/auth/v2/authz/allow",
+                headers={"X-NMP-Principal-Id": "service:"},
+                json={},
+            )
+
+        assert response.status_code == 403
+        mock_authorize.assert_not_called()
 
 
 class TestCompatibilityAuth:
@@ -1246,6 +1373,20 @@ class TestCompatibilityAuth:
             assert response.status_code == expected_status
             if expected_status == 200:
                 mock_authorize.assert_called_once()
+
+    @pytest.mark.parametrize("token", ["service:", "service:has spaces", "service:/path", "service:*"])
+    def test_hf_endpoint_rejects_malformed_service_bearer_token(self, auth_config_enabled, token: str):
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch("nmp.common.auth.client.AuthClient.authorize_request") as mock_authorize:
+            response = client.get(
+                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 401
+        mock_authorize.assert_not_called()
 
     def test_hf_endpoint_authorizes_as_bearer_service_principal(self, auth_config_enabled):
         """The PDP receives the service principal synthesized from the HF Bearer token."""

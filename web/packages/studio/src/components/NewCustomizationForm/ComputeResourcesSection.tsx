@@ -12,7 +12,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
@@ -28,7 +27,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'automodel.parallelism.num_nodes', control }}
-        formFieldProps={{ slotLabel: 'Nodes' }}
+        formFieldProps={{ slotLabel: 'Nodes', slotInfo: 'Number of nodes to train on.' }}
         {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_num_nodes')}
         min={1}
         max={16}
@@ -37,7 +36,10 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'automodel.parallelism.num_gpus_per_node', control }}
-        formFieldProps={{ slotLabel: 'GPUs per Node' }}
+        formFieldProps={{
+          slotLabel: 'GPUs per Node',
+          slotInfo: 'GPUs used on each node. Total GPUs is nodes multiplied by this.',
+        }}
         {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_num_gpus_per_node')}
         min={1}
         max={8}
@@ -109,7 +111,12 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
               />
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
-                formFieldProps={{ slotLabel: 'Sequence Parallel', labelPosition: 'left' }}
+                formFieldProps={{
+                  slotLabel: 'Sequence Parallel',
+                  slotInfo:
+                    'Shards layer-norm and dropout activations along the sequence axis to save memory.',
+                  labelPosition: 'left',
+                }}
                 disabled={disabled}
               />
             </Stack>
@@ -126,7 +133,10 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.num_nodes', control }}
-        formFieldProps={{ slotLabel: 'Nodes' }}
+        formFieldProps={{
+          slotLabel: 'Nodes',
+          slotInfo: 'Number of nodes (>1 → multi-node Ray cluster).',
+        }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_num_nodes')}
         min={1}
         max={16}
@@ -135,7 +145,10 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.num_gpus_per_node', control }}
-        formFieldProps={{ slotLabel: 'GPUs per Node' }}
+        formFieldProps={{
+          slotLabel: 'GPUs per Node',
+          slotInfo: 'GPUs used on each node. Total GPUs is nodes multiplied by this.',
+        }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_num_gpus_per_node')}
         min={1}
         max={8}
@@ -215,12 +228,6 @@ const UnslothHardware = ({ disabled }: { disabled: boolean }) => {
         useControllerProps={{ name: 'unsloth.hardware.gpus', control }}
         label="GPU Indices"
         placeholder="0  or  0,1"
-        disabled={disabled}
-      />
-      <ControlledJsonInput
-        useControllerProps={{ name: 'unsloth.deployment_config', control }}
-        formFieldProps={{ slotLabel: 'Deployment Config (name or JSON)' }}
-        placeholder='"my-config"  or  { "gpu": 1 }'
         disabled={disabled}
       />
     </Stack>

@@ -4,7 +4,9 @@ name: nemo-data-designer-plugin
 description: Use when the user wants to create a dataset, generate synthetic data, or build a data generation pipeline.
 argument-hint: [describe the dataset you want to generate]
 license: Apache-2.0
+allowed-tools: Bash, Read
 metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
   owner: nemo-platform
 ---
 
@@ -20,6 +22,8 @@ $ARGUMENTS
 
 # Workflow
 
+If the user wants Nemotron-style **embedding or reranking** data (corpus → Q&A → `training.jsonl` / `eval_beir` → fine-tune), **stop**. Announce a handoff to `nemo-retrieval-recipes`. Do not enter Autopilot or Interactive `create`. Dedicated jobs are documented in `references/retrieval-sdg.md` for Stage 0/1 debugging only.
+
 Use **Autopilot** mode if the user implies they don't want to answer questions — e.g., they say something like "be opinionated", "you decide", "make reasonable assumptions", "just build it", "surprise me", etc. Otherwise, use **Interactive** mode (default).
 
 Read **only** the workflow file that matches the selected mode, then follow it:
@@ -34,7 +38,7 @@ Read **only** the workflow file that matches the selected mode, then follow it:
 - When the dataset requires person data (names, demographics, addresses), read `references/person-sampling.md`.
 - If a dataset script that matches the dataset description already exists, ask the user whether to edit it or create a new one.
 - Data Designer runs on NeMo Platform: inference, seed data, and persona data all resolve through the platform, never from local files or a local model registry. Read `references/platform-execution.md` before writing a config — it covers model configs, validation, and what the platform accepts.
-- For Nemotron retrieval SDG Stage 0/1 (`retrieval-generate` / `retrieval-prepare`), read `references/retrieval-sdg.md`. Do not use `create` for that pipeline.
+- For Nemotron retrieval SDG Stage 0/1 (`retrieval-generate` / `retrieval-prepare` / `retrieval-run`), read `references/retrieval-sdg.md`. Do not use `create` for that pipeline. Full embed/rerank recipes belong to `nemo-retrieval-recipes`.
 
 # Usage Tips and Common Pitfalls
 

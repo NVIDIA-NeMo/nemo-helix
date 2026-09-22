@@ -38,6 +38,16 @@ import data.common.path_matches_pattern
 #      }
 #    }
 
+# Normalize Envoy/header-style input once. HTTP header names are case-insensitive,
+# and neither clients nor proxies owe us a canonical capitalization.
+request_headers := normalized if {
+	headers := input.attributes.request.http.headers
+	normalized := {lower(key): value |
+		some key
+		value := headers[key]
+	}
+} else := {}
+
 # Extract method from either format
 extract_method := method if {
 	# Direct format
@@ -67,12 +77,8 @@ extract_scopes := scopes if {
 	scopes := input.scopes
 } else := scopes if {
 	# Envoy format - try x-nmp-scopes header (space-separated)
-	input.attributes.request.http.headers["x-nmp-scopes"]
-	scopes := split(input.attributes.request.http.headers["x-nmp-scopes"], " ")
-} else := scopes if {
-	# Envoy format - try X-NMP-Scopes header (case variation)
-	input.attributes.request.http.headers["X-NMP-Scopes"]
-	scopes := split(input.attributes.request.http.headers["X-NMP-Scopes"], " ")
+	request_headers["x-nmp-scopes"]
+	scopes := split(request_headers["x-nmp-scopes"], " ")
 }
 
 # Extract principal_id from either format
@@ -82,13 +88,33 @@ extract_principal_id := principal_id if {
 	principal_id := input.principal_id
 } else := principal_id if {
 	# Envoy format - try x-nmp-principal-id header
-	input.attributes.request.http.headers["x-nmp-principal-id"]
-	principal_id := input.attributes.request.http.headers["x-nmp-principal-id"]
-} else := principal_id if {
-	# Envoy format - try X-NMP-Principal-Id header (case variation)
-	input.attributes.request.http.headers["X-NMP-Principal-Id"]
-	principal_id := input.attributes.request.http.headers["X-NMP-Principal-Id"]
+	request_headers["x-nmp-principal-id"]
+	principal_id := request_headers["x-nmp-principal-id"]
 }
+
+# Extract stable actor account_id from either format
+extract_actor_account_id := account_id if {
+	input.actor_account_id
+	account_id := input.actor_account_id
+} else := account_id if {
+	request_headers["x-nmp-actor-account-id"]
+	account_id := request_headers["x-nmp-actor-account-id"]
+} else := ""
+
+# Extract actor authorization aliases from either format
+extract_actor_aliases := aliases if {
+	input.actor_aliases
+	aliases := input.actor_aliases
+} else := aliases if {
+	request_headers["x-nmp-actor-aliases"]
+	aliases := split(request_headers["x-nmp-actor-aliases"], ",")
+} else := []
+
+# Extract caller kind from either format
+extract_caller_kind := caller_kind if {
+	input.caller_kind
+	caller_kind := input.caller_kind
+} else := ""
 
 # Extract principal_email from either format
 extract_principal_email := email if {
@@ -97,12 +123,8 @@ extract_principal_email := email if {
 	email := input.principal_email
 } else := email if {
 	# Envoy format - try x-nmp-principal-email header
-	input.attributes.request.http.headers["x-nmp-principal-email"]
-	email := input.attributes.request.http.headers["x-nmp-principal-email"]
-} else := email if {
-	# Envoy format - try X-NMP-Principal-Email header (case variation)
-	input.attributes.request.http.headers["X-NMP-Principal-Email"]
-	email := input.attributes.request.http.headers["X-NMP-Principal-Email"]
+	request_headers["x-nmp-principal-email"]
+	email := request_headers["x-nmp-principal-email"]
 } else := ""
 
 # Extract principal_groups from either format
@@ -112,12 +134,35 @@ extract_principal_groups := groups if {
 	groups := input.principal_groups
 } else := groups if {
 	# Envoy format - try x-nmp-principal-groups header (comma-separated)
-	input.attributes.request.http.headers["x-nmp-principal-groups"]
-	groups := split(input.attributes.request.http.headers["x-nmp-principal-groups"], ",")
-} else := groups if {
-	# Envoy format - try X-NMP-Principal-Groups header (case variation)
-	input.attributes.request.http.headers["X-NMP-Principal-Groups"]
-	groups := split(input.attributes.request.http.headers["X-NMP-Principal-Groups"], ",")
+	request_headers["x-nmp-principal-groups"]
+	groups := split(request_headers["x-nmp-principal-groups"], ",")
+} else := []
+
+# Extract on-behalf-of principal id from either format
+extract_on_behalf_of_principal_id := principal_id if {
+	input.on_behalf_of_principal_id
+	principal_id := input.on_behalf_of_principal_id
+} else := principal_id if {
+	request_headers["x-nmp-principal-on-behalf-of"]
+	principal_id := request_headers["x-nmp-principal-on-behalf-of"]
+} else := ""
+
+# Extract stable subject account_id from either format
+extract_subject_account_id := account_id if {
+	input.subject_account_id
+	account_id := input.subject_account_id
+} else := account_id if {
+	request_headers["x-nmp-subject-account-id"]
+	account_id := request_headers["x-nmp-subject-account-id"]
+} else := ""
+
+# Extract subject authorization aliases from either format
+extract_subject_aliases := aliases if {
+	input.subject_aliases
+	aliases := input.subject_aliases
+} else := aliases if {
+	request_headers["x-nmp-subject-aliases"]
+	aliases := split(request_headers["x-nmp-subject-aliases"], ",")
 } else := []
 
 # Extract workspace from path by matching against defined endpoint patterns

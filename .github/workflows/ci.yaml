@@ -2188,10 +2188,10 @@ jobs:
               echo "| **${label}** | N/A | N/A | N/A |"
               return
             fi
-            LINE_RATE=$(grep -oP 'line-rate="\K[^"]+' "${xml_file}" | head -1)
-            LINE_COVERED=$(grep -oP 'lines-covered="\K[^"]+' "${xml_file}" | head -1)
-            LINE_VALID=$(grep -oP 'lines-valid="\K[^"]+' "${xml_file}" | head -1)
-            BRANCH_RATE=$(grep -oP 'branch-rate="\K[^"]+' "${xml_file}" | head -1)
+            LINE_RATE=$(grep -m1 -oP 'line-rate="\K[^"]+' "${xml_file}")
+            LINE_COVERED=$(grep -m1 -oP 'lines-covered="\K[^"]+' "${xml_file}")
+            LINE_VALID=$(grep -m1 -oP 'lines-valid="\K[^"]+' "${xml_file}")
+            BRANCH_RATE=$(grep -m1 -oP 'branch-rate="\K[^"]+' "${xml_file}")
             LINE_PCT=$(awk "BEGIN {printf \"%.1f\", ${LINE_RATE} * 100}")
             BRANCH_PCT=$(awk "BEGIN {printf \"%.1f\", ${BRANCH_RATE} * 100}")
             echo "| **${label}** | ${LINE_COVERED}/${LINE_VALID} | ${LINE_PCT}% | ${BRANCH_PCT}% |"

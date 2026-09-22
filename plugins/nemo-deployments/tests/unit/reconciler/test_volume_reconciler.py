@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
+from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -36,7 +38,7 @@ async def test_volume_create_failure(
     async def fail(**kwargs: object) -> VolumeStatusUpdate:
         raise RuntimeError("docker unavailable")
 
-    mock_backend.create_volume = fail  # type: ignore[method-assign]
+    mock_backend.create_volume = fail  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
     await volume_reconciler.reconcile_one(vol)
 
@@ -57,6 +59,32 @@ async def test_deleting_volume_removes_backend_then_entity(
 
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
     mock_entities.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deleting_volume_keeps_entity_when_backend_delete_fails(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.delete_volume = AsyncMock(
+        return_value=VolumeStatusUpdate(
+            status="FAILED",
+            status_message="PVC deletion failed",
+            error_details={"reason": "forbidden"},
+        )
+    )
+
+    await volume_reconciler.reconcile_one(vol)
+
+    mock_backend.delete_volume.assert_awaited_once()
+    assert vol.status == "DELETING"
+    assert vol.status_message == "PVC deletion failed"
+    assert vol.error_details == {"reason": "forbidden"}
+    mock_entities.update.assert_awaited_once_with(vol)
+    mock_entities.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -94,6 +122,64 @@ async def test_deleting_volume_waits_for_executor(
 
     await reconciler.reconcile_one(vol)
 
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deleting_volume_backend_failure_preserves_entity_for_retry(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A backend delete that reports FAILED must NOT delete the entity row.
+
+    Backends signal a failed delete by returning a FAILED VolumeStatusUpdate
+    rather than raising. Deleting the entity anyway orphans the underlying PVC
+    while the model reports DELETED. The entity must survive so the next
+    reconcile cycle retries the backend delete.
+    """
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.volume_delete_status = VolumeStatusUpdate(status="FAILED", status_message="Failed to delete PVC: boom")
+
+    with caplog.at_level(logging.WARNING, logger="nemo_deployments_plugin.reconciler.volume_reconciler"):
+        await volume_reconciler.reconcile_one(vol)
+
+    # Backend was asked to delete (so a retry occurs next cycle) ...
+    assert mock_backend.volume_delete_calls == [("default", "vol1")]
+    # ... but the entity row survives rather than orphaning the PVC.
+    mock_entities.delete.assert_not_awaited()
+    # ... and the retry is logged with the backend's reported status interpolated
+    # (the %s renders the status word, so the message reads sensibly end to end).
+    rendered = caplog.text
+    assert "did not succeed (reported FAILED)" in rendered
+    assert "will retry: Failed to delete PVC: boom" in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_status", ["FAILED", "PENDING", "BOUND", "DELETING"])
+async def test_deleting_volume_non_released_status_preserves_entity(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+    delete_status: Literal["FAILED", "PENDING", "BOUND", "DELETING"],
+) -> None:
+    """ANY non-RELEASED backend delete status must preserve the entity for retry.
+
+    The reconciler guards on ``status != "RELEASED"`` rather than ``== "FAILED"``,
+    so the entity survives for every non-success status — pinning the
+    backend-agnostic contract against a future regression to a FAILED-only check.
+    Only RELEASED (see ``test_deleting_volume_removes_backend_then_entity``) may
+    remove the entity row.
+    """
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.volume_delete_status = VolumeStatusUpdate(status=delete_status)  # type: ignore[arg-type]
+
+    await volume_reconciler.reconcile_one(vol)
+
+    assert mock_backend.volume_delete_calls == [("default", "vol1")]
     mock_entities.delete.assert_not_awaited()
 
 

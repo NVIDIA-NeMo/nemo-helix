@@ -33,7 +33,6 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     scoped_harbor_agent_import,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
-    _final_agent_message,
     _rewards_mapping,
     _trial_from_harbor_result,
 )
@@ -47,7 +46,12 @@ from nemo_evaluator_sdk.agent_eval.tasks import (
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialError
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
-from nemo_evaluator_sdk.values.evidence import ATIFTraceHandle, OTLPTraceHandle, read_atif
+from nemo_evaluator_sdk.values.evidence import (
+    ATIFTraceHandle,
+    OTLPTraceHandle,
+    final_agent_message,
+    read_atif,
+)
 from pydantic import BaseModel, ValidationError
 
 _HELLO_WORLD_DATASET = Path(__file__).resolve().parents[2] / "examples" / "harbor" / "hello_world_dataset"
@@ -2030,7 +2034,7 @@ def test_harbor_still_words_its_resume_refusals_the_way_we_match_them() -> None:
     # If Harbor rewords, the predicate stops matching and the refusal propagates as a
     # crash — the safe direction, but a silent loss of the graceful re-run. Catch that
     # at upgrade time here instead of in someone's failed experiment.
-    pytest.importorskip("harbor.job", reason="harbor needs python >= 3.12")
+    pytest.importorskip("harbor.job", reason="needs the harbor extra")
     import inspect
 
     from harbor.job import Job
@@ -2049,7 +2053,7 @@ def test_harbor_job_config_equality_still_behaves_as_the_retry_assumes() -> None
     # The FileExistsError retry exists because Harbor compares its whole JobConfig and
     # ignores only identity/logging fields. Pin that behaviourally, so a Harbor upgrade
     # that changes the rule surfaces here rather than as a mystery re-run in production.
-    job_config = pytest.importorskip("harbor.models.job.config", reason="harbor needs python >= 3.12")
+    job_config = pytest.importorskip("harbor.models.job.config", reason="needs the harbor extra")
 
     baseline = job_config.JobConfig(job_name="a")
     assert baseline == job_config.JobConfig(job_name="b"), "job_name must stay outside Harbor's comparison"
@@ -2063,7 +2067,7 @@ def test_every_harbor_job_config_field_is_classified_against_the_sdk_stamp() -> 
     # comparison, but only in ways we have reasoned about. A Harbor upgrade that adds a
     # compared field would silently widen that gap into unexplained full re-runs, so
     # every field must land in exactly one bucket before it can ship.
-    job_config = pytest.importorskip("harbor.models.job.config", reason="harbor needs python >= 3.12")
+    job_config = pytest.importorskip("harbor.models.job.config", reason="needs the harbor extra")
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
         _CACHE_IRRELEVANT_OPTIONS,
         _HARBOR_EQ_IGNORED_FIELDS,
@@ -2968,7 +2972,7 @@ def test_output_text_falls_back_to_atif_when_the_otlp_trace_carries_no_answer(tm
 
     trial = _adapt_evidence_trial(job_dir)
 
-    atif_answer = _final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
+    atif_answer = final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
     assert atif_answer
     assert trial.output is not None
     assert trial.output.output_text == atif_answer
@@ -3002,7 +3006,7 @@ def test_an_unreadable_otlp_trace_does_not_lose_the_atif_answer(
 
     assert "Ignoring unreadable OTLP trace" in caplog.text
     assert trial.output is not None
-    assert trial.output.output_text == _final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
+    assert trial.output.output_text == final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
 
 
 def test_an_empty_message_envelope_falls_back_to_the_atif_answer(tmp_path: Path) -> None:
@@ -3032,7 +3036,7 @@ def test_an_empty_message_envelope_falls_back_to_the_atif_answer(tmp_path: Path)
     trial = _adapt_evidence_trial(job_dir)
 
     assert trial.output is not None
-    assert trial.output.output_text == _final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
+    assert trial.output.output_text == final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
 
 
 @pytest.mark.asyncio

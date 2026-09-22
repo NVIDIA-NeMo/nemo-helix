@@ -27,7 +27,7 @@ decisions about what survives translation, and are deliberately not guessed at h
 
 from __future__ import annotations
 
-from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymPlacement, GymRunnerTarget
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
 from pydantic_core import PydanticSerializationError
@@ -41,26 +41,35 @@ class UnsubmittableRunnerError(TypeError):
     """
 
 
-def runner_to_target(runner: AgentTaskRunner) -> AgentRunnerTarget:
-    """The target spec that reproduces ``runner`` as a job.
+def runner_to_target(runner: AgentTaskRunner, placement: GymPlacement | None = None) -> AgentRunnerTarget:
+    """The target spec that reproduces ``runner`` as a job, placed by ``placement``.
+
+    ``placement`` carries what the deployment decides rather than what the evaluation is — a staged
+    environment FileSet, the agent instance a sandboxed host routes to. It is runner-specific, so
+    supplying one for a runner that cannot be placed is refused rather than ignored.
 
     Raises:
-        UnsubmittableRunnerError: If the runner has no wire form, or carries state that would be
-            lost in translation.
+        UnsubmittableRunnerError: If the runner has no wire form, carries state that would be lost in
+            translation, or was given a placement it cannot use.
     """
     if isinstance(runner, GymAgentTaskRunner):
-        return _gym_target(runner)
+        return _gym_target(runner, placement or GymPlacement())
+    if placement is not None:
+        raise UnsubmittableRunnerError(
+            f"a GymPlacement cannot place a {type(runner).__name__}; placement is per runner kind."
+        )
     raise UnsubmittableRunnerError(
         f"{type(runner).__name__} has no target spec, so it cannot be submitted as a job. Run it "
         "in-process with AgentEvaluator(), or pass a runner target spec directly."
     )
 
 
-def _gym_target(runner: GymAgentTaskRunner) -> GymRunnerTarget:
-    """``GymAgentTaskRunner`` -> ``GymRunnerTarget``.
+def _gym_target(runner: GymAgentTaskRunner, placement: GymPlacement) -> GymRunnerTarget:
+    """``GymAgentTaskRunner`` + ``GymPlacement`` -> ``GymRunnerTarget``.
 
-    Every field carries, and nothing is rejected — unusual among the runners, and worth saying
-    plainly rather than inventing rejections to look careful. Gym's settings are all *behaviour*
+    Every config field carries, and nothing is rejected — unusual among the runners, and worth saying
+    plainly rather than inventing rejections to look careful. The placement only adds to that; it
+    overrides nothing. Gym's settings are all *behaviour*
     (which environment, which agent, how many attempts, how long to wait) rather than *location*:
     there is no work root, no local base directory, and no injected callable to lose. The one thing
     that reads like a local path, ``agent_config``, is resolved relative to the Gym installation
@@ -78,7 +87,11 @@ def _gym_target(runner: GymAgentTaskRunner) -> GymRunnerTarget:
     raised from the transport, naming neither the runner nor the field. Checking here turns that
     into the refusal this module promises.
     """
-    target = GymRunnerTarget(**runner.config.model_dump())
+    target = GymRunnerTarget(
+        **runner.config.model_dump(),
+        environment=placement.environment,
+        agent_ref_name=placement.agent_ref_name,
+    )
     try:
         target.model_dump(mode="json")
     except PydanticSerializationError as error:

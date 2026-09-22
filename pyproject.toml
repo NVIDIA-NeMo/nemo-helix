@@ -71,13 +71,9 @@ version = "0.0.0"
 [dependency-groups]
 # Insights analyst plugin convenience group.
 insights = ["nemo-insights-plugin"]
-# Experimentalist and Eval Author support Python 3.12 and 3.13. Both are listed so the
-# `nemo agents eval-author` commands are installed alongside Experimentalist. The
-# dependency is one arrow: Eval Author borrows the Experimentalist platform client
-# (see plugins/nemo-eval-author/README.md).
+# Experimentalist supports Python 3.12 and 3.13.
 experimentalist = [
   "nemo-experimentalist-plugin ; python_full_version < '3.14'",
-  "nemo-eval-author-plugin ; python_full_version < '3.14'",
 ]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin stays out of `enabled-plugins` so a platform install does not
@@ -257,7 +253,7 @@ cpu-tasks = [
   # insights.analyze bridge, which is a ModuleNotFoundError in a built image otherwise.
   "nemo-insights-plugin",
   "nemo-evaluator-plugin",
-  "sandboxed-gym[server,opensandbox]",
+  "nemo-sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-optimization-plugin",
@@ -401,7 +397,7 @@ nemo-agent-hardener-plugin = { workspace = true }
 nemo-data-designer-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
-sandboxed-gym = { workspace = true }
+nemo-sandboxed-gym = { workspace = true }
 nmp-guardrails = { workspace = true }
 nmp-intake = { workspace = true }
 nmp-jobs = { workspace = true }
@@ -430,7 +426,6 @@ nmp-testing = { workspace = true }
 nmp-build-tools = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
-nemo-eval-author-plugin = { workspace = true }
 nemo-experimentalist-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
@@ -504,7 +499,6 @@ members = [
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
-  "plugins/nemo-eval-author",
   "plugins/nemo-experimentalist",
   # Not shipped. An out-of-tree component package, installed so the tests that prove the
   # plugin mechanism actually run instead of being skipped by `importorskip`.
@@ -642,7 +636,7 @@ extra-paths = [
   "plugins/nemo-insights/src",
   # Source path for Experimentalist; its tests also import the benchmark runner.
   "plugins/nemo-experimentalist/src",
-  # Source path for sandboxed-gym; its tests import the package under test.
+  # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
   # on sys.path in tests/conftest.py.
@@ -670,7 +664,7 @@ exclude = [
   # `sandboxed_gym.sandbox_types`). Same rationale as the GPU training drivers below.
   #
   # The episode driver and backend DO type-check cleanly against the real SDK -- verified with
-  # `sandboxed-gym[opensandbox]` installed. They are excluded only because CI installs workspace
+  # `nemo-sandboxed-gym[opensandbox]` installed. They are excluded only because CI installs workspace
   # members without their extras, so `ty` would report `opensandbox` as unresolved. Drop these two
   # lines once the lint job installs that extra.
   "packages/sandboxed_gym/src/sandboxed_gym/backends/_opensandbox_driver.py",

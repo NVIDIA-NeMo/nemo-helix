@@ -716,6 +716,9 @@ export const handlers = [
       );
     }
   ),
+  http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`, () =>
+    HttpResponse.json({ data: [], total: 0 })
+  ),
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
     HttpResponse.json({
       data: [

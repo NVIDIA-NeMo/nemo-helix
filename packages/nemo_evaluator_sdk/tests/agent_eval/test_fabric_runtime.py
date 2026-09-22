@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_TRACE
@@ -387,6 +388,63 @@ async def test_fabric_runtime_maps_atif_artifact_to_trace_evidence(
     assert "prompt_tokens" not in trials[0].metadata
 
 
+@pytest.mark.asyncio
+async def test_fabric_runtime_reads_the_answer_from_atif_when_the_harness_reports_no_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    atif = _FakeArtifact("relay_atif", "atif", tmp_path / "trajectory.atif.json", "application/json")
+    atif.path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "steps": [
+                    {"source": "agent", "message": "let me check"},
+                    {"source": "agent", "message": "PONG"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output=None, artifacts=[atif])
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    trials = await runtime.run_tasks([_TASK])
+
+    assert trials[0].output is not None
+    assert trials[0].output.output_text == "PONG"
+    assert trials[0].output.response is None
+
+
+@pytest.mark.asyncio
+async def test_fabric_runtime_reads_the_answer_from_atif_when_the_harness_answer_is_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An adapter that always emits its envelope reports "no answer" as a null field rather than by
+    # omitting the output, so the envelope is present and only its answer is missing.
+    atif = _FakeArtifact("relay_atif", "atif", tmp_path / "trajectory.atif.json", "application/json")
+    atif.path.write_text(
+        json.dumps({"schema_version": "ATIF-v1.7", "steps": [{"source": "agent", "message": "PONG"}]}),
+        encoding="utf-8",
+    )
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output={"response": None}, artifacts=[atif])
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    trials = await runtime.run_tasks([_TASK])
+
+    assert trials[0].output is not None
+    assert trials[0].output.output_text == "PONG"
+    # The envelope is still the response: only the answer came from elsewhere.
+    assert trials[0].output.response == {"response": None}
+
+
 def _workspace_from_config(config: Any) -> Path:
     """Pull the staged workspace path out of the composed per-task config."""
     return Path(config.environment.workspace)
@@ -500,112 +558,6 @@ async def test_fabric_runtime_bad_seed_fails_only_that_task(tmp_path: Path, monk
 
     assert trials[0].status == "failed"
     assert trials[0].metadata["error_type"] == "WorkspaceSeedError"
-
-
-@pytest.mark.asyncio
-async def test_fabric_runtime_invokes_task_hook_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    events: list[str] = []
-
-    class _Hook:
-        def prepare(self, *, config, task, evidence_dir, workspace_dir, session):  # noqa: ANN001
-            events.append("prepare")
-            session.state["ok"] = True
-            return config
-
-        def after_success(self, *, task, result, session):  # noqa: ANN001
-            events.append("after_success")
-            assert session.state["ok"] is True
-            return {"analyzer_analysis": {"label": "benign"}}
-
-        def cleanup(self, *, session):  # noqa: ANN001
-            events.append("cleanup")
-
-    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
-        return _FakeResult(status="succeeded", output={"response": "ok"})
-
-    _install_fake_fabric(monkeypatch, handler)
-    runtime = fabric_runtime.FabricAgentRuntime(
-        config=_CONFIG,
-        work_root=tmp_path / "fabric",
-        capture_trajectory=False,
-        task_hook=_Hook(),
-    )
-
-    trials = await runtime.run_tasks([_TASK])
-
-    assert events == ["prepare", "after_success", "cleanup"]
-    assert trials[0].status == "completed"
-    assert trials[0].metadata["analyzer_analysis"]["label"] == "benign"
-    assert trials[0].output is not None
-    assert trials[0].output.metadata["analyzer_analysis"]["label"] == "benign"
-
-
-@pytest.mark.asyncio
-async def test_fabric_runtime_recovers_mcp_binding_when_fabric_status_not_succeeded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class _Hook:
-        def prepare(self, *, config, task, evidence_dir, workspace_dir, session):  # noqa: ANN001
-            return config
-
-        def after_success(self, *, task, result, session):  # noqa: ANN001
-            return {"analyzer_analysis": {"label": "phishing", "is_likely_phishing": True}}
-
-        def cleanup(self, *, session):  # noqa: ANN001
-            return None
-
-    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
-        return _FakeResult(status="failed", output={"response": ""})
-
-    _install_fake_fabric(monkeypatch, handler)
-    runtime = fabric_runtime.FabricAgentRuntime(
-        config=_CONFIG,
-        work_root=tmp_path / "fabric",
-        capture_trajectory=False,
-        task_hook=_Hook(),
-    )
-
-    trials = await runtime.run_tasks([_TASK])
-
-    assert trials[0].status == "completed"
-    assert trials[0].metadata.get("recovered_from_mcp_binding") is True
-    assert trials[0].output is not None
-    assert "phishing" in (trials[0].output.output_text or "")
-
-
-@pytest.mark.asyncio
-async def test_fabric_runtime_task_hook_cleanup_runs_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    events: list[str] = []
-
-    class _Hook:
-        def prepare(self, *, config, task, evidence_dir, workspace_dir, session):  # noqa: ANN001
-            events.append("prepare")
-            return config
-
-        def after_success(self, *, task, result, session):  # noqa: ANN001
-            events.append("after_success")
-            return None
-
-        def cleanup(self, *, session):  # noqa: ANN001
-            events.append("cleanup")
-
-    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
-        raise RuntimeError("boom")
-
-    _install_fake_fabric(monkeypatch, handler)
-    runtime = fabric_runtime.FabricAgentRuntime(
-        config=_CONFIG,
-        work_root=tmp_path / "fabric",
-        capture_trajectory=False,
-        task_hook=_Hook(),
-    )
-
-    trials = await runtime.run_tasks([_TASK])
-
-    assert events == ["prepare", "cleanup"]
-    assert trials[0].status == "failed"
 
 
 @pytest.mark.asyncio
@@ -1128,6 +1080,28 @@ async def test_fabric_runtime_codex_skills_removed_even_when_run_fails(
     assert not (workspace / ".agents").exists()
     # Provenance is still stamped on the failed trial for the A/B diff.
     assert [prov["name"] for prov in trials[0].metadata["skills"]] == list(names)
+
+
+# --- harness output text ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("plain text", "plain text"),
+        ({"response": "PONG"}, "PONG"),
+        ({"response": None, "text": "PONG"}, "PONG"),
+        # No text key at all: the payload *is* the output, so it stringifies.
+        ({"answer": 42}, '{"answer": 42}'),
+        ({"response": {"text": "PONG"}}, '{"response": {"text": "PONG"}}'),
+        # Nothing to say: None, so the caller falls back to the trace instead of scoring the envelope.
+        (None, None),
+        ({}, None),
+        ({"response": None}, None),
+    ],
+)
+def test_extract_output_text_answers_only_when_the_envelope_carries_one(output: Any, expected: str | None) -> None:
+    assert _common.extract_output_text(output) == expected
 
 
 # --- ATIF token capture -----------------------------------------------------

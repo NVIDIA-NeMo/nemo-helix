@@ -40,6 +40,7 @@ from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_t
 from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
 from nemo_platform_ext.cli.core.stdin_utils import (
     build_request_body,
+    pop_exist_ok,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
@@ -419,17 +420,17 @@ def create_filesets(
     validate_required_fields(input_payload, ["name"], "files filesets create", {"name": FILESET_NAME_HELP})
 
     workspace = input_payload.pop("workspace", None)
-    exist_ok = input_payload.pop("exist_ok", None)
+    exist_ok = pop_exist_ok(input_payload)
     body = build_request_body(CreateFilesetRequest, input_payload, command_name="files filesets create")
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(workspace=workspace, body=body, exist_ok=exist_ok)
+    kwargs = build_kwargs(workspace=workspace, body=body, exist_ok=exist_ok or None)
     if handle_code_generation(FilesClient, "create_fileset", kwargs, resolved_output_format, state):
         return
 
-    result = state.typed_client(FilesClient).create_fileset(workspace=workspace, body=body, exist_ok=bool(exist_ok))
+    result = state.typed_client(FilesClient).create_fileset(workspace=workspace, body=body, exist_ok=exist_ok)
 
     format_output(
         result,

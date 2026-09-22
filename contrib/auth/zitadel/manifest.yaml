@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+provider: zitadel
+mode: reference-only
+compose_file: null
+gateway_base_url: https://127.0.0.1:18084
+issuer_url: https://127.0.0.1:18084
+discovery_url: https://127.0.0.1:18084/.well-known/openid-configuration
+nemo_config: helm/values.yaml
+principal_contract:
+  subject_claim: sub
+  groups_claim: groups
+  external_machine_principals_use_service_prefix: false
+  internal_service_prefix_reserved: "service:"
+interactive_user_identity:
+  username: nemo-user
+  password_env_var: ZITADEL_INTERACTIVE_USER_PASSWORD
+  expected_email: nemo-user@example.com
+workload_identity:
+  principal_id: svc-nemo
+  expected_groups:
+    - nemo-workloads
+workload_contract:
+  audience: nemo-platform
+  principal_claim: sub
+  groups_claim: groups
+  groups_format: list
+  token_env_vars:
+    - NMP_WORKLOAD_IDENTITY_TOKEN_FILE
+  forwarded_headers:
+    principal_id: X-NMP-Principal-Id
+    principal_groups: X-NMP-Principal-Groups
+token_acquisition:
+  token_endpoint: https://127.0.0.1:18084/oauth/v2/token
+  # E2E TEST HARNESS ONLY. ZITADEL does not support resource-owner password
+  # credentials; setup uses a demo service application instead.
+  e2e_setup_grant:
+    grant_type: client_credentials
+    client_id: "__ZITADEL_SETUP_CLIENT_ID__"
+    client_secret_env_var: ZITADEL_E2E_SETUP_CLIENT_SECRET
+    client_auth_method: client_secret_basic
+    expected_subject: nemo-setup
+    scope: "openid profile email groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud"
+  workload_provider_grant:
+    grant_type: client_credentials
+    client_id: "__ZITADEL_WORKLOAD_CLIENT_ID__"
+    client_secret_env_var: ZITADEL_WORKLOAD_CLIENT_SECRET
+    client_auth_method: client_secret_basic
+    expected_subject: svc-nemo
+    scope: "openid profile email groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud"
+healthchecks:
+  - kind: http
+    url: https://127.0.0.1:18084/.well-known/openid-configuration
+startup_timeouts:
+  healthchecks_seconds: 600
+  gateway_seconds: 30
+  token_endpoint_seconds: 180
+test_runtimes:
+  - id: zitadel-kubernetes
+    backend: kubernetes
+    command: k8s
+    capabilities:
+      - gateway_discovery
+      - gateway_authn
+      - spoofed_header_rejection
+      - workload_provider_token
+      - workload_subject_token
+      - workload_token_exchange
+      - platform_access_keys
+      - workspace_rbac
+      - workload_job
+      - managed_workload_job_obo
+      - workload_deployment
+      - managed_workload_deployment_obo
+      - device_flow
+      - kubernetes_token_review

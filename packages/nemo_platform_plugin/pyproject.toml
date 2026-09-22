@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
     "anthropic>=0.88.0",
     "fastapi>=0.115.4",
+    "filesets",
     "jsonschema>=4.0.0",
     "lark>=1.1.0",
     "nemo-platform-sdk",
@@ -85,6 +86,7 @@ nemo-platform-sdk = [
 ]
 
 [tool.uv.sources]
+filesets = { workspace = true }
 nemo-platform-sdk = { workspace = true }
 nmp-build-tools = { workspace = true }
 

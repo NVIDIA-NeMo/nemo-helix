@@ -75,6 +75,10 @@ def _workload_identity_headers(internal: bool) -> dict[str, str]:
     return MARK_INTERNAL_REQUEST_HEADERS.copy() if internal else {}
 
 
+def _forwardable_otel_headers() -> dict[str, str]:
+    return {name: value for name, value in get_otel_headers().items() if not name.lower().startswith("x-nmp-")}
+
+
 def _platform_headers(
     as_service: str | None,
     internal: bool,
@@ -88,11 +92,7 @@ def _platform_headers(
     request scope).
     """
     headers = _get_default_headers(as_service, internal, on_behalf_of)
-    for name, value in get_otel_headers().items():
-        normalized_name = name.lower()
-        if normalized_name == "x-nmp-internal" or normalized_name.startswith("x-nmp-principal-"):
-            continue
-        headers[name] = value
+    headers.update(_forwardable_otel_headers())
     return headers
 
 

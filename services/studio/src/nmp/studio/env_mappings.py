@@ -57,6 +57,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(marker="STUDIO_UI_VITE_TELEMETRY_ENABLED", config_path="studio.telemetry_enabled", default="false"),
     # Feature Flags (VITE_FF_* prefix)
     EnvMapping(
+        marker="STUDIO_UI_VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED",
+        config_path="studio.feature_flags.agent_container_deployments_enabled",
+        default="true",
+    ),
+    EnvMapping(
         marker="STUDIO_UI_VITE_FF_AGENT_OPTIMIZATIONS_ENABLED",
         config_path="studio.feature_flags.agent_optimizations_enabled",
         default="false",
@@ -97,6 +102,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_DASHBOARD_ENABLED",
         config_path="studio.feature_flags.dashboard_enabled",
+        default="false",
+    ),
+    EnvMapping(
+        marker="STUDIO_UI_VITE_FF_DASHBOARD_SANDBOX_ENABLED",
+        config_path="studio.feature_flags.dashboard_sandbox_enabled",
         default="false",
     ),
     EnvMapping(

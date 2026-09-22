@@ -77,6 +77,7 @@ auth-service = [
   "httpx>=0.27.0",
   "pyyaml>=6.0.0",
   "nmp-common",
+  "nmp-entities",
   "wasmtime>=20.0.0",
 ]
 
@@ -106,7 +107,7 @@ core-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 data-designer-nemo = [
-  "data-designer==0.9.1",
+  "data-designer==0.9.3",
   "anyio>=4.0",
   "duckdb",
   "pydantic>=2",
@@ -268,7 +269,7 @@ nemo-agents-plugin = [
   "python-on-whales>=0.60",
   "anthropic>=0.88.0",
   "rich>=13.7.1",
-  "nemo-fabric[claude,codex,relay]>=0.3.0,<0.4.0",
+  "nemo-fabric[claude,codex,relay,streaming]>=0.3.0,<0.4.0",
   "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
   "deepagents>=0.7.8,<0.8",
   "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
@@ -277,8 +278,8 @@ nemo-agents-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-anonymizer-plugin = [
   "nemo-platform-plugin",
-  "nemo-anonymizer==0.3.3",
-  "data-designer==0.9.1",
+  "nemo-anonymizer==0.4.0",
+  "data-designer==0.9.3",
   "data-designer-nemo",
   "httpx>=0.27",
   "fastapi",
@@ -317,7 +318,7 @@ nemo-customizer-plugin = [
 nemo-data-designer-plugin = [
   "nemo-platform-plugin",
   "nmp-customization-common",
-  "data-designer==0.9.1",
+  "data-designer==0.9.3",
   "data-designer-nemo",
   "httpx>=0.27",
   "fastapi",
@@ -423,6 +424,7 @@ nemo-optimization-plugin = [
 nemo-platform-plugin = [
   "anthropic>=0.88.0",
   "fastapi>=0.115.4",
+  "filesets",
   "jsonschema>=4.0.0",
   "lark>=1.1.0",
   "nemo-platform-sdk",

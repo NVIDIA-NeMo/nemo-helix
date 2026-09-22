@@ -49,9 +49,11 @@ def test_resolved_token_maps_actor_claims_to_delegated_principal_headers() -> No
     assert resolved.principal_headers() == {
         "X-NMP-Principal-Id": "service:jobs",
         "X-NMP-Principal-Groups": "system:serviceaccounts",
+        "X-NMP-Actor-Aliases": "service:jobs",
         "X-NMP-Principal-On-Behalf-Of": "user:alice",
         "X-NMP-Principal-On-Behalf-Of-Groups": "researchers",
         "X-NMP-Principal-On-Behalf-Of-Email": "alice@example.test",
+        "X-NMP-Subject-Aliases": "user:alice,alice@example.test",
         "X-NMP-Scopes": "models.read",
     }
 
@@ -72,6 +74,7 @@ def test_non_workload_access_tokens_ignore_actor_claims(token_kind: ResolvedToke
         "X-NMP-Principal-Id": "user:alice",
         "X-NMP-Principal-Email": "alice@example.test",
         "X-NMP-Principal-Groups": "researchers",
+        "X-NMP-Actor-Aliases": "user:alice,alice@example.test",
         "X-NMP-Scopes": "models.read",
     }
 
@@ -113,6 +116,7 @@ async def test_resolver_uses_access_key_validator_when_access_keys_are_enabled()
         "X-NMP-Principal-Id": "alice@example.com",
         "X-NMP-Principal-Email": "alice@example.com",
         "X-NMP-Principal-Groups": "team-ml",
+        "X-NMP-Actor-Aliases": "alice@example.com",
         "X-NMP-Scopes": "models:read",
     }
     validate_access_key.assert_awaited_once_with(config, "scoped-access-key")

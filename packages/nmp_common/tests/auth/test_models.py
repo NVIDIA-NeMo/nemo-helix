@@ -55,6 +55,118 @@ class TestPrincipalFromHeaders:
         assert principal.on_behalf_of_groups == []
         assert principal.on_behalf_of_email is None
 
+    def test_from_headers_account_context_roundtrip(self):
+        headers = {
+            "x-nmp-principal-id": "service:worker",
+            "x-nmp-actor-account-id": "account-service",
+            "x-nmp-actor-aliases": "service:worker,service:worker,legacy-worker",
+            "x-nmp-principal-on-behalf-of": "user@example.com",
+            "x-nmp-subject-account-id": "account-user",
+            "x-nmp-subject-aliases": "legacy-user,user@example.com",
+        }
+
+        principal = Principal.from_headers(headers)
+
+        assert principal is not None
+        assert principal.account_id == "account-service"
+        assert principal.authz_aliases == ["service:worker", "legacy-worker"]
+        assert principal.caller_kind == "service_principal"
+        assert principal.on_behalf_of_account_id == "account-user"
+        assert principal.on_behalf_of_authz_aliases == ["legacy-user", "user@example.com"]
+        assert Principal.from_headers({k.lower(): v for k, v in principal.get_headers().items()}) == principal
+
+    def test_from_headers_ignores_caller_kind_header(self):
+        headers = {
+            "x-nmp-principal-id": "user@example.com",
+            "x-nmp-caller-kind": "service_principal",
+        }
+
+        principal = Principal.from_headers(headers)
+
+        assert principal is not None
+        assert principal.caller_kind == "principal"
+        assert "X-NMP-Caller-Kind" not in principal.get_headers()
+
+    def test_direct_principal_classifies_extended_non_service_subject_as_principal(self):
+        principal = Principal(id="auth0|abc")
+
+        assert principal.caller_kind == "principal"
+        assert principal.is_privileged() is False
+        assert principal.is_service_identity() is False
+
+    @pytest.mark.parametrize(
+        "principal_id",
+        [
+            "service:",
+            "service:has spaces",
+            "service:bad$name",
+            "service:/path",
+            "service:*",
+        ],
+    )
+    def test_from_headers_rejects_malformed_service_principal_id(self, principal_id: str):
+        with pytest.raises(InvalidPrincipalHeader):
+            Principal.from_headers({"x-nmp-principal-id": principal_id})
+
+    def test_from_headers_rejects_empty_service_account_principal_id(self):
+        with pytest.raises(InvalidPrincipalHeader, match="malformed"):
+            Principal.from_headers({"x-nmp-principal-id": "service-account:"})
+
+    @pytest.mark.parametrize(
+        "on_behalf_of",
+        [
+            "service:",
+            "service:has spaces",
+            "service:bad$name",
+            "service:/path",
+            "service:*",
+        ],
+    )
+    def test_from_headers_rejects_malformed_on_behalf_of_service_principal(self, on_behalf_of: str):
+        with pytest.raises(InvalidPrincipalHeader):
+            Principal.from_headers(
+                {
+                    "x-nmp-principal-id": "service:worker",
+                    "x-nmp-principal-on-behalf-of": on_behalf_of,
+                }
+            )
+
+    def test_from_headers_rejects_malformed_service_principal_alias(self):
+        with pytest.raises(InvalidPrincipalHeader, match="malformed"):
+            Principal.from_headers(
+                {
+                    "x-nmp-principal-id": "user@example.com",
+                    "x-nmp-actor-aliases": "service:",
+                }
+            )
+
+    def test_from_headers_rejects_malformed_service_principal_group(self):
+        with pytest.raises(InvalidPrincipalHeader, match="malformed"):
+            Principal.from_headers(
+                {
+                    "x-nmp-principal-id": "user@example.com",
+                    "x-nmp-principal-groups": "service:",
+                }
+            )
+
+    def test_from_headers_rejects_wildcard_alias(self):
+        headers = {
+            "x-nmp-principal-id": "user@example.com",
+            "x-nmp-actor-aliases": "team-a,*",
+        }
+
+        with pytest.raises(InvalidPrincipalHeader, match="wildcard"):
+            Principal.from_headers(headers)
+
+    def test_from_headers_rejects_delegated_account_without_delegation(self):
+        headers = {
+            "x-nmp-principal-id": "user@example.com",
+            "x-nmp-subject-account-id": "account-user",
+        }
+
+        with pytest.raises(InvalidPrincipalHeader, match="On-Behalf-Of is required"):
+            Principal.from_headers(headers)
+
     def test_from_nmp_headers_with_on_behalf_of_groups_and_email(self):
         """On-behalf-of groups and email are parsed when the on-behalf-of header is present."""
         headers = {
@@ -132,16 +244,17 @@ class TestPrincipalFromHeaders:
         assert principal is None
 
     def test_from_headers_case_insensitive_keys(self):
-        """Test that header keys are case-sensitive (lowercase expected)."""
-        # Headers should be lowercase as per HTTP/2 and common practice
+        """HTTP header keys are case-insensitive."""
         headers = {
-            "X-NMP-Principal-Id": "user@example.com",  # Wrong case
+            "X-NMP-Principal-Id": "user@example.com",
+            "X-NMP-Principal-Email": "user@example.com",
         }
 
         principal = Principal.from_headers(headers)
 
-        # Should not find principal with wrong case
-        assert principal is None
+        assert principal is not None
+        assert principal.id == "user@example.com"
+        assert principal.email == "user@example.com"
 
 
 class TestPrincipalEffectiveIdentity:
@@ -244,7 +357,9 @@ class TestPrincipalGetHeaders:
 
         headers = principal.get_headers()
 
-        assert headers == {"X-NMP-Principal-Id": "user@example.com"}
+        assert headers == {
+            "X-NMP-Principal-Id": "user@example.com",
+        }
 
     def test_get_headers_full(self):
         """Test getting headers from a full Principal."""
@@ -263,6 +378,23 @@ class TestPrincipalGetHeaders:
             "X-NMP-Principal-Groups": "admin,users",
             "X-NMP-Principal-On-Behalf-Of": "other@example.com",
         }
+
+    def test_get_headers_includes_account_context(self):
+        principal = Principal(
+            id="service:worker",
+            account_id="account-123",
+            authz_aliases=["service:worker"],
+            on_behalf_of="user@example.com",
+            on_behalf_of_account_id="account-456",
+            on_behalf_of_authz_aliases=["legacy-user"],
+        )
+
+        headers = principal.get_headers()
+
+        assert headers["X-NMP-Actor-Account-Id"] == "account-123"
+        assert headers["X-NMP-Actor-Aliases"] == "service:worker"
+        assert headers["X-NMP-Subject-Account-Id"] == "account-456"
+        assert headers["X-NMP-Subject-Aliases"] == "legacy-user"
 
     def test_get_headers_includes_on_behalf_of_groups_and_email(self):
         principal = Principal(
@@ -696,6 +828,15 @@ class TestPrincipalHeaderValidation:
         principal = Principal.from_headers(headers)
         assert principal is not None
         assert principal.on_behalf_of is None
+
+    def test_blank_on_behalf_of_rejects_subject_account_headers(self):
+        headers = {
+            "x-nmp-principal-id": "admin@example.com",
+            "x-nmp-principal-on-behalf-of": "   ",
+            "x-nmp-subject-account-id": "account-user",
+        }
+        with pytest.raises(InvalidPrincipalHeader, match="On-Behalf-Of is required"):
+            Principal.from_headers(headers)
 
     # --- Combined validation ---
 

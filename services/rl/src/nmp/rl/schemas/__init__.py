@@ -17,6 +17,7 @@ from nmp.rl.schemas.job import (
     RlJobOutput,
     RlSchema,
     TrainingMethod,
+    trains_lora_adapter,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "RlJobOutput",
     "RlSchema",
     "TrainingMethod",
+    "trains_lora_adapter",
 ]

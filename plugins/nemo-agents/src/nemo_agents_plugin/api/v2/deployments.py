@@ -54,7 +54,12 @@ from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_platform_plugin.api.filters import make_filter_obj_dep
 from nemo_platform_plugin.auth import current_auth_context
 from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.schema import PaginationData
 
@@ -169,6 +174,8 @@ async def create_deployment(
             status_code=409,
             detail=f"Deployment '{deployment_name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to create deployment for agent '%s'", body.agent)
         raise HTTPException(status_code=500, detail="Failed to create deployment.") from exc

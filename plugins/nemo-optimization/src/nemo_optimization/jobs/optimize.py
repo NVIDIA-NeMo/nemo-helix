@@ -22,6 +22,7 @@ from typing import Any, ClassVar
 import yaml
 from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import (
@@ -44,7 +45,6 @@ from nemo_platform_plugin.refs import (
     LocalDir,
     classify_output_target,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError
 from pydantic import BaseModel
 
 from nemo_optimization.agents import resolve_agent_config
@@ -112,8 +112,8 @@ class OptimizeJob(NemoJob):
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
 
-        # ``compile`` is the remote submission path only — ``NemoJobScheduler.run_local`` goes
-        # straight to ``run`` — so requiring the fileset here keeps platform execution remote-safe.
+        # ``compile`` is the remote submission path only, so requiring the
+        # fileset here keeps platform execution remote-safe.
         if spec.optimize_config_fileset is None:
             raise PlatformJobCompilationError(FILESET_REQUIRED)
 
@@ -176,7 +176,7 @@ def _profiles_unavailable(profile: str) -> PlatformJobDependencyUnavailableError
     )
 
 
-async def _resolve_executor(*, profile: str, async_sdk: object) -> ExecutorSpec:
+async def _resolve_executor(*, profile: str, async_sdk: AsyncPlatformClient) -> ExecutorSpec:
     """Pick the executor for *profile* from the backends the platform actually registered.
 
     Optimize prefers ``subprocess``: a study drives Fabric trials that may need the host's
@@ -184,9 +184,6 @@ async def _resolve_executor(*, profile: str, async_sdk: object) -> ExecutorSpec:
     register a subprocess backend (Helm / Minikube) get the ``cpu`` provider instead, which the
     platform maps to whichever backend it registered for that profile (docker or kubernetes_job).
     """
-    if async_sdk is None:
-        raise _profiles_unavailable(profile)
-
     try:
         profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
     except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
@@ -270,8 +267,7 @@ def _bundle_workdir(bundle_root: Path | None) -> Iterator[None]:
     """Run the study with *bundle_root* as the working directory (no-op when ``None``).
 
     Relative paths in the optimize config are documented as fileset-root-relative, and they are
-    consumed in many places — the dataset loader, Fabric's ``base_dir``, ``run_hook.path``,
-    author-supplied MCP ``config_paths``.  Rewriting each key would mean chasing every schema that
+    consumed in many places — the dataset loader, Fabric's ``base_dir``, MCP config files.  Rewriting each key would mean chasing every schema that
     can hold a path; moving the process instead makes them all resolve correctly at once.  The task
     subprocess runs exactly one job, so the process-global chdir is contained.
     """
@@ -408,8 +404,7 @@ def _publish_results(
     if sdk is None:
         raise LocalRunError(
             f"Publishing optimize results to fileset '{ws}/{name}' requires a 'sdk: NeMoPlatform', "
-            "but no platform SDK was available.  Set NMP_BASE_URL, pass sdk via "
-            "NemoJobScheduler.run_local(sdk=...), or use a local output directory instead."
+            "but no platform SDK was available. Set NMP_BASE_URL or use a local output directory instead."
         )
     upload_to_fileset(artifacts, fileset=name, workspace=ws, sdk=sdk)
     logger.info("Published optimize results from %s to fileset %s/%s", artifacts, ws, name)

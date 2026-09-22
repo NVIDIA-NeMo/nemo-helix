@@ -75,6 +75,15 @@ def _assert_created_job_request(jobs_client: MagicMock, *, workspace: str = "tes
     assert body.platform_spec.steps[0].executor.provider == "cpu"
 
 
+def _deployments_ctx(client: object, created: object) -> SimpleNamespace:
+    """CLI context whose typed ModelsClient returns *created* from ``create_deployment``."""
+    ctx = _ctx(client)
+    models_client = MagicMock()
+    models_client.create_deployment.return_value = _Response(created)
+    ctx.obj.typed_client.return_value = models_client
+    return ctx
+
+
 def test_jobs_create_watch_uses_sdk_watcher_and_outputs_created_job() -> None:
     created_job = _CreatedJob()
     client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))

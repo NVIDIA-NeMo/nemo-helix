@@ -9,7 +9,7 @@ description: ""
 
 This tutorial demonstrates how to use external datasets as seed data for synthetic data generation in Data Designer.
 
-For more detail about seed dataset behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/tutorials/seeding-with-an-external-dataset) of this tutorial.
+For more detail about seed dataset behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/tutorials/seeding-with-an-external-dataset) of this tutorial.
 
 ### HuggingFace Datasets
 
@@ -96,7 +96,7 @@ MODEL_ALIAS = "text"
 model_configs = [
     dd.ModelConfig(
         provider="default/nvidia-build",
-        model="nvidia/nemotron-3-nano-30b-a3b",  # Use the `served_model_name` from the provider
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(
             temperature=1.0,
@@ -319,5 +319,5 @@ When you configure a seed dataset:
 
 ## Next Steps
 
-- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/columns)
-- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/validators)
+- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/columns)
+- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/validators)

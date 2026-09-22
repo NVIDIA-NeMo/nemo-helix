@@ -39,7 +39,7 @@ dependencies = [
     # improvement/ subpackage — agent-improvement workflow (POC).
     "anthropic>=0.88.0",
     "rich>=13.7.1",
-    "nemo-fabric[claude,codex,relay]>=0.3.0,<0.4.0",
+    "nemo-fabric[claude,codex,relay,streaming]>=0.3.0,<0.4.0",
     "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
     # Platform owns the security-required DeepAgents harness version instead of
     # inheriting Fabric's optional harness extra, which is capped below 0.7.

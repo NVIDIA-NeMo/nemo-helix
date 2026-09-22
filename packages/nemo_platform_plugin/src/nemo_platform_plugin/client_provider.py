@@ -146,10 +146,15 @@ def _build_headers(
 
     if as_service is not None:
         headers["X-NMP-Principal-Id"] = f"service:{as_service}"
+        headers["X-NMP-Actor-Aliases"] = f"service:{as_service}"
     else:
         principal = _read_principal_from_env()
         if principal is not None:
             headers["X-NMP-Principal-Id"] = principal["id"]
+            if principal.get("account_id"):
+                headers["X-NMP-Actor-Account-Id"] = principal["account_id"]
+            if principal.get("authz_aliases"):
+                headers["X-NMP-Actor-Aliases"] = ",".join(principal["authz_aliases"])
             if principal.get("email"):
                 headers["X-NMP-Principal-Email"] = principal["email"]
             if principal.get("groups"):
@@ -160,6 +165,10 @@ def _build_headers(
                     headers["X-NMP-Principal-On-Behalf-Of-Email"] = principal["on_behalf_of_email"]
                 if principal.get("on_behalf_of_groups"):
                     headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(principal["on_behalf_of_groups"])
+                if principal.get("on_behalf_of_account_id"):
+                    headers["X-NMP-Subject-Account-Id"] = principal["on_behalf_of_account_id"]
+                if principal.get("on_behalf_of_authz_aliases"):
+                    headers["X-NMP-Subject-Aliases"] = ",".join(principal["on_behalf_of_authz_aliases"])
 
     if on_behalf_of is not None:
         # An explicit override wins over any on-behalf-of delegation carried by
@@ -168,12 +177,14 @@ def _build_headers(
         # email/groups) -- mirrors nmp.common.sdk_factory._get_default_headers.
         headers.pop("X-NMP-Principal-On-Behalf-Of-Email", None)
         headers.pop("X-NMP-Principal-On-Behalf-Of-Groups", None)
+        headers.pop("X-NMP-Subject-Account-Id", None)
+        headers.pop("X-NMP-Subject-Aliases", None)
         headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of
 
     return headers
 
 
-def _effective_on_behalf_of(principal: dict[str, Any]) -> tuple[str, list[str], str | None]:
+def _effective_on_behalf_of(principal: dict[str, Any]) -> tuple[str, list[str], str | None, str | None, list[str]]:
     """Collapse an env principal to its acting identity (id, groups, email).
 
     Mirrors :pyattr:`nmp.common.auth.Principal.effective_principal`: if the job
@@ -185,8 +196,16 @@ def _effective_on_behalf_of(principal: dict[str, Any]) -> tuple[str, list[str], 
             principal["on_behalf_of"],
             list(principal.get("on_behalf_of_groups") or []),
             principal.get("on_behalf_of_email"),
+            principal.get("on_behalf_of_account_id"),
+            list(principal.get("on_behalf_of_authz_aliases") or []),
         )
-    return principal["id"], list(principal.get("groups") or []), principal.get("email")
+    return (
+        principal["id"],
+        list(principal.get("groups") or []),
+        principal.get("email"),
+        principal.get("account_id"),
+        list(principal.get("authz_aliases") or []),
+    )
 
 
 def _build_task_headers(service_name: str) -> dict[str, str]:
@@ -199,6 +218,7 @@ def _build_task_headers(service_name: str) -> dict[str, str]:
     headers: dict[str, str] = {
         _INTERNAL_REQUEST_HEADER: "true",
         "X-NMP-Principal-Id": f"service:{service_name}",
+        "X-NMP-Actor-Aliases": f"service:{service_name}",
     }
     principal = _read_principal_from_env()
     if principal is None:
@@ -207,12 +227,16 @@ def _build_task_headers(service_name: str) -> dict[str, str]:
             service_name,
         )
         return headers
-    obo_id, obo_groups, obo_email = _effective_on_behalf_of(principal)
+    obo_id, obo_groups, obo_email, obo_account_id, obo_aliases = _effective_on_behalf_of(principal)
     headers["X-NMP-Principal-On-Behalf-Of"] = obo_id
     if obo_groups:
         headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(obo_groups)
     if obo_email:
         headers["X-NMP-Principal-On-Behalf-Of-Email"] = obo_email
+    if obo_account_id:
+        headers["X-NMP-Subject-Account-Id"] = obo_account_id
+    if obo_aliases:
+        headers["X-NMP-Subject-Aliases"] = ",".join(obo_aliases)
     return headers
 
 

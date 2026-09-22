@@ -92,10 +92,11 @@ class BaseContributor:
             _add_submit_command,
         )
         from nemo_platform_plugin.scheduler import NemoJobScheduler
+        from nmp.customization_common.cli.renderer import CustomizationSubmitRenderer
 
         app = typer.Typer(name=self.name, help=self.cli_help, no_args_is_help=True)
         scheduler = NemoJobScheduler()
-        _add_submit_command(app, self.job_cls, scheduler)
+        _add_submit_command(app, self.job_cls, scheduler, renderer_cls=CustomizationSubmitRenderer)
         _add_explain_command(app, self.job_cls, scheduler)
         self.apply_cli_overrides(app)
         return app

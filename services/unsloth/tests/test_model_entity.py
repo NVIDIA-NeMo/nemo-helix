@@ -7,7 +7,7 @@ Covers:
 - Adapter (LoRA) creation
 - Full / merged model entity creation
 - Update-on-conflict semantics (matches automodel behavior)
-- Deployment launch with string-ref and inline DeploymentParameters
+- Deployment launch with string-ref and inline DeploymentParams
 - Skipping deployment when there's already an active one for a LoRA base
 - sanitize_name utility
 """
@@ -329,8 +329,9 @@ class TestLaunchModel:
         models.create_deployment_config.assert_not_called()
 
     def test_inline_params_creates_config_then_deployment(self) -> None:
+        from nemo_platform_plugin.deployment import DeploymentParams
         from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
         deployment_config = types.SimpleNamespace(workspace="other", name="sft-cfg-x")
@@ -355,7 +356,7 @@ class TestLaunchModel:
             workspace="other",
             fileset=FileSetRef(workspace="other", name="x"),
             model_entity="other/base",
-            deployment_config=DeploymentParameters(gpu=1, image_name="img", image_tag="1.0"),
+            deployment_config=DeploymentParams(gpu=1, image_name="img", image_tag="1.0"),
         )
 
         runner.launch_model(config, me)
@@ -381,8 +382,9 @@ class TestLaunchModel:
         models.get_deployment.assert_called_once_with(workspace="other", name="sft-deploy-x")
 
     def test_inline_config_conflict_updates_before_deployment(self) -> None:
+        from nemo_platform_plugin.deployment import DeploymentParams
         from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
         models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
@@ -408,7 +410,7 @@ class TestLaunchModel:
             workspace="default",
             fileset=FileSetRef(workspace="default", name="x"),
             model_entity="default/base",
-            deployment_config=DeploymentParameters(gpu=2),
+            deployment_config=DeploymentParams(gpu=2),
         )
 
         runner.launch_model(config, me)
@@ -458,9 +460,9 @@ class TestLaunchModel:
         assert deployment_call.kwargs["body"].config == "existing-cfg"
 
     def test_lora_with_active_deployment_skips(self) -> None:
+        from nemo_platform_plugin.deployment import DeploymentParams
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import (
-            DeploymentParameters,
             ModelEntityTaskConfig,
             PEFTConfig,
         )
@@ -480,7 +482,7 @@ class TestLaunchModel:
             fileset=FileSetRef(workspace="other", name="adapter"),
             model_entity="other/base",
             peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
-            deployment_config=DeploymentParameters(),
+            deployment_config=DeploymentParams(),
         )
 
         runner.launch_model(config, me)
@@ -501,9 +503,9 @@ class TestLaunchModel:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
+        from nemo_platform_plugin.deployment import DeploymentParams
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import (
-            DeploymentParameters,
             ModelEntityTaskConfig,
             PEFTConfig,
         )
@@ -520,7 +522,7 @@ class TestLaunchModel:
             fileset=FileSetRef(workspace="default", name="adapter"),
             model_entity="default/base",
             peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
-            deployment_config=DeploymentParameters(lora_enabled=False),
+            deployment_config=DeploymentParams(lora_enabled=False),
         )
 
         with caplog.at_level("WARNING"):
@@ -570,7 +572,7 @@ class TestCompilerDeploymentConfigPlumbing:
             job_spec = await platform_job_config_compiler(
                 workspace="default",
                 job_spec=spec,
-                sdk=MagicMock(),
+                platform=MagicMock(),
             )
         finally:
             compiler_mod.fetch_model_entity = original_fetch
@@ -615,7 +617,7 @@ class TestCompilerDeploymentConfigPlumbing:
             job_spec = await platform_job_config_compiler(
                 workspace="default",
                 job_spec=spec,
-                sdk=MagicMock(),
+                platform=MagicMock(),
             )
         finally:
             compiler_mod.fetch_model_entity = original_fetch

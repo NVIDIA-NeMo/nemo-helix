@@ -41,6 +41,13 @@ import data.common.req_method_lower
 # This can be made configurable if customers want to enforce strict scope checking by
 # rejecting tokens without platform scopes.
 
+is_platform_scope(scope) if {
+	contains(scope, ":")
+	not startswith(scope, "urn:")
+	not startswith(scope, "http://")
+	not startswith(scope, "https://")
+}
+
 # Check if scopes are valid for the request (variant 1: no scopes provided)
 # If no scopes provided at all, skip check to allow tokens without scopes (optional scope mechanism)
 
@@ -54,7 +61,7 @@ scope_check_passed if {
 # If no platform scopes are found, skip check to allow tokens without platform scopes (optional scope mechanism)
 scope_check_passed if {
 	scopes := extract_scopes
-	platform_scopes := [s | s := scopes[_]; contains(s, ":")]
+	platform_scopes := [s | s := scopes[_]; is_platform_scope(s)]
 	count(platform_scopes) == 0
 }
 
@@ -62,7 +69,7 @@ scope_check_passed if {
 # Extract platform scopes and validate them against endpoint requirements
 scope_check_passed if {
 	scopes := extract_scopes
-	platform_scopes := [s | s := scopes[_]; contains(s, ":")]
+	platform_scopes := [s | s := scopes[_]; is_platform_scope(s)]
 	count(platform_scopes) > 0
 	req_has_required_scopes(platform_scopes)
 }

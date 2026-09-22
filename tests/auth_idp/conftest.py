@@ -113,7 +113,7 @@ def _token_request_body(grant: dict[str, str]) -> dict[str, str]:
         "grant_type": grant_type,
         "client_id": grant["client_id"],
     }
-    if "client_secret" in grant:
+    if "client_secret" in grant and grant.get("client_auth_method") != "client_secret_basic":
         body["client_secret"] = grant["client_secret"]
     if grant_type == "password":
         body["username"] = grant["username"]
@@ -126,6 +126,15 @@ def _token_request_body(grant: dict[str, str]) -> dict[str, str]:
             body["scope"] = grant["scope"]
         return body
     raise ValueError(f"unsupported grant_type for auth_idp token exchange: {grant_type}")
+
+
+def _token_request_auth(grant: dict[str, str]) -> tuple[str, str] | None:
+    if grant.get("client_auth_method") != "client_secret_basic":
+        return None
+    client_secret = grant.get("client_secret")
+    if not client_secret:
+        raise AssertionError("client_secret_basic token acquisition requires client_secret")
+    return grant["client_id"], client_secret
 
 
 def _compose_e2e_config_for_case(
@@ -173,6 +182,7 @@ def _exchange_token_with_retries(
             response = httpx.post(
                 token_endpoint,
                 data=_token_request_body(grant),
+                auth=_token_request_auth(grant),
                 timeout=30.0,
                 **request_tls_config,
             )

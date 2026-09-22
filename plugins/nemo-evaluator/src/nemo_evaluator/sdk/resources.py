@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, overload
 
 from nemo_evaluator.api.schemas import TasksetRef
+from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator.sdk._executor import (
     SubmitTargetSpec,
     _AsyncEvaluatorPluginExecutor,
@@ -45,6 +46,7 @@ from nemo_evaluator.sdk.types import (
 )
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackager
 from nemo_evaluator.shared.metric_bundles.defaults import resolve_default_metric_bundle_packager
+from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.values import (
@@ -133,6 +135,15 @@ class Evaluator:
         self,
         *,
         tasks: TasksetRef,
+        target: GymAgentTaskRunner,
+        placement: GymPlacement,
+    ) -> AgentEvaluatorJobResource: ...
+
+    @overload
+    def submit(
+        self,
+        *,
+        tasks: TasksetRef,
         target: AgentTaskRunner,
     ) -> AgentEvaluatorJobResource: ...
 
@@ -144,6 +155,7 @@ class Evaluator:
         tasks: TasksetRef | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,
+        placement: GymPlacement | None = None,
         field_mapping: FieldMapping | None = None,
         prompt_template: str | dict[str, Any] | None = None,
         metric_bundle_packager: MetricBundlePackager | None = None,
@@ -154,6 +166,11 @@ class Evaluator:
         ``tasks`` + ``target`` evaluates a stored taskset with a live agent runner. They are one
         method because they are one concept — the split is a property of how the work is described
         today, not of what the caller is asking for.
+
+        ``placement`` says where the platform runs the runner — a staged environment FileSet, the
+        agent instance a sandboxed host routes to — as opposed to what the evaluation is, which is
+        the runner's own config. It is typed per runner kind, so the overloads admit a
+        ``GymPlacement`` only alongside a ``GymAgentTaskRunner``.
         """
         if tasks is not None:
             if metric is not None or dataset is not None:
@@ -182,7 +199,18 @@ class Evaluator:
                     "evaluation. A taskset evaluation is configured by the runner passed as "
                     "`target`, so supplying them here would have no effect."
                 )
-            return self._executor.submit_agent_eval(tasks=tasks, target=target)
+            if placement is not None and not isinstance(target, GymAgentTaskRunner):
+                # Rejected statically by the overloads; this is for callers without a type checker.
+                raise TypeError(
+                    f"placement=GymPlacement(...) places a GymAgentTaskRunner, not a {type(target).__name__}. "
+                    "Placement is per runner kind, so honouring it here would mean guessing."
+                )
+            return self._executor.submit_agent_eval(tasks=tasks, target=target, placement=placement)
+        if placement is not None:
+            raise TypeError(
+                "placement configures a taskset evaluation's runner; a row evaluation has no runner to "
+                "place. Pass `tasks=TasksetRef(...)` with the runner it belongs to."
+            )
         if metric is None or dataset is None:
             raise TypeError(
                 "submit() needs either `tasks` + `target` for a taskset evaluation, or `metric` + "

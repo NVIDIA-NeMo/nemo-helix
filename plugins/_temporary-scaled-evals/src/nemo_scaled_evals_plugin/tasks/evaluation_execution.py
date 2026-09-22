@@ -6,23 +6,37 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_platform_plugin.errors import LocalRunError
+from nemo_platform_plugin.tasks.dispatcher import exit_code_for, read_step_config
+from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> int:
     """Dispatch the evaluation execution job."""
-    _ensure_in_cluster_kubeconfig()
-    return run_task(
-        EvaluationExecutionJob,
-        sdk=get_task_sdk("scaled-evals"),
-        async_sdk=get_async_task_sdk("scaled-evals"),
-    )
+    configure_task_logging()
+    try:
+        _ensure_in_cluster_kubeconfig()
+        config = read_step_config()
+        job = EvaluationExecutionJob()
+    except Exception:
+        logger.exception("Failed to prepare task for scaled-evals evaluation execution")
+        return 2
+
+    try:
+        return exit_code_for(job.run(config))
+    except LocalRunError:
+        raise
+    except Exception:
+        logger.exception("EvaluationExecutionJob.run raised")
+        return 1
 
 
 def _ensure_in_cluster_kubeconfig() -> None:

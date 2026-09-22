@@ -26,7 +26,12 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_platform_plugin.api.filters import make_filter_obj_dep
 from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 from nemo_platform_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
@@ -69,6 +74,8 @@ async def create_agent(
             status_code=409,
             detail=f"Agent '{body.name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to create agent '%s'", body.name)
         raise HTTPException(status_code=500, detail="Failed to create agent.") from exc

@@ -10,8 +10,8 @@ above reach stderr as bare messages with no timestamp, level or logger name,
 and INFO/DEBUG are dropped outright. A job that fails without raising can
 therefore produce completely empty logs.
 
-:func:`configure_task_logging` closes that gap for every task dispatched
-through :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`.
+:func:`configure_task_logging` closes that gap for every typed task entrypoint
+dispatched through :mod:`nemo_platform_plugin.tasks.dispatcher`.
 
 Lookup order for the provider
 -----------------------------

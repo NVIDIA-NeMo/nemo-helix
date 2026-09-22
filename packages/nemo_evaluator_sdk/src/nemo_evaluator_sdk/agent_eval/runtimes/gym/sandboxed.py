@@ -24,7 +24,7 @@ Gym's model-call captures make the same hop: the host enables capture, reads eac
 and returns it on the record. This runner writes them back out in the layout the CLI runner's parser
 expects, so per-call timing reaches a trace either way.
 
-The host itself is provisioned by ``sandboxed-gym``: start a session, take its rollout URL and
+The host itself is provisioned by ``nemo-sandboxed-gym``: start a session, take its rollout URL and
 token off the descriptor, and hand them to this runner.
 """
 
@@ -151,7 +151,7 @@ class SandboxedGymRuntimeConfig(BaseModel):
         "not already carry one. Required by the host path: `RolloutCollectionHelper.run_examples` reads "
         "`row['agent_ref']['name']` with no fallback, while the `gym eval run` CLI resolves the agent from "
         "config instead -- so a dataset that runs under the CLI can arrive here unroutable. This is the "
-        "instance an environment's config defines (`mcqa_simple_agent`), not the agent component "
+        "instance an agent config's top-level key defines (`rewoo_agent`), not the component it configures "
         "(`simple_agent`).",
     )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from each rollout record.")

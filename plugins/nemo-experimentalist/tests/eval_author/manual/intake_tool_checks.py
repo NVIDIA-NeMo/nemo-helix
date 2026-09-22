@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Manual check of the Eval Author Intake tools against a live platform.
+"""Manual check of the Experimentalist Intake tools against a live platform.
 
 Not a test. Pytest does not collect this file. No automation runs it. See README.md in
 this directory.
@@ -11,7 +11,7 @@ Intake answers the way the logic expects. This script proves the second half.
 
 Read-only: every call is a GET.
 
-    uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_tool_checks.py
+    uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_tool_checks.py
 """
 
 import argparse

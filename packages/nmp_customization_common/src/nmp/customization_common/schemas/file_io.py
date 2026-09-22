@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Optional
+from typing import Optional, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 FILESET_PROTOCOL = "fileset://"
 
@@ -34,33 +34,54 @@ class TaskPhase(StrEnum):
 
 
 class FileSetRef(BaseModel):
-    """Reference to a FileSet."""
+    """Reference to a FileSet, optionally rooted at a directory within it."""
 
     # workspace is optional because at compile time, the workspace is not known.
     # None tells the file_io task to use the job's workspace from the NMPJobContext.
     workspace: Optional[str] = None
     name: str
+    path: Optional[str] = None
 
     def __str__(self) -> str:
-        if self.workspace is None:
-            return self.name
-        return f"{self.workspace}/{self.name}"
+        base = self.name if self.workspace is None else f"{self.workspace}/{self.name}"
+        return f"{base}#{self.path}" if self.path is not None else base
 
     def __repr__(self) -> str:
-        return f"FileSetRef(workspace={self.workspace}, name={self.name})"
+        return f"FileSetRef(workspace={self.workspace}, name={self.name}, path={self.path})"
 
     @classmethod
-    def _parse_string_parts(cls, ref: str) -> tuple[Optional[str], str] | None:
-        """Parse a FileSet reference string into a tuple of workspace and name."""
+    def _parse_string_parts(cls, ref: str) -> tuple[Optional[str], str, Optional[str]] | None:
+        """Parse a FileSet reference string into workspace, name, and optional path."""
         if len(ref) == 0:
             return None
         if ref.startswith(FILESET_PROTOCOL):
             ref = ref[len(FILESET_PROTOCOL) :]
-        parts = ref.split("/", 1)
+        fileset_ref, separator, path = ref.partition("#")
+        if separator and "#" in path:
+            raise ValueError("FileSet reference path cannot contain '#'.")
+        parts = fileset_ref.split("/", 1)
         if len(parts) == 1:
-            return None, parts[0]
+            return None, parts[0], path if separator else None
         # split("/", 1) yields at most 2 parts, so this is the 2-part case.
-        return parts[0], parts[1]
+        return parts[0], parts[1], path if separator else None
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def _normalize_path(cls, value: object) -> object:
+        """Normalize a fileset directory path and ensure it cannot traverse upward."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("FileSet reference path must be a string.")
+        if "#" in value or "\\" in value:
+            raise ValueError("FileSet reference path cannot contain '#' or '\\'.")
+
+        path = value.lstrip("/").rstrip("/")
+        if not path:
+            raise ValueError("FileSet reference path cannot be empty.")
+        if any(part in ("", ".", "..") for part in path.split("/")):
+            raise ValueError("FileSet reference path must not contain empty, '.' or '..' segments.")
+        return f"{path}/"
 
     @classmethod
     def extract_name(cls, ref: str) -> str:
@@ -69,6 +90,7 @@ class FileSetRef(BaseModel):
         Supports:
         - workspace/name
         - name
+        - workspace/name#path/
         - fileset://workspace/name (legacy, stripped)
         """
         return cls.model_validate(ref).name
@@ -83,9 +105,12 @@ class FileSetRef(BaseModel):
         if isinstance(v, str):
             result = cls._parse_string_parts(v)
             if result is None:
-                raise ValueError(f"Invalid FileSet reference: {v!r}. Expected format: 'workspace/name' or 'name'.")
-            workspace, name = result
-            return {"workspace": workspace, "name": name}
+                raise ValueError(
+                    f"Invalid FileSet reference: {v!r}. "
+                    "Expected format: 'workspace/name', 'name', or either form with '#path/'."
+                )
+            workspace, name, path = result
+            return {"workspace": workspace, "name": name, "path": path}
         return v
 
 
@@ -99,7 +124,8 @@ class DownloadItem(BaseModel):
     src: FileSetRef = Field(
         description=(
             "FileSet reference for the source files. "
-            "Accepts 'workspace/name' or 'name' (job workspace used when omitted)."
+            "Accepts 'workspace/name', 'name', or either form with a '#path/' directory fragment "
+            "(job workspace used when omitted)."
         ),
     )
     dest: str = Field(
@@ -127,6 +153,12 @@ class UploadItem(BaseModel):
             "propagated from the source model entity)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _reject_destination_path(self) -> Self:
+        if self.dest.path is not None:
+            raise ValueError("Upload destination must reference a FileSet root, not a '#path/' directory.")
+        return self
 
 
 class FileIOTaskConfig(BaseModel):

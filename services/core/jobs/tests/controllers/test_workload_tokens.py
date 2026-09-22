@@ -97,6 +97,7 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
     assert str(request.url) == "http://platform/apis/entities/v2/workspaces/system/entities/workload_delegation"
     assert request.headers["Authorization"] == "Bearer controller-token"
     assert request.headers["X-NMP-Principal-Id"] == "service:jobs"
+    assert request.headers["X-NMP-Actor-Aliases"] == "service:jobs"
     assert request.headers["X-NMP-Principal-On-Behalf-Of"] == ""
     assert request.headers["X-NMP-Principal-On-Behalf-Of-Email"] == ""
     assert request.headers["X-NMP-Principal-On-Behalf-Of-Groups"] == ""

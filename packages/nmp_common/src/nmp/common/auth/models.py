@@ -9,34 +9,54 @@ import json
 import logging
 import os
 import re
-from typing import Dict, List, Optional, Self
+from typing import Dict, List, Literal, Optional, Self
 from urllib.parse import quote
 
 from pydantic import BaseModel, Field, ValidationError
 
 from .exceptions import InvalidPrincipalHeader
+from .principal_identifier import (
+    MAX_PRINCIPAL_ID_LENGTH as MAX_PRINCIPAL_ID_LENGTH,
+)
+from .principal_identifier import (
+    PRINCIPAL_ID_ALLOWED_CHARACTERS,
+    InvalidPrincipalIdentifier,
+    parse_principal_identifier,
+    validate_principal_identifier,
+)
 
 logger = logging.getLogger(__name__)
 
 NMP_PRINCIPAL_ENVVAR = "NMP_PRINCIPAL"
 
-MAX_PRINCIPAL_ID_LENGTH = 256
 MAX_EMAIL_LENGTH = 320
 MAX_GROUP_LENGTH = 256
 MAX_GROUPS_COUNT = 100
+MAX_AUTHZ_ALIAS_LENGTH = 256
+MAX_AUTHZ_ALIASES_COUNT = 100
 
-_PRINCIPAL_ID_RE = re.compile(r"^[a-zA-Z0-9@._\-:+/]+$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+
+CallerKind = Literal["principal", "service_principal"]
+
+
+def _normalize_headers(headers: Dict[str, str]) -> dict[str, str]:
+    return {key.lower(): value for key, value in headers.items()}
 
 
 def _validate_principal_id(value: str, header_name: str) -> None:
     """Validate a principal identifier value (used for principal-id and on-behalf-of)."""
-    if len(value) > MAX_PRINCIPAL_ID_LENGTH:
-        raise InvalidPrincipalHeader(f"{header_name} exceeds maximum length of {MAX_PRINCIPAL_ID_LENGTH} characters")
-    if not _PRINCIPAL_ID_RE.match(value):
-        raise InvalidPrincipalHeader(
-            f"{header_name} contains invalid characters; allowed: alphanumeric, @, ., -, _, :, +, /"
-        )
+    try:
+        validate_principal_identifier(value, label=header_name)
+    except InvalidPrincipalIdentifier as exc:
+        raise InvalidPrincipalHeader(str(exc)) from exc
+
+
+def _parse_principal_id(value: str, header_name: str) -> str:
+    try:
+        return parse_principal_identifier(value, label=header_name).raw
+    except InvalidPrincipalIdentifier as exc:
+        raise InvalidPrincipalHeader(str(exc)) from exc
 
 
 def _principal_email_from_headers(headers: Dict[str, str], header_key: str, header_label: str) -> Optional[str]:
@@ -65,11 +85,58 @@ def _principal_groups_from_headers(headers: Dict[str, str], header_key: str, hea
     for group in groups:
         if len(group) > MAX_GROUP_LENGTH:
             raise InvalidPrincipalHeader(f"{header_label} contains a group exceeding {MAX_GROUP_LENGTH} characters")
-        if not _PRINCIPAL_ID_RE.match(group):
+        try:
+            parse_principal_identifier(group, label=f"{header_label} group")
+        except InvalidPrincipalIdentifier as exc:
+            if "contains invalid characters" not in str(exc):
+                raise InvalidPrincipalHeader(str(exc)) from exc
             raise InvalidPrincipalHeader(
-                f"{header_label} contains a group with invalid characters; allowed: alphanumeric, @, ., -, _, :, +, /"
-            )
+                f"{header_label} contains a group with invalid characters; allowed: {PRINCIPAL_ID_ALLOWED_CHARACTERS}"
+            ) from exc
     return groups
+
+
+def _optional_principal_id_from_headers(headers: Dict[str, str], header_key: str, header_label: str) -> str | None:
+    raw = headers.get(header_key)
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    _validate_principal_id(value, header_label)
+    return value
+
+
+def _principal_aliases_from_headers(headers: Dict[str, str], header_key: str, header_label: str) -> list[str]:
+    aliases_header = headers.get(header_key, "")
+    if not aliases_header:
+        return []
+
+    aliases: list[str] = []
+    for raw_alias in aliases_header.split(","):
+        alias = raw_alias.strip()
+        if not alias:
+            raise InvalidPrincipalHeader(f"{header_label} contains an empty alias")
+        if alias == "*":
+            raise InvalidPrincipalHeader(f"{header_label} cannot contain wildcard principal '*'")
+        if len(alias) > MAX_AUTHZ_ALIAS_LENGTH:
+            raise InvalidPrincipalHeader(
+                f"{header_label} contains an alias exceeding {MAX_AUTHZ_ALIAS_LENGTH} characters"
+            )
+        try:
+            parse_principal_identifier(alias, label=f"{header_label} alias")
+        except InvalidPrincipalIdentifier as exc:
+            if "contains invalid characters" not in str(exc):
+                raise InvalidPrincipalHeader(str(exc)) from exc
+            raise InvalidPrincipalHeader(
+                f"{header_label} contains an alias with invalid characters; allowed: {PRINCIPAL_ID_ALLOWED_CHARACTERS}"
+            ) from exc
+        if alias not in aliases:
+            aliases.append(alias)
+
+    if len(aliases) > MAX_AUTHZ_ALIASES_COUNT:
+        raise InvalidPrincipalHeader(f"{header_label} exceeds maximum of {MAX_AUTHZ_ALIASES_COUNT} aliases")
+    return aliases
 
 
 class Principal(BaseModel):
@@ -79,8 +146,13 @@ class Principal(BaseModel):
     """
 
     id: str = Field(default="", description="The principal's unique identifier")
+    account_id: Optional[str] = Field(None, description="Stable NeMo account identifier resolved for this principal")
     email: Optional[str] = Field(None, description="The principal's email address")
     groups: List[str] = Field(default_factory=list, description="Groups the principal belongs to")
+    authz_aliases: List[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers that may appear on authorization bindings",
+    )
     on_behalf_of: Optional[str] = Field(
         None,
         description="If acting on behalf of another principal, their principal ID",
@@ -93,6 +165,21 @@ class Principal(BaseModel):
         None,
         description="The on-behalf-of principal's email address",
     )
+    on_behalf_of_account_id: Optional[str] = Field(
+        None,
+        description="Stable NeMo account identifier resolved for the on-behalf-of principal",
+    )
+    on_behalf_of_authz_aliases: List[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the on-behalf-of principal",
+    )
+
+    @property
+    def caller_kind(self) -> CallerKind:
+        """Whether the caller is a service principal, derived from the trusted principal id."""
+        if not self.id:
+            return "principal"
+        return parse_principal_identifier(self.id, validate=False).caller_kind
 
     @property
     def effective_id(self) -> str:
@@ -114,12 +201,28 @@ class Principal(BaseModel):
         return self.email
 
     @property
+    def effective_account_id(self) -> Optional[str]:
+        """The acting user's stable account ID when available."""
+        if self.on_behalf_of:
+            return self.on_behalf_of_account_id
+        return self.account_id
+
+    @property
+    def effective_authz_aliases(self) -> List[str]:
+        """The acting user's authorization aliases when available."""
+        if self.on_behalf_of:
+            return list(self.on_behalf_of_authz_aliases)
+        return list(self.authz_aliases)
+
+    @property
     def effective_principal(self) -> Principal:
         """The acting user's principal: on_behalf_of principal if delegated, otherwise the principal's own principal."""
         return Principal(
             id=self.effective_id,
             groups=self.effective_groups,
             email=self.effective_email,
+            account_id=self.effective_account_id,
+            authz_aliases=self.effective_authz_aliases,
         )
 
     @property
@@ -127,14 +230,17 @@ class Principal(BaseModel):
         """Whether the principal is delegated."""
         return self.on_behalf_of is not None
 
-    @property
     def is_privileged(self) -> bool:
         """Whether the principal is privileged."""
-        return self.id.startswith("service:")
+        if not self.id:
+            return False
+        return parse_principal_identifier(self.id, validate=False).is_privileged()
 
     def is_service_identity(self) -> bool:
         """Whether the principal is an internal service or service account."""
-        return self.is_privileged or self.id.startswith("service-account:")
+        if not self.id:
+            return False
+        return parse_principal_identifier(self.id, validate=False).is_service_identity()
 
     @classmethod
     def from_headers(cls, headers: Dict[str, str]) -> Optional[Principal]:
@@ -149,23 +255,35 @@ class Principal(BaseModel):
         Raises:
             InvalidPrincipalHeader: If any header value fails validation
         """
+        headers = _normalize_headers(headers)
         principal_id = headers.get("x-nmp-principal-id", "").strip()
         if not principal_id:
             return None
 
-        _validate_principal_id(principal_id, "X-NMP-Principal-Id")
+        principal_id = _parse_principal_id(principal_id, "X-NMP-Principal-Id")
 
         email = _principal_email_from_headers(headers, "x-nmp-principal-email", "X-NMP-Principal-Email")
         groups = _principal_groups_from_headers(headers, "x-nmp-principal-groups", "X-NMP-Principal-Groups")
-
+        account_id = _optional_principal_id_from_headers(
+            headers,
+            "x-nmp-actor-account-id",
+            "X-NMP-Actor-Account-Id",
+        )
+        authz_aliases = _principal_aliases_from_headers(
+            headers,
+            "x-nmp-actor-aliases",
+            "X-NMP-Actor-Aliases",
+        )
         on_behalf_of_groups: Optional[List[str]] = None
         on_behalf_of_email: Optional[str] = None
+        on_behalf_of_account_id: Optional[str] = None
+        on_behalf_of_authz_aliases: List[str] = []
 
         on_behalf_of = headers.get("x-nmp-principal-on-behalf-of")
         if on_behalf_of is not None:
             on_behalf_of = on_behalf_of.strip()
             if on_behalf_of:
-                _validate_principal_id(on_behalf_of, "X-NMP-Principal-On-Behalf-Of")
+                on_behalf_of = _parse_principal_id(on_behalf_of, "X-NMP-Principal-On-Behalf-Of")
             else:
                 on_behalf_of = None
 
@@ -179,14 +297,32 @@ class Principal(BaseModel):
                 "x-nmp-principal-on-behalf-of-email",
                 "X-NMP-Principal-On-Behalf-Of-Email",
             )
+            on_behalf_of_account_id = _optional_principal_id_from_headers(
+                headers,
+                "x-nmp-subject-account-id",
+                "X-NMP-Subject-Account-Id",
+            )
+            on_behalf_of_authz_aliases = _principal_aliases_from_headers(
+                headers,
+                "x-nmp-subject-aliases",
+                "X-NMP-Subject-Aliases",
+            )
+        if on_behalf_of is None and (headers.get("x-nmp-subject-account-id") or headers.get("x-nmp-subject-aliases")):
+            raise InvalidPrincipalHeader(
+                "X-NMP-Principal-On-Behalf-Of is required when delegated account headers are present"
+            )
 
         return cls(
             id=principal_id,
+            account_id=account_id,
             email=email,
             groups=groups,
+            authz_aliases=authz_aliases,
             on_behalf_of=on_behalf_of,
             on_behalf_of_groups=on_behalf_of_groups,
             on_behalf_of_email=on_behalf_of_email,
+            on_behalf_of_account_id=on_behalf_of_account_id,
+            on_behalf_of_authz_aliases=on_behalf_of_authz_aliases,
         )
 
     def get_headers(self) -> Dict[str, str]:
@@ -197,11 +333,17 @@ class Principal(BaseModel):
         """
         headers = {"X-NMP-Principal-Id": self.id}
 
+        if self.account_id:
+            headers["X-NMP-Actor-Account-Id"] = self.account_id
+
         if self.email:
             headers["X-NMP-Principal-Email"] = self.email
 
         if self.groups:
             headers["X-NMP-Principal-Groups"] = ",".join(self.groups)
+
+        if self.authz_aliases:
+            headers["X-NMP-Actor-Aliases"] = ",".join(self.authz_aliases)
 
         if self.on_behalf_of:
             headers["X-NMP-Principal-On-Behalf-Of"] = self.on_behalf_of
@@ -211,6 +353,12 @@ class Principal(BaseModel):
 
         if self.on_behalf_of_email:
             headers["X-NMP-Principal-On-Behalf-Of-Email"] = self.on_behalf_of_email
+
+        if self.on_behalf_of_account_id:
+            headers["X-NMP-Subject-Account-Id"] = self.on_behalf_of_account_id
+
+        if self.on_behalf_of_authz_aliases:
+            headers["X-NMP-Subject-Aliases"] = ",".join(self.on_behalf_of_authz_aliases)
 
         return headers
 
@@ -227,6 +375,8 @@ class Principal(BaseModel):
             id=self.on_behalf_of,
             groups=list(self.on_behalf_of_groups or []),
             email=self.on_behalf_of_email,
+            account_id=self.on_behalf_of_account_id,
+            authz_aliases=list(self.on_behalf_of_authz_aliases),
         )
 
     def get_env_var(self, env_var_name: str = NMP_PRINCIPAL_ENVVAR) -> Dict[str, str]:
@@ -248,6 +398,9 @@ class Principal(BaseModel):
         """
         parts = [f"X-NMP-Principal-Id={quote(self.id, safe='')}"]
 
+        if self.account_id:
+            parts.append(f"X-NMP-Actor-Account-Id={quote(self.account_id, safe='')}")
+
         if self.email:
             parts.append(f"X-NMP-Principal-Email={quote(self.email, safe='')}")
 
@@ -255,6 +408,10 @@ class Principal(BaseModel):
             # Groups are comma-separated, so URL-encode the whole value
             groups_value = ",".join(self.groups)
             parts.append(f"X-NMP-Principal-Groups={quote(groups_value, safe='')}")
+
+        if self.authz_aliases:
+            aliases_value = ",".join(self.authz_aliases)
+            parts.append(f"X-NMP-Actor-Aliases={quote(aliases_value, safe='')}")
 
         if self.on_behalf_of:
             parts.append(f"X-NMP-Principal-On-Behalf-Of={quote(self.on_behalf_of, safe='')}")
@@ -265,6 +422,13 @@ class Principal(BaseModel):
 
         if self.on_behalf_of_email:
             parts.append(f"X-NMP-Principal-On-Behalf-Of-Email={quote(self.on_behalf_of_email, safe='')}")
+
+        if self.on_behalf_of_account_id:
+            parts.append(f"X-NMP-Subject-Account-Id={quote(self.on_behalf_of_account_id, safe='')}")
+
+        if self.on_behalf_of_authz_aliases:
+            aliases_value = ",".join(self.on_behalf_of_authz_aliases)
+            parts.append(f"X-NMP-Subject-Aliases={quote(aliases_value, safe='')}")
 
         return ",".join(parts)
 
@@ -310,8 +474,16 @@ class AuthContext(BaseModel):
     """
 
     principal_id: str = Field(..., description="The principal's unique identifier")
+    principal_account_id: Optional[str] = Field(
+        default=None,
+        description="Stable NeMo account identifier for the principal",
+    )
     principal_email: Optional[str] = Field(default=None, description="The principal's email address")
     principal_groups: List[str] = Field(default_factory=list, description="Groups the principal belongs to")
+    principal_authz_aliases: List[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the principal",
+    )
     principal_on_behalf_of: Optional[str] = Field(
         default=None, description="If acting on behalf of another principal, their principal ID"
     )
@@ -321,26 +493,42 @@ class AuthContext(BaseModel):
     principal_on_behalf_of_email: Optional[str] = Field(
         default=None, description="The on-behalf-of principal's email address"
     )
+    principal_on_behalf_of_account_id: Optional[str] = Field(
+        default=None,
+        description="Stable NeMo account identifier for the on-behalf-of principal",
+    )
+    principal_on_behalf_of_authz_aliases: List[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the on-behalf-of principal",
+    )
 
     @classmethod
     def from_principal(cls, principal: Principal) -> Self:
         """Create from a runtime Principal."""
         return cls(
             principal_id=principal.id,
+            principal_account_id=principal.account_id,
             principal_email=principal.email,
             principal_groups=principal.groups,
+            principal_authz_aliases=principal.authz_aliases,
             principal_on_behalf_of=principal.on_behalf_of,
             principal_on_behalf_of_groups=principal.on_behalf_of_groups,
             principal_on_behalf_of_email=principal.on_behalf_of_email,
+            principal_on_behalf_of_account_id=principal.on_behalf_of_account_id,
+            principal_on_behalf_of_authz_aliases=principal.on_behalf_of_authz_aliases,
         )
 
     def to_principal(self) -> Principal:
         """Convert back to a Principal for SDK calls."""
         return Principal(
             id=self.principal_id,
+            account_id=self.principal_account_id,
             email=self.principal_email,
             groups=self.principal_groups,
+            authz_aliases=self.principal_authz_aliases,
             on_behalf_of=self.principal_on_behalf_of,
             on_behalf_of_groups=self.principal_on_behalf_of_groups,
             on_behalf_of_email=self.principal_on_behalf_of_email,
+            on_behalf_of_account_id=self.principal_on_behalf_of_account_id,
+            on_behalf_of_authz_aliases=self.principal_on_behalf_of_authz_aliases,
         )

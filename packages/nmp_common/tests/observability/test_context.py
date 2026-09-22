@@ -4,6 +4,7 @@
 """Tests for AppContext and context management functionality."""
 
 import logging
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from nmp.common.observability.context import (
     AppContext,
     AppContextLogProcessor,
     AppContextSpanProcessor,
+    AuthContext,
     BaseContext,
     get_app_ctx,
     initialize_app_ctx,
@@ -24,13 +26,16 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import Tracer
-from structlog.typing import EventDict
+from structlog.typing import EventDict, Processor
 
 
-def create_capture_processor(captured_logs: dict[str, EventDict]):
-    def capture_processor(logger, method_name, event_dict):
-        captured_logs[event_dict["event"]] = event_dict.copy()
-        return event_dict
+def create_capture_processor(captured_logs: dict[str, EventDict]) -> Processor:
+    def capture_processor(logger: Any, method_name: str, event_dict: MutableMapping[str, Any]) -> EventDict:
+        event_name = event_dict["event"]
+        assert isinstance(event_name, str)
+        captured = dict(event_dict)
+        captured_logs[event_name] = captured
+        return captured
 
     return capture_processor
 
@@ -125,6 +130,7 @@ def _assert_attribs(
     for msg, attrib_assertions in expected_attribs.items():
         log_attribs = captured_logs[msg]
         span_attribs = span_to_attribs[msg]
+        assert span_attribs is not None
         for key, value in attrib_assertions.items():
             assert log_attribs[key] == value
             assert span_attribs[key] == value
@@ -224,3 +230,20 @@ def test_update_app_ctx_does_not_restore_on_scope_exit():
     assert ctx is not None
     assert ctx.get_custom_ctx(OuterContext) is not None
     assert ctx.get_custom_ctx(InnerContext) is not None
+
+
+def test_auth_context_round_trips_stable_account_headers():
+    headers = {
+        "x-nmp-principal-id": "user@example.com",
+        "x-nmp-actor-account-id": "account-user",
+        "x-nmp-principal-email": "user@example.com",
+        "x-nmp-principal-groups": "team-a,team-b",
+        "x-nmp-actor-aliases": "legacy-user,user@example.com",
+        "x-nmp-principal-on-behalf-of": "delegate@example.com",
+        "x-nmp-principal-on-behalf-of-email": "delegate@example.com",
+        "x-nmp-principal-on-behalf-of-groups": "team-c",
+        "x-nmp-subject-account-id": "account-delegate",
+        "x-nmp-subject-aliases": "legacy-delegate",
+    }
+
+    assert AuthContext.from_headers(headers).to_headers() == headers

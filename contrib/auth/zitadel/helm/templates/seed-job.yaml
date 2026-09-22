@@ -1,0 +1,809 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if .Values.zitadelSeedJob.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.zitadelSeedJob.serviceAccountName }}
+  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  labels:
+    app.kubernetes.io/component: zitadel-seed
+    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.zitadelSeedJob.serviceAccountName }}
+  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  labels:
+    app.kubernetes.io/component: zitadel-seed
+    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.zitadelSeedJob.serviceAccountName }}
+  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  labels:
+    app.kubernetes.io/component: zitadel-seed
+    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.zitadelSeedJob.serviceAccountName }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.zitadelSeedJob.serviceAccountName }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-zitadel-seed" .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  labels:
+    app.kubernetes.io/component: zitadel-seed
+    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+data:
+  seed.py: |-
+    import base64
+    import json
+    import os
+    import ssl
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from datetime import datetime, timezone
+
+
+    NAMESPACE = os.environ["POD_NAMESPACE"]
+    SERVICE_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    SERVICE_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    K8S_API = "https://{}:{}".format(
+        os.environ["KUBERNETES_SERVICE_HOST"],
+        os.environ.get("KUBERNETES_SERVICE_PORT", "443"),
+    )
+    ZITADEL_INTERNAL_URL = os.environ["ZITADEL_INTERNAL_URL"].rstrip("/")
+    ZITADEL_PUBLIC_URL = os.environ["ZITADEL_PUBLIC_URL"].rstrip("/")
+    ZITADEL_INTERNAL_HEADERS = {"Host": urllib.parse.urlsplit(ZITADEL_PUBLIC_URL).netloc}
+    STATE_SECRET_NAME = os.environ["STATE_SECRET_NAME"]
+    PAT_SECRET_NAME = os.environ["PAT_SECRET_NAME"]
+    PAT_SECRET_KEY = os.environ["PAT_SECRET_KEY"]
+    NEMO_CONFIGMAP_NAME = os.environ["NEMO_CONFIGMAP_NAME"]
+    NEMO_DEPLOYMENTS = [name for name in os.environ["NEMO_DEPLOYMENTS"].split(",") if name]
+    GROUPS_CLAIM = os.environ["GROUPS_CLAIM"]
+    ROLE_KEY = os.environ["ROLE_KEY"]
+    SETUP_USER_ID = os.environ["SETUP_USER_ID"]
+    SETUP_USER_NAME = os.environ["SETUP_USER_NAME"]
+    WORKLOAD_USER_ID = os.environ["WORKLOAD_USER_ID"]
+    WORKLOAD_USER_NAME = os.environ["WORKLOAD_USER_NAME"]
+    LOGIN_CLIENT_USER_ID = os.environ["LOGIN_CLIENT_USER_ID"]
+    LOGIN_CLIENT_USER_NAME = os.environ["LOGIN_CLIENT_USER_NAME"]
+    INTERACTIVE_USER_NAME = os.environ["INTERACTIVE_USER_NAME"]
+    INTERACTIVE_USER_FIRST_NAME = os.environ["INTERACTIVE_USER_FIRST_NAME"]
+    INTERACTIVE_USER_LAST_NAME = os.environ["INTERACTIVE_USER_LAST_NAME"]
+    INTERACTIVE_USER_EMAIL = os.environ["INTERACTIVE_USER_EMAIL"]
+    INTERACTIVE_USER_PASSWORD = os.environ["INTERACTIVE_USER_PASSWORD"]
+    ACTION_NAME = os.environ["ACTION_NAME"]
+    PROJECT_NAME = "NeMo Platform"
+    API_APP_NAME = "nemo-platform-api"
+    CLI_APP_NAME = "nemo-platform-cli"
+    REQUEST_TIMEOUT_SECONDS = 15
+    WAIT_TIMEOUT_SECONDS = int(os.environ.get("WAIT_TIMEOUT_SECONDS", "600"))
+    REQUIRED_STATE_KEYS = {
+        "project_id",
+        "nemo_client_id",
+        "nemo_client_secret",
+        "cli_client_id",
+        "interactive_user_id",
+        "interactive_user_password",
+        "setup_user_id",
+        "setup_client_id",
+        "setup_client_secret",
+        "workload_user_id",
+        "workload_client_id",
+        "workload_client_secret",
+        "login_client_user_id",
+        "login_client_pat",
+        "groups_claim",
+        "role_key",
+    }
+
+
+    class RequestFailed(RuntimeError):
+        def __init__(self, method, url, status, body):
+            super().__init__("{} {} failed with {}: {}".format(method, url, status, body[:1000]))
+            self.status = status
+
+
+    def _json_request(method, url, payload=None, headers=None, context=None):
+        body = None if payload is None else json.dumps(payload).encode("utf-8")
+        request_headers = {"Accept": "application/json"}
+        if body is not None:
+            request_headers["Content-Type"] = "application/json"
+        if headers:
+            request_headers.update(headers)
+        request = urllib.request.Request(url, data=body, method=method, headers=request_headers)
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS, context=context) as response:
+                content = response.read().decode("utf-8")
+                if not content:
+                    return {}
+                return json.loads(content)
+        except urllib.error.HTTPError as exc:
+            content = exc.read().decode("utf-8", errors="replace")
+            raise RequestFailed(method, url, exc.code, content) from exc
+
+
+    def _retry(description, func):
+        deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+        last_error = None
+        while time.monotonic() < deadline:
+            try:
+                return func()
+            except Exception as exc:
+                last_error = exc
+                print("waiting for {}: {}".format(description, exc), flush=True)
+                time.sleep(5)
+        raise TimeoutError("timed out waiting for {}".format(description)) from last_error
+
+
+    with open(SERVICE_TOKEN_PATH, encoding="utf-8") as token_file:
+        K8S_TOKEN = token_file.read().strip()
+    K8S_CONTEXT = ssl.create_default_context(cafile=SERVICE_CA_PATH)
+
+
+    def _k8s_request(method, path, payload=None, content_type="application/json"):
+        headers = {"Authorization": "Bearer {}".format(K8S_TOKEN)}
+        if payload is not None:
+            headers["Content-Type"] = content_type
+        return _json_request(method, K8S_API + path, payload, headers=headers, context=K8S_CONTEXT)
+
+
+    def _secret_path(name):
+        return "/api/v1/namespaces/{}/secrets/{}".format(NAMESPACE, name)
+
+
+    def _configmap_path(name):
+        return "/api/v1/namespaces/{}/configmaps/{}".format(NAMESPACE, name)
+
+
+    def _deployment_path(name):
+        return "/apis/apps/v1/namespaces/{}/deployments/{}".format(NAMESPACE, name)
+
+
+    def _decode_secret_data(secret):
+        return {
+            key: base64.b64decode(value).decode("utf-8")
+            for key, value in secret.get("data", {}).items()
+        }
+
+
+    def _get_secret(name):
+        return _k8s_request("GET", _secret_path(name))
+
+
+    def _read_state_secret():
+        try:
+            state = _decode_secret_data(_get_secret(STATE_SECRET_NAME))
+        except RequestFailed as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return state
+
+
+    def _validate_complete_state(state):
+        missing = REQUIRED_STATE_KEYS - state.keys()
+        if missing:
+            raise RuntimeError(
+                "state secret {}/{} is missing {}; delete it to re-seed".format(
+                    NAMESPACE,
+                    STATE_SECRET_NAME,
+                    sorted(missing),
+                )
+            )
+        return state
+
+
+    def _migrate_state(pat, state):
+        missing = REQUIRED_STATE_KEYS - state.keys()
+        if missing == {"interactive_user_password"}:
+            migrated = dict(state)
+            migrated["interactive_user_id"] = _create_interactive_user(pat)
+            migrated["interactive_user_password"] = INTERACTIVE_USER_PASSWORD
+            _upsert_secret(STATE_SECRET_NAME, migrated)
+            print("migrated legacy ZITADEL seed state in {}".format(STATE_SECRET_NAME), flush=True)
+            return migrated
+        return _validate_complete_state(state)
+
+
+    def _upsert_secret(name, values):
+        encoded = {
+            key: base64.b64encode(value.encode("utf-8")).decode("ascii")
+            for key, value in values.items()
+        }
+        metadata = {
+            "name": name,
+            "labels": {
+                "app.kubernetes.io/component": "zitadel-seed",
+                "app.kubernetes.io/managed-by": "Helm",
+            },
+        }
+        try:
+            _get_secret(name)
+        except RequestFailed as exc:
+            if exc.status != 404:
+                raise
+            _k8s_request(
+                "POST",
+                "/api/v1/namespaces/{}/secrets".format(NAMESPACE),
+                {"apiVersion": "v1", "kind": "Secret", "metadata": metadata, "type": "Opaque", "data": encoded},
+            )
+            return
+        _k8s_request(
+            "PATCH",
+            _secret_path(name),
+            {"metadata": {"labels": metadata["labels"]}, "data": encoded},
+            content_type="application/merge-patch+json",
+        )
+
+
+    def _wait_for_pat():
+        def get_pat():
+            secret = _get_secret(PAT_SECRET_NAME)
+            pat = _decode_secret_data(secret).get(PAT_SECRET_KEY)
+            if not pat:
+                raise RuntimeError("secret key is empty")
+            return pat.strip()
+
+        return _retry("ZITADEL admin PAT secret", get_pat)
+
+
+    def _wait_for_zitadel_discovery():
+        def get_discovery():
+            return _json_request(
+                "GET",
+                ZITADEL_INTERNAL_URL + "/.well-known/openid-configuration",
+                headers=ZITADEL_INTERNAL_HEADERS,
+            )
+
+        return _retry("ZITADEL discovery endpoint", get_discovery)
+
+
+    def _zitadel_request(method, path, pat, payload=None):
+        headers = dict(ZITADEL_INTERNAL_HEADERS)
+        headers["Authorization"] = "Bearer {}".format(pat)
+        return _json_request(method, ZITADEL_INTERNAL_URL + path, payload, headers=headers)
+
+
+    def _first_matching(items, field, expected):
+        for item in items:
+            if item.get(field) == expected:
+                return item
+        return None
+
+
+    def _search_projects(pat):
+        return _zitadel_request(
+            "POST",
+            "/management/v1/projects/_search",
+            pat,
+            {
+                "query": {"limit": 100},
+                "queries": [
+                    {"nameQuery": {"name": PROJECT_NAME, "method": "TEXT_QUERY_METHOD_EQUALS"}},
+                ],
+            },
+        ).get("result", [])
+
+
+    def _ensure_project(pat):
+        try:
+            project = _zitadel_request(
+                "POST",
+                "/management/v1/projects",
+                pat,
+                {
+                    "name": PROJECT_NAME,
+                    "projectRoleAssertion": True,
+                    "projectRoleCheck": False,
+                    "hasProjectCheck": False,
+                },
+            )
+            return project["id"]
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+            project = _first_matching(_search_projects(pat), "name", PROJECT_NAME)
+            if project is None:
+                raise
+            return project["id"]
+
+
+    def _ensure_project_role(pat, project_id):
+        try:
+            _zitadel_request(
+                "POST",
+                "/management/v1/projects/{}/roles".format(project_id),
+                pat,
+                {"roleKey": ROLE_KEY, "displayName": "NeMo workload access", "group": ROLE_KEY},
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+
+
+    def _search_apps(pat, project_id):
+        return _zitadel_request(
+            "POST",
+            "/management/v1/projects/{}/apps/_search".format(project_id),
+            pat,
+            {"query": {"limit": 100}},
+        ).get("result", [])
+
+
+    def _ensure_api_app(pat, project_id):
+        try:
+            return _zitadel_request(
+                "POST",
+                "/management/v1/projects/{}/apps/api".format(project_id),
+                pat,
+                {
+                    "name": API_APP_NAME,
+                    "authMethodType": "API_AUTH_METHOD_TYPE_BASIC",
+                },
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+            app = _first_matching(_search_apps(pat, project_id), "name", API_APP_NAME)
+            if app is None:
+                raise
+            secret = _zitadel_request(
+                "POST",
+                "/management/v1/projects/{}/apps/{}/api_config/_generate_client_secret".format(
+                    project_id,
+                    app["id"],
+                ),
+                pat,
+            )
+            return {
+                "appId": app["id"],
+                "clientId": app["apiConfig"]["clientId"],
+                "clientSecret": secret["clientSecret"],
+            }
+
+
+    def _ensure_cli_app(pat, project_id):
+        try:
+            return _zitadel_request(
+                "POST",
+                "/management/v1/projects/{}/apps/oidc".format(project_id),
+                pat,
+                {
+                    "name": CLI_APP_NAME,
+                    "redirectUris": ["http://localhost:3000/auth/callback", "http://localhost"],
+                    "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+                    "grantTypes": [
+                        "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
+                        "OIDC_GRANT_TYPE_REFRESH_TOKEN",
+                        "OIDC_GRANT_TYPE_DEVICE_CODE",
+                    ],
+                    "appType": "OIDC_APP_TYPE_NATIVE",
+                    "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
+                    "postLogoutRedirectUris": [ZITADEL_PUBLIC_URL],
+                    "version": "OIDC_VERSION_1_0",
+                    "devMode": True,
+                    "accessTokenType": "OIDC_TOKEN_TYPE_BEARER",
+                    "accessTokenRoleAssertion": True,
+                    "idTokenRoleAssertion": True,
+                    "idTokenUserinfoAssertion": True,
+                },
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+            app = _first_matching(_search_apps(pat, project_id), "name", CLI_APP_NAME)
+            if app is None:
+                raise
+            return {"appId": app["id"], "clientId": app["oidcConfig"]["clientId"]}
+
+
+    def _create_machine_user(pat, user_id, name, description):
+        try:
+            _zitadel_request(
+                "POST",
+                "/management/v1/users/machine",
+                pat,
+                {
+                    "userName": user_id,
+                    "name": name,
+                    "description": description,
+                    "accessTokenType": "ACCESS_TOKEN_TYPE_BEARER",
+                    "userId": user_id,
+                },
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+        secret = _zitadel_request("PUT", "/management/v1/users/{}/secret".format(user_id), pat, {})
+        return {
+            "user_id": user_id,
+            "client_id": secret["clientId"],
+            "client_secret": secret["clientSecret"],
+        }
+
+
+    def _add_instance_member(pat, user_id, roles):
+        try:
+            _zitadel_request(
+                "POST",
+                "/admin/v1/members",
+                pat,
+                {"userId": user_id, "roles": roles},
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+
+
+    def _create_personal_access_token(pat, user_id):
+        response = _zitadel_request(
+            "POST",
+            "/management/v1/users/{}/pats".format(user_id),
+            pat,
+            {"expirationDate": "2029-01-01T00:00:00Z"},
+        )
+        return response["token"]
+
+
+    def _create_interactive_user(pat):
+        try:
+            user = _zitadel_request(
+                "POST",
+                "/management/v1/users/human/_import",
+                pat,
+                {
+                    "userName": INTERACTIVE_USER_NAME,
+                    "profile": {
+                        "firstName": INTERACTIVE_USER_FIRST_NAME,
+                        "lastName": INTERACTIVE_USER_LAST_NAME,
+                    },
+                    "email": {
+                        "email": INTERACTIVE_USER_EMAIL,
+                        "isEmailVerified": True,
+                    },
+                    "password": INTERACTIVE_USER_PASSWORD,
+                    "passwordChangeRequired": False,
+                },
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+            query = urllib.parse.urlencode({"loginName": INTERACTIVE_USER_NAME})
+            user = _zitadel_request("GET", "/management/v1/global/users/_by_login_name?{}".format(query), pat)
+            user_id = _user_id(user)
+            _set_interactive_user_password(pat, user_id)
+            return user_id
+        return _user_id(user)
+
+
+    def _user_id(user):
+        if "userId" in user:
+            return user["userId"]
+        return user["user"]["id"]
+
+
+    def _set_interactive_user_password(pat, user_id):
+        _zitadel_request(
+            "POST",
+            "/management/v1/users/{}/password".format(user_id),
+            pat,
+            {"password": INTERACTIVE_USER_PASSWORD, "noChangeRequired": True},
+        )
+
+
+    def _add_user_grant(pat, user_id, project_id):
+        try:
+            _zitadel_request(
+                "POST",
+                "/management/v1/users/{}/grants".format(user_id),
+                pat,
+                {"projectId": project_id, "roleKeys": [ROLE_KEY]},
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+
+
+    def _ensure_action(pat, script):
+        try:
+            action = _zitadel_request(
+                "POST",
+                "/management/v1/actions",
+                pat,
+                {"name": ACTION_NAME, "script": script},
+            )
+            return action["id"]
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+            actions = _zitadel_request(
+                "POST",
+                "/management/v1/actions/_search",
+                pat,
+                {"query": {"limit": 100}},
+            ).get("result", [])
+            action = _first_matching(actions, "name", ACTION_NAME)
+            if action is None:
+                raise
+            return action["id"]
+
+
+    def _set_trigger_action(pat, action_id, trigger):
+        try:
+            _zitadel_request(
+                "POST",
+                "/management/v1/flows/2/trigger/{}".format(trigger),
+                pat,
+                {"actionIds": [action_id]},
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+
+
+    def _seed_zitadel(pat):
+        project_id = _ensure_project(pat)
+        _ensure_project_role(pat, project_id)
+        api_app = _ensure_api_app(pat, project_id)
+        cli_app = _ensure_cli_app(pat, project_id)
+        setup = _create_machine_user(pat, SETUP_USER_ID, SETUP_USER_NAME, "NeMo Platform setup test identity")
+        workload = _create_machine_user(
+            pat,
+            WORKLOAD_USER_ID,
+            WORKLOAD_USER_NAME,
+            "NeMo Platform workload provider test identity",
+        )
+        login_client = _create_machine_user(
+            pat,
+            LOGIN_CLIENT_USER_ID,
+            LOGIN_CLIENT_USER_NAME,
+            "NeMo Platform login client test identity",
+        )
+        _add_instance_member(pat, login_client["user_id"], ["IAM_LOGIN_CLIENT"])
+        login_client_pat = _create_personal_access_token(pat, login_client["user_id"])
+        interactive_user_id = _create_interactive_user(pat)
+        _add_user_grant(pat, setup["user_id"], project_id)
+        _add_user_grant(pat, workload["user_id"], project_id)
+        _add_user_grant(pat, interactive_user_id, project_id)
+        action_script = """
+        function %s(ctx, api) {
+          if (ctx.v1.user.grants == undefined || ctx.v1.user.grants.count == 0) {
+            return;
+          }
+          let groups = [];
+          ctx.v1.user.grants.grants.forEach(grant => {
+            grant.roles.forEach(role => {
+              if (groups.indexOf(role) === -1) {
+                groups.push(role);
+              }
+            });
+            });
+          api.v1.claims.setClaim('%s', groups);
+        }
+        """ % (ACTION_NAME, GROUPS_CLAIM)
+        action_id = _ensure_action(pat, action_script)
+        for trigger in ("4", "5"):
+            _set_trigger_action(pat, action_id, trigger)
+        return {
+            "project_id": project_id,
+            "nemo_client_id": api_app["clientId"],
+            "nemo_client_secret": api_app["clientSecret"],
+            "cli_client_id": cli_app["clientId"],
+            "interactive_user_id": interactive_user_id,
+            "interactive_user_password": INTERACTIVE_USER_PASSWORD,
+            "setup_user_id": setup["user_id"],
+            "setup_client_id": setup["client_id"],
+            "setup_client_secret": setup["client_secret"],
+            "workload_user_id": workload["user_id"],
+            "workload_client_id": workload["client_id"],
+            "workload_client_secret": workload["client_secret"],
+            "login_client_user_id": login_client["user_id"],
+            "login_client_pat": login_client_pat,
+            "groups_claim": GROUPS_CLAIM,
+            "role_key": ROLE_KEY,
+            "action_id": action_id,
+        }
+
+
+    def _patch_nemo_config(state):
+        config_map = _k8s_request("GET", _configmap_path(NEMO_CONFIGMAP_NAME))
+        config = config_map.get("data", {}).get("config.yaml")
+        if not config:
+            raise RuntimeError("configmap {}/{} has no config.yaml".format(NAMESPACE, NEMO_CONFIGMAP_NAME))
+        replacements = {
+            "__ZITADEL_NEMO_CLIENT_ID__": json.dumps(state["cli_client_id"]),
+            "__ZITADEL_INTROSPECTION_CLIENT_ID__": json.dumps(state["nemo_client_id"]),
+            "__ZITADEL_PROJECT_ID__": state["project_id"],
+        }
+        patched = config
+        for placeholder, value in replacements.items():
+            patched = patched.replace(placeholder, value)
+        if patched != config:
+            _k8s_request(
+                "PATCH",
+                _configmap_path(NEMO_CONFIGMAP_NAME),
+                {"data": {"config.yaml": patched}},
+                content_type="application/merge-patch+json",
+            )
+
+
+    def _restart_nemo_deployments():
+        restarted_at = datetime.now(timezone.utc).isoformat()
+        for deployment in NEMO_DEPLOYMENTS:
+            _k8s_request(
+                "PATCH",
+                _deployment_path(deployment),
+                {
+                    "spec": {
+                        "template": {
+                            "metadata": {
+                                "annotations": {
+                                    "nemo-platform.nvidia.com/zitadel-seeded-at": restarted_at,
+                                },
+                            },
+                        },
+                    },
+                },
+                content_type="application/merge-patch+json",
+            )
+
+
+    def main():
+        pat = _wait_for_pat()
+        _wait_for_zitadel_discovery()
+        state = _read_state_secret()
+        if state is None:
+            state = _seed_zitadel(pat)
+            _upsert_secret(STATE_SECRET_NAME, state)
+            print("seeded ZITADEL project {} and stored {}".format(state["project_id"], STATE_SECRET_NAME), flush=True)
+        else:
+            state = _migrate_state(pat, state)
+            print("using existing ZITADEL seed state from {}".format(STATE_SECRET_NAME), flush=True)
+        _patch_nemo_config(state)
+        _restart_nemo_deployments()
+
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-zitadel-seed" .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  labels:
+    app.kubernetes.io/component: zitadel-seed
+    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: {{ .Values.zitadelSeedJob.activeDeadlineSeconds }}
+  backoffLimit: {{ .Values.zitadelSeedJob.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.zitadelSeedJob.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: zitadel-seed
+        {{- include "nemo-platform-zitadel.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.zitadelSeedJob.serviceAccountName }}
+      automountServiceAccountToken: true
+      restartPolicy: OnFailure
+      {{- with .Values.zitadelSeedJob.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: seed
+          image: "{{ .Values.zitadelSeedJob.image.repository }}:{{ .Values.zitadelSeedJob.image.tag }}"
+          imagePullPolicy: {{ .Values.zitadelSeedJob.image.pullPolicy }}
+          command:
+            - python
+            - /seed/seed.py
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ZITADEL_INTERNAL_URL
+              value: {{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" .Values.integration.zitadel.serviceName "scheme" "http" "port" .Values.integration.zitadel.servicePort) | quote }}
+            - name: ZITADEL_PUBLIC_URL
+              value: {{ include "nemo-platform-zitadel.publicGatewayUrl" . | quote }}
+            - name: STATE_SECRET_NAME
+              value: {{ .Values.zitadelSeedJob.stateSecretName | quote }}
+            - name: PAT_SECRET_NAME
+              value: {{ .Values.zitadelSeedJob.patSecretName | quote }}
+            - name: PAT_SECRET_KEY
+              value: {{ .Values.zitadelSeedJob.patSecretKey | quote }}
+            - name: NEMO_CONFIGMAP_NAME
+              value: {{ .Values.zitadelSeedJob.nemoConfigMapName | quote }}
+            - name: NEMO_DEPLOYMENTS
+              value: {{ join "," .Values.zitadelSeedJob.nemoDeployments | quote }}
+            - name: GROUPS_CLAIM
+              value: {{ .Values.zitadelDemo.groupsClaim | quote }}
+            - name: ROLE_KEY
+              value: {{ .Values.zitadelDemo.roleKey | quote }}
+            - name: SETUP_USER_ID
+              value: {{ .Values.zitadelDemo.setupMachine.userId | quote }}
+            - name: SETUP_USER_NAME
+              value: {{ .Values.zitadelDemo.setupMachine.name | quote }}
+            - name: WORKLOAD_USER_ID
+              value: {{ .Values.zitadelDemo.workloadMachine.userId | quote }}
+            - name: WORKLOAD_USER_NAME
+              value: {{ .Values.zitadelDemo.workloadMachine.name | quote }}
+            - name: LOGIN_CLIENT_USER_ID
+              value: {{ .Values.zitadelDemo.loginClientMachine.userId | quote }}
+            - name: LOGIN_CLIENT_USER_NAME
+              value: {{ .Values.zitadelDemo.loginClientMachine.name | quote }}
+            - name: INTERACTIVE_USER_NAME
+              value: {{ .Values.zitadelDemo.interactiveUser.userName | quote }}
+            - name: INTERACTIVE_USER_FIRST_NAME
+              value: {{ .Values.zitadelDemo.interactiveUser.firstName | quote }}
+            - name: INTERACTIVE_USER_LAST_NAME
+              value: {{ .Values.zitadelDemo.interactiveUser.lastName | quote }}
+            - name: INTERACTIVE_USER_EMAIL
+              value: {{ .Values.zitadelDemo.interactiveUser.email | quote }}
+            - name: INTERACTIVE_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.zitadelSecrets.demo.secretName | quote }}
+                  key: {{ .Values.zitadelSecrets.demo.interactiveUserPasswordKey | quote }}
+            - name: ACTION_NAME
+              value: {{ .Values.zitadelDemo.actionName | quote }}
+            - name: WAIT_TIMEOUT_SECONDS
+              value: {{ .Values.zitadelSeedJob.waitTimeoutSeconds | quote }}
+          volumeMounts:
+            - name: seed-script
+              mountPath: /seed
+              readOnly: true
+          {{- with .Values.zitadelSeedJob.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.zitadelSeedJob.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: seed-script
+          configMap:
+            name: {{ printf "%s-zitadel-seed" .Release.Name | trunc 63 | trimSuffix "-" }}
+      {{- with .Values.zitadelSeedJob.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.zitadelSeedJob.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.zitadelSeedJob.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

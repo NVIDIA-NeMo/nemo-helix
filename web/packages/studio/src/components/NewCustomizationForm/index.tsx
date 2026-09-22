@@ -17,10 +17,17 @@ import {
   PageHeader,
   Panel,
   Stack,
+  Text,
 } from '@nvidia/foundations-react-core';
 import { CustomizationFilesetSelect } from '@studio/components/customizer/CustomizationFilesetSelect';
 import { BackendSelectionSection } from '@studio/components/NewCustomizationForm/BackendSelectionSection';
+import {
+  baseDeploymentDefaults,
+  baseDeploymentName,
+  DEFAULT_DEPLOY_BASE_MODEL,
+} from '@studio/components/NewCustomizationForm/baseDeploymentForm';
 import { ComputeResourcesSection } from '@studio/components/NewCustomizationForm/ComputeResourcesSection';
+import { DeploymentSection } from '@studio/components/NewCustomizationForm/DeploymentSection';
 import { DpoParametersSection } from '@studio/components/NewCustomizationForm/DpoParametersSection';
 import { GeneralParametersSection } from '@studio/components/NewCustomizationForm/GeneralParametersSection';
 import { GrpoParametersSection } from '@studio/components/NewCustomizationForm/GrpoParametersSection';
@@ -29,6 +36,16 @@ import { LoraParametersSection } from '@studio/components/NewCustomizationForm/L
 import { ModelSelectionSection } from '@studio/components/NewCustomizationForm/ModelSelectionSection';
 import { RewardEnvironmentSection } from '@studio/components/NewCustomizationForm/RewardEnvironmentSection';
 import { TrainingMethodSection } from '@studio/components/NewCustomizationForm/TrainingMethodSection';
+import {
+  useBaseModelDeploymentReadiness,
+  type BaseModelDeploymentState,
+} from '@studio/hooks/useBaseModelDeploymentReadiness';
+import {
+  configNameFromWizardBaseName,
+  createDeploymentWizardSchema,
+  type WizardFormValues,
+} from '@studio/routes/NewDeploymentRoute/schema';
+import { ensureWorkspaceDeploymentConfig } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
   FORM_DEFAULTS,
@@ -36,11 +53,81 @@ import {
   formToAutomodelCreate,
   formToRlCreate,
   formToUnslothCreate,
+  MODEL_FIELD_BY_BACKEND,
+  producesAdapter,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type FieldErrors, FormProvider, type Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
+
+/**
+ * Turn a react-hook-form field path into a human label for the error banner, so a bare
+ * Zod message ("Number must be greater than 0") says which field it belongs to. Generalizes
+ * across every field and every Zod error: the leaf path segment, minus array indices, spaced
+ * and capitalized.
+ *
+ * ponytail: derived from the field path, not the UI slotLabel — `batch_size` reads
+ * "Batch size", not the control's "Global Batch Size". Swap in a path->label map here if
+ * exact UI labels are ever required.
+ */
+const humanizeFieldPath = (path: string): string => {
+  const leaf = path
+    .split('.')
+    .filter((segment) => segment && !/^\d+$/.test(segment))
+    .pop();
+  if (!leaf) return '';
+  const spaced = leaf.replace(/_/g, ' ').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+};
+
+/**
+ * Flatten a react-hook-form error tree into deduped, field-labeled messages for the banner.
+ * Used by submit validation; the load-time check uses `messagesFromZodIssues`. Both share
+ * `humanizeFieldPath`, so an imported config and a rejected submit read identically.
+ * Returns [] when there are no errors.
+ */
+const collectErrorMessages = (errors: FieldErrors<CustomizationFormFields>): string[] => {
+  const messages: string[] = [];
+  const walk = (node: unknown, path: string) => {
+    if (!node || typeof node !== 'object') return;
+    if ('message' in node && typeof node.message === 'string') {
+      const label = humanizeFieldPath(path);
+      messages.push(label ? `${label}: ${node.message}` : node.message);
+      return;
+    }
+    Object.entries(node).forEach(([key, value]) => walk(value, path ? `${path}.${key}` : key));
+  };
+  walk(errors, '');
+  return Array.from(new Set(messages));
+};
+
+/** Same field-labeled banner messages as `collectErrorMessages`, but from a Zod parse (load). */
+const messagesFromZodIssues = (
+  issues: readonly { path: readonly (string | number)[]; message: string }[]
+): string[] =>
+  Array.from(
+    new Set(
+      issues.map((issue) => {
+        const label = humanizeFieldPath(issue.path.join('.'));
+        return label ? `${label}: ${issue.message}` : issue.message;
+      })
+    )
+  );
+
+/**
+ * Readiness states in which creating a base-model deployment is the right move.
+ *
+ * An allowlist rather than `!== 'serving-lora'`, because the negative form treats every
+ * state it does not name as grounds to create a deployment — which is how
+ * `'indeterminate'`, the state that means "we could not find out", would become the state
+ * that acts. Any state added later gets the safe default of doing nothing.
+ */
+const CREATE_DEPLOYMENT_STATES: readonly BaseModelDeploymentState[] = [
+  'none',
+  'serving-without-lora',
+  'unavailable',
+];
 
 interface NewCustomizationFormProps {
   workspace: string;
@@ -57,6 +144,8 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const toast = useToast();
   const errorBannerRef = useRef<HTMLDivElement>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [deployStage, setDeployStage] = useState<string | null>(null);
+  const [deployBaseModel, setDeployBaseModel] = useState(DEFAULT_DEPLOY_BASE_MODEL);
 
   const defaultValues = useMemo<CustomizationFormFields>(() => {
     if (initialValues) return initialValues;
@@ -88,15 +177,61 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     control: form.control,
     name: 'unsloth.training.finetuning_type',
   });
+  // Unsloth decides adapter-vs-merged at save time, not via `finetuning_type` — so
+  // `producesAdapter` needs this as well. No control binds it today; it is watched
+  // rather than read once so the section reacts if one is ever added.
+  const unslothSaveMethod = useWatch({
+    control: form.control,
+    name: 'unsloth.output.save_method',
+  });
   // Bound to `grpo.trainingType` rather than `rl.training.type`: the form holds one
   // `rl.training` object, and flipping the union discriminator in place would leave it
   // carrying the other arm's fields. `formToRlCreate` sets `type` from this on submit.
   const grpoTrainingType = useWatch({ control: form.control, name: 'grpo.trainingType' });
+  const grpoFinetuningType = useWatch({ control: form.control, name: 'grpo.finetuning_type' });
   const finetuningType = backend === 'automodel' ? automodelFinetuningType : unslothFinetuningType;
-  const isLora =
+  // Gates the LoRA *hyperparameter* controls, so it includes `lora_merged`,
+  // which trains with LoRA. It is NOT "the output is an adapter" — a merged run
+  // emits full weights. Use `producesAdapter` for anything about serving.
+  const usesLoraControls =
     backend !== 'rl' && (finetuningType === 'lora' || finetuningType === 'lora_merged');
   const isDpo = backend === 'rl' && grpoTrainingType !== 'grpo';
   const isGrpo = backend === 'rl' && grpoTrainingType === 'grpo';
+
+  // The serving question, not the training one: only an unmerged LoRA run emits an
+  // adapter, and only an adapter is served by a deployment of its *base* model.
+  const isAdapterRun = producesAdapter({
+    backend,
+    automodel: { training: { finetuning_type: automodelFinetuningType } },
+    unsloth: {
+      training: { finetuning_type: unslothFinetuningType },
+      output: { save_method: unslothSaveMethod },
+    },
+    grpo: { trainingType: grpoTrainingType, finetuning_type: grpoFinetuningType },
+  });
+
+  const baseModelRef = useWatch({
+    control: form.control,
+    name: MODEL_FIELD_BY_BACKEND[backend],
+  }) as string | undefined;
+
+  const readiness = useBaseModelDeploymentReadiness(baseModelRef, { enabled: isAdapterRun });
+  const needsBaseDeployment = isAdapterRun && CREATE_DEPLOYMENT_STATES.includes(readiness.state);
+
+  // Separate form: these fields drive their own API calls and are not part of any
+  // job payload. Typed exactly `WizardFormValues` so the wizard's field components
+  // take its `control` unchanged — see baseDeploymentForm.ts.
+  const deployForm = useForm<WizardFormValues>({
+    resolver: zodResolver(createDeploymentWizardSchema),
+    defaultValues: baseDeploymentDefaults(),
+    mode: 'onChange',
+  });
+
+  // Keep the nested form pointed at whatever base model is currently picked.
+  useEffect(() => {
+    deployForm.setValue('modelRef', (baseModelRef ?? '') as WizardFormValues['modelRef']);
+    deployForm.setValue('name', baseDeploymentName(baseModelRef));
+  }, [baseModelRef, deployForm]);
 
   const { mutateAsync: createAutomodel, isPending: isPendingAutomodel } =
     useCustomizationCreateAutomodelJob({
@@ -138,34 +273,136 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
 
   const isPending = isPendingAutomodel || isPendingUnsloth || isPendingRl;
 
+  /**
+   * Anything in flight that the button should report, including the config-creation
+   * step that precedes the job mutations. `form.formState.isSubmitting` is true for
+   * the whole of `onSubmit`, so it is what actually covers that window.
+   */
+  const isSubmitting = isPending || form.formState.isSubmitting;
+
+  /**
+   * Also blocked while readiness resolves, which is not "busy" but "not yet safe to
+   * act on" — the section's `'none'` default is indistinguishable from a real answer
+   * until the queries settle. Only for adapter runs, since that is the only case the
+   * readiness hook is enabled for.
+   */
+  const isSubmitBlocked = isSubmitting || (isAdapterRun && readiness.isLoading);
+
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
+
+    // The config first, and only the config. The job carries its name as
+    // `deployment_config` and creates the deployment itself once training finishes
+    // — deploying up front reaches the same end state hours earlier and idles a
+    // serving GPU for the whole run to get there.
+    //
+    // Creating it here rather than passing inline parameters is what buys the early
+    // failure: `_validate_engine_config` runs synchronously inside
+    // create_deployment_config, so a bad engine or missing image surfaces in
+    // milliseconds and the job is never submitted. Inline params are validated by
+    // the job, after training.
+    //
+    // Skipping is allowed: the user may already have a serving plan of their own.
+    // The section warns that the adapter will not be servable until the base model
+    // is deployed, and the Deployments page can do that at any time afterwards.
+    let deploymentConfig: string | undefined;
+    if (needsBaseDeployment && deployBaseModel) {
+      const valid = await deployForm.trigger();
+      if (!valid) {
+        const messages = Object.values(deployForm.formState.errors)
+          .map((e) => (e && 'message' in e ? String(e.message) : ''))
+          .filter(Boolean);
+        setValidationErrors(
+          messages.length ? messages : ['Please complete the deployment fields.']
+        );
+        return;
+      }
+      const values = deployForm.getValues();
+      const configName = configNameFromWizardBaseName(values.name.trim());
+      try {
+        const { config, reused } = await ensureWorkspaceDeploymentConfig(
+          workspace,
+          values,
+          configName,
+          (message) => setDeployStage(message)
+        );
+        // Adopting an existing config is the intended outcome — one LoRA-enabled
+        // deployment of a base serves every adapter trained against it. But it was
+        // created by an earlier run and may not match what was just filled in, so
+        // say so rather than let the form imply these settings were used. A toast
+        // because `onSuccess` navigates away the moment the job is created.
+        if (reused) {
+          toast.info(
+            `Reused the existing deployment configuration "${configName}" ` +
+              `(${config.engine}, ${config.executor_config?.gpu ?? '?'} GPU). ` +
+              'Its settings take precedence over the ones entered here.'
+          );
+        }
+      } catch (e) {
+        setDeployStage(null);
+        setValidationErrors([
+          getErrorMessage(
+            e as Error,
+            'Failed to create the base model deployment configuration. The job was not started.'
+          ),
+        ]);
+        return;
+      }
+      setDeployStage(null);
+      deploymentConfig = configName;
+    }
+
     if (fields.backend === 'automodel') {
-      await createAutomodel({ workspace, data: formToAutomodelCreate(fields) }).catch(
+      await createAutomodel({
+        workspace,
+        data: formToAutomodelCreate(fields, deploymentConfig),
+      }).catch(() => undefined);
+    } else if (fields.backend === 'rl') {
+      await createRl({ workspace, data: formToRlCreate(fields, deploymentConfig) }).catch(
         () => undefined
       );
-    } else if (fields.backend === 'rl') {
-      await createRl({ workspace, data: formToRlCreate(fields) }).catch(() => undefined);
     } else {
-      await createUnsloth({ workspace, data: formToUnslothCreate(fields) }).catch(() => undefined);
+      await createUnsloth({
+        workspace,
+        data: formToUnslothCreate(fields, deploymentConfig),
+      }).catch(() => undefined);
     }
   };
 
   const onInvalid = (formErrors: FieldErrors<CustomizationFormFields>) => {
-    const messages: string[] = [];
-    const collect = (node: unknown) => {
-      if (!node || typeof node !== 'object') return;
-      if ('message' in node && typeof (node as { message?: unknown }).message === 'string') {
-        messages.push((node as { message: string }).message);
-        return;
-      }
-      Object.values(node as Record<string, unknown>).forEach(collect);
-    };
-    collect(formErrors);
-    setValidationErrors(
-      messages.length ? Array.from(new Set(messages)) : ['Please complete the required fields.']
-    );
+    const messages = collectErrorMessages(formErrors);
+    setValidationErrors(messages.length ? messages : ['Please complete the required fields.']);
   };
+
+  // A seeded config (clone, template, or "start from your own config") is validated the
+  // moment it loads, so an imported value that violates the schema — e.g. a numeric of 0
+  // against a `.gt(0)` field — surfaces in the banner immediately, not only on submit.
+  useEffect(() => {
+    if (!initialValues) return;
+    const result = customizationFormSchema.safeParse(initialValues);
+    if (result.success) return;
+    const messages = messagesFromZodIssues(result.error.issues);
+    if (messages.length > 0) setValidationErrors(messages);
+  }, [initialValues]);
+
+  // Once a banner is showing (seeded config or a rejected submit), keep it in sync as the
+  // user corrects fields: revalidate the live values and clear it when they pass. Guarded on
+  // an already-shown banner, so it never surfaces errors on an untouched form.
+  useEffect(() => {
+    const subscription = form.watch(() => {
+      setValidationErrors((current) => {
+        if (current.length === 0) return current;
+        const result = customizationFormSchema.safeParse(form.getValues());
+        const next = result.success ? [] : messagesFromZodIssues(result.error.issues);
+        // Keep the same array reference when nothing changed, so a keystroke that does not
+        // change the error set does not re-render the form.
+        return next.length === current.length && next.every((message, i) => message === current[i])
+          ? current
+          : next;
+      });
+    });
+    return () => subscription.unsubscribe();
+  }, [form]);
 
   useEffect(() => {
     if (validationErrors.length > 0) {
@@ -194,9 +431,28 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                   elevation="high"
                   density="standard"
                   slotFooter={
-                    <Flex className="w-full justify-end gap-2">
-                      <Button type="submit" disabled={isPending} color="brand">
-                        {isPending ? 'Starting…' : 'Start Fine-Tuning'}
+                    <Flex className="w-full items-center justify-end gap-2">
+                      {deployStage ? (
+                        <Text kind="body/regular/sm" color="secondary" className="mr-auto">
+                          {deployStage}
+                        </Text>
+                      ) : null}
+                      {/* `isPending` covers only the job mutations, which are the *last*
+                          step. Config creation happens before them and takes real time, so
+                          on its own `isPending` leaves a window where a second click runs
+                          `onSubmit` again and creates a second config.
+
+                          Readiness matters for the opposite reason: while it loads, `state`
+                          is still its `'none'` default, which the section reads as "no
+                          deployment exists". Submitting then would create a config for a
+                          base that may already be serving LoRA. */}
+                      <Button
+                        type="submit"
+                        disabled={isSubmitBlocked}
+                        color="brand"
+                        aria-busy={isSubmitting}
+                      >
+                        {isSubmitting ? 'Starting…' : 'Start Fine-Tuning'}
                       </Button>
                     </Flex>
                   }
@@ -217,7 +473,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                     <CustomizationFilesetSelect disabled={isPending} />
                     <Divider />
                     {isGrpo ? <GrpoParametersSection /> : <GeneralParametersSection />}
-                    {isLora && (
+                    {usesLoraControls && (
                       <>
                         <Divider />
                         <LoraParametersSection />
@@ -233,6 +489,19 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                     <IntegrationsSection backend={backend} />
                     <Divider />
                     <ComputeResourcesSection />
+                    {isAdapterRun && (
+                      <>
+                        <Divider />
+                        <DeploymentSection
+                          readiness={readiness}
+                          control={deployForm.control}
+                          errors={deployForm.formState.errors}
+                          baseModelRef={baseModelRef ?? ''}
+                          deployBaseModel={deployBaseModel}
+                          onDeployBaseModelChange={setDeployBaseModel}
+                        />
+                      </>
+                    )}
                     {validationErrors.length > 0 && (
                       <Banner kind="inline" ref={errorBannerRef} status="error">
                         Please fix the following errors: {validationErrors.join(', ')}

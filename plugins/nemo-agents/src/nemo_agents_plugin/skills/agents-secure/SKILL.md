@@ -16,6 +16,9 @@ description: >-
   guardrails, content safety, PII, data safety, secrets scan, leaked api key,
   leaked token, telemetry scan, redact telemetry, Safe Synthesizer, Anonymizer,
   gliner, nemoguard.
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Agent Security

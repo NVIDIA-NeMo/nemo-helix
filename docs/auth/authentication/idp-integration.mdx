@@ -12,9 +12,14 @@ to work in production.
 ## Provider References
 
 - `contrib/auth/authentik`
+- `contrib/auth/zitadel`
 
 Each provider bundle includes a gateway layer that strips inbound
 `X-NMP-Principal-*` headers before traffic reaches NeMo.
+
+The ZITADEL Kubernetes reference uses opaque access tokens and validates them
+with RFC 7662 introspection. Its Helm chart seeds generated ZITADEL clients at
+install time and patches the local demo ConfigMap with those generated values.
 
 For workload authentication, the gateway should validate the bearer token and
 derive NeMo's trusted header contract from verified claims rather than passing

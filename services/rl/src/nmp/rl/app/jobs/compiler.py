@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 
+from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE, DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -35,7 +37,9 @@ from nemo_platform_plugin.jobs.api_factory import (
     ResourcesSpec,
 )
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import ModelDeploymentConfig, ModelEntity
+from nmp.common.auth import auth_client_context
+from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nmp.customization_common.integrations import (
     collect_integration_secret_envs,
@@ -177,8 +181,124 @@ def _build_model_entity_config(
         base_model=job_spec.model,
         peft=peft,
         trust_remote_code=trust_remote_code,
-        deployment_config=None,
+        deployment_config=job_spec.deployment_config,
     )
+
+
+async def _resolve_deployment_config_ref(
+    config_ref: str,
+    workspace: str,
+    platform: AsyncCustomizationPlatformClients,
+) -> ModelDeploymentConfig:
+    """Resolve a ``name`` or ``workspace/name`` string to a ModelDeploymentConfig."""
+    ref = parse_entity_ref(config_ref, default_workspace=workspace)
+    try:
+        response = await platform.models.get_deployment_config(name=ref.name, workspace=ref.workspace)
+        return response.data()
+    except NotFoundError as e:
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{config_ref}' which does not exist in workspace '{ref.workspace}'."
+        ) from e
+    except Exception as e:
+        raise PlatformJobCompilationError(f"Failed to resolve deployment_config '{config_ref}': {e}") from e
+
+
+async def _require_tool_call_plugin_permission(workspace: str) -> None:
+    """Gate ``tool_call_plugin``, the one deployment field that needs a permission check.
+
+    Auth is resolved here rather than up front: every other deployment_config
+    shape validates without it, so demanding an auth context for all of them
+    would fail compilation for jobs that never consult it.
+    """
+    auth_client = auth_client_context.get()
+    if auth_client is None:
+        raise PlatformJobCompilationError(
+            "No auth context available; cannot validate the tool_call_plugin permission.",
+        )
+    if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
+        raise PlatformJobCompilationError(
+            "Insufficient permissions to set tool_call_plugin. Requires the models.tool-call-plugin.set permission."
+        )
+
+
+def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
+    """Whether ``config`` deploys the model entity ``workspace/name``.
+
+    ``model_entity_id`` is the canonical link; older configs only carry the
+    name/namespace pair on ``model_spec``, so both are accepted.
+    """
+    model_spec = config.model_spec
+    return (config.model_entity_id == f"{workspace}/{name}") or (
+        model_spec.model_name == name and model_spec.model_namespace == workspace
+    )
+
+
+async def _validate_deployment_config(
+    workspace: str,
+    job_spec: RlJobOutput,
+    platform: AsyncCustomizationPlatformClients,
+) -> None:
+    """Validate deployment_config consistency before training starts.
+
+    RL runs are long and expensive, so a contradictory deployment config must fail
+    at submit time rather than after the run completes.
+    """
+    dc = job_spec.deployment_config
+    if dc is None:
+        return
+
+    # Inline deployment params: check permission-gated fields.
+    if isinstance(dc, DeploymentParams):
+        # RlJobInput rejects this at submit, but the compiler is entered with an
+        # RlJobOutput, which carries no such validator -- re-assert it here.
+        if job_spec.trains_lora_adapter and not dc.lora_enabled:
+            raise PlatformJobCompilationError(LORA_ENABLED_REQUIRED_MESSAGE)
+        tcc = dc.tool_call_config
+        if tcc and tcc.tool_call_plugin:
+            await _require_tool_call_plugin_permission(workspace)
+        return
+
+    resolved_config = await _resolve_deployment_config_ref(dc, workspace, platform)
+
+    # A LoRA adapter cannot be served by a base deployment that does not load adapters.
+    if job_spec.trains_lora_adapter and resolved_config.model_spec.lora_enabled is False:
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{dc}' which has lora_enabled=false, "
+            "but this is a LoRA training job. The deployment would not load LoRA adapters. "
+            "Use a deployment config with lora_enabled=true, or provide inline deployment parameters."
+        )
+
+    if job_spec.trains_lora_adapter:
+        # The adapter is served from its base model's deployment, so a referenced
+        # config is only usable if it deploys that base model.
+        base = parse_entity_ref(job_spec.model, workspace)
+        if not _config_targets_model(resolved_config, base.workspace, base.name):
+            raise PlatformJobCompilationError(
+                f"deployment_config references '{dc}' which targets a different model entity than the base model "
+                f"'{base.workspace}/{base.name}'. A LoRA adapter is served from its base model's deployment, "
+                "so the config must target that base model, or use inline deployment parameters instead."
+            )
+        return
+
+    # Full-weight training creates its own model entity, so a pre-existing config can
+    # only be correct if it already targets that entity (i.e. this is a retrain).
+    output_name = job_spec.output.name
+    try:
+        existing_me = (await platform.models.get_model(name=output_name, workspace=workspace)).data()
+    except NotFoundError as e:
+        raise PlatformJobCompilationError(
+            f"deployment_config cannot be a string reference ('{dc}') for full-weight training "
+            "that creates a new model entity. The referenced config was created for a different model. "
+            'Use inline deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}) instead.'
+        ) from e
+
+    if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{dc}' which targets a different model entity "
+            f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
+            "The deployment config must target the same model entity being retrained, "
+            "or use inline deployment parameters instead."
+        )
 
 
 def _build_integrations_config(integrations: IntegrationsSpec | None) -> TrainingStepConfig.IntegrationsConfig:
@@ -538,6 +658,9 @@ async def platform_job_config_compiler(
 
     me = await fetch_model_entity(job_spec.model, workspace, platform)
     trust_remote_code = me.trust_remote_code or False
+
+    if job_spec.deployment_config is not None:
+        await _validate_deployment_config(workspace, job_spec, platform)
 
     cpu_resources = _get_cpu_resources()
     base_env = _base_environment()

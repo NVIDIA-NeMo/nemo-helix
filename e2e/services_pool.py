@@ -300,7 +300,7 @@ class E2EServicesPool:
             state.key.config_hash,
         )
         rendered_config = yaml.safe_dump(rendered_config_data, default_flow_style=False, sort_keys=True)
-        config_path = self._get_generated_config_dir() / f"platform-{state.key.config_hash}.yaml"
+        config_path = self._get_generated_config_dir(state.harness_config) / f"platform-{state.key.config_hash}.yaml"
         if not config_path.exists():
             config_path.write_text(rendered_config)
             self._log_debug(
@@ -319,7 +319,9 @@ class E2EServicesPool:
             auth_enabled=state.auth_enabled,
         )
 
-    def _get_generated_config_dir(self) -> Path:
+    def _get_generated_config_dir(self, harness_config: E2EHarnessConfig) -> Path:
+        if _e2e_backend(harness_config) == "docker_compose":
+            return _docker_compose_generated_config_dir()
         if self._generated_config_dir is None:
             self._generated_config_dir = self._get_log_dir() / "generated-configs"
             self._generated_config_dir.mkdir(parents=True, exist_ok=True)
@@ -404,6 +406,12 @@ def _services_log_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         directory.mkdir(parents=True, exist_ok=True)
         return directory
     return tmp_path_factory.mktemp("e2e-services-logs")
+
+
+def _docker_compose_generated_config_dir() -> Path:
+    directory = _E2E_REPO_ROOT / ".pytest_cache" / "e2e-services" / f"generated-configs-{os.getpid()}"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any]]:

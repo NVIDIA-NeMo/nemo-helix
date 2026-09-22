@@ -26,6 +26,9 @@ from nemo_deployments_plugin.backends.labels import (
     k8s_deployment_secret_name,
     k8s_volume_resource_name,
 )
+from nemo_deployments_plugin.constants import (
+    DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
+)
 from nemo_deployments_plugin.entities import (
     Affinity,
     ConfigFile,
@@ -171,6 +174,7 @@ class ExecutorK8sDefaults:
     tolerations: list[dict[str, Any]] = field(default_factory=list)
     affinity: dict[str, Any] = field(default_factory=dict)
     topology_spread_constraints: list[dict[str, Any]] = field(default_factory=list)
+    job_ttl_seconds_after_finished: int | None = DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED
 
 
 @dataclass(frozen=True)

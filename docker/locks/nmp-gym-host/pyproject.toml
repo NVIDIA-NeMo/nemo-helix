@@ -7,12 +7,19 @@ version = "0.0.0"
 requires-python = ">=3.13.14,<3.14"
 dependencies = [
     "nemo-gym==0.5.0",
-    "sandboxed-gym[runtime]",
+    "nemo-sandboxed-gym[runtime]",
     "tiktoken==0.13.0",
 ]
 
 [tool.uv.sources]
-sandboxed-gym = { path = "../../../packages/sandboxed_gym" }
+nemo-sandboxed-gym = { path = "../../../packages/sandboxed_gym" }
+# Some first-party packages declare nmp-build-tools in build-system.requires. The standalone
+# gym-host lock project is resolved outside the root workspace, so it must provide an explicit
+# local source for that build dependency instead of letting uv search the package registry.
+nmp-build-tools = { path = "../../../packages/nmp_build_tools" }
+
+[tool.uv.extra-build-dependencies]
+nemo-sandboxed-gym = ["nmp-build-tools"]
 
 [tool.uv]
 constraint-dependencies = [

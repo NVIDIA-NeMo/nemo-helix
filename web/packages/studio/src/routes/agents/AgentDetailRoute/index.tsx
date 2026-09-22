@@ -16,6 +16,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
@@ -50,7 +51,7 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { Dot, GitCommitHorizontal } from 'lucide-react';
-import { type FC, useEffect, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 
 export const AgentDetailRoute: FC = () => {
@@ -75,6 +76,7 @@ export const AgentDetailRoute: FC = () => {
 
   const {
     agent,
+    isAgentLoading,
     agentDeployments,
     agentEvals,
     isAgentEvalsPending,
@@ -130,6 +132,26 @@ export const AgentDetailRoute: FC = () => {
 
   const modelNames = getAgentModelNames(agent?.config);
   const canDeploy = !!agent?.config;
+  // Narrower than canDeploy: NAT workflows package from a source checkout.
+  const canPackage = agent?.config_format === FABRIC_CONFIG_FORMAT;
+  // Survives closing the deploy modal, but not a change of agent: the route is
+  // reused across agentName, so an unscoped tag would deploy one agent's image
+  // under another's name.
+  const [builtImage, setBuiltImage] = useState<{ agent: string; image: string } | undefined>();
+  const builtImageForAgent = builtImage?.agent === agentName ? builtImage?.image : undefined;
+  // Stable identity, and a no-op when nothing changed: the panel reports the tag
+  // from an effect keyed on this callback, so a new closure or a new object here
+  // re-runs it forever.
+  const rememberBuiltImage = useCallback(
+    (image: string) => {
+      setBuiltImage((current) =>
+        current?.agent === agentName && current?.image === image
+          ? current
+          : { agent: agentName ?? '', image }
+      );
+    },
+    [agentName]
+  );
 
   const canRunEvaluation = !!agentName && canDeploy;
 
@@ -177,7 +199,11 @@ export const AgentDetailRoute: FC = () => {
                 {agent?.description && (
                   <>
                     <Dot className="size-2" aria-hidden />
-                    <Text kind="body/regular/sm" className="text-secondary">
+                    <Text
+                      kind="body/regular/sm"
+                      className="line-clamp-1 text-secondary"
+                      title={agent.description}
+                    >
                       {agent.description}
                     </Text>
                   </>
@@ -261,6 +287,14 @@ export const AgentDetailRoute: FC = () => {
               onViewLogs={viewLogs}
               canDeploy={canDeploy}
               specSource={specSource}
+              workspace={workspace}
+              canPackage={canPackage}
+              isAgentLoading={isAgentLoading}
+              onImageBuilt={(image) => {
+                rememberBuiltImage(image);
+                setCreateDeploymentOpen(true);
+              }}
+              onImageAvailable={rememberBuiltImage}
             />
           </TabsContent>
 
@@ -314,6 +348,7 @@ export const AgentDetailRoute: FC = () => {
           open
           agent={agentName}
           workspace={workspace}
+          initialImage={builtImageForAgent}
           onClose={() => setCreateDeploymentOpen(false)}
         />
       )}

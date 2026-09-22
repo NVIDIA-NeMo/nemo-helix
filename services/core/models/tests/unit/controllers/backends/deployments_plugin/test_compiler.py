@@ -195,6 +195,89 @@ def test_nim_weighted_chain_sets_model_path_env() -> None:
     assert "resolved-secret" not in compiled.server_config.model_dump_json()
 
 
+def test_nim_non_legacy_weighted_chain_uses_engine_model_env() -> None:
+    # NIM images that retired NIM_MODEL_NAME / NIM_MODEL_PATH fail config
+    # validation when either name is present, so the two cannot be emitted
+    # alongside their replacements.
+    resolved = _resolved("nim")
+    resolved.view.override_config = {"nimLegacy": False}
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        return_value=SecretRef(workspace="system", name="ngc-api-key"),
+    ):
+        compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = {item.name: item.value for item in compiled.server_config.containers[0].env}
+    assert env["NIM_ENGINE_MODEL_NAME"] == "org/model"
+    assert env["NIM_ENGINE_MODEL_PATH"] == "/model-store"
+    assert "NIM_MODEL_NAME" not in env
+    assert "NIM_MODEL_PATH" not in env
+    assert env["NIM_SERVED_MODEL_NAME"] == "org/model"
+
+
+@pytest.mark.parametrize("runtime", [Runtime.KUBERNETES, Runtime.DOCKER])
+@pytest.mark.parametrize(
+    "path_env",
+    [
+        {"NIM_ENGINE_MODEL_PATH": "alternates/hf"},
+        {"NIM_MODEL_PATH": "/alternates/hf"},
+    ],
+)
+def test_nim_additional_envs_path_overrides_weights_dir_only(runtime: Runtime, path_env: dict[str, str]) -> None:
+    resolved = _resolved("nim", runtime=runtime)
+    resolved.view.override_config = {"nimLegacy": False}
+    resolved.view.additional_envs = path_env
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        return_value=SecretRef(workspace="system", name="ngc-api-key"),
+    ):
+        compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = {item.name: item.value for item in compiled.server_config.containers[0].env}
+    assert env["NIM_ENGINE_MODEL_NAME"] == "org/model"
+    assert env["NIM_ENGINE_MODEL_PATH"] == "/model-store/alternates/hf"
+    assert env["NIM_FT_MODEL"] == "/model-store/alternates/hf"
+    assert env["NIM_CUSTOM_MODEL"] == "/model-store/alternates/hf"
+
+
+@pytest.mark.parametrize("bad_path", ["../x", "foo/../bar", "/model-store/../etc"])
+def test_nim_additional_envs_path_outside_mount_is_rejected(bad_path: str) -> None:
+    resolved = _resolved("nim")
+    resolved.view.additional_envs = {"NIM_ENGINE_MODEL_PATH": bad_path}
+    with pytest.raises(ValueError, match="must stay under"):
+        compile_model_deployment(resolved, DeploymentsPluginConfig())
+
+
+def test_nim_baked_engine_model_name_falls_back_to_model_entity() -> None:
+    resolved = _resolved("nim")
+    resolved = ResolvedPluginDeployment(
+        deployment=resolved.deployment,
+        config=resolved.config,
+        model_entity=SimpleNamespace(
+            workspace="default",
+            name="nemotron-3-embed-1b",
+            spec=None,
+            trust_remote_code=False,
+        ),
+        view=DeploymentConfigView(override_config={"nimLegacy": False}),
+        weights_type=ModelWeightsType.BAKED_CONTAINER,
+        model_namespace=None,
+        model_name=None,
+        model_revision=None,
+        files_hf_url=resolved.files_hf_url,
+        huggingface_model_puller=resolved.huggingface_model_puller,
+        runtime=resolved.runtime,
+    )
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
+        return_value=SecretRef(workspace="system", name="ngc-api-key"),
+    ):
+        compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = {item.name: item.value for item in compiled.server_config.containers[0].env}
+    assert env["NIM_ENGINE_MODEL_NAME"] == "default/nemotron-3-embed-1b"
+    assert "NIM_SERVED_MODEL_NAME" not in env
+    assert "NIM_ENGINE_MODEL_PATH" not in env
+    assert "NIM_MODEL_NAME" not in env
+
+
 def test_nim_explicit_ngc_env_is_not_persisted_as_plaintext() -> None:
     resolved = _resolved("nim")
     resolved.view.additional_envs = {"NGC_API_KEY": "explicit-value"}

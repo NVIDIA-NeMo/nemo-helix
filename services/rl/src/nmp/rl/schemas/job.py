@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self, Union
 
+from nemo_platform_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.customization_common.schema import NamespacedModel
 from nmp.customization_common.schemas.values import OutputNameType
@@ -40,6 +41,23 @@ class ParallelismParams(RlSchema):
         "policy_backend='automodel'.",
     )
     sequence_parallel: bool = Field(default=False, description="Enable sequence parallelism.")
+
+    @model_validator(mode="after")
+    def _context_and_sequence_parallel_cannot_share_tensor_parallel(self) -> Self:
+        """DTensor context parallel cannot run with sequence parallel under TP > 1.
+
+        NeMo-RL asserts this in the policy worker after the model loads. Catch it here so
+        the request fails instead of claiming GPUs first.
+        """
+        if self.context_parallel_size > 1 and self.sequence_parallel and self.tensor_parallel_size > 1:
+            raise ValueError(
+                "context_parallel_size > 1 cannot be combined with sequence_parallel=true "
+                f"and tensor_parallel_size={self.tensor_parallel_size}: DTensor context "
+                "parallel is incompatible with sequence parallel under tensor parallelism. "
+                "Set context_parallel_size=1, disable sequence_parallel, or drop to "
+                "tensor_parallel_size=1."
+            )
+        return self
 
 
 class RewardShapingParams(RlSchema):
@@ -180,6 +198,7 @@ class _TrainingBase(RlSchema):
     max_steps: int | None = Field(default=None, gt=0, description="Max training steps (overrides epochs if set).")
     val_check_interval: float | None = Field(
         default=None,
+        ge=0.0,
         description="Validation interval. Float <= 1.0 is fraction of epoch; > 1.0 is step count.",
     )
     val_at_end: bool = Field(
@@ -217,6 +236,14 @@ class _TrainingBase(RlSchema):
         description="Execution profile for the GPU training step (operator-configured). "
         "Falls back to the service default when omitted.",
     )
+
+    @model_validator(mode="after")
+    def _min_learning_rate_does_not_exceed_peak(self) -> Self:
+        if self.min_learning_rate is not None and self.min_learning_rate > self.learning_rate:
+            raise ValueError(
+                f"min_learning_rate ({self.min_learning_rate}) cannot exceed learning_rate ({self.learning_rate})."
+            )
+        return self
 
 
 class DPOTraining(_TrainingBase):
@@ -414,10 +441,11 @@ class GRPOTraining(_TrainingBase):
     )
     batch_multiplier: float = Field(
         default=1.0,
-        gt=0.0,
+        ge=1.0,
         description="Over-generate each step by this factor so dynamic sampling has candidates to "
-        "filter. Set it near `1 / pct_mixed`. Rejected above 1.0 unless `use_dynamic_sampling` is "
-        "true, which is what NeMo-RL asserts at startup.",
+        "filter. Set it near `1 / pct_mixed`. Must be >= 1.0 (NeMo-RL's DAPO contract). "
+        "Rejected above 1.0 unless `use_dynamic_sampling` is true, which is what NeMo-RL "
+        "asserts at startup.",
     )
 
     # --- Reward shaping (DAPO) ---
@@ -446,7 +474,8 @@ class GRPOTraining(_TrainingBase):
         gt=0,
         description="Token budget per training micro-batch, read by `dynamic` and `sequence_packing`. "
         "Defaults to max_seq_length * micro_batch_size, the peak `static` already provisions for. "
-        "Lower it if you OOM.",
+        "Must be at least max_seq_length so a full-length rollout still fits. Lower it if you OOM, "
+        "but not below that floor.",
     )
     sequence_length_round: int = Field(
         default=64,
@@ -630,6 +659,36 @@ class GRPOTraining(_TrainingBase):
             )
         return self
 
+    @model_validator(mode="after")
+    def _sequence_packing_rejects_context_parallel(self) -> Self:
+        """DTensorPolicyWorker rejects packing under CP; fail the request instead of the GPU job."""
+        if self.batching_strategy == BatchingStrategy.SEQUENCE_PACKING and self.parallelism.context_parallel_size > 1:
+            raise ValueError(
+                "batching_strategy='sequence_packing' is not supported with "
+                f"context_parallel_size ({self.parallelism.context_parallel_size}) > 1. "
+                "Use 'dynamic' or 'static'."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _train_mb_tokens_fits_longest_rollout(self) -> Self:
+        """A budget under max_seq_length leaves the longest rollout unable to fit anywhere."""
+        if self.train_mb_tokens is not None and self.train_mb_tokens < self.max_seq_length:
+            raise ValueError(
+                f"train_mb_tokens ({self.train_mb_tokens}) is below max_seq_length "
+                f"({self.max_seq_length}); a full-length rollout would not fit in any micro-batch."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _leave_one_out_needs_a_group(self) -> Self:
+        if self.use_leave_one_out_baseline and self.num_generations_per_prompt < 2:
+            raise ValueError(
+                "use_leave_one_out_baseline requires num_generations_per_prompt >= 2; "
+                "a singleton group has no other rollouts to form a baseline."
+            )
+        return self
+
 
 TrainingMethod = Annotated[Union[DPOTraining, GRPOTraining], Discriminator("type")]
 
@@ -649,6 +708,15 @@ class OutputResponse(_OutputBase):
     fileset: str = Field(max_length=255)
 
 
+def trains_lora_adapter(training: TrainingMethod) -> bool:
+    """True when ``training`` produces a LoRA adapter rather than a full-weight model.
+
+    Only GRPO can train LoRA, and the platform DTensor path has no merge-at-export,
+    so an unmerged adapter is the only possible LoRA output.
+    """
+    return isinstance(training, GRPOTraining) and training.finetuning_type == "lora"
+
+
 class RlJobOutput(RlSchema):
     """Canonical NeMo-RL job spec (output of the plugin transform)."""
 
@@ -661,10 +729,19 @@ class RlJobOutput(RlSchema):
     training: TrainingMethod = Field(description="Training method and hyperparameters.")
     integrations: IntegrationsSpec | None = Field(default=None)
     output: OutputResponse = Field(description="Output artifact created by this job.")
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
+    )
 
     @property
     def training_type(self) -> TrainingType:
         return TrainingType(self.training.type)
+
+    @property
+    def trains_lora_adapter(self) -> bool:
+        """True when this job produces a LoRA adapter rather than a full-weight model."""
+        return trains_lora_adapter(self.training)
 
     def validate_for_training(self) -> None:
         """Validate parallelism/batch consistency before compiling."""

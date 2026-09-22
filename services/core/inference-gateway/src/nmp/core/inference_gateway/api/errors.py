@@ -4,12 +4,33 @@
 from typing import NoReturn
 
 from fastapi import HTTPException, status
+from nmp.common.entities.utils import parse_adapters_suffix
 
 
 def raise_model_entity_not_found(workspace: str, model_entity_name: str) -> NoReturn:
+    """Raise a 404 for a model entity the routing table cannot resolve.
+
+    ``model_entity_name`` may be a LoRA composite
+    ``{base}&adapters/{adapter_workspace}/{adapter_name}``. When it is, the message
+    names the base model and the adapter separately so the failure is legible
+    (e.g. the base isn't served, or the adapter id is wrong).
+    """
+    # A LoRA composite ``base&adapters/adapter_ws/adapter_name`` names the base and the
+    # adapter separately so the 404 is legible. parse_adapters_suffix owns that grammar
+    # split (shared with validation/routing); a plain name falls through to the simple form.
+    adapter_parts = parse_adapters_suffix(model_entity_name)
+    if adapter_parts is not None:
+        base, adapter_workspace, adapter_name = adapter_parts
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Routing table lookup failed: Model entity not found for base model "
+                f"{workspace}/{base} with adapter {adapter_workspace}/{adapter_name}"
+            ),
+        )
     raise HTTPException(
         status.HTTP_404_NOT_FOUND,
-        detail=f"Model entity not found for {workspace}/{model_entity_name}",
+        detail=f"Routing table lookup failed: Model entity not found for {workspace}/{model_entity_name}",
     )
 
 

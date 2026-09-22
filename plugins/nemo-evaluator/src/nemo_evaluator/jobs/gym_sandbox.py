@@ -76,7 +76,12 @@ def gym_global_config(target: GymRunnerTarget) -> dict[str, Any]:
 
     if target.bind_resources_server:
         # The CLI's `+{agent}.responses_api_agents.{agent}.resources_server.name={server}`, as data.
-        agent_instance = (target.agent_ref_name or target.agent) if target.environment is not None else target.agent
+        # Keyed on the *instance*, with or without an environment FileSet: `SessionBackedGymRunner`
+        # stamps rows with `agent_ref_name or agent` either way, so keying this on `agent` instead
+        # would bind a resources server onto an instance no row routes to, and leave the one they do
+        # route to unbound. Renaming is not FileSet-only: 35 of stock Gym's 79 agent configs key an
+        # instance differently from the component (`rewoo_agent` on `langgraph_agent`).
+        agent_instance = target.agent_ref_name or target.agent
         config[agent_instance] = {
             "responses_api_agents": {
                 target.agent: {"resources_server": {"name": target.resources_server}},
@@ -399,7 +404,7 @@ class SessionBackedGymRunner:
     failed collection reclaims it too.
     """
 
-    #: Job id used when the run has none -- a local run outside the platform. The broker requires a
+    #: Job id used when the run has none -- an in-process run outside the platform. The broker requires a
     #: non-empty id because it scopes episode ownership and orphan reconciliation by it.
     LOCAL_JOB_ID = "agent-eval-local"
 

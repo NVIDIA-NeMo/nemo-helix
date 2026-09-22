@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The SSE decoder and the typed streaming response ``nemo chat`` consumes."""
+"""The SSE decoder and the typed binary stream ``nemo chat`` consumes."""
 
 from __future__ import annotations
 

@@ -16,11 +16,19 @@ from .token_claims import TokenClaims
 ResolvedTokenKind = Literal["access_key", "oidc_access_token", "workload_access_token", "workload_subject_token"]
 
 
+def _identity_aliases(subject: str, email: str | None) -> list[str]:
+    aliases = [subject]
+    if email and email not in aliases:
+        aliases.append(email)
+    return aliases
+
+
 def _direct_principal_from_claims(claims: TokenClaims) -> Principal:
     return Principal(
         id=claims.subject,
         email=claims.email,
         groups=claims.groups,
+        authz_aliases=_identity_aliases(claims.subject, claims.email),
     )
 
 
@@ -30,9 +38,11 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
     return Principal(
         id=claims.actor.subject,
         groups=claims.actor.groups,
+        authz_aliases=[claims.actor.subject],
         on_behalf_of=claims.subject,
         on_behalf_of_email=claims.email,
         on_behalf_of_groups=claims.groups,
+        on_behalf_of_authz_aliases=_identity_aliases(claims.subject, claims.email),
     )
 
 

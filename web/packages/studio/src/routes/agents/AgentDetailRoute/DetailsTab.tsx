@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
+import { MarkdownContent } from '@nemo/common/src/components/MarkdownContent';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { isDefined } from '@nemo/common/src/utils/list';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
@@ -49,7 +50,12 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
             <KVPair label="Project" value={agent.project} />
           )}
           {isDefined(agent?.description) && agent.description && (
-            <KVPair label="Description" value={agent.description} />
+            <Stack gap="1">
+              <Text kind="label/regular/sm" className="text-secondary">
+                Description
+              </Text>
+              <MarkdownContent content={agent.description} disableImages />
+            </Stack>
           )}
           {models.length > 0 && <KVPair label="Model" value={models.join(', ')} />}
           {isDefined(agent?.config_format) && (

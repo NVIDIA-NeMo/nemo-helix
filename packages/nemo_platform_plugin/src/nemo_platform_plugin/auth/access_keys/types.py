@@ -4,13 +4,50 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import Literal, Self, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AccessKeyStatus = Literal["ACTIVE", "EXPIRED", "REVOKED", "SUSPENDED", "ROTATING"]
 AccessKeyReversibleStatus = Literal["ACTIVE", "EXPIRED", "SUSPENDED"]
 AccessKeyEntityType = Literal["USER", "SERVICE_ACCOUNT"]
+ACCESS_KEY_JTI_PATTERN = r"^ak_[0-9a-f]{32}$"
+# Not blank once trimmed. Keep in sync with the `.strip()` checks below (this is what OpenAPI shows).
+_NON_BLANK_PATTERN = r"^\s*\S.*$"
+# A service/role name with no whitespace or ':' once trimmed (those chars are claim delimiters).
+_SCOPE_ITEM_PATTERN = r"^\s*[^\s:]+\s*$"
+
+
+class AccessKeyWorkspaceGrant(BaseModel):
+    """Workspace membership to grant to a newly created access key principal."""
+
+    workspace: str = Field(
+        pattern=_NON_BLANK_PATTERN,
+        description="Workspace name. Must not be blank.",
+    )
+    roles: list[str] = Field(
+        default_factory=lambda: ["Editor"],
+        json_schema_extra={
+            "x-schema-default": ["Editor"],
+            # Blank entries get dropped below, but at least one non-blank role must remain.
+            "contains": {"pattern": _NON_BLANK_PATTERN},
+            "minContains": 1,
+        },
+        description="Roles to grant in the workspace. Defaults to ['Editor'] when omitted.",
+    )
+
+    @model_validator(mode="after")
+    def _normalize(self) -> Self:
+        workspace = self.workspace.strip()
+        if not workspace:
+            raise ValueError("workspace must not be blank")
+        # Reject empty roles instead of silently creating a no-op grant.
+        roles = [role.strip() for role in self.roles if role.strip()]
+        if not roles:
+            raise ValueError("roles, if provided, must contain at least one non-empty role")
+        self.workspace = workspace
+        self.roles = roles
+        return self
 
 
 class AccessKeyListQueryParams(TypedDict, total=False):
@@ -58,6 +95,49 @@ class AccessKeyCreateRequest(BaseModel):
             "created by a PlatformAdmin and authenticate as service-account:<id>."
         ),
     )
+    scope: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        json_schema_extra={"nullable": True, "items": {"type": "string", "pattern": _SCOPE_ITEM_PATTERN}},
+        description="Optional service names that restrict this key to read and write access for those services.",
+    )
+    rotates: str | None = Field(
+        default=None,
+        pattern=ACCESS_KEY_JTI_PATTERN,
+        json_schema_extra={"nullable": True},
+        description=(
+            "JTI of a prior Scoped Access Key owned by the caller to revoke after creation. "
+            "Intended primarily for personal keys without a service-account identity."
+        ),
+    )
+    workspaces: list[AccessKeyWorkspaceGrant] | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Optional workspace memberships to grant to the newly created key principal.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_scope(self) -> Self:
+        if self.scope is None:
+            return self
+        # Reject empty scope instead of silently minting an unscoped, full-access token.
+        normalized = [service.strip() for service in self.scope]
+        if not normalized or any(not service for service in normalized):
+            raise ValueError("scope, if provided, must contain at least one non-empty service name")
+        # Service names later join into one space-delimited claim, so ':' or whitespace would corrupt it.
+        if any(char.isspace() or char == ":" for service in normalized for char in service):
+            raise ValueError("scope service names must not contain whitespace or ':' characters")
+        self.scope = normalized
+        return self
+
+    @model_validator(mode="after")
+    def _validate_workspace_grants(self) -> Self:
+        seen: set[str] = set()
+        for grant in self.workspaces or []:
+            if grant.workspace in seen:
+                raise ValueError(f"workspaces must not contain duplicate workspace names: {grant.workspace}")
+            seen.add(grant.workspace)
+        return self
 
 
 class AccessKeyRotateRequest(BaseModel):
@@ -99,6 +179,10 @@ class AccessKeyMetadataResponse(BaseModel):
     audiences: list[str] = Field(
         description="Audiences accepted for the Scoped Access Key JWT.",
         json_schema_extra={"uniqueItems": True},
+    )
+    scope: list[str] = Field(
+        default_factory=list,
+        description="Services this key is restricted to. An empty list means the key is unscoped.",
     )
     created_at: datetime
     expires_at: datetime | None = Field(default=None, json_schema_extra={"nullable": True})

@@ -69,7 +69,7 @@ class RunJob(NemoJob):
         entity_client: object,
         async_sdk: AsyncPlatformClient,
         is_local: bool,
-    ) -> BaseModel:  # AnonymizerStepConfig
+    ) -> AnonymizerStepConfig:
         del entity_client, is_local
         input_spec = cast(AnonymizerRequest, input_spec)
         anon_ctx = create_anonymizer_context(_generated_sdk(async_sdk), workspace)

@@ -4,6 +4,7 @@
 package authz
 
 import data.authz.allow
+import data.common
 import future.keywords.if
 import future.keywords.in
 
@@ -47,6 +48,28 @@ test_service_principal_bypass_read if {
     }
     
     result.allowed == true
+}
+
+test_malformed_service_principals_are_not_valid if {
+    not common.valid_service_principal("service:")
+    not common.valid_service_principal("service:has spaces")
+    not common.valid_service_principal("service:/path")
+    not common.valid_service_principal("service:*")
+}
+
+test_malformed_service_principal_does_not_receive_service_system_role if {
+    result := allow
+        with input as {
+            "method": "GET",
+            "path": "/apis/files/v2/workspaces/e2ens/filesets/e2eds",
+            "principal_id": "service:"
+        }
+        with data.authz.roles as mock_roles
+        with data.authz.endpoints as mock_endpoints
+        with data.authz.workspaces as mock_workspaces
+        with data.authz.principals as mock_principals
+
+    result.allowed == false
 }
 
 # Test service principal bypass - should allow writes too

@@ -20,6 +20,7 @@ from typing import Any
 from nemo_platform import ConflictError, NeMoPlatform, NotFoundError, omit
 from nemo_platform.types.inference import ModelProvider, ServedModelMapping
 from nemo_platform.types.workspaces import WorkspaceMember
+from nmp.common.auth import Principal
 from nmp.common.entities.constants import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nmp.common.entities.utils import get_random_id
 
@@ -357,13 +358,12 @@ def as_user(
     Returns:
         A new SDK client with auth headers set
     """
-    headers: dict[str, str] = {
-        "X-NMP-Principal-Id": email,
-    }
-    if "@" in email:
-        headers["X-NMP-Principal-Email"] = email
-    if groups:
-        headers["X-NMP-Principal-Groups"] = ",".join(groups)
+    headers = Principal(
+        id=email,
+        email=email if "@" in email else None,
+        groups=groups or [],
+        authz_aliases=[email],
+    ).get_headers()
     return sdk.with_options(set_default_headers=headers)
 
 
@@ -387,12 +387,14 @@ def as_service_for(
     Returns:
         A new SDK client with service principal + on-behalf-of headers
     """
-    return sdk.with_options(
-        set_default_headers={
-            "X-NMP-Principal-Id": f"service:{service_name}",
-            "X-NMP-Principal-On-Behalf-Of": on_behalf_of,
-        }
+    service_principal = Principal(
+        id=f"service:{service_name}",
+        authz_aliases=[f"service:{service_name}"],
+        on_behalf_of=on_behalf_of,
+        on_behalf_of_email=on_behalf_of if "@" in on_behalf_of else None,
+        on_behalf_of_authz_aliases=[on_behalf_of],
     )
+    return sdk.with_options(set_default_headers=service_principal.get_headers())
 
 
 def grant_workspace_role(

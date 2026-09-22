@@ -8,7 +8,9 @@ license: Apache-2.0
 preconditions:
   - nemo_setup_complete
   - workspace_exists
-allowed-tools: [Bash, Read]
+allowed-tools: Bash, Read
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Use NeMo Intake
