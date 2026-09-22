@@ -51,6 +51,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _detect_coding_agents,
     _detect_startup_port_conflict,
     _ensure_port_available_for_start,
+    _ensure_workspace_exists,
     _filter_agents_by_scope,
     _find_project_root,
     _is_preferred_vendor,
@@ -66,8 +67,10 @@ from nemo_helix_ext.cli.commands.setup import (
     _parse_csv_flag,
     _pick_default_chat_entity,
     _print_onboarding,
+    _print_setup_complete,
     _probe_model_entity,
     _prompt_custom_provider,
+    _prompt_post_setup_path,
     _register_provider_interactive,
     _render_onboarding_card,
     _require_supported_python,
@@ -110,6 +113,8 @@ from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from pydantic import SecretStr
 
 SETUP_MOD = "nemo_helix_ext.cli.commands.setup"
@@ -480,6 +485,49 @@ def _upsert_body(client: Any) -> UpsertModelProviderRequest:
     body = client.models.upsert_provider.call_args.kwargs["body"]
     assert isinstance(body, UpsertModelProviderRequest)
     return body
+
+
+class TestEnsureWorkspaceExists:
+    def test_existing_workspace_is_reused(self):
+        workspaces_client = MagicMock(spec=WorkspacesClient)
+        workspaces_client.get_workspace.return_value = _entity_response(MagicMock())
+
+        created = _ensure_workspace_exists(workspaces_client, "sample")
+
+        assert created is False
+        workspaces_client.get_workspace.assert_called_once_with(name="sample")
+        workspaces_client.create_workspace.assert_not_called()
+
+    def test_missing_workspace_is_created(self):
+        workspaces_client = MagicMock(spec=WorkspacesClient)
+        workspaces_client.get_workspace.side_effect = _not_found_error()
+        workspaces_client.create_workspace.return_value = _entity_response(MagicMock())
+
+        created = _ensure_workspace_exists(workspaces_client, "sample")
+
+        assert created is True
+        workspaces_client.create_workspace.assert_called_once_with(body=CreateWorkspaceRequest(name="sample"))
+
+    def test_concurrent_creation_is_treated_as_success(self):
+        workspaces_client = MagicMock(spec=WorkspacesClient)
+        workspaces_client.get_workspace.side_effect = [
+            _not_found_error(),
+            _entity_response(MagicMock()),
+        ]
+        workspaces_client.create_workspace.side_effect = RuntimeError("already exists")
+
+        created = _ensure_workspace_exists(workspaces_client, "sample")
+
+        assert created is False
+        assert workspaces_client.get_workspace.call_count == 2
+
+    def test_creation_error_is_raised_when_workspace_is_still_missing(self):
+        workspaces_client = MagicMock(spec=WorkspacesClient)
+        workspaces_client.get_workspace.side_effect = [_not_found_error(), _not_found_error()]
+        workspaces_client.create_workspace.side_effect = RuntimeError("permission denied")
+
+        with pytest.raises(RuntimeError, match="permission denied"):
+            _ensure_workspace_exists(workspaces_client, "sample")
 
 
 # ---------------------------------------------------------------------------
@@ -2169,6 +2217,7 @@ class TestInteractiveModelPairSelection:
     def test_run_scopes_picker_to_registered_provider(self):
         client = MagicMock()
         cli_context = MagicMock()
+        event_order: list[str] = []
         model_pair = ModelPair(
             default="default/claude-sonnet-4-6",
             fast="default/claude-haiku-4-5-20251001",
@@ -2189,11 +2238,25 @@ class TestInteractiveModelPairSelection:
             ),
             patch(f"{self._MOD}._select_model_pair", return_value=model_pair) as select_model_pair,
             patch(f"{self._MOD}._save_model_pair"),
-            patch(f"{self._MOD}._maybe_install_skills"),
-            patch(f"{self._MOD}._maybe_deploy_agent", return_value=False),
-            patch(f"{self._MOD}._print_onboarding"),
+            patch(
+                f"{self._MOD}._maybe_install_skills",
+                side_effect=lambda *args, **kwargs: event_order.append("skills"),
+            ),
+            patch(
+                f"{self._MOD}._print_setup_complete",
+                side_effect=lambda *args, **kwargs: event_order.append("complete"),
+            ),
+            patch(f"{self._MOD}._maybe_deploy_agent") as deploy_agent,
+            patch(
+                f"{self._MOD}._prompt_post_setup_path",
+                side_effect=lambda *args, **kwargs: event_order.append("post_setup") or "sample",
+            ),
+            patch(
+                f"{self._MOD}._ensure_workspace_exists",
+                side_effect=lambda *args, **kwargs: event_order.append("workspace") or True,
+            ) as ensure_workspace,
         ):
-            _run_interactive_mode(
+            selected_path = _run_interactive_mode(
                 cli_context,
                 client,
                 "default",
@@ -2203,6 +2266,11 @@ class TestInteractiveModelPairSelection:
             )
 
         select_model_pair.assert_called_once_with(client, "default", provider_name="anthropic")
+        assert selected_path == "sample"
+        deploy_agent.assert_not_called()
+        workspaces_client = cli_context.typed_client.return_value
+        ensure_workspace.assert_called_once_with(workspaces_client, "sample")
+        assert event_order == ["skills", "complete", "post_setup", "workspace"]
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
         """When the new provider is still syncing, setup should not show a misleading picker."""
@@ -2219,8 +2287,8 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._select_model_pair") as mock_select_model_pair,
             patch(f"{self._MOD}._save_model_pair"),
             patch(f"{self._MOD}._maybe_install_skills"),
-            patch(f"{self._MOD}._maybe_deploy_agent"),
-            patch(f"{self._MOD}._print_onboarding"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="explore"),
             patch(f"{self._MOD}.console") as mock_console,
         ):
             _run_interactive_mode(
@@ -2233,6 +2301,7 @@ class TestInteractiveModelPairSelection:
             )
 
         mock_select_model_pair.assert_not_called()
+        cli_context.typed_client.assert_not_called()
         printed_lines = [call.args[0] for call in mock_console.print.call_args_list if call.args]
         assert any("No models discovered yet (provider may still be syncing)" in line for line in printed_lines)
         assert any("Step 5: Choose agent models" in line for line in printed_lines)
@@ -2263,8 +2332,8 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._select_model_pair") as mock_select_model_pair,
             patch(f"{self._MOD}._save_model_pair"),
             patch(f"{self._MOD}._maybe_install_skills"),
-            patch(f"{self._MOD}._maybe_deploy_agent"),
-            patch(f"{self._MOD}._print_onboarding"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
             patch(f"{self._MOD}.console") as mock_console,
         ):
             _run_interactive_mode(
@@ -4687,72 +4756,90 @@ class TestRenderOnboardingCard:
             assert hasattr(panel, "renderable")
 
 
-class TestPrintOnboarding:
-    def test_shows_setup_complete_and_choice(self):
+class TestPrintSetupComplete:
+    def test_shows_setup_complete_and_summary(self):
         with (
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="optimize") as mock_choice,
-            patch(f"{SETUP_MOD}._render_onboarding_card") as mock_card,
             patch(f"{SETUP_MOD}.console") as mock_console,
         ):
-            _print_onboarding("http://localhost:8080", "nvidia-build", "default/some-model")
+            _print_setup_complete(
+                "http://localhost:8080",
+                "nvidia-build",
+                "default/some-model",
+                fast_model="default/fast-model",
+            )
 
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
         assert "Setup complete" in printed
         assert "nvidia-build" in printed
-        mock_choice.assert_called_once()
-        mock_card.assert_called_once_with("optimize")
-
-    def test_explore_path_renders_card(self):
-        with (
-            patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
-            patch(f"{SETUP_MOD}._render_onboarding_card") as mock_card,
-            patch(f"{SETUP_MOD}.console"),
-        ):
-            _print_onboarding("http://localhost:8080", "nvidia-build", None)
-
-        mock_card.assert_called_once_with("explore")
+        assert "some-model" in printed
+        assert "fast-model" in printed
 
     def test_unhealthy_platform_exits(self):
         with (
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=False),
             pytest.raises((typer.Exit, SystemExit)),
         ):
-            _print_onboarding("http://localhost:8080", "nvidia-build", None)
+            _print_setup_complete("http://localhost:8080", "nvidia-build", None)
 
-    def test_default_model_shown_when_present(self):
+
+class TestPromptPostSetupPath:
+    def test_returns_selected_path(self):
+        with patch(f"{SETUP_MOD}.prompt_choice", return_value="explore") as mock_choice:
+            selected = _prompt_post_setup_path()
+
+        assert selected == "explore"
+        mock_choice.assert_called_once_with(
+            "How would you like to get started?",
+            (
+                ("sample", "Create a sample workspace and demo agent"),
+                ("explore", "I would like to explore NeMo Helix on my own"),
+            ),
+            default="sample",
+            indent=2,
+        )
+
+
+class TestPrintOnboarding:
+    def test_shows_choice(self):
         with (
-            patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
-            patch(f"{SETUP_MOD}._render_onboarding_card"),
-            patch(f"{SETUP_MOD}.console") as mock_console,
+            patch(f"{SETUP_MOD}.prompt_choice", return_value="optimize") as mock_choice,
+            patch(f"{SETUP_MOD}._render_onboarding_card") as mock_card,
+            patch(f"{SETUP_MOD}.console"),
         ):
-            _print_onboarding("http://localhost:8080", "nvidia-build", "default/llama-3-3")
+            _print_onboarding()
 
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "llama-3-3" in printed
+        mock_choice.assert_called_once()
+        mock_card.assert_called_once_with("optimize")
+
+    def test_explore_path_renders_card(self):
+        with (
+            patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
+            patch(f"{SETUP_MOD}._render_onboarding_card") as mock_card,
+            patch(f"{SETUP_MOD}.console"),
+        ):
+            _print_onboarding()
+
+        mock_card.assert_called_once_with("explore")
 
     def test_demo_agent_shown_when_deployed(self):
         with (
-            patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
             patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
             patch(f"{SETUP_MOD}._render_onboarding_card"),
             patch(f"{SETUP_MOD}.console") as mock_console,
         ):
-            _print_onboarding("http://localhost:8080", "nvidia-build", "m", demo_deployed=True)
+            _print_onboarding(demo_deployed=True)
 
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
         assert "calculator-agent" in printed
 
     def test_demo_agent_hidden_when_not_deployed(self):
         with (
-            patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
             patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
             patch(f"{SETUP_MOD}._render_onboarding_card"),
             patch(f"{SETUP_MOD}.console") as mock_console,
         ):
-            _print_onboarding("http://localhost:8080", "nvidia-build", "m", demo_deployed=False)
+            _print_onboarding(demo_deployed=False)
 
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
         assert "calculator-agent" not in printed
