@@ -1544,14 +1544,10 @@ class TestFilterAgentsByScope:
         assert set(kept) == {"claude", "cursor", "codex"}
         assert skipped == []
 
-    def test_user_scope_skips_cursor(self):
-        # Cursor only supports PROJECT scope; should be filtered out at USER scope.
+    def test_user_scope_keeps_cursor(self):
         kept, skipped = _filter_agents_by_scope(["claude", "cursor", "codex"], Scope.USER)
-        assert "cursor" not in kept
-        assert {"claude", "codex"}.issubset(set(kept))
-        assert any(name == "cursor" for name, _ in skipped)
-        cursor_reason = next(reason for name, reason in skipped if name == "cursor")
-        assert "user" in cursor_reason
+        assert set(kept) == {"claude", "cursor", "codex"}
+        assert skipped == []
 
     def test_user_scope_keeps_codex_and_claude(self):
         kept, _ = _filter_agents_by_scope(["claude", "codex"], Scope.USER)
@@ -1640,7 +1636,7 @@ class TestMaybeInstallSkills:
 
         installers = {
             "codex": _StubInstaller("codex", [Scope.PROJECT, Scope.USER]),
-            "cursor": _StubInstaller("cursor", [Scope.PROJECT]),
+            "cursor": _StubInstaller("cursor", [Scope.PROJECT, Scope.USER]),
             "claude": _StubInstaller("claude", [Scope.PROJECT, Scope.USER]),
         }
 
@@ -1664,6 +1660,61 @@ class TestMaybeInstallSkills:
         ):
             _maybe_install_skills(**call_kwargs)
         return recorded_calls
+
+    def test_interactive_without_markers_offers_every_agent(self, tmp_path):
+        skills = {"alpha": self._skill("alpha")}
+        installed: list[str] = []
+
+        class _StubInstaller:
+            supported_scopes = [Scope.PROJECT, Scope.USER]
+
+            def __init__(self, name: str):
+                self.name = name
+                self.display_name = name.title()
+
+            def install(self, scope, project_root, selected_skills):
+                installed.append(self.name)
+                return []
+
+            def get_install_path(self, scope, project_root, skill_name):
+                return project_root / self.name / skill_name / "SKILL.md"
+
+        multiselect = MagicMock(side_effect=[["nemo-platform"], ["claude"]])
+        with (
+            patch("nemo_platform_ext.cli.commands.setup._detect_coding_agents", return_value=[]),
+            patch("nemo_platform_ext.cli.commands.setup._load_skills_with_warnings", return_value=(skills, [])),
+            patch("nemo_platform_ext.cli.commands.setup._find_project_root", return_value=tmp_path),
+            patch("nemo_platform_ext.cli.commands.setup.is_interactive", return_value=True),
+            patch("nemo_platform_ext.cli.commands.setup.prompt_multiselect", multiselect),
+            patch("nemo_platform_ext.cli.commands.setup.prompt_choice", return_value=Scope.PROJECT.value),
+            patch("nemo_platform_ext.cli.commands.setup.prompt_confirm", return_value=True),
+            patch(
+                "nemo_platform_ext.cli.commands.setup.get_installer",
+                side_effect=lambda name: _StubInstaller(name),
+            ),
+        ):
+            _maybe_install_skills(auto=False, install_skills=None)
+
+        agent_options = multiselect.call_args_list[1].kwargs["options"]
+        assert {value for value, _label in agent_options} == {"claude", "codex", "cursor", "opencode", "other"}
+        assert installed == ["claude"]
+
+    def test_auto_installs_to_explicit_path(self, tmp_path):
+        custom_path = tmp_path / "custom-skills"
+        skills = {"alpha": self._skill("alpha")}
+
+        with (
+            patch("nemo_platform_ext.cli.commands.setup._detect_coding_agents", return_value=[]),
+            patch("nemo_platform_ext.cli.commands.setup._load_skills_with_warnings", return_value=(skills, [])),
+            patch("nemo_platform_ext.cli.commands.setup._find_project_root", return_value=tmp_path),
+        ):
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_path=custom_path,
+            )
+
+        assert (custom_path / "nemo-alpha" / "SKILL.md").exists()
 
     @pytest.mark.parametrize(
         "call_kwargs",
@@ -1705,7 +1756,7 @@ class TestMaybeInstallSkills:
         )
         assert {name for name, _, _ in calls} == {"codex"}
 
-    def test_skills_scope_user_filters_out_cursor(self, tmp_path):
+    def test_skills_scope_user_installs_cursor(self, tmp_path):
         calls = self._patched_install(
             tmp_path,
             auto=True,
@@ -1713,9 +1764,7 @@ class TestMaybeInstallSkills:
             skills_scope=Scope.USER,
         )
         installed_agents = {name for name, _, _ in calls}
-        # Cursor doesn't support USER scope; should be skipped, not installed.
-        assert "cursor" not in installed_agents
-        assert {"codex", "claude"}.issubset(installed_agents)
+        assert installed_agents == {"codex", "cursor", "claude"}
         for _name, scope, _sk in calls:
             assert scope == Scope.USER
 
@@ -1855,6 +1904,40 @@ class TestMaybeInstallSkills:
                 install_skills=True,
                 skills_agents=["copex"],  # typo
             )
+
+    def test_skills_path_and_skills_agents_conflict(self, tmp_path):
+        with pytest.raises(typer.BadParameter) as exc_info:
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_path=tmp_path / "skills",
+                skills_agents=["claude"],
+            )
+        assert "--skills-path and --skills-agents cannot be combined" in str(exc_info.value)
+
+    def test_auto_other_agent_requires_skills_path(self):
+        with pytest.raises(typer.BadParameter) as exc_info:
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_agents=["other"],
+            )
+        assert "requires --skills-path" in str(exc_info.value)
+
+    def test_skills_path_selects_custom_agent(self, tmp_path):
+        skills = {"alpha": self._skill("alpha")}
+        custom_path = tmp_path / "skills"
+        with (
+            patch("nemo_platform_ext.cli.commands.setup._load_skills_with_warnings", return_value=(skills, [])),
+            patch("nemo_platform_ext.cli.commands.setup._find_project_root", return_value=tmp_path),
+        ):
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_path=custom_path,
+            )
+
+        assert (custom_path / "nemo-alpha" / "SKILL.md").exists()
 
     def test_partial_install_failure_does_not_raise(self, tmp_path):
         """Mixed success/failure shouldn't fail the run; only total failure should."""

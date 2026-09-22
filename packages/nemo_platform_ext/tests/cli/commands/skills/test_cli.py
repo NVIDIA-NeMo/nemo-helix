@@ -257,8 +257,8 @@ class TestInstall:
         [
             ("claude", ".claude/skills/nemo-inference/SKILL.md"),
             ("codex", ".agents/skills/nemo-inference/SKILL.md"),
-            ("cursor", ".cursor/rules/nemo-inference/SKILL.md"),
-            ("opencode", ".opencode/commands/nemo-inference/SKILL.md"),
+            ("cursor", ".cursor/skills/nemo-inference/SKILL.md"),
+            ("opencode", ".opencode/skills/nemo-inference/SKILL.md"),
         ],
     )
     def test_install_uses_cwd_when_parent_has_git_directory(
@@ -340,11 +340,63 @@ class TestInstall:
         assert_exit_code(result, 1)
         assert "Unsupported agent" in result.output
 
-    def test_install_cursor_user_scope_errors(self, tmp_path: Path, monkeypatch):
+    def test_install_cursor_user_scope(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, "skills install --agent cursor --user")
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        result = runner.invoke(app, "skills install --agent cursor --user --skill inference")
+        assert_exit_code(result, 0)
+        assert (tmp_path / ".cursor" / "skills" / "nemo-inference" / "SKILL.md").exists()
+
+    def test_install_requires_agent_or_path(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, "skills install --skill inference")
         assert_exit_code(result, 1)
-        assert "does not support" in result.output
+        assert "provide --agent or --path" in result.output
+
+    def test_install_to_custom_path(self, tmp_path: Path):
+        skills_path = tmp_path / "custom" / "skills"
+        result = runner.invoke(
+            app,
+            ["skills", "install", "--path", str(skills_path), "--skill", "inference"],
+        )
+        assert_exit_code(result, 0)
+        skill_file = skills_path / "nemo-inference" / "SKILL.md"
+        assert skill_file.exists()
+        assert "name: nemo-inference" in skill_file.read_text()
+
+    def test_install_agent_and_path_conflict(self, tmp_path: Path):
+        result = runner.invoke(
+            app,
+            ["skills", "install", "--agent", "claude", "--path", str(tmp_path / "skills")],
+        )
+        assert_exit_code(result, 1)
+        assert "--agent and --path cannot be used together" in result.output
+
+    def test_install_path_and_project_dir_conflict(self, tmp_path: Path):
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        result = runner.invoke(
+            app,
+            [
+                "skills",
+                "install",
+                "--path",
+                str(tmp_path / "skills"),
+                "--project-dir",
+                str(project_dir),
+            ],
+        )
+        assert_exit_code(result, 1)
+        assert "--path and --project-dir cannot be used together" in result.output
+
+    def test_install_user_scope_is_accepted_for_custom_path(self, tmp_path: Path):
+        skills_path = tmp_path / "custom" / "skills"
+        result = runner.invoke(
+            app,
+            ["skills", "install", "--path", str(skills_path), "--user", "--skill", "inference"],
+        )
+        assert_exit_code(result, 0)
+        assert (skills_path / "nemo-inference" / "SKILL.md").exists()
 
 
 class TestFindProjectRoot:

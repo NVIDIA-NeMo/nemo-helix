@@ -50,8 +50,10 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from nemo_platform_ext.cli.commands.skills import registry as skills_registry
+from nemo_platform_ext.cli.commands.skills.agents.custom import CustomPathInstaller
 from nemo_platform_ext.cli.commands.skills.base import Scope, Skill
-from nemo_platform_ext.cli.commands.skills.registry import get_installer, load_skills
+from nemo_platform_ext.cli.commands.skills.installer import BaseAgentInstaller
+from nemo_platform_ext.cli.commands.skills.registry import get_installer, list_agent_names, load_skills
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_ext.cli.core.errors import handle_errors
 from nemo_platform_ext.cli.docker_preflight import DOCKER_PREFLIGHT_MESSAGE, require_docker_for_default_local
@@ -306,7 +308,6 @@ _AGENT_MARKERS: tuple[tuple[str, str], ...] = (
     (".opencode", "opencode"),
     (".claude", "claude"),
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — platform reachability
@@ -1469,6 +1470,13 @@ def _print_plugin_warnings(plugin_warnings: list[str]) -> None:
 
 
 _BUILTIN_SOURCE_NAME = "nemo-platform"
+_CUSTOM_AGENT_NAME = "other"
+
+
+def _get_skills_installer(agent_name: str) -> BaseAgentInstaller:
+    if agent_name == _CUSTOM_AGENT_NAME:
+        return CustomPathInstaller()
+    return get_installer(agent_name)
 
 
 def _skill_sources_of(skills: dict[str, Skill]) -> dict[str, list[Skill]]:
@@ -1494,7 +1502,7 @@ def _filter_agents_by_scope(agents: list[str], scope: Scope) -> tuple[list[str],
     kept: list[str] = []
     skipped: list[tuple[str, str]] = []
     for agent in agents:
-        installer = get_installer(agent)
+        installer = _get_skills_installer(agent)
         if scope in installer.supported_scopes:
             kept.append(agent)
         else:
@@ -1503,7 +1511,9 @@ def _filter_agents_by_scope(agents: list[str], scope: Scope) -> tuple[list[str],
     return kept, skipped
 
 
-def _print_final_skills_summary(agents: list[str], scope: Scope, skill_names: list[str]) -> None:
+def _print_final_skills_summary(
+    agents: list[str], scope: Scope, skill_names: list[str], custom_path: Path | None = None
+) -> None:
     """Print the planned action before final confirmation."""
     if not skill_names or not agents:
         return
@@ -1514,10 +1524,11 @@ def _print_final_skills_summary(agents: list[str], scope: Scope, skill_names: li
         f"[bold]{agent_list}[/bold] at [bold]{scope.value}[/bold] scope:"
     )
     for agent in agents:
-        installer = get_installer(agent)
+        installer = _get_skills_installer(agent)
         # Show the parent directory of one representative skill so the user
         # sees the destination root, not a single SKILL.md path.
-        example = installer.get_install_path(scope, project_root, skill_names[0])
+        install_root = custom_path if agent == _CUSTOM_AGENT_NAME and custom_path is not None else project_root
+        example = installer.get_install_path(scope, install_root, skill_names[0])
         console.print(f"    {agent} → {example.parent.parent}/")
     console.print()
 
@@ -1529,6 +1540,7 @@ def _run_skill_install(
     skill_names: list[str],
     all_skills: dict[str, Skill],
     project_root: Path,
+    custom_path: Path | None = None,
 ) -> None:
     """Run the actual installer for each agent with the chosen skill subset.
 
@@ -1548,8 +1560,9 @@ def _run_skill_install(
         failures = 0
         for agent in agents:
             try:
-                installer = get_installer(agent)
-                installer.install(scope, project_root, chosen)
+                installer = _get_skills_installer(agent)
+                install_root = custom_path if agent == _CUSTOM_AGENT_NAME and custom_path is not None else project_root
+                installer.install(scope, install_root, chosen)
                 console.print(f"  {CHECK} Installed {len(chosen)} skill(s) for {agent}")
                 successes += 1
             except Exception as exc:
@@ -1584,6 +1597,7 @@ def _maybe_install_skills(
     skills_agents: list[str] | None = None,
     skills_scope: Scope | None = None,
     skills_from: list[str] | None = None,
+    skills_path: Path | None = None,
 ) -> None:
     """Install coding agent skills if requested.
 
@@ -1608,19 +1622,20 @@ def _maybe_install_skills(
 
     # Validate --skills-agents up-front: a typo like `--skills-agents copex` should
     # fail loudly before any platform work, regardless of detection state.
+    if skills_path is not None:
+        skills_path = skills_path.expanduser().resolve()
+        if skills_agents is not None:
+            raise typer.BadParameter("--skills-path and --skills-agents cannot be combined", param_hint="--skills-path")
+        skills_agents = [_CUSTOM_AGENT_NAME]
+
     if skills_agents:
         for agent in skills_agents:
-            get_installer(agent)
+            _get_skills_installer(agent)
 
     detected = _detect_coding_agents()
     # --skills-agents overrides detection: an explicit instruction to install for
     # an agent wins over "we didn't find a marker file for it." Detection is still
     # load-bearing as the default when the flag is absent.
-    if not detected and not skills_agents:
-        if not auto:
-            console.print(f"  {WARN} No coding agents detected in project (no .cursor/, AGENTS.md, etc.)")
-        return
-
     all_skills, plugin_warnings = _load_skills_with_warnings()
     if not all_skills:
         console.print(f"  {WARN} No NeMo skills available to install.")
@@ -1640,9 +1655,9 @@ def _maybe_install_skills(
             )
 
     detected_names = [name for _, name in detected]
-    # Interactive menu options: detected agents plus any extras the user explicitly
-    # asked for. dict.fromkeys preserves order and deduplicates.
-    menu_agent_names = list(dict.fromkeys(detected_names + (skills_agents or [])))
+    # Detection determines defaults only. Every built-in target remains available
+    # so setup works outside an existing coding-agent project.
+    menu_agent_names = [*list_agent_names(), _CUSTOM_AGENT_NAME]
     project_root = _find_project_root()
     non_interactive = auto or not is_interactive()
 
@@ -1655,6 +1670,14 @@ def _maybe_install_skills(
         if install_skills is not True:
             return
         chosen_agents = skills_agents or detected_names
+        if not chosen_agents:
+            console.print(f"  {WARN} No coding agents detected. Use --skills-agents or --skills-path <directory>.")
+            return
+        if _CUSTOM_AGENT_NAME in chosen_agents and skills_path is None:
+            raise typer.BadParameter(
+                "The 'other' agent requires --skills-path in non-interactive mode",
+                param_hint="--skills-path",
+            )
         chosen_scope = skills_scope or Scope.PROJECT
         chosen_sources = skills_from or source_names
         chosen_skills = _skills_for_sources(chosen_sources)
@@ -1670,6 +1693,7 @@ def _maybe_install_skills(
             skill_names=chosen_skills,
             all_skills=all_skills,
             project_root=project_root,
+            custom_path=skills_path,
         )
         return
 
@@ -1696,11 +1720,25 @@ def _maybe_install_skills(
     agent_defaults = skills_agents if skills_agents else detected_names
     chosen_agents = prompt_multiselect(
         message="Install skills for which agents?",
-        options=[(name, get_installer(name).display_name) for name in menu_agent_names],
+        options=[(name, _get_skills_installer(name).display_name) for name in menu_agent_names],
         defaults=agent_defaults,
         min_choices=1,
         indent=2,
     )
+
+    if _CUSTOM_AGENT_NAME in chosen_agents and skills_path is None:
+        skills_path = (
+            Path(
+                prompt_text(
+                    "Skills directory: ",
+                    validator=non_empty_validator("skills directory"),
+                    hint="For example: ~/.my-agent/skills",
+                    indent=2,
+                )
+            )
+            .expanduser()
+            .resolve()
+        )
 
     scope_default = (skills_scope or Scope.PROJECT).value
     chosen_scope = Scope(
@@ -1722,7 +1760,7 @@ def _maybe_install_skills(
         console.print(f"  {WARN} No installable agents for scope '{chosen_scope.value}'.")
         return
 
-    _print_final_skills_summary(chosen_agents, chosen_scope, chosen_skills)
+    _print_final_skills_summary(chosen_agents, chosen_scope, chosen_skills, custom_path=skills_path)
     if not prompt_confirm("Proceed?", default=True, indent=2):
         return
 
@@ -1732,6 +1770,7 @@ def _maybe_install_skills(
         skill_names=chosen_skills,
         all_skills=all_skills,
         project_root=project_root,
+        custom_path=skills_path,
     )
 
 
@@ -2468,6 +2507,16 @@ def setup_command(
             ),
         ),
     ] = None,
+    skills_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--skills-path",
+            help="Install skills to a custom directory for another coding agent",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
     deploy_agent: Annotated[
         bool | None,
         typer.Option("--deploy-agent/--no-deploy-agent", help="Deploy the demo calculator agent"),
@@ -2624,6 +2673,7 @@ def setup_command(
                 skills_agents=skills_agents_list,
                 skills_scope=skills_scope,
                 skills_from=skills_from_list,
+                skills_path=skills_path,
                 certificate_authority=certificate_authority,
             )
         else:
@@ -2637,6 +2687,7 @@ def setup_command(
                 skills_agents=skills_agents_list,
                 skills_scope=skills_scope,
                 skills_from=skills_from_list,
+                skills_path=skills_path,
                 certificate_authority=certificate_authority,
             )
     except typer.Exit as exc:
@@ -2664,6 +2715,7 @@ def _run_auto_mode(
     skills_agents: list[str] | None = None,
     skills_scope: Scope | None = None,
     skills_from: list[str] | None = None,
+    skills_path: Path | None = None,
     certificate_authority: str | None = None,
 ) -> None:
     """Non-interactive provider registration from environment variables."""
@@ -2734,6 +2786,7 @@ def _run_auto_mode(
         skills_agents=skills_agents,
         skills_scope=skills_scope,
         skills_from=skills_from,
+        skills_path=skills_path,
     )
     _maybe_deploy_agent(
         base_url,
@@ -2766,6 +2819,7 @@ def _run_interactive_mode(
     skills_agents: list[str] | None = None,
     skills_scope: Scope | None = None,
     skills_from: list[str] | None = None,
+    skills_path: Path | None = None,
     certificate_authority: str | None = None,
 ) -> None:
     """Walk the user through provider selection, credential entry, and model choice."""
@@ -2831,6 +2885,7 @@ def _run_interactive_mode(
             skills_agents=skills_agents,
             skills_scope=skills_scope,
             skills_from=skills_from,
+            skills_path=skills_path,
         )
 
         console.print("\n[bold]Step 7: Demo agent (optional)[/bold]\n")

@@ -37,7 +37,7 @@ const preamble = (
 
   const installStep = opts.checkExistingSkill
     ? [
-        `1. Check whether the ${skillList} ${noun} ${are} already installed for this coding agent (look for its existing skill file, e.g. under \`.claude/skills\`, \`.cursor/rules\`, or the equivalent for this coding agent). If ${them} ${are} already installed, skip straight to step 2 — do not reinstall. Otherwise install ${them} (replace \`${CODING_AGENT_PLACEHOLDER}\` with one of: ${SUPPORTED_CODING_AGENTS}):`,
+        `1. Check whether the ${skillList} ${noun} ${are} already installed for this coding agent (look for its existing skill file, e.g. under \`.claude/skills\`, \`.cursor/skills\`, or the equivalent for this coding agent). If ${them} ${are} already installed, skip straight to step 2 — do not reinstall. Otherwise install ${them} (replace \`${CODING_AGENT_PLACEHOLDER}\` with one of: ${SUPPORTED_CODING_AGENTS}):`,
         `   \`\`\`bash`,
         `   nemo skills install --agent ${CODING_AGENT_PLACEHOLDER}`,
         `   \`\`\``,

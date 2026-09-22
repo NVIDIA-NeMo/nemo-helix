@@ -6,7 +6,17 @@
 import shutil
 from pathlib import Path
 
-from nemo_platform_ext.cli.commands.skills.base import Scope, Skill, validate_skill_name
+import yaml
+from nemo_platform_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name, validate_skill_name
+
+
+def format_agent_skill_content(skill: Skill) -> str:
+    """Return standard Agent Skills content with normalized NeMo metadata."""
+    metadata: dict[str, object] = {"name": installed_skill_name(skill.name), "description": skill.description}
+    if skill.preconditions:
+        metadata["preconditions"] = skill.preconditions
+    front_matter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
+    return f"---\n{front_matter}---\n\n{skill.content}"
 
 
 class BaseAgentInstaller:
