@@ -16,12 +16,17 @@
 #   ./eval-smoke.sh cancel                   # cancel queued, then cancel running
 #   ./eval-smoke.sh retry                    # fail an execution, then retry it
 #   ./eval-smoke.sh restart                  # restart the controller mid-run
+#   ./eval-smoke.sh fanout                   # benchmark fan-out: ramp and caps
 #   ./eval-smoke.sh all                      # every scenario, one task build
 #
 # The fault-injection scenarios need a run long enough to interrupt, so they
 # build a slow variant of hello-world: the same task with a sleep in front of
 # the reference solution. It is synthesised here rather than committed as a
 # second fixture so it cannot drift from hello-world.
+#
+# Fan-out needs many *tasks*, not many runs of one task, and building an image
+# per member would measure Cloud Build instead of the controller. So it builds
+# once and registers the remaining members against that same signed image.
 set -euo pipefail
 
 NS=nemo-platform-scaled-evals
@@ -32,6 +37,11 @@ WORK="$(mktemp -d)"
 # Long enough to observe a run and intervene, well inside the task's own 900s
 # agent timeout.
 SLOW_SECONDS="${SLOW_SECONDS:-240}"
+# Enough members to see a ramp and to exceed the member cap below, small enough
+# that one run fits in a coffee break.
+MEMBERS="${MEMBERS:-10}"
+# Deliberately below MEMBERS so the cap actually has to bind.
+MEMBER_CAP="${MEMBER_CAP:-3}"
 SCENARIO="${1:-happy}"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -118,6 +128,30 @@ build_task() {
   done
   [ "$status" = ready ] || fail "revision never reached ready (last: $status)"
   note "image_ref: $(json "$WORK/task_now.json" "image_ref")"
+}
+
+# clone_task <label>  ->  echoes a task id already `ready` on $IMAGE_REF
+#
+# Finalize accepts an already-signed image instead of building the uploaded
+# pack. The pack still has to be uploaded -- finalize rejects a revision with
+# no object behind it -- but nothing rebuilds it.
+clone_task() {
+  local label="$1" tid out="$WORK/clone-$1.json"
+  curl -sf -X POST "$BASE/v1/tasks" -H 'content-type: application/json' \
+    -d "{\"name\":\"$NAME-$label\",\"description\":\"fan-out member $label\"}" \
+    -o "$out" || fail "clone $label: task create"
+  tid="$(json "$out" id)"
+  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" \
+    -H 'Content-Type: application/gzip' "$(json "$out" upload.url)" \
+    -o /dev/null || fail "clone $label: pack upload"
+  curl -sf -X POST "$BASE/v1/tasks/$tid/finalize" -H 'content-type: application/json' \
+    -d "{\"image_ref\":\"$IMAGE_REF\",\"image_digest\":\"$IMAGE_DIGEST\"}" \
+    -o "$WORK/clone-$label-final.json" \
+    || fail "clone $label: finalize did not accept the reused image"
+  local status
+  status="$(json "$WORK/clone-$label-final.json" status)"
+  [ "$status" = ready ] || fail "clone $label finalized as '$status', expected ready"
+  printf '%s' "$tid"
 }
 
 # create_eval <suffix>  ->  sets EV_ID
@@ -326,6 +360,66 @@ scenario_restart() {
   pass "$EV_ID completed across a controller restart"
 }
 
+# Every scenario above drives one evaluation, so none of them can show what
+# happens when a benchmark fans out: how fast the controller submits, whether
+# the concurrency cap binds, and whether a status ever moves backward.
+scenario_fanout() {
+  build_task hello-world 0
+  IMAGE_REF="$(json "$WORK/task_now.json" image_ref)"
+  IMAGE_DIGEST="$(json "$WORK/task_now.json" image_digest)"
+  [ -n "$IMAGE_REF" ] || fail "the built task exposed no image_ref to reuse"
+  [ -n "$IMAGE_DIGEST" ] || fail "the built task exposed no image_digest to reuse"
+
+  step "registering $MEMBERS member tasks against one built image"
+  local members="$TASK_ID" i
+  for i in $(seq 2 "$MEMBERS"); do
+    members="$members $(clone_task "m$i")"
+    printf '  [%03d/%03d] registered\n' "$i" "$MEMBERS"
+  done
+  pass "$MEMBERS member tasks ready without $((MEMBERS - 1)) extra builds"
+
+  step "creating the benchmark and running it"
+  # shellcheck disable=SC2086 -- $members is a deliberate word-split list.
+  python3 -c '
+import json, sys
+print(json.dumps({
+    "name": sys.argv[1],
+    "description": "fan-out smoke",
+    "tasks": [{"task_id": t} for t in sys.argv[2:]],
+}))' "$NAME-bm" $members > "$WORK/bm_req.json"
+  curl -sf -X POST "$BASE/v1/benchmarks" -H 'content-type: application/json' \
+    --data-binary "@$WORK/bm_req.json" -o "$WORK/bm.json" || fail "benchmark create"
+  local bm_id
+  bm_id="$(json "$WORK/bm.json" id)"
+  note "benchmark_id: $bm_id"
+
+  curl -sf -X POST "$BASE/v1/benchmark-runs" -H 'content-type: application/json' \
+    -d "{\"name\":\"$NAME-run\",\"benchmark_id\":\"$bm_id\",\"runtime\":\"sandbox_k8s\",\"max_concurrent_members\":$MEMBER_CAP}" \
+    -o "$WORK/run.json" || fail "benchmark run create"
+  local run_id
+  run_id="$(json "$WORK/run.json" id)"
+  note "benchmark_run_id: $run_id   member cap: $MEMBER_CAP"
+
+  step "watching the fan-out"
+  python3 "$(dirname "$0")/fanout-probe.py" "$BASE" "$run_id" \
+    --expect-members "$MEMBERS" --member-cap "$MEMBER_CAP" \
+    | tee "$WORK/fanout.json" || fail "fan-out probe reported a violation"
+
+  local per_min settled
+  per_min="$(json "$WORK/fanout.json" submissions_per_minute)"
+  settled="$(python3 -c '
+import json, sys
+counts = json.load(open(sys.argv[1]))["final_status_counts"]
+print(counts.get("succeeded", 0))' "$WORK/fanout.json")"
+  [ "$settled" = "$MEMBERS" ] || fail "only $settled/$MEMBERS members succeeded"
+  pass "all $MEMBERS members succeeded, cap held at $MEMBER_CAP, no status regressed"
+  # One submission per reconcile pass at the 10s default is ~6/min. Anything at
+  # or below that means the drain loop is not draining.
+  python3 -c "import sys; sys.exit(0 if float('${per_min:-0}') > 6.0 else 1)" \
+    || fail "submitted ${per_min}/min, at or below the one-per-pass ceiling of 6/min"
+  pass "controller submitted ${per_min} evaluations/minute"
+}
+
 # ----------------------------------------------------------------------- main
 
 port_forward
@@ -336,6 +430,7 @@ case "$SCENARIO" in
   cancel)    build_task slow-world "$SLOW_SECONDS"; scenario_cancel ;;
   retry)     build_task slow-world "$SLOW_SECONDS"; scenario_retry ;;
   restart)   build_task slow-world "$SLOW_SECONDS"; scenario_restart ;;
+  fanout)    scenario_fanout ;;
   all)
     scenario_happy
     scenario_artifacts
@@ -343,8 +438,9 @@ case "$SCENARIO" in
     scenario_cancel
     scenario_retry
     scenario_restart
+    scenario_fanout
     ;;
-  *) fail "unknown scenario '$SCENARIO' (happy|artifacts|cancel|retry|restart|all)" ;;
+  *) fail "unknown scenario '$SCENARIO' (happy|artifacts|cancel|retry|restart|fanout|all)" ;;
 esac
 
 printf '\n\033[32mPASS\033[0m — scenario %s.\n' "$SCENARIO"
