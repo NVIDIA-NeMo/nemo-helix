@@ -91,6 +91,48 @@ def test_installed_packages_are_not_our_gates(tmp_path: Path) -> None:
     assert check_test_gates.orphaned_gates(tmp_path, workflows) == {}
 
 
+def test_the_other_pytest_filename_pattern_is_scanned(tmp_path: Path) -> None:
+    # pytest.ini sets `python_files = test_*.py *_test.py`. Scanning one pattern would leave gates in
+    # the other invisible here while pytest still skipped those tests.
+    tests = tmp_path / "pkg" / "tests"
+    tests.mkdir(parents=True)
+    (tests / "thing_test.py").write_text(
+        GATED.format(read=ENV_READS[0].format(var="RUN_OTHER_PATTERN")), encoding="utf-8"
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")
+
+    assert "RUN_OTHER_PATTERN" in check_test_gates.orphaned_gates(tmp_path, workflows)
+
+
+def test_the_generated_sdk_is_skipped_but_first_party_sdk_tooling_is_not(tmp_path: Path) -> None:
+    """The exclusion is the generated tree, not every directory that happens to be called ``sdk``.
+
+    ``sdk/python`` is Stainless output -- a gate there would not be ours to set. But
+    ``tools/nemo-platform-sdk-tools/tests/sdk`` is first-party, and a component-name match would
+    exempt it too.
+    """
+    generated = tmp_path / "sdk" / "python" / "nemo-platform" / "tests"
+    generated.mkdir(parents=True)
+    (generated / "test_generated.py").write_text(
+        GATED.format(read=ENV_READS[0].format(var="RUN_GENERATED")), encoding="utf-8"
+    )
+    first_party = tmp_path / "tools" / "nemo-platform-sdk-tools" / "tests" / "sdk"
+    first_party.mkdir(parents=True)
+    (first_party / "thing_test.py").write_text(
+        GATED.format(read=ENV_READS[0].format(var="RUN_FIRST_PARTY")), encoding="utf-8"
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")
+
+    orphans = check_test_gates.orphaned_gates(tmp_path, workflows)
+
+    assert "RUN_GENERATED" not in orphans
+    assert "RUN_FIRST_PARTY" in orphans
+
+
 def test_a_file_that_does_not_parse_does_not_fail_the_check(tmp_path: Path) -> None:
     # Fixtures and templates share the test_*.py name. Refusing to run over them would make the
     # check fail for a reason unrelated to gates.
