@@ -5,11 +5,21 @@
 
 Provides functions for waiting on job completion across any NeMo Helix service
 that implements the standard jobs API pattern.
+
+Why these waits are capped on wall clock
+----------------------------------------
+
+``pytest.ini`` sets ``timeout_method = thread``, which cannot unwind a test
+blocked in a poll loop: it calls ``os._exit(1)``, losing fixture teardown, job
+cleanup, the JUnit report and every later test.  A wait that outlives pytest's
+budget therefore destroys the run rather than failing one test, so each wait is
+capped below it via :func:`wait_budget` and raises its own diagnostic first.
 """
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
@@ -19,6 +29,26 @@ from nemo_helix_plugin.jobs.schemas import HelixJobLogPage
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 
 logger = logging.getLogger(__name__)
+
+# Absolute ``time.monotonic()`` instant past which no wait below may run, or
+# ``None`` when the harness has not published a budget.
+_wait_deadline: float | None = None
+
+
+@contextmanager
+def wait_budget(seconds: float | None) -> Iterator[None]:
+    """Cap every job wait in this block to *seconds* of wall clock.
+
+    The e2e harness publishes each test's share of its pytest budget here.
+    ``None`` clears the cap, for callers outside pytest.
+    """
+    global _wait_deadline
+    previous = _wait_deadline
+    _wait_deadline = None if seconds is None else time.monotonic() + seconds
+    try:
+        yield
+    finally:
+        _wait_deadline = previous
 
 
 def poll_until_terminal(
@@ -35,10 +65,23 @@ def poll_until_terminal(
     instead capped by the separate *image_pull_timeout*.  *get_status* must
     return a **lowercase** status string each call.
 
+    Total wall-clock time is capped at whichever comes first of ``timeout +
+    image_pull_timeout`` and any budget published via :func:`wait_budget`.
+    Neither per-status budget bounds wall clock alone, because a job parked in
+    ``pending`` never advances *timeout*.
+
     Raises:
-        TimeoutError: When *timeout* is exceeded (excluding pending time) or
-            *image_pull_timeout* is exceeded while in pending status.
+        TimeoutError: When *timeout* is exceeded (excluding pending time),
+            *image_pull_timeout* is exceeded while in pending status, or the
+            total wall-clock budget is exhausted.
     """
+    start = time.monotonic()
+    budget = timeout + image_pull_timeout
+    harness_deadline = _wait_deadline
+    if harness_deadline is not None:
+        budget = min(budget, harness_deadline - start)
+    deadline = start + budget
+
     elapsed = 0.0
     pending_elapsed = 0.0
     pending_logged = False
@@ -53,6 +96,12 @@ def poll_until_terminal(
 
         if elapsed >= timeout:
             raise TimeoutError(f"'{label}' timed out after {timeout}s. Status: {status}")
+
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"'{label}' exhausted its total wall-clock budget of {budget:.0f}s "
+                f"(job timeout {timeout}s, image pull timeout {image_pull_timeout}s). Status: {status}"
+            )
 
         time.sleep(poll_interval)
         poll_duration = time.time() - poll_start
