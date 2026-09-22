@@ -56,6 +56,13 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
                 "nmp_common",
                 "NMP_CONFIG",
                 "nmp-common",
+                "PlatformJobStep",
+                "CreatePlatformJobRequest",
+                "AsyncCustomizationPlatformClients",
+                "_SyncPlatform",
+                "usePlatformSdk",
+                "mockPlatform",
+                "Platform",
                 "NMPJobContext",
                 "TestNMPJobContextFromEnv",
                 "NMPOIDCConfig",
@@ -111,6 +118,13 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "nhx_common" in renamed_text
     assert "NHX_CONFIG" in renamed_text
     assert "nhx-common" in renamed_text
+    assert "HelixJobStep" in renamed_text
+    assert "CreateHelixJobRequest" in renamed_text
+    assert "AsyncCustomizationHelixClients" in renamed_text
+    assert "_SyncHelix" in renamed_text
+    assert "useHelixSdk" in renamed_text
+    assert "mockHelix" in renamed_text
+    assert " Platform " in f" {renamed_text} "
     assert "NHXJobContext" in renamed_text
     assert "TestNHXJobContextFromEnv" in renamed_text
     assert "NHXOIDCConfig" in renamed_text
@@ -222,7 +236,7 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
     (repo / "dist/index.js").write_text(
-        "const product = 'NeMo Platform'; snmp abcNMPdef nmp_common NmpContext nmpclient NMPJobContext\n"
+        "const product = 'NeMo Platform'; PlatformJobStep snmp abcNMPdef nmp_common NmpContext nmpclient NMPJobContext\n"
     )
     (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
 
@@ -235,6 +249,7 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "dist/index.js" in result.stdout
     assert "Legacy product names remain" in result.stderr
+    assert "Legacy Platform identifiers remain" in result.stderr
     assert "Legacy acronym references remain" in result.stderr
 
 

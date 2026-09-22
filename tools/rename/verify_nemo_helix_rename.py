@@ -14,6 +14,7 @@ from rename_common import (
     BAKE_IMAGE_PATTERN,
     IMAGE_PREFIX,
     LEGACY_ACRONYM_PATTERN,
+    LEGACY_PLATFORM_IDENTIFIER_PATTERN,
     LEGACY_PRODUCT_PATTERN,
     content_paths,
     git_file_set,
@@ -74,6 +75,11 @@ def main() -> int:
         print("Legacy product names remain in tracked file contents.", file=sys.stderr)
         failed = True
 
+    platform_identifier_matches = [print_matches(path, LEGACY_PLATFORM_IDENTIFIER_PATTERN.search) for path in paths]
+    if any(platform_identifier_matches):
+        print("Legacy Platform identifiers remain in tracked file contents.", file=sys.stderr)
+        failed = True
+
     acronym_matches = [print_matches(path, LEGACY_ACRONYM_PATTERN.search) for path in paths]
     if any(acronym_matches):
         print("Legacy acronym references remain in tracked file contents.", file=sys.stderr)
@@ -83,7 +89,11 @@ def main() -> int:
         if not path.exists() and not path.is_symlink():
             continue
         path_string = path.as_posix()
-        if LEGACY_PRODUCT_PATTERN.search(path_string) or LEGACY_ACRONYM_PATTERN.search(path_string):
+        if (
+            LEGACY_PRODUCT_PATTERN.search(path_string)
+            or LEGACY_PLATFORM_IDENTIFIER_PATTERN.search(path_string)
+            or LEGACY_ACRONYM_PATTERN.search(path_string)
+        ):
             print(f"Legacy name remains in tracked path: {path}", file=sys.stderr)
             failed = True
 

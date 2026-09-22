@@ -84,7 +84,11 @@ UNPREFIXED_IMAGES = [
 IMAGE_PREFIX = "nhx-"
 IMAGE_PATTERN = re.compile(r"(?<![A-Za-z0-9-])(" + "|".join(re.escape(image) for image in UNPREFIXED_IMAGES) + r")")
 BAKE_IMAGE_PATTERN = re.compile(r'(?:sha_and_maybe_latest_tags|base_tags)\("([^"]+)"\)')
+PLATFORM_IDENTIFIER_PATTERN = re.compile(
+    r"(?:(?<![A-Za-z0-9_])Platform(?=[A-Z])|(?<=[A-Za-z0-9_])Platform(?=[A-Z])|(?<=[A-Za-z0-9_])Platform(?![A-Za-z0-9_]))"
+)
 LEGACY_PRODUCT_PATTERN = re.compile(r"nemo[ _-]?platform", re.IGNORECASE)
+LEGACY_PLATFORM_IDENTIFIER_PATTERN = PLATFORM_IDENTIFIER_PATTERN
 
 
 def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -165,6 +169,7 @@ def replace_legacy_names(text: str) -> str:
     updated = text
     for old, new in PRODUCT_REPLACEMENTS:
         updated = updated.replace(old, new)
+    updated = PLATFORM_IDENTIFIER_PATTERN.sub("Helix", updated)
     return replace_acronyms(updated)
 
 

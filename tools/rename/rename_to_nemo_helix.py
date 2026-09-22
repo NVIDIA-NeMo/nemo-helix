@@ -15,6 +15,7 @@ from rename_common import (
     BAKE_IMAGE_PATTERN,
     IMAGE_PATTERN,
     IMAGE_PREFIX,
+    PLATFORM_IDENTIFIER_PATTERN,
     PRODUCT_REPLACEMENTS,
     content_paths,
     git_file_set,
@@ -46,6 +47,13 @@ def inventory(include_globs: tuple[str, ...], exclude_globs: tuple[str, ...]) ->
                 continue
             count += sum(1 for line in text.splitlines() if old in line)
         print(f"  {old:<24} -> {new:<24} {count:8d} matching lines")
+    count = 0
+    for path in paths:
+        text = read_text(path)
+        if text is None:
+            continue
+        count += sum(1 for line in text.splitlines() for _ in PLATFORM_IDENTIFIER_PATTERN.finditer(line))
+    print(f"  {'Platform identifiers':<24} -> {'Helix identifiers':<24} {count:8d} matching lines")
     for old, pattern, new in ACRONYM_REPLACEMENT_RULES:
         count = 0
         for path in paths:
