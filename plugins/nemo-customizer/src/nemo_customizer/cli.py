@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import ClassVar
 
 import typer
@@ -52,25 +53,29 @@ class CustomizationCLI(NemoCLI):
             )
 
     def get_cli(self) -> typer.Typer:
+        # A contributor may return no CLI. Collect the subgroups first so the help
+        # lists only backends that have a command to run.
+        subgroups = {
+            key: subgroup
+            for key in sorted(self._contributors.keys())
+            if (subgroup := self._contributors[key].get_cli()) is not None
+        }
         app = typer.Typer(
             name=self.name,
-            help=self._compose_help(),
+            help=self._compose_help(subgroups.keys()),
             no_args_is_help=True,
         )
 
-        for key in sorted(self._contributors.keys()):
-            contributor = self._contributors[key]
-            subgroup = contributor.get_cli()
-            if subgroup is not None:
-                app.add_typer(subgroup, name=key)
+        for key, subgroup in subgroups.items():
+            app.add_typer(subgroup, name=key)
 
         return app
 
-    def _compose_help(self) -> str:
-        """Overview, one summary per discovered backend in name order, then next steps."""
+    def _compose_help(self, mounted: Iterable[str]) -> str:
+        """Overview, one summary per mounted backend in name order, then next steps."""
         blocks = [_OVERVIEW, "Installed backends:"]
 
-        for key in sorted(self._contributors.keys()):
+        for key in mounted:
             # Contributing a summary is optional, so a backend without one is
             # listed by name instead of breaking --help for the others.
             contributor = self._contributors[key]
