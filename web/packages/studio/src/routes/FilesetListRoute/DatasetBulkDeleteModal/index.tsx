@@ -24,13 +24,6 @@ interface TriggerProps {
 interface DatasetBulkDeleteModalProps {
   selectedDatasets: FilesetOutput[];
   onConfirmSuccess: () => void;
-  /**
-   * Called once the batch settles, whether it fully succeeded, partially
-   * succeeded, or failed entirely. Individual deletes run in parallel
-   * (`useMutateMany`), so some may have already landed even when the batch
-   * as a whole throws — refresh the list here so those datasets don't
-   * linger in the table.
-   */
   onSettled: () => void;
   /** Custom trigger element; when provided, used instead of the default Button */
   slotTrigger?: ReactNode;
@@ -44,10 +37,6 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
 
-  // Cache invalidation happens once for the whole batch, in `onSettled`, rather than
-  // per item here — invalidating the list query after each delete resolves would
-  // refetch and reshuffle rows mid-batch while selection state still reflects the full
-  // original selection, making unrelated rows flash as selected.
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset();
   const deleteDatasetWithMessage = async (variables: { workspace: string; name: string }) => {
     try {

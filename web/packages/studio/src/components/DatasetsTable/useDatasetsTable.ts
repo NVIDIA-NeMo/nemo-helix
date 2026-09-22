@@ -189,9 +189,6 @@ export function useDatasetsTable({
     dataViewState.rowSelection.set({});
   }, [dataViewState.rowSelection, onDatasetsSelected]);
 
-  // Runs once per batch regardless of outcome (see DatasetBulkDeleteModal's `onSettled`).
-  // On success this fires after selection is already cleared; on a partial/full failure
-  // it still refreshes the list, since some deletes in the batch may have landed.
   const handleBulkDeleteSettled = useCallback(() => {
     invalidateDatasetCaches(workspace, undefined, ['list']);
     refetch();

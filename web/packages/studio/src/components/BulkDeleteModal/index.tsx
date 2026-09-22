@@ -30,10 +30,6 @@ export const BulkDeleteModal = <T,>({
   title,
   onClose,
 }: BulkDeleteModalProps<T>) => {
-  // `items` (and its length) can change out from under us mid-delete — e.g. the caller
-  // clears its selection as part of `onDelete`'s success handling. Freeze the count for
-  // the title once a delete starts so it doesn't visibly drop (e.g. to 0) before the
-  // modal has a chance to close.
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const resolvedTitle = typeof title === 'function' ? title(pendingCount ?? items.length) : title;
 
