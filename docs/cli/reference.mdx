@@ -9107,6 +9107,7 @@ nemo anonymizer preview [OPTIONS]
 * `--config.rewrite.instructions`: Additional instructions for the rewrite LLM.
 * `--config.rewrite.risk-tolerance`: Preset controlling repair thresholds and review flagging.
 * `--config.rewrite.max-repair-iterations <INTEGER>`: Maximum repair rounds. Set to 0 to disable repair.
+* `--config.rewrite.use-combined-graph`: Run rewrite and conditional repair iterations in one Data Designer graph.
 * `--config.rewrite.strict-entity-protection`: If True, requires every entity to receive a protective disposition during sensitivity analysis.
 * `--config.emit-telemetry`: Whether to emit anonymous Anonymizer telemetry events. See the Telemetry section in the README for what is collected and how to opt out at the environment or CLI level.
 * `--data.source`: HTTP(S) URL or fileset reference for a CSV/Parquet input file.
@@ -9133,7 +9134,7 @@ nemo anonymizer preview [OPTIONS]
 
 Function Spec flags are generated from the PreviewRequest Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `config.detect.entity_labels`, `config.replace`, `model_configs`, `selected_models.detection`, `selected_models.replace`, `selected_models.rewrite`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `config.detect.entity_labels`, `config.detect.excluded_entity_labels`, `config.replace`, `model_configs`, `selected_models.detection`, `selected_models.replace`, `selected_models.rewrite`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 #### nemo anonymizer run
@@ -9160,6 +9161,7 @@ nemo anonymizer run [OPTIONS] [COMMAND] [ARGS]...
 * `--config.rewrite.instructions`: Additional instructions for the rewrite LLM.
 * `--config.rewrite.risk-tolerance`: Preset controlling repair thresholds and review flagging.
 * `--config.rewrite.max-repair-iterations <INTEGER>`: Maximum repair rounds. Set to 0 to disable repair.
+* `--config.rewrite.use-combined-graph`: Run rewrite and conditional repair iterations in one Data Designer graph.
 * `--config.rewrite.strict-entity-protection`: If True, requires every entity to receive a protective disposition during sensitivity analysis.
 * `--config.emit-telemetry`: Whether to emit anonymous Anonymizer telemetry events. See the Telemetry section in the README for what is collected and how to opt out at the environment or CLI level.
 * `--data.source`: HTTP(S) URL or fileset reference for a CSV/Parquet input file.
@@ -9183,7 +9185,7 @@ nemo anonymizer run [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the AnonymizerRequest Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `config.detect.entity_labels`, `config.replace`, `model_configs`, `selected_models.detection`, `selected_models.replace`, `selected_models.rewrite`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `config.detect.entity_labels`, `config.detect.excluded_entity_labels`, `config.replace`, `model_configs`, `selected_models.detection`, `selected_models.replace`, `selected_models.rewrite`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
