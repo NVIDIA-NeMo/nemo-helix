@@ -160,7 +160,12 @@ class BuilderConfig(NemoConfig):
         description=(
             "Name of the Secrets entry holding the registry credential. Resolved in-pod by the "
             "jobs launcher as the submitting principal -- the value never enters a job spec, "
-            "and never enters a pod that ran a Dockerfile."
+            "and never enters a pod that ran a Dockerfile.\n\n"
+            "**A bare name resolves in the SUBMITTER'S workspace**, not the platform's: the Jobs "
+            "backend qualifies it with the job's workspace. So every workspace that submits builds "
+            "needs a secret of exactly this name, and whatever it holds is the credential `push` "
+            "uses -- the submitter's, not the operator's, despite this being operator config. "
+            "Whether that is the intended ownership is an open decision; see the README."
         ),
     )
     signing_key: str | None = Field(

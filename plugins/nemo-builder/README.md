@@ -59,7 +59,18 @@ Verified independently of the control plane, from inside the cluster:
 | `supervise` has **no** work-volume mount | ✅ observed — absence is the control, and it holds |
 | namespace still refuses the BuildKit posture | ✅ re-run after the green build |
 | sandbox reaches the internet and nothing private | ✅ 7/7, against cluster-derived addresses |
-| 111 unit tests, `ruff` and `ty` clean | ✅ |
+| 130 unit tests, `ruff` and `ty` clean | ✅ |
+
+A second run, built to hit the conditions the first one never did -- one set, two different
+Dockerfiles published to the **same repository**, and a third Dockerfile that **fails**:
+
+| | |
+|---|---|
+| the failing image does not stop the others publishing | ✅ 2 `ready`, 1 `failed`; `supervise` completed, `push` ran |
+| two images in one repository get distinct digests | ✅ and each digest's image contains its own Dockerfile's output |
+| the caller's tags point at the right images | ✅ `:staging` and `:prod` match their rows |
+| two specs publishing one reference are refused | ✅ 400 at submit, nothing created |
+| the job still ends honestly as an error | ✅ `push` exits non-zero for the image with no layout |
 
 ### The two environments, and why both exist
 
@@ -122,6 +133,53 @@ And one from `deploy/README.md` worth repeating, because it generalises past any
 kube-dns back reopened the Pod CIDR, measured. The sandbox now uses public resolvers via
 `dnsPolicy: None` — it needs to resolve `pypi.org`, not `kubernetes.default.svc` — which is
 strictly more closed than the version with a DNS hole in it.
+
+## What an independent adversarial review found
+
+A fresh-context review, told to treat every claim in the code as a hypothesis to falsify. Its
+most serious findings broke guarantees the design explicitly makes, and **none was caught by the
+unit tests or the first minikube run** -- every one lives off the happy path: an image that
+fails, two specs sharing a repository, a transient API error, a token that expires. The first run
+had none of those conditions. It proved the pipeline works; it said nothing about failure
+handling.
+
+**Fixed, each with a regression test:**
+
+1. **One failed image published nothing.** `supervise` exited 1 on any failure, and the Jobs
+   dispatcher schedules the next step only on `COMPLETED` -- so `push` never ran, for the whole
+   set. The exit code is a scheduling decision, not a report; it is now non-zero only when nothing
+   built. *Verified on the cluster by the second run above.*
+2. **Two images could record one digest.** The system tag was per set, so two specs in one
+   repository pushed the same tag and the second overwrote the first. It is now per image. This
+   flaw is **inherited from RFC 001** (line 2200), whose worked example happens to use three
+   distinct repositories. *Verified on the cluster by pulling each image back out.*
+3. **One transient error failed a healthy build permanently.** Every exception from the
+   job-status read was treated as "job not found". Only a 404 is now; anything else waits.
+4. **A stale registry token was reused forever.** The bearer-token cache was never invalidated,
+   so the reconciler would stop resolving within the hour against a real registry. A 401 now
+   forces one fresh exchange. *Unit-tested only: the local registry is anonymous.*
+
+**Still open:**
+
+- **`push_secret` resolves in the submitter's workspace, as the submitter.** Every submitting
+  workspace needs a secret of that name, and its contents -- the push credential -- are the
+  submitter's. With no registry allowlist, the caller therefore controls both where an image goes
+  and what credential pushes it. **This needs a decision, not a fix**: if the push credential is
+  the tenant's (RFC 001's "tenant-provisioned, creds in Secrets" suggests so), rename and document
+  it; if it is the operator's, the config must name a secret in the platform's own workspace.
+- `context_path`, `fileset` and `BuildSet.name` are not validated for their destinations the way
+  `dockerfile` is. Not a cross-tenant escape -- the kubelet rejects `..` in a subPath -- but it
+  turns a caller mistake into an opaque late failure instead of a 400.
+- The reconciler reads one page (200) of `pending` rows per cycle.
+- Every sandbox group in a set shares one `/out`, so one spec's `RUN` can overwrite another's
+  layout. Same submitter on both sides, so not escalation, but it is weaker than the
+  one-sandbox-per-source isolation implies.
+- Two edge cases, neither demonstrated: an index resolves to its first manifest unchecked, and
+  sandbox pod names can collide when truncated.
+
+**Not covered:** the review stopped early and never examined how exposed `push`'s credentials are
+to the attacker-controlled manifest content that `crane` and `cosign` parse. That is the most
+important unreviewed surface in this plugin.
 
 ## Deliberately out of scope
 
