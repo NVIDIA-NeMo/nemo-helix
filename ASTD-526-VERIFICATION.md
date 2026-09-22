@@ -371,6 +371,36 @@ workspace while leaving them a read role anywhere else. An admin who revokes a b
 If per-user exclusion from the global workspace is a requirement, this design cannot
 express it, and that is a reason to revisit the approach rather than something to patch.
 
+## Run 6 — closing the concurrency race
+
+Run 4 found the guard checking for foreign children in one transaction and deleting in
+another, with a child created in that window cascaded away unseen. It was recorded as a
+limitation on the grounds that the pre-existing behaviour was an unconditional cascade, so
+the guard was still an improvement. That reasoning held, but the window was wide enough to
+be worth closing: 24 of 25 concurrent trials destroyed the child.
+
+The check now runs inside the delete's transaction, with the row locked first. Inserting a
+child takes a `FOR KEY SHARE` lock on its parent, which conflicts with `FOR UPDATE`, so the
+two operations serialize — either the child lands before the select and the delete is
+refused, or the delete wins and the child insert fails its foreign key.
+
+That required moving the guard from an endpoint-level query into a repository argument,
+since correctness depends on it sharing the delete's transaction rather than running
+beside it.
+
+| Backend | Scenario | Before | After |
+| --- | --- | --- | --- |
+| PostgreSQL | 40 concurrent child-create vs delete | 24/25 destroyed | **0 destroyed** — all 40 serialized, delete won, foreign key rejected the child |
+| PostgreSQL | Child created first, 20 trials | — | 20/20 refused with `409` |
+| PostgreSQL | `force=true` | — | still cascades deliberately |
+| SQLite | 40 concurrent child-create vs delete | — | **0 destroyed** |
+
+`FOR UPDATE` is a no-op on SQLite, but the repository's existing write lock plus the
+single-transaction delete produce the same outcome there.
+
+Five repository tests cover the guard's contract directly, including that it is opt-in so
+`force=true` keeps the unguarded cascade.
+
 ## Totals
 
 | Run | Focus | Scenarios | Result |
@@ -382,11 +412,11 @@ express it, and that is a reason to revisit the approach rather than something t
 | 4 | Scan limit, before and after the fix | 2 | bug found, fixed, re-verified |
 | 4 | Concurrency | 2 | one clean, one known limitation |
 | 5 | Principals lacking global-workspace access | 6 | all as designed; one consequence recorded |
+| 6 | Concurrency race, after the fix | 101 | 0 silent destructions on either backend |
 
 ## Known limitations
 
-- **Racing child creation.** See run 4. Narrower than the unconditional cascade it
-  replaces, but open.
+- ~~**Racing child creation.**~~ Fixed — see run 6.
 - **No automated PostgreSQL coverage.** Run 4 checked it by hand. Nothing in CI will
   catch a future Postgres-only regression in this path.
 - **No per-user exclusion from the global workspace.** See run 5. Revoking a binding on
