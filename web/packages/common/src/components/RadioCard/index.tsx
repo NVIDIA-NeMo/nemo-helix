@@ -21,6 +21,9 @@ export interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupIte
   label: ReactNode;
   /** Optional secondary description text */
   description?: ReactNode;
+  /** Type scale for the label and description. Defaults suit a full-size card. */
+  labelKind?: ComponentProps<typeof Text>['kind'];
+  descriptionKind?: ComponentProps<typeof Text>['kind'];
   /** Rendered at the end of the label row, pushed right — a status or metadata Badge. */
   slotEnd?: ReactNode;
   /** Optional icon or element shown between the radio indicator and the label */
@@ -58,6 +61,8 @@ export const RadioCard: FC<RadioCardProps> = ({
   description,
   icon,
   slotEnd,
+  labelKind = 'body/bold/lg',
+  descriptionKind = 'body/regular/md',
   value,
   labelId,
   labelSide = 'right',
@@ -130,14 +135,14 @@ export const RadioCard: FC<RadioCardProps> = ({
                 {icon}
               </Flex>
             )}
-            <Text kind="body/bold/lg" id={id}>
+            <Text kind={labelKind} id={id}>
               {label}
             </Text>
             {slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
           </Flex>
         </Flex>
         {hasDescription && (
-          <Text kind="body/regular/md" color="secondary" className={descriptionClass}>
+          <Text kind={descriptionKind} color="secondary" className={descriptionClass}>
             {description}
           </Text>
         )}

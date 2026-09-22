@@ -23,6 +23,10 @@ const CONTENT_WIDTH = 'w-full max-w-[768px]';
 /** The design's tile is `radius/md`; Card's own `radius-density-xl` is visibly rounder. */
 const TILE_RADIUS = 'rounded-[var(--radius-md)]';
 
+/** The design's tile sets its title at 14px semibold over a 12px description. */
+const TILE_LABEL_KIND = 'label/semibold/md' as const;
+const TILE_DESCRIPTION_KIND = 'label/regular/sm' as const;
+
 /** Placeholders shown for a group that is still loading — the design's rows are pairs. */
 const PLACEHOLDER_TILES = 2;
 
@@ -86,6 +90,8 @@ export const StartPage: FC<StartPageProps> = ({
                           </Badge>
                         ) : undefined
                       }
+                      labelKind={TILE_LABEL_KIND}
+                      descriptionKind={TILE_DESCRIPTION_KIND}
                       showIndicator={false}
                       className={TILE_RADIUS}
                       disabled={disabled || !option.enabled}
@@ -134,6 +140,8 @@ export const StartPage: FC<StartPageProps> = ({
                                   icon={
                                     <template.icon size={16} color={group.accent} aria-hidden />
                                   }
+                                  labelKind={TILE_LABEL_KIND}
+                                  descriptionKind={TILE_DESCRIPTION_KIND}
                                   showIndicator={false}
                                   className={TILE_RADIUS}
                                   disabled={disabled}
