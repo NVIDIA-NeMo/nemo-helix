@@ -13,14 +13,16 @@ Customizer backends swap in the same shape:
   submitted to the platform, not executed through local CLI scheduling.
 - ``explain`` → unchanged.
 
-Only the backend's ``load_job_json`` and the ``JOB_JSON`` help text differ;
-everything else is shared here.
+Only the backend's ``load_job_json``, ``JOB_JSON`` help text and ``submit``
+help text differ; everything else is shared here.
 """
 
 from collections.abc import Callable
 from pathlib import Path
 
 import typer
+from nemo_platform_plugin.cli_options import WorkspaceOption
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 
 LoadJobJson = Callable[[Path], str]
 
@@ -30,6 +32,7 @@ def apply_job_cli_overrides(
     *,
     load_job_json: LoadJobJson,
     job_json_help: str,
+    submit_help: str | None = None,
 ) -> None:
     """Drop generated ``run``/``submit`` verbs, then re-register submit.
 
@@ -38,7 +41,7 @@ def apply_job_cli_overrides(
     users back to the auto-generated shapes.
     """
     _drop_command(group, "run")
-    _replace_job_submit(group, load_job_json, job_json_help)
+    _replace_job_submit(group, load_job_json, job_json_help, submit_help)
 
 
 def _pluck_callback(group: typer.Typer, verb: str) -> Callable[..., None]:
@@ -52,20 +55,33 @@ def _drop_command(group: typer.Typer, name: str) -> None:
     group.registered_commands = [c for c in group.registered_commands if c.name != name]
 
 
-def _replace_job_submit(group: typer.Typer, load_job_json: LoadJobJson, job_json_help: str) -> None:
+def _replace_job_submit(
+    group: typer.Typer,
+    load_job_json: LoadJobJson,
+    job_json_help: str,
+    submit_help: str | None = None,
+) -> None:
     """Replace ``submit`` with a ``JOB_JSON`` positional + standard submit flags."""
     original = _pluck_callback(group, "submit")
     # Drop the original before re-registering so we don't leave a duplicate
     # ``submit`` entry (Typer would otherwise keep both and dispatch the last).
     _drop_command(group, "submit")
 
-    @group.command("submit")
+    @group.command("submit", help=submit_help)
     def submit(
         typer_ctx: typer.Context,
         job_json: Path = typer.Argument(..., metavar="JOB_JSON", help=job_json_help),
-        workspace: str = typer.Option("default", "--workspace", "-w", help="Target workspace."),
-        profile: str | None = typer.Option(None, "--profile"),
-        cluster: str | None = typer.Option(None, "--cluster"),
+        workspace: WorkspaceOption = None,
+        profile: str | None = typer.Option(
+            None,
+            "--profile",
+            help="Execution profile to run the job on. Uses the backend default when omitted.",
+        ),
+        cluster: str | None = typer.Option(
+            None,
+            "--cluster",
+            help="Name of a cluster in the CLI config. Submits to that cluster's base URL.",
+        ),
         base_url: str | None = typer.Option(
             None,
             "--base-url",
@@ -75,8 +91,13 @@ def _replace_job_submit(group: typer.Typer, load_job_json: LoadJobJson, job_json
             ),
         ),
         options: list[str] = typer.Option([], "-o", help="Backend option override, 'backend.key=value'."),
-        options_file: Path | None = typer.Option(None, "--options-file"),
+        options_file: Path | None = typer.Option(
+            None,
+            "--options-file",
+            help="JSON or YAML file of backend option overrides. Any -o flag wins over it.",
+        ),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         spec_json = load_job_json(job_json)
         original(
             typer_ctx,

@@ -74,7 +74,7 @@ def _run_data(
 
 def _create_run(sdk: Any, *, workspace: str, data: dict[str, Any]) -> str | None:
     """Persist a new AgentHardenerRun record; never fail the run on error. Returns its name."""
-    if sdk is None or not hasattr(sdk, "entities"):
+    if sdk is None:
         return None
     try:
         entity = (
@@ -124,7 +124,7 @@ def _run_facts(sdk: Any, *, workspace: str, name: str) -> tuple[str, int]:
     Updates replace the whole record (see :func:`_run_data`), so a failure finalizing a pre-created
     row must carry these forward or the run is left showing no agent.
     """
-    if sdk is None or not hasattr(sdk, "entities"):
+    if sdk is None:
         return "", 0
     try:
         record = (
@@ -142,7 +142,7 @@ def _run_facts(sdk: Any, *, workspace: str, name: str) -> tuple[str, int]:
 
 def _update_run(sdk: Any, *, workspace: str, name: str, data: dict[str, Any]) -> None:
     """Overwrite an existing AgentHardenerRun record (e.g. running -> completed); best-effort."""
-    if sdk is None or not hasattr(sdk, "entities"):
+    if sdk is None:
         return
     try:
         client_from_platform(sdk, EntitiesClient).update_entity_by_name(
@@ -154,7 +154,7 @@ def _update_run(sdk: Any, *, workspace: str, name: str, data: dict[str, Any]) ->
 
 def _manifest_rounds(sdk: Any, manifest_id: str, ctx: JobContext) -> int:
     """The manifest's configured number of hardening rounds (>=1); 1 if unset/unavailable (best-effort)."""
-    if sdk is None or not hasattr(sdk, "entities"):
+    if sdk is None:
         return 1
     try:
         record = (
@@ -171,7 +171,7 @@ def _manifest_rounds(sdk: Any, manifest_id: str, ctx: JobContext) -> int:
 
 def _manifest_models(sdk: Any, manifest_id: str, ctx: JobContext) -> dict[str, Any]:
     """The manifest's stored default model selection (attack/analysis/agent), or ``{}`` (best-effort)."""
-    if sdk is None or not hasattr(sdk, "entities"):
+    if sdk is None:
         return {}
     try:
         record = (
@@ -188,7 +188,7 @@ def _manifest_models(sdk: Any, manifest_id: str, ctx: JobContext) -> dict[str, A
 
 def _cached_benign_suite(sdk: Any, manifest_id: str, ctx: JobContext) -> list[dict[str, str]]:
     """The manifest's cached benign-suite rows, or ``[]`` when none/unavailable (best-effort)."""
-    if sdk is None or not hasattr(sdk, "entities"):
+    if sdk is None:
         return []
     try:
         record = (
@@ -232,7 +232,7 @@ def _persist_benign_suite(
     interview: list[dict[str, Any]] | None = None,
 ) -> None:
     """Cache the reviewed benign suite (and the interview Q&A behind it) on the manifest; best-effort."""
-    if sdk is None or not hasattr(sdk, "entities") or not suite:
+    if sdk is None or not suite:
         return
     try:
         record = (

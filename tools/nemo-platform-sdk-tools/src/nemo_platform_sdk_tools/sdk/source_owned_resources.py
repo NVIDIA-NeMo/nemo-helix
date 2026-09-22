@@ -36,6 +36,13 @@ SOURCE_OWNED_RESOURCE_EXCLUSIONS = (
         resource_name="secrets",
         path_prefixes=("/apis/secrets/v2",),
     ),
+    SourceOwnedResource(
+        resource_name="entities",
+        path_prefixes=(
+            "/apis/entities/v2/workspaces/{workspace}/entities",
+            "/apis/entities/v2/entities",
+        ),
+    ),
 )
 
 

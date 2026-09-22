@@ -130,18 +130,34 @@ class ScaledEvalsJobsController(NemoController):
         phases: list[tuple[str, Callable[[], Awaitable[None]]]] = []
         if settings.platform_build_jobs_enabled:
             phases += [
-                ("submit_build", self._submit_one_build),
+                ("submit_build", self._drain(self._submit_one_build)),
                 ("reconcile_builds", self._reconcile_builds),
             ]
         if settings.platform_evaluation_jobs_enabled:
             phases += [
-                ("submit_evaluation", self._submit_one_evaluation),
-                ("reconcile_evaluation", self._reconcile_one_evaluation),
+                ("submit_evaluation", self._drain(self._submit_one_evaluation)),
+                ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
                 ("cancel_evaluations", self._cancel_evaluation_jobs),
             ]
         if self._projection is not None:
             phases.append(("project_evaluations", self._project_evaluations))
         return phases
+
+    def _drain(self, step: Callable[[], Awaitable[bool]]) -> Callable[[], Awaitable[None]]:
+        """Wrap a single-row step so one pass drains a bounded batch of rows."""
+
+        async def drained() -> None:
+            # A raising step ends the batch and is logged by reconcile(). Each
+            # step marks its own row failed before raising, so continuing here
+            # would turn a Jobs outage into a batch of failed rows per pass
+            # instead of one. Progress is still one row per pass in that case.
+            deadline = time.monotonic() + settings.platform_jobs_phase_budget_seconds
+            for _ in range(settings.platform_jobs_phase_batch_size):
+                claimed = await step()
+                if not claimed or time.monotonic() >= deadline:
+                    return
+
+        return drained
 
     async def _project_evaluations(self) -> None:
         """Project one bounded batch of changed evaluation rows into entities."""
@@ -166,14 +182,15 @@ class ScaledEvalsJobsController(NemoController):
         with pooled_connection() as conn:
             return EvaluationRepository(conn).list_changed_since(updated_after, limit=limit)
 
-    async def _submit_one_build(self) -> None:
+    async def _submit_one_build(self) -> bool:
+        """Submit one claimed build; return False only when the queue is empty."""
         job = await asyncio.to_thread(self._claim_build)
         if job is None:
-            return
+            return False
         name = task_image_build_job_name(job.task_id, job.revision, job.attempt)
         bound = await asyncio.to_thread(self._bind_build, job, name)
         if not bound:
-            return
+            return True
         spec = TaskImageBuildSpec.model_validate(
             {
                 "task_id": job.task_id,
@@ -191,15 +208,17 @@ class ScaledEvalsJobsController(NemoController):
         except Exception as exc:
             await asyncio.to_thread(self._fail_build, job, name, f"Platform Job submission failed: {exc}")
             raise
+        return True
 
-    async def _submit_one_evaluation(self) -> None:
+    async def _submit_one_evaluation(self) -> bool:
+        """Submit one claimed evaluation; return False only when the queue is empty."""
         row = await asyncio.to_thread(self._claim_evaluation)
         if row is None:
-            return
+            return False
         evaluation_id = str(row["id"])
         current = await asyncio.to_thread(self._load_evaluation, evaluation_id)
         if current is None:
-            return
+            return True
         execution_number = int(current.get("current_execution") or 1)
         name = evaluation_execution_job_name(evaluation_id, execution_number)
         spec = EvaluationExecutionSpec(
@@ -225,6 +244,7 @@ class ScaledEvalsJobsController(NemoController):
             name,
             platform_job.id,
         )
+        return True
 
     async def _create_job(
         self,
@@ -277,24 +297,30 @@ class ScaledEvalsJobsController(NemoController):
                 detail = f"Platform build job ended as {status.status.value} without recording a ready task revision"
                 await asyncio.to_thread(self._fail_build_row, row, detail)
 
-    async def _reconcile_one_evaluation(self) -> None:
+    async def _reconcile_one_evaluation(self) -> bool:
+        """Repair one stale evaluation; return False only when none are stale."""
         row = await asyncio.to_thread(self._claim_stale_evaluation)
         if row is None:
-            return
+            return False
         name = str(row["dispatch_job_name"])
         try:
             status = (await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)).data()
         except NotFoundError:
             await asyncio.to_thread(self._fail_evaluation_job, row, "Platform evaluation job was not found")
-            return
+            return True
         if status.status in _ACTIVE_JOB_STATUSES:
-            await asyncio.to_thread(self._release_evaluation_reconcile_claim, row)
-            return
+            # Hold the lease rather than releasing it. The claim orders by
+            # dispatch_claimed_at, which a release does not change, so a
+            # released row sorts first again and the drain re-claims this same
+            # row instead of advancing. The lease lapses after claim_timeout,
+            # which is soon enough for a job that is running normally.
+            return True
         if status.status == PlatformJobStatus.COMPLETED:
             detail = "Platform evaluation job completed without recording a terminal evaluation status"
         else:
             detail = f"Platform evaluation job ended as {status.status.value}"
         await asyncio.to_thread(self._fail_evaluation_job, row, detail)
+        return True
 
     async def _cancel_evaluation_jobs(self) -> None:
         for row in await asyncio.to_thread(self._list_cancelled_evaluations):
@@ -414,15 +440,6 @@ class ScaledEvalsJobsController(NemoController):
             return EvaluationRepository(conn).claim_stale_dispatch_job(
                 stale_seconds=settings.dispatch_job_reconcile_stale_seconds,
                 claim_timeout=TaskBuildWorker.claim_timeout,
-                worker_id=self._worker_id,
-            )
-
-    def _release_evaluation_reconcile_claim(self, row: dict[str, Any]) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).release_dispatch_reconcile_claim(
-                str(row["id"]),
-                execution_number=int(row["current_execution"]),
-                dispatch_job_name=str(row["dispatch_job_name"]),
                 worker_id=self._worker_id,
             )
 

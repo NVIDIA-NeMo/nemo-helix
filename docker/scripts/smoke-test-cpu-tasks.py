@@ -46,10 +46,7 @@ EVALUATOR_IMPORTS: dict[str, str | None] = {
 
 #: Task modules launched via `python -m`, so the `__main__` submodule is what
 #: has to resolve -- not merely the containing package.
-TASK_ENTRYPOINTS = (
-    "nemo_agents_plugin.tasks.execute.__main__",
-    "nemo_insights_plugin.jobs.bridge",
-)
+TASK_ENTRYPOINTS = ("nemo_agents_plugin.tasks.execute.__main__",)
 
 #: First-party Fabric adapters that must ship in this image. Checked as a
 #: subset so a newly added adapter does not fail the build.
@@ -83,7 +80,7 @@ def check_evaluator_imports() -> list[str]:
 
 
 def check_task_entrypoints() -> list[str]:
-    """Resolve the `python -m` entrypoints for agents.execute and insights.analyze."""
+    """Resolve the `python -m` entrypoints for agent execution."""
     failures: list[str] = []
 
     for name in TASK_ENTRYPOINTS:

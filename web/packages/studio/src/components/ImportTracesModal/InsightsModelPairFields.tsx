@@ -29,7 +29,7 @@ const errorFor = (value: string): string | undefined =>
     : undefined;
 
 /**
- * Shows the default/fast pair the analyze-job will use, prefilled from the agent's stored
+ * Shows the default/fast pair the analysis run will use, prefilled from the agent's stored
  * AnalysisConfig, and lets either half be replaced for this run without editing the stored config.
  */
 export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({

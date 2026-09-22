@@ -173,13 +173,15 @@ class Settings(BaseSettings):
     dispatch_kubernetes_jobs_enabled: bool = False
     dispatch_job_reconcile_stale_seconds: float = 60.0
     # Platform Jobs migration flags. Postgres remains the admission and
-    # compatibility source of truth while these are enabled.
+    # compatibility source of truth while these are enabled. Default-on since
+    # the GKE acceptance matrix passed end to end; set either to false to fall
+    # back to the legacy in-process workers.
     platform_build_jobs_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias="SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED",
     )
     platform_evaluation_jobs_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias="SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED",
     )
     platform_jobs_workspace: str = Field(
@@ -211,6 +213,27 @@ class Settings(BaseSettings):
     platform_jobs_registry_auth_secret: str = Field(
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
+    )
+    # A controller pass handles at most this many rows per queue phase. One row
+    # per pass caps a benchmark at ~6 submissions/minute, so fan-out spends
+    # longer submitting than running.
+    platform_jobs_phase_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BATCH_SIZE",
+    )
+    # Bounds how many further rows a phase starts, not how long one row takes:
+    # the deadline is checked between rows. The heartbeat runs only after every
+    # phase and a stale heartbeat marks this controller unhealthy, so a busy
+    # queue must not hold the pass open. A single slow row can still overrun
+    # this, exactly as it could before phases were batched.
+    # Infinity satisfies gt=0 and would disable the deadline entirely.
+    platform_jobs_phase_budget_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
     )
     # Entity Store migration flags. Projection writes a derived read model while
     # Postgres stays authoritative; reads only flip once parity is established,

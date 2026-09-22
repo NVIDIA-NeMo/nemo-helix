@@ -422,7 +422,7 @@ class BaseNemoClient(Generic[HttpClientT]):
         return origin is not None and origin == _url_origin(self._base_url)
 
     @property
-    def _client(self) -> httpx.Client | httpx.AsyncClient:
+    def _client(self) -> HttpClientT:
         """Underlying httpx transport.
 
         Legacy plugin SDK resources access ``NeMoPlatform._client`` to make raw
@@ -1009,6 +1009,29 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
 
     Async twin of :class:`NemoClient`.
     """
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Give this async client its own endpoint descriptors.
+
+        Endpoints are declared once on a generated mixin and inherited by both the sync client and
+        this async one, so a purely static reader cannot tell the two apart. Re-binding an
+        owner-matched copy onto the async class makes ``inspect.getattr_static`` -- and therefore
+        ``unittest.mock`` on Python 3.14 -- classify these endpoints as awaitable.
+        """
+        super().__init_subclass__(**kwargs)  # type: ignore[arg-type]
+        # Imported here: `method` imports this module, so a module-level import would be circular.
+        from nemo_platform_plugin.client.method import EndpointMethod
+
+        for name in dir(cls):
+            # Every endpoint, not only the inherited ones. Endpoints live on generated mixins
+            # today, so nothing is declared in an async client's own body -- but one that were
+            # would keep a `__wrapped__` pointing at the synchronous endpoint and spec as a
+            # non-awaitable mock, which is a miserable thing to debug for the sake of skipping
+            # a few rebinds. `bound_to_owner` returns a clone, so this never mutates a
+            # descriptor a sync client is also using.
+            resolved = inspect.getattr_static(cls, name, None)
+            if isinstance(resolved, EndpointMethod):
+                setattr(cls, name, resolved.bound_to_owner(cls))
 
     def __init__(
         self,

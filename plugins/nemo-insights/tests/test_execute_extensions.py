@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_insights_plugin.execute_extensions import InsightsAnalysisExtension
-from nemo_insights_plugin.jobs.analyze import REPORT_RESULT_NAME
+from nemo_insights_plugin.execute_extensions import REPORT_RESULT_NAME, InsightsAnalysisExtension
 from nemo_platform_plugin.agents.execute_extensions import (
     ExecuteAgentAfterInvokeContext,
     FabricRuntimeResult,

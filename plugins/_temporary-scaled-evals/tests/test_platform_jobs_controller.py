@@ -136,13 +136,68 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
 
 
 @pytest.mark.asyncio
+async def test_an_active_job_keeps_its_reconcile_lease_so_the_drain_advances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A still-running Job must not hand its row back to the same drain pass.
+
+    The claim orders by `dispatch_claimed_at`, which releasing the reconcile
+    lease does not change, so a released row sorts first again. Releasing it
+    made the drain re-claim the head of the queue until the batch ran out and
+    never reach the rows behind it.
+    """
+    rows = [
+        {"id": "ev_1", "current_execution": 1, "dispatch_job_name": "job-1"},
+        {"id": "ev_2", "current_execution": 1, "dispatch_job_name": "job-2"},
+    ]
+    leased: set[str] = set()
+
+    def _claim() -> dict[str, Any] | None:
+        # Stands in for claim_stale_dispatch_job: the first unleased row in a
+        # fixed order, so a released row is handed straight back.
+        for row in rows:
+            if row["id"] not in leased:
+                leased.add(str(row["id"]))
+                return row
+        return None
+
+    inspected: list[str] = []
+
+    async def _get_job_status(*, workspace: str, name: str) -> Any:
+        inspected.append(name)
+        return SimpleNamespace(data=lambda: SimpleNamespace(status=PlatformJobStatus.ACTIVE))
+
+    repo = MagicMock()
+    # Releasing really does make the row claimable again, which is the whole
+    # mechanism of the spin. Without this the fake could never reproduce it.
+    repo.release_dispatch_reconcile_claim.side_effect = lambda evaluation_id, **_: leased.discard(evaluation_id)
+    controller = ScaledEvalsJobsController()
+    controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status))
+    monkeypatch.setattr(controller, "_claim_stale_evaluation", _claim)
+    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
+    monkeypatch.setattr(controller_module, "EvaluationRepository", lambda conn: repo)
+
+    await controller._drain(controller._reconcile_one_evaluation)()
+
+    # Each row inspected once, so the pass reached the end of the queue instead
+    # of spending the whole batch on its head.
+    assert inspected == ["job-1", "job-2"]
+    repo.release_dispatch_reconcile_claim.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: pytest.MonkeyPatch) -> None:
     # Patch the module global, not the resolved singleton: other tests reset
     # the lazy settings instance, so its identity is not stable across the suite.
     monkeypatch.setattr(
         controller_module,
         "settings",
-        SimpleNamespace(platform_build_jobs_enabled=True, platform_evaluation_jobs_enabled=True),
+        SimpleNamespace(
+            platform_build_jobs_enabled=True,
+            platform_evaluation_jobs_enabled=True,
+            platform_jobs_phase_batch_size=20,
+            platform_jobs_phase_budget_seconds=5.0,
+        ),
     )
     controller = ScaledEvalsJobsController()
     calls: list[str] = []
@@ -185,3 +240,52 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
     await controller.reconcile()
 
     assert not controller.is_healthy
+
+
+@pytest.mark.asyncio
+async def test_controller_drains_a_bounded_batch_per_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        controller_module,
+        "settings",
+        SimpleNamespace(platform_jobs_phase_batch_size=3, platform_jobs_phase_budget_seconds=60.0),
+    )
+    controller = ScaledEvalsJobsController()
+
+    # Submitting one row per pass caps a fanned-out benchmark at roughly six
+    # rows a minute, so a pass has to keep claiming until the queue is empty.
+    queued = 0
+
+    async def _two_queued_rows() -> bool:
+        nonlocal queued
+        queued += 1
+        return queued < 3
+
+    await controller._drain(_two_queued_rows)()
+    assert queued == 3
+
+    # The batch size bounds a backlog so one phase cannot starve the others or
+    # delay the heartbeat that gates API readiness.
+    endless = 0
+
+    async def _endless_queue() -> bool:
+        nonlocal endless
+        endless += 1
+        return True
+
+    await controller._drain(_endless_queue)()
+    assert endless == 3
+
+    # Slow rows hit the wall-clock budget before the count limit.
+    monkeypatch.setattr(controller_module.settings, "platform_jobs_phase_budget_seconds", 0.0)
+    endless = 0
+    await controller._drain(_endless_queue)()
+    assert endless == 1
+
+    # A raising row ends the batch and surfaces to reconcile(), which logs it.
+    # Each step fails its own row first, so continuing would turn one Jobs
+    # outage into a batch of failed rows per pass.
+    async def _poison_pill_row() -> bool:
+        raise RuntimeError("poison-pill row")
+
+    with pytest.raises(RuntimeError):
+        await controller._drain(_poison_pill_row)()

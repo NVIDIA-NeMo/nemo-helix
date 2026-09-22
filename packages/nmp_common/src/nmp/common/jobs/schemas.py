@@ -31,6 +31,10 @@ class PaginationDirection(int, Enum):
     BACKWARD = 1
 
 
+class InvalidPageCursorError(ValueError):
+    """Custom exception for invalid page cursor errors."""
+
+
 class PageCursor(BaseModel):
     """Schema for cursor-based pagination."""
 
@@ -52,14 +56,8 @@ class PageCursor(BaseModel):
             start_id, direction_int = json.loads(decoded)
             direction = PaginationDirection(direction_int)
             return PageCursor(start_id=start_id, direction=direction)
-        except (ValueError, TypeError):
-            raise ValueError("Invalid page cursor")
-
-
-class InvalidPageCursorError(Exception):
-    """Custom exception for invalid page cursor errors."""
-
-    pass
+        except (ValueError, TypeError, ValidationError) as e:
+            raise InvalidPageCursorError("Invalid page cursor") from e
 
 
 class LogPageCursorV1(BaseModel):
@@ -94,6 +92,6 @@ def decode_log_page_cursor(page_cursor: str) -> LogPageCursor:
             return LogPageCursorV0(start_id=start_id, direction=PaginationDirection(direction_int))
         if isinstance(payload, dict) and payload.get("v") == 1:
             return LogPageCursorV1.model_validate(payload)
-    except (ValueError, TypeError, ValidationError):
-        pass
-    raise ValueError("Invalid page cursor")
+    except (ValueError, TypeError, ValidationError) as e:
+        raise InvalidPageCursorError("Invalid page cursor") from e
+    raise InvalidPageCursorError("Invalid page cursor")

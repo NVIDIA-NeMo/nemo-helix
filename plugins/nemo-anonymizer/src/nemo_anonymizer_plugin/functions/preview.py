@@ -27,7 +27,7 @@ from nemo_anonymizer_plugin.app.model_configs import (
 )
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
 from nemo_anonymizer_plugin.config import get_config
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.function import NemoFunction
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.frames import Done, Error, FrameModel, Heartbeat
@@ -89,7 +89,7 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
         spec: PreviewSpec,
         *,
         ctx: FunctionContext,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
     ) -> AsyncIterator[BaseModel]:
         num_records = _validate_and_get_num_records(spec.num_records)
         validate_selected_models_have_model_configs(

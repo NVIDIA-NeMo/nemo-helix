@@ -9,7 +9,6 @@ import {
   GitBranch,
   Hammer,
   KeyRound,
-  Search,
   SearchCheck,
   ShieldCheck,
   Sliders,
@@ -84,9 +83,9 @@ export const SKILL_ACTION_TEMPLATES = {
   },
   'nemo-build-agent': {
     title: 'Build an agent',
-    description: 'Scaffold and deploy a NAT workflow from an agent Ethos.',
+    description: 'Build and deploy a LangChain Deep Agent through Fabric.',
     prompt:
-      'Use the nemo-build-agent skill to scaffold and deploy a NeMo agent from an existing Ethos. Inspect the workspace first and ask for the target Ethos if needed.',
+      'Use the nemo-build-agent skill to build and deploy a NeMo agent from confirmed requirements. Inspect the workspace first and clarify any missing requirements.',
     icon: <Hammer size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
@@ -129,14 +128,6 @@ export const SKILL_ACTION_TEMPLATES = {
       'Use the nemo-evaluator-plugin skill to inspect or update evaluator plugin jobs, SDK specs, or plugin-owned evaluator skills.',
     icon: <BarChart3 size={18} />,
     requiredFeatureFlags: ['evaluatorEnabled'],
-  },
-  'nemo-explore': {
-    title: 'Explore an agent idea',
-    description: 'Capture the job, audience, tools, model, and constraints.',
-    prompt:
-      'Use the nemo-explore skill to guide an agent design conversation and capture the important decisions before writing a spec.',
-    icon: <Search size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-files': {
     title: 'Manage filesets',
@@ -184,14 +175,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-skill-selection skill to route this NeMo Platform task to the right specialized skill before taking action.',
     icon: <GitBranch size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
-  },
-  'nemo-ethos': {
-    title: 'Write an agent Ethos',
-    description: 'Turn exploration notes into a durable agent contract.',
-    prompt:
-      'Use the nemo-ethos skill to turn the current agent design notes into a durable NeMo Platform agent Ethos.',
-    icon: <Hammer size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-status': {

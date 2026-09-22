@@ -6,7 +6,7 @@
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE
+from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE, is_unbound_deployment_config
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -306,11 +306,15 @@ async def _require_tool_call_plugin_permission(workspace: str) -> None:
 
 
 def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
-    """Whether ``config`` deploys the model entity ``workspace/name``.
+    """Whether ``config`` can serve the model entity ``workspace/name``.
 
     ``model_entity_id`` is the canonical link; older configs only carry the
-    name/namespace pair on ``model_spec``, so both are accepted.
+    name/namespace pair on ``model_spec``, so both are accepted. A config that
+    names no model at all serves any model: the model_entity task binds it to the
+    trained one at deploy time.
     """
+    if is_unbound_deployment_config(config):
+        return True
     model_spec = config.model_spec
     return (config.model_entity_id == f"{workspace}/{name}") or (
         model_spec.model_name == name and model_spec.model_namespace == workspace
@@ -370,29 +374,21 @@ async def _validate_deployment_config(
                 "so the config must target that base model, or use inline deployment parameters instead."
             )
 
-    # SFT or lora_merged referencing a string config
+    # SFT or lora_merged referencing a string config: the config must be able to serve
+    # the model entity this run produces. That entity usually does not exist yet, and
+    # two shapes are legitimate ahead of it -- a config created up front that points
+    # *forward* at the output model (Studio does this, so the deployment can start the
+    # moment training ends), and an unbound config that names no model at all and is
+    # bound to the trained model at deploy time. So validate the target rather than the
+    # entity's existence; the same comparison covers a retrain, where it already exists.
     if produces_new_model:
         output_name = transformed_spec.output.name
-        try:
-            response = await platform.models.get_model(name=output_name, workspace=workspace)
-            existing_me = response.data()
-        except NotFoundError:
-            # Output model entity doesn't exist yet, so a string
-            # ref is inherently invalid -- it was created for a different model.
-            raise PlatformJobCompilationError(
-                f"deployment_config cannot be a string reference ('{dc}') for {ft_type.value} training "
-                "that creates a new model entity. The referenced config was created for a different model. "
-                "Use inline deployment parameters (e.g., DeploymentParams(gpu=1, lora_enabled=True)) instead."
-            )
-
-        # Output model entity already exists (retraining to create a new FileSet).
-        # Verify the config actually targets this model entity.
-        if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
+        if not _config_targets_model(resolved_config, workspace, output_name):
             raise PlatformJobCompilationError(
                 f"deployment_config references '{dc}' which targets a different model entity "
-                f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
-                "The deployment config must target the same model entity being retrained, "
-                "or use inline deployment parameters instead."
+                f"than the output model '{workspace}/{output_name}'. The deployment config must "
+                "target the model this run produces, name no model at all, or use inline "
+                "deployment parameters instead."
             )
 
 

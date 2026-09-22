@@ -12,6 +12,7 @@ import os
 import re
 import stat
 import time
+from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast
@@ -43,7 +44,12 @@ from nemo_agents_plugin.jobs.execute_extensions import (
     run_execute_agent_after_invoke_extension,
     validate_execute_agent_extension_config,
 )
-from nemo_agents_plugin.jobs.gateway_proxy import authenticated_gateway_config
+from nemo_agents_plugin.jobs.gateway_proxy import (
+    optional_platform_auth_proxy,
+    platform_auth_proxy,
+    rewrite_gateway_models,
+    routes_inference_through_gateway,
+)
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     materialize_agent_workdir,
@@ -52,14 +58,10 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 from nemo_agents_plugin.telemetry.intake_export import (
     configure_intake_atif_export,
     supports_intake_atif_export,
+    wants_intake_atif_export,
 )
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.constants import (
-    WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
-    is_workload_identity_token_file_set,
-)
-from nemo_platform_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
 from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_platform_plugin.job import NemoJob
@@ -91,7 +93,6 @@ from nemo_platform_plugin.jobs.constants import (
 )
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
-from nemo_platform_plugin.sdk_provider import get_forwarding_headers
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,6 @@ INPUT_WORKDIR_RESULT_NAME = "input_workdir"
 OUTPUT_WORKDIR_RESULT_NAME = "output_workdir"
 OUTPUT_ARTIFACTS_RESULT_NAME = "output_artifacts"
 NMP_BASE_URL_ENVVAR = "NMP_BASE_URL"
-HEADER_ENVVAR_PREFIX = "NMP_AGENT_TELEMETRY_HEADER_"
 FABRIC_RUN_RESULT_NAME = "fabric_run_result"
 FABRIC_ERROR_RESULT_NAME = "fabric_error"
 FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
@@ -449,31 +449,54 @@ class ExecuteAgentJob(NemoJob):
 
         fabric_dirs = FabricDirectories.create(agent_config, ctx.storage.ephemeral)
 
-        if step_config.request.auto_telemetry and supports_intake_atif_export(
-            step_config.agent.config, base_dir=fabric_dirs.base
-        ):
-            _configure_intake_telemetry(step_config.agent.config, workspace=ctx.workspace, sdk=sdk)
-            # Wiring mutates the config mapping, not the model validated above,
-            # so re-validate to carry it into what Fabric is handed.
-            agent_config = _validate_agent_config(step_config.agent.config)
+        # One loopback proxy serves both ways the *agent process* reaches the
+        # platform: its inference calls and Relay's trajectory export. This task's
+        # own calls -- staging a workdir, saving results -- need none of it; they
+        # go through an SDK that authenticates them. The proxy stays open through
+        # result saving, so an export posted as the agent exits still lands.
+        # A job that opted out of ATIF, or already named its own destination, should
+        # not pay for the Fabric plan probe, nor for the proxy that probe would justify.
+        exports_telemetry = (
+            step_config.request.auto_telemetry
+            and wants_intake_atif_export(step_config.agent.config)
+            and supports_intake_atif_export(step_config.agent.config, base_dir=fabric_dirs.base)
+        )
+        # Starting a proxy nothing would use is not free: it resolves the job's
+        # credentials up front, failing a run that never needed them. And a job
+        # that wants one only for telemetry would rather run untraced than not
+        # at all, which inference cannot say.
+        if routes_inference_through_gateway(agent_config):
+            proxy = platform_auth_proxy()
+        elif exports_telemetry:
+            proxy = optional_platform_auth_proxy()
+        else:
+            proxy = nullcontext(None)
 
-        if step_config.workdir is not None and _has_workdir_inputs(step_config.workdir):
-            if sdk is None:
-                raise RuntimeError("sdk is required to stage workdir inputs.")
-            logger.info("Staging workdir inputs for agent %s.", agent_ref)
-            files_client = client_from_platform(sdk, FilesClient)
-            materialize_agent_workdir(step_config.workdir, files_client, fabric_dirs.workspace)
+        with proxy as proxy_origin:
+            if exports_telemetry:
+                _configure_intake_telemetry(
+                    step_config.agent.config, workspace=ctx.workspace, proxy_origin=proxy_origin
+                )
+                # Wiring mutates the config mapping, not the model validated above,
+                # so re-validate to carry it into what Fabric is handed.
+                agent_config = _validate_agent_config(step_config.agent.config)
 
-        input_workdir_ref = ctx.results.save(INPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+            if step_config.workdir is not None and _has_workdir_inputs(step_config.workdir):
+                if sdk is None:
+                    raise RuntimeError("sdk is required to stage workdir inputs.")
+                logger.info("Staging workdir inputs for agent %s.", agent_ref)
+                files_client = client_from_platform(sdk, FilesClient)
+                materialize_agent_workdir(step_config.workdir, files_client, fabric_dirs.workspace)
 
-        logger.info("Invoking agent %s.", agent_ref)
-        started_at = time.monotonic()
-        try:
-            with authenticated_gateway_config(agent_config) as runtime_config:
+            input_workdir_ref = ctx.results.save(INPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+
+            logger.info("Invoking agent %s.", agent_ref)
+            started_at = time.monotonic()
+            try:
                 result = asyncio.run(
                     invoke_agent_config_request_once(
                         AgentConfigInvocationRequest(
-                            agent_config=runtime_config,
+                            agent_config=rewrite_gateway_models(agent_config, proxy_origin),
                             input=step_config.request.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,
@@ -486,74 +509,76 @@ class ExecuteAgentJob(NemoJob):
                         )
                     )
                 )
-        except Exception as error:
-            # Fabric never produced a result, so the agent's own stderr is the
-            # only account of how far it got, if anywhere.
-            logger.exception(
-                "Fabric invocation failed for agent %s after %.1fs.", agent_ref, time.monotonic() - started_at
-            )
-            _log_agent_stderr(fabric_dirs.artifacts)
-            self._save_fabric_error_results(
-                ctx, workspace_dir=fabric_dirs.workspace, artifacts_dir=fabric_dirs.artifacts, error=error
-            )
-            raise
-
-        logger.info("Agent %s returned status=%s after %.1fs.", agent_ref, result.status, time.monotonic() - started_at)
-
-        fabric_run_result_ref = _save_json_result(
-            ctx,
-            FABRIC_RUN_RESULT_NAME,
-            ctx.storage.ephemeral / FABRIC_RUN_RESULT_FILENAME,
-            asdict(result),
-        )
-        output_workdir_ref = ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
-        output_artifacts_ref = ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts)
-        status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
-        if status == "completed":
-            try:
-                run_execute_agent_after_invoke_extension(
-                    step_config.extension.kind,
-                    ExecuteAgentAfterInvokeContext(
-                        ctx=ctx,
-                        config=step_config.extension.config,
-                        agent_name=step_config.agent.name,
-                        fabric_result=result,
-                    ),
+            except Exception as error:
+                # Fabric never produced a result, so the agent's own stderr is the
+                # only account of how far it got, if anywhere.
+                logger.exception(
+                    "Fabric invocation failed for agent %s after %.1fs.", agent_ref, time.monotonic() - started_at
                 )
-            except Exception:
-                logger.exception("Execute-agent extension failed.")
+                _log_agent_stderr(fabric_dirs.artifacts)
+                self._save_fabric_error_results(
+                    ctx, workspace_dir=fabric_dirs.workspace, artifacts_dir=fabric_dirs.artifacts, error=error
+                )
                 raise
-        else:
-            # A Fabric result that *reports* failure is not an exception here,
-            # so this is the only place the reason is stated. Without it the
-            # step exits non-zero having logged nothing at all, and the cause
-            # is only reachable by downloading the saved artifacts.
-            logger.error(
-                "Agent %s failed: fabric_status=%s error=%s (runtime_id=%s invocation_id=%s). "
-                "Fabric run result: %s. Agent stdout/stderr: %s",
-                agent_ref,
-                result.status,
-                result.error,
-                result.runtime_id,
-                result.invocation_id,
-                fabric_run_result_ref.artifact_url,
-                output_artifacts_ref.artifact_url,
-            )
-            _log_agent_stderr(fabric_dirs.artifacts)
 
-        output = {
-            "status": status,
-            "agent": agent_ref,
-            "fabric_status": result.status,
-            "runtime_id": result.runtime_id,
-            "invocation_id": result.invocation_id,
-            "request_id": result.request_id,
-            "input_workdir": input_workdir_ref.model_dump(),
-            "output_workdir": output_workdir_ref.model_dump(),
-            "output_artifacts": output_artifacts_ref.model_dump(),
-            "fabric_run_result": fabric_run_result_ref.model_dump(),
-        }
-        return output
+            logger.info(
+                "Agent %s returned status=%s after %.1fs.", agent_ref, result.status, time.monotonic() - started_at
+            )
+
+            fabric_run_result_ref = _save_json_result(
+                ctx,
+                FABRIC_RUN_RESULT_NAME,
+                ctx.storage.ephemeral / FABRIC_RUN_RESULT_FILENAME,
+                asdict(result),
+            )
+            output_workdir_ref = ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+            output_artifacts_ref = ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts)
+            status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
+            if status == "completed":
+                try:
+                    run_execute_agent_after_invoke_extension(
+                        step_config.extension.kind,
+                        ExecuteAgentAfterInvokeContext(
+                            ctx=ctx,
+                            config=step_config.extension.config,
+                            agent_name=step_config.agent.name,
+                            fabric_result=result,
+                        ),
+                    )
+                except Exception:
+                    logger.exception("Execute-agent extension failed.")
+                    raise
+            else:
+                # A Fabric result that *reports* failure is not an exception here,
+                # so this is the only place the reason is stated. Without it the
+                # step exits non-zero having logged nothing at all, and the cause
+                # is only reachable by downloading the saved artifacts.
+                logger.error(
+                    "Agent %s failed: fabric_status=%s error=%s (runtime_id=%s invocation_id=%s). "
+                    "Fabric run result: %s. Agent stdout/stderr: %s",
+                    agent_ref,
+                    result.status,
+                    result.error,
+                    result.runtime_id,
+                    result.invocation_id,
+                    fabric_run_result_ref.artifact_url,
+                    output_artifacts_ref.artifact_url,
+                )
+                _log_agent_stderr(fabric_dirs.artifacts)
+
+            output = {
+                "status": status,
+                "agent": agent_ref,
+                "fabric_status": result.status,
+                "runtime_id": result.runtime_id,
+                "invocation_id": result.invocation_id,
+                "request_id": result.request_id,
+                "input_workdir": input_workdir_ref.model_dump(),
+                "output_workdir": output_workdir_ref.model_dump(),
+                "output_artifacts": output_artifacts_ref.model_dump(),
+                "fabric_run_result": fabric_run_result_ref.model_dump(),
+            }
+            return output
 
     def _save_fabric_error_results(
         self,
@@ -850,71 +875,25 @@ def _configure_intake_telemetry(
     agent_config: dict[str, Any],
     *,
     workspace: str,
-    sdk: NeMoPlatform | None,
+    proxy_origin: str | None,
 ) -> None:
     """Wire the agent's trajectory export to Intake for this job.
 
-    Runs here rather than at create time because only the task knows both
-    halves: ``NMP_BASE_URL`` is the platform URL reachable from *this* pod (the
-    Jobs service rewrites it per runtime), and the task's own SDK carries the
-    identity the platform gave this job -- the same ``service:agents`` principal
-    and on-behalf-of delegation a deployment gets from its auth-proxy sidecar.
+    Runs here rather than at create time because only the task knows where the
+    export can reach: the loopback proxy it is running for this invocation, or
+    -- on a platform with auth disabled, where there is no proxy -- the
+    ``NMP_BASE_URL`` the Jobs service rewrote for this pod.
 
-    Credentials go in the process environment and the config names them.
-    Fabric writes the resolved agent config into the run's artifacts, and those
-    are uploaded as a job result, so an inline header would be a downloadable
-    one.
+    No credential travels with the config. The proxy authenticates each export
+    as it forwards it, which both keeps the bearer out of artifacts Fabric
+    uploads as a job result and lets a job outlive any single access token.
     """
-    base_url = os.environ.get(NMP_BASE_URL_ENVVAR)
+    base_url = proxy_origin or os.environ.get(NMP_BASE_URL_ENVVAR)
     if not base_url:
         logger.warning("%s is not set; the agent will run untraced.", NMP_BASE_URL_ENVVAR)
         return
 
-    headers = get_forwarding_headers(sdk) if sdk is not None else {}
-    headers.update(_workload_identity_headers(base_url))
-    for name, value in headers.items():
-        os.environ[_header_envvar(name)] = value
-
-    configure_intake_atif_export(
-        agent_config,
-        workspace=workspace,
-        base_url=base_url,
-        header_env={name: _header_envvar(name) for name in headers},
-    )
-
-
-def _workload_identity_headers(base_url: str) -> dict[str, str]:
-    """Bearer credentials for Relay when the job runs under workload identity.
-
-    ``get_forwarding_headers`` returns only what the SDK was *constructed* with.
-    Under workload identity that is the internal marker alone -- the bearer is
-    exchanged per request by the SDK's own auth layer, which Relay's raw POST to
-    Intake does not go through. Without this the export would be unauthenticated
-    on exactly the deployments that enforce auth.
-
-    The token is resolved once and read from the environment at export time, so
-    a run outliving its token exports with an expired one. Relay resolves
-    ``header_env`` statically, so refreshing needs a dynamic-credential hook it
-    does not offer today.
-    """
-    if not is_workload_identity_token_file_set():
-        return {}
-    token_file = os.environ[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR]
-    try:
-        provider = resolve_workload_exchange_provider(base_url=base_url, subject_token_file=Path(token_file))
-        return {"Authorization": f"Bearer {provider.get_access_token()}"}
-    except Exception:
-        logger.warning(
-            "Could not exchange the workload identity token for telemetry export; "
-            "the trajectory will be posted without credentials.",
-            exc_info=True,
-        )
-        return {}
-
-
-def _header_envvar(header_name: str) -> str:
-    """Environment variable the exporter reads one outbound header value from."""
-    return f"{HEADER_ENVVAR_PREFIX}{header_name.upper().replace('-', '_')}"
+    configure_intake_atif_export(agent_config, workspace=workspace, base_url=base_url)
 
 
 def _validate_agent_config(config: dict) -> AgentConfig:

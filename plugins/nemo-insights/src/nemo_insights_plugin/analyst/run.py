@@ -8,19 +8,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from nemo_insights_plugin.analyst.agent import (
-    KICKOFF,
-    Analyst,
-    build_analyst_agent,
-)
 from nemo_insights_plugin.analyst.analyst_backend import AnalystBackend, make_analyst_backend
-from nemo_insights_plugin.analyst.deps import AnalystDeps
 from nemo_insights_plugin.analyst.observability import (
     ANALYST_OBSERVABILITY_ENV,
     AnalystEvaluationContext,
     setup_analyst_observability,
 )
 from nemo_insights_plugin.analyst.result import AnalystResult
+from nemo_insights_plugin.analyst.trace_intel import analyze_snapshot, load_existing_insights
+from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.models.client import AsyncModelsClient
@@ -143,15 +139,6 @@ async def run_analyst_change_set(
             insights_output=insights_output_path,
             local_only=local_only,
         )
-        deps = AnalystDeps(
-            agent=agent,
-            workspace=workspace,
-            base_url=base_url,
-            insights_output=insights_output_path,
-            backend=backend,
-            since=since,
-            evaluation_id=evaluation_id,
-        )
         if base_url and enable_observability and _analyst_observability_enabled():
             observability = setup_analyst_observability(
                 base_url=base_url,
@@ -160,22 +147,23 @@ async def run_analyst_change_set(
                 evaluation_context=analyst_evaluation,
             )
         with activate_model_clients(model_clients):
-            analyst = build_analyst_agent(
-                deps=deps,
+            existing = await load_existing_insights(backend, workspace=workspace, agent=agent)
+            snapshot = await load_trace_snapshot(
+                backend.intake,
+                workspace=workspace,
                 agent=agent,
-                ethos=ethos,
+                base_url=base_url or str(client.base_url).rstrip("/"),
+                since=since,
+                evaluation_id=evaluation_id,
             )
-            # Relay instruments the agent through Nooa middleware, so the scope
-            # has to wrap the run and needs the agent object -- which only
-            # exists here. The caller decides whether Relay is active; it holds
-            # the Fabric context that says so.
-            if relay_scope_name is None:
-                result = await _run_agent(analyst, verbose=verbose)
-            else:
-                from nooa.nemo_relay_middleware import nemo_relay_scope
-
-                async with nemo_relay_scope(analyst, relay_scope_name):
-                    result = await _run_agent(analyst, verbose=verbose)
+            result = await analyze_snapshot(
+                snapshot,
+                existing=existing,
+                model_clients=model_clients,
+                ethos=ethos,
+                relay_scope_name=relay_scope_name,
+                event_handler=_echo_event if verbose else None,
+            )
         return result, backend
     finally:
         # *client* is deliberately absent here: it belongs to the caller, who
@@ -192,26 +180,6 @@ def _analyst_observability_enabled() -> bool:
     """Return false only when self-observability is explicitly disabled."""
     value = os.environ.get(ANALYST_OBSERVABILITY_ENV)
     return value is None or value.strip().lower() not in {"0", "false", "no", "off"}
-
-
-async def _run_agent(
-    analyst: Analyst,
-    *,
-    verbose: bool,
-) -> AnalystResult:
-    """Run *analyst*, optionally streaming Nooa reasoning and execution events."""
-    if not verbose:
-        return await analyst.analyze(KICKOFF)
-
-    unsubscribers = [
-        analyst.event_manager.on("LLMComplete", _echo_event),
-        analyst.event_manager.on("PythonOutput", _echo_event),
-    ]
-    try:
-        return await analyst.analyze(KICKOFF)
-    finally:
-        for unsubscribe in unsubscribers:
-            unsubscribe()
 
 
 def _echo_event(event: EventBase) -> None:

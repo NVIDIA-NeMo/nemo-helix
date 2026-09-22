@@ -19,15 +19,13 @@ triggers:
   - convert agent.yml to agent.yaml
   - NeMo agent.yaml config
 not-for:
-  - nemo-build-agent (use for full Ethos-to-deployed-agent build flows)
-  - nemo-explore (use to design what the agent should do before writing config)
-  - nemo-ethos (use to write ETHOS.md before implementation)
+  - nemo-build-agent (use for full agent build and deployment flows)
   - nemo-model-selection (use when the user only wants model recommendation)
   - generic YAML editing unrelated to NeMo Platform agents
 preconditions:
   - nemo_setup_complete
   - agents_plugin_available
-compatibility: nemo-platform >= 0.1.0; writes or edits agents/<name>-ethos/agent.yaml; validates through nemo agents create; supports nemo-agents-spec-v1 configs; safe under sandbox.
+compatibility: nemo-platform >= 0.1.0; writes or edits agents/<name>/agent.yaml; validates through nemo agents create; supports nemo-agents-spec-v1 configs; safe under sandbox.
 maturity: active
 license: Apache-2.0
 user-invocable: true
@@ -48,11 +46,10 @@ agent config.
 
 ## Storage model
 
-The local config lives next to the human-readable Ethos:
+The local project contains the runtime configuration:
 
 ```txt
-agents/<agent-name>-ethos/
-  ETHOS.md
+agents/<agent-name>/
   agent.yaml
 ```
 
@@ -69,7 +66,7 @@ The canonical remote config location is derivable from workspace and agent name:
 ## What you do
 
 1. Confirm the agent name and config path. Default to
-   `agents/<agent-name>-ethos/agent.yaml`.
+   `agents/<agent-name>/agent.yaml`.
 2. Select one supported harness:
    - `codex`
    - `hermes`
@@ -104,7 +101,7 @@ Require the explicit image-packaging path before deployment:
 ```bash
 IMAGE_TAG="${AGENT_NAME}:local"
 .venv/bin/nemo agents package \
-  --agent "agents/$AGENT_NAME-ethos/agent.yaml" \
+  --agent "agents/$AGENT_NAME/agent.yaml" \
   --tag "$IMAGE_TAG"
 ```
 
@@ -251,7 +248,7 @@ ask for explicit confirmation, and wait for approval.
 ```bash
 .venv/bin/nemo agents create \
   --name "$AGENT_NAME" \
-  --agent-config "agents/$AGENT_NAME-ethos/agent.yaml"
+  --agent-config "agents/$AGENT_NAME/agent.yaml"
 ```
 
 If validation fails, fix the named field in `agent.yaml` and retry. Do not
@@ -284,7 +281,7 @@ deployment path, not this local path:
 
 ```bash
 .venv/bin/nemo agents invoke \
-  --agent-config "agents/$AGENT_NAME-ethos/agent.yaml" \
+  --agent-config "agents/$AGENT_NAME/agent.yaml" \
   --input "<test prompt>"
 ```
 
@@ -293,7 +290,7 @@ accessible host only when the user explicitly asks to expose the server:
 
 ```bash
 .venv/bin/nemo agents run \
-  --agent-config "agents/$AGENT_NAME-ethos/agent.yaml" \
+  --agent-config "agents/$AGENT_NAME/agent.yaml" \
   --host 127.0.0.1 \
   --port 8080
 ```

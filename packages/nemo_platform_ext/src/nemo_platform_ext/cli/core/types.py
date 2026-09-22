@@ -104,16 +104,6 @@ AllPagesOption = Annotated[
     ),
 ]
 
-WorkspaceOption = Annotated[
-    str | None,
-    typer.Option(
-        "--workspace",
-        "-w",
-        help="Workspace",
-        autocompletion=autocomplete_workspace,
-    ),
-]
-
 WorkspaceFilterOption = Annotated[
     str | None,
     typer.Option(

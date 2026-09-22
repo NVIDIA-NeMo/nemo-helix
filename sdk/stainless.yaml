@@ -197,20 +197,6 @@ diagnostics:
 #
 # [configuration guide]: https://app.stainless.com/docs/guides/configure#resources
 resources:
-  entities:
-    standalone_api: true
-    models:
-      entities_page: EntitiesPage
-      entity: Entity
-      entity_create_param: EntityCreateInput
-      entity_update: EntityUpdate
-    methods:
-      create: post /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}
-      list: get /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}
-      get_entity_by_name: get /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}
-      update_entity_by_name: put /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}
-      delete_entity_by_name: delete /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}
-      get_entity_by_id: get /apis/entities/v2/entities/{id}
   files:
     standalone_api: true
     models:

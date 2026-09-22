@@ -82,28 +82,3 @@ DEPLOYMENT_CONFIG_DESCRIPTION = (
     "('my-config' or 'workspace/my-config'). An object provides inline NIM "
     "deployment parameters. Omit to skip deployment."
 )
-
-LORA_ENABLED_REQUIRED_MESSAGE = (
-    "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
-    "Setting lora_enabled=false would deploy the base model without LoRA support, "
-    "making the trained adapter unservable."
-)
-
-
-def reject_lora_without_lora_enabled(
-    deployment_config: str | DeploymentParams | None,
-    *,
-    trains_lora_adapter: bool,
-) -> None:
-    """Raise when a LoRA job asks for a deployment that cannot load adapters.
-
-    A LoRA adapter is served by its base model's deployment, so a base deployed with
-    ``lora_enabled=false`` would refuse it. Backends call this from a submit-time
-    validator, passing their own answer for whether the job trains a standalone
-    adapter — that predicate differs per backend, the check does not.
-
-    String references are not checked here: resolving them needs a platform client,
-    so the compiler validates those.
-    """
-    if trains_lora_adapter and isinstance(deployment_config, DeploymentParams) and not deployment_config.lora_enabled:
-        raise ValueError(LORA_ENABLED_REQUIRED_MESSAGE)

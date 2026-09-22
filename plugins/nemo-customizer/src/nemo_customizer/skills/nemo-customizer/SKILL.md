@@ -52,7 +52,6 @@ triggers:
   - rl submit
 not-for:
   - nemo-build-agent (agent scaffold/deploy, not weight training)
-  - nemo-explore (agent design only)
   - nemo-setup (platform install; route here when CLI resolution fails)
   - safe-synthesizer (tabular synthetic data training)
   - nemo-retrieval-recipes (domain embed/rerank SDG → train → retrieve-eval conductor)

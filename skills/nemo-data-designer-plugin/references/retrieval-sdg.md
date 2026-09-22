@@ -14,18 +14,18 @@ Stage 0:
 nemo data-designer retrieval-generate --spec '{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3-nano-30b-a3b","qa_generation_model":"nvidia/nemotron-3-nano-30b-a3b","quality_judge_model":"nvidia/nemotron-3-nano-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"}'
 ```
 
-Stage 1 (conversion only; mining is off unless you set `enable_mining`):
+Stage 1 (mine immediately; convert-only `enable_mining: false` is inspect-only):
 
 ```bash
-nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out"}'
+nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out","enable_mining":true,"model":"default/nemotron-3-embed-1b"}'
 ```
 
 Skip SDG entirely by pointing `sdg_input` at a Stage 0 fileset or `hf://` URI. Live generate writes `generation_result.json` (the default `generation_file`). For Hub dumps, name the file on the ref or set `generation_file`:
 
 ```bash
-nemo data-designer retrieval-prepare --spec '{"sdg_input":"hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<rev>/nv_pp_dd_sdg.json","enable_mining":false}'
+nemo data-designer retrieval-prepare --spec '{"sdg_input":"hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<rev>/nv_pp_dd_sdg.json","enable_mining":true,"model":"default/nemotron-3-embed-1b"}'
 # or
-nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-synthetic-nvdocs-v1","generation_file":"nv_pp_dd_sdg.json","enable_mining":false}'
+nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-synthetic-nvdocs-v1","generation_file":"nv_pp_dd_sdg.json","enable_mining":true,"model":"default/nemotron-3-embed-1b"}'
 ```
 
 Model roles resolve through Inference Gateway (`provider` + served model names). Do not set `NVIDIA_API_KEY` on the job.

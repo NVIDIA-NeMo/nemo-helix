@@ -1,11 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data-access backend for the analyst's tools and final change-set.
+"""Platform data access and persistence for analysis runs.
 
-Every tool talks to the platform through one :class:`AnalystBackend`, built
-once per run by the CLI and shared via ``AnalystDeps`` instead of threading a
-raw SDK client around. The backend owns the SDK client and exposes:
+The caller supplies an authenticated SDK client. The backend exposes:
 
 - read-only Intake queries (spans, span groups, feedback annotations, and a
   span-rollup session count),
@@ -168,9 +166,7 @@ class AnalystBackend(ABC):
     The read surface is a thin, uniform pass-through over the Intake SDK: every
     list method takes the raw Intake ``filter`` dict and ``sort`` field and
     drains pages up to ``limit``, and there are get-by-id and evaluator-score
-    primitives. The analyst composes these in Nooa CodeAct rather than relying
-    on a wide catalog of narrow tools. Reads always hit the live platform, even
-    in local insights mode.
+    primitives. Reads always hit the live platform, even in local insights mode.
     """
 
     def __init__(self, client: AsyncNeMoPlatform) -> None:
@@ -493,6 +489,7 @@ class RemoteAnalystBackend(AnalystBackend):
                 if upd.trace_refs:
                     updated = await self._add_trace_refs(
                         workspace=workspace,
+                        agent=agent,
                         insight_id=upd.id,
                         trace_refs=upd.trace_refs,
                     )
@@ -546,8 +543,10 @@ class RemoteAnalystBackend(AnalystBackend):
             trace_refs=_union_refs(None, trace_refs),
         )
 
-    async def _add_trace_refs(self, *, workspace: str, insight_id: str, trace_refs: list[str]) -> Insight:
+    async def _add_trace_refs(self, *, workspace: str, agent: str, insight_id: str, trace_refs: list[str]) -> Insight:
         current = await self._get(workspace=workspace, insight_id=insight_id)
+        if current.workspace != workspace or current.agent != agent:
+            raise ValueError(f"Insight {insight_id!r} no longer belongs to this workspace and agent")
         try:
             return await self._insights.update(
                 workspace=workspace,
@@ -633,6 +632,8 @@ class LocalAnalystBackend(AnalystBackend):
             if existing is None:
                 lines.append(f"- skipped (insight not found): {upd.id}")
                 continue
+            if existing.get("agent") != agent:
+                raise ValueError(f"Insight {upd.id!r} no longer belongs to this agent")
             existing["trace_refs"] = _union_refs(existing.get("trace_refs"), upd.trace_refs)
             existing["updated_at"] = now
             lines.append(f"- updated: {upd.id} ({len(upd.trace_refs)} trace refs)")

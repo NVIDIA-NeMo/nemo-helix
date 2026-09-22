@@ -28,12 +28,19 @@ Run after: make convert-execute-notebooks && make generate-colab-notebooks
 from __future__ import annotations
 
 import base64
+import importlib.util
 import io
 import json
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
+
+_mdx_spec = importlib.util.spec_from_file_location("ipynb_to_mdx", Path(__file__).with_name("ipynb-to-mdx.py"))
+_mdx_mod = importlib.util.module_from_spec(_mdx_spec)
+assert _mdx_spec is not None and _mdx_spec.loader is not None
+_mdx_spec.loader.exec_module(_mdx_mod)
+rewrite_links = _mdx_mod.rewrite_links
 
 _CURRENT_YEAR = datetime.now().year
 _TS_FILE_HEADER = (
@@ -288,7 +295,7 @@ def convert_cell(cell: dict, default_language: str) -> dict:
         # Pre-render markdown to HTML at build time. NotebookViewer renders
         # this directly, side-stepping the JS-side markdown parser that
         # didn't handle blockquotes, fenced code, tables, or nested lists.
-        result["source_html"] = _MD.render(source)
+        result["source_html"] = _MD.render(rewrite_links(source))
     return result
 
 

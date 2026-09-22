@@ -9,6 +9,7 @@
 -e ./packages/filesets ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-platform
+    #   nemo-platform-plugin
     #   nmp-customization-common
     #   nmp-files
 -e ./packages/garak_api ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -23,7 +24,6 @@
 -e ./packages/nemo_evaluator_sdk ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-evaluator-plugin
-    #   nemo-experimentalist-plugin
     #   nemo-optimization-plugin
     #   nemo-platform
 -e ./packages/nemo_platform ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -33,7 +33,6 @@
     #   nemo-anonymizer-plugin
     #   nemo-auditor-plugin
     #   nemo-data-designer-plugin
-    #   nemo-experimentalist-plugin
     #   nemo-guardrails-plugin
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
@@ -52,7 +51,6 @@
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-plugin
-    #   nemo-experimentalist-plugin
     #   nemo-guardrails-plugin
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
@@ -137,12 +135,8 @@
     #   nemo-agents-plugin
     #   nemo-platform
 -e ./plugins/nemo-evaluator ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-experimentalist ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-guardrails ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-insights ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-experimentalist-plugin
-    #   nemo-platform
 -e ./plugins/nemo-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-agents-plugin
@@ -1055,9 +1049,7 @@ h2==4.4.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platf
 harbor==0.20.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a \
     --hash=sha256:e2e5e88f772690fd121553ca34fd5d6dd6b4aaa51c8fae635abc84b112303112
-    # via
-    #   nemo-experimentalist-plugin
-    #   nemo-platform
+    # via nemo-evaluator-sdk
 hf-transfer==0.1.9 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:035572865dab29d17e783fbf1e84cf1cb24f3fcf8f1b17db1cfc7fdf139f02bf \
     --hash=sha256:0d991376f0eac70a60f0cbc95602aa708a6f7c8617f28b4945c1431d67b8e3c8 \
@@ -1133,7 +1125,6 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-sdk
-    #   nemo-experimentalist-plugin
     #   nemo-fabric-runtime
     #   nemo-insights-plugin
     #   nemo-platform
@@ -1895,7 +1886,6 @@ nooa==0.0.9 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pla
     --hash=sha256:60b64663f34a47aec206137035d62e816c1147484bb74a8a4700a47d1a10b60c \
     --hash=sha256:c7a90ffb5b54094180efcb845e74a00c4182766745245f4258e613f9c12cb522
     # via
-    #   nemo-experimentalist-plugin
     #   nemo-insights-plugin
     #   nemo-platform
 numpy==2.5.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2260,7 +2250,6 @@ opentelemetry-proto==1.43.0 ; (platform_machine == 'arm64' and sys_platform == '
     # via
     #   mlflow-skinny
     #   nemo-evaluator-sdk
-    #   nemo-experimentalist-plugin
     #   nemo-platform
     #   nmp-files
     #   nmp-intake
@@ -2547,8 +2536,6 @@ protobuf==6.33.6 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   mlflow-skinny
     #   mlx-lm
     #   nemo-deployments-plugin
-    #   nemo-experimentalist-plugin
-    #   nemo-platform
     #   nemoguardrails
     #   nemoplatform
     #   onnxruntime
@@ -2680,7 +2667,6 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-deployments-plugin
     #   nemo-evaluator-plugin
     #   nemo-evaluator-sdk
-    #   nemo-experimentalist-plugin
     #   nemo-fabric-runtime
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
@@ -2917,7 +2903,6 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-anonymizer-plugin
     #   nemo-auditor-plugin
     #   nemo-deployments-plugin
-    #   nemo-experimentalist-plugin
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
     #   nemo-platform
@@ -3441,10 +3426,7 @@ tomli-w==1.2.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
 tomlkit==0.15.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:4dbc8f0fc024412b57ced8757ac7461305126a648ff8c2c807fcb8e133a78738 \
     --hash=sha256:7d1a9ecba3086638211b13814ea79c90dd54dd11993564376f3aa92271f5c7a3
-    # via
-    #   nemo-experimentalist-plugin
-    #   nemo-platform
-    #   nemoplatform
+    # via nemoplatform
 torch==2.11.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:0f68f4ac6d95d12e896c3b7a912b5871619542ec54d3649cf48cc1edd4dd2756 \
     --hash=sha256:1e6debd97ccd3205bbb37eb806a9d8219e1139d15419982c09e23ef7d4369d18 \

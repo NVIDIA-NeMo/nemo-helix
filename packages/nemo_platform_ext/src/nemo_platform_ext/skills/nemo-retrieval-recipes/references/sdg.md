@@ -177,15 +177,19 @@ A published dump under another name needs the filename on the ref or in
 ```bash
 nemo data-designer retrieval-prepare --workspace default --spec '{
   "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<revision>/nv_pp_dd_sdg.json",
-  "enable_mining": false
+  "enable_mining": true,
+  "model": "default/nemotron-3-embed-1b"
 }'
 
 nemo data-designer retrieval-prepare --workspace default --spec '{
   "sdg_input": "default/retrieval-synthetic-nvdocs-v1",
   "generation_file": "nv_pp_dd_sdg.json",
-  "enable_mining": false
+  "enable_mining": true,
+  "model": "default/nemotron-3-embed-1b"
 }'
 ```
+
+Convert-only (`enable_mining: false`) is only for inspecting `eval_beir`. It writes empty `neg_doc` lists and is not a training path.
 
 ## Stage 1 output
 

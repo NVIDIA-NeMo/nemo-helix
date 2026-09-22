@@ -117,13 +117,13 @@ def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_d
     so the platform's own base URL reaches it as-is: there is no container
     network to rebase onto and no auth-proxy sidecar to route through.
 
-    No ``header_env`` either. The sidecar is what stamps identity for a container
-    deployment, and a job names environment variables instead
-    (``jobs/execute.py``'s ``_configure_intake_telemetry``) because it has no
-    sidecar. Subprocess has none, but it is already an auth-disabled shape: the
-    child carries only the placeholder gateway credential, so with platform auth
-    on, its inference calls fail well before its telemetry does. Wiring identity
-    here alone would half-fix a configuration nothing else supports.
+    No identity either. A container deployment gets it from the sidecar and a
+    job from the in-process proxy it runs for the same purpose
+    (``jobs/gateway_proxy.py``). Subprocess has neither, but it is already an
+    auth-disabled shape: the child carries only the placeholder gateway
+    credential, so with platform auth on, its inference calls fail well before
+    its telemetry does. Wiring identity here alone would half-fix a
+    configuration nothing else supports.
 
     Imported lazily for the same reason as :func:`validate_platform_agent_config`:
     ``intake_export`` imports Fabric at module scope, and NAT deployments must

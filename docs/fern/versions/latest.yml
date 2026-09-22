@@ -27,9 +27,6 @@ navigation:
                 path: ../../get-started/concepts/projects.mdx
               - page: Workspaces
                 path: ../../get-started/concepts/workspaces.mdx
-          - page: Example Agent
-            hidden: true
-            path: ../../get-started/example-agent.mdx
       - section: Models and Inference
         path: ../../run-inference/about.mdx
         contents:
@@ -53,13 +50,8 @@ navigation:
             path: ../../agents/scan-trace-data.mdx
           - section: Optimize Agents
             contents:
-              - page: ETHOS.md
-                path: ../../agents/ethos.mdx
-                slug: ethos
               - page: Run the Agent Optimizer
                 path: ../../agents/optimization.mdx
-              - page: Insight-Driven Optimization
-                path: ../../agents/insight-driven-optimization.mdx
           - page: Plugins and Skills
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models
@@ -248,6 +240,9 @@ navigation:
               - page: Embedding Customization Job
                 path: ../../customizer/tutorials/embedding-customization-job.mdx
                 slug: embedding-customization-job
+              - page: Train on SPECTER or Triplet JSONL
+                path: ../../customizer/tutorials/embedding-triplet-dataset.mdx
+                slug: embedding-triplet-dataset
               - page: Job Metrics
                 path: ../../customizer/tutorials/metrics.mdx
                 slug: metrics
@@ -268,6 +263,9 @@ navigation:
                 path: ../../data-designer/tutorials/basics.mdx
               - page: Seeding with External Datasets
                 path: ../../data-designer/tutorials/seeding.mdx
+              - page: Generate Retrieval Training Data
+                path: ../../data-designer/tutorials/retrieval-generate.mdx
+                slug: retrieval-generate
           - page: SDK Resources
             path: ../../data-designer/sdk-resources.mdx
           - page: Migrating from Standalone Library
