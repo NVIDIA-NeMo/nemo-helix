@@ -43,19 +43,18 @@ _SORT_KEY_TIMESTAMP = "%Y-%m-%dT%H:%M:%S.%f"
 
 
 def evaluation_sort_key(created_at: datetime, evaluation_id: str) -> str:
-    """Return the one field reproducing SQL's `ORDER BY created_at, id`.
+    """Pack a timestamp and id into one string that sorts by both.
 
-    Postgres stores `created_at` as TIMESTAMPTZ and orders by the instant, so
-    the key is normalized to UTC; a naive value is read as UTC rather than as
-    local time, which is what the SQL side means by it.
+    Comparing two of these lexicographically gives the same answer as SQL's
+    `ORDER BY created_at, id`, so a store that sorts a single field can still
+    reproduce the list API's order.
 
-    Pagination itself is collation-independent, because the store applies the
-    same collation to the sort and to the cursor's `<`/`>` bound. Agreeing with
-    the authoritative Postgres order is the part that needs the charset:
-    ordering 300 keys under C, glibc `en_US.utf8` and two ICU collations
-    differed on exactly one axis, letter case, and `make_id` mints ids as a
-    lowercase hex suffix. Punctuation sits at identical offsets in every key,
-    so collations that discount it still compare aligned text.
+    `created_at` is normalized to UTC because Postgres orders TIMESTAMPTZ by the
+    instant; a naive value is taken as UTC, not as local time.
+
+    Agreeing with the Postgres order relies on ids being lowercase hex, which is
+    what `make_id` mints. Letter case is the one axis the collations tested here
+    disagreed on.
     """
     moment = created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at.astimezone(UTC)
     return f"{moment.strftime(_SORT_KEY_TIMESTAMP)}|{evaluation_id}"
