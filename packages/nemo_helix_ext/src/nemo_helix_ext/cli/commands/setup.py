@@ -300,6 +300,7 @@ _POST_START_REACHABLE_DELAY = 2.0
 
 _DEMO_AGENT_NAME = "calculator-agent"
 _SAMPLE_WORKSPACE_NAME = "sample"
+_SAMPLE_WORKSPACE_DESCRIPTION = "Sample workspace created by the NeMo setup flow."
 _LOCAL_CONTEXT_NAME = "local"
 
 
@@ -2914,7 +2915,11 @@ def _run_interactive_mode(
         selected_path = _prompt_post_setup_path()
         if selected_path == "sample":
             workspaces_client = cli_context.typed_client(WorkspacesClient)
-            if _ensure_workspace_exists(workspaces_client, _SAMPLE_WORKSPACE_NAME):
+            if _ensure_workspace_exists(
+                workspaces_client,
+                _SAMPLE_WORKSPACE_NAME,
+                description=_SAMPLE_WORKSPACE_DESCRIPTION,
+            ):
                 console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
         return selected_path
 
@@ -2998,14 +3003,19 @@ def _print_setup_complete(
         console.print(f"  Fast model: {_display_model_name(fast_model)}")
 
 
-def _ensure_workspace_exists(workspaces_client: WorkspacesClient, name: str) -> bool:
+def _ensure_workspace_exists(
+    workspaces_client: WorkspacesClient,
+    name: str,
+    *,
+    description: str | None = None,
+) -> bool:
     """Ensure a workspace exists and return whether it was created."""
     try:
         workspaces_client.get_workspace(name=name).data()
         return False
     except Exception:
         try:
-            workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
+            workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=name, description=description)).data()
             return True
         except Exception as create_err:
             # Treat a workspace created concurrently as success without hiding real failures.
