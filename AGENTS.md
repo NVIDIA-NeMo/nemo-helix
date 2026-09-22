@@ -151,8 +151,8 @@ The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platfo
 **Update the OpenAPI spec:**
 - `make refresh-openapi` - Regenerate `openapi/openapi.yaml` from API definitions
 
-**Update the web SDK / CLI:**
-- `make update-sdk` - Regenerate the OpenAPI spec, TypeScript web SDK (Orval), and CLI.
+**Update web SDK / CLI:**
+- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), then vendor `nemo_platform_ext` into the SDK and regenerate the CLI reference docs. The `nemo` CLI commands themselves are hand-written (not generated from the OpenAPI spec).
 
 **When to run `make refresh-openapi`:**
 Run it whenever you modify:
