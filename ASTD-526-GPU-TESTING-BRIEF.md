@@ -21,6 +21,52 @@ tests:
 - A response can have `workspace: "default"` while the path said `marcus`. That is correct —
   it is how you tell a resolved shared entity from a local one.
 
+## Results so far (2026-09-22, local platform on a GB300, auth disabled)
+
+All verified by running them. Auth was off, so nothing here tests the entitlement gate.
+
+**Priority 1 — passed.** Qwen3-1.7B deployed once on vLLM in `default`; a chat completion
+from another workspace, model id `<that-workspace>/<model>`, returned `200` and was served by
+the `default` deployment. Deployments stayed at 1 in `default` and 0 in the caller's
+workspace, GPU processes and vLLM containers stayed at 1, and the vLLM log shows exactly the
+two requests sent (a same-workspace control plus the cross-workspace call). A nonexistent
+model from the same workspace returned `404`. The shared model stayed out of the caller's
+model list and gateway catalogue.
+
+**Priority 2 — passed for automodel and unsloth; `nemo-rl` not run** (it needs Kubernetes +
+Ray; the local platform runs jobs on Docker). All eight jobs — both backends, all four cells
+of the matrix below — ran from another workspace and completed. Each compiled download
+pointed at `default`; the platform log shows every weight-file read (96) against `default`
+and none against the caller's workspace; and every job on a backend ended at the same loss,
+consistent with all of them training from the same real weights.
+
+**Open design question found in Priority 2.** A LoRA job registers its adapter on the base
+model entity (`tasks/model_entity/run.py`, `create_model_adapter(workspace=base_me.workspace)`),
+so a job in `marcus` writes an adapter onto the shared model in `default`, with the adapter's
+weights in `marcus`. Consequences, none yet tested: with auth on, a caller who can read but
+not write `default` likely fails at the final step after training; adapter names from
+different workspaces collide, and on conflict the task *updates* the existing adapter, so one
+workspace can silently replace another's; adapter names and fileset refs are visible to every
+workspace that sees the shared model; and a `lora_enabled` deployment in `default` would try
+to hot-load weights from `marcus`, which filesets (not shared, ASTD-640) should refuse.
+
+**Local setup that is not in SETUP.md** — each cost a failed run:
+
+1. Build `my-registry/nmp-api:local` (the deployment weights puller runs in it) and, for
+   training, `nmp-customizer-tasks`, `nmp-automodel-training-docker` and
+   `nmp-unsloth-training` via `make docker-load TARGET=<target>
+   DOCKER_PLATFORMS=linux/arm64`. The last three need `USE_LOCAL_WHEELS=1`, or they try to
+   pull prebuilt CUDA wheel images from the placeholder `my-registry`. Budget ~150 GB for the
+   images and roughly as much again in build cache.
+2. Pull the engine image yourself (`docker pull vllm/vllm-openai:v0.22.1`, 38 GB): the local
+   config sets `pull_images: false`.
+3. Start the platform with `--host 0.0.0.0`. On the default `127.0.0.1`, containers get
+   `Connection refused` from `host.docker.internal:8080`. With auth off, that exposes the
+   platform to the network while it runs.
+4. **Do not trust the deployment puller's exit code.** When it cannot reach the platform it
+   prints `✓ Downloaded`, exits `0`, and leaves `/model-store` empty; vLLM then fails with
+   `Invalid repository ID or local directory specified: '/model-store'`. Read its log.
+
 ## Priority 1 — the headline case (needs GPU)
 
 Deploy a model **once** in `default`, then invoke it from a different workspace. Nothing has
