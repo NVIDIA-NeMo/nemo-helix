@@ -36,6 +36,10 @@ const SOURCE_NOTEBOOKS = {
     ROOT,
     "../../customizer/tutorials/embedding-customization-job.ipynb",
   ),
+  "embedding-triplet-dataset": join(
+    ROOT,
+    "../../customizer/tutorials/embedding-triplet-dataset.ipynb",
+  ),
   "lora-customization-job": join(
     ROOT,
     "../../customizer/tutorials/lora-customization-job.ipynb",
@@ -43,6 +47,10 @@ const SOURCE_NOTEBOOKS = {
   "optimize-throughput": join(
     ROOT,
     "../../customizer/tutorials/optimize-throughput.ipynb",
+  ),
+  "retrieval-generate": join(
+    ROOT,
+    "../../data-designer/tutorials/retrieval-generate.ipynb",
   ),
   "sft-customization-job": join(
     ROOT,

@@ -242,6 +242,9 @@ navigation:
               - page: Embedding Customization Job
                 path: ../../customizer/tutorials/embedding-customization-job.mdx
                 slug: embedding-customization-job
+              - page: Train on SPECTER or Triplet JSONL
+                path: ../../customizer/tutorials/embedding-triplet-dataset.mdx
+                slug: embedding-triplet-dataset
               - page: Job Metrics
                 path: ../../customizer/tutorials/metrics.mdx
                 slug: metrics
@@ -262,6 +265,9 @@ navigation:
                 path: ../../data-designer/tutorials/basics.mdx
               - page: Seeding with External Datasets
                 path: ../../data-designer/tutorials/seeding.mdx
+              - page: Generate Retrieval Training Data
+                path: ../../data-designer/tutorials/retrieval-generate.mdx
+                slug: retrieval-generate
           - page: SDK Resources
             path: ../../data-designer/sdk-resources.mdx
           - page: Migrating from Standalone Library

@@ -8,8 +8,10 @@ import type { ReactNode } from "react";
 import distillationCustomizationJob from "./notebooks/distillation-customization-job";
 import dpoCustomizationJob from "./notebooks/dpo-customization-job";
 import embeddingCustomizationJob from "./notebooks/embedding-customization-job";
+import embeddingTripletDataset from "./notebooks/embedding-triplet-dataset";
 import loraCustomizationJob from "./notebooks/lora-customization-job";
 import optimizeThroughput from "./notebooks/optimize-throughput";
+import retrievalGenerate from "./notebooks/retrieval-generate";
 import sftCustomizationJob from "./notebooks/sft-customization-job";
 import toolCalling from "./notebooks/tool-calling";
 
@@ -20,8 +22,10 @@ const notebooks: Record<string, unknown> = {
   "distillation-customization-job": distillationCustomizationJob,
   "dpo-customization-job": dpoCustomizationJob,
   "embedding-customization-job": embeddingCustomizationJob,
+  "embedding-triplet-dataset": embeddingTripletDataset,
   "lora-customization-job": loraCustomizationJob,
   "optimize-throughput": optimizeThroughput,
+  "retrieval-generate": retrievalGenerate,
   "sft-customization-job": sftCustomizationJob,
   "tool-calling": toolCalling,
 };

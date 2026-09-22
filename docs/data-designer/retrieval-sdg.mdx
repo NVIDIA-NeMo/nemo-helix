@@ -58,31 +58,64 @@ nemo data-designer retrieval-preview --spec '{"generate":{"corpus":"default/my-d
 
 ## Prepare (Stage 1)
 
-Conversion (CPU) produces `eval_beir/` and training JSON. GPU mining is off by
-default. Skip SDG by pointing `sdg_input` at a fileset containing an existing
-`generation_result.json`. For a differently named dump, put the filename in
-the reference or set `generation_file`. Directories default to
-`generation_result.json`; the job does not guess among JSON files.
+Conversion produces `eval_beir/` and training JSON. Automodel needs hard
+negatives, so run with `enable_mining: true` and a fileset-backed encoder
+`model`. Without mining, rows keep `neg_doc: []`, which training rejects.
+
+Skip live Stage 0 by pointing `sdg_input` at a fileset holding an existing
+`generation_result.json`, or at the published NVDocs dump. For a differently
+named dump, put the filename in the reference or set `generation_file`.
+Directories default to `generation_result.json`; the job does not guess among
+JSON files.
+
+<Tabs>
+<Tab title="CLI">
 
 ```bash
 nemo data-designer retrieval-prepare --spec '{
-  "sdg_input": "default/stage0-out"
+  "sdg_input": "default/stage0-out",
+  "enable_mining": true,
+  "model": "default/nemotron-3-embed-1b"
 }'
 
 nemo data-designer retrieval-prepare --spec '{
-  "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<revision>/nv_pp_dd_sdg.json",
-  "enable_mining": false
+  "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json",
+  "enable_mining": true,
+  "model": "default/nemotron-3-embed-1b"
 }'
 
 nemo data-designer retrieval-prepare --spec '{
   "sdg_input": "default/retrieval-synthetic-nvdocs-v1",
   "generation_file": "nv_pp_dd_sdg.json",
-  "enable_mining": false
+  "enable_mining": true,
+  "model": "default/nemotron-3-embed-1b"
 }'
 ```
 
-Enable mining (GPU, ~40GB) with `"enable_mining": true`. `model` is a platform
-entity with an attached encoder fileset.
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_platform import NeMoPlatform
+from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig
+
+client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+
+client.data_designer.retrieval_prepare(
+    RetrievalPrepareJobConfig(
+        sdg_input="hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json",
+        enable_mining=True,
+        model="default/nemotron-3-embed-1b",
+    )
+)
+```
+
+</Tab>
+</Tabs>
+
+Mining runs on GPU and needs about 40 GB. `model` is a platform entity with an
+attached encoder fileset; an Inference Gateway endpoint entity has no fileset
+and cannot serve as the mining encoder.
 
 Mining embeds every training query and the corpus, so it dominates Stage 1 wall
 time. The `mining.query_embedding_batch_size` and
@@ -129,16 +162,16 @@ Pass that fileset to both downstream consumers without repackaging it:
 - `nemo evaluator retrieve-eval` `dataset` — the BEIR loader accepts either the
   BEIR directory or a fileset root containing `eval_beir`.
 
-Convert-only prepare (`enable_mining: false`) writes `neg_doc: []` on every
+Prepare without mining (`enable_mining: false`) writes `neg_doc: []` on every
 training row. Encoder fine-tuning still samples `train_n_passages - 1` negatives
 (default 4) and fails with `neg_doc must contain at least 1 document to sample N
 negatives`. Before `nemo customization automodel submit`, download
 `training.jsonl` and require a non-empty `neg_doc` list on every checked row.
 A single empty list can be selected by the collator and fail the run. If any row
 is empty, re-run `retrieval-prepare` with `"enable_mining": true` and a
-fileset-backed encoder `model`. To mine an existing convert-only fileset without
-regenerating frozen `eval_beir`, set `train_input_file` to that fileset instead
-of `sdg_input`.
+fileset-backed encoder `model`. To mine an unmined fileset without regenerating
+frozen `eval_beir`, set `train_input_file` to that fileset instead of
+`sdg_input`.
 
 ```bash
 nemo files list <artifacts-fileset> --workspace default
@@ -169,8 +202,8 @@ client.data_designer.retrieval_generate(
 
 ## Next Steps
 
-- Conduct the rest of the recipe with the `nemo-retrieval-recipes` skill (Automodel
-  `bi_encoder` / `cross_encoder`, then `nemo evaluator retrieve-eval` on frozen `eval_beir`).
+- Worked Stage 0 notebook: [Generate retrieval training data](/documentation/design-synthetic-data/tutorials/retrieval-generate).
+- Continue with mining, Automodel `bi_encoder`, Retriever NIM 2.2.0, and `retrieve-eval` in [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job).
 - See the [Data Designer CLI](/documentation/design-synthetic-data/cli) for configuration and command details.
 - Stage 1 emits `training.jsonl` plus `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`).
   Tiny corpora can leave the train split empty — generate with enough files (50+) before mining.
