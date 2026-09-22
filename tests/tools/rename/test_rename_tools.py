@@ -157,6 +157,7 @@ def test_include_and_exclude_globs_limit_rename_scope(tmp_path: Path) -> None:
 
     (repo / "docs").mkdir()
     (repo / "web").mkdir()
+    (repo / "README.md").write_text("NeMo Platform uses NMP.\n")
     (repo / "docs/guide.md").write_text("NeMo Platform uses NMP.\n")
     (repo / "docs/skip.md").write_text("NeMo Platform uses NMP.\n")
     (repo / "web/app.md").write_text("NeMo Platform uses NMP.\n")
@@ -175,6 +176,7 @@ def test_include_and_exclude_globs_limit_rename_scope(tmp_path: Path) -> None:
         repo,
     )
 
+    assert (repo / "README.md").read_text() == "NeMo Platform uses NMP.\n"
     assert (repo / "docs/guide.md").read_text() == "NeMo Helix uses NHX.\n"
     assert (repo / "docs/skip.md").read_text() == "NeMo Platform uses NMP.\n"
     assert (repo / "web/app.md").read_text() == "NeMo Platform uses NMP.\n"
@@ -190,6 +192,25 @@ def test_include_and_exclude_globs_limit_rename_scope(tmp_path: Path) -> None:
         repo,
     )
     assert "No legacy product" in verify.stdout
+
+
+def test_root_globs_do_not_match_nested_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+    install_rename_tools(repo)
+
+    (repo / "docs").mkdir()
+    (repo / "README.md").write_text("NeMo Platform uses NMP.\n")
+    (repo / "docs/guide.md").write_text("NeMo Platform uses NMP.\n")
+
+    run(["git", "add", "."], repo)
+    run(["git", "commit", "-m", "initial"], repo)
+
+    run(["tools/rename/rename-to-nemo-helix.sh", "--include-glob", "*.md"], repo)
+
+    assert (repo / "README.md").read_text() == "NeMo Helix uses NHX.\n"
+    assert (repo / "docs/guide.md").read_text() == "NeMo Platform uses NMP.\n"
 
 
 def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:

@@ -116,7 +116,7 @@ def glob_matches(path: Path, pattern: str) -> bool:
     if normalized.endswith("/"):
         return path_string.startswith(normalized)
     if "/" not in normalized:
-        return fnmatch.fnmatchcase(path.name, normalized)
+        return path.parent == Path(".") and fnmatch.fnmatchcase(path.name, normalized)
     return fnmatch.fnmatchcase(path_string, normalized)
 
 
