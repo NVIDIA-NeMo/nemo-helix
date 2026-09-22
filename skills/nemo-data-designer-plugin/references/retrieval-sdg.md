@@ -30,6 +30,17 @@ nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-syn
 
 Model roles resolve through Inference Gateway (`provider` + served model names). Do not set `NVIDIA_API_KEY` on the job.
 
+The Nemotron embed recipe uses `nvidia/nemotron-3-ultra-550b-a55b` for all three chat roles. Examples here use `nvidia/nemotron-3-nano-30b-a3b` only because that is the model most Platform deployments already serve. Tell the user the swap changes query quality and downstream nDCG; prefer 550B when the provider serves it, and treat Nano as a cost/latency choice confirmed by a 50–100 document pilot.
+
+Stage 0 quality controls are fields on the generate spec:
+`file_extensions` (default `.txt`, `.md`, `.text`, and no extension),
+`sentences_per_chunk` (5), `max_artifacts_per_type` (2), `num_pairs` (7),
+`multi_doc` (false), and `max_parallel_requests_for_gen` (provider default).
+When changing `num_pairs`, make both `query_counts` and `reasoning_counts` sum
+to it. `multi_doc` also exposes `bundle_size`, `bundle_strategy`, and
+`max_docs_per_bundle`. Stage 1 `quality_threshold` defaults to 7.0 and filters
+generated pairs by judge score.
+
 Stage 1 mining (`enable_mining: true`) is a GPU step. Pass `--profile` (or set
 `data_designer.job_executor_profile`) so generate, convert, and mine share job
 storage. `model` must be a platform entity with an attached encoder fileset.
@@ -52,10 +63,14 @@ Convert-only prepare (`enable_mining: false`) writes `training.jsonl` with empty
 
 `retrieval-prepare` saves one `artifacts` job result holding `training.jsonl`,
 `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`), and the wrapped
-`train.json` that mining consumes. Pass that fileset directly to both consumers:
-Automodel's dataset discovery selects `training.jsonl` and ignores the non-JSONL
-siblings, and the BEIR loader accepts a fileset root containing `eval_beir`.
-Splitting the artifacts into separate training and eval filesets is optional.
+`train.json` that mining consumes. On **0.7+**, pass that fileset (or
+`workspace/fileset#path`) directly to Automodel `dataset.training` and
+`retrieve-eval` `dataset`. Automodel's dataset discovery selects `training.jsonl`
+and ignores the non-JSONL siblings; current Stage 1 unique-keys qrels. On
+**0.6**, copy `training.jsonl` and `eval_beir/` to a fileset root (no path
+fragment) and drop duplicate `(query-id, corpus-id)` rows from
+`eval_beir/qrels/test.tsv` — the BEIR loader rejects them. Splitting the
+artifacts into separate training and eval filesets is optional.
 
 ## Previous / Next / artifacts
 

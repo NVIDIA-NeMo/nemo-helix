@@ -7765,12 +7765,16 @@ nemo data-designer retrieval-preview [OPTIONS]
 * `--generate.sentences-per-chunk <INTEGER>`: Override `generate.sentences_per_chunk` in the spec.
 * `--generate.num-sections <INTEGER>`: Override `generate.num_sections` in the spec.
 * `--generate.num-files <INTEGER>`: Override `generate.num_files` in the spec.
+* `--generate.multi-doc`: Override `generate.multi_doc` in the spec.
+* `--generate.bundle-size <INTEGER>`: Override `generate.bundle_size` in the spec.
+* `--generate.max-docs-per-bundle <INTEGER>`: Override `generate.max_docs_per_bundle` in the spec.
 * `--generate.max-artifacts-per-type <INTEGER>`: Override `generate.max_artifacts_per_type` in the spec.
 * `--generate.num-pairs <INTEGER>`: Override `generate.num_pairs` in the spec.
 * `--generate.min-hops <INTEGER>`: Override `generate.min_hops` in the spec.
 * `--generate.max-hops <INTEGER>`: Override `generate.max_hops` in the spec.
 * `--generate.min-complexity <INTEGER>`: Override `generate.min_complexity` in the spec.
 * `--generate.similarity-threshold <FLOAT>`: Override `generate.similarity_threshold` in the spec.
+* `--generate.max-parallel-requests-for-gen <INTEGER>`: Override `generate.max_parallel_requests_for_gen` in the spec.
 * `--generate.buffer-size <INTEGER>`: Override `generate.buffer_size` in the spec.
 * `--generate.num-records <INTEGER>`: Override `generate.num_records` in the spec.
 * `--generate.artifact-extraction-model`: Chat model for artifact extraction.
@@ -7798,7 +7802,7 @@ nemo data-designer retrieval-preview [OPTIONS]
 
 Function Spec flags are generated from the RetrievalPreviewSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.bundle_strategy`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 #### nemo data-designer retrieval-generate
@@ -7827,12 +7831,16 @@ nemo data-designer retrieval-generate [OPTIONS]
 * `--sentences-per-chunk <INTEGER>`: Override `sentences_per_chunk` in the spec.
 * `--num-sections <INTEGER>`: Override `num_sections` in the spec.
 * `--num-files <INTEGER>`: Override `num_files` in the spec.
+* `--multi-doc`: Override `multi_doc` in the spec.
+* `--bundle-size <INTEGER>`: Override `bundle_size` in the spec.
+* `--max-docs-per-bundle <INTEGER>`: Override `max_docs_per_bundle` in the spec.
 * `--max-artifacts-per-type <INTEGER>`: Override `max_artifacts_per_type` in the spec.
 * `--num-pairs <INTEGER>`: Override `num_pairs` in the spec.
 * `--min-hops <INTEGER>`: Override `min_hops` in the spec.
 * `--max-hops <INTEGER>`: Override `max_hops` in the spec.
 * `--min-complexity <INTEGER>`: Override `min_complexity` in the spec.
 * `--similarity-threshold <FLOAT>`: Override `similarity_threshold` in the spec.
+* `--max-parallel-requests-for-gen <INTEGER>`: Override `max_parallel_requests_for_gen` in the spec.
 * `--buffer-size <INTEGER>`: Override `buffer_size` in the spec.
 * `--num-records <INTEGER>`: Override `num_records` in the spec.
 * `--artifact-extraction-model`: Chat model for artifact extraction.
@@ -7857,7 +7865,7 @@ nemo data-designer retrieval-generate [OPTIONS]
 
 Job Spec flags are generated from the RetrievalGenerateJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `file_extensions`, `query_counts`, `reasoning_counts`, `resume`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `file_extensions`, `bundle_strategy`, `query_counts`, `reasoning_counts`, `resume`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 #### nemo data-designer retrieval-prepare
@@ -7951,12 +7959,16 @@ nemo data-designer retrieval-run [OPTIONS]
 * `--generate.sentences-per-chunk <INTEGER>`: Override `generate.sentences_per_chunk` in the spec.
 * `--generate.num-sections <INTEGER>`: Override `generate.num_sections` in the spec.
 * `--generate.num-files <INTEGER>`: Override `generate.num_files` in the spec.
+* `--generate.multi-doc`: Override `generate.multi_doc` in the spec.
+* `--generate.bundle-size <INTEGER>`: Override `generate.bundle_size` in the spec.
+* `--generate.max-docs-per-bundle <INTEGER>`: Override `generate.max_docs_per_bundle` in the spec.
 * `--generate.max-artifacts-per-type <INTEGER>`: Override `generate.max_artifacts_per_type` in the spec.
 * `--generate.num-pairs <INTEGER>`: Override `generate.num_pairs` in the spec.
 * `--generate.min-hops <INTEGER>`: Override `generate.min_hops` in the spec.
 * `--generate.max-hops <INTEGER>`: Override `generate.max_hops` in the spec.
 * `--generate.min-complexity <INTEGER>`: Override `generate.min_complexity` in the spec.
 * `--generate.similarity-threshold <FLOAT>`: Override `generate.similarity_threshold` in the spec.
+* `--generate.max-parallel-requests-for-gen <INTEGER>`: Override `generate.max_parallel_requests_for_gen` in the spec.
 * `--generate.buffer-size <INTEGER>`: Override `generate.buffer_size` in the spec.
 * `--generate.num-records <INTEGER>`: Override `generate.num_records` in the spec.
 * `--generate.artifact-extraction-model`: Chat model for artifact extraction.
@@ -8010,7 +8022,7 @@ nemo data-designer retrieval-run [OPTIONS]
 
 Job Spec flags are generated from the RetrievalRunJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`, `prepare.split_strategy`, `prepare.attn_implementation`, `prepare.mining.hard_neg_margin_type`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `generate.file_extensions`, `generate.bundle_strategy`, `generate.query_counts`, `generate.reasoning_counts`, `generate.resume`, `prepare.split_strategy`, `prepare.attn_implementation`, `prepare.mining.hard_neg_margin_type`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 ### nemo guardrail

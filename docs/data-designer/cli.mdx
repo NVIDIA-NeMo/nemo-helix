@@ -91,7 +91,7 @@ nemo data-designer validate product_reviews.py --output json
 
 ## Retrieval SDG
 
-Nemotron retrieval Stage 0/1 use dedicated jobs, not `create`. See [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg).
+Nemotron retrieval Stage 0/1 use dedicated jobs, not `create`. See [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg) for the Stage 0 model choice: the recipe uses `nvidia/nemotron-3-ultra-550b-a55b`; the `--chat-model` below is a smaller IGW example.
 
 ```bash
 nemo data-designer retrieval generate \
