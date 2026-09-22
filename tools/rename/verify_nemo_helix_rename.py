@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -35,8 +36,20 @@ def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
     return found
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Verify that NeMo Platform rename references are gone.")
+    parser.add_argument(
+        "--repo-dir",
+        type=Path,
+        default=Path("."),
+        help="repository checkout to verify; defaults to the current working directory",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
-    os.chdir(repo_root())
+    args = parse_args()
+    os.chdir(repo_root(args.repo_dir))
     failed = False
 
     paths = content_paths()

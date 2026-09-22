@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -98,24 +99,27 @@ def apply_path_renames() -> None:
         path.rename(destination)
 
 
-def usage() -> None:
-    print(f"Usage: {sys.argv[0]} [--dry-run|--continue]")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Rename NeMo Platform references to NeMo Helix.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", help="print planned changes without editing files")
+    mode.add_argument("--continue", dest="resume", action="store_true", help="resume after a partial rename")
+    parser.add_argument(
+        "--repo-dir",
+        type=Path,
+        default=Path("."),
+        help="repository checkout to modify; defaults to the current working directory",
+    )
+    return parser.parse_args()
 
 
 def main() -> int:
-    os.chdir(repo_root())
-    if len(sys.argv) > 2:
-        usage()
-        return 2
-
-    mode = sys.argv[1] if len(sys.argv) == 2 else ""
-    if mode == "--dry-run":
+    args = parse_args()
+    os.chdir(repo_root(args.repo_dir))
+    if args.dry_run:
         inventory()
         return 0
-    if mode and mode != "--continue":
-        usage()
-        return 2
-    if mode != "--continue" and run_git("status", "--short").stdout:
+    if not args.resume and run_git("status", "--short").stdout:
         print("The worktree must be clean before running the rename.", file=sys.stderr)
         return 1
 

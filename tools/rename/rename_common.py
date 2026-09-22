@@ -62,8 +62,15 @@ def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], check=check, text=True, capture_output=True)
 
 
-def repo_root() -> Path:
-    return Path(run_git("rev-parse", "--show-toplevel").stdout.strip())
+def repo_root(repo_dir: Path = Path(".")) -> Path:
+    return Path(
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "--show-toplevel"],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.strip()
+    )
 
 
 def git_paths(*args: str) -> list[Path]:

@@ -72,7 +72,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     run(["git", "add", "-f", "dist/index.js", "dist/binary.dat"], repo)
     run(["git", "commit", "-m", "initial"], repo)
 
-    result = run(["tools/rename/rename-to-nemo-helix.sh"], repo)
+    result = run([str(repo / "tools/rename/rename-to-nemo-helix.sh"), "--repo-dir", str(repo)], tmp_path)
 
     assert "tools/rename/verify-nemo-helix-rename.sh" in result.stdout
     index_bytes = (repo / "dist/index.js").read_bytes()
@@ -100,7 +100,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert '"auditor-tasks"' in common_text
     assert '"nhx-auditor-tasks"' not in common_text
 
-    verify = run(["tools/rename/verify-nemo-helix-rename.sh"], repo)
+    verify = run([str(repo / "tools/rename/verify-nemo-helix-rename.sh"), "--repo-dir", str(repo)], tmp_path)
     assert "No legacy product" in verify.stdout
 
 
