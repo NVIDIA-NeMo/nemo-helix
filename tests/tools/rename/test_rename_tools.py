@@ -56,11 +56,16 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
                 "nmp_common",
                 "NMP_CONFIG",
                 "nmp-common",
+                "NmpContext",
+                "nmpclient",
+                "nmpcontext",
                 "NMP",
                 "nmp",
                 "snmp",
                 "abcNMPdef012",
                 "abc-nmpXYZ",
+                "Nmpnotpascal",
+                "nmpclientExtra",
                 "sha384-AbCdNMPefghnmpQRST==",
             ]
         )
@@ -89,11 +94,16 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "nhx_common" in renamed_text
     assert "NHX_CONFIG" in renamed_text
     assert "nhx-common" in renamed_text
+    assert "NhxContext" in renamed_text
+    assert "nhxclient" in renamed_text
+    assert "nhxcontext" in renamed_text
     assert " NHX " in f" {renamed_text} "
     assert " nhx " in f" {renamed_text} "
     assert "snmp" in renamed_text
     assert "abcNMPdef012" in renamed_text
     assert "abc-nmpXYZ" in renamed_text
+    assert "Nmpnotpascal" in renamed_text
+    assert "nmpclientExtra" in renamed_text
     assert "sha384-AbCdNMPefghnmpQRST==" in renamed_text
 
     common_text = (repo / "tools/rename/rename_common.py").read_text()
@@ -113,7 +123,9 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
 
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
-    (repo / "dist/index.js").write_text("const product = 'NeMo Platform'; snmp abcNMPdef nmp_common\n")
+    (repo / "dist/index.js").write_text(
+        "const product = 'NeMo Platform'; snmp abcNMPdef nmp_common NmpContext nmpclient\n"
+    )
     (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
 
     run(["git", "add", "."], repo)

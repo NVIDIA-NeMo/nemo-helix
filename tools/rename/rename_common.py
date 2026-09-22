@@ -39,10 +39,20 @@ ACRONYM_REPLACEMENTS = {
     "NMP": "NHX",
     "Nmp": "Nhx",
     "nmp": "nhx",
+    "nmpclient": "nhxclient",
+    "nmpcontext": "nhxcontext",
 }
 
+ACRONYM_REPLACEMENT_RULES = [
+    ("NMP", re.compile(r"(?<![A-Za-z0-9])NMP(?![A-Za-z0-9])"), "NHX"),
+    ("Nmp", re.compile(r"(?<![A-Za-z0-9])Nmp(?=[A-Z])"), "Nhx"),
+    ("nmp", re.compile(r"(?<![A-Za-z0-9])nmp(?![A-Za-z0-9])"), "nhx"),
+    ("nmpclient", re.compile(r"(?<![A-Za-z0-9])nmpclient(?![A-Za-z0-9])"), "nhxclient"),
+    ("nmpcontext", re.compile(r"(?<![A-Za-z0-9])nmpcontext(?![A-Za-z0-9])"), "nhxcontext"),
+]
+
 REPLACEMENTS = [*PRODUCT_REPLACEMENTS, *ACRONYM_REPLACEMENTS.items()]
-ACRONYM_PATTERN = re.compile(r"(?<![A-Za-z0-9])(NMP|Nmp|nmp)(?![A-Za-z0-9])")
+LEGACY_ACRONYM_PATTERN = re.compile("|".join(f"(?:{rule.pattern})" for _, rule, _ in ACRONYM_REPLACEMENT_RULES))
 
 # These are first-party published image names that predate the common prefix.
 UNPREFIXED_IMAGES = [
@@ -55,7 +65,6 @@ IMAGE_PREFIX = "nhx-"
 IMAGE_PATTERN = re.compile(r"(?<![A-Za-z0-9-])(" + "|".join(re.escape(image) for image in UNPREFIXED_IMAGES) + r")")
 BAKE_IMAGE_PATTERN = re.compile(r'(?:sha_and_maybe_latest_tags|base_tags)\("([^"]+)"\)')
 LEGACY_PRODUCT_PATTERN = re.compile(r"nemo[ _-]?platform", re.IGNORECASE)
-LEGACY_ACRONYM_PATTERN = ACRONYM_PATTERN
 
 
 def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -101,7 +110,10 @@ def read_text(path: Path) -> str | None:
 
 
 def replace_acronyms(text: str) -> str:
-    return ACRONYM_PATTERN.sub(lambda match: ACRONYM_REPLACEMENTS[match.group(1)], text)
+    updated = text
+    for _, pattern, replacement in ACRONYM_REPLACEMENT_RULES:
+        updated = pattern.sub(replacement, updated)
+    return updated
 
 
 def replace_legacy_names(text: str) -> str:

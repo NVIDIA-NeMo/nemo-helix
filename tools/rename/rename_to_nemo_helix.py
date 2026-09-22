@@ -11,8 +11,7 @@ import sys
 from pathlib import Path
 
 from rename_common import (
-    ACRONYM_PATTERN,
-    ACRONYM_REPLACEMENTS,
+    ACRONYM_REPLACEMENT_RULES,
     BAKE_IMAGE_PATTERN,
     IMAGE_PATTERN,
     IMAGE_PREFIX,
@@ -47,13 +46,13 @@ def inventory() -> None:
                 continue
             count += sum(1 for line in text.splitlines() if old in line)
         print(f"  {old:<24} -> {new:<24} {count:8d} matching lines")
-    for old, new in ACRONYM_REPLACEMENTS.items():
+    for old, pattern, new in ACRONYM_REPLACEMENT_RULES:
         count = 0
         for path in paths:
             text = read_text(path)
             if text is None:
                 continue
-            count += sum(match == old for line in text.splitlines() for match in ACRONYM_PATTERN.findall(line))
+            count += sum(1 for line in text.splitlines() for _ in pattern.finditer(line))
         print(f"  {old:<24} -> {new:<24} {count:8d} matching lines")
 
     print()
