@@ -13,6 +13,7 @@ const OPTIONS = [
     title: 'Build from scratch',
     description: 'Start with an empty form.',
     icon: Plus,
+    tag: { label: 'Advanced', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
 ];
@@ -39,6 +40,40 @@ const renderPage = (groups: StartTemplateGroup[], value: string | null = null) =
       />
     </TestProviders>
   );
+
+describe('StartPage badges', () => {
+  it('shows an option tag on its tile', () => {
+    renderPage([group()]);
+
+    expect(screen.getByText('Advanced')).toBeInTheDocument();
+  });
+
+  it('shows the templates tag on the divider', () => {
+    render(
+      <TestProviders>
+        <StartPage
+          heading="Page Title"
+          headingDescription="Page Description"
+          options={OPTIONS}
+          templateGroups={[group()]}
+          templatesTag={{ label: 'Intermediate', color: 'gray', kind: 'solid' }}
+          value={null}
+          onChange={() => undefined}
+          canContinue={false}
+          onContinue={() => undefined}
+        />
+      </TestProviders>
+    );
+
+    expect(screen.getByText('Intermediate')).toBeInTheDocument();
+  });
+
+  it('leaves the divider bare when no templates tag is given', () => {
+    renderPage([group()]);
+
+    expect(screen.queryByText('Intermediate')).not.toBeInTheDocument();
+  });
+});
 
 describe('StartPage template groups', () => {
   it('renders every group it is given', () => {

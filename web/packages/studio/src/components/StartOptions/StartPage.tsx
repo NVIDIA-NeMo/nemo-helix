@@ -4,6 +4,7 @@
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
 import {
+  Badge,
   Block,
   Divider,
   Flex,
@@ -40,6 +41,7 @@ export const StartPage: FC<StartPageProps> = ({
   onChange,
   disabled = false,
   emptyHint,
+  templatesTag,
   continueLabel = 'Continue',
   continueLoading = false,
   canContinue,
@@ -77,6 +79,13 @@ export const StartPage: FC<StartPageProps> = ({
                       label={option.title}
                       description={option.description}
                       icon={<option.icon size={16} aria-hidden />}
+                      slotEnd={
+                        option.tag ? (
+                          <Badge kind={option.tag.kind} color={option.tag.color} size="medium">
+                            {option.tag.label}
+                          </Badge>
+                        ) : undefined
+                      }
                       showIndicator={false}
                       className={TILE_RADIUS}
                       disabled={disabled || !option.enabled}
@@ -91,6 +100,16 @@ export const StartPage: FC<StartPageProps> = ({
                       <Text kind="label/regular/sm" className="whitespace-nowrap text-secondary">
                         OR START FROM A TEMPLATE
                       </Text>
+                      {templatesTag && (
+                        <Badge
+                          kind={templatesTag.kind}
+                          color={templatesTag.color}
+                          size="medium"
+                          className="shrink-0"
+                        >
+                          {templatesTag.label}
+                        </Badge>
+                      )}
                       <Divider className="flex-1" />
                     </Flex>
 

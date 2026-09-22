@@ -1,15 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
-import type { StartOption } from '@studio/components/CreateFilesetStart/types';
+import type { StartOption, StartOptionTag } from '@studio/components/CreateFilesetStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
-import { LayoutGrid, Plus, Sparkles } from 'lucide-react';
-
-/** "N recipe(s)" badge label, kept in sync with the number of authored templates. */
-const RECIPE_COUNT_LABEL = `${FILESET_TEMPLATES.length} ${
-  FILESET_TEMPLATES.length === 1 ? 'recipe' : 'recipes'
-}`;
+import { Plus, Sparkles } from 'lucide-react';
 
 /**
  * Example prompts offered as pills inside an empty prompt field. Each is a complete,
@@ -33,6 +27,22 @@ export const PROMPT_SUGGESTIONS: PromptSuggestion[] = [
   },
 ];
 
+/**
+ * Difficulty badges. The levels are the whole point of the set: they are only meaningful
+ * relative to each other, so they live together rather than beside each option.
+ */
+const BEGINNER: StartOptionTag = { label: 'Beginner', color: 'gray', kind: 'solid' };
+const ADVANCED: StartOptionTag = { label: 'Advanced', color: 'gray', kind: 'solid' };
+export const TEMPLATES_TAG: StartOptionTag = {
+  label: 'Intermediate',
+  color: 'gray',
+  kind: 'solid',
+};
+
+/**
+ * The non-template ways in. "Start from a template" is not among them — templates are
+ * picked directly from the groups below the divider rather than behind an option.
+ */
 export const START_OPTIONS: StartOption[] = [
   {
     id: 'ai',
@@ -40,14 +50,7 @@ export const START_OPTIONS: StartOption[] = [
     description:
       'Tell us what you need in plain language. AI drafts the columns and prompts — then you refine everything visually.',
     icon: Sparkles,
-    enabled: true,
-  },
-  {
-    id: 'template',
-    title: 'Start from a template',
-    description: 'Pick a ready-made recipe for SFT, classification, RAG eval, tool-use and more.',
-    icon: LayoutGrid,
-    tag: { label: RECIPE_COUNT_LABEL, color: 'blue', kind: 'outline' },
+    tag: BEGINNER,
     enabled: true,
   },
   {
@@ -55,6 +58,14 @@ export const START_OPTIONS: StartOption[] = [
     title: 'Build from scratch',
     description: 'Open an empty canvas and add columns block by block, your way.',
     icon: Plus,
+    tag: ADVANCED,
     enabled: true,
   },
 ];
+
+/**
+ * Section order for the template groups. A template's own tag names its section, and
+ * anything outside this list falls into "Other" rather than earning a section of one.
+ */
+export const TEMPLATE_SECTIONS = ['Evaluation', 'Fine-tuning'] as const;
+export const OTHER_SECTION = 'Other';

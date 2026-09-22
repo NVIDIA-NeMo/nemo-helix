@@ -11,7 +11,7 @@ import type {
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import type { LucideIcon } from 'lucide-react';
 
-export type StartOptionId = 'ai' | 'template' | 'clone' | 'scratch';
+export type StartOptionId = 'ai' | 'scratch';
 
 export type { StartOptionTag };
 
@@ -52,12 +52,6 @@ export interface FilesetTemplate {
   models?: TemplateModelSpec[];
 }
 
-export interface TemplateCardProps {
-  template: FilesetTemplate;
-  selected: boolean;
-  onSelect: () => void;
-}
-
 export interface DetailPoint {
   icon: LucideIcon;
   title: string;
@@ -93,16 +87,6 @@ export interface GeneratedConfigPanelProps {
   /** Pretty-printed JSON shown in the snippet. */
   config: string;
   onClose: () => void;
-}
-
-export interface StartOptionDetailProps {
-  option: StartOption;
-  /** Id of the currently-chosen template, when {@link option} is "template". */
-  selectedTemplateId: string | null;
-  onSelectTemplate: (templateId: string) => void;
-  /** Workspace passed through to the "ai" option's panel. */
-  workspace: string;
-  onValidConfig: (jobRequest: DataDesignerJobRequest | null) => void;
 }
 
 /** What the user confirmed via the Continue footer, carrying that option's payload. */

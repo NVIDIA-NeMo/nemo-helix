@@ -4,6 +4,7 @@
 import { Banner } from '@nvidia/foundations-react-core';
 import {
   START_OPTIONS,
+  TEMPLATES_TAG,
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
 import type { CreateCustomizationStartProps } from '@studio/components/CreateCustomizationStart/types';
@@ -65,6 +66,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       headingDescription="Train a model on your own data. Start from a config you already have, pick a ready-made recipe, or set everything up yourself."
       options={START_OPTIONS}
       templateGroups={templateGroups}
+      templatesTag={TEMPLATES_TAG}
       value={selectedId}
       // Provisioning registers models and uploads a dataset, which takes long enough that
       // the tiles would stay clickable behind the disabled Continue button. Moving the

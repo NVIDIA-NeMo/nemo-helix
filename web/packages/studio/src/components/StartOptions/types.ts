@@ -29,19 +29,6 @@ export interface StartOption<Id extends string = string> {
   enabled: boolean;
 }
 
-export interface StartOptionCardProps {
-  option: StartOption;
-  selected: boolean;
-  /** Fired on click / keyboard activation. Only invoked for enabled options. */
-  onSelect: () => void;
-  /**
-   * Lays the icon beside the title instead of above it and drops the fixed height, so the
-   * row takes about half the vertical space. For flows where the tiles are a step on the
-   * way somewhere rather than the main event.
-   */
-  compact?: boolean;
-}
-
 /** One template tile below the divider. */
 export interface StartTemplate {
   id: string;
@@ -87,6 +74,11 @@ export interface StartPageProps {
   continueLoading?: boolean;
   canContinue: boolean;
   onContinue: () => void;
+  /**
+   * Badge shown on the divider, beside "OR START FROM A TEMPLATE" — the templates'
+   * counterpart to the per-option tags.
+   */
+  templatesTag?: StartOptionTag;
   /** Rendered above the footer — an error banner, typically. */
   slotBanner?: ReactNode;
 }
