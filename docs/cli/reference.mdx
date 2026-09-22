@@ -104,6 +104,7 @@ nemo setup [OPTIONS]
 * `--skills-agents`: Comma-separated list of agents to install skills for (e.g. 'codex,cursor'). Default: all detected. Only applied when --install-skills is set.
 * `--skills-scope <CHOICE>`: Install scope for skills: 'project' (this repo) or 'user' (home). Default: project. Only applied when --install-skills is set. [possible values: project, user]
 * `--skills-from`: Comma-separated list of skill sources to install from (e.g. 'nemo-platform,nemo-evaluator-plugin'). Use 'nemo-platform' for the built-in set. Default: all sources. Only applied when --install-skills is set.
+* `--skills-path <DIRECTORY>`: Install skills to a custom directory for another coding agent
 * `--deploy-agent, --no-deploy-agent`: Deploy the demo calculator agent
 * `--resume`: Retry an interrupted setup using the normal idempotent setup path.
 * `--ready-timeout <INTEGER>`: Seconds to wait for platform readiness (default: 240)
@@ -820,9 +821,9 @@ nemo skills show [OPTIONS] NAME
 
 Install Nemo skill files for an AI coding agent.
 
-By default, installs all skills to project scope.
+Use --agent for a known coding agent and --path for any other agent.
 Use --skill to select specific skills, --user for user scope, or
---project-dir to explicitly select the project install directory.
+--project-dir to explicitly select a known agent's project directory.
 
 **Examples:**
 
@@ -831,6 +832,7 @@ nemo skills install --agent claude
 nemo skills install --agent claude --user
 nemo skills install --agent claude --skill inference
 nemo skills install --agent claude --project-dir /path/to/project
+nemo skills install --path ~/.my-agent/skills
 ```
 
 **Usage:**
@@ -841,10 +843,11 @@ nemo skills install [OPTIONS]
 
 **Options:**
 
-* `--agent, -a`: Agent to install for (required). Supported: claude, codex, cursor, opencode
+* `--agent, -a`: Agent to install for. Supported: claude, codex, cursor, opencode
 * `--skill, -s`: Install specific skill(s) only. Can be repeated.
 * `--user`: Install to user scope (default: project scope)
 * `--project-dir, --project-root <DIRECTORY>`: Project directory to install into (default: current working directory)
+* `--path <DIRECTORY>`: Install to a custom skills directory (for example ~/.my-agent/skills)
 
 **Help:**
 
