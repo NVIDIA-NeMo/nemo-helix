@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generated job/function verbs resolve the workspace from a real config file.
+"""CLI commands resolve the workspace from a real config file.
 
 The unit coverage in ``packages/nemo_platform_plugin/tests/test_commands.py``
 injects a hand-written stand-in for the state object, so it pins the resolver
@@ -14,13 +14,20 @@ That link is worth an integration test because
 ``None``, which the resolver then turns into ``"default"``. Any future
 breakage in config loading therefore degrades silently back to the original
 bug -- wrong workspace, no error, no failing unit test. These tests drive the
-generated verbs with a real :class:`CLIContext` over a real config file on
-disk so that regression surfaces.
+commands with a real :class:`CLIContext` over a real config file on disk so
+that regression surfaces.
+
+Both resolver entry points are covered: ``resolve_cli_workspace`` (a
+``typer.Context`` passed explicitly, used by the generated verbs) and
+``resolve_workspace`` (the ambient Click context, used by the hand-written
+plugin commands). They read the state object differently, so exercising only
+one would leave the other's real-config path untested.
 """
 
 import json
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import patch
 
 import pytest
 import typer
@@ -228,3 +235,46 @@ def test_falls_back_to_default_when_config_has_no_workspace(
     result = runner.invoke(_function_app(), ["echo-workspace", "run", "--spec", "{}"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"workspace": "default"}
+
+
+# ---------------------------------------------------------------------------
+# Hand-written plugin commands — the ambient ``resolve_workspace`` path
+# ---------------------------------------------------------------------------
+
+
+def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Path) -> None:
+    """A real plugin command resolves via the ambient Click context.
+
+    ``nemo auditor configs list`` is hand-written (not a generated verb) and
+    calls ``resolve_workspace()`` with no ``typer.Context`` in its signature,
+    so it exercises ``click.get_current_context()`` against the state object
+    the top-level ``nemo`` callback installed — a different code path from the
+    generated verbs above.
+    """
+    del config_file
+    import httpx
+    from nemo_platform_ext.cli.app import app
+
+    captured: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.Client
+
+    def _factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    with patch.object(httpx, "Client", _factory):
+        result = runner.invoke(
+            app,
+            ["auditor", "configs", "list"],
+            obj=CLIContext(overrides={}),
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured, "no HTTP request was issued"
+    assert f"/workspaces/{CONTEXT_WORKSPACE}/" in str(captured[0].url), captured[0].url

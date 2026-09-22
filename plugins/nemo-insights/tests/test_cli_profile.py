@@ -800,3 +800,105 @@ def test_doctor_reports_healthy_profile(app: typer.Typer, profile_tree: Path, mo
     assert result.exit_code == 0, result.output
     assert "Profile\n  ✓ profile for agent 'flight-planner'" in result.output
     assert "Models\n  ✓ default=default/gpt-5; fast=default/gpt-5-mini" in result.output
+
+
+class _ContextState:
+    """Minimal stand-in for ``CLIContext`` exposing an active workspace."""
+
+    def __init__(self, workspace: str | None = "my-team-ws") -> None:
+        self._workspace = workspace
+
+    def get_workspace(self) -> str | None:
+        return self._workspace
+
+
+def _app_with_state(inner: typer.Typer, state: object | None) -> typer.Typer:
+    """Wrap *inner* in a parent group whose callback seeds ``ctx.obj``."""
+    parent = typer.Typer()
+
+    @parent.callback()
+    def _root(ctx: typer.Context) -> None:
+        ctx.obj = state
+
+    parent.add_typer(inner, name="analyst")
+    return parent
+
+
+class TestAnalyzeWorkspacePrecedence:
+    """``analyze`` resolves: --workspace > profile > active context > "default".
+
+    The profile keeps precedence over the context because pinning
+    ``workspace:`` in ``optimizer.yaml`` is a deliberate per-project choice.
+    The context beats the bare literal so that, with no profile, ``analyze``
+    targets the workspace the user selected rather than silently using
+    ``default``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_env_workspace(self, monkeypatch) -> None:
+        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+
+    def test_context_used_when_no_profile_and_no_flag(self, app, tmp_path: Path, monkeypatch) -> None:
+        recorder = AnalystRecorder()
+        monkeypatch.setattr(cli, "run_analyst", recorder)
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(_app_with_state(app, _ContextState()), ["analyst", "run", "--agent", "a"])
+
+        assert result.exit_code == 0, result.output
+        assert recorder.kwargs is not None
+        assert recorder.kwargs["workspace"] == "my-team-ws"
+
+    def test_profile_workspace_outranks_context(self, app, tmp_path: Path, monkeypatch) -> None:
+        recorder = AnalystRecorder()
+        monkeypatch.setattr(cli, "run_analyst", recorder)
+        (tmp_path / "optimizer.yaml").write_text("agent: a\nworkspace: profile-ws\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(_app_with_state(app, _ContextState()), ["analyst", "run"])
+
+        assert result.exit_code == 0, result.output
+        assert recorder.kwargs is not None
+        assert recorder.kwargs["workspace"] == "profile-ws"
+
+    def test_profile_without_workspace_key_falls_through_to_context(self, app, tmp_path: Path, monkeypatch) -> None:
+        """A profile that does not pin a workspace must not mean "default".
+
+        ``AnalysisProfile.workspace`` used to default to the literal
+        ``"default"``, which was indistinguishable from the user pinning
+        ``workspace: default`` — the same bug as a literal Typer default,
+        one level down.
+        """
+        recorder = AnalystRecorder()
+        monkeypatch.setattr(cli, "run_analyst", recorder)
+        (tmp_path / "optimizer.yaml").write_text("agent: a\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(_app_with_state(app, _ContextState()), ["analyst", "run"])
+
+        assert result.exit_code == 0, result.output
+        assert recorder.kwargs is not None
+        assert recorder.kwargs["workspace"] == "my-team-ws"
+
+    def test_explicit_flag_outranks_profile_and_context(self, app, tmp_path: Path, monkeypatch) -> None:
+        recorder = AnalystRecorder()
+        monkeypatch.setattr(cli, "run_analyst", recorder)
+        (tmp_path / "optimizer.yaml").write_text("agent: a\nworkspace: profile-ws\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(_app_with_state(app, _ContextState()), ["analyst", "run", "--workspace", "flag-ws"])
+
+        assert result.exit_code == 0, result.output
+        assert recorder.kwargs is not None
+        assert recorder.kwargs["workspace"] == "flag-ws"
+
+    def test_falls_back_to_default_without_context(self, app, tmp_path: Path, monkeypatch) -> None:
+        recorder = AnalystRecorder()
+        monkeypatch.setattr(cli, "run_analyst", recorder)
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(_app_with_state(app, None), ["analyst", "run", "--agent", "a"])
+
+        assert result.exit_code == 0, result.output
+        assert recorder.kwargs is not None
+        assert recorder.kwargs["workspace"] == "default"
