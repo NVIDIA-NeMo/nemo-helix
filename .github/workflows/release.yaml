@@ -1012,7 +1012,9 @@ jobs:
     # custom runs can finish or retry a release without manual tagging.
     name: Create or confirm GitHub Release
     needs: [plan-release, poll-final-release]
+    # Explicit status check allows intentionally skipped upstream artifact jobs.
     if: >-
+      !cancelled() &&
       needs.plan-release.outputs.release_type == 'stable' &&
       needs.plan-release.outputs.dry_run != 'true' &&
       needs.plan-release.outputs.act != 'true' &&
