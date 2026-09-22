@@ -5,7 +5,7 @@
 name = "nmp-automodel"
 description = "NeMo Automodel job compiler and platform tasks (no HTTP server)."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nmp-common",
     "nmp-customization-common",

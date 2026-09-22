@@ -21,7 +21,7 @@ description = "Convenience wrapper distribution for NeMo Platform Python package
 readme = "README.md"
 authors = [{ name = "NVIDIA Corporation" }]
 license = "Apache-2.0"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3.12",

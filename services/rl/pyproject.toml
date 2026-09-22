@@ -6,7 +6,7 @@ name = "nmp-rl"
 version = "0.1.0"
 description = "NeMo-RL task package — Ray DPO driver and compile glue. No HTTP server."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nmp-common",
     "nmp-customization-common",

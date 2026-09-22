@@ -6,7 +6,7 @@ name = "nemo-platform-plugin"
 dynamic = ["version"]
 description = "Public plugin contract for the NeMo Platform - the only package plugin authors need."
 readme = "src/nemo_platform_plugin/README.md"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3.12",
