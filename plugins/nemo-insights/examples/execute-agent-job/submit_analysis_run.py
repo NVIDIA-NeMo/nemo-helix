@@ -11,9 +11,7 @@ config from the supplied model pair and submits it as an inline agent
 definition, so there is no Analyst Agent entity to provision.
 
 With ``--wait`` it polls the run to a terminal state and prints the
-``analysis-report`` result the ``insights.analysis`` execute extension saved —
-the durable comparison point against the existing ``AnalyzeJob``, which saves
-the same report under the same result name.
+``analysis-report`` result saved by the ``insights.analysis`` execute extension.
 
 The equivalent one-liner, with the model pair taken from your CLI config::
 

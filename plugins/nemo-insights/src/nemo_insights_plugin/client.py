@@ -31,10 +31,6 @@ class _InsightsMethods:
     list_analysis_runs = method(endpoints.list_analysis_runs)
     get_analysis_run = method(endpoints.get_analysis_run)
 
-    create_analysis_job = method(endpoints.create_analysis_job)
-    list_analysis_jobs = method(endpoints.list_analysis_jobs)
-    get_analysis_job = method(endpoints.get_analysis_job)
-
 
 class InsightsClient(_InsightsMethods, NemoClient):
     """Sync client for the Insights plugin API."""

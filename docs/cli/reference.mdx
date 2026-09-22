@@ -10052,10 +10052,6 @@ nemo insights [OPTIONS] COMMAND [ARGS]...
 * `analysis`: Manage periodic agent analysis opt-in state.
 * `analysis-runs`: Submit and inspect on-demand analysis runs.
 
-*Jobs:*
-
-* `analyze-job`: Run the insights analyst once for a single agent.
-
 #### nemo insights analysis
 
 Manage periodic agent analysis opt-in state.
@@ -10235,86 +10231,6 @@ nemo insights analysis-runs get [OPTIONS] NAME
 * `--wait`: Poll until the run's backing job reaches a terminal state.
 * `--poll-timeout <FLOAT>`: How long --wait polls before giving up. [default: 900.0]
 * `--poll-interval <FLOAT>`: Seconds between --wait polls. [default: 5.0]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo insights analyze-job
-
-Run the insights analyst once for a single agent.
-
-**Usage:**
-
-```shell
-nemo insights analyze-job [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `submit`: Submit to a cluster.
-* `explain`: Show input/output schemas.
-
-##### nemo insights analyze-job submit
-
-Submit to a cluster.
-
-**Usage:**
-
-```shell
-nemo insights analyze-job submit [OPTIONS]
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Job Spec:**
-
-* `--agent`: Agent under test.
-* `--ethos`: Optional Ethos Markdown for the agent under test.
-* `--insights-output`: Optional local YAML path mirroring the Insights the platform stored. Container-local unless it points at mounted storage.
-* `--update-analysis-config`: Update the matching AnalysisRunStatus with run metadata.
-* `--default-model`: Workspace-qualified default Model Entity ID selected during setup.
-* `--fast-model`: Workspace-qualified fast Model Entity ID selected during setup.
-
-**Spec Source:**
-
-* `--spec`: Spec as a JSON string. [default: \{}]
-* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
-
-**Submission:**
-
-* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
-* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
-* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
-
-Job Spec flags are generated from the AnalyzeSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
-
-Some spec fields cannot be represented as CLI flags: `base_url`, `since`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
-​
-
-##### nemo insights analyze-job explain
-
-Show input/output schemas.
-
-**Usage:**
-
-```shell
-nemo insights analyze-job explain [OPTIONS]
-```
-
-**Options:**
-
-* `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
