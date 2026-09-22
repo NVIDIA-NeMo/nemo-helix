@@ -11,6 +11,7 @@ from nemo_deployments_plugin.constants import (
     ENTITY_TYPE_DEPLOYMENT,
     ENTITY_TYPE_DEPLOYMENT_CONFIG,
     ENTITY_TYPE_VOLUME,
+    MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
 )
 from nemo_deployments_plugin.types import (
     AccessMode,
@@ -211,6 +212,20 @@ class K8sDeploymentConfig(BaseModel):
             "pod rendered from this config (e.g. an Istio native-sidecar annotation so a "
             "mesh-injected proxy terminates when a puller Job's main container exits). "
             "k8s-only; ignored on docker/openshell backends."
+        ),
+    )
+
+    job_ttl_seconds_after_finished: int | None = Field(
+        default=None,
+        ge=MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
+        alias="jobTtlSecondsAfterFinished",
+        description=(
+            "Per-deployment override for ttlSecondsAfterFinished on a finite (Never/OnFailure) Job, "
+            "such as the weight-puller. When set, wins over the executor default; when unset, the "
+            "executor default applies. Controls how quickly a completed Job's pod (and its "
+            "ReadWriteOnce volume attachment) is reaped. A set value must be at least "
+            f"{MIN_JOB_TTL_SECONDS_AFTER_FINISHED}s so the reconciler can observe Job completion before "
+            "the pod is reaped. k8s-only."
         ),
     )
 
