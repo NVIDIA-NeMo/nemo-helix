@@ -352,21 +352,28 @@ class ModelEntityRunner:
         # Set only when a template was bound: the derived config and its deployment are
         # named after the template as well as the model, so two templates aimed at one
         # model stay separate instead of overwriting each other.
-        template_name: str | None = None
+        #
+        # Never set for a LoRA adapter. ``me`` is the *base* model there, and the adapter
+        # is served from the base model's deployment -- one per base, shared by every
+        # adapter and every template. Scoping it per template would stand up a second
+        # copy of the same base model on another GPU, which is the resource waste the
+        # active-deployment guard above exists to prevent.
+        discriminator: str | None = None
 
         if isinstance(dc, str):
             logger.info(f"Resolving deployment config reference: {dc}")
             referenced = self._resolve_config_ref(dc, me.workspace)
             if is_unbound_deployment_config(referenced):
-                template_name = template_discriminator(referenced.workspace, referenced.name)
-                deployment_config = self._bind_deployment_config(referenced, me)
+                if not is_lora:
+                    discriminator = template_discriminator(referenced.workspace, referenced.name)
+                deployment_config = self._bind_deployment_config(referenced, me, discriminator=discriminator)
             else:
                 deployment_config = referenced
             logger.info(f"Using deployment config: {deployment_config.workspace}/{deployment_config.name}")
         else:
             deployment_config = self._create_deployment_config(dc, me)
 
-        self._create_deployment(deployment_config, me, discriminator=template_name)
+        self._create_deployment(deployment_config, me, discriminator=discriminator)
 
     def _has_active_deployment(self, me: ModelEntity) -> bool:
         """Check if the model entity already has an active deployment."""
@@ -438,7 +445,13 @@ class ModelEntityRunner:
             executor_config=executor_config,
         )
 
-    def _bind_deployment_config(self, template: ModelDeploymentConfig, me: ModelEntity) -> ModelDeploymentConfig:
+    def _bind_deployment_config(
+        self,
+        template: ModelDeploymentConfig,
+        me: ModelEntity,
+        *,
+        discriminator: str | None = None,
+    ) -> ModelDeploymentConfig:
         """Derive a config that serves ``me`` from an unbound ``template``.
 
         The referenced config names no model, so deploying it verbatim would leave
@@ -458,7 +471,7 @@ class ModelEntityRunner:
             engine=template.engine,
             model_spec=model_spec,
             executor_config=template.executor_config,
-            discriminator=template_discriminator(template.workspace, template.name),
+            discriminator=discriminator,
         )
 
     def _create_or_update_config(

@@ -803,6 +803,83 @@ class TestLaunchModel:
         # No explicit version -> the latest, which is the one just written.
         assert update_call.kwargs["body"].config_version is None
 
+    def test_lora_template_does_not_fork_the_base_models_deployment(self) -> None:
+        """A LoRA adapter must never stand up a second copy of its base model.
+
+        The adapter is served from the base model's deployment, which is shared by
+        every adapter and every template. Scoping the deployment per template would
+        put a second copy of the same base model on another GPU -- the waste the
+        active-deployment guard exists to prevent, reintroduced by the back door.
+        """
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nmp.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([])  # no active base deployment
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(name="prod", model_entity_id=None, model_name=None, model_namespace=None)
+        )
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-cfg-llama-base")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-deploy-llama-base")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="d", status=ModelDeploymentStatus.PENDING)
+        )
+
+        runner = _make_runner(models, files)
+        base = _model_entity(name="llama-base", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        runner.launch_model(
+            ModelEntityTaskConfig(
+                name="my-adapter",
+                workspace="default",
+                fileset=FileSetRef(workspace="default", name="fs"),
+                model_entity="default/llama-base",
+                peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                deployment_config="shared/prod",
+            ),
+            base,  # the LoRA path hands launch_model the BASE model entity
+        )
+
+        # Named for the base model alone -- no template scope. A second LoRA job with a
+        # different template lands on this same name and reuses the deployment.
+        assert models.create_deployment_config.call_args.kwargs["body"].name == "sft-cfg-llama-base"
+        assert models.create_deployment.call_args.kwargs["body"].name == "sft-deploy-llama-base"
+
+    def test_lora_with_an_active_base_deployment_still_skips(self) -> None:
+        """The pre-existing deconfliction guard is untouched by template binding."""
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nmp.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([types.SimpleNamespace(name="base-cfg")])
+        models.list_deployments.return_value = _page(
+            [types.SimpleNamespace(name="base-deploy", status=ModelDeploymentStatus.READY)]
+        )
+
+        runner = _make_runner(models, files)
+        base = _model_entity(name="llama-base", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        runner.launch_model(
+            ModelEntityTaskConfig(
+                name="my-adapter",
+                workspace="default",
+                fileset=FileSetRef(workspace="default", name="fs"),
+                model_entity="default/llama-base",
+                peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                deployment_config="shared/prod",
+            ),
+            base,
+        )
+
+        # The live base deployment hot-loads the adapter; nothing new is stood up.
+        models.get_deployment_config.assert_not_called()
+        models.create_deployment_config.assert_not_called()
+        models.create_deployment.assert_not_called()
+
     def test_bound_string_ref_is_deployed_as_is(self) -> None:
         """A config that already names a model is used verbatim -- nothing to bind."""
         from nmp.customization_common.schemas.file_io import FileSetRef
