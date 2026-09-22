@@ -58,3 +58,20 @@ def test_submit_help_explains_the_job_json(contributor: RlContributor) -> None:
     assert submit.help is not None
     assert "RlJobInput" in submit.help
     assert "nemo customization rl explain" in submit.help
+
+
+def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tracking message names this backend, so all three job id prefixes read correctly."""
+    import typer
+    from nmp.customization_common.cli import overrides
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        overrides,
+        "_replace_job_submit",
+        lambda group, backend, *args, **kwargs: captured.update(backend=backend),
+    )
+    from nemo_rl_plugin.cli.inputs import apply_rl_job_cli_overrides
+
+    apply_rl_job_cli_overrides(typer.Typer())
+    assert captured["backend"] == "rl"

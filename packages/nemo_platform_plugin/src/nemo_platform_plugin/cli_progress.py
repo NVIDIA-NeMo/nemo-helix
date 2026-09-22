@@ -65,6 +65,10 @@ class _ProgressHandle:
             self._progress.update(self._task_id, description=message)
 
 
+#: Public name for what :func:`request_progress` yields, so callers can annotate it.
+ProgressHandle = _ProgressHandle
+
+
 @contextmanager
 def request_progress(
     message: str,

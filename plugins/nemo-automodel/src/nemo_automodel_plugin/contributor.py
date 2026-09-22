@@ -24,13 +24,13 @@ from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 
 _CLI_HELP = """Fine-tune a model with Automodel: SFT, LoRA, or knowledge distillation.
 
-The platform runs the job on a GPU execution profile. That profile's backend
-is docker or kubernetes_job, depending on how the platform was set up. Run
-'nemo jobs list-execution-profiles' to see the profiles on this platform.
+The platform runs the job on a GPU execution profile. On a single node, that
+profile's backend is docker or kubernetes_job, depending on how the platform
+was set up; set the GPU count with parallelism.num_gpus_per_node.
 
-Multi-node training (parallelism.num_nodes above 1) needs a kubernetes_job or
-volcano_job backend. On a single node, set the GPU count with
-parallelism.num_gpus_per_node.
+Multi-node training (parallelism.num_nodes above 1) runs on a volcano_job or
+kubernetes_job backend, so it needs a Kubernetes platform. Run
+'nemo jobs list-execution-profiles' to see the profiles on this platform.
 
 The job JSON follows the AutomodelJobInput schema:
   model        base model entity, as 'name' or 'workspace/name'
@@ -58,8 +58,8 @@ class AutomodelContributor(BaseContributor):
     cli_summary: ClassVar[CustomizationCLISummary] = CustomizationCLISummary(
         trains="SFT and LoRA fine-tuning, and knowledge distillation.",
         runs_on=(
-            "a GPU execution profile, on the docker or kubernetes_job backend. "
-            "Multi-node needs kubernetes_job or volcano_job."
+            "a GPU execution profile: docker or kubernetes_job on a single node, "
+            "volcano_job or kubernetes_job for multi-node."
         ),
         job_json="model, dataset, training, schedule, batch, optimizer, parallelism.",
         use_when="you need SFT, LoRA, or knowledge distillation on one or more GPUs.",

@@ -77,6 +77,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional, cast
 
@@ -370,6 +371,30 @@ def _job_input_schema(job_cls: type[NemoJob]) -> type[BaseModel] | None:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class SubmittedJob:
+    """What a job ``submit`` created, plus the connection it was created over.
+
+    Returned by the generated ``submit`` callback so that a wrapper can follow
+    the job without resolving the base URL, workspace or auth headers again.
+    """
+
+    #: The platform's job response, as printed to stdout.
+    response: dict[str, Any]
+    #: Platform base URL the job was submitted to.
+    base_url: str
+    #: Workspace the job was created in.
+    workspace: str
+    #: Auth headers used for the submit call.
+    headers: dict[str, str]
+
+    @property
+    def name(self) -> str | None:
+        """The platform-assigned job id, or ``None`` if the response omitted it."""
+        name = self.response.get("name")
+        return name if isinstance(name, str) else None
+
+
 def _add_submit_command(
     group: typer.Typer,
     job_cls: type[NemoJob],
@@ -403,7 +428,7 @@ def _add_submit_command(
     unavailable: list[str] = []
     leaves = walk_spec_leaves(schema, reserved=_JOB_SUBMIT_RESERVED_FLAGS, unavailable=unavailable)
 
-    def _submit(typer_ctx: typer.Context, **kwargs: object) -> None:
+    def _submit(typer_ctx: typer.Context, **kwargs: object) -> SubmittedJob | None:
         if as_callback and typer_ctx.invoked_subcommand is not None:
             return
         original_kwargs = dict(kwargs)
@@ -439,19 +464,31 @@ def _add_submit_command(
                 renderer_resolved = cli.get_job_renderer(job_cls, verb="submit")
 
         resolved_base_url = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+        submitted: SubmittedJob | None = None
 
         def _do_submit() -> Any:
+            nonlocal submitted
+            resolved_headers = _resolve_submit_auth_headers(typer_ctx)
             submit_kwargs: dict[str, Any] = {
                 "base_url": resolved_base_url,
                 "workspace": workspace,
                 "profile": profile,
                 "options": merged_options or None,
-                "headers": _resolve_submit_auth_headers(typer_ctx) or None,
+                "headers": resolved_headers or None,
             }
             metadata = _resolve_submit_metadata(typer_ctx)
             if metadata is not None:
                 submit_kwargs["metadata"] = metadata
-            return scheduler.submit_remote(job_cls, spec_data, **submit_kwargs)
+            result = scheduler.submit_remote(job_cls, spec_data, **submit_kwargs)
+            # Captured here rather than after the call so that the renderer path,
+            # which consumes the result itself, still hands it back to the caller.
+            submitted = SubmittedJob(
+                response=result if isinstance(result, dict) else {},
+                base_url=resolved_base_url,
+                workspace=workspace,
+                headers=resolved_headers,
+            )
+            return result
 
         renderer: CLIRenderer | None = None
         rctx: RendererContext | None = None
@@ -482,6 +519,11 @@ def _add_submit_command(
 
         if renderer is not None and rctx is not None:
             renderer.on_complete(ctx=rctx)
+
+        # Only a caller that wraps this callback sees the return value, such as the
+        # Customizer submit override. The CLI entry point discards what `app()`
+        # returns, so this stays invisible to every other job's submit.
+        return submitted
 
     help_text = (
         job_cls.description

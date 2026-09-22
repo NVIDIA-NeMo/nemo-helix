@@ -149,6 +149,7 @@ def test_renderer_prints_link_when_studio_ready(
     assert "View in Studio: https://nmp.test/studio/workspaces/acme/customizations/job-1" in err
     assert "nemo jobs list --workspace acme" in err
     assert "nemo jobs get-status job-1 --workspace acme" in err
+    assert "nemo jobs watch job-1 --workspace acme" in err
     # stdout is PURE JSON (the automation contract) — no guidance leaks into it.
     assert '"name": "job-1"' in out
     assert "View in Studio" not in out
@@ -180,7 +181,7 @@ def test_renderer_omits_link_when_no_base_url(
 def test_renderer_omits_link_when_no_job_name(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # No name in the response -> no link and no `get-status` hint, but list hint stays.
+    # No name in the response -> no link and no `get-status`/`watch` hint, but list hint stays.
     called = {"probed": False}
 
     def fake_probe(base_url: str | None) -> bool:
@@ -191,6 +192,7 @@ def test_renderer_omits_link_when_no_job_name(
     out, err = _run_complete(_ctx("https://nmp.test"), {"id": "internal-uuid"}, capsys)
     assert "View in Studio" not in err
     assert "nemo jobs get-status" not in err
+    assert "nemo jobs watch" not in err
     assert "nemo jobs list --workspace default" in err
     # The probe is skipped entirely when there's no job name to link to.
     assert called["probed"] is False

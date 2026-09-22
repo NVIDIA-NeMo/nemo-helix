@@ -147,6 +147,7 @@ class CustomizationSubmitRenderer(CLIRenderer):
         err.print(f"  nemo jobs list{workspace_flag}")
         if job_name is not None:
             err.print(f"  nemo jobs get-status {shlex.quote(job_name)}{workspace_flag}")
+            err.print(f"  nemo jobs watch {shlex.quote(job_name)}{workspace_flag}")
 
         if job_name is None:
             return

@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
+import pytest
 from fastapi import FastAPI
 from nemo_automodel_plugin.contributor import AutomodelContributor
 
@@ -66,7 +67,7 @@ def test_cli_summary_states_what_it_trains_and_where_it_runs() -> None:
     summary = AutomodelContributor().get_cli_summary()
     assert summary is not None
     assert "SFT" in summary.trains and "LoRA" in summary.trains
-    assert "Multi-node needs kubernetes_job or volcano_job." in summary.runs_on
+    assert "volcano_job or kubernetes_job for multi-node" in summary.runs_on
     assert summary.command == "nemo customization automodel submit job.json"
 
 
@@ -78,6 +79,15 @@ def test_summary_and_help_agree_on_multi_node_backends() -> None:
     for backend in ("kubernetes_job", "volcano_job"):
         assert backend in summary.runs_on, backend
         assert backend in contributor.cli_help, backend
+
+
+def test_help_scopes_the_single_node_backends() -> None:
+    """docker and kubernetes_job are the single-node list; volcano_job is for multi-node only."""
+    help_text = " ".join(AutomodelContributor.cli_help.split())
+    assert "On a single node, that profile's backend is docker or kubernetes_job" in help_text
+    assert "Multi-node training (parallelism.num_nodes above 1) runs on a volcano_job or kubernetes_job backend" in (
+        help_text
+    )
 
 
 def test_cli_summary_fits_the_rendered_width() -> None:
@@ -108,3 +118,20 @@ def test_submit_help_explains_the_job_json() -> None:
     assert submit.help is not None
     assert "AutomodelJobInput" in submit.help
     assert "nemo customization automodel explain" in submit.help
+
+
+def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tracking message names this backend, so all three job id prefixes read correctly."""
+    import typer
+    from nmp.customization_common.cli import overrides
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        overrides,
+        "_replace_job_submit",
+        lambda group, backend, *args, **kwargs: captured.update(backend=backend),
+    )
+    from nemo_automodel_plugin.cli.inputs import apply_automodel_job_cli_overrides
+
+    apply_automodel_job_cli_overrides(typer.Typer())
+    assert captured["backend"] == "automodel"

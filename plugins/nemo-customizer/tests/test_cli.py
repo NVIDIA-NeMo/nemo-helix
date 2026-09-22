@@ -102,3 +102,28 @@ def test_root_help_stays_within_the_rendered_width(monkeypatch: pytest.MonkeyPat
     """Group help is printed through an 80-column Rich console, and longer lines re-wrap."""
     help_text = _root_help({"stub": _SummaryContributor()}, monkeypatch)
     assert [line for line in help_text.splitlines() if len(line) > 80] == []
+
+
+class _HeadlessContributor:
+    """Discovered, but contributes no CLI."""
+
+    name: ClassVar[str] = "headless"
+
+    def get_routers(self) -> list[RouterSpec]:
+        return []
+
+    def get_cli(self) -> typer.Typer | None:
+        return None
+
+
+def test_root_help_omits_contributors_without_a_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Help must not point at 'nemo customization headless', which would not exist."""
+    contributors = {"fake": _FakeContributor(), "headless": _HeadlessContributor()}
+    monkeypatch.setattr("nemo_customizer.cli.discover_customization_contributors", lambda: contributors)
+
+    app = CustomizationCLI().get_cli()
+
+    assert {group.name for group in app.registered_groups} == {"fake"}
+    help_text = app.info.help or ""
+    assert "\nfake\n" in help_text
+    assert "headless" not in help_text
