@@ -17,7 +17,7 @@ from data_designer_nemo.fileset_filesystem_provider import (
 )
 from data_designer_nemo.person_reader import FilesetsPersonReader
 from data_designer_nemo.secret_resolver import NMPSecretResolver
-from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient
 
 
 class DataDesignerExecutionContext:
@@ -25,7 +25,7 @@ class DataDesignerExecutionContext:
 
     def __init__(
         self,
-        sdk: NeMoPlatform,
+        sdk: SyncPlatformClient,
         workspace: str,
         *,
         validated_roots: set[str] | None = None,
@@ -55,7 +55,7 @@ class DataDesignerExecutionContext:
 
 
 def create_execution_context(
-    sdk: NeMoPlatform,
+    sdk: SyncPlatformClient,
     workspace: str,
     *,
     validated_roots: set[str] | None = None,

@@ -26,7 +26,7 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, Anonymizer
 from nemo_anonymizer_plugin.jobs import run as run_module
 from nemo_anonymizer_plugin.jobs.run import RunJob
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
@@ -59,14 +59,14 @@ def _restore_task_loggers(snapshot: dict[str, tuple[list[logging.Handler], int, 
         logger.propagate = propagate
 
 
-def _make_async_sdk() -> AsyncNeMoPlatform:
-    return AsyncMock(spec=AsyncNeMoPlatform)
+def _make_async_sdk() -> AsyncNemoClient:
+    return AsyncMock(spec=AsyncNemoClient)
 
 
 async def _to_run_spec(
     request: AnonymizerRequest,
     *,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNemoClient,
 ) -> AnonymizerStepConfig:
     return await RunJob.to_spec(
         request,
@@ -173,7 +173,7 @@ async def test_run_serialized_step_config_can_be_revalidated(
     assert RunJob().run(
         step_config.model_dump(),
         ctx=ctx,
-        sdk=Mock(spec=NeMoPlatform),
+        sdk=Mock(spec=NemoClient),
     ) == {"exit_code": 0}
 
 
@@ -240,7 +240,7 @@ def test_run_step_config_uses_ctx_results(
             task_run_module.run_step_config(
                 step_config,
                 ctx=ctx,
-                sdk=Mock(spec=NeMoPlatform),
+                sdk=Mock(spec=NemoClient),
             )
             == 0
         )
@@ -294,7 +294,7 @@ def test_run_step_config_requires_resolved_model_configs(
     logging_snapshot = _snapshot_task_loggers()
 
     try:
-        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoPlatform)) == 1
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 1
     finally:
         _restore_task_loggers(logging_snapshot)
     anonymizer.assert_not_called()
@@ -375,7 +375,7 @@ def test_run_step_config_writes_trace_with_roundtrippable_skipped_span_label_cou
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
     try:
-        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoPlatform)) == 0
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 0
     finally:
         _restore_task_loggers(logging_snapshot)
 

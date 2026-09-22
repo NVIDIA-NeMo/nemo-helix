@@ -5,15 +5,14 @@ import logging
 
 from data_designer.engine.errors import SecretResolutionError
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient, SecretsClient
 
 logger = logging.getLogger(__name__)
 
 
-async def validate_secret(sdk: AsyncNeMoPlatform, secret: str, default_workspace: str) -> None:
+async def validate_secret(sdk: AsyncPlatformClient, secret: str, default_workspace: str) -> None:
     """Validate a secret reference with an async SDK instance.
     The SDK instance should carry end user authentication headers,
     so that this function validate existence and access in API
@@ -47,7 +46,7 @@ class NMPSecretResolver:
     sync. Secrets should be validated in advance using :func:`validate_secret`.
     """
 
-    def __init__(self, sdk: NeMoPlatform, default_workspace: str):
+    def __init__(self, sdk: SyncPlatformClient, default_workspace: str):
         self._sdk = sdk
         self._default_workspace = default_workspace
 

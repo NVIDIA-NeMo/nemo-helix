@@ -3,7 +3,7 @@
 
 """Provider lookup through the typed Models client, over a mocked httpx transport.
 
-Driving a real ``NeMoPlatform`` -> ``client_from_platform`` -> ``ModelsClient``
+Driving a real ``NemoClient`` -> ``client_from_platform`` -> ``ModelsClient``
 chain asserts the wire contract (method, path, parsed model) rather than
 restating the call the implementation happens to make.
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 import httpx
 import pytest
 from data_designer_nemo.model_provider import get_nmp_provider, get_nmp_provider_async
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import ModelProvider
 
@@ -48,7 +48,7 @@ def _recording_transport(payload: dict) -> tuple[httpx.MockTransport, list[httpx
 
 def test_get_nmp_provider_hits_the_provider_endpoint() -> None:
     transport, seen = _recording_transport(_provider_json())
-    sdk = NeMoPlatform(base_url=BASE, workspace="default", http_client=httpx.Client(transport=transport))
+    sdk = NemoClient(base_url=BASE, workspace="default", http_client=httpx.Client(transport=transport))
 
     result = get_nmp_provider(sdk, "other", "my-provider")
 
@@ -62,7 +62,7 @@ def test_get_nmp_provider_hits_the_provider_endpoint() -> None:
 @pytest.mark.asyncio
 async def test_get_nmp_provider_async_hits_the_provider_endpoint() -> None:
     transport, seen = _recording_transport(_provider_json())
-    sdk = AsyncNeMoPlatform(base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=transport))
+    sdk = AsyncNemoClient(base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=transport))
 
     result = await get_nmp_provider_async(sdk, "other", "my-provider")
 
@@ -80,7 +80,7 @@ async def test_get_nmp_provider_async_hits_the_provider_endpoint() -> None:
 def test_provider_route_url_conditionally_appends_v1(host_url: str, expected_suffix: str) -> None:
     """The endpoint handed to Data Designer and the anonymizer, built from a fetched provider."""
     transport, _ = _recording_transport(_provider_json(host_url=host_url))
-    sdk = NeMoPlatform(base_url=BASE, workspace="default", http_client=httpx.Client(transport=transport))
+    sdk = NemoClient(base_url=BASE, workspace="default", http_client=httpx.Client(transport=transport))
 
     provider = get_nmp_provider(sdk, "other", "my-provider")
     url = client_from_platform(sdk, ModelsClient).get_provider_route_openai_url(provider)

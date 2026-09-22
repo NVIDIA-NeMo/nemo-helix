@@ -422,7 +422,7 @@ class BaseNemoClient(Generic[HttpClientT]):
         return origin is not None and origin == _url_origin(self._base_url)
 
     @property
-    def _client(self) -> httpx.Client | httpx.AsyncClient:
+    def _client(self) -> HttpClientT:
         """Underlying httpx transport.
 
         Legacy plugin SDK resources access ``NeMoPlatform._client`` to make raw
