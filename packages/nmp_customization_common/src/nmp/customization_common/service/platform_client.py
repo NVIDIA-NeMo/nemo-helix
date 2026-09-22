@@ -161,10 +161,15 @@ async def fetch_model_entity(
         ) from None
 
     if model.fileset:
+        # An unqualified fileset reference on a model names a fileset in the model's own
+        # workspace, which is not always the workspace the reference pointed at: a shared
+        # model resolves out of the global workspace, so resolved_ref would send the lookup
+        # to the caller's workspace and miss.
+        owning_workspace = getattr(model, "workspace", None) or resolved_ref.workspace
         await check_fileset_access(
             platform,
             model.fileset,
-            resolved_ref.workspace,
-            label=f"weights for model '{resolved_ref.workspace}/{resolved_ref.name}'",
+            owning_workspace,
+            label=f"weights for model '{owning_workspace}/{model.name}'",
         )
     return model

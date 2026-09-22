@@ -120,3 +120,23 @@ async def test_environment_access_rejects_directory_path() -> None:
 
     with pytest.raises(ValueError, match="must not include a '#path/' directory"):
         await check_environment_access(platform, "default/environment#package", "default")
+
+
+async def test_fetch_model_entity_resolves_bare_fileset_against_the_models_own_workspace() -> None:
+    """A shared model resolves out of the global workspace, so its bare fileset lives there too."""
+    model = SimpleNamespace(name="llama", workspace="default", fileset="weights")
+    _, files, platform = _clients(model)
+
+    await fetch_model_entity("llama", "marcus", platform)
+
+    # Not workspace="marcus": the reference pointed at the caller's workspace, but the
+    # entity resolved out of the global one, and that is where its weights are.
+    files.get_fileset.assert_awaited_once_with(workspace="default", name="weights")
+
+
+async def test_fetch_model_entity_names_the_owning_workspace_when_weights_are_missing() -> None:
+    model = SimpleNamespace(name="llama", workspace="default", fileset="weights")
+    _, _, platform = _clients(model, fileset_error=_not_found())
+
+    with pytest.raises(ValueError, match="Weights for model 'default/llama'"):
+        await fetch_model_entity("llama", "marcus", platform)
