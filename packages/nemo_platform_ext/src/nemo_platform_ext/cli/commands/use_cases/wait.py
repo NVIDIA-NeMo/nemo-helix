@@ -144,8 +144,7 @@ def wait_provider(
     state: CLIContext = ctx.obj
     client = state.get_client()
 
-    if workspace is None:
-        workspace = client._get_workspace_path_param()
+    workspace = client.require_workspace(workspace)
 
     success = wait_for_gateway(client, name, workspace, timeout, poll_interval)
     sys.exit(0 if success else 1)

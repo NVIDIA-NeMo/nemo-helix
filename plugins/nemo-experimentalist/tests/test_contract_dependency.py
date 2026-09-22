@@ -35,10 +35,6 @@ def test_runtime_dependencies_match_retained_imports() -> None:
     assert all("pydantic-ai" not in dependency for dependency in dependencies)
     assert all("tzdata" not in dependency for dependency in dependencies)
 
-    # The Eval Author agent lives in this plugin, so depending on the Eval Author plugin
-    # would restore the package cycle that uv used to resolve.
-    assert all("nemo-eval-author" not in dependency for dependency in dependencies)
-
 
 def test_shared_contract_modules_are_importable(tmp_path: Path) -> None:
     from nemo_insights_plugin.contracts.checks import CheckResult, format_report

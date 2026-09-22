@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -20,7 +19,7 @@ from nemo_platform_plugin.secrets.types import (
 )
 from pydantic import SecretStr
 
-from nemo_platform_ext.cli.core.code_generator import format_code_output
+from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_ext.cli.core.errors import handle_errors
 from nemo_platform_ext.cli.core.formatters import (
@@ -49,7 +48,7 @@ app = create_typer_app(name="secrets", help="Manage secrets.")
 admin_app = create_typer_app(name="admin", help="Manage admin")
 app.add_typer(admin_app, name="admin")
 
-_CodeArg = str | int | bool | None
+# Stands in for the real secret when rendering -f code; the generator masks SecretStr values anyway.
 _SECRET_VALUE_PLACEHOLDER = "<secret-value>"
 
 
@@ -156,27 +155,6 @@ def _source_secret_page(
     )
 
 
-def _format_python_literal(value: object) -> str:
-    if isinstance(value, str):
-        return json.dumps(value)
-    return repr(value)
-
-
-def _handle_code_generation(
-    method: str, args: dict[str, _CodeArg], output_format: str | None, state: CLIContext
-) -> bool:
-    if output_format != "code":
-        return False
-
-    generated_code = _generate_secrets_python_code(
-        method=method,
-        args=args,
-        base_url=state.get_base_url("http://localhost:8080"),
-    )
-    typer.echo(format_code_output(generated_code, language="python"))
-    return True
-
-
 def _emit_secrets_output(
     data: object,
     *,
@@ -234,121 +212,6 @@ def _emit_secrets_output(
     typer.echo(output)
 
 
-def _generate_secrets_python_code(*, method: str, args: dict[str, _CodeArg], base_url: str | None) -> str:
-    lines = [
-        "from nemo_platform import NeMoPlatform",
-        "from nemo_platform_plugin.client.adapter import client_from_platform",
-        "from nemo_platform_plugin.secrets.client import SecretsClient",
-        (
-            "from nemo_platform_plugin.secrets.types import "
-            "ListSecretsQueryParams, PlatformSecretCreateRequest, PlatformSecretUpdateRequest"
-        ),
-        "from pydantic import SecretStr",
-        "",
-        f"platform_client = NeMoPlatform(base_url={_format_python_literal(base_url)})"
-        if base_url
-        else "platform_client = NeMoPlatform()",
-        "secrets = client_from_platform(platform_client, SecretsClient)",
-        f"args = {_format_python_literal(args)}",
-        "",
-    ]
-    lines.extend(_render_secrets_call(method, args))
-    return "\n".join(lines)
-
-
-def _render_secrets_call(method: str, args: dict[str, _CodeArg]) -> list[str]:
-    if method == "access":
-        return [
-            "response = secrets.access_secret(",
-            '    name=str(args["name"]),',
-            '    workspace=args.get("workspace"),',
-            ")",
-            "print(response.data())",
-        ]
-    if method == "create":
-        return [
-            "response = secrets.create_secret(",
-            '    workspace=args.get("workspace"),',
-            "    body=PlatformSecretCreateRequest(",
-            '        name=str(args["name"]),',
-            '        value=SecretStr(str(args["value"])),',
-            '        description=args.get("description"),',
-            "    ),",
-            ")",
-            "print(response.data())",
-        ]
-    if method == "delete":
-        return [
-            "secrets.delete_secret(",
-            '    name=str(args["name"]),',
-            '    workspace=args.get("workspace"),',
-            ").data()",
-        ]
-    if method == "list":
-        lines = [
-            "query_params: ListSecretsQueryParams = {}",
-            'page = args.get("page")',
-            "if page is not None:",
-            '    query_params["page"] = int(page)',
-            'page_size = args.get("page_size")',
-            "if page_size is not None:",
-            '    query_params["page_size"] = int(page_size)',
-            "response = secrets.list_secrets(",
-            '    workspace=args.get("workspace"),',
-            "    query_params=query_params or None,",
-            ")",
-        ]
-        if args.get("all_pages"):
-            lines.extend(
-                [
-                    "for secret in response.items():",
-                    "    print(secret)",
-                ]
-            )
-        else:
-            lines.extend(
-                [
-                    "page_result = response.page()",
-                    "for secret in page_result.items:",
-                    "    print(secret)",
-                ]
-            )
-        return lines
-    if method == "get":
-        return [
-            "response = secrets.get_secret(",
-            '    name=str(args["name"]),',
-            '    workspace=args.get("workspace"),',
-            ")",
-            "print(response.data())",
-        ]
-    if method == "update":
-        return [
-            'secret_value = args.get("value")',
-            'description = args.get("description")',
-            "if description is not None and secret_value is not None:",
-            "    body = PlatformSecretUpdateRequest(description=str(description), value=SecretStr(str(secret_value)))",
-            "elif description is not None:",
-            "    body = PlatformSecretUpdateRequest(description=str(description))",
-            "elif secret_value is not None:",
-            "    body = PlatformSecretUpdateRequest(value=SecretStr(str(secret_value)))",
-            "else:",
-            "    body = PlatformSecretUpdateRequest()",
-            "response = secrets.update_secret(",
-            '    name=str(args["name"]),',
-            '    workspace=args.get("workspace"),',
-            "    body=body,",
-            ")",
-            "print(response.data())",
-        ]
-    if method == "rotate_encryption_keys":
-        return [
-            "response = secrets.rotate_encryption_keys()",
-            "print(response.data())",
-        ]
-    raise ValueError(f"Unsupported secrets method for code generation: {method}")
-
-
 @app.command("access")
 @collect_warnings
 @handle_errors
@@ -361,8 +224,9 @@ def access_secrets(
     """Access the value of a secret."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    args: dict[str, _CodeArg] = {"name": name, "workspace": workspace}
-    if _handle_code_generation("access", args, resolved_output_format, state):
+    if handle_code_generation(
+        SecretsClient, "access_secret", {"name": name, "workspace": workspace}, resolved_output_format, state
+    ):
         return
 
     result = _secrets_client_from_state(state).access_secret(name=name, workspace=workspace).data()
@@ -411,7 +275,7 @@ def create_secrets(
     [dim]# Read secret from environment variable[/]
     echo "$API_KEY" | nemo secrets create my-secret --from-file -
     """
-    input_payload: dict[str, _CodeArg] = {}
+    input_payload: dict[str, str | None] = {}
     if name is not None:
         input_payload["name"] = name
     if workspace is not None:
@@ -431,9 +295,20 @@ def create_secrets(
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    code_args: dict[str, _CodeArg] = dict(input_payload)
-    code_args["value"] = _SECRET_VALUE_PLACEHOLDER
-    if _handle_code_generation("create", code_args, resolved_output_format, state):
+    if handle_code_generation(
+        SecretsClient,
+        "create_secret",
+        {
+            "workspace": workspace,
+            "body": PlatformSecretCreateRequest(
+                name=name,
+                value=SecretStr(_SECRET_VALUE_PLACEHOLDER),
+                **({"description": description} if description is not None else {}),
+            ),
+        },
+        resolved_output_format,
+        state,
+    ):
         return
 
     direct_value = _resolve_direct_value_alias(value=value, data=data, command_name="secrets create")
@@ -473,8 +348,14 @@ def delete_secrets(
     """Delete a secret."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    args: dict[str, _CodeArg] = {"name": name, "workspace": workspace}
-    if _handle_code_generation("delete", args, resolved_output_format, state):
+    if handle_code_generation(
+        SecretsClient,
+        "delete_secret",
+        {"name": name, "workspace": workspace},
+        resolved_output_format,
+        state,
+        result="none",
+    ):
         return
 
     _secrets_client_from_state(state).delete_secret(name=name, workspace=workspace).data()
@@ -510,8 +391,14 @@ def list_secrets(
     if output_columns is None or str(output_columns).strip() == "default":
         output_columns = default_columns
 
-    args: dict[str, _CodeArg] = {"workspace": workspace, "page": page, "page_size": page_size, "all_pages": all_pages}
-    if _handle_code_generation("list", args, resolved_output_format, state):
+    if handle_code_generation(
+        SecretsClient,
+        "list_secrets",
+        {"workspace": workspace, "query_params": _list_query_params(page=page, page_size=page_size)},
+        resolved_output_format,
+        state,
+        result="all-pages" if all_pages else "list",
+    ):
         return
 
     response = _secrets_client_from_state(state).list_secrets(
@@ -544,8 +431,9 @@ def retrieve_secrets(
     """Retrieve a secret by its name."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    args: dict[str, _CodeArg] = {"name": name, "workspace": workspace}
-    if _handle_code_generation("get", args, resolved_output_format, state):
+    if handle_code_generation(
+        SecretsClient, "get_secret", {"name": name, "workspace": workspace}, resolved_output_format, state
+    ):
         return
 
     result = _secrets_client_from_state(state).get_secret(name=name, workspace=workspace).data()
@@ -596,10 +484,22 @@ def update_secrets(
     """
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    code_args: dict[str, _CodeArg] = {"name": name, "workspace": workspace, "description": description}
-    if from_file is not None or value is not None or data is not None:
-        code_args["value"] = _SECRET_VALUE_PLACEHOLDER
-    if _handle_code_generation("update", code_args, resolved_output_format, state):
+    if handle_code_generation(
+        SecretsClient,
+        "update_secret",
+        {
+            "name": name,
+            "workspace": workspace,
+            "body": _update_body(
+                description=description,
+                secret_data=_SECRET_VALUE_PLACEHOLDER
+                if from_file is not None or value is not None or data is not None
+                else None,
+            ),
+        },
+        resolved_output_format,
+        state,
+    ):
         return
 
     direct_value = _resolve_direct_value_alias(value=value, data=data, command_name="secrets update")
@@ -633,7 +533,7 @@ def rotate_encryption_keys(
     """Rotate encryption keys for all platform secrets."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    if _handle_code_generation("rotate_encryption_keys", {}, resolved_output_format, state):
+    if handle_code_generation(SecretsClient, "rotate_encryption_keys", {}, resolved_output_format, state):
         return
 
     result = _secrets_client_from_state(state).rotate_encryption_keys().data()

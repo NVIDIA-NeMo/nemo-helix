@@ -63,21 +63,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
+from nemo_platform_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_platform_plugin.dependencies import get_sdk_client, get_sync_sdk_client
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Heartbeat
+from nemo_platform_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE, Heartbeat
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
-# NDJSON over chunked HTTP. Matches what the SDK and Studio clients
-# expect when ``returns_async_iterator(...)`` is True. DD's existing
-# ``application/jsonl`` is treated as a synonym by clients today;
-# ``application/x-ndjson`` is what `plan-functions.md` standardises on
-# for new functions.
-NDJSON_MEDIA_TYPE = "application/x-ndjson"
 
 
 class NdjsonFrameResponse(JSONResponse):
@@ -97,14 +90,6 @@ class NdjsonFrameResponse(JSONResponse):
 # when wiring a router for a function with very different latency
 # expectations.
 HEARTBEAT_INTERVAL_SECONDS: float = 5.0
-
-# Default mount path. Routers are typically included under a
-# ``/apis/<plugin>/v2/workspaces/{workspace}`` prefix, so the bare
-# ``/{name}`` here resolves to the canonical
-# ``POST /apis/<plugin>/v2/workspaces/{workspace}/{name}``. Functions
-# overriding :attr:`NemoFunction.endpoint` substitute its template
-# instead — see :func:`_resolve_route_path`.
-DEFAULT_FUNCTION_PATH: str = "/{name}"
 
 
 def add_function_routes(
@@ -126,7 +111,8 @@ def add_function_routes(
             Lower values are useful in tests; production callers
             usually leave the default.
         authz: The plugin's :class:`~nemo_platform_plugin.authz.AuthzScope`.
-            When set, a PRINCIPAL ``@path_rule`` is stamped on the route with
+            When set, a ``@path_rule`` is stamped on the route — callers
+            :data:`~nemo_platform_plugin.authz.GENERATED_ROUTE_CALLERS`, with
             an invoke permission minted from it (``<namespace>.<function-name>``,
             a write action). When omitted the route is left unruled — denied
             fail-closed at bundle time.
@@ -198,7 +184,7 @@ def add_function_routes(
             or function_cls.description
             or f"Invoke the {function_cls.name} function",
         )
-        path_rule(callers=[CallerKind.PRINCIPAL], permissions=[permission])(handler)
+        path_rule(callers=GENERATED_ROUTE_CALLERS, permissions=[permission])(handler)
         # Invoking a function is a write action; the scope rides on the route via @AuthzScope.write.
         authz.write(handler)
 

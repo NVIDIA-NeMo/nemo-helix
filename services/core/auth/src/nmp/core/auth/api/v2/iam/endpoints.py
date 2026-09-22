@@ -31,8 +31,7 @@ def require_service_principal_for_iam_role_bindings(auth_client: AuthClient) -> 
     """Enforce access rules for IAM role-binding routes."""
     if not auth_client.auth_enabled:
         return
-    principal_id = auth_client.principal.id or ""
-    if principal_id.startswith("service:"):
+    if auth_client.principal.caller_kind == "service_principal":
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 

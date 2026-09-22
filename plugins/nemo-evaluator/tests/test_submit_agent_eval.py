@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from nemo_evaluator.api.fields import TasksetRef
+from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 
 
 def _evaluator() -> tuple[Evaluator, MagicMock]:
@@ -150,3 +153,31 @@ def test_the_agent_job_resource_does_not_offer_row_evaluation_readers() -> None:
     # And it is not related to the row resource by inheritance in either direction.
     assert not issubclass(AgentEvaluatorJobResource, EvaluatorJobResource)
     assert not issubclass(EvaluatorJobResource, AgentEvaluatorJobResource)
+
+
+def test_a_placement_for_a_runner_it_does_not_fit_is_refused() -> None:
+    # Ignoring the placement would submit a job missing the environment the caller asked for.
+    evaluator, executor = _evaluator()
+
+    # A real runner, not a mock: a MagicMock satisfies any parameter type, leaving the overloads
+    # unexercised.
+    harbor = HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=Path("/tmp/harbor-unused")))
+
+    with pytest.raises(TypeError) as excinfo:
+        evaluator.submit(tasks=TasksetRef("ts"), target=harbor, placement=GymPlacement())  # ty: ignore[invalid-argument-type]
+
+    assert "GymAgentTaskRunner" in str(excinfo.value)
+    executor.submit_agent_eval.assert_not_called()
+
+
+def test_a_placement_on_the_row_path_is_refused() -> None:
+    # A row evaluation has no runner to place; accepting one would silently drop it.
+    evaluator, executor = _evaluator()
+
+    with pytest.raises(TypeError) as excinfo:
+        evaluator.submit(  # ty: ignore[no-matching-overload]
+            metric=MagicMock(), dataset=MagicMock(), placement=GymPlacement()
+        )
+
+    assert "row evaluation" in str(excinfo.value)
+    executor.submit.assert_not_called()

@@ -21,6 +21,7 @@ from click.testing import Result
 from nemo_platform import NeMoPlatform
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
@@ -66,6 +67,12 @@ def sdk(client_context: ClientContext) -> NeMoPlatform:
 
 
 @pytest.fixture(scope="module")
+def nemo_client(sdk: NeMoPlatform) -> NemoClient:
+    """Typed platform client sharing the ASGI-backed transport; what the CLI holds at runtime."""
+    return client_from_platform(sdk, NemoClient)
+
+
+@pytest.fixture(scope="module")
 def files_client(sdk: NeMoPlatform) -> FilesClient:
     """Provide a FilesClient derived from the SDK."""
     return client_from_platform(sdk, FilesClient)
@@ -87,7 +94,7 @@ def random_workspace(sdk: NeMoPlatform) -> str:
 
 
 class NmpCliRunner(CliRunner):
-    def __init__(self, client: NeMoPlatform):
+    def __init__(self, client: NemoClient):
         super().__init__()
         self.client = client
 
@@ -102,9 +109,9 @@ class NmpCliRunner(CliRunner):
 
 
 @pytest.fixture
-def runner(sdk: NeMoPlatform) -> NmpCliRunner:
-    """Create a CLI test runner with injected NeMoPlatform client."""
-    return NmpCliRunner(client=sdk)
+def runner(nemo_client: NemoClient) -> NmpCliRunner:
+    """Create a CLI test runner with the ASGI-backed typed client injected."""
+    return NmpCliRunner(client=nemo_client)
 
 
 @pytest.fixture(autouse=True)

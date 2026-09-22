@@ -1,68 +1,55 @@
 ---
 name: nmp-cli
-description: Use when developing the NeMo Platform CLI - adding commands, modifying the generator, templates, or configuration. Covers both manual commands (use-cases, config) and auto-generated API commands. Also helps troubleshoot CLI generation failures (e.g., Typer errors after updates).
+description: Use when developing the NeMo Platform CLI - adding or changing command groups, wiring a service's typed client into commands, output formatting, pagination, error mapping, or the `--output-format code` snippet generator. Covers core groups in nemo_platform_ext and plugin-hosted `nemo.cli` groups.
 ---
 
 # NeMo Platform CLI Development
 
-The CLI provides a command-line interface for NeMo Platform, implemented using Typer in `packages/nemo_platform_ext/src/nemo_platform_ext/cli/`.
+The CLI is implemented with Typer in `packages/nemo_platform_ext/src/nemo_platform_ext/cli/`. Every
+command talks to the platform through the typed clients in `packages/nemo_platform_plugin`
+(`nemo_platform_plugin.<area>.client`). The CLI has **no dependency on the generated `nemo_platform`
+(Stainless) SDK**; `packages/nemo_platform_ext/tests/cli/test_stainless_boundary.py` enforces this
+statically and by running the CLI with `nemo_platform` un-importable. Never add a `from nemo_platform`
+import under `cli/`.
 
 ## Command Categories
 
-| Category | Location | Description | Editable? |
-|----------|----------|-------------|-----------|
-| **API** | `commands/api/` | Auto-generated from SDK | ❌ Never edit |
-| **Configuration** | `commands/config.py`, `commands/configure.py` | Config management | ✅ Yes |
-| **Use-case** | `commands/use_cases/` | High-level commands (e.g., `chat`) | ✅ Yes |
-| **Quickstart** | `commands/quickstart/` | Local deployment | ✅ Yes |
+| Category | Location | Description |
+|----------|----------|-------------|
+| **Core resource groups** | `commands/<group>.py` (`files`, `inference/`, `jobs`, `models`, `secrets`, `workspaces`, hidden `adapters`, `iam`, `projects`) | Hand-written on typed clients, registered in `commands/manifest_registry.py` |
+| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`) | Appear only when the package is installed |
+| **Setup / use cases** | `commands/setup.py`, `commands/use_cases/`, `commands/auth.py`, `commands/config.py` | Wizards and workflows (`chat`, `wait`, ...) |
+| **Services** | `commands/services/`, `commands/quickstart/` | Run the platform locally (imports server packages by design) |
 
 ## Directory Structure
 
 ```
 packages/nemo_platform_ext/src/nemo_platform_ext/cli/
-├── app.py                    # Entry point, command registration, global options
-├── core/                     # Shared utilities
+├── app.py                    # Entry point, global options, lazy manifest registration
+├── manifest.py               # TopLevelEntry, panel order
+├── core/
+│   ├── context.py            # CLIContext: get_client() -> NemoClient, typed_client(XClient)
+│   ├── pagination.py         # collect_offset_pages / collect_cursor_pages / warn_if_more_pages
+│   ├── formatters.py         # format_output (unwraps NemoResponse), Column, table/json/yaml/csv
+│   ├── errors.py             # handle_errors: typed-client error hierarchy -> exit codes
+│   ├── code_generator.py     # --output-format code -> typed-client Python snippet
+│   └── waiters.py            # --wait / --watch helpers (deployments, jobs, gateway readiness)
 └── commands/
-    ├── config.py             # kubectl-style config management
-    ├── configure.py          # Interactive configuration
-    ├── quickstart/           # Local deployment commands
-    ├── use_cases/            # High-level commands (chat, wait)
-    └── api/                  # ⚠️ AUTO-GENERATED - DO NOT EDIT
+    ├── manifest_registry.py  # TOP_LEVEL_ENTRIES: every built-in group/command
+    ├── secrets.py            # REFERENCE port: copy its shape for new groups
+    └── ...
 ```
 
-## Building the CLI
-
-### Development Shortcut
-
-During local CLI development, you can run `_nemo` to execute the CLI directly from `packages/nemo_platform_ext`.
-This lets you test changes immediately without running vendoring first.
+## Running the CLI During Development
 
 ```bash
-uv run _nemo --help
+uv run _nemo --help                 # runs from packages/nemo_platform_ext, no vendoring needed
+make update-cli                     # vendor into sdk/python/nemo-platform + regenerate reference docs
 ```
 
-Use vendoring (`make vendor-nemo-platform-ext`) when you need to validate behavior in `sdk/python/nemo-platform`.
+## Adding or Changing a Command Group
 
-Build everything (recommended):
-```bash
-make update-cli
-```
-
-Individual steps:
-```bash
-# Step 1: Generate CLI commands from SDK
-make generate-cli-commands
-
-# Step 2: Vendor into SDK package
-make vendor-nemo-platform-ext
-
-# Step 3: Generate documentation
-make generate-cli-reference-docs
-```
-
-## Adding a Manual Command
-
-Manual commands go in `commands/use_cases/` or directly in `commands/`.
+Use `commands/secrets.py` and `tests/cli/commands/test_secrets.py` as the template.
 
 ### Pattern
 
@@ -72,267 +59,113 @@ from __future__ import annotations
 from typing import Annotated
 
 import typer
+from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_platform_plugin.secrets.types import ListSecretsQueryParams, PlatformSecretCreateRequest
 
+from nemo_platform_ext.cli.core.api import build_kwargs
+from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_ext.cli.core.errors import handle_errors
+from nemo_platform_ext.cli.core.formatters import Column, format_output
+from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.types import EntityOutputFormatOption, ListOutputFormatOption
+
+app = create_typer_app(name="secrets", help="Manage secrets.")
 
 
+@app.command("get")
+@collect_warnings
 @handle_errors
-def my_command(
+def retrieve_secrets(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="The name argument")],
-    option: Annotated[str | None,
-        typer.Option(
-            "--option",
-            "-o",
-            help="An optional flag",
-            rich_help_panel="Options",
-        ),
-    ] = None,
+    name: Annotated[str, typer.Argument()],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """
-    Short description of what the command does.
-
-    Examples:
-      nemo my-command foo
-      nemo my-command bar --option value
-    """
+    """Retrieve a secret by its name."""
     state: CLIContext = ctx.obj
-    client = state.get_client()
+    resolved_output_format = state.get_output_format(output_format)
 
-    # Use client to make API calls
-    result = client.some_resource.some_method(name=name)
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(SecretsClient, "get_secret", kwargs, resolved_output_format, state):
+        return
 
-    # Output result (use state.output() for formatted output)
-    state.output(result)
-```
-
-### Register in app.py
-
-```python
-from nemo_platform_ext.cli.commands.my_module import my_command
-
-# Single command
-app.command(name="my-command", rich_help_panel="Use cases")(my_command)
-
-# Command group (sub-app)
-app.add_typer(my_sub_app, name="my-group", rich_help_panel="Category")
-```
-
-## CLI Generator
-
-The generator creates commands in `commands/api/` from SDK introspection.
-
-### Key Files
-
-```
-tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk/cli_generator/
-├── cli_config.yaml           # Generation configuration
-├── generator.py              # Main generation logic
-├── sdk_introspector.py       # SDK introspection
-├── operation_classifier.py   # Classifies methods (list, get, create, etc.)
-├── templates/                # Jinja2 templates
-├── context_collectors/       # Collect template context per operation type
-└── overrides/                # Custom command implementations
-```
-
-### Configuration (cli_config.yaml)
-
-Configure table columns for `list` commands:
-```yaml
-- resource: [customization, jobs]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - status
-      - created_at
-```
-
-Skip a method:
-```yaml
-- resource: [filesets]
-  methods:
-    upload_file:
-      skip: true
-```
-
-Use custom implementation:
-```yaml
-- resource: [secrets]
-  methods:
-    create:
-      override: secrets/create.py
-```
-
-### Command Overrides
-
-For methods requiring custom handling (file uploads, streaming), create overrides:
-
-1. Add config in `cli_config.yaml`:
-   ```yaml
-   - resource: [files]
-     additional_methods:
-       upload:
-         override: files/upload.py
-   ```
-
-2. Create override file in `overrides/files/upload.py`:
-   ```python
-   from typing import Annotated, Any, cast
-
-   import typer
-
-   from nemo_platform_ext.cli.core.context import CLIContext
-   from nemo_platform_ext.cli.core.errors import handle_errors
-
-   app = cast(Any, None)  # override-skip: provided by generated file
+    result = state.typed_client(SecretsClient).get_secret(name=name, workspace=workspace)
+    format_output(result, is_list=False, output_format=resolved_output_format, ...)
 
 
-   @app.command("upload")
-   @handle_errors
-   def upload_files(
-       ctx: typer.Context,
-       path: Annotated[str, typer.Argument(help="Local path to upload")],
-   ) -> None:
-       """Upload files to a fileset."""
-       state: CLIContext = ctx.obj
-       client = state.get_client()
-       # Custom implementation...
-   ```
-
-The `# override-skip` comment strips that line from output (useful for linter satisfaction).
-
-### Templates
-
-Templates use Jinja2. Key variables available:
-- `command_name` - CLI command name (e.g., "list")
-- `method_name` - SDK method name (e.g., "list")
-- `resource_path` - Resource path (e.g., ["customization", "jobs"])
-- `params` - List of parameter info
-- `docstring` - Method docstring
-
-## Core Utilities
-
-### CLIContext
-
-Access via `ctx.obj`:
-```python
-state: CLIContext = ctx.obj
-client = state.get_client()  # Get SDK client
-state.output(data)           # Format and print output
-state.verbosity              # 0 or 1
-```
-
-### Error Handling
-
-Always use `@handle_errors` decorator:
-```python
-from nemo_platform_ext.cli.core.errors import handle_errors
-
+@app.command("list")
+@collect_warnings
 @handle_errors
-def my_command(ctx: typer.Context) -> None:
-    ...
+def list_secrets(ctx: typer.Context, ..., all_pages: bool = False) -> None:
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    query_params: ListSecretsQueryParams = {...}   # omit keys the user did not set
+    if handle_code_generation(SecretsClient, "list_secrets", kwargs, resolved_output_format, state, result="list"):
+        return
+    response = state.typed_client(SecretsClient).list_secrets(workspace=workspace, query_params=query_params)
+    items = collect_offset_pages(response, all_pages=all_pages)
+    format_output(items, is_list=True, output_columns=[Column("name", None), ...], ...)
+    if not all_pages:
+        warn_if_more_pages(items, PaginationType.PAGE_NUMBER)
 ```
 
-### Building API Request Bodies
+Conventions that keep the surface consistent:
+- `state.typed_client(XClient)` derives the service client from the CLI's `NemoClient` (shared auth
+  and transport). Never construct clients from config inside a command.
+- Name the resolved output format `resolved_output_format` (ty otherwise narrows the option Literal).
+- Request bodies are the typed request models from `nemo_platform_plugin.<area>.types`, built only from
+  fields the user provided (`model.model_copy(update={...})` for optionals) so the wire payload has no
+  spurious nulls. Query params are the `TypedDict`s in `types.py`.
+- Single-entity responses go straight into `format_output` (it unwraps `NemoResponse`).
+- `handle_code_generation(XClient, "<method>", kwargs, ..., result="entity"|"list"|"none"|"binary")`
+  renders the `-f code` snippet; pass the same kwargs you call the client with.
+- Errors: let `nemo_platform_plugin.client.errors` propagate; `@handle_errors` maps them (404 → exit 3,
+  missing workspace → exit 2, client-side pydantic validation → exit 2).
 
-```python
-from nemo_platform_ext.cli.core.api import build_kwargs
+### Register the group
 
-body = build_kwargs(
-    model="my-model",
-    messages=[{"role": "user", "content": "Hello"}],
-    stream=True,
-    temperature=0.7,
-)
-```
+Core group: add a `TopLevelEntry` to `commands/manifest_registry.py` (`help` must equal the Typer app's
+help string; `tests/cli/test_app.py::test_manifest_help_matches_loaded_manual_entry` checks this).
+
+Plugin-hosted group: subclass `nemo_platform_plugin.cli.NemoCLI` in the owning package and register it
+under `[project.entry-points."nemo.cli"]` in that package's `pyproject.toml` (see
+`plugins/nemo-guardrails/src/nemo_guardrails_plugin/cli.py`). Run `uv sync --frozen --all-packages` so
+the entry point is installed. A plugin group with the same name as a built-in core group replaces it.
+
+### Missing typed endpoint
+
+If the typed client lacks a route, add it to `nemo_platform_plugin/<area>/{endpoints,types,client}.py`
+mirroring the server's FastAPI route exactly, with tests under `packages/nemo_platform_plugin/tests/<area>/`.
 
 ## Testing
 
-Run CLI tests:
+Three layers, all required for a new group:
+
+1. **Wire-level unit tests** (`tests/cli/commands/test_<group>.py`): drive the real Typer app with a
+   `CLIContext(_client=NemoClient(... http_client=httpx.Client(transport=httpx.MockTransport(recorder))))`
+   and assert method, path, query string, exact JSON body, stdout, `--all-pages`, error mapping, and that
+   `-f code` sends nothing and emits typed-client code.
+2. **Integration tests** (`tests/cli/integration/test_<group>.py`): the `runner` fixture injects a
+   `NemoClient` backed by the in-process ASGI app from `nmp.testing`; add the service class to
+   `create_test_client(...)` in `tests/cli/integration/conftest.py` if it is not hosted yet.
+3. **Boundary**: add the group's `--help` and a `-f code` invocation to `RUNTIME_COMMANDS` in
+   `tests/cli/test_stainless_boundary.py`.
+
 ```bash
-uv run pytest packages/nemo_platform_ext/tests/cli/ -v
+uv run --frozen pytest packages/nemo_platform_ext/tests/cli -q
+uv run --frozen pytest packages/nemo_platform_plugin/tests/<area> -q
 ```
-
-Run generator tests:
-```bash
-uv run --package nemo-platform-sdk-tools pytest tools/nemo-platform-sdk-tools/tests/sdk/cli_generator/ -v
-```
-
-## Common Tasks
-
-### Add table columns for a new resource
-
-Edit `cli_config.yaml`:
-```yaml
-- resource: [my_service, my_resource]
-  methods:
-    list:
-      columns:
-      - name
-      - status
-      - created_at
-```
-
-Then rebuild: `make update-cli`
-
-### Add a new use-case command
-
-1. Create file in `commands/use_cases/my_command.py`
-2. Implement using pattern above
-3. Register in `app.py`
-4. Vendor: `make vendor-nemo-platform-ext`
-
-### Modify how a command is generated
-
-1. Check which template is used (see `operation_classifier.py`)
-2. Edit template in `templates/`
-3. Rebuild: `make update-cli`
-
-### Override an auto-generated command
-
-1. Add override config in `cli_config.yaml`
-2. Create override file in `overrides/`
-3. Rebuild: `make update-cli`
 
 ## Troubleshooting
 
-### Typer errors after CLI update
-
-If tests fail with Typer errors after running `make update-cli`, the issue is usually one of:
-
-**1. Unsupported type in Typer**
-
-Typer doesn't support all Python types (e.g., complex unions, nested TypedDicts). Fix by updating the generator code to handle the type:
-
-- Check `type_formatter.py` for type formatting
-- Check `typed_dict_utils.py` for TypedDict handling
-- Add type conversion or simplification in the relevant context collector
-
-**2. Method miscategorized**
-
-The operation classifier may assign the wrong template (e.g., "default" instead of "create"). Fix via `cli_config.yaml`:
-
-```yaml
-- resource: [my_service]
-  methods:
-    my_method:
-      operation_type: create  # Override the auto-detected type
-```
-
-Available operation types: `list`, `get`, `create`, `update`, `delete`, `download`, `default`
-
-**3. Skip the method temporarily**
-
-If the fix is non-trivial, skip the method to unblock your work:
-
-```yaml
-- resource: [my_service]
-  methods:
-    problematic_method:
-      skip: true  # TODO: Fix...
-```
-
-Create a GitLab issue to track the fix, then rebuild: `make update-cli`
+- **Group help mismatch**: the manifest `help` and the Typer app `help` must be identical.
+- **"Missing workspace" exit 2 when a workspace is configured**: the command passed `workspace=None`
+  to an endpoint whose path has no `{workspace}` default; pass the option through unchanged and let the
+  client fill its default.
+- **`-f code` snippet does not compile**: the kwargs contain a value `_render_value` cannot render;
+  extend `core/code_generator.py` (it handles pydantic models, `RootModel`, enums, `SecretStr`
+  masking, datetimes, dicts, lists) and add a `compile()` test in `tests/cli/core/test_code_generator.py`.
+- **Command needs a Stainless helper**: it does not; find the equivalent on the typed client or in
+  `packages/filesets/src/filesets/transfer.py` (fileset upload/download/list/delete).

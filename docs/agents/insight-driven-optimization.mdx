@@ -30,8 +30,6 @@ operate on it:
 - The **Analyst** turns raw traces into actionable Insights.
 - The **Experimenter** turns a single Insight into an empirically validated
   pull request (PR).
-- The **Eval Author** builds and extends evaluation suites in response to
-  real-world usage.
 
 ## Before You Start
 
@@ -45,8 +43,9 @@ want to automate portions of the agent improvement loop.
 - A NeMo Platform deployment (local or remote) with Intake enabled, so the
   Analyst has traces to read.
 - The optimization plugins installed in the same Python environment as the NeMo command-line
-  interface (CLI). From a source checkout, `uv sync` installs all three through the default
-  `enabled-plugins` group. The Experimenter and Eval Author plugins require Python earlier than 3.14.
+  interface (CLI). From a source checkout, `uv sync` installs Insights and Experimentalist
+  through the default `enabled-plugins` group. Experimentalist requires Python 3.12
+  or 3.13.
 - Access to the code base for the agent under test. The Experimenter needs
   a change surface (source, prompts, tool definitions, model selection, or
   runtime configuration) and a way to run or evaluate the agent reproducibly.
@@ -56,14 +55,14 @@ want to automate portions of the agent improvement loop.
   `nemo setup` for the optimization agents. This access is separate from the
   model access that your agent under test needs at runtime.
 - Train and validation datasets in a Harbor-compatible layout, plus a task
-  template and an output directory for artifacts. This is what the Eval Author
-  works from and what the Experimenter uses to validate changes.
+  template and an output directory for artifacts. The Experimenter uses these to
+  build evaluation suites and validate changes.
 
 To install only one side of the loop, use the convenience groups:
 
 ```bash
 uv sync --only-group insights         # Analyst only
-uv sync --only-group experimentalist  # Experimenter and Eval Author
+uv sync --only-group experimentalist  # Experimenter only
 ```
 
 ### Dependencies
@@ -245,7 +244,7 @@ default it reads the local `.nemo-optimizer/insights.yaml` beside the profile;
 `--insight` names another local file or a platform Insight ID. When a local
 file holds multiple Insights, `--insight-id` selects one by exact ID, exact
 title, or zero-based index. The agent referenced by the Insight is used unless
-`--agent` overrides it. The Eval Author step builds an Insight-specific
+`--agent` overrides it. The Experimenter builds an Insight-specific
 evaluation suite before optimization begins, which requires a task template.
 
 #### Dataset Mode
@@ -279,14 +278,6 @@ trees, and evaluator results. When configured with a Git source, the
 Experimenter can archive candidate branches and open a draft PR or merge request (MR) for
 the winning candidate against the baseline reference.
 
-### Eval Author
-
-The Eval Author builds and maintains the evaluation suites that the loop uses.
-Given an Insight and its evidence traces, it creates an Insight-specific
-evaluation suite for validating candidates that address the Insight. The
-Experimenter invokes the Eval Author workflow in Insight mode and reads the
-`eval_author` section of the experiment configuration.
-
 ## Get Started
 
 ### Set Up
@@ -308,7 +299,7 @@ nemo setup
 During setup, register a supported provider and select the default and fast
 Platform Model Entities. The default model handles quality-critical work and
 the fast model handles latency-sensitive work; press Enter at the fast-model
-prompt to reuse the default. The Analyst, Eval Author, and Experimentalist all
+prompt to reuse the default. The Analyst and Experimentalist both
 use this pair. Provider credentials are stored in Platform Secrets rather than
 plugin-specific environment variables.
 
@@ -587,10 +578,10 @@ The optimization agents use the active Platform CLI context:
 
 | Variable | Used by | Default and notes |
 |----------|---------|-------------------|
-| stored `default_model` | Analyst, Experimenter, Eval Author | Required workspace-qualified Model Entity selected by `nemo setup`. Used for quality-critical analysis, authoring, proposing, and coding. |
-| stored `fast_model` | Analyst, Experimenter, Eval Author | Selected by `nemo setup`; defaults to the default model. Used for high-volume scoring, summarization, and control steps. |
-| `NEMO_DEFAULT_MODEL` | Analyst, Experimenter, Eval Author | Optional non-interactive override for `default_model`, in `workspace/model-name` form. |
-| `NEMO_FAST_MODEL` | Analyst, Experimenter, Eval Author | Optional non-interactive override for `fast_model`, in `workspace/model-name` form. Falls back to the effective default model. |
+| stored `default_model` | Analyst, Experimenter | Required workspace-qualified Model Entity selected by `nemo setup`. Used for quality-critical analysis, authoring, proposing, and coding. |
+| stored `fast_model` | Analyst, Experimenter | Selected by `nemo setup`; defaults to the default model. Used for high-volume scoring, summarization, and control steps. |
+| `NEMO_DEFAULT_MODEL` | Analyst, Experimenter | Optional non-interactive override for `default_model`, in `workspace/model-name` form. |
+| `NEMO_FAST_MODEL` | Analyst, Experimenter | Optional non-interactive override for `fast_model`, in `workspace/model-name` form. Falls back to the effective default model. |
 
 Each Model Entity owns its backend format and provider route. OpenAI-compatible
 and Anthropic entities are adapted to Nooa's unified completion client through the

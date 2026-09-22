@@ -24,6 +24,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+# Media type of a streamed function response body: one JSON frame per line, as
+# the route adapter emits and the CLI decodes. DD's existing ``application/jsonl``
+# is treated as a synonym by clients today; ``application/x-ndjson`` is what
+# `plan-functions.md` standardises on for new functions.
+NDJSON_MEDIA_TYPE = "application/x-ndjson"
+
+# Default mount path. Routers are typically included under a
+# ``/apis/<plugin>/v2/workspaces/{workspace}`` prefix, so the bare ``/{name}``
+# here resolves to ``POST /apis/<plugin>/v2/workspaces/{workspace}/{name}``.
+# Functions overriding :attr:`NemoFunction.endpoint` substitute its template.
+DEFAULT_FUNCTION_PATH: str = "/{name}"
+
 
 class FrameModel(BaseModel):
     """Base for stream frames, marking ``kind`` required in the schema.

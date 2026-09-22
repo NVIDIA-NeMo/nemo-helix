@@ -267,6 +267,34 @@ describe('DatasetBulkDeleteModal', () => {
       });
     });
 
+    it('shows why an in-use dataset could not be deleted', async () => {
+      const user = userEvent.setup();
+      const detail =
+        "Cannot delete fileset 'test-namespace/dataset-1' because 1 model entity reference(s) and 0 adapter entity reference(s) still use it. Relink or delete the dependent entities first.";
+
+      server.use(
+        http.delete(`${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`, () =>
+          HttpResponse.json({ detail }, { status: 409 })
+        )
+      );
+
+      render(
+        <DatasetBulkDeleteModal
+          selectedDatasets={[bulkDeleteTestDatasets[0]]}
+          onConfirmSuccess={mockOnConfirmSuccess}
+        />
+      );
+
+      await user.click(screen.getByTestId('bulk-delete-modal-trigger-button'));
+      const deleteButton = within(await screen.findByRole('dialog')).getByRole('button', {
+        name: 'Delete',
+      });
+      await user.click(deleteButton);
+
+      expect(await screen.findByText((content) => content.includes(detail))).toBeInTheDocument();
+      expect(mockOnConfirmSuccess).not.toHaveBeenCalled();
+    });
+
     it('shows loading state during deletion', async () => {
       const user = userEvent.setup();
 

@@ -15,13 +15,11 @@ not run to completion.
 
 Run directly::
 
-    RUN_AGENT_EVAL_INTEGRATION=1 uv run pytest \\
-        plugins/nemo-evaluator/tests/integration/test_submit_gym_agent_eval.py -v
+    uv run pytest plugins/nemo-evaluator/tests/integration/test_submit_gym_agent_eval.py -v
 """
 
 from __future__ import annotations
 
-import os
 import sys
 import uuid
 
@@ -37,23 +35,21 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
     TasksetRef,
 )
+from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator.sdk.job_resources import AgentEvaluatorJobResource
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nemo_evaluator_sdk.values import SecretRef
+from nemo_platform_plugin.client.errors import UnprocessableEntityError
 from nemo_platform_plugin.sdk import NeMoPlatform
 
 WORKSPACE = "default"
 
-#: Opt-in: shares the evaluator-plugin integration opt-in (spins a real ``nemo services`` platform).
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+#: Runs in CI, unlike the ``RUN_AGENT_EVAL_INTEGRATION`` siblings in this directory.
+pytestmark = pytest.mark.integration
 
 
 # Pickle metrics defined in this module BY VALUE, so the bundle embeds the class itself: the service
@@ -164,3 +160,72 @@ def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subproces
     assert target["bind_resources_server"] is False
     assert target["hydra_params"] == {"simple_agent": {"responses_api_agents": {"x": 1}}}
     assert target["env_vars"] == {"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"}
+
+
+def test_a_secret_reference_and_agent_ref_name_survive_submission(subprocess_platform: str) -> None:
+    """A secret reference and an agent instance, from the runner and the placement, on one target.
+
+    The secret is created for real, so the reference names something the service can resolve rather
+    than a string that happens to parse.
+    """
+    client = NeMoPlatform(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    secret_name = _unique("gym-model-key")
+    client.secrets.create(name=secret_name, value="sk-not-a-real-key")
+    taskset_name = _stored_taskset(client)
+
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="mcqa",
+            env_secrets={"EXTERNAL_MODEL_API_KEY": SecretRef(f"{WORKSPACE}/{secret_name}")},
+        )
+    )
+
+    job = client.evaluator.submit(
+        tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"),
+        target=runner,
+        placement=GymPlacement(agent_ref_name="mcqa_simple_agent"),
+    )
+
+    fetched = httpx.get(
+        f"{subprocess_platform}/apis/evaluator/v2/workspaces/{WORKSPACE}/agent-evaluate/jobs/{job.name}",
+        timeout=30,
+    )
+    assert fetched.status_code == 200, fetched.text
+    target = fetched.json()["spec"]["target"]
+
+    assert target["env_secrets"] == {"EXTERNAL_MODEL_API_KEY": f"{WORKSPACE}/{secret_name}"}
+    assert target["agent_ref_name"] == "mcqa_simple_agent"
+
+
+def test_an_environment_fileset_reaches_the_compiler_from_a_runner(subprocess_platform: str) -> None:
+    """A FileSet environment named on the placement is resolved by the service, not dropped.
+
+    Executing one needs a Kubernetes or Volcano profile with a shared PVC, which this subprocess
+    deployment does not have — so the job is refused at compile time. That refusal *is* the
+    assertion: reaching a FileSet-only branch of the compiler proves ``environment`` travelled from
+    the placement through ``runner_to_target`` onto the spec. A dropped field would compile cleanly
+    as an ordinary colocated Gym run, which is the silent wrong answer this guards.
+    """
+    client = NeMoPlatform(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    fileset_name = _unique("gym-env")
+    client.files.filesets.create(name=fileset_name, purpose="environment")
+    taskset_name = _stored_taskset(client)
+
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="custom_greeting",
+        )
+    )
+    placement = GymPlacement(environment=FilesetRef(root=f"{WORKSPACE}/{fileset_name}"))
+
+    with pytest.raises(UnprocessableEntityError) as excinfo:
+        client.evaluator.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner, placement=placement)
+
+    message = str(excinfo.value)
+    assert fileset_name in message or "FileSet" in message, (
+        f"the refusal must come from the FileSet path rather than a generic spec error: {message}"
+    )

@@ -10,9 +10,20 @@ import { Control, FieldErrors } from 'react-hook-form';
 export const GPULoraFields = ({
   control,
   errors,
+  hideLoraToggle = false,
 }: {
   control: Control<WizardFormValues>;
   errors: FieldErrors<WizardFormValues>;
+  /**
+   * Omit the LoRA switch because the caller has fixed `loraEnabled` itself.
+   *
+   * For a caller that deploys a base model specifically to serve an adapter,
+   * `loraEnabled` is an invariant rather than a preference — turning it off
+   * produces a deployment that refuses the adapter. Rendering the switch
+   * disabled would still present it as a decision the user might revisit, so it
+   * is not rendered at all. The value still travels with the form.
+   */
+  hideLoraToggle?: boolean;
 }) => {
   return (
     <Flex gap="4" align="start" className="w-full">
@@ -28,17 +39,19 @@ export const GPULoraFields = ({
           }}
         />
       </Flex>
-      <Flex className="flex-1 shrink-0 ">
-        <ControlledSwitch
-          useControllerProps={{ control, name: 'loraEnabled' }}
-          attributes={{ Flex: { justify: 'start' } }}
-          formFieldProps={{
-            slotLabel: 'LoRA Enabled',
-            slotInfo:
-              'Serve LoRA adapters alongside this base model. Adapters trained against it are picked up automatically and addressed as “workspace--adapter-name”.',
-          }}
-        />
-      </Flex>
+      {!hideLoraToggle && (
+        <Flex className="flex-1 shrink-0 ">
+          <ControlledSwitch
+            useControllerProps={{ control, name: 'loraEnabled' }}
+            attributes={{ Flex: { justify: 'start' } }}
+            formFieldProps={{
+              slotLabel: 'LoRA Enabled',
+              slotInfo:
+                'Serve LoRA adapters alongside this base model. Adapters trained against it are picked up automatically and addressed as “workspace--adapter-name”.',
+            }}
+          />
+        </Flex>
+      )}
     </Flex>
   );
 };

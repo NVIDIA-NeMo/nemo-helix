@@ -77,7 +77,7 @@ _MISSING_WORKSPACE_MARKERS = (
 
 
 def _is_missing_workspace_error(error: ValueError) -> bool:
-    """Return whether *error* is a client reporting an unresolved workspace."""
+    """Return whether *error* is the typed client reporting an unresolved workspace."""
     message = str(error)
     return any(marker in message for marker in _MISSING_WORKSPACE_MARKERS)
 
@@ -189,19 +189,6 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
     console = Console(stderr=True)
 
     import click.exceptions
-    from nemo_platform import (
-        APIConnectionError,
-        APIError,
-        APIStatusError,
-        APITimeoutError,
-        AuthenticationError,
-        BadRequestError,
-        ConflictError,
-        InternalServerError,
-        NotFoundError,
-        PermissionDeniedError,
-        RateLimitError,
-    )
     from nemo_platform_plugin.client import errors as plugin_errors
 
     prog = "nemo"
@@ -267,30 +254,30 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
     if isinstance(error, typer.Exit):
         # Re-raise typer.Exit with its original exit code (don't treat Exit(0) as error)
         raise error
-    if isinstance(error, (AuthenticationError, plugin_errors.AuthenticationError)):
+    if isinstance(error, plugin_errors.AuthenticationError):
         console.print(f"[bold red]Authentication error:[/] ({error.status_code}) {_format_api_error(error)}")
         console.print(
             "[yellow]Hint:[/] Run [cyan]'nemo auth login'[/] or set the token manually "
             "with [cyan]nemo config set --access-token <token>[/], or use [cyan]NMP_ACCESS_TOKEN[/]."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (PermissionDeniedError, plugin_errors.PermissionDeniedError)):
+    elif isinstance(error, plugin_errors.PermissionDeniedError):
         console.print(f"[bold red]Permission denied:[/] ({error.status_code}) {_format_api_error(error)}")
         console.print(
             "[yellow]Hint:[/] Your current credentials do not have access to perform this operation. "
             "Contact your administrator to request access."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (NotFoundError, plugin_errors.NotFoundError)):
+    elif isinstance(error, plugin_errors.NotFoundError):
         console.print(f"[bold red]Not found:[/] ({error.status_code}) {_format_api_error(error)}")
         _print_api_request_context(console, error)
         console.print(f"[yellow]Hint:[/] {_format_not_found_hint(ctx, prog)}")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (BadRequestError, plugin_errors.BadRequestError)):
+    elif isinstance(error, plugin_errors.BadRequestError):
         console.print(f"[bold red]Bad request:[/] ({error.status_code}) {_format_api_error(error)}")
         console.print("[yellow]Hint:[/] Check your input values. Run with [cyan]--help[/] to see required options.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (ConflictError, plugin_errors.ConflictError)):
+    elif isinstance(error, plugin_errors.ConflictError):
         console.print(f"[bold red]Conflict:[/] ({error.status_code}) {_format_api_error(error)}")
         console.print(
             "[yellow]Hint:[/] This can mean a resource with that name already exists (try a different name or delete the existing one), "
@@ -301,11 +288,11 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         console.print(f"[bold red]Invalid input:[/] ({error.status_code}) {_format_api_error(error)}")
         console.print("[yellow]Hint:[/] Check your input values. Run with [cyan]--help[/] to see required options.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (RateLimitError, plugin_errors.RateLimitError)):
+    elif isinstance(error, plugin_errors.RateLimitError):
         console.print(f"[bold red]Rate limit exceeded:[/] ({error.status_code}) {_format_api_error(error)}")
         console.print("[yellow]Hint:[/] Too many requests. Wait a moment and try again.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (InternalServerError, plugin_errors.InternalServerError)):
+    elif isinstance(error, plugin_errors.InternalServerError):
         formatted = _format_api_error(error)
         console.print(f"[bold red]Server error:[/] ({error.status_code}) {formatted}")
         list_cmd = _build_list_cmd(ctx, prog) if ("404" in formatted or "not found" in formatted.lower()) else None
@@ -314,21 +301,19 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         else:
             console.print("[yellow]Hint:[/] This is a server-side issue. Try again later or contact support.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, APITimeoutError) or (
-        isinstance(error, plugin_errors.NemoTransportError) and isinstance(error.error, httpx.TimeoutException)
-    ):
+    elif isinstance(error, plugin_errors.NemoTransportError) and isinstance(error.error, httpx.TimeoutException):
         console.print(f"[bold red]Timeout error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         console.print("[yellow]Hint:[/] The request timed out. The server may be busy - try again later.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (APIConnectionError, plugin_errors.NemoTransportError)):
+    elif isinstance(error, plugin_errors.NemoTransportError):
         console.print(f"[bold red]Connection error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         console.print(
             "[yellow]Hint:[/] Check your network connection and verify that [cyan]base-url[/] you configured is correct."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (APIStatusError, plugin_errors.NemoHTTPError)):
+    elif isinstance(error, plugin_errors.NemoHTTPError):
         console.print(f"[bold red]API error:[/] ({error.status_code}) {_format_api_error(error)}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
@@ -336,7 +321,7 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         console.print(f"[bold red]API response error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, (APIError, plugin_errors.NemoClientError)):
+    elif isinstance(error, plugin_errors.NemoClientError):
         console.print(f"[bold red]API error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)

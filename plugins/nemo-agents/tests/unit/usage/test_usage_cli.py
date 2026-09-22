@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
+from nemo_platform_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -376,7 +377,7 @@ def test_usage_show_rejects_empty_or_dot_relative_fileset_name(app, tmp_path: Pa
 
 
 def test_usage_show_fileset_builds_sdk_with_context_base_url_and_auth(app, tmp_natjobs_dir: Path) -> None:
-    """A fileset ref builds the SDK client with the shared context's base URL + auth token.
+    """A fileset ref builds the platform client with the shared context's base URL + auth token.
 
     Pins P0 parity for ``usage show``: it must honor ``nemo config`` /
     ``NMP_BASE_URL`` and attach the ``Authorization`` bearer token, instead
@@ -384,18 +385,14 @@ def test_usage_show_fileset_builds_sdk_with_context_base_url_and_auth(app, tmp_n
     """
     captured: dict[str, object] = {}
 
-    def fake_platform(**kwargs: object) -> object:
-        captured.update(kwargs)
-        return object()
-
     @contextmanager
     def fake_fileset_path(_ref, *, sdk, workspace):
+        assert isinstance(sdk, NemoClient)
+        captured["base_url"] = sdk.base_url
+        captured["default_headers"] = sdk.default_headers
         yield tmp_natjobs_dir
 
-    with (
-        patch("nemo_agents_plugin.usage.cli.NeMoPlatform", fake_platform),
-        patch("nemo_agents_plugin.usage.cli.fileset_path", fake_fileset_path),
-    ):
+    with patch("nemo_agents_plugin.usage.cli.fileset_path", fake_fileset_path):
         result = runner.invoke(
             app,
             ["usage", "show", "my-fileset"],

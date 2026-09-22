@@ -150,24 +150,15 @@ The SDK's `get_context()` function:
 4. Resolves cluster/user references to actual objects
 5. Returns a `Context` with resolved configuration
 
-## Code Generation
+## Command Groups
 
-API commands in `commands/api/` are auto-generated from Jinja2 templates.
+API command groups are hand-written on the typed clients in `nemo_platform_plugin`
+(see `commands/secrets.py` for the reference shape). Core groups are registered in
+`commands/manifest_registry.py`; functional groups are `nemo.cli` entry points shipped
+by the owning plugin or service package. `--output-format code` renders the equivalent
+typed-client Python via `core/code_generator.py`.
 
-### Templates
-
-Located in `tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk/cli_generator/templates/`:
-
-| Template | Purpose |
-|----------|---------|
-| `list_command.py.j2` | List operations with pagination |
-| `get_command.py.j2` | Get single resource |
-| `create_command.py.j2` | Create operations |
-| `update_command.py.j2` | Update operations |
-| `delete_command.py.j2` | Delete operations |
-| `api_init.py.j2` | `__init__.py` for command modules |
-
-### Regenerating Commands
+### Regenerating Reference Docs
 
 ```bash
 make update-cli

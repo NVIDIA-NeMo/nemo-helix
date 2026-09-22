@@ -72,14 +72,54 @@ def test_every_prefixed_name_is_stripped_not_just_the_loss(finetune: ModuleType)
     assert stripped == {"loss": 0.5, "acc1": 0.8, "mrr": 0.7}
 
 
-def test_cross_encoder_target_is_detected(finetune: ModuleType) -> None:
-    def NeMoAutoModelCrossEncoder() -> None:
-        pass
+def test_the_compiled_cross_encoder_recipe_selects_the_reranker(finetune: ModuleType) -> None:
+    """The compiler writes `_recipe`; this process only sees YAML, not the job spec."""
+    cfg = {"_recipe": "cross_encoder", "model": {"_target_": object}}
 
-    cfg = {"model": {"_target_": NeMoAutoModelCrossEncoder}}
+    finetune.create_automodel_recipe(cfg)
 
-    assert finetune._model_target_contains(cfg, "crossencoder") is True
-    assert finetune._model_target_contains(cfg, "biencoder") is False
+    finetune.TrainCrossEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainBiEncoderRecipe.assert_not_called()
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
+
+
+def test_the_compiled_bi_encoder_recipe_selects_the_embedder(finetune: ModuleType) -> None:
+    cfg = {"_recipe": "bi_encoder"}
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.TrainBiEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainCrossEncoderRecipe.assert_not_called()
+
+
+def test_a_causal_checkpoint_still_uses_the_compiled_cross_encoder_recipe(finetune: ModuleType) -> None:
+    """Recipe, not architecture: Llama + cross_encoder must not fall through to SFT."""
+    cfg = {
+        "_recipe": "cross_encoder",
+        "model": {"_target_": "nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained"},
+    }
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.TrainCrossEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
+
+
+def test_an_absent_compiled_recipe_uses_sft(finetune: ModuleType) -> None:
+    """A config from before `_recipe` existed should still start."""
+    finetune.create_automodel_recipe({"model": {}})
+
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_called_once()
+    finetune.TrainCrossEncoderRecipe.assert_not_called()
+
+
+def test_kd_still_wins_on_an_sft_compiled_recipe(finetune: ModuleType) -> None:
+    cfg = {"_recipe": "sft", "teacher_model": {"path": "teacher"}}
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.KnowledgeDistillationRecipeForNextTokenPrediction.assert_called_once_with(cfg)
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
 
 
 def test_an_unprefixed_name_is_left_alone(finetune: ModuleType) -> None:

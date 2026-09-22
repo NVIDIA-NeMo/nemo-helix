@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient
 from nemo_platform_plugin.job_context import JobContext
 
 from nemo_optimization.fabric import build_optimize_payload, require_fabric_agent_config
@@ -39,7 +39,7 @@ class OptimizeRouter:
         agent_config: dict[str, Any] | None,
         optimize_config: dict[str, Any],
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
+        sdk: SyncPlatformClient | None = None,
     ) -> dict[str, Any]:
         """Route a Fabric-native optimize study to the selected Tune backend."""
         payload = build_optimize_payload(agent_config=agent_config, optimize_config=optimize_config)
@@ -57,7 +57,7 @@ class OptimizeRouter:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
+        sdk: SyncPlatformClient | None = None,
     ) -> dict[str, Any]:
         """Route an already-merged Fabric payload (used by tests and future job types)."""
         require_fabric_agent_config(payload, label="optimize payload")

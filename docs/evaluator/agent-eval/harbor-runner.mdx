@@ -19,9 +19,10 @@ the verifier rewards through agent-eval — the same
 
 Unlike the quickstart, this runner is **not** zero-dependency — it shells out to Harbor and Docker:
 
-- **Python `>=3.12,<3.14`** — Harbor is imported lazily, so the base SDK remains usable on Python
-  3.11 without it; Harbor execution and existing-result adaptation require 3.12 or newer. The upper
-  bound is `nemo-platform`'s own; a source checkout resolves up to 3.14.
+- **Python `>=3.12,<3.14`** — the SDK's own floor is `>=3.12`, matching Harbor's. Harbor is still
+  imported lazily, so importing the SDK and building a Harbor config work without the extra
+  installed; execution and existing-result adaptation need it. The upper bound is
+  `nemo-platform`'s own; a source checkout resolves up to 3.14.
 - **A Docker-compatible container runtime** — Harbor invokes the `docker` executable on `PATH`
   (`docker info` must succeed) and uses `docker compose`.
 - **Harbor** `>=0.20,<0.21` — see [Install Harbor](#install-harbor).

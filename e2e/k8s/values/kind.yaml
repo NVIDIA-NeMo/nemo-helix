@@ -33,6 +33,10 @@ httpRoute:
     - name: nmp-e2e-gateway
 
 platformConfig:
+  auth:
+    allowed_service_principals:
+      - e2e-test
+      - e2e-test-on-behalf
   inference_gateway:
     mock_provider_prefix: igw-mock-
   jobs:

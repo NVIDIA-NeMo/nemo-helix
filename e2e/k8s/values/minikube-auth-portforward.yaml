@@ -33,6 +33,9 @@ platformConfig:
     policy_data_refresh_interval: 2
     bundle_cache_seconds: 2
     admin_email: "admin@example.com"
+    allowed_service_principals:
+      - e2e-test
+      - e2e-test-on-behalf
   inference_gateway:
     mock_provider_prefix: igw-mock-
   jobs:

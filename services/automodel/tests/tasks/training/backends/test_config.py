@@ -574,6 +574,7 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
         "time_series_metrics": ["*_loss"],
         "min_report_interval_seconds": 30,
     }
+    assert compiled["_recipe"] == "sft"
 
 
 def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path) -> None:
@@ -602,6 +603,7 @@ def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path
 
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["model"]["num_labels"] == 1
+    assert compiled["_recipe"] == "cross_encoder"
     assert "loss_fn" not in compiled
 
 
@@ -642,6 +644,7 @@ def test_auto_recipe_maps_cross_encoder_head_to_cross_encoder_model(tmp_path: Pa
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
     assert resolve_compiled_recipe(config) == TrainingRecipe.CROSS_ENCODER
+    assert compiled["_recipe"] == "cross_encoder"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["optimizer"]["_target_"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
     assert compiled["model"]["attn_implementation"] == "sdpa"
@@ -665,6 +668,7 @@ def test_auto_recipe_prefers_cross_encoder_head_over_stale_embedding_alias(tmp_p
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
     assert resolve_compiled_recipe(config) == TrainingRecipe.CROSS_ENCODER
+    assert compiled["_recipe"] == "cross_encoder"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
 
 
@@ -680,6 +684,7 @@ def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: P
     assert compiled["optimizer"]["_target_"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
     assert compiled["model"]["attn_implementation"] == "sdpa"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelBiEncoder.from_pretrained")
+    assert compiled["_recipe"] == "bi_encoder"
 
 
 @pytest.mark.parametrize("requested", [False, True])

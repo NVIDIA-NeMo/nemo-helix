@@ -102,16 +102,6 @@ export const LoraParametersSection = () => {
             step={0.01}
             disabled={disabled}
           />
-          <ControlledSwitch
-            useControllerProps={{ name: 'automodel.training.lora.merge', control }}
-            formFieldProps={{
-              slotLabel: 'Merge Weights',
-              slotInfo:
-                'Merges the adapter into the base model, producing a full-weight checkpoint instead of an adapter.',
-              labelPosition: 'left',
-            }}
-            disabled={disabled}
-          />
           <AccordionRoot multiple>
             <AccordionItem value="advanced-lora" className="border-b-0">
               <AccordionTrigger>

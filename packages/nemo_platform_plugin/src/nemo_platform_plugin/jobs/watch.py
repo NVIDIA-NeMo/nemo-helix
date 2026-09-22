@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import ClassVar, Literal, TypeAlias
 
-from nemo_platform._exceptions import APIConnectionError, APIStatusError, APITimeoutError
-from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError
+import httpx
+from nemo_platform_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError
 from nemo_platform_plugin.jobs.client import (
     AsyncJobLogsClient,
     AsyncJobStatusClient,
@@ -36,8 +36,7 @@ _SUCCESSFUL_TERMINAL_STATUSES = {"completed"}
 _FAILED_TERMINAL_STATUSES = {"cancelled", "error", "paused"}
 _TERMINAL_STATUSES = _SUCCESSFUL_TERMINAL_STATUSES | _FAILED_TERMINAL_STATUSES
 _TRANSIENT_STATUS_CODES = {429, 502, 503, 504}
-_TRANSPORT_ERRORS = (NemoTransportError, APIConnectionError, APITimeoutError)
-_HTTP_STATUS_ERRORS = (NemoHTTPError, APIStatusError)
+_TRANSPORT_ERRORS = (NemoTransportError,)
 _INVALID_PAGE_CURSOR_STATUS_CODE = 422
 _INVALID_PAGE_CURSOR_ERROR_CODE = "invalid_page_cursor"
 _PAGE_CURSOR_DECODE_ERROR_DETAIL = "Invalid page cursor"
@@ -290,14 +289,8 @@ def _watch_job(
         try:
             status_response = jobs.status.get_job_status(workspace=options.workspace, name=name)
             status_event = _status_event(status_response.data(), name)
-        except _TRANSPORT_ERRORS as exc:
-            retry = _transient_retry(status_retry, "status", name, exc, poll_interval)
-            if retry.warning is not None:
-                yield retry.warning
-            _sleep(retry.sleep_interval, deadline)
-            continue
-        except _HTTP_STATUS_ERRORS as exc:
-            if not _is_retryable_http_error(exc):
+        except Exception as exc:
+            if not _is_transient_failure(exc):
                 raise
             retry = _transient_retry(status_retry, "status", name, exc, poll_interval)
             if retry.warning is not None:
@@ -324,17 +317,13 @@ def _watch_job(
                 )
                 logs_drained = True
                 log_retry.reset()
-            except _TRANSPORT_ERRORS as exc:
-                retry = _transient_retry(log_retry, "log", name, exc, poll_interval)
-                if retry.warning is not None:
-                    yield retry.warning
-                sleep_interval = retry.sleep_interval
-            except _HTTP_STATUS_ERRORS as exc:
-                retry = (
-                    _transient_retry(log_retry, "log", name, exc, poll_interval)
-                    if _is_retryable_http_error(exc)
-                    else _log_failure_retry(log_retry, name, exc, poll_interval)
-                )
+            except Exception as exc:
+                if _is_transient_failure(exc):
+                    retry = _transient_retry(log_retry, "log", name, exc, poll_interval)
+                elif _is_http_status_error(exc):
+                    retry = _log_failure_retry(log_retry, name, exc, poll_interval)
+                else:
+                    raise
                 if retry.warning is not None:
                     yield retry.warning
                 sleep_interval = retry.sleep_interval
@@ -368,14 +357,8 @@ async def _async_watch_job(
         try:
             status_response = await jobs.status.get_job_status(workspace=options.workspace, name=name)
             status_event = _status_event(status_response.data(), name)
-        except _TRANSPORT_ERRORS as exc:
-            retry = _transient_retry(status_retry, "status", name, exc, poll_interval)
-            if retry.warning is not None:
-                yield retry.warning
-            await _async_sleep(retry.sleep_interval, deadline)
-            continue
-        except _HTTP_STATUS_ERRORS as exc:
-            if not _is_retryable_http_error(exc):
+        except Exception as exc:
+            if not _is_transient_failure(exc):
                 raise
             retry = _transient_retry(status_retry, "status", name, exc, poll_interval)
             if retry.warning is not None:
@@ -403,17 +386,13 @@ async def _async_watch_job(
                     yield event
                 logs_drained = True
                 log_retry.reset()
-            except _TRANSPORT_ERRORS as exc:
-                retry = _transient_retry(log_retry, "log", name, exc, poll_interval)
-                if retry.warning is not None:
-                    yield retry.warning
-                sleep_interval = retry.sleep_interval
-            except _HTTP_STATUS_ERRORS as exc:
-                retry = (
-                    _transient_retry(log_retry, "log", name, exc, poll_interval)
-                    if _is_retryable_http_error(exc)
-                    else _log_failure_retry(log_retry, name, exc, poll_interval)
-                )
+            except Exception as exc:
+                if _is_transient_failure(exc):
+                    retry = _transient_retry(log_retry, "log", name, exc, poll_interval)
+                elif _is_http_status_error(exc):
+                    retry = _log_failure_retry(log_retry, name, exc, poll_interval)
+                else:
+                    raise
                 if retry.warning is not None:
                     yield retry.warning
                 sleep_interval = retry.sleep_interval
@@ -666,8 +645,41 @@ def _log_failure_warning(job_name: str, exc: Exception) -> JobWarningEvent:
     return JobWarningEvent(kind="warning", job_name=job_name, message=f"Log check failed: {exc}")
 
 
-def _is_retryable_http_error(exc: NemoHTTPError | APIStatusError) -> bool:
-    return exc.status_code in _TRANSIENT_STATUS_CODES
+def _http_status_code(exc: BaseException) -> int | None:
+    """Return the HTTP status carried by *exc*, or ``None`` when it is not an HTTP status error.
+
+    :class:`NemoHTTPError` is the typed-client status error. Any other
+    non-client exception exposing an ``int`` ``status_code`` attribute (the
+    generated SDK's ``APIStatusError`` shape) is treated the same way, so
+    callers still on that SDK keep identical retry behaviour.
+    """
+    if isinstance(exc, NemoHTTPError):
+        return exc.status_code
+    if isinstance(exc, NemoClientError):
+        return None
+    status_code = getattr(exc, "status_code", None)
+    return status_code if type(status_code) is int else None
+
+
+def _is_http_status_error(exc: BaseException) -> bool:
+    return _http_status_code(exc) is not None
+
+
+def _is_transport_error(exc: BaseException) -> bool:
+    """Typed-client transport failures, plus foreign wrappers chaining an httpx transport error as their cause."""
+    if isinstance(exc, _TRANSPORT_ERRORS):
+        return True
+    if isinstance(exc, NemoClientError) or _is_http_status_error(exc):
+        return False
+    return isinstance(exc.__cause__, httpx.TransportError)
+
+
+def _is_retryable_http_error(exc: BaseException) -> bool:
+    return _http_status_code(exc) in _TRANSIENT_STATUS_CODES
+
+
+def _is_transient_failure(exc: BaseException) -> bool:
+    return _is_transport_error(exc) or _is_retryable_http_error(exc)
 
 
 def _can_retry_log_scan_from_start(exc: NemoHTTPError, page_cursor: str | None) -> bool:

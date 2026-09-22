@@ -6,20 +6,17 @@
 from __future__ import annotations
 
 import pytest
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.api.fields import TasksetRef
+from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement, GymRunnerTarget
 from nemo_evaluator.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.values import SecretRef
+from pydantic import ValidationError
 
-#: Target fields with no counterpart on the runtime config, so a round-trip cannot check them.
-#:
-#: * ``kind`` discriminates the target union.
-#: * ``env_secrets`` holds references the service resolves into the job environment, so a *running*
-#:   runner has already had them delivered as ordinary variables and has no reference to restate.
-#: * ``agent_ref_name`` routes rollouts on the sandboxed host path only; the CLI runner resolves its
-#:   agent from Gym config instead, so there is nothing on the runtime config to compare against.
-#: * ``environment`` identifies a FileSet staged by the platform before the job runs; a live runner
-#:   has no FileSet staging reference to restate.
-WIRE_ONLY_TARGET_FIELDS = {"kind", "env_secrets", "agent_ref_name", "environment"}
+#: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
+#: discriminates the target union, and the other two come from the ``GymPlacement``.
+WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name"}
 
 
 def _configured() -> GymRuntimeConfig:
@@ -36,6 +33,7 @@ def _configured() -> GymRuntimeConfig:
         bind_resources_server=False,
         hydra_params={"simple_agent": {"responses_api_agents": {"x": 1}}},
         env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"},
+        env_secrets={"NVIDIA_API_KEY": SecretRef("evals/nvidia-api-key")},
         num_repeats=3,
         concurrency=7,
         startup_timeout_s=1800.0,
@@ -136,3 +134,66 @@ def test_an_unsupported_runner_is_refused_by_name() -> None:
     assert "_Unsupported" in message, "the message must name the runner that could not be converted"
     # Points at the alternative rather than dead-ending.
     assert "AgentEvaluator()" in message
+
+
+def test_a_custom_environment_run_with_a_secret_is_submittable_from_a_runner() -> None:
+    """A FileSet environment and a model credential, arriving from the runner and the placement.
+
+    A sandboxed deployment refuses credential-shaped plaintext in ``env_vars``, so this combination
+    is what a real custom-environment evaluation needs, and both halves have to reach one target.
+    """
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="gdpval",
+            env_secrets={"NVIDIA_API_KEY": SecretRef("evals/nvidia-api-key")},
+        )
+    )
+    placement = GymPlacement(
+        environment=FilesetRef(root="evals/gdpval-env"),
+        agent_ref_name="gdpval_simple_agent",
+    )
+
+    target = runner_to_target(runner, placement)
+
+    assert isinstance(target, GymRunnerTarget)
+    assert target.environment is not None and target.environment.root == "evals/gdpval-env"
+    assert target.env_secrets["NVIDIA_API_KEY"].root == "evals/nvidia-api-key"
+    assert target.agent_ref_name == "gdpval_simple_agent"
+    assert target.agent_config == "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    AgentEvalInputSpec(tasks=TasksetRef("gdpval"), target=target)
+
+
+def test_a_runner_submitted_without_a_placement_keeps_its_own_agent_config() -> None:
+    target = runner_to_target(GymAgentTaskRunner(config=_configured()))
+
+    assert isinstance(target, GymRunnerTarget)
+    assert target.agent_config == "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    assert target.environment is None
+    assert target.agent_ref_name is None
+
+
+def test_a_placement_for_a_runner_that_cannot_be_placed_is_refused() -> None:
+    # Ignoring a placement aimed at the wrong runner would submit a job without the environment.
+    class _Unsupported:
+        def runner_info(self):  # pragma: no cover - never reached
+            raise NotImplementedError
+
+        async def run_tasks(self, tasks, config=None):  # pragma: no cover - never reached
+            return []
+
+    with pytest.raises(UnsubmittableRunnerError, match="GymPlacement"):
+        runner_to_target(_Unsupported(), GymPlacement(environment=FilesetRef(root="ws/env")))
+
+
+def test_a_hand_written_target_cannot_name_a_variable_both_ways_either() -> None:
+    # Same rule as GymRuntimeConfig, because a hand-written spec never passes through one.
+    with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
+        GymRunnerTarget(
+            agent="simple_agent",
+            agent_config="c",
+            resources_server="mcqa",
+            env_vars={"GYM_MODEL_KEY": "plaintext"},
+            env_secrets={"GYM_MODEL_KEY": SecretRef("evals/nvidia-api-key")},
+        )

@@ -148,6 +148,7 @@ So `num_repeats=2` over a 5-row dataset yields 5 tasks and 10 trials.
 | `concurrency` | no | concurrent rollouts during collection — tune to your model endpoint's limits |
 | `hydra_params` | no | parameters merged into Gym's Hydra config, e.g. `{"model": {"temperature": 0.7}}` |
 | `env_vars` | no | environment variables set on the `gym` invocation |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` for values that must not be written down — resolved locally from your environment, and by the platform for a submitted job |
 | `reward_key` | no | key read from each rollout record (default `reward`) |
 | `startup_timeout_s` | no | max wait for `gym env start` readiness |
 | `collection_timeout_s` | no | max wait for collection; `None` is unbounded |
@@ -158,17 +159,17 @@ Hydra's override grammar and applied to `gym env start`. For the full set of kno
 [NeMo Gym documentation](https://github.com/NVIDIA-NeMo/Gym).
 
 Platform job specs use `GymRunnerTarget`, the serializable counterpart of the local
-`GymRuntimeConfig`. It adds three platform-only fields:
+`GymRuntimeConfig`. Submitting a runner builds one, and the deployment-specific settings come from a
+`GymPlacement` passed alongside it rather than from the runner:
 
 - `environment` points to a FileSet containing Gym component configuration, code, and dependencies
   that are not built into the runtime image.
 - `agent_ref_name` identifies the agent instance registered inside the sandbox when that instance
   name differs from the `agent` component name.
-- `env_secrets` maps environment variable names to NeMo Platform secret references without placing
-  secret values in the job spec.
 
-`agent_config` remains required when the target uses an agent built into the Gym image. It becomes
-optional only when the environment FileSet supplies and registers the selected agent configuration.
+They live on the placement because the local `gym` CLI has no equivalent of either — it stages
+no packages and resolves its agent from Hydra config — so a runner carrying them would hold fields
+that do nothing wherever it actually runs.
 See [Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment).
 
 ## Read the results

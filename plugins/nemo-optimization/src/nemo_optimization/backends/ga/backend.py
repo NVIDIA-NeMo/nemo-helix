@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient
 from nemo_platform_plugin.job_context import JobContext
 
 
@@ -23,7 +23,7 @@ class GaBackend:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
+        sdk: SyncPlatformClient | None = None,
     ) -> dict[str, Any]:
         del payload, ctx, sdk
         raise GaBackendError(

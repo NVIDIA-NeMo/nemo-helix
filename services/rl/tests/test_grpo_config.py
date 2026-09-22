@@ -1255,6 +1255,12 @@ def test_dapo_components_default_off(tmp_path: Path, job_ctx: NMPJobContext, mon
     assert cfg["loss_fn"]["truncated_importance_sampling_type"] is None
 
 
+def test_internal_grpo_config_rejects_batch_multiplier_below_one() -> None:
+    """The step config is what the container deserializes; keep the DAPO floor here too."""
+    with pytest.raises(ValueError, match="batch_multiplier"):
+        GRPOConfig(batch_multiplier=0.5)
+
+
 def test_truncated_importance_sampling_reaches_the_loss_fn(
     tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -29,7 +29,8 @@ virtually every route handler:
 injects the real implementation at startup via ``app.dependency_overrides``.
 """
 
-from nemo_platform_plugin.dependencies import get_entity_client
+from typing import Any
+
 from nemo_platform_plugin.entities import (
     AnyEntityDeleteClientProtocol as NemoAnyEntityDeleteClientProtocol,
 )
@@ -76,5 +77,16 @@ __all__ = [
     "NemoEntityNotFoundError",
     "NemoEntityValidationError",
     "NemoPaginationInfo",
-    "get_entity_client",
+    "get_entity_client",  # noqa: F822  (resolved lazily by module __getattr__)
 ]
+
+
+def __getattr__(name: str) -> Any:
+    # ``get_entity_client`` lives in the FastAPI dependencies module, which pulls
+    # in server-side clients. Resolve it on first use so importing the entity
+    # client types (as plugin CLIs and seed jobs do) stays free of that graph.
+    if name == "get_entity_client":
+        from nemo_platform_plugin.dependencies import get_entity_client
+
+        return get_entity_client
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
