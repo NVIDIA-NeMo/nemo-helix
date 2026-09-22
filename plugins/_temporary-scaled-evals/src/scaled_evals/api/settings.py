@@ -173,13 +173,15 @@ class Settings(BaseSettings):
     dispatch_kubernetes_jobs_enabled: bool = False
     dispatch_job_reconcile_stale_seconds: float = 60.0
     # Platform Jobs migration flags. Postgres remains the admission and
-    # compatibility source of truth while these are enabled.
+    # compatibility source of truth while these are enabled. Default-on since
+    # the GKE acceptance matrix passed end to end; set either to false to fall
+    # back to the legacy in-process workers.
     platform_build_jobs_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias="SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED",
     )
     platform_evaluation_jobs_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias="SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED",
     )
     platform_jobs_workspace: str = Field(
