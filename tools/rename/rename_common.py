@@ -61,7 +61,7 @@ ACRONYM_REPLACEMENT_RULES = [
         "Nhx",
     ),
     ("nmp", re.compile(r"(?<![A-Za-z0-9])nmp(?=BaseURLEnv)"), "nhx"),
-    ("nmp-intake", re.compile(r"(?<![A-Za-z0-9])nmp-intake(?![A-Za-z0-9])"), "nhx-intake"),
+    ("nmp-intake", re.compile(r"(?:(?<![A-Za-z0-9])|(?<=\\n))nmp-intake(?![A-Za-z0-9])"), "nhx-intake"),
     ("nmp2", re.compile(r"(?<![A-Za-z0-9])nmp2(?![A-Za-z0-9])"), "nhx2"),
     ("_xnmp", re.compile(r"_xnmp(?![A-Za-z0-9])"), "_xnhx"),
     ("NMP", re.compile(r"(?<![A-Za-z0-9])NMP(?![A-Za-z0-9])"), "NHX"),

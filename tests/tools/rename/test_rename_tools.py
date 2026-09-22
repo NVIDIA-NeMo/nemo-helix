@@ -71,6 +71,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
                 "ManifestBackedNmpGroup",
                 "nmpBaseURLEnv",
                 "nmp-intake",
+                r"nhx-intake-clickhouse-one\nnmp-intake-clickhouse-two",
                 "nmp2",
                 "_xnmp",
                 "nmpclient",
@@ -125,6 +126,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "ManifestBackedNhxGroup" in renamed_text
     assert "nhxBaseURLEnv" in renamed_text
     assert "nhx-intake" in renamed_text
+    assert r"nhx-intake-clickhouse-one\nnhx-intake-clickhouse-two" in renamed_text
     assert "nhx2" in renamed_text
     assert "_xnhx" in renamed_text
     assert "nhxclient" in renamed_text
