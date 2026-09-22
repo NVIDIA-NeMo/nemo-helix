@@ -5,9 +5,8 @@
 
 from pathlib import Path
 
-import yaml
 from nemo_platform_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name
-from nemo_platform_ext.cli.commands.skills.installer import BaseAgentInstaller
+from nemo_platform_ext.cli.commands.skills.installer import BaseAgentInstaller, format_agent_skill_content
 
 
 class CustomPathInstaller(BaseAgentInstaller):
@@ -22,8 +21,4 @@ class CustomPathInstaller(BaseAgentInstaller):
         return project_root / installed_skill_name(skill_name) / "SKILL.md"
 
     def format_content(self, skill: Skill) -> str:
-        metadata: dict[str, object] = {"name": installed_skill_name(skill.name), "description": skill.description}
-        if skill.preconditions:
-            metadata["preconditions"] = skill.preconditions
-        front_matter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
-        return f"---\n{front_matter}---\n\n{skill.content}"
+        return format_agent_skill_content(skill)

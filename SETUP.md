@@ -265,7 +265,14 @@ Default flow (already wired into `nemo setup`):
 nemo skills install --agent <claude|cursor|codex|opencode>
 ```
 
-With no `--skill` flag, this installs **all** skills from `nemo skills list` into the chosen agent. Run it again any time `nemo skills list` changes (new plugin installed, plugin updated).
+For another Agent Skills-compatible harness, install to its skills directory explicitly, or have setup do the same with `--skills-path`:
+
+```bash
+nemo skills install --path ~/.my-agent/skills
+nemo setup --install-skills --skills-path ~/.my-agent/skills
+```
+
+With no `--skill` flag, this installs **all** skills from `nemo skills list` into the chosen agent or path. Run it again any time `nemo skills list` changes (new plugin installed, plugin updated).
 
 If the user's goal in the table above maps to a skill that you (the coding agent) don't currently have in this session, install only the skills you need rather than all of them:
 
@@ -284,4 +291,5 @@ If a goal-relevant skill is **missing from `nemo skills list` entirely**, the pl
 ```bash
 uv pip install -e plugins/<plugin-name>
 nemo skills install --agent <agent>            # picks up the new skill(s)
+nemo skills install --path ~/.my-agent/skills  # for custom coding agents
 ```

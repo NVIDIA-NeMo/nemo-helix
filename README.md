@@ -135,11 +135,13 @@ See the [current release notes](https://docs.nvidia.com/nemo-platform/documentat
 
 `nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. Platform-level skills live under `packages/nemo_platform_ext/src/nemo_platform_ext/skills/` and ship with the `nemo-platform` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
 
-To install or refresh skills:
+To install or refresh skills for a built-in coding agent, use `--agent`. For another Agent Skills-compatible harness, point `--path` at that harness's skills directory.
 
 ```bash
 nemo skills install --agent claude
 nemo skills install --agent claude --skill nemo-build-agent --skill nemo-status
+nemo skills install --path ~/.my-agent/skills
+nemo setup --install-skills --skills-path ~/.my-agent/skills
 ```
 
 ## Try the demo agent

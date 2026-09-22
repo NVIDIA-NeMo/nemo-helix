@@ -364,6 +364,40 @@ class TestInstall:
         assert skill_file.exists()
         assert "name: nemo-inference" in skill_file.read_text()
 
+    def test_install_agent_and_path_conflict(self, tmp_path: Path):
+        result = runner.invoke(
+            app,
+            ["skills", "install", "--agent", "claude", "--path", str(tmp_path / "skills")],
+        )
+        assert_exit_code(result, 1)
+        assert "--agent and --path cannot be used together" in result.output
+
+    def test_install_path_and_project_dir_conflict(self, tmp_path: Path):
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        result = runner.invoke(
+            app,
+            [
+                "skills",
+                "install",
+                "--path",
+                str(tmp_path / "skills"),
+                "--project-dir",
+                str(project_dir),
+            ],
+        )
+        assert_exit_code(result, 1)
+        assert "--path and --project-dir cannot be used together" in result.output
+
+    def test_install_user_scope_is_accepted_for_custom_path(self, tmp_path: Path):
+        skills_path = tmp_path / "custom" / "skills"
+        result = runner.invoke(
+            app,
+            ["skills", "install", "--path", str(skills_path), "--user", "--skill", "inference"],
+        )
+        assert_exit_code(result, 0)
+        assert (skills_path / "nemo-inference" / "SKILL.md").exists()
+
 
 class TestFindProjectRoot:
     def test_uses_cwd_even_when_parent_has_git_directory(self, tmp_path: Path, monkeypatch):

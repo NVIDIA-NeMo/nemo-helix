@@ -43,6 +43,14 @@ def test_user_install_path(tmp_path: Path):
     assert path == Path.home() / ".config" / "opencode" / "skills" / "nemo-inference" / "SKILL.md"
 
 
+def test_format_content_matches_installed_skill_name():
+    installer = OpenCodeInstaller()
+    content = installer.format_content(_make_skill("inference"))
+    assert "name: nemo-inference" in content
+    assert "description: desc" in content
+    assert content.endswith("# Test")
+
+
 def test_install_copies_companion_files(tmp_path: Path):
     source_dir = tmp_path / "source" / "evaluation"
     source_dir.mkdir(parents=True)

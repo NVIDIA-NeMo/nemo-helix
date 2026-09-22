@@ -1878,6 +1878,40 @@ class TestMaybeInstallSkills:
                 skills_agents=["copex"],  # typo
             )
 
+    def test_skills_path_and_skills_agents_conflict(self, tmp_path):
+        with pytest.raises(typer.BadParameter) as exc_info:
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_path=tmp_path / "skills",
+                skills_agents=["claude"],
+            )
+        assert "--skills-path and --skills-agents cannot be combined" in str(exc_info.value)
+
+    def test_auto_other_agent_requires_skills_path(self):
+        with pytest.raises(typer.BadParameter) as exc_info:
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_agents=["other"],
+            )
+        assert "requires --skills-path" in str(exc_info.value)
+
+    def test_skills_path_selects_custom_agent(self, tmp_path):
+        skills = {"alpha": self._skill("alpha")}
+        custom_path = tmp_path / "skills"
+        with (
+            patch("nemo_platform_ext.cli.commands.setup._load_skills_with_warnings", return_value=(skills, [])),
+            patch("nemo_platform_ext.cli.commands.setup._find_project_root", return_value=tmp_path),
+        ):
+            _maybe_install_skills(
+                auto=True,
+                install_skills=True,
+                skills_path=custom_path,
+            )
+
+        assert (custom_path / "nemo-alpha" / "SKILL.md").exists()
+
     def test_partial_install_failure_does_not_raise(self, tmp_path):
         """Mixed success/failure shouldn't fail the run; only total failure should."""
         skills = {"alpha": self._skill("alpha")}

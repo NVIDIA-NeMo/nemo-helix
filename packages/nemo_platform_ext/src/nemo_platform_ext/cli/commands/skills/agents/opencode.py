@@ -5,8 +5,8 @@
 
 from pathlib import Path
 
-from nemo_platform_ext.cli.commands.skills.base import Scope, installed_skill_name
-from nemo_platform_ext.cli.commands.skills.installer import BaseAgentInstaller
+from nemo_platform_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name
+from nemo_platform_ext.cli.commands.skills.installer import BaseAgentInstaller, format_agent_skill_content
 
 
 class OpenCodeInstaller(BaseAgentInstaller):
@@ -19,3 +19,6 @@ class OpenCodeInstaller(BaseAgentInstaller):
         if scope == Scope.PROJECT:
             return project_root / ".opencode" / "skills" / target_name / "SKILL.md"
         return Path.home() / ".config" / "opencode" / "skills" / target_name / "SKILL.md"
+
+    def format_content(self, skill: Skill) -> str:
+        return format_agent_skill_content(skill)

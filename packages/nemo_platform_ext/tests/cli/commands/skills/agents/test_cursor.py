@@ -57,6 +57,14 @@ def test_install_creates_files(tmp_path: Path):
     assert paths[0].exists()
 
 
+def test_format_content_matches_installed_skill_name():
+    installer = CursorInstaller()
+    content = installer.format_content(_make_skill("inference"))
+    assert "name: nemo-inference" in content
+    assert "description: desc" in content
+    assert content.endswith("# Test")
+
+
 def test_install_copies_companion_files(tmp_path: Path):
     source_dir = tmp_path / "source" / "evaluation"
     source_dir.mkdir(parents=True)
