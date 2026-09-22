@@ -514,7 +514,7 @@ def test_spec_package_warning_points_at_nemo_ethos(tmp_path: Path, monkeypatch: 
 
     assert _spec_package_warning("acme-bot", config) == (
         "Warning: This package uses AGENT-SPEC.md.",
-        "Run the nemo-ethos skill to write ETHOS.md, then delete the acme-bot-spec package.",
+        "Provide an existing ETHOS.md, then delete the acme-bot-spec package.",
     )
     assert _spec_package_warning("acme-bot", tmp_path / "agent.yaml") == ()
     escaped = tmp_path / "escaped-spec"

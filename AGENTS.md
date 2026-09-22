@@ -30,16 +30,14 @@ User-facing skills in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`
 
 - `nemo-skill-selection`: entry point. Use when the user's intent is broad or unclear.
 - `setup`: verifies that NeMo Platform is installed and running. If install is missing, tells the user how to run the CLI install (`make bootstrap` + `nemo setup`). **Install itself is CLI-only.** Do not attempt to install NeMo via skill-driven pip; the workspace dependency graph and credential handling are not reliably automatable inside a sandbox.
-- `nemo-explore`: design conversation that feeds into an Ethos. Always confirms purpose, principles, and vision.
-- `nemo-ethos`: writes `agents/<name>-ethos/ETHOS.md` from explore output, then shows a gut-check of the agent.
-- `nemo-build-agent`: builds a tested LangChain Deep Agent from an approved Ethos, then packages and registers it through Fabric.
+- `nemo-build-agent`: builds a tested LangChain Deep Agent from approved requirements, then packages and registers it through Fabric.
 - `nemo-try-agent`: test a deployed agent or chat with a model.
 - `nemo-intake`: instrument agents, choose an ingest format, upload/query telemetry, and attach evaluator results.
 - `nemo-experiments-upload`: publish named evaluation runs and scores to the Experiments leaderboard.
 - `nemo-status`: read-only health dashboard.
 - `nemo-teardown`: guided shutdown with confirmation.
 
-Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, Experimentalist source/harness improvement, and Analyst telemetry analysis.
+Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, and Analyst telemetry analysis.
 
 ### Working in a sandboxed environment
 

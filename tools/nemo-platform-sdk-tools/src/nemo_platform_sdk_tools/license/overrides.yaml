@@ -305,8 +305,7 @@ overrides:
   crc32c: LGPL-2.1-or-later # https://pypi.org/project/crc32c/
   detect-installer: 0BSD # https://pypi.org/project/detect-installer/
 
-  # Experimentalist plugin. Only nooa needs an entry: it is a git dependency rather than
-  # a PyPI release, so osv has no metadata to read and reports UNKNOWN.
+  # Shared agent framework used by Insights.
   nooa: Apache-2.0 # https://github.com/NVIDIA-NeMo/labs-OO-Agents
 
   databricks-sdk: Apache-2.0  # https://github.com/databricks/databricks-sdk-py/blob/main/LICENSE

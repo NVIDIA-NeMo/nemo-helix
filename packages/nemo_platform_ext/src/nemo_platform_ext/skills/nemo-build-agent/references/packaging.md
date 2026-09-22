@@ -5,11 +5,10 @@ package that must run with the deployed agent.
 
 ## Project layout
 
-Keep the complete deployable package under the canonical Ethos directory:
+Keep the complete deployable package under the agent directory:
 
 ```text
-agents/<agent-name>-ethos/
-  ETHOS.md
+agents/<agent-name>/
   agent.yaml
   pyproject.toml
   uv.lock
@@ -45,8 +44,8 @@ the image:
 ```bash
 IMAGE_TAG="$AGENT_NAME:local"
 .venv/bin/nemo agents package \
-  --agent "agents/$AGENT_NAME-ethos/agent.yaml" \
-  --pyproject "agents/$AGENT_NAME-ethos/pyproject.toml" \
+  --agent "agents/$AGENT_NAME/agent.yaml" \
+  --pyproject "agents/$AGENT_NAME/pyproject.toml" \
   --tag "$IMAGE_TAG"
 ```
 
@@ -56,8 +55,8 @@ Platform wheel and point packaging at it:
 ```bash
 uv build --package nemo-platform --wheel --out-dir dist
 NEMO_AGENTS_WHEEL=LATEST .venv/bin/nemo agents package \
-  --agent "agents/$AGENT_NAME-ethos/agent.yaml" \
-  --pyproject "agents/$AGENT_NAME-ethos/pyproject.toml" \
+  --agent "agents/$AGENT_NAME/agent.yaml" \
+  --pyproject "agents/$AGENT_NAME/pyproject.toml" \
   --tag "$IMAGE_TAG"
 ```
 
@@ -75,7 +74,7 @@ WORKSPACE="<confirmed-workspace>"
 
 .venv/bin/nemo agents create \
   --name "$AGENT_NAME" \
-  --agent-config "agents/$AGENT_NAME-ethos/agent.yaml" \
+  --agent-config "agents/$AGENT_NAME/agent.yaml" \
   --workspace "$WORKSPACE"
 ```
 

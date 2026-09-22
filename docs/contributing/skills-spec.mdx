@@ -48,12 +48,10 @@ Entry point: a coding agent (Claude Code, Cursor, Codex, OpenCode) opened inside
 | Step | Skill | What it does |
 |---|---|---|
 | 1 | `nemo-skill-selection` | Router: parses natural-language intent, picks the right downstream skill |
-| 2 | `nemo-explore` | Design conversation: captures goal, audience, tools, constraints |
-| 3 | `nemo-ethos` | Writes the design to `agents/<name>-ethos/ETHOS.md`. See [Agent Ethos](/documentation/agents/optimize-agents/ethos). |
-| 4 | `nemo-build-agent` | Scaffolds NAT workflow YAML and deploys |
-| 5 | `nemo-try-agent` | Sends queries to the deployed agent |
-| 6 | `nemo-status` | Read-only platform health dashboard |
-| 7 | `nemo-teardown` | Guided shutdown |
+| 2 | `nemo-build-agent` | Builds a LangChain Deep Agent through Fabric and deploys |
+| 3 | `nemo-try-agent` | Sends queries to the deployed agent |
+| 4 | `nemo-status` | Read-only platform health dashboard |
+| 5 | `nemo-teardown` | Guided shutdown |
 
 **Where this journey breaks today** (post-install CTA): after `nemo setup` finishes, the CLI tells the user to chat with the built-in calculator agent. That's the wrong handoff for Journey A: the user came here to build *their* agent, not chat with someone else's. The CTA should be goal-oriented ("what do you want to build?" or "ask me to design an agent for X"). The CLI is the journey transition point, not the README. Most users never read the README all the way through.
 
@@ -116,20 +114,18 @@ Library-prefix naming (`nemo-*`) is required for user-invocable skills (skills i
 ---
 name: nemo-build-agent
 description: >
-  Scaffold and deploy a NeMo Agent Toolkit (NAT) agent from an Ethos.
-  Generates the workflow YAML, creates the agent, deploys it, optionally
+  Build and deploy a LangChain Deep Agent through Fabric from confirmed requirements.
+  Generates the agent YAML, creates the agent, deploys it, optionally
   wires guardrails and an eval suite. Use when the user says "build me an
-  agent," "scaffold from this ethos," "deploy my agent," or has finished
-  `nemo-explore` and is ready to ship.
+  agent," "implement these requirements," or "deploy my agent."
 triggers:
   - build the agent
-  - scaffold from ethos
+  - implement these requirements
   - deploy my agent
 not-for:
-  - nemo-explore (use for design conversation before an Ethos exists)
   - nemo-try-agent (use to test an already-deployed agent)
   - nemo-agents-optimize (use to improve a deployed agent's metrics)
-compatibility: nemo-platform >= 0.1.0; macOS or Linux; requires `agents/<name>-ethos/ETHOS.md`
+compatibility: nemo-platform >= 0.1.0; macOS or Linux
 maturity: active
 license: Apache-2.0
 user-invocable: true
