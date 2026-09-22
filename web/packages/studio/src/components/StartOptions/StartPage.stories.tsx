@@ -20,6 +20,7 @@ const OPTIONS = [
     title: 'Build from scratch',
     description: 'Open the full form with sensible defaults and choose everything yourself.',
     icon: Plus,
+    tag: { label: 'Advanced', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
   {
@@ -27,6 +28,7 @@ const OPTIONS = [
     title: 'Start from a config you already have',
     description: 'Upload a YAML or JSON config and continue from it.',
     icon: Upload,
+    tag: { label: 'Intermediate', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
   {
@@ -34,6 +36,7 @@ const OPTIONS = [
     title: 'Describe it and let AI draft it',
     description: 'Say what you want in a sentence and start from the draft.',
     icon: Sparkles,
+    tag: { label: 'Beginner', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
 ];
@@ -61,6 +64,7 @@ const Demo = (args: Partial<React.ComponentProps<typeof StartPage>>) => {
           group('a', 'Template Group Title', ['Template Name', 'Template Name', 'Template Name']),
           group('b', 'Template Group Title', ['Template Name', 'Template Name']),
         ]}
+        templatesTag={{ label: 'Intermediate', color: 'gray', kind: 'solid' }}
         value={value}
         onChange={setValue}
         canContinue={value !== null}
