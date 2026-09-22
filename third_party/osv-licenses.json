@@ -307,6 +307,16 @@
         },
         {
           "package": {
+            "name": "bracex",
+            "version": "3.0.1",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
             "name": "cachetools",
             "version": "7.1.7",
             "ecosystem": "PyPI"
@@ -359,6 +369,16 @@
           "package": {
             "name": "charset-normalizer",
             "version": "3.4.9",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
+            "name": "claude-agent-sdk",
+            "version": "0.2.120",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -761,6 +781,16 @@
         },
         {
           "package": {
+            "name": "deepagents",
+            "version": "0.7.9",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
             "name": "defusedxml",
             "version": "0.7.1",
             "ecosystem": "PyPI"
@@ -1021,6 +1051,16 @@
         },
         {
           "package": {
+            "name": "filetype",
+            "version": "1.2.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
             "name": "flatbuffers",
             "version": "25.12.19",
             "ecosystem": "PyPI"
@@ -1083,6 +1123,16 @@
           "package": {
             "name": "google-auth",
             "version": "2.56.2",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
+            "name": "google-genai",
+            "version": "2.16.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1541,6 +1591,16 @@
         },
         {
           "package": {
+            "name": "langchain-anthropic",
+            "version": "1.7.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
             "name": "langchain-aws",
             "version": "1.1.0",
             "ecosystem": "PyPI"
@@ -1573,6 +1633,16 @@
           "package": {
             "name": "langchain-core",
             "version": "1.6.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
+            "name": "langchain-google-genai",
+            "version": "4.3.6",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2082,6 +2152,16 @@
         {
           "package": {
             "name": "nemo-relay",
+            "version": "0.7.3",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
+            "name": "nemo-relay-cli-bin",
             "version": "0.7.3",
             "ecosystem": "PyPI"
           },
@@ -2613,6 +2693,26 @@
           "package": {
             "name": "openai",
             "version": "2.53.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
+            "name": "openai-codex",
+            "version": "0.144.4",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
+            "name": "openai-codex-cli-bin",
+            "version": "0.144.4",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -5937,6 +6037,16 @@
           "package": {
             "name": "watchfiles",
             "version": "1.2.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
+            "name": "wcmatch",
+            "version": "11.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -11385,11 +11495,11 @@
   "license_summary": [
     {
       "name": "MIT",
-      "count": 163
+      "count": 170
     },
     {
       "name": "Apache-2.0",
-      "count": 150
+      "count": 154
     },
     {
       "name": "BSD-3-Clause",
