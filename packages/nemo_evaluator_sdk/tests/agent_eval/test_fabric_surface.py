@@ -23,7 +23,7 @@ These tests close that gap by driving the runtime's own composition against the 
   adapter registry via the planner. A suffixed ``nvidia.fabric.codex.cli`` would raise instead.
 
 ``importorskip('nemo_fabric')`` makes the whole module inert wherever the native Fabric wheels are not
-installed (the hermetic-only 3.11 lanes), so it never competes with the fake-backed unit tests. It is
+installed (the hermetic lanes), so it never competes with the fake-backed unit tests. It is
 meant to run where the ``fabric`` extra is present — e.g. the Linux ``fabric-wheel-smoke`` CI job, or a
 local ``uv sync --extra fabric`` (Fabric publishes a macOS arm64 wheel as of 0.1.0rc2).
 """
