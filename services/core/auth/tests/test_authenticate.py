@@ -554,9 +554,10 @@ def test_authenticate_invalid_workload_access_token_returns_401(tmp_path):
     assert response.json()["detail"] == "Invalid bearer token"
 
 
-def test_authenticate_workload_access_token_surfaces_signing_key_misconfiguration(caplog):
+def test_authenticate_workload_access_token_surfaces_signing_key_misconfiguration(caplog, tmp_path):
     config = AuthConfig(
         enabled=True,
+        token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "missing-private.pem")),
         oidc=OIDCConfig(
             workload_token_exchange_enabled=True,
             workload_audience="nemo-platform",

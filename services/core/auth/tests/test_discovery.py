@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from nmp.common.config import AuthConfig, Configuration
-from nmp.common.config.base import OIDCConfig
+from nmp.common.config.base import OIDCConfig, TokenSigningConfig
 from nmp.core.auth.api.v2.discovery.endpoints import (
     AuthDiscoveryResponse,
     OIDCDiscoveryResponse,
@@ -50,6 +50,7 @@ def auth_config_oidc_enabled(oidc_config):
     return AuthConfig(
         enabled=True,
         policy_decision_point_base_url="http://localhost:8181",
+        token_signing=TokenSigningConfig(private_key_file="/var/run/secrets/nemo-platform/token-signing/private.pem"),
         oidc=oidc_config,
     )
 
@@ -210,6 +211,9 @@ class TestGetAuthDiscovery:
         auth_config = AuthConfig(
             enabled=True,
             policy_decision_point_base_url="http://localhost:8181",
+            token_signing=TokenSigningConfig(
+                private_key_file="/var/run/secrets/nemo-platform/token-signing/private.pem"
+            ),
             oidc=oidc_config,
         )
         Configuration.set_override(auth_config)

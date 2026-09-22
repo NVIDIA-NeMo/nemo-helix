@@ -437,7 +437,7 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
     )
 
     @model_validator(mode="after")
-    def validate_workload_token_signing_key_id(self) -> Self:
+    def validate_workload_token_signing_config(self) -> Self:
         if not self.oidc.workload_token_exchange_enabled:
             return self
 
@@ -449,6 +449,11 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
             )
         workload_private_key_file = self._normalized_private_key_file(self.oidc.workload_token_private_key_file)
         access_key_private_key_file = self._normalized_private_key_file(self.token_signing.private_key_file)
+        if not workload_private_key_file and not access_key_private_key_file:
+            raise ValueError(
+                "auth.oidc.workload_token_private_key_file or auth.token_signing.private_key_file must be "
+                "configured when auth.oidc.workload_token_exchange_enabled is true"
+            )
         if (
             self.access_keys.enabled
             and workload_private_key_file
