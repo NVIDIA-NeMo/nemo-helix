@@ -251,6 +251,14 @@ models-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agent-optimization-plugin = [
+  "fastapi>=0.115",
+  "nemo-helix-plugin",
+  "pydantic>=2.12.0",
+  "typer>=0.20.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-example-calculator = [
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
   "nvidia-nat-langchain>=1.9.0a20260811,<1.10",
@@ -260,7 +268,6 @@ nemo-agents-example-calculator = [
 nemo-agents-plugin = [
   "nemo-helix-plugin",
   "nemo-deployments-plugin",
-  "nemo-optimization-plugin",
   "nemo-agents-example-calculator",
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
   "nvidia-nat-langchain>=1.9.0a20260811,<1.10",
@@ -462,6 +469,7 @@ nemo-insights-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-optimization-plugin = [
+  "nemo-agents-plugin",
   "nemo-helix-plugin",
   "nemo-evaluator-sdk",
   "matplotlib>=3.8.0",
@@ -568,6 +576,7 @@ platform-seed-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 plugins = [
+    "nemo-helix[nemo-agent-optimization-plugin]",
     "nemo-helix[nemo-agents-example-calculator]",
     "nemo-helix[nemo-agents-plugin]",
     "nemo-helix[nemo-anonymizer-plugin]",
@@ -689,6 +698,14 @@ intake = "nhx.intake.cli:IntakeCLI"
 experiments = "nhx.intake.cli:ExperimentsCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."nemo.cli.agents"]
+optimize = "nemo_agent_optimization_plugin.cli:AgentOptimizeCLI"
+
+# Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."nemo.cli.agents.optimize"]
+prepare-fileset = "nemo_optimization.optimize_cli:register_prepare_fileset_command"
+
+# Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.client_provider"]
 platform = "nhx.common.client_factory:HelixNemoClientProvider"
 
@@ -724,7 +741,6 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
 "agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "anonymizer.run" = "nemo_anonymizer_plugin.jobs.run:RunJob"
 "auditor.audit" = "nemo_auditor.jobs.audit:AuditJob"
@@ -740,6 +756,8 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "data-designer.retrieval-generate" = "nemo_data_designer_plugin.jobs.retrieval_generate:RetrievalGenerateJob"
 "data-designer.retrieval-prepare" = "nemo_data_designer_plugin.jobs.retrieval_prepare:RetrievalPrepareJob"
 "data-designer.retrieval-run" = "nemo_data_designer_plugin.jobs.retrieval_run:RetrievalRunJob"
+"agent-optimization.run-strategy" = "nemo_agent_optimization_plugin.jobs.run_strategy:RunStrategyJob"
+"optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
 "evaluator.retrieve-eval" = "nemo_evaluator.jobs.retrieve_eval:RetrieveEvalJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
@@ -778,6 +796,7 @@ auditor = "nemo_auditor.seed_job:AuditorSeedJob"
 [project.entry-points."nemo.services"]
 safe-synthesizer = "nemo_safe_synthesizer_plugin.service:SafeSynthesizerService"
 agents = "nemo_agents_plugin.service:AgentsService"
+agent-optimization = "nemo_agent_optimization_plugin.service:AgentOptimizationService"
 anonymizer = "nemo_anonymizer_plugin.service:AnonymizerService"
 auditor = "nemo_auditor.service:AuditorPluginService"
 data-designer = "nemo_data_designer_plugin.service:DataDesignerService"
@@ -857,6 +876,7 @@ switchyard-vendored = { source = "../../plugins/nemo-switchyard/vendor/switchyar
 
 # Default first-party plugins
 nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents"] } }
+nemo-agent-optimization-plugin = { source = "../../plugins/nemo-agent-optimization/src/nemo_agent_optimization_plugin", module = "nemo_agent_optimization_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-anonymizer-plugin = { source = "../../plugins/nemo-anonymizer/src/nemo_anonymizer_plugin", module = "nemo_anonymizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor", inherit = { "entry-points" = ["nemo.*"] } }
 # Customization router plus its backend contributors. Heavy ML stacks stay in the
@@ -869,7 +889,8 @@ nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evalua
 # shared_data mirrors the standalone plugin's wheel shared-data: Fabric resolves
 # adapter descriptors from <sys.prefix>/share/nemo-fabric/adapters at runtime.
 nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] }, shared_data = { "../../insights-analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json" } }
-# Required by agents.optimize (OptimizeJob lives here; agents plugin imports it at router setup).
+# Supplies the `nat` optimization strategy that `nemo agents optimize` dispatches to. Discovered
+# through its nemo.jobs entry point; nemo-agent-optimization-plugin does not depend on it.
 nemo-optimization-plugin = { source = "../../plugins/nemo-optimization/src/nemo_optimization", module = "nemo_optimization", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-guardrails-plugin = { source = "../../plugins/nemo-guardrails/src/nemo_guardrails_plugin", module = "nemo_guardrails_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-rl-plugin = { source = "../../plugins/nemo-rl/src/nemo_rl_plugin", module = "nemo_rl_plugin", inherit = { "entry-points" = ["nemo.*"] } }

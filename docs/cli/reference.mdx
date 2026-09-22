@@ -5939,7 +5939,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `evaluate`: Evaluate an agent workflow against a dataset as a...
 * `evaluate-suite`: Run a directory of containerized eval tasks (Harbor or...
 * `execute`: Execute an agent to completion as a scheduled platform job.
-* `optimize`: Optimize a Fabric agent workflow (numeric HPO).
 * `optimize-skills`: Optimize an agent's skills against eval failures via a...
 * `package-agent`: Build a container image for an agent stored on the platform.
 
@@ -5953,6 +5952,10 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 *Packaging (no platform required):*
 
 * `package`: Package a Fabric or NAT agent -- render -> validate ->...
+
+*Platform agents:*
+
+* `optimize`: Optimize a platform agent with an installed optimization...
 
 #### nemo agents create
 
@@ -7049,95 +7052,6 @@ nemo agents execute explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo agents optimize
-
-Optimize a Fabric agent workflow (numeric HPO).
-
-**Usage:**
-
-```shell
-nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Job Spec:**
-
-* `--optimize-config`: Location of the Fabric-native optimization YAML.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.
-* `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references (Agent under Test package, dataset, eval.fabric.base_dir tree, hooks and MCP configs).  Stage one with `nemo agents optimize prepare-fileset`. Required for remote submissions, where the job has no access to the client's filesystem. Programmatic local runs may omit it and use an absolute host path for optimize_config.
-* `--agent`: Optional platform agent reference ('name' or 'workspace/name'). When omitted, the optimization config must include an inline Fabric agent package.
-* `--output PATH | FILESET_REF`: Where to publish the study artifacts (optimized config, trials dataframe, pareto plots, ATIF evidence) once the study succeeds — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  This is in addition to the per-job artifacts that ``ctx.results.save`` always registers; it gives remote clients a stable, addressable location to read from.
-
-**Spec Source:**
-
-* `--spec`: Spec as a JSON string. [default: \{}]
-* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
-
-**Submission:**
-
-* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
-* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
-* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-
-Job Spec flags are generated from the OptimizeSubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
-
-Some spec fields cannot be represented as CLI flags: `workspace`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
-​
-
-**Commands:**
-
-* `explain`: Show input/output schemas.
-* `prepare-fileset`: Validate an optimize bundle and upload it to a fileset...
-
-##### nemo agents optimize explain
-
-Show input/output schemas.
-
-**Usage:**
-
-```shell
-nemo agents optimize explain [OPTIONS]
-```
-
-**Options:**
-
-* `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents optimize prepare-fileset
-
-Validate an optimize bundle and upload it to a fileset for `optimize`.
-
-**Usage:**
-
-```shell
-nemo agents optimize prepare-fileset [OPTIONS]
-```
-
-**Options:**
-
-* `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
-* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --optimize-config`.
-* `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
-* `--workspace`: Workspace for the fileset and for agent / model preflight. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
-* `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
-* `--dry-run`: Run preflight and print the result without uploading.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
 #### nemo agents optimize-skills
 
 Optimize an agent's skills against eval failures via a coding agent (Claude).
@@ -7473,6 +7387,142 @@ nemo agents package [OPTIONS]
 * `--agent-version`: Override agent version OCI label.
 * `--agent-author`: Override agent author OCI label.
 * `--template`: Path to an external Jinja2 Dockerfile template.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents optimize
+
+Optimize a platform agent with an installed optimization strategy.
+
+**Usage:**
+
+```shell
+nemo agents optimize [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--install-completion`: Install completion for the current shell.
+* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list-strategies`: List the strategies `--strategy` accepts, one name per line.
+* `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
+
+*Jobs:*
+
+* `run-strategy`: Optimize a platform agent with an installed optimization...
+
+##### nemo agents optimize list-strategies
+
+List the strategies `--strategy` accepts, one name per line.
+
+Only the platform is asked, because only the platform runs the job: a
+client venv without a strategy plugin still submits to a server that
+has it, and vice versa. Answering from this environment instead would
+describe a different machine, so an unreachable platform is an error
+rather than a cue to guess.
+
+**Usage:**
+
+```shell
+nemo agents optimize list-strategies [OPTIONS]
+```
+
+**Options:**
+
+* `--base-url`: Platform to ask. Defaults to the same target as every other `nemo` command. [env: NEMO_BASE_URL=]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents optimize prepare-fileset
+
+Validate a NAT optimize bundle and upload it to a fileset for `optimize run-strategy`.
+
+**Usage:**
+
+```shell
+nemo agents optimize prepare-fileset [OPTIONS]
+```
+
+**Options:**
+
+* `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
+* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize run-strategy --optimize-config`.
+* `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
+* `--workspace`: Workspace for the fileset and for agent / model preflight. [default: default]
+* `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
+* `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
+* `--dry-run`: Run preflight and print the result without uploading.
+* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents optimize run-strategy
+
+Optimize a platform agent with an installed optimization strategy.
+
+**Usage:**
+
+```shell
+nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--strategy`: Installed optimization strategy to run, e.g. 'nat'. List what this platform has with `nemo agents optimize list-strategies`.
+* `--optimize-config`: Location of the strategy's configuration YAML.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.
+* `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references.  Stage one with `nemo agents optimize prepare-fileset`.  Required for remote submissions, where the job has no access to the client's filesystem.
+* `--agent`: Platform agent to optimize ('name' or 'workspace/name'). Strategies that can take the agent under test from the config itself may leave this unset.
+* `--output PATH | FILESET_REF`: Where the strategy should publish its artifacts once the run succeeds — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
+* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
+
+Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
+​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
+###### nemo agents optimize run-strategy explain
+
+Show input/output schemas.
+
+**Usage:**
+
+```shell
+nemo agents optimize run-strategy explain [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: Annotate the bundle with this profile.
+* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 

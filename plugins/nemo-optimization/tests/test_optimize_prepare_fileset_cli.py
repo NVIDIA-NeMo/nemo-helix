@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -14,9 +15,7 @@ from unittest.mock import patch
 import pytest
 import typer
 import yaml
-from nemo_agents_plugin.cli import AgentsCLI
-from nemo_agents_plugin.jobs.optimize_cli import register_prepare_fileset_command
-from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_optimization.optimize_cli import register_prepare_fileset_command
 from typer.testing import CliRunner
 
 CONFIG: dict[str, Any] = {
@@ -44,7 +43,7 @@ def bundle(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def app() -> typer.Typer:
-    """The ``optimize`` job group, with the command the CLI hook injects into it."""
+    """The shared ``optimize`` group, carrying the verb this plugin contributes to it."""
     group = typer.Typer(name="optimize")
 
     @group.callback()
@@ -76,7 +75,7 @@ def _patch_upload(record: dict[str, Any]) -> ExitStack:
         return _StubManager()
 
     stack = ExitStack()
-    stack.enter_context(patch("nemo_agents_plugin.jobs.optimize_cli._platform_sdk", return_value=_StubSDK()))
+    stack.enter_context(patch("nemo_optimization.optimize_cli._platform_sdk", return_value=_StubSDK()))
     stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=object()))
     stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=manager))
     return stack
@@ -106,6 +105,8 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
     assert record["validated"] is True
     assert record["local_path"] == bundle
     assert record["remote_path"] == ""
+    assert "nemo agents optimize run-strategy" in result.output
+    assert "--strategy nat" in result.output
     assert "--optimize-config-fileset default/my-opt-fs" in result.output
     assert "--optimize-config optimize.yml" in result.output
 
@@ -141,7 +142,7 @@ def test_refuses_to_upload_a_bundle_that_fails_preflight(app: typer.Typer, bundl
     def _no_sdk(_base_url: str) -> Any:
         raise AssertionError("preflight must fail before the platform is contacted")
 
-    with patch("nemo_agents_plugin.jobs.optimize_cli._platform_sdk", side_effect=_no_sdk):
+    with patch("nemo_optimization.optimize_cli._platform_sdk", side_effect=_no_sdk):
         result = CliRunner().invoke(
             app,
             [
@@ -164,7 +165,7 @@ def test_dry_run_validates_without_uploading(app: typer.Typer, bundle: Path) -> 
     def _no_sdk(_base_url: str) -> Any:
         raise AssertionError("--dry-run must not contact the platform")
 
-    with patch("nemo_agents_plugin.jobs.optimize_cli._platform_sdk", side_effect=_no_sdk):
+    with patch("nemo_optimization.optimize_cli._platform_sdk", side_effect=_no_sdk):
         result = CliRunner().invoke(
             app,
             [
@@ -184,14 +185,17 @@ def test_dry_run_validates_without_uploading(app: typer.Typer, bundle: Path) -> 
     assert "Would upload" in result.output
 
 
-def test_the_hook_attaches_prepare_fileset_to_the_optimize_group_only() -> None:
-    """``update_job_cli`` fires for every job; only optimize gets the extra verb."""
-    optimize_group = typer.Typer(name="optimize")
-    AgentsCLI().update_job_cli(OptimizeJob, optimize_group)
-    assert [command.name for command in optimize_group.registered_commands] == ["prepare-fileset"]
+def test_this_plugin_contributes_only_prepare_fileset() -> None:
+    """What the optimize group gets when it calls this plugin's registrar: exactly one verb."""
+    group = typer.Typer(name="optimize")
+    register_prepare_fileset_command(group)
+    assert [command.name for command in group.registered_commands] == ["prepare-fileset"]
 
-    from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
 
-    evaluate_group = typer.Typer(name="evaluate")
-    AgentsCLI().update_job_cli(EvaluateAgentJob, evaluate_group)
-    assert evaluate_group.registered_commands == []
+def test_the_entry_point_points_at_the_registrar() -> None:
+    """Discovery calls whatever this key names; a stale path would drop the verb silently."""
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as f:
+        entry_points = tomllib.load(f)["project"]["entry-points"]["nemo.cli.agents.optimize"]
+
+    assert entry_points == {"prepare-fileset": "nemo_optimization.optimize_cli:register_prepare_fileset_command"}

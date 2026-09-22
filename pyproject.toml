@@ -245,6 +245,7 @@ agents-deepagents-e2e-services = [
 cpu-tasks = [
   { include-group = "nhx-base" },
   { include-group = "nhx-task-runtime" },
+  "nemo-agent-optimization-plugin",
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[all]",
@@ -437,6 +438,7 @@ nemo-agents-example-email-security = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
 nemo-automodel-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nhx-automodel = { workspace = true }
@@ -501,6 +503,7 @@ members = [
   "plugins/nemo-customizer",
   "plugins/nemo-automodel",
   "plugins/nemo-optimization",
+  "plugins/nemo-agent-optimization",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "services/automodel",

@@ -98,14 +98,14 @@ See **the `nemo-agent-skills-optimization` skill** for the full optimize-skills 
 
 ### 3. Prompt + hyperparameter tuning
 
-If `nemo agents optimize` has not been run for this agent since the last
+If `nemo agents optimize run-strategy` has not been run for this agent since the last
 snapshot, suggest running it. The job sweeps prompts and hyperparameters via
 `nat optimize` against the agent's eval dataset.
 
 Suggested actions:
 
 - `nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>`
-- `nemo agents optimize --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
+- `nemo agents optimize run-strategy --strategy nat --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
 - After it completes, apply the new prompt + hyperparameters to a sibling
   agent, deploy it, and run `nemo agents evaluate` to compare.
 
@@ -215,7 +215,7 @@ survives across reads.
 |--------------|---------|
 | `model_optimization` | Switchyard routing split or smaller-model fit |
 | `skill_optimization` | `nemo agents optimize-skills` is recommended |
-| `prompt_optimization` | `nemo agents optimize` is recommended |
+| `prompt_optimization` | `nemo agents optimize run-strategy` is recommended |
 | `new_model_scan` | New model appeared since last snapshot |
 
 `model_optimization` is reused for both "use a smaller model" and "add a
@@ -321,7 +321,7 @@ nemo models list --filter.name nemotron   # find Nemotron candidates
 # The optimize command's --optimize-config value must be relative to the staged fileset root.
 nemo agents evaluate --agent <name> --eval-config <yaml>
 nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>
-nemo agents optimize --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
+nemo agents optimize run-strategy --strategy nat --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
 nemo agents optimize-skills --spec-file .agent-improver.yml
 nemo agents evaluate-suite --spec '{"evals": "<dir>", "agent": "<name>"}'
 
@@ -348,7 +348,7 @@ nemo auditor audit run --spec '{"config": "default/<config>", "target": "default
   snapshot model list. Pure computation.
 - **Skill / prompt optimization gating**: check whether
   `iterations[].timestamp` from a prior `nemo agents optimize-skills` /
-  `nemo agents optimize` run is newer than the last snapshot.
+  `nemo agents optimize run-strategy` run is newer than the last snapshot.
 
 **Requires execution:**
 
