@@ -61,14 +61,6 @@ Check whether the generated SDK matches the OpenAPI spec and Stainless config:
 uv run --frozen nemo-platform-sdk-tools is-up-to-date --output-dir python-sdk-lint
 ```
 
-## Generated CLI
-
-Regenerate the API-backed NeMo Platform CLI commands:
-
-```sh
-uv run --frozen nemo-platform-sdk-tools generate-cli
-```
-
 ## SDK Vendoring
 
 Vendor configured platform packages into the Python SDK wrapper:
@@ -86,4 +78,4 @@ uv run --frozen nemo-platform-sdk-tools post-generation update-pyproject
 uv run --frozen nemo-platform-sdk-tools post-generation update-all
 ```
 
-Prefer the Makefile targets (`make generate-cli-commands`, `make vendor`, and `make update-sdk`) for normal repo workflows.
+Prefer the Makefile targets (`make vendor` and `make update-sdk`) for normal repo workflows.

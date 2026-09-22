@@ -345,10 +345,10 @@ def test_code_output_uses_typed_secrets_client() -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert "client_from_platform(platform_client, SecretsClient)" in result.stdout
-    assert "PlatformSecretCreateRequest" in result.stdout
-    assert "SecretStr" in result.stdout
-    assert "<secret-value>" in result.stdout
+    assert "from nemo_platform_plugin.secrets.client import SecretsClient" in result.stdout
+    assert "nemo_platform import" not in result.stdout
+    assert "client.create_secret(" in result.stdout
+    assert 'PlatformSecretCreateRequest(name="hf-token", value="***")' in result.stdout
     assert "nvapi-real" not in result.stdout
     assert secrets.create_calls == []
 
@@ -370,9 +370,9 @@ def test_delete_code_output_uses_typed_secrets_client_without_deleting() -> None
     )
 
     assert result.exit_code == 0, result.output
-    assert "client_from_platform(platform_client, SecretsClient)" in result.stdout
-    assert "secrets.delete_secret(" in result.stdout
-    assert 'name=str(args["name"])' in result.stdout
+    assert "from nemo_platform_plugin.secrets.client import SecretsClient" in result.stdout
+    assert 'client.delete_secret(name="hf-token", workspace="default")' in result.stdout
+    assert "print(" not in result.stdout
     assert secrets.delete_calls == []
 
 
@@ -394,12 +394,9 @@ def test_list_code_output_omits_none_query_params() -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert "query_params: ListSecretsQueryParams = {}" in result.stdout
-    assert 'query_params["page_size"] = int(page_size)' in result.stdout
-    assert "query_params=query_params or None" in result.stdout
-    assert "page_result = response.page()" in result.stdout
+    assert 'client.list_secrets(workspace="default", query_params={"page_size": 20})' in result.stdout
+    assert "for item in response.page().items:" in result.stdout
     assert "response.items()" not in result.stdout
-    assert "else None" not in result.stdout
     assert secrets.list_calls == []
 
 
@@ -422,8 +419,8 @@ def test_list_code_output_consumes_all_pages_only_when_requested() -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert "for secret in response.items():" in result.stdout
-    assert "page_result = response.page()" not in result.stdout
+    assert "for item in response.items():" in result.stdout
+    assert "response.page()" not in result.stdout
     assert secrets.list_calls == []
 
 
@@ -446,9 +443,8 @@ def test_update_code_output_preserves_unset_value_for_description_only_update() 
     )
 
     assert result.exit_code == 0, result.output
-    assert "body = PlatformSecretUpdateRequest(description=str(description))" in result.stdout
-    assert "value=SecretStr(str(secret_value)) if secret_value is not None else None" not in result.stdout
-    assert "description=args.get" not in result.stdout
+    assert 'body=PlatformSecretUpdateRequest(description="metadata only")' in result.stdout
+    assert "value=" not in result.stdout
     assert secrets.update_calls == []
 
 
@@ -471,8 +467,7 @@ def test_update_code_output_preserves_unset_description_for_value_only_update() 
     )
 
     assert result.exit_code == 0, result.output
-    assert "body = PlatformSecretUpdateRequest(value=SecretStr(str(secret_value)))" in result.stdout
-    assert "value=SecretStr(str(secret_value)) if secret_value is not None else None" not in result.stdout
+    assert 'body=PlatformSecretUpdateRequest(value="***")' in result.stdout
+    assert "description=" not in result.stdout
     assert "new-secret" not in result.stdout
-    assert "<secret-value>" in result.stdout
     assert secrets.update_calls == []

@@ -99,7 +99,7 @@ from nemo_platform_plugin.cli_state import resolve_cli_workspace, resolve_local_
 from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.routes import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
+from nemo_platform_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.jobs._cli_options import (
     load_options_file,
