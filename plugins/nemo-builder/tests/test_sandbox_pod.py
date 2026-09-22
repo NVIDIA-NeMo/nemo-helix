@@ -14,6 +14,7 @@ from nemo_builder_plugin.run.supervise import (
     KANIKO_CAPABILITIES,
     RESULT_MARKER,
     _build_script,
+    _exit_code,
     _pod_manifest,
     _results_from_log,
 )
@@ -182,3 +183,25 @@ class TestResultParsing:
         """A Dockerfile can print anything it likes into this log."""
         log = f"{RESULT_MARKER} demo-1-0 notanumber\n{RESULT_MARKER} oops\n"
         assert _results_from_log(log) == {}
+
+
+class TestExitCode:
+    """The exit code is a scheduling decision, not a report.
+
+    The Jobs dispatcher schedules the next step only when this one is COMPLETED, so a non-zero
+    exit here means `push` never runs for ANY image in the set. Found by adversarial review: the
+    original returned 1 on any failure, so one broken Dockerfile published nothing at all.
+    """
+
+    def test_a_partial_failure_still_lets_push_run(self) -> None:
+        assert _exit_code(failures=1, total=10) == 0
+
+    def test_a_clean_set_succeeds(self) -> None:
+        assert _exit_code(failures=0, total=3) == 0
+
+    def test_a_set_where_nothing_built_fails_the_step(self) -> None:
+        """Nothing to publish, so there is no reason to run push -- and the job should say so."""
+        assert _exit_code(failures=3, total=3) == 1
+
+    def test_a_single_image_set_that_failed_fails_the_step(self) -> None:
+        assert _exit_code(failures=1, total=1) == 1

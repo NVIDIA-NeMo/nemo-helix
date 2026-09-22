@@ -233,6 +233,26 @@ def _results_from_log(log: str | bytes) -> dict[str, int]:
     return results
 
 
+def _exit_code(*, failures: int, total: int) -> int:
+    """This step's exit code, given how many of the set's images failed to build.
+
+    **Non-zero only when there is nothing left to publish.** The exit code is not a report -- it
+    is a scheduling decision, because the Jobs dispatcher creates the next step only when this one
+    is `COMPLETED`. Any non-zero exit therefore means `push` never runs, for the whole set.
+
+    An earlier version returned 1 whenever *any* image failed. One broken Dockerfile in a set of
+    ten then published zero images, and the reconciler failed all ten rows -- the opposite of what
+    every docstring in this plugin claimed about partial failure.
+
+    Exiting 0 on a partial failure does not hide it. `push` finds no layout for each failed image,
+    counts it, and exits non-zero itself; that is the last step, so the job still ends in an error
+    state, and the reconciler resolves exactly the images that were published.
+    """
+    if total and failures >= total:
+        return 1
+    return 0
+
+
 def main() -> int:
     config = SuperviseStepConfig.model_validate(read_step_config())
     workspace, job_id = job_identity()
@@ -241,6 +261,7 @@ def main() -> int:
     k8s_config.load_incluster_config()
     api = k8s.CoreV1Api()
 
+    total = sum(len(group.images) for group in config.groups)
     failures = 0
     for index, group in enumerate(config.groups):
         pod_name = f"nmp-sbx-{job_id}-g{index}"[:63]
@@ -276,8 +297,5 @@ def main() -> int:
             api.delete_namespaced_pod(name=pod_name, namespace=config.sandbox.namespace, grace_period_seconds=0)
 
     if failures:
-        # Non-zero, but every group was still attempted. A partially failed set still has images
-        # worth publishing, which is why push and the reconciler both continue from here.
-        logger.error("%d image(s) failed to build", failures)
-        return 1
-    return 0
+        logger.error("%d of %d image(s) failed to build", failures, total)
+    return _exit_code(failures=failures, total=total)
