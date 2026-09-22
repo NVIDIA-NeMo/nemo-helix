@@ -63,9 +63,16 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
                 "NMPSecretResolver",
                 "NMPGenerationLog",
                 "NmpContext",
+                "NmpCliRunner",
+                "NmpErrorHandlingMixin",
+                "NmpDynamicVersionSource",
+                "NmpRun",
                 "TestNmpOption",
                 "ManifestBackedNmpGroup",
                 "nmpBaseURLEnv",
+                "nmp-intake",
+                "nmp2",
+                "_xnmp",
                 "nmpclient",
                 "nmpcontext",
                 "NMP",
@@ -110,9 +117,16 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "NHXSecretResolver" in renamed_text
     assert "NHXGenerationLog" in renamed_text
     assert "NhxContext" in renamed_text
+    assert "NhxCliRunner" in renamed_text
+    assert "NhxErrorHandlingMixin" in renamed_text
+    assert "NhxDynamicVersionSource" in renamed_text
+    assert "NhxRun" in renamed_text
     assert "TestNhxOption" in renamed_text
     assert "ManifestBackedNhxGroup" in renamed_text
     assert "nhxBaseURLEnv" in renamed_text
+    assert "nhx-intake" in renamed_text
+    assert "nhx2" in renamed_text
+    assert "_xnhx" in renamed_text
     assert "nhxclient" in renamed_text
     assert "nhxcontext" in renamed_text
     assert " NHX " in f" {renamed_text} "

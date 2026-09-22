@@ -41,20 +41,29 @@ ACRONYM_REPLACEMENTS = {
     "nmp": "nhx",
     "nmpclient": "nhxclient",
     "nmpcontext": "nhxcontext",
+    "nmpBaseURLEnv": "nhxBaseURLEnv",
+    "nmp-intake": "nhx-intake",
+    "nmp2": "nhx2",
+    "_xnmp": "_xnhx",
 }
 
 ACRONYM_REPLACEMENT_RULES = [
     (
         "NMP",
-        re.compile(r"NMP(?=BASE_URL|JobContext|OIDCConfig|ModelProvider|SecretResolver|GenerationLog)"),
+        re.compile(r"NMP(?=_BASE_URL|JobContext|OIDCConfig|ModelProvider|SecretResolver|GenerationLog)"),
         "NHX",
     ),
     (
         "Nmp",
-        re.compile(r"Nmp(?=Argument|Command|Config|Context|Group|HelpFormatter|Option|RepoRoot)"),
+        re.compile(
+            r"Nmp(?=Argument|CliRunner|Command|Config|Context|DynamicVersionSource|ErrorHandlingMixin|Group|HelpFormatter|Option|RepoRoot|Run)"
+        ),
         "Nhx",
     ),
     ("nmp", re.compile(r"(?<![A-Za-z0-9])nmp(?=BaseURLEnv)"), "nhx"),
+    ("nmp-intake", re.compile(r"(?<![A-Za-z0-9])nmp-intake(?![A-Za-z0-9])"), "nhx-intake"),
+    ("nmp2", re.compile(r"(?<![A-Za-z0-9])nmp2(?![A-Za-z0-9])"), "nhx2"),
+    ("_xnmp", re.compile(r"_xnmp(?![A-Za-z0-9])"), "_xnhx"),
     ("NMP", re.compile(r"(?<![A-Za-z0-9])NMP(?![A-Za-z0-9])"), "NHX"),
     ("nmp", re.compile(r"(?<![A-Za-z0-9])nmp(?![A-Za-z0-9])"), "nhx"),
     ("nmpclient", re.compile(r"(?<![A-Za-z0-9])nmpclient(?![A-Za-z0-9])"), "nhxclient"),
