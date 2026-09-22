@@ -133,6 +133,11 @@ def parse_args() -> argparse.Namespace:
         metavar="PATTERN",
         help="skip repo-relative paths matching this glob; may be repeated",
     )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="run even when the target worktree already has changes",
+    )
     return parser.parse_args()
 
 
@@ -144,8 +149,8 @@ def main() -> int:
     if args.dry_run:
         inventory(include_globs, exclude_globs)
         return 0
-    if not args.resume and run_git("status", "--short").stdout:
-        print("The worktree must be clean before running the rename.", file=sys.stderr)
+    if not args.resume and not args.allow_dirty and run_git("status", "--short").stdout:
+        print("The worktree must be clean before running the rename. Use --allow-dirty to override.", file=sys.stderr)
         return 1
 
     try:

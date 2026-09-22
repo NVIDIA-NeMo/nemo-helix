@@ -227,6 +227,26 @@ def test_root_globs_do_not_match_nested_paths(tmp_path: Path) -> None:
     assert (repo / "docs/guide.md").read_text() == "NeMo Platform uses NMP.\n"
 
 
+def test_allow_dirty_overrides_clean_worktree_guard(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+    install_rename_tools(repo)
+
+    (repo / "README.md").write_text("initial\n")
+    run(["git", "add", "."], repo)
+    run(["git", "commit", "-m", "initial"], repo)
+    (repo / "README.md").write_text("NeMo Platform uses NMP.\n")
+
+    blocked = run(["tools/rename/rename-to-nemo-helix.sh"], repo, check=False)
+    assert blocked.returncode == 1
+    assert "--allow-dirty" in blocked.stderr
+
+    run(["tools/rename/rename-to-nemo-helix.sh", "--allow-dirty"], repo)
+
+    assert (repo / "README.md").read_text() == "NeMo Helix uses NHX.\n"
+
+
 def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

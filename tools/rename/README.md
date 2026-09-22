@@ -10,7 +10,7 @@ Use these scripts from the repository root to preview, apply, and verify the NeM
 - Run from a git checkout of this repository, or pass `--repo-dir /path/to/checkout` to target another checkout explicitly.
 - Optionally pass repeated `--include-glob` and `--exclude-glob` filters to segment a rename by repo-relative path. Use patterns such as `docs/**`, `packages/**`, `web/**`, `*.md`, and `docker-bake.hcl`.
 - Install the standard repository tools, including `git`, `grep`, `sed`, and Python 3.7 or newer.
-- Start with a clean worktree before the actual rename. The script refuses to run when `git status --short` is non-empty unless `--continue` is used.
+- Start with a clean worktree before the actual rename when possible. The script refuses to run when `git status --short` is non-empty unless `--continue` or `--allow-dirty` is used.
 - Review the dry-run output before applying changes.
 
 ## 1. Preview the rename
@@ -43,6 +43,8 @@ If a previous rename attempt stopped after making changes, inspect the worktree 
 tools/rename/rename-to-nemo-helix.sh --continue
 # or, from any directory:
 tools/rename/rename-to-nemo-helix.sh --repo-dir /path/to/checkout --continue
+# or, when intentionally applying on top of existing changes:
+tools/rename/rename-to-nemo-helix.sh --allow-dirty
 ```
 
 ## 3. Verify the result
