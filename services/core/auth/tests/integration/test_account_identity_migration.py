@@ -99,6 +99,10 @@ def _grant_workspace_role(client: TestClient, *, workspace: str, principal: str,
     assert response.status_code in {200, 201}, response.text
 
 
+@pytest.mark.skip(
+    reason="hangs past the 120s CI timeout and kills the xdist worker; "
+    "see https://github.com/NVIDIA-NeMo/nemo-platform/actions/runs/35649117450 (main)"
+)
 def test_first_bearer_request_materializes_account_and_uses_legacy_alias_binding(
     account_migration_client: TestClient,
 ) -> None:

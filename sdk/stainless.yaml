@@ -177,7 +177,7 @@ readme:
       params: {}
     pagination:
       type: request
-      endpoint: get /apis/audit/v2/workspaces/{workspace}/jobs
+      endpoint: get /apis/files/v2/workspaces/{workspace}/filesets
       params: {}
 
 # security_schemes:
@@ -197,26 +197,6 @@ diagnostics:
 #
 # [configuration guide]: https://app.stainless.com/docs/guides/configure#resources
 resources:
-  audit:
-    standalone_api: true
-    models: {}
-    methods: {}
-    subresources:
-      configs:
-        models: {}
-        methods: {}
-      plugins:
-        models: {}
-        methods: {}
-      targets:
-        models: {}
-        methods: {}
-      jobs:
-        models: {}
-        methods: {}
-        subresources:
-          results:
-            methods: {}
   entities:
     standalone_api: true
     models:
@@ -574,16 +554,6 @@ resources:
           create: post /apis/entities/v2/workspaces/{workspace}/members
           update: put /apis/entities/v2/workspaces/{workspace}/members/{principal_id}
           delete: delete /apis/entities/v2/workspaces/{workspace}/members/{principal_id}
-  safe_synthesizer:
-    standalone_api: true
-    subresources:
-      jobs:
-        models: {}
-        methods: {}
-        subresources:
-          results:
-            models: {}
-            methods: {}
   $shared:
     models:
       validation_error: ValidationError

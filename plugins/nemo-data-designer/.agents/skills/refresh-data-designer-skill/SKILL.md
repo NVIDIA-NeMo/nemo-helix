@@ -53,7 +53,7 @@ For plugin-owned files, "review only" means: read upstream's version to see whet
 grep -E '"data-designer==' plugins/nemo-data-designer/pyproject.toml | head -1
 ```
 
-Capture the version string (e.g., `0.9.1`) — this is `$VERSION` for the rest of the procedure.
+Capture the version string (e.g., `0.9.3`) — this is `$VERSION` for the rest of the procedure.
 
 ### Step 2 — Fetch the upstream bundle to a temp directory
 

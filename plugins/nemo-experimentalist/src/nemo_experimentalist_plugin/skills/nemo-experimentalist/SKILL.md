@@ -20,7 +20,6 @@ not-for:
   - nemo-experiments-upload (use to upload traces or evaluation results)
   - nemo-evaluator (use to author a new evaluation or metric)
   - nemo-insights / agents analyst (use to generate the Insight before optimizing from it)
-  - nemo-eval-author (use to author an evaluation outside an Experimentalist run)
   - agents-optimize (use to tune routing, cost, or latency for a deployed agent)
 compatibility: requires the enabled `nemo-experimentalist-plugin`, Docker for Harbor evaluation, a running local platform, and the repository-root `.venv` for LLM-authored code.
 maturity: beta
@@ -207,7 +206,7 @@ from the current directory.
 | `--agent` | Local agent directory or Git URL. A Git URL enables candidate branch and PR/MR publication. | Explicit mode; optional when an Insight supplies the agent. |
 | `--ethos` | Markdown description of the agent. | Optional; use the profile or conventional `ETHOS.md` when available. |
 | `--train-dataset` / `--validation-dataset` | Separate local Harbor datasets or registry references used to measure improvement. | Yes, unless the profile supplies both. |
-| `--task-template` | A directory containing one Harbor task template (`task.toml`, with placeholder values). In Insight-driven mode, Eval Author copies and fills it for representative failing traces to create the targeted evaluation suite. | Required in Insight-driven mode unless the profile supplies it. |
+| `--task-template` | A directory containing one Harbor task template (`task.toml`, with placeholder values). In Insight-driven mode, Experimentalist copies and fills it for representative failing traces to create the targeted evaluation suite. | Required in Insight-driven mode unless the profile supplies it. |
 | `--config` | YAML or JSON **mapping** that validates as the Experimentalist run configuration: top-level run limits plus optional `source`, `storage`, `goal_config`, `coder`, `analyzer`, `proposer`, `evaluator`, and `eval_author` sections. It does not configure model endpoints or model tiers. | No; profile or defaults apply. |
 | `--workspace` / `--base-url` | NeMo workspace and platform URL. | Workspace defaults to the profile or `default`; base URL uses `NMP_BASE_URL` or localhost. |
 | `--experiment-dir` / `--output` / `--experiments-output` / `-o` | Experiment directory that receives `eval-and-optimize/`: the resolved source agent, generated candidates, per-trial results, analysis, `run.json` state, and `OPTIMIZATION.md` summary. | No; default is `<profile-dir>/.nemo-optimizer/experiments/<timestamp>-<uuid>` with a profile, otherwise `./tmp/<timestamp>-<uuid>`. |

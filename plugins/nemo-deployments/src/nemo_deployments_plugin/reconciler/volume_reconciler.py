@@ -57,22 +57,24 @@ class VolumeReconciler:
 
         backend_config = volume.backend_config.model_dump(by_alias=True, exclude_none=True)
         try:
-            update = await backend.delete_volume(volume.workspace, volume.name, backend_config=backend_config)
+            result = await backend.delete_volume(volume.workspace, volume.name, backend_config=backend_config)
         except Exception:
             logger.warning("Backend delete failed for volume %s — will retry", volume_id, exc_info=True)
             return
-
-        # Backends report a failed delete by returning a FAILED status rather than
-        # raising, so guard on the returned status too: only remove the entity row
-        # once the backend confirms the resource is gone (RELEASED). A non-success
-        # status must leave the entity + backend resource intact so the next cycle
-        # retries, otherwise the entity disappears while the PVC is orphaned.
-        if update.status != "RELEASED":
+        if result.status != "RELEASED":
             logger.warning(
                 "Backend delete for volume %s did not succeed (reported %s) — will retry: %s",
                 volume_id,
-                update.status,
-                update.status_message,
+                result.status,
+                result.status_message,
+            )
+            await self._update_volume_status(
+                volume,
+                VolumeStatusUpdate(
+                    status="DELETING",
+                    status_message=result.status_message,
+                    error_details=result.error_details,
+                ),
             )
             return
 

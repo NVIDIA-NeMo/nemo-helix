@@ -2892,3 +2892,91 @@ def test_scheduler_name_not_set_by_default(
     backend._batch_v1.create_namespaced_job.assert_called_once()
     job_body = backend._batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert job_body.spec.template.spec.scheduler_name is None
+
+
+def _cancellation_step() -> PlatformJobStepWithContext:
+    return PlatformJobStepWithContext(
+        id="test-step-id",
+        job="test-job-id",
+        workspace="default",
+        attempt_id="test-job-attempt-id",
+        name="test-step",
+        fileset="test-logs-fileset",
+        step_spec=PlatformJobStepSpec(
+            name="test-step",
+            executor=CPUExecutionProvider(
+                provider="cpu", profile="default", container=ContainerSpec(image="test-image")
+            ),
+            config={},
+        ),
+    )
+
+
+def _active_task_jobs_client() -> MagicMock:
+    active_task = MagicMock()
+    active_task.name = "test-task"
+    active_task.status = PlatformJobStatus.ACTIVE
+    jobs = MagicMock()
+    jobs.list_job_step_tasks.return_value.data.return_value.data = [active_task]
+    return jobs
+
+
+def test_cancel_sweeps_active_task_when_kubernetes_job_still_exists(kubernetes_job):
+    """update_all_tasks only visits tasks that still have a pod, so an orphan stays ACTIVE.
+
+    Once this pass returns a terminal status the step is never reconciled again, so the
+    sweep has to happen here rather than on a later `job is None` pass.
+    """
+    from nmp.core.jobs.controllers.backends.base import JobUpdate
+
+    kubernetes_job._jobs = _active_task_jobs_client()
+    kubernetes_job.terminate_job = MagicMock()
+    kubernetes_job.create_step_update = MagicMock(
+        return_value=JobUpdate(status=PlatformJobStatus.CANCELLED, status_details={})
+    )
+
+    update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
+
+    assert update.status == PlatformJobStatus.CANCELLED
+    kwargs = kubernetes_job._jobs.update_job_step_task.call_args.kwargs
+    assert kwargs["name"] == "test-task"
+    assert kwargs["body"].status == PlatformJobStatus.CANCELLED
+
+
+def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job):
+    """A non-terminal pass gets reconciled again; cancelling its tasks now would be premature."""
+    from nmp.core.jobs.controllers.backends.base import JobUpdate
+
+    kubernetes_job._jobs = _active_task_jobs_client()
+    kubernetes_job.terminate_job = MagicMock()
+    kubernetes_job.create_step_update = MagicMock(
+        return_value=JobUpdate(status=PlatformJobStatus.CANCELLING, status_details={})
+    )
+
+    kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
+
+    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+
+
+def test_cancel_sweep_attempts_every_task_when_one_update_fails(kubernetes_job):
+    """One failed task update must not stop the remaining tasks from being cancelled."""
+    from nmp.core.jobs.controllers.backends.base import JobUpdate
+
+    first, second = MagicMock(), MagicMock()
+    first.name, first.status = "task-1", PlatformJobStatus.ACTIVE
+    second.name, second.status = "task-2", PlatformJobStatus.ACTIVE
+
+    jobs = MagicMock()
+    jobs.list_job_step_tasks.return_value.data.return_value.data = [first, second]
+    jobs.update_job_step_task.side_effect = [RuntimeError("boom"), None]
+    kubernetes_job._jobs = jobs
+    kubernetes_job.terminate_job = MagicMock()
+    kubernetes_job.create_step_update = MagicMock(
+        return_value=JobUpdate(status=PlatformJobStatus.CANCELLED, status_details={})
+    )
+
+    update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
+
+    assert [call.kwargs["name"] for call in jobs.update_job_step_task.call_args_list] == ["task-1", "task-2"]
+    # The pod is gone, so the step still reaches a terminal status and stays deletable.
+    assert update.status == PlatformJobStatus.CANCELLED
