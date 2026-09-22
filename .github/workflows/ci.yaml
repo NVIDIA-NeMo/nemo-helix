@@ -1052,6 +1052,40 @@ jobs:
             coverage.json
             coverage-html/
 
+  # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
+  # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
+  # nothing carries the bare name -- the required check would sit on "Expected — Waiting for
+  # status to be reported" forever. This job reports that name, and is red whenever any leg is.
+  # Removing it means updating the ruleset, which needs repository admin.
+  python-unit-test-status:
+    name: Python unit tests
+    needs: [python-unit-test]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check unit test legs
+        shell: bash
+        env:
+          # A matrix job's `result` is already the aggregate: success only when every leg
+          # succeeded, failure when any leg failed.
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Python unit tests"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            printf '%s\n' "${NEEDS_JSON}" \
+              | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          printf '%s\n' "${NEEDS_JSON}" \
+            | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
   # The scaled-evals plugin stays out of `enabled-plugins`, so `python-unit-test` cannot
   # import it and skips its tests. Installing it into that shared run is not an option:
   # the platform then discovers the service and waits on a Postgres that is not there,
