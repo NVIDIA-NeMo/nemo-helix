@@ -301,7 +301,7 @@ export const grpoCustomizationJob: RlJob = {
 
 /**
  * The mapped message the training runner reports on an OOM, taken from the `CudaError` rule in
- * `services/rl/src/nmp/rl/tasks/training/errors/error_rules.yaml`.
+ * `services/rl/src/nhx/rl/tasks/training/errors/error_rules.yaml`.
  */
 export const grpoCudaErrorMessage =
   'Your job ran out of GPU memory during training. To reduce memory usage: 1) Reduce ' +

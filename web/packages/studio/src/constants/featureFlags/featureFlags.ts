@@ -30,7 +30,7 @@ import { z } from 'zod';
 // 2. Add the flag definition to `flagDefinitions` below:
 //    myNewFlag: booleanFlag('VITE_FF_MY_NEW_FLAG', false),
 //
-// 3. Add the flag to the `service/studio/src/nmp/studio/env_mappings.py`. Example:
+// 3. Add the flag to the `service/studio/src/nhx/studio/env_mappings.py`. Example:
 //    EnvMapping(marker="STUDIO_UI_VITE_FF_MY_NEW_FLAG", config_path="studio.feature_flags.my_new_flag", default="false"),
 //
 // 4. Use it in your code:

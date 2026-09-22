@@ -15,7 +15,7 @@ import {
  * On submit Studio creates the ModelDeploymentConfig and passes its name to the
  * job as `deployment_config`. The job's own model_entity task resolves that name
  * once training finishes and creates the ModelDeployment then — see
- * `launch_model` in `nmp.customization_common.tasks.model_entity.run`.
+ * `launch_model` in `nhx.customization_common.tasks.model_entity.run`.
  *
  * Studio deliberately does not create the deployment itself. That is the same
  * end state reached hours earlier, with a serving GPU idling through the entire

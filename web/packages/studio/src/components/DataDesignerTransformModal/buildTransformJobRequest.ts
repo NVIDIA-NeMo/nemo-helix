@@ -69,7 +69,7 @@ export const buildTransformJobRequest = ({
         : [],
       seed_config: {
         source: {
-          seed_type: 'nmp',
+          seed_type: 'nhx',
           path: buildSeedPath(filesetWorkspace, filesetName, filePath),
         },
         sampling_strategy: SamplingStrategy.ordered,
