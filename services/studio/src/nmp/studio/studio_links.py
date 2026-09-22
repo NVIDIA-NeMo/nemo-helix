@@ -76,7 +76,6 @@ STUDIO_LINK_DESTINATIONS: dict[str, StudioLinkDestination] = {
         aliases=("agent_evaluation_detail",),
         requires_name=True,
     ),
-    "agent_monitor": StudioLinkDestination("Agent monitor", "/workspaces/{workspace}/agents/monitor"),
     "agent_optimizations": StudioLinkDestination(
         "Agent optimizations",
         "/workspaces/{workspace}/agents/suggestions",
@@ -376,7 +375,6 @@ _STUDIO_LINK_DESTINATION_FEATURE_FLAGS: dict[str, tuple[str, ...]] = {
     "agent_deployment": ("agents_enabled",),
     "agent_evaluations": ("agents_enabled",),
     "agent_evaluation": ("agents_enabled",),
-    "agent_monitor": ("agents_enabled",),
     "agent_optimizations": ("agents_enabled",),
     "base_models": ("base_models_enabled",),
     "base_model": ("base_models_enabled",),

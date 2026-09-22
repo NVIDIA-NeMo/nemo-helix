@@ -169,11 +169,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="false",
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_MONITOR_ENABLED",
-        config_path="studio.feature_flags.monitor_enabled",
-        default="false",
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_OPTIMIZER_ENABLED",
         config_path="studio.feature_flags.optimizer_enabled",
         default="true",

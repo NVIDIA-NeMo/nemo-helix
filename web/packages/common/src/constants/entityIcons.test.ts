@@ -9,8 +9,6 @@ import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
  * must own its glyph outright — see the reuse test below.
  */
 const INTENTIONAL_ALIASES: Record<string, string> = {
-  // Monitor runs are agent telemetry, the same data spans are drawn from.
-  agentMonitorRuns: 'telemetrySpans',
   // Traces are one entity whether reached from Intake or from an Insight.
   insightTraces: 'telemetryTraces',
   // Every evaluation surface reads as "an evaluation".

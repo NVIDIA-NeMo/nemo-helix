@@ -4,7 +4,6 @@
 import { featureFlags } from '@studio/constants/featureFlags';
 import type { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 import {
-  getAgentMonitorRoute,
   getAgentsListRoute,
   getDataDesignerJobListRoute,
   getEvaluationResultsRoute,
@@ -55,19 +54,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
       /\bsynthesi[sz]e (data|dataset|datasets)\b/i,
       /\bgenerate (safety[-\s]?focused|safe|synthetic) (data|dataset|datasets)\b/i,
       /\bsafety data\b/i,
-    ],
-  },
-  {
-    id: 'agent-monitor',
-    title: 'Open Agent Monitor',
-    description: 'Studio has a monitor UI for agent telemetry, logs, and token usage.',
-    getHref: getAgentMonitorRoute,
-    requiredFeatureFlags: ['agentsEnabled', 'monitorEnabled'],
-    patterns: [
-      /\bmonitor (an? )?agent\b/i,
-      /\bagent (monitor|telemetry|logs|traces|usage)\b/i,
-      /\b(agent|agents).*\btoken usage\b/i,
-      /\btoken usage (for|on|of) (an? )?agent\b/i,
     ],
   },
   {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { agentRoutes, getAgentSideNavItems } from '@studio/routes/groups/agentRoutes';
+export { agentRoutes } from '@studio/routes/groups/agentRoutes';
 export {
   anonymizerRoutes,
   getAnonymizerSideNavItems,

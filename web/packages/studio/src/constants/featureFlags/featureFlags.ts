@@ -81,7 +81,6 @@ export const flagDefinitions = {
   jobsEnabled: previewFlag('VITE_FF_JOBS_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED'),
   modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
-  monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
   pluginsEnabled: previewFlag('VITE_FF_PLUGINS_ENABLED', true),
   safeSynthesizerEnabled: previewFlag('VITE_FF_SAFE_SYNTHESIZER_ENABLED', true),
