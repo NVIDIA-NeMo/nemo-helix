@@ -10,10 +10,10 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from nemo_deployments_plugin.backends.k8s.compiler import (
+from nemo_deployments_plugin.backends.k8s.compiler import ExecutorK8sDefaults
+from nemo_deployments_plugin.constants import (
     DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
     MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
-    ExecutorK8sDefaults,
 )
 from nemo_platform_plugin.config import ImagePullSecret
 from pydantic import BaseModel, Field, field_validator

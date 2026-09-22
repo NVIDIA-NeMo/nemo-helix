@@ -103,6 +103,22 @@ def test_resolve_job_ttl_none_when_unset_everywhere() -> None:
     assert resolve_job_ttl_seconds_after_finished(k8s_config=None, executor_defaults=None) is None
 
 
+def test_entity_job_ttl_rejects_below_floor() -> None:
+    # A per-deployment TTL below the floor races the reconciler's completion read; rejected.
+    from nemo_deployments_plugin.entities import K8sDeploymentConfig
+
+    for bad in (0, 5, 9):
+        with pytest.raises(ValueError):
+            K8sDeploymentConfig(jobTtlSecondsAfterFinished=bad)
+
+
+def test_entity_job_ttl_accepts_floor_and_none() -> None:
+    from nemo_deployments_plugin.entities import K8sDeploymentConfig
+
+    assert K8sDeploymentConfig(jobTtlSecondsAfterFinished=10).job_ttl_seconds_after_finished == 10
+    assert K8sDeploymentConfig(jobTtlSecondsAfterFinished=None).job_ttl_seconds_after_finished is None
+
+
 @pytest.mark.asyncio
 async def test_create_job_sets_default_ttl_seconds_after_finished(
     k8s_backend, mock_k8s_clients: MagicMock, mock_entities: AsyncMock
