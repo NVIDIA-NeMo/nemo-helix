@@ -44,8 +44,18 @@ ACRONYM_REPLACEMENTS = {
 }
 
 ACRONYM_REPLACEMENT_RULES = [
+    (
+        "NMP",
+        re.compile(r"NMP(?=BASE_URL|JobContext|OIDCConfig|ModelProvider|SecretResolver|GenerationLog)"),
+        "NHX",
+    ),
+    (
+        "Nmp",
+        re.compile(r"Nmp(?=Argument|Command|Config|Context|Group|HelpFormatter|Option|RepoRoot)"),
+        "Nhx",
+    ),
+    ("nmp", re.compile(r"(?<![A-Za-z0-9])nmp(?=BaseURLEnv)"), "nhx"),
     ("NMP", re.compile(r"(?<![A-Za-z0-9])NMP(?![A-Za-z0-9])"), "NHX"),
-    ("Nmp", re.compile(r"(?<![A-Za-z0-9])Nmp(?=[A-Z])"), "Nhx"),
     ("nmp", re.compile(r"(?<![A-Za-z0-9])nmp(?![A-Za-z0-9])"), "nhx"),
     ("nmpclient", re.compile(r"(?<![A-Za-z0-9])nmpclient(?![A-Za-z0-9])"), "nhxclient"),
     ("nmpcontext", re.compile(r"(?<![A-Za-z0-9])nmpcontext(?![A-Za-z0-9])"), "nhxcontext"),

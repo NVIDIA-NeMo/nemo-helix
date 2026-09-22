@@ -30,7 +30,7 @@ tools/rename/rename-to-nemo-helix.sh
 tools/rename/rename-to-nemo-helix.sh --repo-dir /path/to/checkout
 ```
 
-Expected outcome: the script updates UTF-8 text file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned. Acronym-only replacements are intentionally explicit: separated tokens such as `nmp_common`, `nmp-common`, and `NMP_*`; PascalCase prefixes such as `NmpContext`; and allowlisted lowercase names `nmpclient` and `nmpcontext` are renamed, while `snmp` and larger opaque alphanumeric values are left unchanged.
+Expected outcome: the script updates UTF-8 text file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned. Acronym-only replacements are intentionally explicit: separated tokens such as `nmp_common`, `nmp-common`, and `NMP_*`; known all-caps/PascalCase code prefixes such as `NMPJobContext`, `NMPOIDCConfig`, and `NmpContext`; and allowlisted lowercase names `nmpclient`, `nmpcontext`, and `nmpBaseURLEnv` are renamed, while `snmp` and larger opaque alphanumeric values are left unchanged.
 
 If a previous rename attempt stopped after making changes, inspect the worktree and then resume the remaining passes with:
 
