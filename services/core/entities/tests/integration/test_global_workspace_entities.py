@@ -72,7 +72,8 @@ class TestGlobalWorkspaceGet:
 @pytest.mark.integration
 @pytest.mark.asyncio
 class TestGlobalWorkspaceList:
-    async def test_listing_a_workspace_includes_global_entities(self, client: AsyncClient, workspaces):
+    async def test_listing_a_workspace_does_not_fold_in_global_entities(self, client: AsyncClient, workspaces):
+        """Sharing resolves names; it deliberately does not change what a listing returns."""
         await _create(client, "default", SHAREABLE, "shared-llm")
         await _create(client, "team-a", SHAREABLE, "local-llm")
 
@@ -80,8 +81,16 @@ class TestGlobalWorkspaceList:
 
         assert response.status_code == 200
         listed = {(e["workspace"], e["name"]) for e in response.json()["data"]}
-        assert ("default", "shared-llm") in listed
-        assert ("team-a", "local-llm") in listed
+        assert listed == {("team-a", "local-llm")}
+
+    async def test_a_globally_shared_entity_is_still_reachable_by_name(self, client: AsyncClient, workspaces):
+        """The listing stays pure, but the shared entity is usable - which is the point."""
+        await _create(client, "default", SHAREABLE, "shared-llm")
+
+        response = await client.get(_entities_url("team-a", SHAREABLE, "shared-llm"))
+
+        assert response.status_code == 200
+        assert response.json()["workspace"] == "default"
 
     async def test_listing_does_not_include_other_workspaces(self, client: AsyncClient, workspaces):
         await _create(client, "team-b", SHAREABLE, "other-llm")

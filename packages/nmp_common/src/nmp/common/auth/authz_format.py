@@ -10,9 +10,6 @@ from nemo_platform_plugin.authz_format import (
     PERMISSION_ID_PATTERN as PERMISSION_ID_PATTERN,
 )
 from nemo_platform_plugin.authz_format import (
-    global_read_permissions as global_read_permissions,
-)
-from nemo_platform_plugin.authz_format import (
     is_valid_nmp_scope_id as is_valid_nmp_scope_id,
 )
 from nemo_platform_plugin.authz_format import (

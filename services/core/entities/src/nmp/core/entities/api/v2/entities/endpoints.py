@@ -36,8 +36,8 @@ from nmp.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
     bindings_cache_delete,
-    expand_readable_workspaces,
-    get_readable_workspaces,
+    can_read_global_workspace,
+    get_accessible_workspaces,
     raise_if_workspace_inaccessible,
     require_workspace_access,
 )
@@ -50,7 +50,7 @@ from nmp.core.entities.app.repository.exceptions import (
 from nmp.core.entities.entities import Entity
 from nmp.core.entities.utils.filter import FilterDep
 from nmp.core.entities.utils.identifiers import generate_entity_name
-from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE, is_globally_shareable
+from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE
 from sqlalchemy.exc import IntegrityError
 
 
@@ -109,8 +109,10 @@ async def _validate_parent_access(
     """
 
     parent = await repository.get_entity_by_id(entity_id=parent_id)
-    readable = expand_readable_workspaces(accessible, parent.entity_type) if parent else accessible
-    if not parent or (readable is not None and parent.workspace not in readable):
+    allowed = accessible
+    if parent and accessible is not None and can_read_global_workspace(accessible, parent.entity_type):
+        allowed = accessible | {GLOBAL_WORKSPACE}
+    if not parent or (allowed is not None and parent.workspace not in allowed):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Parent entity '{parent_id}' not found or not in accessible workspaces",
@@ -356,7 +358,7 @@ async def list_entities(
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
     # Reads of a globally shareable type also see the global workspace; writes do not.
-    accessible_workspaces = await get_readable_workspaces(repository, entity_type)
+    accessible_workspaces = await get_accessible_workspaces(repository)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
         # Build combined filter for workspace access and user's filter
@@ -371,15 +373,11 @@ async def list_entities(
         # Check if workspace is being deleted (404 for user requests)
         await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
-        # A shareable type lists the request workspace unioned with the global one, so a
-        # shared entity shows up in every workspace's listing. Both rows are returned when
-        # a name exists in each; the caller sees the owning workspace on every entity.
-        if is_globally_shareable(entity_type) and workspace != GLOBAL_WORKSPACE:
-            query_workspace = ALL_WORKSPACES
-            effective_filter = add_workspace_filtering({workspace, GLOBAL_WORKSPACE}, filter, field="workspace")
-        else:
-            query_workspace = workspace
-            effective_filter = filter
+        # Listing a workspace returns that workspace only. Shared entities resolve by name
+        # (see get_entity_by_name) but are deliberately not folded into listings: doing so
+        # would redefine what this endpoint returns for every existing caller.
+        query_workspace = workspace
+        effective_filter = filter
 
     entities, total = await repository.list_entities(
         workspace=query_workspace,
@@ -445,15 +443,18 @@ async def get_entity_by_name(
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
+    accessible = await get_accessible_workspaces(repository)
     raise_if_workspace_inaccessible(
-        await get_readable_workspaces(repository, entity_type),
+        accessible,
         workspace,
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
 
     # Shareable types also resolve out of the global workspace. Local wins, so a
     # same-named entity in the request workspace always shadows the global one.
-    candidates = workspace_lookup_order(workspace) if is_globally_shareable(entity_type) else (workspace,)
+    candidates = (
+        workspace_lookup_order(workspace) if can_read_global_workspace(accessible, entity_type) else (workspace,)
+    )
     for candidate in candidates:
         entity = await repository.get_entity_by_name(
             workspace=candidate,

@@ -352,28 +352,25 @@ def add_workspace_filtering(
     return workspace_filter
 
 
-def expand_readable_workspaces(
+def can_read_global_workspace(
     accessible_workspaces: Optional[Set[str]],
     entity_type: Optional[str],
-) -> Optional[Set[str]]:
-    """Widen a write-scoped workspace set to the set readable for *entity_type*.
+) -> bool:
+    """Whether a caller may see global-workspace entities of *entity_type*.
 
-    The ``default`` workspace is the installation-wide GLOBAL workspace: entities of a
-    globally shareable type that live there are readable from every workspace. Writes
-    keep using :func:`get_accessible_workspaces` unchanged, so a caller that gains read
-    access here still cannot mutate anything in ``default``.
-
-    ``None`` (unscoped / full access) passes through untouched.
+    Sharing resolves a shared entity into the caller's own workspace; it does not grant
+    access to the global workspace. A caller entitled only to their own workspace sees
+    nothing from the global one, by any route. ``None`` means unrestricted access
+    (auth disabled, or a service principal).
     """
-    if accessible_workspaces is None or not is_globally_shareable(entity_type):
-        return accessible_workspaces
-    return accessible_workspaces | {GLOBAL_WORKSPACE}
+    if not is_globally_shareable(entity_type):
+        return False
+    return accessible_workspaces is None or GLOBAL_WORKSPACE in accessible_workspaces
 
 
-async def get_readable_workspaces(
+async def resolve_global_readability(
     entity_repository: EntityRepositoryInterface,
     entity_type: Optional[str],
-) -> Optional[Set[str]]:
-    """Accessible workspaces for a read of *entity_type*, including the global workspace."""
-    accessible = await get_accessible_workspaces(entity_repository)
-    return expand_readable_workspaces(accessible, entity_type)
+) -> bool:
+    """Resolve accessible workspaces and report whether the global workspace is among them."""
+    return can_read_global_workspace(await get_accessible_workspaces(entity_repository), entity_type)

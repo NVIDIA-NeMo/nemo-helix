@@ -4,7 +4,7 @@
 """Unit tests for global-workspace read sharing (ASTD-526)."""
 
 import pytest
-from nmp.core.entities.api.v2.utils import expand_readable_workspaces
+from nmp.core.entities.api.v2.utils import can_read_global_workspace
 from nmp.core.entities.utils.sharing import (
     GLOBAL_WORKSPACE,
     globally_shareable_entity_types,
@@ -33,23 +33,22 @@ def test_none_entity_type_is_not_shareable() -> None:
     assert not is_globally_shareable(None)
 
 
-def test_shareable_type_gains_global_workspace() -> None:
-    assert expand_readable_workspaces({"team-a"}, "model") == {"team-a", "default"}
+def test_shareable_type_is_readable_for_a_global_workspace_member() -> None:
+    assert can_read_global_workspace({"team-a", "default"}, "model")
 
 
-def test_unshareable_type_is_untouched() -> None:
-    assert expand_readable_workspaces({"team-a"}, "agent_session") == {"team-a"}
+def test_shareable_type_is_not_readable_without_global_workspace_access() -> None:
+    """Sharing resolves into your workspace; it does not grant access to the global one."""
+    assert not can_read_global_workspace({"team-a"}, "model")
 
 
-def test_full_access_passes_through() -> None:
-    assert expand_readable_workspaces(None, "model") is None
+def test_unshareable_type_is_never_globally_readable() -> None:
+    assert not can_read_global_workspace({"team-a", "default"}, "agent_session")
 
 
-def test_expansion_does_not_mutate_caller_set() -> None:
-    accessible = {"team-a"}
-    expand_readable_workspaces(accessible, "model")
-    assert accessible == {"team-a"}
+def test_full_access_can_read_the_global_workspace() -> None:
+    assert can_read_global_workspace(None, "model")
 
 
-def test_member_of_global_workspace_is_unchanged() -> None:
-    assert expand_readable_workspaces({"default", "team-a"}, "model") == {"default", "team-a"}
+def test_full_access_still_respects_the_type_registry() -> None:
+    assert not can_read_global_workspace(None, "agent_session")

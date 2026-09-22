@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Annotated
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from nemo_platform_plugin.client.client import AsyncNemoClient
-from nmp.common.entities.global_workspace import workspace_lookup_order
 from nmp.common.entities.utils import parse_adapters_suffix
 from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.inference_gateway.api.authz import (
@@ -166,20 +165,14 @@ async def openai_get_models(
     validate_entity_name(workspace, field_name="workspace")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
 
-    # Mirror resolution order so the catalog matches what the proxy would actually route:
-    # later candidates only contribute names the earlier ones did not already claim.
-    by_name: dict[str, str] = {}
-    for candidate_workspace in workspace_lookup_order(workspace):
-        for vm_workspace, vm_name in virtual_model_cache.virtual_model_map:
-            if vm_workspace != candidate_workspace:
-                continue
-            by_name.setdefault(vm_name, vm_workspace)
-
-    # The id is addressed in the request workspace so it round-trips through this
-    # workspace's routes; owned_by carries the real provenance for shared entries.
+    # The catalog lists this workspace only. A VirtualModel shared from the global
+    # workspace is still routable by name (see resolve_vm_for_model) but is deliberately
+    # not listed here, matching the entity store: sharing resolves names, it does not
+    # fold shared entities into a workspace's listings.
     all_oai_models = [
-        OpenAIModelResp(id=f"{workspace}/{vm_name}", owned_by=owning_workspace)
-        for vm_name, owning_workspace in by_name.items()
+        OpenAIModelResp(id=f"{vm_workspace}/{vm_name}", owned_by=vm_workspace)
+        for vm_workspace, vm_name in virtual_model_cache.virtual_model_map
+        if vm_workspace == workspace
     ]
 
     return OpenAIListModelsResp(data=all_oai_models)

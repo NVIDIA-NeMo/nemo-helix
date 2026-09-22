@@ -98,10 +98,8 @@ authz:
         delete:
           description: "Delete inference providers"
         list:
-          global_read: true
           description: "List inference providers"
         read:
-          global_read: true
           description: "Read inference providers"
         update:
           description: "Update inference providers"
@@ -111,10 +109,8 @@ authz:
         delete:
           description: "Delete virtual models"
         list:
-          global_read: true
           description: "List virtual models"
         read:
-          global_read: true
           description: "Read virtual models"
         update:
           description: "Update virtual models"
@@ -189,10 +185,8 @@ authz:
     models:
       adapters:
         read:
-          global_read: true
           description: "Read model adapters"
         list:
-          global_read: true
           description: "List model adapters"
         create:
           description: "Create model adapters"
@@ -216,10 +210,8 @@ authz:
       delete:
         description: "Delete models"
       list:
-        global_read: true
         description: "List models"
       read:
-        global_read: true
         description: "Read models"
       update:
         description: "Update models"
