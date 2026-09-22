@@ -21,13 +21,13 @@ config formats::
 
 How it runs, and where:
 
-- The deployed agent runs from an E2E-only ``nmp-agents-e2e`` image, which
+- The deployed agent runs from an E2E-only ``nmp-agents-deepagents-e2e`` image, which
   adds DeepAgents to the normal ``nmp-api`` contents. The
   deployments docker executor overrides the image entrypoint with the server
   for the selected config format, so the image's own entrypoint is irrelevant.
 - The image is supplied prebuilt via ``NMP_E2E_IMAGE_REGISTRY`` /
   ``NMP_E2E_IMAGE_TAG`` (the existing e2e convention). Its dedicated CI job
-  (``python-e2e-image-test``) pulls ``nmp-agents-e2e`` and sets these; the
+  (``python-e2e-image-test``) pulls ``nmp-agents-deepagents-e2e`` and sets these; the
   ``needs_agents_e2e_image`` marker skips the test everywhere they are unset (the
   plain subprocess e2e job and local runs without them).
 - The agent is registered with a deterministic single-LLM ``chat_completion``
@@ -62,14 +62,14 @@ _DOCKER_BRIDGE_HOST = "172.17.0.1"
 
 # E2E image name to deploy the agent from. Registry and tag come from
 # NMP_E2E_IMAGE_REGISTRY / NMP_E2E_IMAGE_TAG.
-_AGENT_IMAGE_NAME = "nmp-agents-e2e"
+_AGENT_IMAGE_NAME = "nmp-agents-deepagents-e2e"
 
 # Runs the platform as a local process wired with a docker deployments executor
 # (see the config), and deploys the agent as a real docker container.
 #
 # Markers:
 # - ``needs_agents_e2e_image``: skips unless NMP_E2E_IMAGE_REGISTRY + NMP_E2E_IMAGE_TAG
-#   are set (its dedicated CI job pulls nmp-agents-e2e and sets them).
+#   are set (its dedicated CI job pulls nmp-agents-deepagents-e2e and sets them).
 # - ``subprocess_only``: this test drives its own subprocess-harness platform
 #   configured with a docker deployments executor. It must NOT run against an
 #   external cluster (``NMP_BASE_URL`` set, e.g. the Kind CPU e2e job), where the
@@ -95,7 +95,7 @@ def agent_deployment_image() -> str:
     """Return the prebuilt platform image ref to deploy the agent from.
 
     Composed from the e2e image convention (``NMP_E2E_IMAGE_REGISTRY`` /
-    ``NMP_E2E_IMAGE_TAG``) as ``{registry}/nmp-agents-e2e:{tag}``. The
+    ``NMP_E2E_IMAGE_TAG``) as ``{registry}/nmp-agents-deepagents-e2e:{tag}``. The
     ``needs_agents_e2e_image`` marker guarantees both env vars are set before this
     test runs; assert defensively.
     """

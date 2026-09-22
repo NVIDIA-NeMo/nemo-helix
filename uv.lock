@@ -7586,7 +7586,7 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-agents-e2e-services = [
+agents-deepagents-e2e-services = [
     { name = "nemo-agents-plugin", extra = ["deepagents"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7844,7 +7844,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-agents-e2e-services = [
+agents-deepagents-e2e-services = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-agents-plugin", extras = ["deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },

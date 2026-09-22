@@ -25,7 +25,7 @@ How it runs, and where:
   with a nemo-deployments ``k8s`` executor (see ``e2e/k8s/values/kind.yaml``).
   The ``container_only`` marker skips it for the subprocess harness (local /
   plain e2e job), which is the inverse of the docker module's ``subprocess_only``.
-- The agent runs from the E2E-only ``nmp-agents-e2e`` image, which adds
+- The agent runs from the E2E-only ``nmp-agents-deepagents-e2e`` image, which adds
   DeepAgents to the normal ``nmp-api`` contents (see the docker module
   docstring). The deployments k8s executor overrides the image entrypoint with
   the server for the selected config format. In CI the image is pre-pulled into
@@ -56,7 +56,7 @@ from e2e.agents_deploy_helpers import run_container_agent_deploy_and_invoke
 
 # E2E image name to deploy the agent from (see module docstring). Registry
 # and tag come from NMP_E2E_IMAGE_REGISTRY / NMP_E2E_IMAGE_TAG.
-_AGENT_IMAGE_NAME = "nmp-agents-e2e"
+_AGENT_IMAGE_NAME = "nmp-agents-deepagents-e2e"
 
 # Markers:
 # - ``container_only``: runs only against an external cluster (``NMP_BASE_URL``
@@ -76,7 +76,7 @@ def agent_deployment_image() -> str:
     """Return the prebuilt platform image ref to deploy the agent from.
 
     Composed from the e2e image convention (``NMP_E2E_IMAGE_REGISTRY`` /
-    ``NMP_E2E_IMAGE_TAG``) as ``{registry}/nmp-agents-e2e:{tag}``. In the Kind
+    ``NMP_E2E_IMAGE_TAG``) as ``{registry}/nmp-agents-deepagents-e2e:{tag}``. In the Kind
     e2e job this exact ref is pre-pulled into the cluster nodes, so the pod
     resolves it node-locally under ``IfNotPresent``. The
     ``needs_agents_e2e_image`` marker guarantees both env vars are set before this

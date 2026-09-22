@@ -235,7 +235,7 @@ functional-services = [
 ]
 
 # nmp-api variant used only to deploy DeepAgents in container E2E tests.
-agents-e2e-services = [
+agents-deepagents-e2e-services = [
   { include-group = "functional-services" },
   "nemo-agents-plugin[deepagents]",
 ]

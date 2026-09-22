@@ -564,7 +564,7 @@ jobs:
           NMP_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: |
           e2e/k8s/scripts/prepull_kind_images.sh \
-            "${NMP_E2E_IMAGE_REGISTRY}/nmp-agents-e2e:${NMP_E2E_IMAGE_TAG}"
+            "${NMP_E2E_IMAGE_REGISTRY}/nmp-agents-deepagents-e2e:${NMP_E2E_IMAGE_TAG}"
 
       - name: Run jobs and data-designer e2e tests
         shell: bash
@@ -575,7 +575,7 @@ jobs:
           # Let the k8s-mode agent deployment e2e (test_nemo_agents_k8s.py) learn
           # the agent image ref. The Helm platform is configured with a k8s
           # deployments executor (e2e/k8s/values/kind.yaml) and this same
-          # nmp-agents-e2e image is pre-pulled into the kind nodes, so the agent pod
+          # nmp-agents-deepagents-e2e image is pre-pulled into the kind nodes, so the agent pod
           # resolves it node-locally under IfNotPresent.
           NMP_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
           NMP_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
@@ -1746,7 +1746,7 @@ jobs:
       - name: Pull agent E2E image (timed)
         shell: bash
         run: |
-          image="${NMP_E2E_IMAGE_REGISTRY}/nmp-agents-e2e:${NMP_E2E_IMAGE_TAG}"
+          image="${NMP_E2E_IMAGE_REGISTRY}/nmp-agents-deepagents-e2e:${NMP_E2E_IMAGE_TAG}"
           echo "Pulling ${image}"
           start=$(date +%s)
           docker pull "$image"
