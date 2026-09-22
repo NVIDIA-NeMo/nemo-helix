@@ -6,11 +6,14 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from nhx.common.auth.access_key_lifecycle import ACCESS_KEY_LIFECYCLE_CIRCUIT_FAILURE_THRESHOLD
@@ -27,7 +30,7 @@ from nhx.common.auth.models import Principal
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken
 from nhx.common.config import AuthConfig, Configuration, HelixConfig
-from nhx.common.config.base import OIDCConfig
+from nhx.common.config.base import OIDCConfig, TokenSigningConfig
 from starlette.responses import Response
 
 
@@ -55,6 +58,29 @@ def auth_config_enabled(oidc_config):
         enabled=True,
         policy_decision_point_base_url="http://localhost:8181",
         oidc=oidc_config,
+    )
+
+
+@pytest.fixture
+def auth_config_token_exchange(auth_config_enabled, tmp_path: Path):
+    """Create an AuthConfig with workload token exchange enabled."""
+    workload_private_key_file = tmp_path / "workload-private.pem"
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    workload_private_key_file.write_bytes(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    return auth_config_enabled.model_copy(
+        update={
+            "token_signing": TokenSigningConfig(
+                key_id="test-workload",
+                private_key_file=str(workload_private_key_file),
+            ),
+            "oidc": auth_config_enabled.oidc.model_copy(update={"workload_token_exchange_enabled": True}),
+        }
     )
 
 
@@ -671,9 +697,15 @@ class TestBearerTokenAuth:
                 http_client=pdp_client,
                 access_key_lifecycle_http_client=lifecycle_client,
             )
-            with patch(
-                "nhx.common.sdk_factory.Configuration.get_platform_config",
-                return_value=HelixConfig(base_url="unix:///tmp/nemo-helix.sock", services=""),
+            with (
+                patch(
+                    "nhx.common.sdk_factory._get_platform_config",
+                    return_value=HelixConfig(base_url="unix:///tmp/nemo-helix.sock", services=""),
+                ),
+                patch(
+                    "nhx.common.platform_endpoint._get_platform_config",
+                    return_value=HelixConfig(base_url="unix:///tmp/nemo-helix.sock", services=""),
+                ),
             ):
                 response = await middleware._authenticate_access_key_lifecycle("scoped-access-key")
 
@@ -939,6 +971,7 @@ class TestBearerTokenAuth:
                 "principal": principal.id,
                 "email": principal.email,
                 "groups": principal.groups,
+                "bearer_token": auth_client.bearer_token,
                 "on_behalf_of": principal.on_behalf_of,
                 "on_behalf_of_email": principal.on_behalf_of_email,
                 "on_behalf_of_groups": principal.on_behalf_of_groups,
@@ -974,6 +1007,7 @@ class TestBearerTokenAuth:
             "principal": "alice@example.com",
             "email": "alice@example.com",
             "groups": ["team-ml", "team-ai"],
+            "bearer_token": "scoped-access-key",
             "on_behalf_of": None,
             "on_behalf_of_email": None,
             "on_behalf_of_groups": None,
@@ -1235,6 +1269,130 @@ class TestPrincipalHeadersAuth:
             )
 
             assert response.status_code == 200
+
+    def test_token_exchange_mode_rejects_principal_headers(self, auth_config_token_exchange):
+        """Trusted identity headers hard-fail when workload token exchange is enabled."""
+        app = create_test_app(auth_config_token_exchange)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch("nhx.common.auth.client.AuthClient.authorize_request") as mock_authorize:
+            response = client.get(
+                "/test",
+                headers={"X-NHX-Principal-Id": "user@example.com"},
+            )
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": "Trusted identity headers are not accepted when workload token exchange is enabled"
+        }
+        mock_authorize.assert_not_called()
+
+    def test_token_exchange_mode_rejects_trusted_headers_even_with_bearer(self, auth_config_token_exchange):
+        """A bearer token must not make trusted identity headers acceptable."""
+        app = create_test_app(auth_config_token_exchange)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock()) as resolver:
+            response = client.get(
+                "/test",
+                headers={
+                    "Authorization": "Bearer token",
+                    "X-NHX-Principal-On-Behalf-Of": "user:attacker",
+                    "X-NHX-Scopes": "platform:write",
+                },
+            )
+
+        assert response.status_code == 400
+        resolver.assert_not_awaited()
+
+    def test_token_exchange_mode_accepts_workload_subject_bearer(self, auth_config_token_exchange):
+        """Configured workload subject tokens are resolved before generic OIDC issuer validation."""
+        config = auth_config_token_exchange.model_copy(
+            update={
+                "oidc": auth_config_token_exchange.oidc.model_copy(
+                    update={
+                        "workload_subject_jwks_uri": "https://sso.example.test/application/o/nemo-workload/jwks/",
+                        "workload_subject_issuers": ["https://sso.example.test/application/o/nemo-workload/"],
+                    }
+                )
+            }
+        )
+        app = create_test_app(config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(
+                subject="svc-nemo",
+                email="svc-nemo@example.test",
+                groups=["nemo-workloads"],
+                scopes=["openid", "email", "groups"],
+                raw_claims={"iss": "https://sso.example.test/application/o/nemo-workload/"},
+            ),
+            token_kind="workload_subject_token",
+        )
+
+        with (
+            patch("nhx.common.auth.middleware.resolve_workload_access_token", new=AsyncMock(return_value=None)),
+            patch(
+                "nhx.common.auth.middleware.resolve_workload_subject_token",
+                new=AsyncMock(return_value=resolved),
+            ) as subject_resolver,
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
+            mock_authorize.return_value = MagicMock(allowed=True)
+            response = client.get("/test", headers={"Authorization": "Bearer workload-subject-token"})
+
+        assert response.status_code == 200
+        subject_resolver.assert_awaited_once_with(config, "workload-subject-token")
+        mock_authorize.assert_called_once()
+
+    def test_token_exchange_mode_rejects_service_header_on_pdp_entrypoint(self, auth_config_token_exchange):
+        """PDP entrypoints cannot be reached with trusted service headers in token-exchange mode."""
+        app = create_test_app(auth_config_token_exchange)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.post(
+            "/apis/auth/v2/authz/allow",
+            headers={"X-NHX-Principal-Id": "service:jobs"},
+            json={"input": {}},
+        )
+
+        assert response.status_code == 400
+
+    def test_token_exchange_mode_accepts_service_bearer_on_pdp_entrypoint(self, auth_config_token_exchange):
+        """PDP entrypoints accept NeMo workload bearer tokens for internal PDP calls."""
+        app = FastAPI()
+
+        @app.post("/apis/auth/v2/authz/allow")
+        async def authz_allow(auth_client: AuthClient = Depends(get_auth_client)):
+            return {"principal": auth_client.principal.id}
+
+        Configuration.set_override(auth_config_token_exchange)
+        app.add_middleware(AuthorizationMiddleware, service_name="auth")
+        client = TestClient(app, raise_server_exceptions=False)
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(
+                subject="service:models",
+                email=None,
+                groups=[],
+                scopes=[],
+                raw_claims={"iss": "https://nemo.example.test/apis/auth"},
+            ),
+            token_kind="workload_access_token",
+        )
+
+        with patch(
+            "nhx.common.auth.middleware.resolve_workload_access_token",
+            new=AsyncMock(return_value=resolved),
+        ) as resolver:
+            response = client.post(
+                "/apis/auth/v2/authz/allow",
+                headers={"Authorization": "Bearer service-token"},
+                json={"input": {}},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"principal": "service:models"}
+        resolver.assert_awaited_once()
 
     def test_principal_headers_auth_disabled(self, auth_config_disabled):
         """X-NHX-Principal-* headers still set principal when auth is disabled."""

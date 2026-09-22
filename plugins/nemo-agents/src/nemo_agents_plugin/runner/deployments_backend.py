@@ -656,13 +656,21 @@ class DeploymentsRunnerBackend(RunnerBackend):
         # (when known) so the running agent's platform access is scoped to what the
         # creator can reach — the workspace(s) they have access to — rather than the
         # agents service principal's full (ServiceSystem) reach.
+        token_exchange_enabled = is_workload_identity_token_exchange_enabled()
         auth_proxy_identity: str | None = None
         auth_proxy_on_behalf_of: str | None = None
         is_fabric = _is_fabric_agent_config(config)
         if platform_auth_enabled():
+            if token_exchange_enabled and auth_context is None:
+                error = (
+                    "Agent deployment requires creator auth context when workload token exchange is enabled; "
+                    "refusing to deploy without creator workload identity context."
+                )
+                logger.error("Refusing to deploy agent %r: %s", name, error)
+                return DeploymentInfo(name=name, status="failed", error=error)
             auth_proxy_identity = _AUTH_PROXY_IDENTITY
-            auth_proxy_on_behalf_of = created_by or None
-            if not auth_proxy_on_behalf_of:
+            auth_proxy_on_behalf_of = None if token_exchange_enabled else created_by or None
+            if not token_exchange_enabled and not auth_proxy_on_behalf_of:
                 logger.warning(
                     "Deployment %r has no creator principal; the agent will run as the "
                     "unscoped %s service principal without on-behalf-of delegation.",
@@ -735,7 +743,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 resources=resources,
                 secrets=secrets,
                 use_image_entrypoint=use_image_entrypoint,
-                workload_identity_enabled=auth_context is not None and is_workload_identity_token_exchange_enabled(),
+                workload_identity_enabled=auth_context is not None and token_exchange_enabled,
             )
         except ReservedSecretEnvVarError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)

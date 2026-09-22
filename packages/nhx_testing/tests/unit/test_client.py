@@ -7,7 +7,7 @@ import pytest
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
-from nhx.common.config import Configuration
+from nhx.common.config import AuthConfig, Configuration
 from nhx.core.entities.service import EntitiesService
 from nhx.core.inference_gateway.config import InferenceGatewayConfig
 from nhx.core.inference_gateway.service import InferenceGatewayService
@@ -112,6 +112,24 @@ def test_create_test_client_returns_client_context():
         assert ctx.sdk is not None
         assert isinstance(ctx.async_client, AsyncNemoClient)
         assert ctx.test_client is not None
+
+
+def test_create_test_client_uses_loopback_platform_base_url():
+    """Test that in-process platform clients use a loopback base URL."""
+    with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+        assert Configuration.get_platform_config().base_url == "http://127.0.0.1"
+        assert str(ctx.sdk.base_url).rstrip("/") == "http://127.0.0.1"
+        assert str(ctx.async_sdk.base_url).rstrip("/") == "http://127.0.0.1"
+        assert str(ctx.async_client.base_url).rstrip("/") == "http://127.0.0.1"
+        assert str(ctx.test_client.base_url).rstrip("/") == "http://127.0.0.1"
+
+
+def test_create_test_client_auth_defaults_use_platform_base_url():
+    """Test that auth callouts target the same in-process platform URL."""
+    with create_test_client(EntitiesService, client_type=ClientContext, auth_enabled=True):
+        platform_base_url = Configuration.get_platform_config().base_url
+        assert platform_base_url == "http://127.0.0.1"
+        assert Configuration.get_service_config(AuthConfig).policy_decision_point_base_url == platform_base_url
 
 
 def test_create_test_client_creates_default_workspace():

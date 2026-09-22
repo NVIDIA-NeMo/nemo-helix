@@ -96,10 +96,10 @@ class InferenceGatewayService(Service):
         from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
         from nhx.core.inference_gateway.config import config as inference_gateway_config
 
-        sdk = self.dependency_provider.get_sdk_client(as_service="inference-gateway")
+        sdk = self.dependency_provider.get_service_sdk_client("inference-gateway")
 
         def plugin_sdk_factory(plugin_name: str) -> AsyncNeMoHelix:
-            return self.dependency_provider.get_sdk_client(as_service=plugin_name)
+            return self.dependency_provider.get_service_sdk_client(plugin_name)
 
         # Initialize caches
         model_cache = set_global_model_cache(ModelCache(secret_value_ttl=inference_gateway_config.secrets_ttl_sec))

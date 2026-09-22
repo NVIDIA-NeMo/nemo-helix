@@ -252,15 +252,15 @@ def test_access_key_public_jwk_uses_cached_private_key_file(
         access_keys=AccessKeyConfig(enabled=True),
     )
     clear_access_key_signing_key_cache()
-    original_load = signing_keys_mod._load_rsa_signing_key_async
+    original_load = signing_keys_mod._load_rsa_signing_key
     load_count = 0
 
-    async def counted_load(**kwargs: Any) -> signing_keys_mod.RSASigningKey:
+    def counted_load(**kwargs: Any) -> signing_keys_mod.RSASigningKey:
         nonlocal load_count
         load_count += 1
-        return await original_load(**kwargs)
+        return original_load(**kwargs)
 
-    monkeypatch.setattr(signing_keys_mod, "_load_rsa_signing_key_async", counted_load)
+    monkeypatch.setattr(signing_keys_mod, "_load_rsa_signing_key", counted_load)
 
     first = public_jwk_from_private_key_pem(config)
     second = public_jwk_from_private_key_pem(config)
@@ -286,15 +286,15 @@ def test_access_key_private_key_uses_cached_private_key_file_for_token_creation(
     )
     principal = Principal(id="alice@example.com", email="alice@example.com", groups=[])
     clear_access_key_signing_key_cache()
-    original_load = signing_keys_mod._load_rsa_signing_key_async
+    original_load = signing_keys_mod._load_rsa_signing_key
     load_count = 0
 
-    async def counted_load(**kwargs: Any) -> signing_keys_mod.RSASigningKey:
+    def counted_load(**kwargs: Any) -> signing_keys_mod.RSASigningKey:
         nonlocal load_count
         load_count += 1
-        return await original_load(**kwargs)
+        return original_load(**kwargs)
 
-    monkeypatch.setattr(signing_keys_mod, "_load_rsa_signing_key_async", counted_load)
+    monkeypatch.setattr(signing_keys_mod, "_load_rsa_signing_key", counted_load)
 
     issuer = AccessKeyIssuerService(config=config, principal=principal, now=lambda: 1_785_280_000)
     issuer.create(AccessKeyCreateRequest(name="first", expires_in_seconds=600))

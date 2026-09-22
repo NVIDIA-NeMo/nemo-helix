@@ -286,6 +286,56 @@ async def test_create_job_registers_live_pod_uid_workload_delegation(
 
 
 @pytest.mark.asyncio
+async def test_create_job_waits_for_pod_before_registering_workload_delegation(
+    job_ops_clients: MagicMock, mock_k8s_clients: MagicMock
+) -> None:
+    config = with_workload_identity(sample_config(restart_policy="Never"))
+    auth_context = workload_auth_context()
+    workload_store = MagicMock()
+    workload_store.list_by_workload = AsyncMock(return_value=[])
+    workload_store.register = AsyncMock()
+    workload_store.revoke = AsyncMock()
+    mock_k8s_clients.batch_v1.create_namespaced_job.return_value = mock_job(active=1)
+    mock_k8s_clients.core_v1.list_namespaced_pod.side_effect = [
+        MagicMock(items=[]),
+        MagicMock(
+            items=[
+                live_pod(
+                    "job-pod-uid",
+                    owner_kind="Job",
+                    owner_name=k8s_deployment_resource_name("default", "task"),
+                    service_account_name="dep-sa",
+                )
+            ]
+        ),
+    ]
+
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch.object(job_ops, "WORKLOAD_IDENTITY_POD_WAIT_INTERVAL_SECONDS", 0.0),
+    ):
+        update = await job_ops.create_job(
+            job_ops_clients,
+            default_namespace="default",
+            workspace="default",
+            name="task",
+            config_name="config1",
+            labels={},
+            backend_config={"k8s": {"namespace": "dep-ns"}},
+            config=config,
+            auth_context=auth_context,
+            workload_delegation_store=workload_store,
+        )
+
+    assert update.status == "STARTING"
+    assert mock_k8s_clients.core_v1.list_namespaced_pod.call_count == 2
+    workload_store.register.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_create_job_fails_when_workload_identity_auth_context_missing(
     job_ops_clients: MagicMock, mock_k8s_clients: MagicMock
 ) -> None:

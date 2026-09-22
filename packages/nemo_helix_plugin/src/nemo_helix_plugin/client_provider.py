@@ -271,8 +271,15 @@ class DefaultNemoClientProvider:
         on_behalf_of: str | None = None,
         workspace: str | None = None,
     ) -> NemoClient:
+        base_url = _base_url()
+        if as_service is None and on_behalf_of is None and is_workload_identity_token_file_set():
+            headers = {_INTERNAL_REQUEST_HEADER: "true"} if internal else None
+            return NemoClient(
+                base_url=base_url, workspace=workspace, auth=_workload_identity_auth(base_url), default_headers=headers
+            )
+
         headers = _build_headers(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
-        return NemoClient(base_url=_base_url(), workspace=workspace, default_headers=headers or None)
+        return NemoClient(base_url=base_url, workspace=workspace, default_headers=headers or None)
 
     def get_async_nemo_client(
         self,
@@ -282,8 +289,18 @@ class DefaultNemoClientProvider:
         on_behalf_of: str | None = None,
         workspace: str | None = None,
     ) -> AsyncNemoClient:
+        base_url = _base_url()
+        if as_service is None and on_behalf_of is None and is_workload_identity_token_file_set():
+            headers = {_INTERNAL_REQUEST_HEADER: "true"} if internal else None
+            return AsyncNemoClient(
+                base_url=base_url,
+                workspace=workspace,
+                auth=_workload_identity_auth(base_url),
+                default_headers=headers,
+            )
+
         headers = _build_headers(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
-        return AsyncNemoClient(base_url=_base_url(), workspace=workspace, default_headers=headers or None)
+        return AsyncNemoClient(base_url=base_url, workspace=workspace, default_headers=headers or None)
 
     def get_task_nemo_client(
         self,

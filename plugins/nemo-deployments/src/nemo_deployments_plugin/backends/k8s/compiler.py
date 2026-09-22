@@ -598,11 +598,17 @@ def compile_workload(
     # Auth-proxy sidecar (native sidecar with restartPolicy=Always) is appended so
     # it starts before the main workload and keeps running. No-op when the config
     # does not request it or platform auth is disabled. It is a platform-managed
-    # container and deliberately does NOT receive the workload's secret envFrom.
+    # container and deliberately does NOT receive workload token mounts or the
+    # workload's secret envFrom.
     auth_proxy = build_auth_proxy_container(config)
     if auth_proxy is not None:
         init_containers.append(
-            build_container(auth_proxy, config=config, include_probes=True, include_workload_identity=False)
+            build_container(
+                auth_proxy,
+                config=config,
+                include_probes=True,
+                include_workload_identity=False,
+            )
         )
     main_containers = [
         build_container(container, config=config, include_probes=True, secret_name=secret_name)

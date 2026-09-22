@@ -139,8 +139,8 @@ def _read_principal_from_env() -> dict[str, Any] | None:
 def _on_behalf_of_headers(principal: dict[str, Any]) -> dict[str, str]:
     """Derive ``X-NHX-Principal-On-Behalf-Of*`` headers from a principal dict.
 
-    Mirrors the header logic in ``nhx.common.sdk_factory._get_default_headers``
-    so the default provider is wire-compatible.
+    Mirrors the trusted-header logic in ``nhx.common.client_runtime`` so the
+    default provider is wire-compatible.
     """
     # When the principal has an on_behalf_of field, use the effective principal
     # (the on-behalf-of identity).  Otherwise, use the principal itself.

@@ -23,6 +23,7 @@ from nemo_helix import (
 )
 from nemo_helix._base_client import AsyncAPIClient, SyncAPIClient
 from nemo_helix._compat import cached_property
+from nemo_helix_plugin.client.client import NemoClientRuntime, NemoClientRuntimeSource
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
@@ -66,7 +67,7 @@ def _copy_requires_bootstrap(
     )
 
 
-class NeMoHelix(SyncAPIClient):
+class NeMoHelix(NemoClientRuntimeSource, SyncAPIClient):
     def __init__(
         self,
         *,
@@ -93,6 +94,7 @@ class NeMoHelix(SyncAPIClient):
         # outlining your use-case to help us decide if it should be
         # part of our public interface in the future.
         _strict_response_validation: bool = False,
+        nemo_client_runtime: NemoClientRuntime | None = None,
     ) -> None:
         """Construct a new synchronous NeMoHelix client instance.
 
@@ -150,6 +152,7 @@ class NeMoHelix(SyncAPIClient):
             http_client: Custom ``httpx.Client`` instance. When provided, the auth
                 bootstrap is skipped entirely regardless of other parameters.
         """
+        self._nemo_client_runtime = nemo_client_runtime if nemo_client_runtime is not None else NemoClientRuntime()
         env_base_url = os.environ.get("NEMO_HELIX_BASE_URL")
         bootstrap_base_url = base_url if base_url is not None else env_base_url
         client_verify = client_verify_from_env()
@@ -250,6 +253,7 @@ class NeMoHelix(SyncAPIClient):
         set_default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         set_default_query: Mapping[str, object] | None = None,
+        nemo_client_runtime: NemoClientRuntime | NotGiven = not_given,
         _extra_kwargs: Mapping[str, Any] = {},
     ) -> Self:
         """
@@ -291,11 +295,14 @@ class NeMoHelix(SyncAPIClient):
             max_retries=self.max_retries if isinstance(max_retries, NotGiven) else max_retries,
             default_headers=headers,
             default_query=params,
+            nemo_client_runtime=(
+                self.nemo_client_runtime if isinstance(nemo_client_runtime, NotGiven) else nemo_client_runtime
+            ),
             **_extra_kwargs,
         )
 
 
-class AsyncNeMoHelix(AsyncAPIClient):
+class AsyncNeMoHelix(NemoClientRuntimeSource, AsyncAPIClient):
     # client options
     workspace: str | None
 
@@ -325,6 +332,7 @@ class AsyncNeMoHelix(AsyncAPIClient):
         # outlining your use-case to help us decide if it should be
         # part of our public interface in the future.
         _strict_response_validation: bool = False,
+        nemo_client_runtime: NemoClientRuntime | None = None,
     ) -> None:
         """Construct a new asynchronous AsyncNeMoHelix client instance.
 
@@ -401,6 +409,7 @@ class AsyncNeMoHelix(AsyncAPIClient):
             http_client: Custom ``httpx.AsyncClient`` instance. When provided, the
                 auth bootstrap is skipped entirely regardless of other parameters.
         """
+        self._nemo_client_runtime = nemo_client_runtime if nemo_client_runtime is not None else NemoClientRuntime()
         env_base_url = os.environ.get("NEMO_HELIX_BASE_URL")
         bootstrap_base_url = base_url if base_url is not None else env_base_url
         client_verify = client_verify_from_env()
@@ -504,6 +513,7 @@ class AsyncNeMoHelix(AsyncAPIClient):
         set_default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         set_default_query: Mapping[str, object] | None = None,
+        nemo_client_runtime: NemoClientRuntime | NotGiven = not_given,
         _extra_kwargs: Mapping[str, Any] = {},
     ) -> Self:
         """
@@ -545,5 +555,8 @@ class AsyncNeMoHelix(AsyncAPIClient):
             max_retries=self.max_retries if isinstance(max_retries, NotGiven) else max_retries,
             default_headers=headers,
             default_query=params,
+            nemo_client_runtime=(
+                self.nemo_client_runtime if isinstance(nemo_client_runtime, NotGiven) else nemo_client_runtime
+            ),
             **_extra_kwargs,
         )

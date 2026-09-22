@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- if and .Values.api.enabled .Values.platformSeedJob.enabled }}
 {{- $imagePullSecrets := include "nemo-common.imagepullsecrets" . }}
+{{- $platformConfig := include "nemo-helix.calculatedConfig" . | fromYaml }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -68,7 +69,7 @@ spec:
             - name: NHX_CONFIG_FILE_PATH
               value: /etc/nhx/config.yaml
             - name: NHX_BASE_URL
-              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+              value: {{ dig "platform" "base_url" (include "nemo-helix.internalBaseUrl" .) $platformConfig | quote }}
             - name: OTEL_SERVICE_NAME
               value: {{ include "nemo-helix.fullname" . }}-platform-seed
             {{ include "nemo-helix.env" . | nindent 12 | trim }}
@@ -79,12 +80,18 @@ spec:
             - name: config
               mountPath: /etc/nhx/config.yaml
               subPath: config.yaml
+            {{- with .Values.platformSeedJob.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.platformSeedJob.resources | nindent 12 }}
       volumes:
         - name: config
           configMap:
             name: {{ include "nemo-helix.platform-configmap" . }}
+        {{- with .Values.platformSeedJob.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.platformSeedJob.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

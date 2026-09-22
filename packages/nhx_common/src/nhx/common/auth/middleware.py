@@ -23,9 +23,11 @@ from .bearer import MalformedBearerTokenError, parse_bearer_authorization_header
 from .client import AuthClient, AuthorizationResult
 from .dependencies import auth_client_context
 from .exceptions import InvalidPrincipalHeader, InvalidScopeFormatError
+from .headers import TRUSTED_IDENTITY_HEADERS
 from .models import Principal
 from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
-from .token_resolver import ResolvedBearerToken, resolve_bearer_token
+from .token_resolver import ExtraBearerTokenResolver, ResolvedBearerToken, resolve_bearer_token
+from .workload_tokens import resolve_workload_access_token, resolve_workload_subject_token
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +336,18 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             if "_fields" in auth_ctx.__dict__:
                 del auth_ctx.__dict__["_fields"]
 
+    def _reject_trusted_headers_in_token_exchange_mode(self, headers_dict: dict[str, str]) -> JSONResponse | None:
+        if not (self.config.enabled and self.config.oidc.workload_token_exchange_enabled):
+            return None
+        blocked_headers = sorted(header for header in TRUSTED_IDENTITY_HEADERS if header in headers_dict)
+        if not blocked_headers:
+            return None
+        logger.warning("Rejecting trusted identity headers in workload token-exchange mode")
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Trusted identity headers are not accepted when workload token exchange is enabled"},
+        )
+
     async def _call_next_with_auth_client(
         self, request: Request, call_next: Callable, auth_client: AuthClient
     ) -> Response:
@@ -469,21 +483,30 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if path.startswith(BYPASS_PREFIXES):
             return await call_next(request)
 
+        headers_dict = dict(request.headers)
+        if error_response := self._reject_trusted_headers_in_token_exchange_mode(headers_dict):
+            return error_response
+
         # PDP HTTP entrypoints: only service principals may call them, and the middleware
         # must not recurse into authorize_request for these paths (AuthClient uses
-        # X-NHX-Principal-Id: service:{name}; see _pdp_request_headers).
+        # a service credential; see AuthClient._pdp_request_headers).
         if path.startswith("/apis/auth/v2/authz/"):
-            headers_dict = dict(request.headers)
             principal_id = headers_dict.get("x-nhx-principal-id", "")
             if is_service_principal(principal_id):
                 return await self._handle_service_principal_request(request, call_next, headers_dict)
+            try:
+                bearer_token = parse_bearer_authorization_header(headers_dict.get("authorization"))
+            except MalformedBearerTokenError:
+                return JSONResponse(status_code=401, content={"detail": "Invalid bearer token"})
+            if bearer_token is not None:
+                resolved = await resolve_workload_access_token(self.config, request, bearer_token)
+                if resolved is not None and is_service_principal(resolved.principal.id):
+                    return await self._handle_service_bearer_pdp_request(request, call_next, resolved)
             status_code = 401 if not principal_id else 403
             return JSONResponse(
                 status_code=status_code,
                 content={"detail": "Unauthorized" if status_code == 401 else "Forbidden"},
             )
-
-        headers_dict = dict(request.headers)
 
         # HF-compatible endpoints: restricted to service principals via Bearer token (HF_TOKEN).
         if path.startswith("/apis/files/v2/hf/"):
@@ -572,6 +595,31 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         )
         return await self._call_next_with_auth_client(request, call_next, auth_client)
 
+    async def _handle_service_bearer_pdp_request(
+        self,
+        request: Request,
+        call_next: Callable,
+        resolved: ResolvedBearerToken,
+    ) -> Response:
+        """Handle service-principal Bearer tokens on PDP entrypoints without PDP recursion."""
+        principal = resolved.principal
+        if not is_service_principal(principal.id):
+            return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+        try:
+            identity_resolution = _identity_resolution_from_resolved_token(resolved, self.config)
+        except InvalidPrincipalIdentifier as exc:
+            logger.warning("Bearer token rejected on PDP entrypoint: %s", exc)
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+        auth_client = AuthClient(
+            principal=principal,
+            config=self.config,
+            http_client=self._client,
+            service_name=self.service_name,
+            resolved_bearer_token=resolved,
+            identity_resolution=identity_resolution,
+        )
+        return await self._call_next_with_auth_client(request, call_next, auth_client)
+
     async def _handle_principal_headers_request(
         self, request: Request, call_next: Callable, headers_dict: dict
     ) -> Response:
@@ -618,7 +666,12 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
                 resolved_or_error = await self._authenticate_access_key_lifecycle(token)
                 if isinstance(resolved_or_error, Response):
                     return resolved_or_error
-                return await self._handle_resolved_bearer_token(request, call_next, resolved_or_error)
+                return await self._handle_resolved_bearer_token(
+                    request,
+                    call_next,
+                    resolved_or_error,
+                    token=token,
+                )
 
         jwt_validator = self._get_jwt_validator()
         if jwt_validator is None and not self.config.access_keys.enabled:
@@ -631,10 +684,21 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         from .jwt import UnsignedJWTRejectedError
 
         try:
+            extra_resolvers: tuple[ExtraBearerTokenResolver, ...] = ()
+            if self.config.oidc.workload_token_exchange_enabled:
+
+                async def resolve_workload_access(candidate: str) -> ResolvedBearerToken | None:
+                    return await resolve_workload_access_token(self.config, request, candidate)
+
+                async def resolve_workload_subject(candidate: str) -> ResolvedBearerToken | None:
+                    return await resolve_workload_subject_token(self.config, candidate)
+
+                extra_resolvers = (resolve_workload_access, resolve_workload_subject)
             resolved = await resolve_bearer_token(
                 self.config,
                 token,
                 jwt_validator=jwt_validator,
+                extra_resolvers=extra_resolvers,
                 skip_access_key_check=self.config.access_keys.enabled,
             )
         except UnsignedJWTRejectedError as exc:
@@ -655,7 +719,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Invalid or expired token"},
             )
 
-        return await self._handle_resolved_bearer_token(request, call_next, resolved)
+        return await self._handle_resolved_bearer_token(request, call_next, resolved, token=token)
 
     def _access_key_lifecycle_error_response(
         self,
@@ -688,6 +752,8 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable,
         resolved: ResolvedBearerToken,
+        *,
+        token: str | None = None,
     ) -> Response:
         """Authorize a request after a bearer token has produced trusted claims."""
         principal = resolved.principal
@@ -716,6 +782,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
                 http_client=self._client,
                 service_name=self.service_name,
                 resolved_bearer_token=resolved,
+                bearer_token=token,
                 identity_resolution=identity_resolution,
             )
             return await self._call_next_with_auth_client(request, call_next, auth_client)
@@ -727,6 +794,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             http_client=self._get_client(request),
             service_name=self.service_name,
             resolved_bearer_token=resolved,
+            bearer_token=token,
             identity_resolution=identity_resolution,
         )
 

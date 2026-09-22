@@ -83,7 +83,7 @@ def async_client_from_sync_client(client: NemoClient) -> Iterator[AsyncNemoClien
         retry=client._retry,
         http_client=http_client,
         owns_http_client=True,
-        url_resolver=client._url_resolver,
+        client_runtime=client.nemo_client_runtime,
     )
     try:
         yield async_client

@@ -152,10 +152,10 @@ def test_worker_passes_verified_ordered_tasks_to_public_evaluator(
     async_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     headers = {"X-NHX-Principal-Id": "service:harbor-test", "Authorization": "Bearer test-token"}
     sdk = NemoClient(
-        http_client=sync_http, base_url="http://platform.test", workspace="default", default_headers=headers
+        http_client=sync_http, base_url="https://platform.test", workspace="default", default_headers=headers
     )
     async_sdk = AsyncNemoClient(
-        http_client=async_http, base_url="http://platform.test", workspace="default", default_headers=headers
+        http_client=async_http, base_url="https://platform.test", workspace="default", default_headers=headers
     )
     # Isolate onto a real async transport that records requests, as the worker normally does.
     monkeypatch.setattr("nemo_evaluator.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda **_: async_http))
@@ -239,7 +239,7 @@ def test_worker_executes_additional_metric_and_view(tmp_path, stored_packages, m
     with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
         client = NemoClient(
             http_client=transport,
-            base_url="http://platform.test",
+            base_url="https://platform.test",
             workspace="default",
             default_headers={"X-NHX-Principal-Id": "service:harbor-test", "Authorization": "Bearer test-token"},
         )

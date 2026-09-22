@@ -16,10 +16,25 @@ import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.types import PreparedRequest
 from nemo_helix_plugin.client_provider import NemoClientProvider
+from nemo_helix_plugin.jobs import endpoints as jobs_endpoints
+from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.common import client_factory as cf
-from nhx.common.config import Configuration
+from nhx.common.auth import Principal, auth_client_context
+from nhx.common.auth.client import AuthClient
+from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import OIDCConfig
 from nhx.common.observability.otel import scoped_otel_headers
 from nhx.common.platform_endpoint import _AsyncHelixEndpointRoutingTransport, _SyncHelixEndpointRoutingTransport
+
+
+def _auth_config_with_token_exchange() -> AuthConfig:
+    return AuthConfig(
+        enabled=True,
+        oidc=OIDCConfig(
+            workload_token_exchange_enabled=True,
+            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+        ),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +82,35 @@ class TestSyncConstruction:
         assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NHX-Internal"] == "true"
         assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+
+    def test_service_principal_uses_bearer_auth_in_token_exchange_mode(self):
+        try:
+            Configuration.set_override(_auth_config_with_token_exchange())
+
+            with patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+                return_value="typed-service-token",
+            ):
+                client = cf.get_nemo_client(as_service="evaluator", internal=True)
+                assert client._auth is not None
+                assert client._auth.get_access_token() == "typed-service-token"
+        finally:
+            Configuration.clear_override(AuthConfig)
+
+        assert client._default_headers["X-NHX-Internal"] == "true"
+        assert "X-NHX-Principal-Id" not in client._default_headers
+
+    def test_service_principal_rejects_bearer_auth_to_remote_cleartext_endpoint(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        try:
+            Configuration.set_override(_auth_config_with_token_exchange())
+
+            client = cf.get_nemo_client(as_service="evaluator")
+            with pytest.raises(ValueError, match="NemoClient cannot send Authorization.*cleartext remote endpoint"):
+                client.send(_get("/apis/entities/v2/foo"))
+        finally:
+            Configuration.clear_override(AuthConfig)
 
     def test_on_behalf_of(self):
         client = cf.get_nemo_client(as_service="svc", on_behalf_of="user@example.com")
@@ -185,6 +229,19 @@ class TestUrlRouting:
 
         assert "/workspaces/team-a/models" in str(captured[0].url)
 
+    def test_typed_client_jobs_property_preserves_factory_runtime_routing(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NHX_JOBS_URL", "http://jobs-svc:8080")
+        Configuration.clear_cache()
+
+        client = cf.get_nemo_client(workspace="default")
+        jobs = client.jobs
+
+        assert isinstance(jobs, JobsClient)
+        assert jobs.nemo_client_runtime is client.nemo_client_runtime
+        request = jobs_endpoints.list_steps(workspace="default", name="job-1")
+        assert jobs._resolve_path(request) == "http://jobs-svc:8080/apis/jobs/v2/workspaces/default/jobs/job-1/steps"
+
 
 # ---------------------------------------------------------------------------
 # Headers / auth
@@ -194,8 +251,8 @@ class TestUrlRouting:
 class TestHeadersAuth:
     def test_propagates_request_principal_when_no_service(self):
         auth_headers = {"X-NHX-Principal-Id": "user@example.com", "X-NHX-Principal-Groups": "g1,g2"}
-        # _get_default_headers reads the request principal via sdk_factory's binding.
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=auth_headers):
+        # platform_auth_headers reads the request principal via the platform context helper.
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=auth_headers):
             client = cf.get_nemo_client()
         assert client._default_headers["X-NHX-Principal-Id"] == "user@example.com"
         assert client._default_headers["X-NHX-Principal-Groups"] == "g1,g2"
@@ -226,10 +283,55 @@ class TestHeadersAuth:
 
     def test_no_headers_leaves_default_headers_none(self):
         # No service, no principal context, no OTEL, no internal → no default headers.
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value={}):
-            with patch("nhx.common.sdk_factory.principal_from_env", return_value=None):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value={}):
+            with patch("nhx.common.platform_client_context.principal_from_env", return_value=None):
                 client = cf.get_nemo_client()
         assert client._default_headers == {}
+
+    def test_token_exchange_request_context_forwards_bearer_without_trusted_headers(self):
+        config = _auth_config_with_token_exchange()
+        Configuration.set_override(config)
+        context_token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+                bearer_token="incoming-service-token",
+            )
+        )
+        try:
+            client = cf.get_async_nemo_client()
+        finally:
+            auth_client_context.reset(context_token)
+            Configuration.clear_override(AuthConfig)
+
+        assert client._default_headers["Authorization"] == "Bearer incoming-service-token"
+        assert all(name.lower() != "x-nhx-principal-id" for name in client._default_headers)
+        assert all(name.lower() != "x-nhx-actor-aliases" for name in client._default_headers)
+
+    async def test_token_exchange_request_context_rejects_bearer_to_remote_cleartext_endpoint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        config = _auth_config_with_token_exchange()
+        Configuration.set_override(config)
+        context_token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+                bearer_token="incoming-service-token",
+            )
+        )
+        try:
+            client = cf.get_async_nemo_client()
+            with pytest.raises(
+                ValueError, match="AsyncNemoClient cannot send Authorization.*cleartext remote endpoint"
+            ):
+                await client.send(_get("/apis/entities/v2/foo"))
+        finally:
+            auth_client_context.reset(context_token)
+            Configuration.clear_override(AuthConfig)
 
 
 # ---------------------------------------------------------------------------

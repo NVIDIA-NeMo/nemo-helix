@@ -197,6 +197,12 @@ auth:
    workload_scope: "openid email groups"
 ```
 
+Workload token exchange is a platform-wide mode. When
+`auth.oidc.workload_token_exchange_enabled=true`, managed workloads that need
+creator-scoped platform access use exchanged bearer tokens, and trusted
+`X-NHX-*` identity headers are rejected on protected service routes. When it is
+disabled but `auth.enabled=true`, the platform uses trusted-header mode.
+
 By default, workload-exchange access tokens use `auth.token_signing.key_id` as
 their JWT `kid`. To give workload tokens a distinct key identifier, set
 `auth.oidc.workload_token_key_id`. For cryptographic separation, also set
@@ -209,6 +215,12 @@ token from that file and sends an RFC 8693 exchange request using
 and optional `scope`. `workload_token_endpoint` is optional; when it is unset,
 the SDK uses `token_endpoint`. This is useful when host CLI login and workload
 containers need different network-reachable IdP URLs.
+
+`auth.oidc.workload_scope` is a blanket allow-list for scopes minted by the
+current workload token exchange endpoint. It is not a per-service or
+per-workload grant model. Use it conservatively; per-service and per-workload
+scope grants should be modeled with stable service identities and role bindings
+when those grants are available.
 
 For Docker-backed job runtimes, `auth.oidc.workload_token_exchange_enabled`
 controls workload identity. When enabled, job steps with a delegation auth

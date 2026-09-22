@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpcore
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -20,26 +21,34 @@ from nhx.common.service.dependencies import (
 )
 
 
-def test_get_http_client_caches_endpoint_client() -> None:
+def test_get_http_client_caches_runtime_context_endpoint_client() -> None:
     provider = DependencyProvider()
     client = MagicMock()
+    runtime_context = MagicMock()
+    runtime_context.endpoint.async_sdk_http_client.return_value = client
 
     with patch(
-        "nhx.common.service.base.resolve_platform_endpoint",
-    ) as resolve:
-        resolve.return_value.async_sdk_http_client.return_value = client
+        "nhx.common.service.base.build_platform_runtime_context",
+        return_value=runtime_context,
+    ) as build_runtime_context:
         first = provider.get_http_client()
         second = provider.get_http_client()
 
     assert first is client
     assert second is client
-    resolve.assert_called_once_with()
-    resolve.return_value.async_sdk_http_client.assert_called_once_with()
+    build_runtime_context.assert_called_once_with(platform_config=provider.get_platform_config())
+    runtime_context.endpoint.async_sdk_http_client.assert_called_once_with()
 
 
 def _uds_of(client: httpx.AsyncClient) -> str | None:
     """Socket path bound to the client's transport pool, or None for TCP."""
-    return getattr(client._transport._pool, "_uds", None)
+    transport = client._transport
+    if not isinstance(transport, httpx.AsyncHTTPTransport):
+        return None
+    pool = transport._pool
+    if not isinstance(pool, httpcore.AsyncConnectionPool):
+        return None
+    return pool._uds
 
 
 def test_get_http_client_binds_uds_transport(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,10 +97,33 @@ def test_get_sdk_client_caches_request_sdk_and_creates_fresh_service_sdk() -> No
     with patch("nhx.common.sdk_factory.get_async_platform_sdk", side_effect=[request_sdk, service_sdk]) as factory:
         assert provider.get_sdk_client() is request_sdk
         assert provider.get_sdk_client() is request_sdk
-        assert provider.get_sdk_client(as_service="jobs") is service_sdk
+        assert provider.get_service_sdk_client("jobs") is service_sdk
 
     # The provider now shares its pooled HTTP client with every SDK it builds.
     http_client = provider.get_http_client()
+    assert factory.call_args_list[0].kwargs == {"http_client": http_client}
+    assert factory.call_args_list[1].kwargs == {
+        "as_service": "jobs",
+        "internal": True,
+        "http_client": http_client,
+    }
+
+
+def test_get_sync_sdk_client_caches_request_sdk_and_creates_fresh_service_sdk() -> None:
+    provider = DependencyProvider()
+    request_sdk = MagicMock(name="request_sdk")
+    service_sdk = MagicMock(name="service_sdk")
+    http_client = MagicMock(name="http_client")
+
+    with (
+        patch.object(provider, "get_sync_http_client", return_value=http_client) as get_sync_http_client,
+        patch("nhx.common.sdk_factory.get_platform_sdk", side_effect=[request_sdk, service_sdk]) as factory,
+    ):
+        assert provider.get_sync_sdk_client() is request_sdk
+        assert provider.get_sync_sdk_client() is request_sdk
+        assert provider.get_service_sync_sdk_client("jobs") is service_sdk
+
+    assert get_sync_http_client.call_count == 2
     assert factory.call_args_list[0].kwargs == {"http_client": http_client}
     assert factory.call_args_list[1].kwargs == {
         "as_service": "jobs",
@@ -149,23 +181,32 @@ async def test_close_closes_managed_clients_and_clears_references() -> None:
     assert provider._sdk_client is None
 
 
-def test_get_entity_client_as_service_uses_fresh_service_sdk() -> None:
+def test_get_service_entity_client_uses_service_nemo_client() -> None:
     provider = DependencyProvider()
-    sdk = MagicMock(name="service_sdk")
+    nemo_client = MagicMock(name="service_nemo_client")
+    http_client = MagicMock(name="http_client")
     entities_client = MagicMock(name="entities_client")
     entity_client = MagicMock(name="entity_client")
 
     with (
-        patch.object(provider, "get_sdk_client", return_value=sdk) as get_sdk,
+        patch.object(provider, "get_http_client", return_value=http_client) as get_http_client,
+        patch("nhx.common.client_factory.get_async_nemo_client", return_value=nemo_client) as get_nemo_client,
         patch(
             "nemo_helix_plugin.client.adapter.client_from_platform",
             return_value=entities_client,
         ) as adapter,
         patch("nhx.common.entities.client.EntityClient", return_value=entity_client) as client_factory,
     ):
-        result = provider.get_entity_client(as_service="models")
+        result = provider.get_service_entity_client("models")
 
     assert result is entity_client
-    get_sdk.assert_called_once_with(as_service="models")
-    adapter.assert_called_once_with(sdk, AsyncEntitiesClient)
+    get_http_client.assert_called_once_with()
+    get_nemo_client.assert_called_once_with(
+        as_service="models",
+        internal=True,
+        on_behalf_of=None,
+        http_client=http_client,
+    )
+    adapter.assert_called_once()
+    assert adapter.call_args.args == (nemo_client, AsyncEntitiesClient)
     client_factory.assert_called_once_with(entities_client)

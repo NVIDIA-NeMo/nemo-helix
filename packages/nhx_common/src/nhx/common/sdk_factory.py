@@ -4,23 +4,25 @@
 """SDK factory functions for creating NeMo Helix SDK instances."""
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
-from pathlib import Path
-from typing import Optional, override
+from collections.abc import Callable, Mapping
 
 import httpx
-from nemo_helix import DEFAULT_MAX_RETRIES, AsyncNeMoHelix, NeMoHelix, NotGiven, Omit, Timeout, not_given
+from httpx._types import TimeoutTypes
+from nemo_helix import AsyncNeMoHelix, NeMoHelix, Omit
 from nemo_helix_plugin.client.constants import is_workload_identity_token_file_set
-from nhx.common.auth import Principal, get_principal_auth_headers, principal_from_env
+from nhx.common import platform_client_context
+from nhx.common.auth import Principal, principal_from_env
 from nhx.common.config import Configuration, HelixConfig
-from nhx.common.immutable_http_client import ImmutableDefaultAsyncHttpxClient, ImmutableDefaultHttpxClient
-from nhx.common.observability import INTERNAL_REQUEST_HEADER, MARK_INTERNAL_REQUEST_HEADERS
-from nhx.common.observability.otel import get_otel_headers
-from nhx.common.platform_endpoint import HelixEndpoint, resolve_platform_endpoint
+from nhx.common.platform_client_context import (
+    DELEGATED_PRINCIPAL_HEADERS,
+    PRINCIPAL_OBO_HEADER,
+    AsyncRequestHook,
+    HelixClientContext,
+    SyncRequestHook,
+)
+from nhx.common.platform_endpoint import HelixEndpoint
 
 logger = logging.getLogger(__name__)
-_SyncRequestHook = Callable[[httpx.Request], None]
-_AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
 
 
 def _get_platform_config() -> HelixConfig:
@@ -30,280 +32,122 @@ def _get_platform_config() -> HelixConfig:
     return platform_config
 
 
-def _sync_sdk_http_client(
-    endpoint: HelixEndpoint,
-    base_url: str | None,
-    http_client: httpx.Client | None,
-) -> httpx.Client:
-    if http_client is not None:
-        return endpoint.sync_sdk_http_client(http_client=http_client)
-    if base_url is not None and not endpoint.service_endpoints:
-        return ImmutableDefaultHttpxClient()
-    return endpoint.sync_sdk_http_client()
-
-
-def _async_sdk_http_client(
-    endpoint: HelixEndpoint,
-    base_url: str | None,
-    http_client: httpx.AsyncClient | None,
-) -> httpx.AsyncClient:
-    if http_client is not None:
-        return endpoint.async_sdk_http_client(http_client=http_client)
-    if base_url is not None and not endpoint.service_endpoints:
-        return ImmutableDefaultAsyncHttpxClient()
-    return endpoint.async_sdk_http_client()
-
-
 def _sync_workload_identity_http_client_factory(
     endpoint: HelixEndpoint,
-) -> Callable[[_SyncRequestHook, str | bool], httpx.Client]:
-    def create_http_client(request_hook: _SyncRequestHook, verify: str | bool) -> httpx.Client:
-        return endpoint.sync_sdk_http_client(request_hooks=(request_hook,), verify=verify)
+    *,
+    timeout: TimeoutTypes | None,
+    limits: httpx.Limits | None,
+    follow_redirects: bool | None,
+) -> Callable[[SyncRequestHook, str | bool], httpx.Client]:
+    def create_http_client(request_hook: SyncRequestHook, verify: str | bool) -> httpx.Client:
+        return endpoint.sync_sdk_http_client(
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+            request_hooks=(request_hook,),
+            verify=verify,
+        )
 
     return create_http_client
 
 
 def _async_workload_identity_http_client_factory(
     endpoint: HelixEndpoint,
-) -> Callable[[_AsyncRequestHook, str | bool], httpx.AsyncClient]:
-    def create_http_client(request_hook: _AsyncRequestHook, verify: str | bool) -> httpx.AsyncClient:
-        return endpoint.async_sdk_http_client(request_hooks=(request_hook,), verify=verify)
+    *,
+    timeout: TimeoutTypes | None,
+    limits: httpx.Limits | None,
+    follow_redirects: bool | None,
+) -> Callable[[AsyncRequestHook, str | bool], httpx.AsyncClient]:
+    def create_http_client(request_hook: AsyncRequestHook, verify: str | bool) -> httpx.AsyncClient:
+        return endpoint.async_sdk_http_client(
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+            request_hooks=(request_hook,),
+            verify=verify,
+        )
 
     return create_http_client
 
 
-class _WorkloadIdentityRoutedNeMoHelix(NeMoHelix):
-    _platform_endpoint: HelixEndpoint
-
-    def __init__(
-        self,
-        *,
-        workspace: str | None = None,
-        base_url: str | httpx.URL | None = None,
-        inference_base_url: str | httpx.URL | None = None,
-        config_path: Path | None = None,
-        context_name: str | None = None,
-        access_token: str | None = None,
-        timeout: float | Timeout | None | NotGiven = not_given,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        default_headers: Mapping[str, str | Omit] | None = None,
-        default_query: Mapping[str, object] | None = None,
-        http_client: httpx.Client | None = None,
-        _strict_response_validation: bool = False,
-        platform_config: HelixConfig | None = None,
-        platform_endpoint: HelixEndpoint | None = None,
-    ) -> None:
-        resolved_config = platform_config or _get_platform_config()
-        self._platform_endpoint = platform_endpoint or resolve_platform_endpoint(resolved_config)
-        if http_client is None:
-            from nemo_helix_ext.client.factory import build_client_init_kwargs
-
-            client_init_kwargs = build_client_init_kwargs(
-                config_path=config_path,
-                base_url=base_url,
-                context_name=context_name,
-                access_token=access_token,
-                extra_headers=default_headers,
-                http_client_factory=_sync_workload_identity_http_client_factory(self._platform_endpoint),
-            )
-            base_url = client_init_kwargs.base_url
-            if workspace is None:
-                workspace = client_init_kwargs.workspace
-            default_headers = client_init_kwargs.default_headers
-            if client_init_kwargs.http_client is not None and not isinstance(
-                client_init_kwargs.http_client, httpx.Client
-            ):
-                raise TypeError("Expected httpx.Client from sync client factory")
-            if client_init_kwargs.http_client is not None:
-                http_client = client_init_kwargs.http_client
-            else:
-                http_client = self._platform_endpoint.sync_sdk_http_client(verify=client_init_kwargs.client_verify)
-        super().__init__(
-            workspace=workspace,
-            base_url=base_url,
-            inference_base_url=inference_base_url,
-            config_path=config_path,
-            context_name=context_name,
-            access_token=access_token,
-            timeout=timeout,
-            max_retries=max_retries,
-            default_headers=default_headers,
-            default_query=default_query,
-            http_client=http_client,
-            _strict_response_validation=_strict_response_validation,
-        )
-
-    @override
-    def _prepare_url(self, url: str) -> httpx.URL:
-        return self._platform_endpoint.route_request_url(super()._prepare_url(url)).url
-
-
-class _WorkloadIdentityRoutedAsyncNeMoHelix(AsyncNeMoHelix):
-    _platform_endpoint: HelixEndpoint
-
-    def __init__(
-        self,
-        *,
-        workspace: str | None = None,
-        base_url: str | httpx.URL | None = None,
-        inference_base_url: str | httpx.URL | None = None,
-        config_path: Path | None = None,
-        context_name: str | None = None,
-        access_token: str | None = None,
-        timeout: float | Timeout | None | NotGiven = not_given,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        default_headers: Mapping[str, str | Omit] | None = None,
-        default_query: Mapping[str, object] | None = None,
-        http_client: httpx.AsyncClient | None = None,
-        _strict_response_validation: bool = False,
-        platform_config: HelixConfig | None = None,
-        platform_endpoint: HelixEndpoint | None = None,
-    ) -> None:
-        resolved_config = platform_config or _get_platform_config()
-        self._platform_endpoint = platform_endpoint or resolve_platform_endpoint(resolved_config)
-        if http_client is None:
-            from nemo_helix_ext.client.factory import build_async_client_init_kwargs
-
-            client_init_kwargs = build_async_client_init_kwargs(
-                config_path=config_path,
-                base_url=base_url,
-                context_name=context_name,
-                access_token=access_token,
-                extra_headers=default_headers,
-                http_client_factory=_async_workload_identity_http_client_factory(self._platform_endpoint),
-            )
-            base_url = client_init_kwargs.base_url
-            if workspace is None:
-                workspace = client_init_kwargs.workspace
-            default_headers = client_init_kwargs.default_headers
-            if client_init_kwargs.http_client is not None and not isinstance(
-                client_init_kwargs.http_client,
-                httpx.AsyncClient,
-            ):
-                raise TypeError("Expected httpx.AsyncClient from async client factory")
-            if client_init_kwargs.http_client is not None:
-                http_client = client_init_kwargs.http_client
-            else:
-                http_client = self._platform_endpoint.async_sdk_http_client(verify=client_init_kwargs.client_verify)
-        super().__init__(
-            workspace=workspace,
-            base_url=base_url,
-            inference_base_url=inference_base_url,
-            config_path=config_path,
-            context_name=context_name,
-            access_token=access_token,
-            timeout=timeout,
-            max_retries=max_retries,
-            default_headers=default_headers,
-            default_query=default_query,
-            http_client=http_client,
-            _strict_response_validation=_strict_response_validation,
-        )
-
-    @override
-    def _prepare_url(self, url: str) -> httpx.URL:
-        return self._platform_endpoint.route_request_url(super()._prepare_url(url)).url
-
-
-def _should_bootstrap_workload_identity(
+def _workload_identity_platform_sdk(
     *,
-    as_service: str | None,
-    on_behalf_of: str | Principal | None,
-    http_client: httpx.Client | httpx.AsyncClient | None,
-    endpoint: HelixEndpoint,
-) -> bool:
-    return (
-        as_service is None
-        and on_behalf_of is None
-        and http_client is None
-        and endpoint.transport != "uds"
-        and is_workload_identity_token_file_set()
+    context: HelixClientContext,
+    base_url: str | None,
+    headers: Mapping[str, str],
+    timeout: TimeoutTypes | None,
+    limits: httpx.Limits | None,
+    follow_redirects: bool | None,
+) -> NeMoHelix:
+    from nemo_helix_ext.client.factory import build_client_init_kwargs
+
+    client_init_kwargs = build_client_init_kwargs(
+        base_url=base_url,
+        extra_headers=headers or None,
+        http_client_factory=_sync_workload_identity_http_client_factory(
+            context.endpoint,
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+        ),
+    )
+    http_client = client_init_kwargs.http_client
+    if http_client is not None and not isinstance(http_client, httpx.Client):
+        raise TypeError("Expected httpx.Client from sync client factory")
+    if http_client is None:
+        http_client = context.endpoint.sync_sdk_http_client(
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+            verify=client_init_kwargs.client_verify,
+        )
+    return NeMoHelix(
+        workspace=client_init_kwargs.workspace,
+        base_url=client_init_kwargs.base_url,
+        default_headers=client_init_kwargs.default_headers,
+        http_client=http_client,
+        nemo_client_runtime=context.runtime,
     )
 
 
-def _workload_identity_extra_headers(*, internal: bool) -> dict[str, str]:
-    return MARK_INTERNAL_REQUEST_HEADERS.copy() if internal else {}
+def _async_workload_identity_platform_sdk(
+    *,
+    context: HelixClientContext,
+    base_url: str | None,
+    headers: Mapping[str, str],
+    timeout: TimeoutTypes | None,
+    limits: httpx.Limits | None,
+    follow_redirects: bool | None,
+) -> AsyncNeMoHelix:
+    from nemo_helix_ext.client.factory import build_async_client_init_kwargs
 
-
-def _forwardable_otel_headers() -> dict[str, str]:
-    internal_header = INTERNAL_REQUEST_HEADER.lower()
-    return {
-        name: value
-        for name, value in get_otel_headers().items()
-        if name.lower() == internal_header or not name.lower().startswith("x-nhx-")
-    }
-
-
-def _get_default_headers(
-    as_service: str | None = None, internal: bool = False, on_behalf_of: str | Principal | None = None
-) -> dict[str, str]:
-    """Get default headers for SDK requests.
-
-    Args:
-        as_service: If provided, use service principal headers (service:{name}).
-                   If None, use the current request's auth context.
-        internal: If True, include headers to mark requests as internal
-                 (used for controller/background task requests).
-
-    Returns:
-        Headers dict combining auth and internal markers as needed.
-    """
-    headers: dict[str, str] = {}
-
-    # Add internal request marker if requested
-    if internal:
-        headers.update(MARK_INTERNAL_REQUEST_HEADERS)
-
-    # Add auth headers
-    if as_service is not None:
-        # Use service principal
-        headers["X-NHX-Principal-Id"] = f"service:{as_service}"
-        headers["X-NHX-Actor-Aliases"] = f"service:{as_service}"
-
-        if on_behalf_of is not None:
-            if isinstance(on_behalf_of, Principal):
-                effective_principal = on_behalf_of.effective_principal
-                headers["X-NHX-Principal-On-Behalf-Of"] = effective_principal.id
-                if effective_principal.groups:
-                    headers["X-NHX-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
-                if effective_principal.email:
-                    headers["X-NHX-Principal-On-Behalf-Of-Email"] = effective_principal.email
-                if effective_principal.account_id:
-                    headers["X-NHX-Subject-Account-Id"] = effective_principal.account_id
-                if effective_principal.authz_aliases:
-                    headers["X-NHX-Subject-Aliases"] = ",".join(effective_principal.authz_aliases)
-            else:
-                headers["X-NHX-Principal-On-Behalf-Of"] = on_behalf_of
-    else:
-        # Propagate the current user's auth context
-        auth_headers = get_principal_auth_headers()
-        if auth_headers:
-            headers.update(auth_headers)
-
-        elif (principal := principal_from_env()) is not None:
-            # If we don't have auth_headers set yet, try loading them from env
-            headers.update(principal.get_headers())
-
-        if on_behalf_of is not None:
-            headers.pop("X-NHX-Principal-On-Behalf-Of-Groups", None)
-            headers.pop("X-NHX-Principal-On-Behalf-Of-Email", None)
-            headers.pop("X-NHX-Subject-Account-Id", None)
-            headers.pop("X-NHX-Subject-Aliases", None)
-            if isinstance(on_behalf_of, Principal):
-                effective_principal = on_behalf_of.effective_principal
-                headers["X-NHX-Principal-On-Behalf-Of"] = effective_principal.id
-                if effective_principal.groups:
-                    headers["X-NHX-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
-                if effective_principal.email:
-                    headers["X-NHX-Principal-On-Behalf-Of-Email"] = effective_principal.email
-                if effective_principal.account_id:
-                    headers["X-NHX-Subject-Account-Id"] = effective_principal.account_id
-                if effective_principal.authz_aliases:
-                    headers["X-NHX-Subject-Aliases"] = ",".join(effective_principal.authz_aliases)
-            else:
-                headers["X-NHX-Principal-On-Behalf-Of"] = on_behalf_of
-
-    return headers
+    client_init_kwargs = build_async_client_init_kwargs(
+        base_url=base_url,
+        extra_headers=headers or None,
+        http_client_factory=_async_workload_identity_http_client_factory(
+            context.endpoint,
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+        ),
+    )
+    http_client = client_init_kwargs.http_client
+    if http_client is not None and not isinstance(http_client, httpx.AsyncClient):
+        raise TypeError("Expected httpx.AsyncClient from async client factory")
+    if http_client is None:
+        http_client = context.endpoint.async_sdk_http_client(
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+            verify=client_init_kwargs.client_verify,
+        )
+    return AsyncNeMoHelix(
+        workspace=client_init_kwargs.workspace,
+        base_url=client_init_kwargs.base_url,
+        default_headers=client_init_kwargs.default_headers,
+        http_client=http_client,
+        nemo_client_runtime=context.runtime,
+    )
 
 
 def get_platform_sdk(
@@ -312,6 +156,9 @@ def get_platform_sdk(
     http_client: httpx.Client | None = None,
     on_behalf_of: str | Principal | None = None,
     base_url: str | None = None,
+    timeout: TimeoutTypes | None = None,
+    limits: httpx.Limits | None = None,
+    follow_redirects: bool | None = None,
 ) -> NeMoHelix:
     """
     Returns an instance of the NeMoHelix SDK configured with the platform's base URL.
@@ -330,28 +177,36 @@ def get_platform_sdk(
     Returns:
         Configured NeMoHelix SDK instance.
     """
-    platform_config = _get_platform_config()
-    endpoint = resolve_platform_endpoint(platform_config)
-    if _should_bootstrap_workload_identity(
+    context = platform_client_context.build_platform_client_context(
+        platform_config=_get_platform_config(),
+        base_url=base_url,
         as_service=as_service,
+        internal=internal,
         on_behalf_of=on_behalf_of,
-        http_client=http_client,
-        endpoint=endpoint,
-    ):
-        headers = _workload_identity_extra_headers(internal=internal)
-        return _WorkloadIdentityRoutedNeMoHelix(
-            base_url=base_url or endpoint.connect_base_url,
-            default_headers=headers if headers else None,
-            platform_config=platform_config,
-            platform_endpoint=endpoint,
-        )
-
-    headers = _get_default_headers(as_service, internal, on_behalf_of)
-    return NeMoHelix(
-        base_url=base_url or endpoint.connect_base_url,
-        http_client=_sync_sdk_http_client(endpoint, base_url, http_client),
-        default_headers=headers if headers else None,
+        has_explicit_http_client=http_client is not None,
     )
+    resolved_base_url = context.base_url
+    if context.auth_plan.uses_workload_identity_bootstrap:
+        return _workload_identity_platform_sdk(
+            context=context,
+            base_url=resolved_base_url,
+            headers=context.default_headers,
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+        )
+    sdk = NeMoHelix(
+        base_url=resolved_base_url,
+        http_client=context.sync_sdk_http_client(
+            http_client,
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+        ),
+        default_headers=context.default_headers_or_none(),
+        nemo_client_runtime=context.runtime,
+    )
+    return sdk.set_nemo_client_auth(context.nemo_client_auth())
 
 
 def get_task_sdk(as_service: str, http_client: httpx.Client | None = None) -> NeMoHelix:
@@ -385,7 +240,7 @@ def get_task_sdk(as_service: str, http_client: httpx.Client | None = None) -> Ne
     )
 
 
-def get_async_task_sdk(as_service: str, http_client: Optional[httpx.AsyncClient] = None) -> AsyncNeMoHelix:
+def get_async_task_sdk(as_service: str, http_client: httpx.AsyncClient | None = None) -> AsyncNeMoHelix:
     """Async counterpart of :func:`get_task_sdk` for use inside a task container.
 
     Reads the job creator's principal from ``NHX_PRINCIPAL`` and creates an async SDK that
@@ -419,9 +274,12 @@ def get_async_task_sdk(as_service: str, http_client: Optional[httpx.AsyncClient]
 def get_async_platform_sdk(
     as_service: str | None = None,
     internal: bool = False,
-    http_client: Optional[httpx.AsyncClient] = None,
-    on_behalf_of: Optional[str | Principal] = None,
+    http_client: httpx.AsyncClient | None = None,
+    on_behalf_of: str | Principal | None = None,
     base_url: str | None = None,
+    timeout: TimeoutTypes | None = None,
+    limits: httpx.Limits | None = None,
+    follow_redirects: bool | None = None,
 ) -> AsyncNeMoHelix:
     """
     Returns an instance of the AsyncNeMoHelix SDK configured with the platform's base URL.
@@ -440,28 +298,36 @@ def get_async_platform_sdk(
     Returns:
         Configured AsyncNeMoHelix SDK instance.
     """
-    platform_config = _get_platform_config()
-    endpoint = resolve_platform_endpoint(platform_config)
-    if _should_bootstrap_workload_identity(
+    context = platform_client_context.build_platform_client_context(
+        platform_config=_get_platform_config(),
+        base_url=base_url,
         as_service=as_service,
+        internal=internal,
         on_behalf_of=on_behalf_of,
-        http_client=http_client,
-        endpoint=endpoint,
-    ):
-        headers = _workload_identity_extra_headers(internal=internal)
-        return _WorkloadIdentityRoutedAsyncNeMoHelix(
-            base_url=base_url or endpoint.connect_base_url,
-            default_headers=headers if headers else None,
-            platform_config=platform_config,
-            platform_endpoint=endpoint,
-        )
-
-    headers = _get_default_headers(as_service, internal, on_behalf_of)
-    return AsyncNeMoHelix(
-        base_url=base_url or endpoint.connect_base_url,
-        http_client=_async_sdk_http_client(endpoint, base_url, http_client),
-        default_headers=headers if headers else None,
+        has_explicit_http_client=http_client is not None,
     )
+    resolved_base_url = context.base_url
+    if context.auth_plan.uses_workload_identity_bootstrap:
+        return _async_workload_identity_platform_sdk(
+            context=context,
+            base_url=resolved_base_url,
+            headers=context.default_headers,
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+        )
+    sdk = AsyncNeMoHelix(
+        base_url=resolved_base_url,
+        http_client=context.async_sdk_http_client(
+            http_client,
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=follow_redirects,
+        ),
+        default_headers=context.default_headers_or_none(),
+        nemo_client_runtime=context.runtime,
+    )
+    return sdk.set_nemo_client_auth(context.nemo_client_auth())
 
 
 def get_request_scoped_sdk(
@@ -486,8 +352,8 @@ def get_request_scoped_sdk(
     """
 
     # Combine OTEL headers (tracing) + auth headers (user identity)
-    headers = _forwardable_otel_headers()
-    headers.update(get_principal_auth_headers())
+    headers = platform_client_context.forwardable_otel_headers(include_internal=True)
+    headers.update(platform_client_context.current_principal_auth_headers())
 
     # If we have headers to add, create a new SDK with them
     # This reuses the underlying HTTP client (lightweight operation)
@@ -502,8 +368,8 @@ def get_request_scoped_sync_sdk(
 ) -> NeMoHelix:
     """Create a request-scoped sync SDK with current auth and observability headers."""
 
-    headers = _forwardable_otel_headers()
-    headers.update(get_principal_auth_headers())
+    headers = platform_client_context.forwardable_otel_headers(include_internal=True)
+    headers.update(platform_client_context.current_principal_auth_headers())
 
     if headers:
         return base_sdk.with_options(default_headers=headers)
@@ -549,23 +415,9 @@ def get_sdk_on_behalf_of(
     """
     # Merge existing headers with the new on-behalf-of header
     merged_headers: dict[str, str | Omit] = dict(base_sdk._custom_headers)
-    merged_headers.pop("X-NHX-Principal-On-Behalf-Of-Groups", None)
-    merged_headers.pop("X-NHX-Principal-On-Behalf-Of-Email", None)
-    merged_headers.pop("X-NHX-Subject-Account-Id", None)
-    merged_headers.pop("X-NHX-Subject-Aliases", None)
-    if isinstance(on_behalf_of, Principal):
-        effective_principal = on_behalf_of.effective_principal
-        merged_headers["X-NHX-Principal-On-Behalf-Of"] = effective_principal.id
-        if effective_principal.email:
-            merged_headers["X-NHX-Principal-On-Behalf-Of-Email"] = effective_principal.email
-        if effective_principal.groups:
-            merged_headers["X-NHX-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
-        if effective_principal.account_id:
-            merged_headers["X-NHX-Subject-Account-Id"] = effective_principal.account_id
-        if effective_principal.authz_aliases:
-            merged_headers["X-NHX-Subject-Aliases"] = ",".join(effective_principal.authz_aliases)
-    else:
-        merged_headers["X-NHX-Principal-On-Behalf-Of"] = on_behalf_of
+    for header in (PRINCIPAL_OBO_HEADER, *DELEGATED_PRINCIPAL_HEADERS):
+        merged_headers.pop(header, None)
+    merged_headers.update(platform_client_context.delegated_principal_headers(on_behalf_of))
     return base_sdk.with_options(set_default_headers=merged_headers)
 
 

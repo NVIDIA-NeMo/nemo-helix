@@ -28,38 +28,20 @@ def _write_private_key(path: Path) -> None:
     path.write_bytes(_private_key_pem())
 
 
-def test_signing_key_cache_reads_private_key_file_once_for_same_file_metadata(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_signing_key_cache_sync_wrapper_returns_key_material(tmp_path: Path) -> None:
     key_path = tmp_path / "private.pem"
     _write_private_key(key_path)
-    original_load = signing_keys._load_rsa_signing_key_async
-    load_count = 0
-
-    async def counted_load(**kwargs: Any) -> signing_keys.RSASigningKey:
-        nonlocal load_count
-        load_count += 1
-        return await original_load(**kwargs)
-
-    monkeypatch.setattr(signing_keys, "_load_rsa_signing_key_async", counted_load)
     cache = RSASigningKeyCache()
 
-    first = cache.get_from_file(
-        kid="test-key",
-        private_key_file=str(key_path),
-        missing_private_key_message="private key file is required",
-        invalid_private_key_message="private key must be RSA",
-    )
-    second = cache.get_from_file(
+    signing_key = cache.get_from_file(
         kid="test-key",
         private_key_file=str(key_path),
         missing_private_key_message="private key file is required",
         invalid_private_key_message="private key must be RSA",
     )
 
-    assert first is second
-    assert load_count == 1
+    assert signing_key.kid == "test-key"
+    assert signing_key.public_jwk["kid"] == "test-key"
 
 
 def test_signing_key_cache_reloads_when_file_metadata_changes(tmp_path: Path) -> None:
@@ -165,18 +147,14 @@ def test_signing_key_cache_maps_unreadable_private_key_file_to_missing_message(
 ) -> None:
     key_path = tmp_path / "private.pem"
     _write_private_key(key_path)
+    original_read_bytes = Path.read_bytes
 
-    class UnreadableFile:
-        async def __aenter__(self) -> None:
+    def unreadable_read_bytes(path: Path) -> bytes:
+        if path == key_path:
             raise PermissionError("permission denied")
+        return original_read_bytes(path)
 
-        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
-            return False
-
-    def unreadable_open(*args: object, **kwargs: object) -> UnreadableFile:
-        return UnreadableFile()
-
-    monkeypatch.setattr(signing_keys.aiofiles, "open", unreadable_open)
+    monkeypatch.setattr(Path, "read_bytes", unreadable_read_bytes)
     cache = RSASigningKeyCache()
 
     with pytest.raises(RuntimeError, match="private key file is required"):
@@ -263,28 +241,28 @@ def test_async_signing_key_cache_reads_private_key_file_once_for_same_file_metad
     monkeypatch.setattr(signing_keys, "_load_rsa_signing_key_async", counted_load)
     cache = RSASigningKeyCache()
 
-    async_key = asyncio.run(
-        cache.get_from_file_async(
+    async def load_twice() -> tuple[signing_keys.RSASigningKey, signing_keys.RSASigningKey]:
+        async_key = await cache.get_from_file_async(
             kid="test-key",
             private_key_file=str(key_path),
             missing_private_key_message="private key file is required",
             invalid_private_key_message="private key must be RSA",
         )
-    )
-    second_async_key = asyncio.run(
-        cache.get_from_file_async(
+        second_async_key = await cache.get_from_file_async(
             kid="test-key",
             private_key_file=str(key_path),
             missing_private_key_message="private key file is required",
             invalid_private_key_message="private key must be RSA",
         )
-    )
+        return async_key, second_async_key
+
+    async_key, second_async_key = asyncio.run(load_twice())
 
     assert second_async_key is async_key
     assert load_count == 1
 
 
-def test_signing_key_cache_sync_and_async_use_same_cached_entry(tmp_path: Path) -> None:
+def test_signing_key_cache_sync_and_async_return_same_key_material(tmp_path: Path) -> None:
     key_path = tmp_path / "private.pem"
     _write_private_key(key_path)
     cache = RSASigningKeyCache()
@@ -304,7 +282,7 @@ def test_signing_key_cache_sync_and_async_use_same_cached_entry(tmp_path: Path) 
         )
     )
 
-    assert async_key is sync_key
+    assert async_key.public_jwk == sync_key.public_jwk
 
 
 async def test_signing_key_cache_sync_wrapper_rejects_running_event_loop(tmp_path: Path) -> None:

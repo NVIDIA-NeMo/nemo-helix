@@ -73,7 +73,7 @@ class AuthService(Service[AuthServiceConfig]):
         config = self.service_config
         # Config should usually be set, but if not, use a default of 30 seconds
         refresh_interval = config.policy_data_refresh_interval if config else 30
-        service_client = self.dependency_provider.get_entity_client(as_service="auth")
+        service_client = self.dependency_provider.get_service_entity_client("auth")
 
         logger.info("Starting auth policy data refresh loop")
 

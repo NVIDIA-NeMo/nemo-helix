@@ -26,15 +26,19 @@ import os
 import time
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass, replace
 from datetime import timezone
 from functools import cache
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Generic, Self, TypeVar, cast, get_args, get_origin, overload
 from urllib.parse import quote, urlsplit
 
 import httpx
+from nemo_helix_plugin.auth import is_service_principal_id
 from nemo_helix_plugin.client.auth import (
     AsyncTokenProvider,
+    ServicePrincipalTokenProvider,
     StaticToken,
     TokenProvider,
     TokenProviderAuth,
@@ -77,8 +81,77 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0
 _AUTHORIZATION_HEADER = "Authorization"
-_PRINCIPAL_ID_HEADER = "X-NHX-Principal-Id"
+_PRINCIPAL_ID_HEADER = "x-nhx-principal-id"
+_PRINCIPAL_ON_BEHALF_OF_HEADER = "x-nhx-principal-on-behalf-of"
 _DEFAULT_ORIGIN_PORTS = {"http": 80, "https": 443}
+_AuthorizationEndpointPolicy = Callable[[str, str, str], None]
+_UrlResolver = Callable[[str], str | httpx.URL]
+
+
+def _identity_url_resolver(url: str) -> str:
+    return url
+
+
+def _default_authorization_endpoint_policy(_raw_url: str, resolved_url: str, purpose: str) -> None:
+    _require_authorization_header_url(resolved_url, purpose=purpose)
+
+
+@dataclass(frozen=True)
+class NemoClientRuntime:
+    """Platform runtime policy carried by typed NeMo clients.
+
+    The runtime owns local client decisions that must stay consistent across
+    sync and async typed clients: URL routing, bearer-token endpoint validation,
+    and request-safety policy. Credentials and identity travel through trusted
+    headers, auth context, or bearer tokens according to platform auth mode.
+    """
+
+    url_resolver: _UrlResolver = _identity_url_resolver
+    authorization_endpoint_policy: _AuthorizationEndpointPolicy = _default_authorization_endpoint_policy
+
+    def resolve_url(self, url: str) -> str:
+        return str(self.url_resolver(url))
+
+    def should_resolve_authorization_header(self, headers: Mapping[str, str] | None) -> bool:
+        return not _has_header(headers, _AUTHORIZATION_HEADER)
+
+    def require_authorization_endpoint(self, *, raw_url: str, resolved_url: str, purpose: str) -> None:
+        self.authorization_endpoint_policy(raw_url, resolved_url, purpose)
+
+    def require_authorization_endpoint_for_headers(
+        self,
+        *,
+        raw_url: str,
+        resolved_url: str,
+        purpose: str,
+        has_token_provider: bool,
+        headers: Mapping[str, str] | None,
+    ) -> None:
+        if not has_token_provider and not _has_header(headers, _AUTHORIZATION_HEADER):
+            return
+        self.require_authorization_endpoint(raw_url=raw_url, resolved_url=resolved_url, purpose=purpose)
+
+    def with_url_resolver(self, url_resolver: _UrlResolver) -> Self:
+        return replace(self, url_resolver=url_resolver)
+
+
+class NemoClientRuntimeSource:
+    """Explicit adapter interface for objects that carry a NemoClientRuntime."""
+
+    _nemo_client_runtime: NemoClientRuntime
+    _nemo_client_auth: TokenProvider | None = None
+
+    @property
+    def nemo_client_runtime(self) -> NemoClientRuntime:
+        return self._nemo_client_runtime
+
+    @property
+    def nemo_client_auth(self) -> TokenProvider | None:
+        return self._nemo_client_auth
+
+    def set_nemo_client_auth(self, auth: TokenProvider | None) -> Self:
+        self._nemo_client_auth = auth
+        return self
 
 
 def _has_header(headers: Mapping[str, str] | None, name: str) -> bool:
@@ -86,6 +159,19 @@ def _has_header(headers: Mapping[str, str] | None, name: str) -> bool:
         return False
     normalized = name.lower()
     return any(header.lower() == normalized for header in headers)
+
+
+def _merge_header_items(target: dict[str, str], headers: Mapping[str, str]) -> None:
+    for key, value in headers.items():
+        target[str(key).lower()] = str(value)
+
+
+def _effective_principal_id_from_headers(headers: Mapping[str, str]) -> str | None:
+    effective = headers.get(_PRINCIPAL_ON_BEHALF_OF_HEADER) or headers.get(_PRINCIPAL_ID_HEADER)
+    if effective is None:
+        return None
+    principal_id = effective.strip()
+    return principal_id or None
 
 
 def _url_origin(url: str) -> tuple[str, str, int | None] | None:
@@ -100,47 +186,26 @@ def _url_origin(url: str) -> tuple[str, str, int | None] | None:
     return scheme, parsed.hostname, port if port is not None else _DEFAULT_ORIGIN_PORTS.get(scheme)
 
 
-@overload
-def _resolve_implicit_workload_auth(
-    *,
-    base_url: str,
-    auth: TokenProvider | str | None,
-    default_headers: Mapping[str, str] | None,
-    allow_env_bootstrap: bool,
-) -> TokenProvider | str | None: ...
+def _is_loopback_host(host: str | None) -> bool:
+    if host is None:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
-@overload
-def _resolve_implicit_workload_auth(
-    *,
-    base_url: str,
-    auth: TokenProvider | AsyncTokenProvider | str | None,
-    default_headers: Mapping[str, str] | None,
-    allow_env_bootstrap: bool,
-) -> TokenProvider | AsyncTokenProvider | str | None: ...
-
-
-def _resolve_implicit_workload_auth(
-    *,
-    base_url: str,
-    auth: TokenProvider | AsyncTokenProvider | str | None,
-    default_headers: Mapping[str, str] | None,
-    allow_env_bootstrap: bool,
-) -> TokenProvider | AsyncTokenProvider | str | None:
-    if auth is not None or not allow_env_bootstrap:
-        return auth
-    if _has_header(default_headers, _AUTHORIZATION_HEADER) or _has_header(default_headers, _PRINCIPAL_ID_HEADER):
-        return None
-
-    subject_token_file = os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR)
-    if not subject_token_file:
-        return None
-
-    from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
-
-    return resolve_workload_exchange_provider(
-        base_url=base_url,
-        subject_token_file=Path(subject_token_file),
+def _require_authorization_header_url(url: str, *, purpose: str) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme == "https":
+        return
+    if parsed.scheme == "http" and _is_loopback_host(parsed.hostname):
+        return
+    raise ValueError(
+        f"{purpose} cannot send Authorization to cleartext remote endpoint "
+        f"{url!r}; use https:// or loopback HTTP for local development"
     )
 
 
@@ -383,7 +448,7 @@ class _InferenceNamespace:
         return VirtualModelsClient.from_client(self._client)
 
 
-class BaseNemoClient(Generic[HttpClientT]):
+class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
     """Shared logic for sync and async NeMo clients.
 
     Handles URL construction and request serialisation.
@@ -402,14 +467,14 @@ class BaseNemoClient(Generic[HttpClientT]):
         retry: RetryPolicy | None = None,
         default_headers: Mapping[str, str] | None = None,
         timeout: float | httpx.Timeout | None = None,
-        url_resolver: Callable[[str], str | httpx.URL] | None = None,
+        client_runtime: NemoClientRuntime,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._workspace = workspace
         self._auth: TokenProvider | AsyncTokenProvider | None = StaticToken(auth) if isinstance(auth, str) else auth
         self._retry = retry
         self._default_headers = dict(default_headers) if default_headers else {}
-        self._url_resolver = url_resolver
+        self._runtime = client_runtime
         self._timeout: float | httpx.Timeout | None = timeout
 
     @property
@@ -437,6 +502,37 @@ class BaseNemoClient(Generic[HttpClientT]):
         return self._default_headers or {}
 
     @property
+    def nemo_client_runtime(self) -> NemoClientRuntime:
+        """Platform runtime policy used by typed client adapters."""
+        return self._runtime
+
+    def _auth_identity_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        _merge_header_items(headers, self._http.headers)
+        _merge_header_items(headers, self._default_headers)
+        return headers
+
+    def _authenticates_with_direct_service_token(self) -> bool:
+        return (
+            isinstance(self._auth, ServicePrincipalTokenProvider)
+            and not self._auth.delegates_principal_identity
+            and is_service_principal_id(self._auth.service_principal_id)
+        )
+
+    @property
+    def authenticates_as_service_principal(self) -> bool:
+        """Whether this client's effective caller is a direct service principal."""
+        principal_id = _effective_principal_id_from_headers(self._auth_identity_headers())
+        if principal_id is not None:
+            return is_service_principal_id(principal_id)
+        return self._authenticates_with_direct_service_token()
+
+    @property
+    def can_read_stored_auth_context(self) -> bool:
+        """Whether this client may hydrate stored creator auth context from entities."""
+        return self.authenticates_as_service_principal
+
+    @property
     def workspace(self) -> str | None:
         return self._workspace
 
@@ -461,8 +557,8 @@ class BaseNemoClient(Generic[HttpClientT]):
             return retry
         return self._retry
 
-    def _resolve_path(self, request: PreparedRequest) -> str:
-        """Resolve path template with client defaults and explicit params.
+    def _request_url(self, request: PreparedRequest) -> str:
+        """Build a request URL before any platform-specific resolver is applied.
 
         Client-level defaults (e.g. workspace) are merged under explicit
         params — explicit always wins.  Raises ``ValueError`` if any
@@ -477,10 +573,14 @@ class BaseNemoClient(Generic[HttpClientT]):
             path = request.path_template.format_map(encoded_params)
         except KeyError as exc:
             raise ValueError(f"Missing path parameter {exc} for {request.method} {request.path_template}") from exc
-        url = self._base_url + path
-        if self._url_resolver is not None:
-            return str(self._url_resolver(url))
-        return url
+        return self._base_url + path
+
+    def _resolve_url(self, url: str) -> str:
+        return self._runtime.resolve_url(url)
+
+    def _resolve_path(self, request: PreparedRequest) -> str:
+        """Resolve path template with client defaults, explicit params, and URL routing."""
+        return self._resolve_url(self._request_url(request))
 
     def _request_headers(self, request: PreparedRequest) -> dict[str, str] | None:
         headers: dict[str, str] = {}
@@ -492,14 +592,16 @@ class BaseNemoClient(Generic[HttpClientT]):
             headers.update(request.extra_headers)
         return headers or None
 
-    def _needs_auth_header(self, headers: Mapping[str, str] | None) -> bool:
-        """Whether this attempt must carry a freshly resolved bearer token.
-
-        Explicit ``Authorization`` values (per-call ``headers=`` or client defaults)
-        stay authoritative; otherwise the token provider is consulted on every
-        HTTP attempt so retries and later pages never replay an expired token.
-        """
-        return self._auth is not None and not _has_header(headers, _AUTHORIZATION_HEADER)
+    def _require_authorization_endpoint(
+        self, *, raw_url: str, resolved_url: str, headers: Mapping[str, str] | None
+    ) -> None:
+        self._runtime.require_authorization_endpoint_for_headers(
+            raw_url=raw_url,
+            resolved_url=resolved_url,
+            purpose=type(self).__name__,
+            has_token_provider=self._auth is not None,
+            headers=headers,
+        )
 
     def _is_binary(self, request: PreparedRequest) -> bool:
         return request.response_type is BinaryContent
@@ -731,7 +833,8 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         retry: RetryPolicy | None = None,
         http_client: httpx.Client | None = None,
         owns_http_client: bool | None = None,
-        url_resolver: Callable[[str], str | httpx.URL] | None = None,
+        url_resolver: _UrlResolver | None = None,
+        client_runtime: NemoClientRuntime | None = None,
     ) -> None:
         """Create a client.
 
@@ -741,12 +844,8 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         defers to the transport's timeout, giving one we build ourselves
         :data:`DEFAULT_TIMEOUT`; ``httpx.Timeout(None)`` waits indefinitely.
         """
-        auth = _resolve_implicit_workload_auth(
-            base_url=base_url,
-            auth=auth,
-            default_headers=default_headers,
-            allow_env_bootstrap=http_client is None,
-        )
+        runtime = client_runtime if client_runtime is not None else NemoClientRuntime()
+        resolved_runtime = runtime.with_url_resolver(url_resolver) if url_resolver is not None else runtime
         super().__init__(
             base_url=base_url,
             workspace=workspace,
@@ -754,7 +853,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             retry=retry,
             default_headers=default_headers,
             timeout=timeout,
-            url_resolver=url_resolver,
+            client_runtime=resolved_runtime,
         )
         self._owns_http = http_client is None if owns_http_client is None else owns_http_client
         self._http = http_client or httpx.Client(
@@ -775,7 +874,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             retry=client._retry,
             http_client=client._http,
             owns_http_client=False,
-            url_resolver=client._url_resolver,
+            client_runtime=client.nemo_client_runtime,
         )
 
     def close(self) -> None:
@@ -872,30 +971,31 @@ class NemoClient(BaseNemoClient[httpx.Client]):
 
         # The bearer token is resolved per HTTP attempt (see _authorized_headers),
         # not once per logical request, so retries and later pages use a live token.
-        url = self._resolve_path(request)
+        raw_url = self._request_url(request)
+        url = self._resolve_url(raw_url)
         req_headers = self._request_headers(request)
         params = self._resolve_query_params(request)
         resolved_retry = self._resolve_retry(retry)
 
         if self._is_binary(request):
-            stream_ctx = self._stream_with_retry(request, url, req_headers, params, resolved_retry)
+            stream_ctx = self._stream_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
             return NemoBinaryResponse(stream_ctx, request)
 
         if self._is_stream(request):
             assert request.response_type is not None
-            stream_ctx = self._stream_with_retry(request, url, req_headers, params, resolved_retry)
+            stream_ctx = self._stream_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
             model_type = _get_stream_model_type(request.response_type)
             return NemoStreamResponse(stream_ctx, model_type, request)
 
         if self._is_paginated(request):
             assert request.response_type is not None
-            raw = self._request_with_retry(request, url, req_headers, params, resolved_retry)
+            raw = self._request_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
             model_type, strategy = _get_paginated_types(request.response_type)
             return NemoPaginatedResponse(
                 raw, model_type, request, self._make_page_fetcher(strategy, resolved_retry), strategy
             )
 
-        raw = self._request_with_retry(request, url, req_headers, params, resolved_retry)
+        raw = self._request_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
         if _should_resolve_conflict(raw, request):
             assert request.on_conflict_get is not None
             return self.send(request.on_conflict_get, headers=headers, retry=retry)
@@ -907,9 +1007,10 @@ class NemoClient(BaseNemoClient[httpx.Client]):
 
     def _authorized_headers(self, headers: dict[str, str] | None) -> dict[str, str] | None:
         """Return *headers* with a bearer token resolved for this attempt when the provider owns auth."""
-        if self._auth is None or not self._needs_auth_header(headers):
+        auth = self._auth
+        if auth is None or not self._runtime.should_resolve_authorization_header(headers):
             return headers
-        token = self._auth.get_access_token()
+        token = auth.get_access_token()
         if inspect.isawaitable(token):
             raise TypeError("Async token provider used on a synchronous client; use AsyncNemoClient.")
         return {**(headers or {}), _AUTHORIZATION_HEADER: f"Bearer {token}"}
@@ -917,6 +1018,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
     def _request_with_retry(
         self,
         request: PreparedRequest,
+        raw_url: str,
         url: str,
         headers: dict[str, str] | None,
         params: dict | None,
@@ -926,9 +1028,11 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         last_response: httpx.Response | None = None
         for attempt in range(retry.max_retries + 1 if retry else 1):
             try:
+                self._require_authorization_endpoint(raw_url=raw_url, resolved_url=url, headers=headers)
+                authorized_headers = self._authorized_headers(headers)
                 kwargs: dict = {
                     "content": request.content,
-                    "headers": self._authorized_headers(headers),
+                    "headers": authorized_headers,
                     "params": params,
                 }
                 if self._timeout is not None:
@@ -955,6 +1059,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
     def _stream_with_retry(
         self,
         request: PreparedRequest,
+        raw_url: str,
         url: str,
         headers: dict[str, str] | None,
         params: dict | None,
@@ -964,9 +1069,11 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         for attempt in range(retry.max_retries + 1 if retry else 1):
             yielded = False
             try:
+                self._require_authorization_endpoint(raw_url=raw_url, resolved_url=url, headers=headers)
+                authorized_headers = self._authorized_headers(headers)
                 kwargs: dict = {
                     "content": request.content,
-                    "headers": self._authorized_headers(headers),
+                    "headers": authorized_headers,
                     "params": params,
                 }
                 if self._timeout is not None:
@@ -994,12 +1101,13 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         """Create a page-fetching callback bound to this client and strategy."""
 
         def fetch(request: PreparedRequest, page: Any) -> httpx.Response:
-            url = self._resolve_path(request)
+            raw_url = self._request_url(request)
+            url = self._resolve_url(raw_url)
             req_headers = self._request_headers(request)
             existing_params = self._resolve_query_params(request) or {}
             page_params = strategy.page_query_params(page)
             params = {**existing_params, **page_params}
-            return self._request_with_retry(request, url, req_headers, params, retry)
+            return self._request_with_retry(request, raw_url, url, req_headers, params, retry)
 
         return fetch
 
@@ -1044,15 +1152,12 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         retry: RetryPolicy | None = None,
         http_client: httpx.AsyncClient | None = None,
         owns_http_client: bool | None = None,
-        url_resolver: Callable[[str], str | httpx.URL] | None = None,
+        url_resolver: _UrlResolver | None = None,
+        client_runtime: NemoClientRuntime | None = None,
     ) -> None:
         """Create a client. See :meth:`NemoClient.__init__` for *timeout*."""
-        auth = _resolve_implicit_workload_auth(
-            base_url=base_url,
-            auth=auth,
-            default_headers=default_headers,
-            allow_env_bootstrap=http_client is None,
-        )
+        runtime = client_runtime if client_runtime is not None else NemoClientRuntime()
+        resolved_runtime = runtime.with_url_resolver(url_resolver) if url_resolver is not None else runtime
         super().__init__(
             base_url=base_url,
             workspace=workspace,
@@ -1060,7 +1165,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             retry=retry,
             default_headers=default_headers,
             timeout=timeout,
-            url_resolver=url_resolver,
+            client_runtime=resolved_runtime,
         )
         self._owns_http = http_client is None if owns_http_client is None else owns_http_client
         self._http = http_client or httpx.AsyncClient(
@@ -1081,7 +1186,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             retry=client._retry,
             http_client=client._http,
             owns_http_client=False,
-            url_resolver=client._url_resolver,
+            client_runtime=client.nemo_client_runtime,
         )
 
     async def close(self) -> None:
@@ -1110,7 +1215,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             retry=self._retry,
             http_client=http_client,
             owns_http_client=False,
-            url_resolver=self._url_resolver,
+            client_runtime=self.nemo_client_runtime,
         )
         return type(self).from_client(transport_owner)
 
@@ -1180,30 +1285,31 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         if headers:
             request = request.with_headers(headers)
 
-        url = self._resolve_path(request)
+        raw_url = self._request_url(request)
+        url = self._resolve_url(raw_url)
         req_headers = self._request_headers(request)
         params = self._resolve_query_params(request)
         resolved_retry = self._resolve_retry(retry)
 
         if self._is_binary(request):
-            stream_ctx = self._stream_with_retry(request, url, req_headers, params, resolved_retry)
+            stream_ctx = self._stream_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
             return AsyncNemoBinaryResponse(stream_ctx, request)
 
         if self._is_stream(request):
             assert request.response_type is not None
-            stream_ctx = self._stream_with_retry(request, url, req_headers, params, resolved_retry)
+            stream_ctx = self._stream_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
             model_type = _get_stream_model_type(request.response_type)
             return AsyncNemoStreamResponse(stream_ctx, model_type, request)
 
         if self._is_paginated(request):
             assert request.response_type is not None
-            raw = await self._request_with_retry(request, url, req_headers, params, resolved_retry)
+            raw = await self._request_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
             model_type, strategy = _get_paginated_types(request.response_type)
             return AsyncNemoPaginatedResponse(
                 raw, model_type, request, self._make_page_fetcher(strategy, resolved_retry), strategy
             )
 
-        raw = await self._request_with_retry(request, url, req_headers, params, resolved_retry)
+        raw = await self._request_with_retry(request, raw_url, url, req_headers, params, resolved_retry)
         if _should_resolve_conflict(raw, request):
             assert request.on_conflict_get is not None
             return await self.send(request.on_conflict_get, headers=headers, retry=retry)
@@ -1215,14 +1321,16 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
 
     async def _authorized_headers(self, headers: dict[str, str] | None) -> dict[str, str] | None:
         """Return *headers* with a bearer token resolved for this attempt when the provider owns auth."""
-        if self._auth is None or not self._needs_auth_header(headers):
+        auth = self._auth
+        if auth is None or not self._runtime.should_resolve_authorization_header(headers):
             return headers
-        token = await resolve_token_async(self._auth)
+        token = await resolve_token_async(auth)
         return {**(headers or {}), _AUTHORIZATION_HEADER: f"Bearer {token}"}
 
     async def _request_with_retry(
         self,
         request: PreparedRequest,
+        raw_url: str,
         url: str,
         headers: dict[str, str] | None,
         params: dict | None,
@@ -1232,9 +1340,11 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         last_response: httpx.Response | None = None
         for attempt in range(retry.max_retries + 1 if retry else 1):
             try:
+                self._require_authorization_endpoint(raw_url=raw_url, resolved_url=url, headers=headers)
+                authorized_headers = await self._authorized_headers(headers)
                 kwargs: dict = {
                     "content": request.content,
-                    "headers": await self._authorized_headers(headers),
+                    "headers": authorized_headers,
                     "params": params,
                 }
                 if self._timeout is not None:
@@ -1261,6 +1371,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
     async def _stream_with_retry(
         self,
         request: PreparedRequest,
+        raw_url: str,
         url: str,
         headers: dict[str, str] | None,
         params: dict | None,
@@ -1270,9 +1381,11 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         for attempt in range(retry.max_retries + 1 if retry else 1):
             yielded = False
             try:
+                self._require_authorization_endpoint(raw_url=raw_url, resolved_url=url, headers=headers)
+                authorized_headers = await self._authorized_headers(headers)
                 kwargs: dict = {
                     "content": request.content,
-                    "headers": await self._authorized_headers(headers),
+                    "headers": authorized_headers,
                     "params": params,
                 }
                 if self._timeout is not None:
@@ -1300,12 +1413,13 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         """Create an async page-fetching callback bound to this client and strategy."""
 
         async def fetch(request: PreparedRequest, page: Any) -> httpx.Response:
-            url = self._resolve_path(request)
+            raw_url = self._request_url(request)
+            url = self._resolve_url(raw_url)
             req_headers = self._request_headers(request)
             existing_params = self._resolve_query_params(request) or {}
             page_params = strategy.page_query_params(page)
             params = {**existing_params, **page_params}
-            return await self._request_with_retry(request, url, req_headers, params, retry)
+            return await self._request_with_retry(request, raw_url, url, req_headers, params, retry)
 
         return fetch
 
@@ -1326,7 +1440,7 @@ def _client_from_config(
     """Shared implementation for NemoClient.from_config / AsyncNemoClient.from_config."""
     from nemo_helix_plugin.client.config.config import Config
     from nemo_helix_plugin.client.config.models import ConfigParams, OAuthUser
-    from nemo_helix_plugin.client.oidc_factory import resolve_oidc_provider
+    from nemo_helix_plugin.client.oidc_factory import resolve_oidc_provider, resolve_workload_exchange_provider
 
     resolved_path = Path(config_path) if isinstance(config_path, str) else config_path
     overrides: ConfigParams | None = None
@@ -1342,9 +1456,13 @@ def _client_from_config(
 
     auth: TokenProvider | str | None = None
     workload_identity_token_file = os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR)
-    use_implicit_workload_auth = bool(workload_identity_token_file and not explicit_access_token)
 
-    if not use_implicit_workload_auth and isinstance(ctx.user, OAuthUser):
+    if workload_identity_token_file is not None and not explicit_access_token:
+        auth = resolve_workload_exchange_provider(
+            base_url=str(ctx.cluster.base_url),
+            subject_token_file=Path(workload_identity_token_file),
+        )
+    elif isinstance(ctx.user, OAuthUser):
         auth = resolve_oidc_provider(
             base_url=str(ctx.cluster.base_url),
             context_name=ctx.context_name,
@@ -1354,7 +1472,7 @@ def _client_from_config(
             config_path=actual_config_path,
             explicit_access_token=explicit_access_token,
         )
-    elif not use_implicit_workload_auth and ctx.user:
+    elif ctx.user:
         client_config = ctx.user.get_client_config()
         raw_headers = client_config.get("default_headers")
         if isinstance(raw_headers, dict):

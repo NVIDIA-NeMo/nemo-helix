@@ -20,6 +20,7 @@ from .dependencies import (
     get_principal_auth_headers,
 )
 from .exceptions import AuthorizationError, InvalidPermissionFormatError, InvalidScopeFormatError
+from .headers import AUTHENTICATION_CONTEXT_HEADERS, AUTHORIZATION_HEADER, TRUSTED_IDENTITY_HEADERS
 from .middleware import AuthorizationMiddleware
 from .models import NHX_PRINCIPAL_ENVVAR, AuthContext, Principal
 from .permissions import ALL_WORKSPACES, compute_accessible_workspaces
@@ -87,6 +88,8 @@ __all__ = [
     "AuthClient",
     "AuthContext",
     "AuthConfig",
+    "AUTHENTICATION_CONTEXT_HEADERS",
+    "AUTHORIZATION_HEADER",
     "AuthorizationError",
     "InvalidPermissionFormatError",
     "InvalidPrincipalIdentifier",
@@ -113,6 +116,7 @@ __all__ = [
     "Principal",
     "PrincipalIdentifier",
     "SyncWorkloadDelegationStore",
+    "TRUSTED_IDENTITY_HEADERS",
     "WorkloadDelegationConflictError",
     "WorkloadDelegationEntity",
     "WorkloadDelegationError",

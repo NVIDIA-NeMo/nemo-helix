@@ -79,6 +79,23 @@ def _assert_trusted_identity_headers(
         assert required_scopes.issubset(scopes)
 
 
+def _assert_no_trusted_identity_headers(response: httpx.Response) -> None:
+    for header_name in (
+        "x-nhx-principal-id",
+        "x-nhx-actor-account-id",
+        "x-nhx-principal-email",
+        "x-nhx-principal-groups",
+        "x-nhx-actor-aliases",
+        "x-nhx-principal-on-behalf-of",
+        "x-nhx-principal-on-behalf-of-email",
+        "x-nhx-principal-on-behalf-of-groups",
+        "x-nhx-subject-account-id",
+        "x-nhx-subject-aliases",
+        "x-nhx-scopes",
+    ):
+        assert header_name not in response.headers
+
+
 def test_provider_gateway_rejects_unauthenticated_requests(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "gateway_authn")
 
@@ -108,7 +125,7 @@ def test_provider_gateway_accepts_e2e_setup_token(auth_idp_case, auth_idp_runtim
     assert response.json()["name"] == auth_idp_workspace
 
 
-def test_provider_gateway_auth_callout_returns_trusted_identity_headers(auth_idp_case, auth_idp_runtime):
+def test_provider_gateway_auth_callout_validates_bearer_token(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "gateway_authn")
     require_capability(auth_idp_case, "workload_provider_token")
 
@@ -122,10 +139,16 @@ def test_provider_gateway_auth_callout_returns_trusted_identity_headers(auth_idp
     )
 
     assert response.status_code == 200, response.text
-    _assert_trusted_identity_headers(response, claims=workload_token.claims)
+    if "workload_token_exchange" in auth_idp_case.capabilities:
+        _assert_no_trusted_identity_headers(response)
+    else:
+        _assert_trusted_identity_headers(response, claims=workload_token.claims)
 
 
-def test_provider_gateway_auth_callout_returns_exchanged_workload_headers(auth_idp_case, auth_idp_runtime):
+def test_provider_gateway_auth_callout_accepts_exchanged_workload_token_without_trusted_headers(
+    auth_idp_case,
+    auth_idp_runtime,
+):
     require_capability(auth_idp_case, "gateway_authn")
     require_capability(auth_idp_case, "workload_subject_token")
     require_capability(auth_idp_case, "workload_token_exchange")
@@ -140,11 +163,7 @@ def test_provider_gateway_auth_callout_returns_exchanged_workload_headers(auth_i
     )
 
     assert response.status_code == 200, response.text
-    _assert_trusted_identity_headers(
-        response,
-        claims=workload_token.claims,
-        required_scopes={"openid", "groups"},
-    )
+    _assert_no_trusted_identity_headers(response)
 
 
 def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_idp_runtime):

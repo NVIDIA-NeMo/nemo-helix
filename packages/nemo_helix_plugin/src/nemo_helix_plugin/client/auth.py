@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Generator
 from typing import Protocol, cast, runtime_checkable
 
@@ -36,6 +37,19 @@ class AsyncTokenProvider(Protocol):
     """Async protocol for objects that can supply an access token."""
 
     async def get_access_token(self) -> str: ...
+
+
+class ServicePrincipalTokenProvider(ABC):
+    """Token provider that authenticates the local client as a platform service."""
+
+    @property
+    @abstractmethod
+    def service_principal_id(self) -> str:
+        """Return the platform service principal id this provider authenticates as."""
+
+    @property
+    def delegates_principal_identity(self) -> bool:
+        return False
 
 
 # ---------------------------------------------------------------------------

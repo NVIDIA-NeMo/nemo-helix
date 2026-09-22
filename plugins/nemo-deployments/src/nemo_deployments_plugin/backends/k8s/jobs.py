@@ -66,6 +66,9 @@ from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationStore
 
 logger = logging.getLogger(__name__)
 
+WORKLOAD_IDENTITY_POD_WAIT_TIMEOUT_SECONDS = 10.0
+WORKLOAD_IDENTITY_POD_WAIT_INTERVAL_SECONDS = 0.25
+
 
 @dataclass(frozen=True)
 class BuiltJob:
@@ -264,6 +267,33 @@ async def read_job_pods(
         return POD_LIST_UNAVAILABLE
 
 
+async def _read_job_pod_uid_delegation_pods_for_create(
+    clients: KubernetesClients,
+    *,
+    namespace: str,
+    job_name: str,
+    job_uid: str | None,
+    config: DeploymentConfig,
+    k8s_config: K8sDeploymentConfig | None,
+) -> PodListResult:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + WORKLOAD_IDENTITY_POD_WAIT_TIMEOUT_SECONDS
+    while True:
+        pods = await read_job_pods(clients, namespace=namespace, job_name=job_name)
+        delegation_pods = job_pod_uid_delegation_pods(
+            config=config,
+            k8s_config=k8s_config,
+            job_name=job_name,
+            job_uid=job_uid,
+            pods=pods,
+        )
+        if delegation_pods is POD_LIST_UNAVAILABLE or delegation_pods:
+            return delegation_pods
+        if loop.time() >= deadline:
+            return delegation_pods
+        await asyncio.sleep(WORKLOAD_IDENTITY_POD_WAIT_INTERVAL_SECONDS)
+
+
 async def create_job(
     clients: KubernetesClients,
     *,
@@ -380,8 +410,15 @@ async def create_job(
         update = status_from_job(job=job, job_name=job_name, expected_labels=identity_labels)
         if not resource_labels_match(job, identity_labels):
             return update
-        pods = await read_job_pods(clients, namespace=namespace, job_name=job_name)
         if workload_identity_reconcile_allowed(config, auth_context):
+            pods = await _read_job_pod_uid_delegation_pods_for_create(
+                clients,
+                namespace=namespace,
+                job_name=job_name,
+                job_uid=_metadata_uid(job),
+                config=config,
+                k8s_config=k8s_config,
+            )
             await reconcile_pod_uid_delegations(
                 workload_delegation_store,
                 config=config,
@@ -390,13 +427,7 @@ async def create_job(
                 deployment_name=name,
                 namespace=namespace,
                 k8s_config=k8s_config,
-                pods=job_pod_uid_delegation_pods(
-                    config=config,
-                    k8s_config=k8s_config,
-                    job_name=job_name,
-                    job_uid=_metadata_uid(job),
-                    pods=pods,
-                ),
+                pods=pods,
             )
         if update.status in ("SUCCEEDED", "FAILED"):
             exit_code = await read_pod_exit_code(clients, namespace=namespace, job_name=job_name)

@@ -1,15 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.guardrails.app.utils.model_routing import (
     build_openai_gateway_url,
     parse_model_entity_reference,
     resolve_model_entity_references,
 )
 from nhx.guardrails.entities.values._private import Model, RailsConfig
+
+
+def _platform_client() -> NemoClient:
+    return NemoClient(base_url="http://localhost:8000")
 
 
 class TestParseModelEntityReference:
@@ -51,9 +56,7 @@ class TestBuildOpenAIGatewayUrl:
     @patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk")
     def test_url_construction(self, mock_get_sdk):
         """Test URL construction for Model Entity reference."""
-        mock_sdk = MagicMock()
-        mock_sdk.base_url = "http://localhost:8000"
-        mock_get_sdk.return_value = mock_sdk
+        mock_get_sdk.return_value = _platform_client()
 
         url = build_openai_gateway_url("default/my-model")
         assert url == "http://localhost:8000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
@@ -65,9 +68,7 @@ class TestBuildOpenAIGatewayUrl:
     @patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk")
     def test_v1_suffix_preserved(self, mock_get_sdk):
         """Test /v1 suffix is preserved from typed client URL."""
-        mock_sdk = MagicMock()
-        mock_sdk.base_url = "http://localhost:8000"
-        mock_get_sdk.return_value = mock_sdk
+        mock_get_sdk.return_value = _platform_client()
 
         url = build_openai_gateway_url("default/model")
         assert url == "http://localhost:8000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
@@ -76,9 +77,7 @@ class TestBuildOpenAIGatewayUrl:
     @patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk")
     def test_typed_client_adds_v1(self, mock_get_sdk):
         """Test the typed Models client helper adds the OpenAI /v1 suffix."""
-        mock_sdk = MagicMock()
-        mock_sdk.base_url = "http://localhost:8000"
-        mock_get_sdk.return_value = mock_sdk
+        mock_get_sdk.return_value = _platform_client()
 
         url = build_openai_gateway_url("default/model")
         assert url == "http://localhost:8000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
@@ -95,9 +94,7 @@ class TestResolveModelEntityReferences:
     @patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk")
     def test_resolve_single_model(self, mock_get_sdk):
         """Test resolving a single model with Model Entity reference."""
-        mock_sdk = MagicMock()
-        mock_sdk.base_url = "http://localhost:8000"
-        mock_get_sdk.return_value = mock_sdk
+        mock_get_sdk.return_value = _platform_client()
 
         rails_config = RailsConfig(
             models=[
@@ -114,9 +111,7 @@ class TestResolveModelEntityReferences:
     @patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk")
     def test_resolve_all_models(self, mock_get_sdk):
         """Test that ALL models in config get resolved (multiple models use case)."""
-        mock_sdk = MagicMock()
-        mock_sdk.base_url = "http://localhost:8000"
-        mock_get_sdk.return_value = mock_sdk
+        mock_get_sdk.return_value = _platform_client()
 
         rails_config = RailsConfig(
             models=[
@@ -170,9 +165,7 @@ class TestResolveModelEntityReferences:
     @patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk")
     def test_mixed_config(self, mock_get_sdk):
         """Test config with one Model Entity ref, one explicit URLs."""
-        mock_sdk = MagicMock()
-        mock_sdk.base_url = "http://localhost:8000"
-        mock_get_sdk.return_value = mock_sdk
+        mock_get_sdk.return_value = _platform_client()
 
         rails_config = RailsConfig(
             models=[

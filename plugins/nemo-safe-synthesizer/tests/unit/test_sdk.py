@@ -177,7 +177,8 @@ def test_job_builder_uploads_dataframe_and_creates_job() -> None:
         .with_hf_token_secret("hf-token")
     )
 
-    job = builder.create_job(name="safe-synth-job")
+    with patch("nemo_safe_synthesizer_plugin.sdk.job.client_from_platform", return_value=MagicMock()):
+        job = builder.create_job(name="safe-synth-job")
 
     assert job.job_name == "safe-synth-job"
     client.files.upload.assert_called_once()
@@ -205,7 +206,8 @@ def test_job_builder_creates_pretrained_model_job_for_adapter_reuse() -> None:
         .with_generate(num_records=25)
     )
 
-    job = builder.create_job(name="adapter-reuse-job")
+    with patch("nemo_safe_synthesizer_plugin.sdk.job.client_from_platform", return_value=MagicMock()):
+        job = builder.create_job(name="adapter-reuse-job")
 
     assert job.job_name == "adapter-reuse-job"
     create_kwargs = client.safe_synthesizer.jobs.create.call_args.kwargs
