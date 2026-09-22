@@ -14,7 +14,7 @@
 -- that user. Callers already know this mapping, so there is no separate `type`
 -- column.
 CREATE TYPE credential_provider AS ENUM (
-    'openai', 'anthropic', 'nvidia', 'nhx', 'openshift', 'switchyard'
+    'openai', 'anthropic', 'nvidia', 'nmp', 'nhx', 'openshift', 'switchyard'
 );
 
 -- Which write-once secret was supplied: a single-string `key` (model API
