@@ -65,17 +65,17 @@ export const RunEvaluationModal: FC<RunEvaluationModalProps> = ({
     >
       <Stack gap="density-xl">
         <Block className="rounded border border-base bg-surface-sunken px-3 py-2">
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             Preview only — Submit captures your choices and shows what would be sent. The wire-up to
             the evaluator service lands in the next release.
           </Text>
         </Block>
         <Block>
-          <Text kind="label/bold/sm" color="secondary">
+          <Text className="text-secondary" kind="label/bold/sm">
             Models from this Playground ({modelUrns.length})
           </Text>
           {modelUrns.length === 0 ? (
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               Pick at least one model in the Playground first.
             </Text>
           ) : (
@@ -89,7 +89,7 @@ export const RunEvaluationModal: FC<RunEvaluationModalProps> = ({
           )}
         </Block>
         <Block>
-          <Text kind="label/bold/sm" color="secondary">
+          <Text className="text-secondary" kind="label/bold/sm">
             Eval set
           </Text>
           <select
@@ -105,7 +105,7 @@ export const RunEvaluationModal: FC<RunEvaluationModalProps> = ({
           </select>
         </Block>
         <Block>
-          <Text kind="label/bold/sm" color="secondary">
+          <Text className="text-secondary" kind="label/bold/sm">
             Metric
           </Text>
           <select
@@ -120,7 +120,7 @@ export const RunEvaluationModal: FC<RunEvaluationModalProps> = ({
             ))}
           </select>
         </Block>
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Workspace: <Text kind="body/semibold/sm">{workspace}</Text>
         </Text>
       </Stack>

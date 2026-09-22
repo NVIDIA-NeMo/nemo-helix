@@ -433,7 +433,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                   slotFooter={
                     <Flex className="w-full items-center justify-end gap-2">
                       {deployStage ? (
-                        <Text kind="body/regular/sm" color="secondary" className="mr-auto">
+                        <Text kind="body/regular/sm" className="mr-auto text-secondary">
                           {deployStage}
                         </Text>
                       ) : null}

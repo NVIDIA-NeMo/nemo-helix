@@ -26,7 +26,7 @@ export const ComparisonColumnHeader: FC<ComparisonColumnHeaderProps> = ({
         </Badge>
       )}
     </Flex>
-    <Text color="secondary" kind="body/regular/sm">
+    <Text className="text-secondary" kind="body/regular/sm">
       {evaluation.createdAt ? <RelativeTime datetime={evaluation.createdAt} /> : '–'}
     </Text>
   </Stack>

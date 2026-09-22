@@ -166,7 +166,7 @@ export const NewDeploymentRoute: FC = () => {
                 slotFooter={
                   <Stack gap="2">
                     {statusMessage ? (
-                      <Text kind="body/regular/sm" color="secondary" className="mr-auto max-w-full">
+                      <Text kind="body/regular/sm" className="mr-auto max-w-full text-secondary">
                         {statusMessage}
                       </Text>
                     ) : null}

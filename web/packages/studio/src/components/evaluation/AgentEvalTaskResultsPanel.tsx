@@ -61,7 +61,7 @@ const LongCell: FC<{
   content ? (
     <TableExpandableCell content={content} title={title} onExpand={onExpand} />
   ) : (
-    <Text kind="body/regular/sm" color="secondary">
+    <Text className="text-secondary" kind="body/regular/sm">
       —
     </Text>
   );
@@ -120,7 +120,7 @@ export const AgentEvalTaskResultsPanel: FC<AgentEvalTaskResultsPanelProps> = ({ 
           const expected = referenceText(row.original.reference);
           if (!expected) {
             return (
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 —
               </Text>
             );
@@ -132,7 +132,7 @@ export const AgentEvalTaskResultsPanel: FC<AgentEvalTaskResultsPanelProps> = ({ 
                 {entries.map(([key, val]) => (
                   <Stack key={key} gap="density-xs" className="min-w-0">
                     {entries.length > 1 && (
-                      <Text kind="body/regular/sm" color="secondary" className="truncate">
+                      <Text kind="body/regular/sm" className="truncate text-secondary">
                         {key}
                       </Text>
                     )}
