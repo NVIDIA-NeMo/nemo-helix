@@ -126,6 +126,20 @@ class EntityRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def distinct_child_workspaces(
+        self,
+        *,
+        parent_id: str,
+        session: AsyncSession | None = None,
+    ) -> set[str]:
+        """Return every distinct workspace holding a child of *parent_id*.
+
+        Exact regardless of child count, unlike paging the children themselves: callers
+        need the set of affected workspaces, not the rows.
+        """
+        pass
+
+    @abstractmethod
     async def update_entity(
         self,
         *,

@@ -23,7 +23,6 @@ import textwrap
 
 from fastapi import APIRouter, HTTPException, Query, status
 from nmp.common.api.common import DeleteResponse, Page, PaginationData
-from nmp.common.api.filter import ComparisonOperation, FilterOperator
 from nmp.common.auth import ALL_WORKSPACES
 from nmp.common.auth.client import AuthClient
 from nmp.common.entities.global_workspace import workspace_lookup_order
@@ -58,9 +57,6 @@ class EntitiesPage(Page[Entity]):
 router = APIRouter()
 API_TAG = "Entity Store"
 logger = logging.getLogger(__name__)
-
-#: Upper bound on the dependent-children scan; enough to name the affected workspaces.
-MAX_DEPENDENT_CHILDREN_REPORTED = 1000
 
 PROJECT_ENTITY_TYPE = "project"
 
@@ -605,15 +601,14 @@ async def _foreign_child_workspaces(
     parent onto it — a fine-tuned adapter on a shared base model — and those children are
     invisible to whoever owns the parent. Deleting would destroy another team's work with
     no signal, so the caller has to acknowledge the cross-workspace children first.
+
+    Asks the repository for the distinct workspaces rather than paging the children: a
+    page-limited scan silently drops workspaces once a parent has more children than the
+    page holds, and the caller would then read a 409 naming only some of the workspaces
+    it is about to destroy.
     """
-    children, _ = await repository.list_entities(
-        workspace=ALL_WORKSPACES,
-        entity_type=None,
-        page=1,
-        page_size=MAX_DEPENDENT_CHILDREN_REPORTED,
-        filter_op=ComparisonOperation(operator=FilterOperator.EQ, field="parent", value=parent_id),
-    )
-    return sorted({child.workspace for child in children if child.workspace != owning_workspace})
+    workspaces = await repository.distinct_child_workspaces(parent_id=parent_id)
+    return sorted(workspaces - {owning_workspace})
 
 
 @router.delete(

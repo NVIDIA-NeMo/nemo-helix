@@ -174,3 +174,46 @@ class TestGlobalWorkspaceDelete:
         response = await client.delete(_entities_url("default", SHAREABLE, "lonely-llm"))
 
         assert response.status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestDependentWorkspaceReporting:
+    """The 409 must name every affected workspace, not a page's worth."""
+
+    async def test_names_every_workspace_regardless_of_child_count(self, client: AsyncClient, workspaces):
+        await _create(client, "default", SHAREABLE, "busy-base")
+        parent_id = (await client.get(_entities_url("default", SHAREABLE, "busy-base"))).json()["id"]
+
+        # team-b contributes a single child among many from team-a. A page-limited scan
+        # ordered by recency drops whichever workspace falls outside the page.
+        await client.post(
+            _entities_url("team-b", "adapter"),
+            json={"name": "lone-adapter", "parent": parent_id, "data": {}},
+        )
+        for i in range(25):
+            await client.post(
+                _entities_url("team-a", "adapter"),
+                json={"name": f"bulk-{i:03d}", "parent": parent_id, "data": {}},
+            )
+
+        response = await client.delete(_entities_url("default", SHAREABLE, "busy-base"))
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert "team-a" in detail
+        assert "team-b" in detail
+
+    async def test_each_workspace_named_once_not_once_per_child(self, client: AsyncClient, workspaces):
+        await _create(client, "default", SHAREABLE, "multi-child")
+        parent_id = (await client.get(_entities_url("default", SHAREABLE, "multi-child"))).json()["id"]
+        for i in range(5):
+            await client.post(
+                _entities_url("team-a", "adapter"),
+                json={"name": f"ad-{i}", "parent": parent_id, "data": {}},
+            )
+
+        response = await client.delete(_entities_url("default", SHAREABLE, "multi-child"))
+
+        assert response.status_code == 409
+        assert response.json()["detail"].count("team-a") == 1

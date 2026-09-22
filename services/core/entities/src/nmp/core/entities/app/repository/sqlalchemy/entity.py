@@ -199,6 +199,18 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
 
             return entities, total
 
+    async def distinct_child_workspaces(
+        self,
+        *,
+        parent_id: str,
+        session: AsyncSession | None = None,
+    ) -> set[str]:
+        """Return every distinct workspace holding a child of *parent_id*."""
+        async with self._get_session(session) as sess:
+            query = select(DBEntity.workspace).where(DBEntity.parent == parent_id).distinct()
+            rows = (await sess.execute(query)).scalars().all()
+            return {w for w in rows if w}
+
     async def count_entities_by(
         self,
         *,
