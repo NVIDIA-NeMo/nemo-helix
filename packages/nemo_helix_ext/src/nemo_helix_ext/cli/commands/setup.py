@@ -203,6 +203,11 @@ ONBOARDING_PATHS: tuple[OnboardingPath, ...] = (
 
 _ONBOARDING_PATHS_BY_VALUE: dict[str, OnboardingPath] = {p.value: p for p in ONBOARDING_PATHS}
 
+_POST_SETUP_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("sample", "Create a sample workspace and demo agent"),
+    ("explore", "I would like to explore NeMo Helix on my own"),
+)
+
 
 @dataclass(frozen=True)
 class ProbeConfig:
@@ -294,6 +299,7 @@ _POST_START_REACHABLE_RETRIES = 6
 _POST_START_REACHABLE_DELAY = 2.0
 
 _DEMO_AGENT_NAME = "calculator-agent"
+_SAMPLE_WORKSPACE_NAME = "sample"
 _LOCAL_CONTEXT_NAME = "local"
 
 
@@ -2817,7 +2823,7 @@ def _run_interactive_mode(
     skills_from: list[str] | None = None,
     skills_path: Path | None = None,
     certificate_authority: str | None = None,
-) -> None:
+) -> str:
     """Walk the user through provider selection, credential entry, and model choice."""
     try:
         provider_name, host_url, api_key, auth_header_format, default_extra_headers = _interactive_collect_provider()
@@ -2884,25 +2890,33 @@ def _run_interactive_mode(
             skills_path=skills_path,
         )
 
-        console.print("\n[bold]Step 7: Demo agent (optional)[/bold]\n")
-        demo_deployed = _maybe_deploy_agent(
-            base_url,
-            workspace,
-            auto=False,
-            deploy_agent=deploy_agent,
-            default_model=default_model,
-            headers=_platform_request_headers(cli_context),
-            certificate_authority=certificate_authority,
-        )
-
-        _print_onboarding(
+        _print_setup_complete(
             base_url,
             provider_name,
             default_model,
             fast_model=model_pair.fast if model_pair else None,
-            demo_deployed=demo_deployed,
             certificate_authority=certificate_authority,
         )
+
+        # TODO: Remove this legacy step after the replacement onboarding flow is validated.
+        # console.print("\n[bold]Step 7: Demo agent (optional)[/bold]\n")
+        # demo_deployed = _maybe_deploy_agent(
+        #     base_url,
+        #     workspace,
+        #     auto=False,
+        #     deploy_agent=deploy_agent,
+        #     default_model=default_model,
+        #     headers=_platform_request_headers(cli_context),
+        #     certificate_authority=certificate_authority,
+        # )
+        # _print_onboarding(demo_deployed=demo_deployed)
+
+        selected_path = _prompt_post_setup_path()
+        if selected_path == "sample":
+            workspaces_client = cli_context.typed_client(WorkspacesClient)
+            if _ensure_workspace_exists(workspaces_client, _SAMPLE_WORKSPACE_NAME):
+                console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
+        return selected_path
 
     except UserCancelled:
         console.print(f"\n{WARN} Setup cancelled.")
@@ -2964,16 +2978,15 @@ def _render_onboarding_card(value: str) -> None:
     )
 
 
-def _print_onboarding(
+def _print_setup_complete(
     base_url: str,
     provider_name: str,
     default_model: str | None,
     *,
     fast_model: str | None = None,
-    demo_deployed: bool = False,
     certificate_authority: str | None = None,
 ) -> None:
-    """Print setup summary, then present goal-oriented onboarding paths."""
+    """Verify platform health and print the setup summary."""
     if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
         raise typer.Exit(1)
 
@@ -2983,6 +2996,38 @@ def _print_onboarding(
         console.print(f"  Default model: {_display_model_name(default_model)}")
     if fast_model:
         console.print(f"  Fast model: {_display_model_name(fast_model)}")
+
+
+def _ensure_workspace_exists(workspaces_client: WorkspacesClient, name: str) -> bool:
+    """Ensure a workspace exists and return whether it was created."""
+    try:
+        workspaces_client.get_workspace(name=name).data()
+        return False
+    except Exception:
+        try:
+            workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
+            return True
+        except Exception as create_err:
+            # Treat a workspace created concurrently as success without hiding real failures.
+            try:
+                workspaces_client.get_workspace(name=name).data()
+                return False
+            except Exception:
+                raise create_err from None
+
+
+def _prompt_post_setup_path() -> str:
+    """Prompt for the next path without starting it."""
+    return prompt_choice(
+        "How would you like to get started?",
+        _POST_SETUP_OPTIONS,
+        default="sample",
+        indent=2,
+    )
+
+
+def _print_onboarding(*, demo_deployed: bool = False) -> None:
+    """Present goal-oriented onboarding paths."""
     if demo_deployed:
         console.print(f"  Demo agent: {_DEMO_AGENT_NAME}")
 
