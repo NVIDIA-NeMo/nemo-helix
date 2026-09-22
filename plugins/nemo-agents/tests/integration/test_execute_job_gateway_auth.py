@@ -179,8 +179,9 @@ def test_real_agent_calls_gateway_and_returns_file(
         Configuration.clear_cache()
 
 
+@pytest.mark.parametrize("token_expires_mid_run", [False, True])
 def test_real_agent_exports_its_trajectory_through_the_proxy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpserver: HTTPServer
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpserver: HTTPServer, token_expires_mid_run: bool
 ) -> None:
     """The auto-wired export reaches Intake authenticated, carrying no credential itself.
 
@@ -188,6 +189,12 @@ def test_real_agent_exports_its_trajectory_through_the_proxy(
     trajectory does too, which is the point of sharing one mechanism. Relay, the
     real exporter, posts it -- so this also covers the assumption that the POST
     lands before the proxy shuts down.
+
+    The expiring variant is AIRCORE-1152 itself: the access token dies between
+    the agent's last model call and its export. Pinning one token at job start
+    is what used to make that export arrive expired and be dropped; because the
+    proxy exchanges on demand, the export here goes out under a token that did
+    not exist when the job began.
     """
     monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
@@ -216,6 +223,11 @@ def test_real_agent_exports_its_trajectory_through_the_proxy(
         )
 
     def model(request: Request) -> Response:
+        if token_expires_mid_run:
+            # Expire the credential the export will need, after inference is done
+            # with it. Nothing refreshes on a timer; the next request exchanges.
+            assert provider.tokens is not None
+            provider.tokens.expires_at = 0
         return Response(
             json.dumps(
                 {
@@ -274,6 +286,16 @@ def test_real_agent_exports_its_trajectory_through_the_proxy(
         for authorization, size in exports:
             assert authorization == f"Bearer {issued[-1]}", "the proxy authenticates every export it forwards"
             assert size, "the proxy must forward the trajectory body, not an empty POST"
+        if token_expires_mid_run:
+            assert len(issued) > 1, "the expired token was never re-exchanged"
+            assert exports[-1][0] != f"Bearer {issued[0]}", (
+                "the export went out under the token the job started with, which had expired"
+            )
+        else:
+            # The contrast that makes the variant above mean something: a token
+            # that stays valid is exchanged once and reused, so the second
+            # exchange there is the expiry being noticed, not routine churn.
+            assert len(issued) == 1
         for path in results.rglob("*"):
             if path.is_file():
                 assert b"test-job-access-" not in path.read_bytes()
