@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner, Stack, Switch, Text } from '@nvidia/foundations-react-core';
+import { DeploymentFields } from '@studio/components/NewCustomizationForm/DeploymentFields';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { BaseModelDeploymentReadiness } from '@studio/hooks/useBaseModelDeploymentReadiness';
-import { AdvancedSettingsAccordion } from '@studio/routes/NewDeploymentRoute/AdvancedSettingsAccordion';
-import { EngineFields } from '@studio/routes/NewDeploymentRoute/EngineFields';
-import { GPULoraFields } from '@studio/routes/NewDeploymentRoute/GPULoraFields';
 import type { WizardFormValues } from '@studio/routes/NewDeploymentRoute/schema';
-import { useState, type FC } from 'react';
+import type { FC } from 'react';
 import type { Control, FieldErrors } from 'react-hook-form';
 
 export interface DeploymentSectionProps {
@@ -36,8 +34,6 @@ export const DeploymentSection: FC<DeploymentSectionProps> = ({
   deployBaseModel,
   onDeployBaseModelChange,
 }) => {
-  const [advancedAccordion, setAdvancedAccordion] = useState<string>();
-
   if (!baseModelRef) {
     return (
       <FormSection title="Deployment">
@@ -117,17 +113,10 @@ export const DeploymentSection: FC<DeploymentSectionProps> = ({
               the job starts. The job itself creates the deployment once training completes — no GPU
               is held while the run is in progress.
             </Text>
-            <EngineFields control={control} errors={errors} />
             {/* `loraEnabled` is pinned true by `baseDeploymentDefaults`: this deployment
                 exists to serve the adapter this run produces, and a base deployed without
                 LoRA support would refuse it. Not a decision the user should be offered. */}
-            <GPULoraFields control={control} errors={errors} hideLoraToggle />
-            <AdvancedSettingsAccordion
-              control={control}
-              errors={errors}
-              advancedAccordion={advancedAccordion}
-              onAdvancedAccordionChange={setAdvancedAccordion}
-            />
+            <DeploymentFields control={control} errors={errors} hideLoraToggle />
           </>
         ) : (
           <Banner kind="inline" status="warning">

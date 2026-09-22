@@ -49,7 +49,7 @@ export const AdvancedSettingsAccordion: FC<AdvancedSettingsAccordionProps> = ({
               formFieldProps={{
                 className: 'w-full',
                 labelPosition: 'left',
-                slotInfo: 'Applies to NGC NIM container deployments only.',
+                slotInfo: 'Size of the volume holding the model weights. Defaults to 50Gi.',
                 slotError: errors.diskSize?.message,
                 attributes: {
                   FormFieldContentGroup: {

@@ -45,6 +45,7 @@ vi.mock('@studio/hooks/useCustomizationDatasetValidation', async (importOriginal
 
 const mockReadiness = vi.hoisted(() => vi.fn());
 const mockCreateDeploymentConfig = vi.hoisted(() => vi.fn());
+const mockCreateUnboundConfig = vi.hoisted(() => vi.fn());
 
 vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
   useBaseModelDeploymentReadiness: mockReadiness,
@@ -52,6 +53,7 @@ vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
 
 vi.mock('@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource', () => ({
   ensureWorkspaceDeploymentConfig: mockCreateDeploymentConfig,
+  ensureUnboundDeploymentConfig: mockCreateUnboundConfig,
 }));
 
 /** Minimum automodel payload that clears `customizationFormSchema`. */
@@ -94,6 +96,11 @@ describe('NewCustomizationForm', () => {
     mutateRl.mockReset().mockResolvedValue({ name: 'job-1' });
     mockCreateDeploymentConfig.mockReset();
     mockCreateDeploymentConfig.mockResolvedValue({
+      config: { engine: 'vllm', executor_config: { gpu: 1 } },
+      reused: false,
+    });
+    mockCreateUnboundConfig.mockReset();
+    mockCreateUnboundConfig.mockResolvedValue({
       config: { engine: 'vllm', executor_config: { gpu: 1 } },
       reused: false,
     });
@@ -352,7 +359,7 @@ describe('NewCustomizationForm', () => {
       expect(await screen.findByText('Deployment')).toBeInTheDocument();
     });
 
-    it('hides the Deployment section for lora_merged, whose output is full weights', async () => {
+    it('targets the output model for lora_merged, whose output is full weights', async () => {
       const values = validAutomodelValues();
       values.automodel.training = {
         ...values.automodel.training,
@@ -360,16 +367,17 @@ describe('NewCustomizationForm', () => {
       };
       renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
 
-      await screen.findByText('Compute Resources');
-      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+      expect(await screen.findByText(/This run produces my-adapter/)).toBeInTheDocument();
+      expect(screen.queryByText(/A LoRA adapter is served by/)).not.toBeInTheDocument();
     });
 
     // Unsloth's merge is a save_method, not a finetuning_type, so `finetuning_type`
     // alone would call this an adapter and offer a base-model deployment for output
     // that is full weights.
-    it('hides the Deployment section for a merged unsloth save', async () => {
+    it('targets the output model for a merged unsloth save', async () => {
       const values: CustomizationFormFields = {
         ...FORM_DEFAULTS,
+        outputName: 'merged-model',
         backend: 'unsloth',
         unsloth: {
           ...FORM_DEFAULTS.unsloth,
@@ -380,16 +388,47 @@ describe('NewCustomizationForm', () => {
       };
       renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
 
-      await screen.findByText('Compute Resources');
-      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+      expect(await screen.findByText(/This run produces merged-model/)).toBeInTheDocument();
+      expect(screen.queryByText(/A LoRA adapter is served by/)).not.toBeInTheDocument();
     });
 
-    it('hides the Deployment section for DPO, which is always full-weight', async () => {
-      const values: CustomizationFormFields = { ...FORM_DEFAULTS, backend: 'rl' };
-      renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
+    /** DPO: no `finetuning_type` at all, so it is always a full-weight run. */
+    const dpoValues = (): CustomizationFormFields => ({
+      ...FORM_DEFAULTS,
+      outputName: 'dpo-model',
+      backend: 'rl',
+      rl: { ...FORM_DEFAULTS.rl, model: 'default/base-model', dataset: 'default/my-dataset' },
+    });
 
-      await screen.findByText('Compute Resources');
-      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+    it('targets the output model for DPO, which is always full-weight', async () => {
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={dpoValues()} />);
+
+      expect(await screen.findByText(/This run produces dpo-model/)).toBeInTheDocument();
+    });
+
+    // Rendering the section is not the same as the job receiving the config. `formToRlCreate`
+    // serves both arms, and the DPO arm used to omit `deployment_config` — so the config was
+    // created and then orphaned, and the trained model was never served.
+    it('sends the config name on a DPO job, not just the GRPO one', async () => {
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={dpoValues()} />);
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateRl).toHaveBeenCalled());
+      expect(mockCreateUnboundConfig).toHaveBeenCalledWith(
+        'default',
+        expect.anything(),
+        'dpo-model-config',
+        expect.any(Function)
+      );
+      expect(mutateRl).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            spec: expect.objectContaining({ deployment_config: 'dpo-model-config' }),
+          }),
+        })
+      );
     });
 
     it('offers no deployment controls when the base already serves LoRA', async () => {
@@ -432,6 +471,8 @@ describe('NewCustomizationForm', () => {
           }),
         })
       );
+      // The adapter's base exists now, so this config names it rather than being unbound.
+      expect(mockCreateUnboundConfig).not.toHaveBeenCalled();
       // Ordering is the point: a config that fails must not cost a training run.
       expect(mockCreateDeploymentConfig.mock.invocationCallOrder[0]).toBeLessThan(
         mutateAutomodel.mock.invocationCallOrder[0]
@@ -486,7 +527,7 @@ describe('NewCustomizationForm', () => {
 
       // The job still runs — only the deployment is withheld.
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
-      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mockCreateUnboundConfig).not.toHaveBeenCalled();
       expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
     });
 
@@ -538,6 +579,79 @@ describe('NewCustomizationForm', () => {
 
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
       expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('output model deployment', () => {
+    /** A full-weight run: its output is a standalone model, not an adapter. */
+    const fullWeightValues = (): CustomizationFormFields => {
+      const values = validAutomodelValues();
+      values.outputName = 'my-model';
+      values.automodel.training = {
+        ...values.automodel.training,
+        finetuning_type: 'all_weights',
+      };
+      return values;
+    };
+
+    // Opt-out here too, so the switch is not touched before submitting.
+    it('does not start the job when the user opts out', async () => {
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await user.click(await screen.findByRole('switch', { name: /Deploy the model/ }));
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
+    });
+
+    // The config is named after the run's output, not the base model — which is also
+    // why repeated runs cannot collide the way the adapter flow can.
+    it('names the config after the output model and hands the job its name', async () => {
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      // Unbound, not the model-bound creator: the output entity does not exist until
+      // the job finishes, so the config names no model and the job binds it at deploy.
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mockCreateUnboundConfig).toHaveBeenCalledWith(
+        'default',
+        expect.anything(),
+        'my-model-config',
+        expect.any(Function)
+      );
+      expect(mutateAutomodel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            spec: expect.objectContaining({ deployment_config: 'my-model-config' }),
+          }),
+        })
+      );
+    });
+
+    it('does not start the job when the config is rejected', async () => {
+      mockCreateUnboundConfig.mockRejectedValue(new Error('image pull denied'));
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      expect(await screen.findByText(/image pull denied/i)).toBeInTheDocument();
+      await waitFor(() => expect(mutateAutomodel).not.toHaveBeenCalled());
+    });
+
+    // Nothing is serving a model that does not exist yet, so the adapter flow's
+    // four-state readiness question does not arise.
+    it('never consults base model readiness', async () => {
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await screen.findByText(/This run produces my-model/);
+      expect(mockReadiness).toHaveBeenCalledWith(expect.anything(), { enabled: false });
     });
   });
 });
