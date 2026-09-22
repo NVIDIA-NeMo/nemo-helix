@@ -8,9 +8,11 @@ import { Anchor, Block, Card, Flex, Stack, Text } from '@nvidia/foundations-reac
 import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import { LINK_EVAL_DOCS_METRICS } from '@studio/constants/links';
+import { JudgePromptSection } from '@studio/routes/evaluation/EvaluationNewRoute/JudgePromptSection';
 import {
   type EvaluationFormValues,
   NUMBER_CHECK_OPERATIONS,
+  REFERENCE_METRICS,
   SELECTABLE_METRICS,
   STRING_CHECK_OPERATIONS,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
@@ -73,10 +75,7 @@ export const MetricPanel: FC = () => {
                 slotLabel={<Text kind="body/bold/lg">{label}</Text>}
               />
 
-              {/* Exact Match / F1 / BLEU / ROUGE render nothing -- their reference
-                  template is the resolved binding and candidate is omitted, so the
-                  evaluator falls back to the model's own output. */}
-              {metrics?.[type] ? (
+              {metrics?.[type] && !REFERENCE_METRICS.includes(type) ? (
                 <Stack gap="density-lg" className="min-w-0 pl-density-lg">
                   {type === 'string-check' ? (
                     <OperandRelation>
@@ -111,6 +110,8 @@ export const MetricPanel: FC = () => {
                         slotLabel="Judge Model"
                         placeholder="Select a judge model"
                       />
+
+                      <JudgePromptSection />
 
                       {/* ScoreDefinitions directly rather than MetricScoreSection:
                           that wrapper heads the list at body/bold/lg, the same size

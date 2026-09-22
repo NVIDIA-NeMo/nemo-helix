@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
+import {
+  entityNameField,
+  unsalvageableNameError,
+} from '@studio/components/evaluation/shared/entityNameField';
 import { z } from 'zod';
 
 /** Canonical evaluator fields a dataset column can be bound to, mirroring
@@ -55,6 +59,15 @@ export const renderScoreGuidance = (scores: PanelScoreFormData[]): string => {
     'You are an expert evaluator for answers to user queries. Your task is to assess responses to user queries based on ' +
       (names.join(', ') || 'the criteria below') +
       '.',
+    // Criterion-agnostic, because this renders whatever scores the user defines.
+    // The length clause is the one that matters: without it the rubric separates
+    // two correct answers by how much prose surrounds them. Bottom of the scale
+    // is named positionally -- the judge is shown labels and descriptions, never
+    // the numeric `value` behind them.
+    '',
+    'Judge only the content of the response. Length, tone and formatting do not affect any score: a brief response that is right scores the same as a long response that is right.',
+    'If the response is empty or refuses to answer, score it at the bottom of the scale.',
+    'Score each criterion independently.',
   ];
 
   for (const score of scores) {
@@ -78,39 +91,30 @@ export const renderScoreGuidance = (scores: PanelScoreFormData[]): string => {
  *  scores when omitted, and the default parser is a ``JSONScoreParser`` keyed on
  *  the score name, so defining the score here is what makes the judge both
  *  describe the scale and return a parseable answer. */
-export const DEFAULT_HELPFULNESS_SCORE: PanelScoreFormData = {
+export const DEFAULT_CORRECTNESS_SCORE: PanelScoreFormData = {
   scoreType: 'rubric',
-  name: 'helpfulness',
-  description: "Overall utility of the response in addressing the user's needs.",
+  name: 'correctness',
+  description: 'Whether the response gives the same answer as the Ground Truth.',
   // Worded labels, not the digits they map to. The label is what the judge must
-  // emit (rubric scores derive an enum of exactly these strings), while `value`
-  // is what aggregation and ranking use -- so naming the levels costs nothing and
-  // gives the judge something meaningful to choose between.
+  // emit (rubric scores derive an enum of exactly these strings) and an
+  // unrecognised one parses to NaN in silence, so they stay short and literal.
+  // `value` is what aggregation and ranking use, and the judge never sees it.
   rubric: [
     {
-      label: 'Unhelpful',
-      description: 'Fails to address the request, is irrelevant, or could cause harm.',
+      label: 'Incorrect',
+      description:
+        'Contradicts the Ground Truth, answers a different question, or declines to answer.',
       value: 0,
     },
     {
-      label: 'Poor',
-      description: 'Partially addresses the request but has significant gaps or errors.',
+      label: 'Partial',
+      description: 'Some of the Ground Truth is present, but part of it is missing or wrong.',
       value: 1,
     },
     {
-      label: 'Adequate',
-      description: 'Addresses the core request but lacks detail, clarity, or completeness.',
+      label: 'Correct',
+      description: 'States what the Ground Truth states. Additional correct detail is acceptable.',
       value: 2,
-    },
-    {
-      label: 'Good',
-      description: 'Fully addresses the request with appropriate detail and is genuinely useful.',
-      value: 3,
-    },
-    {
-      label: 'Excellent',
-      description: 'Comprehensive and well-structured, fully satisfying the request.',
-      value: 4,
     },
   ],
 };
@@ -157,8 +161,13 @@ export const composeGenerationPrompt = (bindings: DatasetBindings) => ({
  *  in request else completions.create`) -- so a string prompt silently routes the
  *  judge to the COMPLETIONS endpoint, which chat models do not serve. Verified
  *  live: the job fails making a completions request to the judge model. */
-export const composeJudgePromptTemplate = (bindings: DatasetBindings) => ({
-  messages: [{ role: 'user', content: composeJudgeUserPrompt(bindings) }],
+/** Always the chat shape: a bare string routes to the completions endpoint
+ *  rather than chat/completions, so an edited prompt stays wrapped too. */
+export const composeJudgePromptTemplate = (
+  bindings: DatasetBindings,
+  edited: string | null = null
+) => ({
+  messages: [{ role: 'user', content: edited ?? composeJudgeUserPrompt(bindings) }],
 });
 
 export const composeJudgeUserPrompt = (bindings: DatasetBindings): string => {
@@ -226,7 +235,15 @@ export const SAMPLE_OUTPUT_VARIABLE = 'sample.output_text';
 /** Metric fields live under ``body`` so ``ScoreDefinitions`` / ``MetricScoreSection``
  *  (which do ``useFormContext<MetricPanelFormData>()`` and watch ``body.scores``)
  *  drop in without modification. */
+/** ``configSource`` when the user is authoring a config rather than reusing one. */
+export const NEW_CONFIG = '__new__';
+
 export interface EvaluationFormValues {
+  /** ``NEW_CONFIG``, or the name of the fileset holding a saved config. Empty
+   *  until the first wizard step is answered, which is what gates the rest. */
+  configSource: string;
+  /** Name for a newly authored config. Becomes the fileset name verbatim. */
+  name: string;
   /** ``workspace/fileset#path``. Doubles as ``spec.dataset`` at submit. */
   dataset: string | null;
   /** Canonical evaluator field -> dataset column path. ``spec.field_mapping``. */
@@ -238,6 +255,9 @@ export interface EvaluationFormValues {
     metrics: Record<SelectableMetric, boolean>;
     scores: PanelScoreFormData[];
     judgeModel: string;
+    /** ``null`` while the prompt still tracks the dataset bindings; a string
+     *  once the user has edited it, after which it is left alone. */
+    judgePrompt: string | null;
     stringCheck: { operation: (typeof STRING_CHECK_OPERATIONS)[number] };
     numberCheck: {
       operation: (typeof NUMBER_CHECK_OPERATIONS)[number];
@@ -277,6 +297,10 @@ export const toFieldMapping = (
 };
 
 export const EVALUATION_FORM_DEFAULTS: EvaluationFormValues = {
+  // Authoring is the common case and the only one that works on an empty
+  // workspace, so the wizard opens on it rather than on no selection at all.
+  configSource: NEW_CONFIG,
+  name: '',
   dataset: null,
   fieldMapping: EMPTY_FIELD_MAPPING,
   model: '',
@@ -290,8 +314,9 @@ export const EVALUATION_FORM_DEFAULTS: EvaluationFormValues = {
       'string-check': false,
       'number-check': false,
     },
-    scores: [DEFAULT_HELPFULNESS_SCORE],
+    scores: [DEFAULT_CORRECTNESS_SCORE],
     judgeModel: '',
+    judgePrompt: null,
     stringCheck: { operation: 'contains' },
     numberCheck: { operation: 'equals', epsilon: null },
   },
@@ -318,6 +343,8 @@ export const MAPPABLE_FILE_TYPES = ['.json', '.jsonl', '.csv'] as const;
  */
 export const evaluationSchema = z
   .object({
+    configSource: z.string(),
+    name: entityNameField(),
     model: z.string().min(1, 'Select a model to evaluate.'),
     dataset: z.string().min(1, 'Select an input file.').nullable(),
     // Explicit rather than `z.record(z.enum(...))`, which zod infers as
@@ -339,6 +366,7 @@ export const evaluationSchema = z
         'number-check': z.boolean(),
       }),
       judgeModel: z.string(),
+      judgePrompt: z.string().nullable(),
       scores: z.array(z.custom<PanelScoreFormData>()),
       numberCheck: z.object({
         operation: z.enum(NUMBER_CHECK_OPERATIONS),
@@ -352,6 +380,23 @@ export const evaluationSchema = z
     const selected = SELECTABLE_METRICS.map((metric) => metric.type).filter(
       (type) => values.body?.metrics?.[type]
     );
+
+    if (!values.configSource) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['configSource'],
+        message: 'Select a saved configuration.',
+      });
+    }
+
+    // Only an authored config needs a name; a reused one already has the
+    // fileset it was saved under.
+    if (values.configSource === NEW_CONFIG) {
+      const nameError = unsalvageableNameError(values.name ?? '', 'Configuration name');
+      if (nameError) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['name'], message: nameError });
+      }
+    }
 
     if (!values.dataset) {
       ctx.addIssue({

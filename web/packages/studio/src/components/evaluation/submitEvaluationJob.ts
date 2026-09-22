@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FILESET_NAME_MAX_LENGTH, toValidFilesetName } from '@nemo/common/src/utils/filesetName';
-import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
@@ -14,7 +13,10 @@ export const MODE_DEFAULT = 'default';
 export const MODE_EXPERIMENT = 'experiment';
 
 /** Suggested name for a new experiment (e.g. "wise-blue"). */
-export const generateEvalConfigName = (): string => generateDefaultName({ length: 2 });
+/** Fileset `description` that marks a stored model-evaluation config. Written at
+ *  create time and used as the list filter, so the two must stay identical --
+ *  `description` is the only tag the fileset API can filter on. */
+export const MODEL_EVAL_CONFIG_DESCRIPTION = 'Model Evaluation Config';
 
 /** The fileset that stores an experiment's eval config and data artifacts. */
 export const filesetNameForExperiment = (experimentName: string): string =>

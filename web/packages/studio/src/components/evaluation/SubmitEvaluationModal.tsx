@@ -50,7 +50,7 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
-import '@studio/components/evaluation/SubmitEvaluationModal.css';
+import '@studio/components/evaluation/evalWizard.css';
 import {
   entityNameField,
   nameCheckStatus,
