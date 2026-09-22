@@ -5,7 +5,7 @@
 name = "nemo-insights-plugin"
 version = "0.1.0"
 description = "Agent telemetry analysis and persistent insights for NeMo Platform."
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 dependencies = [
   "fastapi>=0.115",
   "httpx",

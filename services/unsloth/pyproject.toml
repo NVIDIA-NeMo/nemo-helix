@@ -5,7 +5,7 @@
 name = "nmp-unsloth"
 description = "NeMo Unsloth task package — container SFT driver and compile glue. No HTTP server."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nmp-common",
     "nmp-customization-common",

@@ -35,7 +35,9 @@ class TestRemoveOptionalFromType:
         """Test Union without None type returns original type unchanged."""
         union_type = Union[str, int]
         result = _remove_optional_from_type(union_type)
-        assert result is Union[str, int]
+        # Equality, not identity: CPython 3.14 stopped interning `Union[...]`, so two
+        # spellings of the same union are equal but no longer the same object.
+        assert result == Union[str, int]
 
     def test_non_optional_type_unchanged(self):
         """Test that non-Optional types are returned unchanged."""

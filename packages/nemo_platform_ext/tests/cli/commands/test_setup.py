@@ -4119,13 +4119,13 @@ def _patch_setup_command(
 
 
 class TestRequireSupportedPython:
-    def test_accepts_3_12_and_3_13(self):
-        for version in ((3, 12, 11, "final", 0), (3, 13, 5, "final", 0)):
+    def test_accepts_3_12_through_3_14(self):
+        for version in ((3, 12, 11, "final", 0), (3, 13, 5, "final", 0), (3, 14, 3, "final", 0)):
             with patch.object(setup_commands.sys, "version_info", version):
                 _require_supported_python()
 
-    def test_rejects_3_14_and_3_11(self, capsys):
-        for version in ((3, 14, 0, "final", 0), (3, 11, 13, "final", 0)):
+    def test_rejects_3_15_and_3_11(self, capsys):
+        for version in ((3, 15, 0, "final", 0), (3, 11, 13, "final", 0)):
             with (
                 patch.object(setup_commands.sys, "version_info", version),
                 pytest.raises(typer.Exit) as exc_info,
@@ -4134,14 +4134,14 @@ class TestRequireSupportedPython:
             assert exc_info.value.exit_code == 1
             err = capsys.readouterr().err
             assert "Unsupported Python" in err
-            assert "Python 3.12-3.13" in err
-            assert "--python 3.13" in err
+            assert "Python 3.12-3.14" in err
+            assert "--python 3.14" in err
 
     def test_setup_command_exits_before_starting_services(self):
         ctx, _cli_context = _make_setup_command_ctx()
         with (
             _patch_setup_command() as mocks,
-            patch.object(setup_commands.sys, "version_info", (3, 14, 0, "final", 0)),
+            patch.object(setup_commands.sys, "version_info", (3, 15, 0, "final", 0)),
             pytest.raises(typer.Exit) as exc_info,
         ):
             setup_command(ctx, auto=False)

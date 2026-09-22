@@ -5,7 +5,7 @@
 name = "nemo-unsloth-plugin"
 description = "Unsloth GPU fine-tuning customization contributor for NeMo Platform (container submit)."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nemo-platform-plugin",
     "nemo-platform",

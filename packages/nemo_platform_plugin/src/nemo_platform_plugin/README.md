@@ -4,7 +4,7 @@
 # nemo-platform-plugin
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-D22128?style=flat-square)](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12--3.13-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.12--3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Docs](https://img.shields.io/static/v1?label=docs&message=docs.nvidia.com%2Fnemo-platform&color=76B900&style=flat-square&logo=readthedocs&logoColor=white)](https://docs.nvidia.com/nemo-platform)
 
 Build NeMo Platform plugins in Python.
@@ -28,7 +28,7 @@ Build NeMo Platform plugins in Python.
 pip install nemo-platform-plugin
 ```
 
-To run a local NeMo Platform that loads and serves your plugin while you develop, use Python 3.12–3.13 and install [`nemo-platform`](https://pypi.org/project/nemo-platform/) too — it ships the platform services, the `nemo` CLI, and the runtime that wires entity-client injection into your plugin's FastAPI app:
+To run a local NeMo Platform that loads and serves your plugin while you develop, use Python 3.12–3.14 and install [`nemo-platform`](https://pypi.org/project/nemo-platform/) too — it ships the platform services, the `nemo` CLI, and the runtime that wires entity-client injection into your plugin's FastAPI app:
 
 ```bash
 pip install "nemo-platform[all]"

@@ -86,7 +86,7 @@ console = Console(stderr=True)
 
 # Supported Python versions (inclusive).
 _SUPPORTED_PYTHON_MIN = (3, 12)
-_SUPPORTED_PYTHON_MAX = (3, 13)
+_SUPPORTED_PYTHON_MAX = (3, 14)
 
 CHECK = "[green]✓[/green]"
 CROSS = "[red]✗[/red]"
