@@ -68,6 +68,9 @@ named dump, put the filename in the reference or set `generation_file`.
 Directories default to `generation_result.json`; the job does not guess among
 JSON files.
 
+<Tabs>
+<Tab title="CLI">
+
 ```bash
 nemo data-designer retrieval-prepare --spec '{
   "sdg_input": "default/stage0-out",
@@ -76,7 +79,7 @@ nemo data-designer retrieval-prepare --spec '{
 }'
 
 nemo data-designer retrieval-prepare --spec '{
-  "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<revision>/nv_pp_dd_sdg.json",
+  "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json",
   "enable_mining": true,
   "model": "default/nemotron-3-embed-1b"
 }'
@@ -88,6 +91,27 @@ nemo data-designer retrieval-prepare --spec '{
   "model": "default/nemotron-3-embed-1b"
 }'
 ```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_platform import NeMoPlatform
+from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig
+
+client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+
+client.data_designer.retrieval_prepare(
+    RetrievalPrepareJobConfig(
+        sdg_input="hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json",
+        enable_mining=True,
+        model="default/nemotron-3-embed-1b",
+    )
+)
+```
+
+</Tab>
+</Tabs>
 
 Mining runs on GPU and needs about 40 GB. `model` is a platform entity with an
 attached encoder fileset; an Inference Gateway endpoint entity has no fileset

@@ -118,6 +118,7 @@ try:
     client.files.filesets.create(
         workspace="default",
         name=MODEL_NAME,
+        purpose="model",
         description="Nemotron 3 Embed 1B BF16 checkpoint",
         storage=storage,
     )
@@ -283,6 +284,7 @@ try:
     client.files.filesets.create(
         workspace="default",
         name=TRAINING_FILESET,
+        purpose="dataset",
         description="NVDocs mined retrieval artifacts",
     )
 except ConflictError:

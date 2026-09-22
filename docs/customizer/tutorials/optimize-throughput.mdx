@@ -62,7 +62,6 @@ Required packages:
 - `nvidia-ml-py` - Collect GPU VRAM and compute utilization metrics during training
 
 ```sh
-%%bash
 if command -v uv >/dev/null 2>&1 && [ -n "$VIRTUAL_ENV" ]; then
     uv pip install datasets pandas matplotlib nvidia-ml-py
 else

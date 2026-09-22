@@ -130,6 +130,14 @@ def rewrite_links(text: str) -> str:
     return text
 
 
+# Jupyter shell cells start with %%bash; published MDX is a copy-paste sh block.
+_JUPYTER_SHELL_MAGIC_RE = re.compile(r"(```(?:sh|bash|shell)\n)%%bash\n")
+
+
+def strip_jupyter_shell_magics(text: str) -> str:
+    return _JUPYTER_SHELL_MAGIC_RE.sub(r"\1", text)
+
+
 def repo_relative_path(path: Path) -> str:
     repo_root = Path(__file__).resolve().parents[3]
     return path.resolve().relative_to(repo_root).as_posix()
@@ -144,6 +152,7 @@ def convert_notebook_to_mdx(ipynb_path: Path, *, title: str) -> str:
     body = DOWNLOAD_LINK_RE.sub("", body).lstrip("\n")
     body = FIRST_H1_RE.sub("", body, count=1)
     body = rewrite_links(body)
+    body = strip_jupyter_shell_magics(body)
 
     return (
         "---\n"
