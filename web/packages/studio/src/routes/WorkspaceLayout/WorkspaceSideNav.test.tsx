@@ -56,6 +56,8 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
 };
 
 describe('WorkspaceSideNav', () => {
+  beforeEach(() => window.localStorage.clear());
+
   it('links to the traces view by default', () => {
     renderSideNav();
 
