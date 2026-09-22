@@ -42,7 +42,11 @@ from nmp.core.entities.api.v2.utils import (
     require_workspace_access,
 )
 from nmp.core.entities.app.repository import WorkspaceRepositoryInterface
-from nmp.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nmp.core.entities.app.repository.exceptions import (
+    EntityNotFoundError,
+    EntityVersionConflictError,
+    ForeignChildEntitiesError,
+)
 from nmp.core.entities.entities import Entity
 from nmp.core.entities.utils.filter import FilterDep
 from nmp.core.entities.utils.identifiers import generate_entity_name
@@ -589,28 +593,6 @@ async def update_entity_by_name(
             ) from e
 
 
-async def _foreign_child_workspaces(
-    repository: EntityRepository,
-    parent_id: str,
-    owning_workspace: str,
-) -> list[str]:
-    """Workspaces other than *owning_workspace* holding children of *parent_id*.
-
-    ``entities.parent`` is ``ON DELETE CASCADE``, so deleting a parent silently removes
-    its children. Once an entity is shared out of the global workspace any workspace can
-    parent onto it — a fine-tuned adapter on a shared base model — and those children are
-    invisible to whoever owns the parent. Deleting would destroy another team's work with
-    no signal, so the caller has to acknowledge the cross-workspace children first.
-
-    Asks the repository for the distinct workspaces rather than paging the children: a
-    page-limited scan silently drops workspaces once a parent has more children than the
-    page holds, and the caller would then read a 409 naming only some of the workspaces
-    it is about to destroy.
-    """
-    workspaces = await repository.distinct_child_workspaces(parent_id=parent_id)
-    return sorted(workspaces - {owning_workspace})
-
-
 @router.delete(
     "/v2/workspaces/{workspace}/entities/{entity_type}/{name}",
     response_model=DeleteResponse,
@@ -654,25 +636,6 @@ async def delete_entity_by_name(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
 
-    if not force:
-        existing = await repository.get_entity_by_name(
-            workspace=workspace,
-            entity_type=entity_type,
-            name=name,
-            parent=parent,
-        )
-        if existing is not None:
-            dependent_workspaces = await _foreign_child_workspaces(repository, existing.id, workspace)
-            if dependent_workspaces:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f"Entity '{name}' has child entities in other workspaces "
-                        f"({', '.join(dependent_workspaces)}). Deleting it would also delete them. "
-                        f"Remove those entities first, or pass force=true to delete them along with it."
-                    ),
-                )
-
     await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
 
     try:
@@ -682,7 +645,17 @@ async def delete_entity_by_name(
             name=name,
             parent=parent,
             expected_db_version=expected_db_version,
+            refuse_children_outside=None if force else workspace,
         )
+    except ForeignChildEntitiesError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Entity '{name}' has child entities in other workspaces "
+                f"({', '.join(e.workspaces)}). Deleting it would also delete them. "
+                f"Remove those entities first, or pass force=true to delete them along with it."
+            ),
+        ) from e
     except EntityVersionConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

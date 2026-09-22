@@ -179,6 +179,10 @@ class EntityRepositoryInterface(ABC):
             parent: Optional parent entity ID (None for root entities)
             project: Optional project name for the entity
             updated_by: Optional principal ID for the updater
+            refuse_children_outside: When set to a workspace name, refuse the delete with
+                ForeignChildEntitiesError if the entity has children in any other workspace.
+                Checked inside the delete transaction with the row locked, so it cannot be
+                raced by a child created after the check.
             expected_db_version: Optional expected database version for optimistic locking. If provided,
                 update will fail if current version doesn't match.
 
@@ -209,6 +213,7 @@ class EntityRepositoryInterface(ABC):
         name: str,
         parent: Optional[str] = None,
         expected_db_version: Optional[int] = None,
+        refuse_children_outside: str | None = None,
         session: AsyncSession | None = None,
     ) -> int:
         """Delete an entity by name.
