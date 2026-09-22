@@ -171,13 +171,11 @@ def _report_submitted(
     """
     if not (wait or watch):
         return
-    # ``submitted`` is None only when the platform response carried no job, which
-    # the submit callback has already reported. There is nothing left to track.
-    if submitted is None:
-        return
-    job_name = submitted.name
-    if job_name is None:
-        return
+    # Exit 0 means the job completed, so a job that cannot be followed is an error.
+    job_name = submitted.name if submitted is not None else None
+    if submitted is None or job_name is None:
+        typer.echo("Error: the submit response has no job name, so the job cannot be followed.", err=True)
+        raise typer.Exit(code=1)
 
     result = follow_job(
         base_url=submitted.base_url,

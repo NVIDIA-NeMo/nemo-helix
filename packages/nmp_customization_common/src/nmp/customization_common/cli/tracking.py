@@ -25,6 +25,7 @@ from collections.abc import Iterable
 from enum import Enum
 
 from nemo_platform_plugin.cli_progress import ProgressHandle, request_progress
+from nemo_platform_plugin.client.errors import NemoClientError
 from nemo_platform_plugin.jobs.client import JobsClient
 from nemo_platform_plugin.jobs.watch import watch_job
 from nemo_platform_plugin.jobs.watch_types import (
@@ -137,6 +138,13 @@ def _consume(
         return FollowResult.INTERRUPTED
     except JobWatchTimeoutError as exc:
         _print(console, f"Error: {exc}", style="red")
+        return FollowResult.FAILED
+    except NemoClientError as exc:
+        # ``watch_job`` retries transient failures itself; what reaches here is
+        # final, such as a 404 for the job or a 401 for the token. The job was
+        # submitted, so say how to check on it rather than print a traceback.
+        _print(console, f"Error: could not follow {job_name}: {exc}", style="red")
+        _print(console, f"Check on it with 'nemo jobs get-status {job_name}'.")
         return FollowResult.FAILED
 
     if terminal is None:

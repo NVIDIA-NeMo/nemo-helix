@@ -125,7 +125,7 @@ class TestWaitAndWatch:
 
     def test_wait_and_watch_together_is_rejected(self) -> None:
         result = _run("--wait", "--watch")
-        assert result.exit_code != 0
+        assert result.exit_code == 2
         assert "not both" in result.stderr
 
     def test_no_flags_does_not_follow_the_job(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,9 +136,9 @@ class TestWaitAndWatch:
         assert _run().exit_code == 0
 
 
-@pytest.mark.usefixtures("stub_submit")
-def test_missing_job_name_is_not_guessed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The job id comes from the submit response, never from listing recent jobs."""
+@pytest.fixture
+def unnamed_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A submit response that carries no job name."""
 
     def fake_submit_remote(*_args: Any, **_kwargs: Any) -> dict:
         return {"status": "created"}
@@ -151,6 +151,17 @@ def test_missing_job_name_is_not_guessed(monkeypatch: pytest.MonkeyPatch) -> Non
         "nmp.customization_common.cli.overrides.follow_job",
         lambda **_: pytest.fail("must not follow a job it cannot name"),
     )
-    result = _run("--wait")
-    assert result.exit_code == 0, result.stderr
-    assert "Submitted" not in result.stderr
+
+
+@pytest.mark.usefixtures("stub_submit", "unnamed_job")
+@pytest.mark.parametrize("flag", ["--wait", "--watch"])
+def test_missing_job_name_fails_the_follow(flag: str) -> None:
+    """Exit 0 means the job completed; a job that cannot be followed is not guessed at."""
+    result = _run(flag)
+    assert result.exit_code == 1
+    assert "no job name" in result.stderr
+
+
+@pytest.mark.usefixtures("stub_submit", "unnamed_job")
+def test_missing_job_name_without_follow_still_succeeds() -> None:
+    assert _run().exit_code == 0

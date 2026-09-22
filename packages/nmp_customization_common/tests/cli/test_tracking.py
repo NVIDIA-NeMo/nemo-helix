@@ -9,8 +9,10 @@ import io
 from collections.abc import Iterable, Mapping
 from contextlib import AbstractContextManager
 
+import httpx
 import pytest
 from nemo_platform_plugin.cli_progress import ProgressHandle
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.jobs.watch_types import (
     JobLogEvent,
     JobStatusEvent,
@@ -166,6 +168,18 @@ class TestFollowJob:
         result, output = _follow(_events())
         assert result is FollowResult.INTERRUPTED
         assert "still running" in output
+
+    def test_non_transient_client_error_is_a_failure(self) -> None:
+        """watch_job raises only after its first status request, so the error surfaces mid-iteration."""
+
+        def _events() -> Iterable[JobWatchEvent]:
+            yield _status("running", terminal=False, successful=None)
+            raise NotFoundError(httpx.Response(404, json={"detail": "job not found"}))
+
+        result, output = _follow(_events())
+        assert result is FollowResult.FAILED
+        assert "could not follow automodel-1a2b3c: HTTP 404: job not found" in output
+        assert "nemo jobs get-status automodel-1a2b3c" in output
 
 
 class TestProgressDisabling:
