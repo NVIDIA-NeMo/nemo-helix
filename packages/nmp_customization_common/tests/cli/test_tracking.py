@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the post-submit tracking message and the --wait/--watch follow."""
+"""Tests for the --wait/--watch follow."""
 
 from __future__ import annotations
 
@@ -19,10 +19,7 @@ from nemo_platform_plugin.jobs.watch_types import (
     JobWatchTimeoutError,
 )
 from nmp.customization_common.cli import tracking
-from nmp.customization_common.cli.tracking import (
-    FollowResult,
-    print_tracking_instructions,
-)
+from nmp.customization_common.cli.tracking import FollowResult
 from rich.console import Console
 
 
@@ -66,44 +63,6 @@ def _follow(
         console=console,
     )
     return result, buffer.getvalue()
-
-
-class TestTrackingInstructions:
-    def test_names_the_job_backend_and_workspace(self) -> None:
-        console, buffer = _console()
-        print_tracking_instructions(
-            backend="automodel",
-            job_name="automodel-1a2b3c",
-            workspace="acme",
-            console=console,
-        )
-        output = buffer.getvalue()
-        assert "Submitted automodel job automodel-1a2b3c to workspace acme." in output
-
-    def test_gives_the_exact_tracking_commands(self) -> None:
-        console, buffer = _console()
-        print_tracking_instructions(
-            backend="rl",
-            job_name="rl-99",
-            workspace="default",
-            console=console,
-        )
-        output = buffer.getvalue()
-        assert "nemo jobs watch rl-99" in output
-        assert "nemo jobs get-status rl-99" in output
-
-    def test_does_not_suggest_flags_for_a_job_already_submitted(self) -> None:
-        """--wait and --watch belong on submit --help; they cannot apply to this job now."""
-        console, buffer = _console()
-        print_tracking_instructions(
-            backend="unsloth",
-            job_name="unsloth-7",
-            workspace="default",
-            console=console,
-        )
-        output = buffer.getvalue()
-        assert "--wait" not in output
-        assert "--watch" not in output
 
 
 class TestFollowJob:

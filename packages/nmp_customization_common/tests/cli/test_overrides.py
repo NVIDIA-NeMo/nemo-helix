@@ -44,6 +44,7 @@ def _build_app(calls: list[dict[str, object]]) -> typer.Typer:
 
     apply_job_cli_overrides(
         app,
+        backend="plugin",
         load_job_json=lambda path: json.dumps(json.loads(Path(path).read_text())),
         job_json_help="Path to the job JSON.",
     )

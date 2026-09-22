@@ -67,15 +67,15 @@ class TestTrackingMessage:
         assert result.exit_code == 0, result.stderr
         assert json.loads(result.stdout) == {"name": "automodel-1a2b3c", "status": "created"}
 
-    def test_tracking_message_goes_to_stderr(self) -> None:
+    def test_tracking_message_goes_to_stderr_once(self) -> None:
         result = _run("--workspace", "acme")
-        assert "Submitted automodel job automodel-1a2b3c to workspace acme." in result.stderr
-        assert "nemo jobs watch automodel-1a2b3c" in result.stderr
+        assert "nemo jobs watch automodel-1a2b3c --workspace acme" in result.stderr
+        assert result.stderr.count("nemo jobs get-status automodel-1a2b3c") == 1
 
     def test_does_not_suggest_flags_that_no_longer_apply(self) -> None:
         """The job is already submitted, so --wait and --watch stay on submit --help."""
         stderr = _run().stderr
-        assert "Submitted automodel job" in stderr
+        assert "Job submitted. Track it with:" in stderr
         assert "--wait" not in stderr
         assert "--watch" not in stderr
 

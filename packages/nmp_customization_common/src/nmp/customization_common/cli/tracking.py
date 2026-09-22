@@ -3,13 +3,11 @@
 
 """Post-submit feedback for Customizer backends.
 
-After ``submit`` creates a job, two things happen here:
-
-- :func:`print_tracking_instructions` writes a short message naming the job and
-  the commands that follow it.
-- :func:`follow_job` optionally blocks until the job reaches a terminal state,
-  for ``--wait`` (status only) and ``--watch`` (status and logs). Both show a
-  spinner, so a phase that produces no output still looks alive.
+After ``submit`` creates a job, :func:`follow_job` optionally blocks until the
+job reaches a terminal state, for ``--wait`` (status only) and ``--watch``
+(status and logs). Both show a spinner, so a phase that produces no output still
+looks alive. The commands for tracking the job later are printed by the submit
+renderer (:class:`~nmp.customization_common.cli.renderer.CustomizationSubmitRenderer`).
 
 Everything is written to **stderr**. Submit prints the job JSON to stdout, and
 scripts parse that, so stdout stays exactly as it was.
@@ -55,25 +53,6 @@ def _print(console: Console, text: str, *, style: str | None = None) -> None:
     get recoloured. Both are off here.
     """
     console.print(text, style=style, markup=False, highlight=False)
-
-
-def print_tracking_instructions(
-    *,
-    backend: str,
-    job_name: str,
-    workspace: str,
-    console: Console | None = None,
-) -> None:
-    """Report the created job and the commands that track it.
-
-    Only commands the user can run now. ``--wait`` and ``--watch`` are documented
-    on ``submit --help``, because by the time this prints the job is already
-    submitted and the flags no longer apply to it.
-    """
-    out = console if console is not None else Console(stderr=True)
-    _print(out, f"\nSubmitted {backend} job {job_name} to workspace {workspace}.")
-    _print(out, f"Track it with 'nemo jobs watch {job_name}', or check its status with")
-    _print(out, f"'nemo jobs get-status {job_name}'.")
 
 
 def follow_job(

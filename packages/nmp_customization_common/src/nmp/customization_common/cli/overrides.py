@@ -29,7 +29,7 @@ import typer
 from nemo_platform_plugin.cli_options import WorkspaceOption
 from nemo_platform_plugin.cli_state import resolve_cli_workspace
 from nemo_platform_plugin.commands import SubmittedJob
-from nmp.customization_common.cli.tracking import FollowResult, follow_job, print_tracking_instructions
+from nmp.customization_common.cli.tracking import FollowResult, follow_job
 
 LoadJobJson = Callable[[Path], str]
 
@@ -153,35 +153,30 @@ def _replace_job_submit(
             config=None,
             config_file=None,
         )
-        _report_submitted(
-            submitted, backend=backend, wait=wait, watch=watch, timeout=timeout, poll_interval=poll_interval
-        )
+        _report_submitted(submitted, wait=wait, watch=watch, timeout=timeout, poll_interval=poll_interval)
 
 
 def _report_submitted(
     submitted: SubmittedJob | None,
     *,
-    backend: str,
     wait: bool,
     watch: bool,
     timeout: int | None,
     poll_interval: int,
 ) -> None:
-    """Print tracking instructions, then follow the job when asked to."""
+    """Follow the job to a terminal state when ``--wait`` or ``--watch`` asked for it.
+
+    The commands for tracking the job later are printed by the submit renderer
+    (``CustomizationSubmitRenderer``), not here.
+    """
+    if not (wait or watch):
+        return
     # ``submitted`` is None only when the platform response carried no job, which
     # the submit callback has already reported. There is nothing left to track.
     if submitted is None:
         return
     job_name = submitted.name
     if job_name is None:
-        return
-
-    print_tracking_instructions(
-        backend=backend,
-        job_name=job_name,
-        workspace=submitted.workspace,
-    )
-    if not (wait or watch):
         return
 
     result = follow_job(

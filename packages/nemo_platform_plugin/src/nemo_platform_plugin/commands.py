@@ -464,13 +464,10 @@ def _add_submit_command(
                 renderer_resolved = cli.get_job_renderer(job_cls, verb="submit")
 
         resolved_base_url = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
-
-        resolved_headers: dict[str, str] = {}
-        resolved_base_url = ""
+        submitted: SubmittedJob | None = None
 
         def _do_submit() -> Any:
-            nonlocal resolved_base_url, resolved_headers
-            resolved_base_url = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+            nonlocal submitted
             resolved_headers = _resolve_submit_auth_headers(typer_ctx)
             submit_kwargs: dict[str, Any] = {
                 "base_url": resolved_base_url,
@@ -482,11 +479,19 @@ def _add_submit_command(
             metadata = _resolve_submit_metadata(typer_ctx)
             if metadata is not None:
                 submit_kwargs["metadata"] = metadata
-            return scheduler.submit_remote(job_cls, spec_data, **submit_kwargs)
+            result = scheduler.submit_remote(job_cls, spec_data, **submit_kwargs)
+            # Captured here rather than after the call so that the renderer path,
+            # which consumes the result itself, still hands it back to the caller.
+            submitted = SubmittedJob(
+                response=result if isinstance(result, dict) else {},
+                base_url=resolved_base_url,
+                workspace=workspace,
+                headers=resolved_headers,
+            )
+            return result
 
         renderer: CLIRenderer | None = None
         rctx: RendererContext | None = None
-        submitted: SubmittedJob | None = None
         try:
             if renderer_resolved is not None:
                 rctx = _make_renderer_context(
@@ -499,12 +504,6 @@ def _add_submit_command(
             else:
                 result = _do_submit()
                 typer.echo(json.dumps(result, indent=2))
-                submitted = SubmittedJob(
-                    response=result if isinstance(result, dict) else {},
-                    base_url=resolved_base_url,
-                    workspace=workspace,
-                    headers=resolved_headers,
-                )
         except (NotImplementedError, ValueError) as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=2) from exc
