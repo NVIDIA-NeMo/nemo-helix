@@ -180,6 +180,7 @@ guardrails-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 harbor = [
+  "nemo-platform[nemo-evaluator-sdk]",
   "harbor>=0.20,<0.21",
 ]
 
