@@ -492,7 +492,11 @@ class TestEnsureWorkspaceExists:
         workspaces_client = MagicMock(spec=WorkspacesClient)
         workspaces_client.get_workspace.return_value = _entity_response(MagicMock())
 
-        created = _ensure_workspace_exists(workspaces_client, "sample")
+        created = _ensure_workspace_exists(
+            workspaces_client,
+            "sample",
+            description="Sample workspace created by the NeMo setup flow.",
+        )
 
         assert created is False
         workspaces_client.get_workspace.assert_called_once_with(name="sample")
@@ -503,10 +507,19 @@ class TestEnsureWorkspaceExists:
         workspaces_client.get_workspace.side_effect = _not_found_error()
         workspaces_client.create_workspace.return_value = _entity_response(MagicMock())
 
-        created = _ensure_workspace_exists(workspaces_client, "sample")
+        created = _ensure_workspace_exists(
+            workspaces_client,
+            "sample",
+            description="Sample workspace created by the NeMo setup flow.",
+        )
 
         assert created is True
-        workspaces_client.create_workspace.assert_called_once_with(body=CreateWorkspaceRequest(name="sample"))
+        workspaces_client.create_workspace.assert_called_once_with(
+            body=CreateWorkspaceRequest(
+                name="sample",
+                description="Sample workspace created by the NeMo setup flow.",
+            )
+        )
 
     def test_concurrent_creation_is_treated_as_success(self):
         workspaces_client = MagicMock(spec=WorkspacesClient)
@@ -2269,7 +2282,11 @@ class TestInteractiveModelPairSelection:
         assert selected_path == "sample"
         deploy_agent.assert_not_called()
         workspaces_client = cli_context.typed_client.return_value
-        ensure_workspace.assert_called_once_with(workspaces_client, "sample")
+        ensure_workspace.assert_called_once_with(
+            workspaces_client,
+            "sample",
+            description="Sample workspace created by the NeMo setup flow.",
+        )
         assert event_order == ["skills", "complete", "post_setup", "workspace"]
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
