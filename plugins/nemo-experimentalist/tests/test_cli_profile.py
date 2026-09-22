@@ -1219,5 +1219,5 @@ def test_experiment_help_names_insights_writer(app) -> None:
 
     assert result.exit_code == 0, result.output
     help_text = " ".join(result.output.replace("│", " ").split())
-    assert "nemo agents analyst run" in help_text
-    assert "writes by default" in help_text
+    assert "nemo insights analysis-runs create" in help_text
+    assert "Create Platform insights" in help_text

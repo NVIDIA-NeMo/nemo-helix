@@ -113,8 +113,8 @@ class ExperimentalistCLI(NemoCLI):
                     "Insight for Mode 1: a local insight file OR a platform insight id "
                     "(surfaced in Studio). A path that exists on disk is read locally; "
                     "otherwise it is fetched from the platform. Default: "
-                    "<profile-dir>/.nemo-optimizer/insights.yaml when it exists (where "
-                    "`nemo agents analyst run` writes by default)."
+                    "<profile-dir>/.nemo-optimizer/insights.yaml when it exists. "
+                    "Create Platform insights with `nemo insights analysis-runs create --agent <agent> --wait`."
                 ),
             ),
             insight_id: str | None = typer.Option(
@@ -221,7 +221,7 @@ class ExperimentalistCLI(NemoCLI):
                 if no_insight:
                     typer.echo("Insight disabled: --no-insight (Mode 2)", err=True)
                 elif effective_insight.is_profile_default:
-                    # `nemo agents analyst run` writes here by default: the verbs connect flag-free.
+                    # Preserve support for existing local insight files.
                     typer.echo(
                         f"Insight file: {effective_insight.ref} (default; pass --insight to override)",
                         err=True,

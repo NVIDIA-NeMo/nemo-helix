@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from importlib.metadata import distribution
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,6 +26,13 @@ runner = CliRunner()
 RUN_NAME = "insights-run-0123456789abcdef0123456789abcdef"
 CONFIGURED_DEFAULT = "default/configured-big"
 CONFIGURED_FAST = "default/configured-small"
+
+
+@pytest.mark.parametrize("package", ["nemo-insights-plugin", "nemo-platform"])
+def test_installed_packages_do_not_register_local_analyst_commands(package: str) -> None:
+    assert not any(
+        entry.group == "nemo.cli.agents" and entry.name == "analyst" for entry in distribution(package).entry_points
+    )
 
 
 def _run(**overrides: Any) -> AnalysisRun:

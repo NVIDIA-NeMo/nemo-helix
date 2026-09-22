@@ -680,7 +680,6 @@ experiments = "nmp.intake.cli:ExperimentsCLI"
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli.agents"]
 experimentalist = "nemo_experimentalist_plugin.cli:ExperimentalistCLI"
-analyst = "nemo_insights_plugin.analyst.cli:AnalystCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.client_provider"]

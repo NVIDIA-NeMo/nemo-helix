@@ -3,11 +3,9 @@
 
 """Experimentalist-owned models for the shared ``optimizer.yaml`` profile.
 
-The profile is the shared per-agent contract: the Platform-owned
-``nemo agents analyst run`` producer writes
-``<profile-dir>/.nemo-optimizer/insights.yaml``, and
-``nemo agents experimentalist run`` reads it by default. NeMo Experimentalist validates
-the full experiment schema; NeMo Insights consumes only its analysis subset.
+The profile can supply a local insights file at
+``<profile-dir>/.nemo-optimizer/insights.yaml``. Platform AnalysisRuns persist
+insights remotely; pass their IDs explicitly with ``--insight``.
 """
 
 from pathlib import Path

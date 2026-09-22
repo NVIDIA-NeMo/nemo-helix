@@ -74,7 +74,7 @@ single leader, so complementary strengths stay alive across rounds.
 
 - [NeMo Insights](../nemo-insights/README.md) produces the Insight — a
   failure pattern inferred from traces — that the Experimentalist optimizes
-  against. Run `nemo agents analyst run` first. The Experimentalist does not
+  against. Run `nemo insights analysis-runs create --agent <agent> --wait` first. The Experimentalist does not
   analyze traces or host an Insight API.
 - **Harbor** runs the task containers that score every candidate.
 - **NeMo Experiments** mirrors each run and its candidates as an experiment

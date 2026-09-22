@@ -89,7 +89,7 @@ If the analyst discovers issues in your application, it will create what we call
 Let's run it:
 
 ```bash
-uv run --frozen nemo agents analyst run \
+uv run --frozen nemo insights analysis-runs create --wait \
   --agent nemo-experimentalist-tau3-nooa \
   --workspace tau3-airline \
   --base-url "$NMP_BASE_URL"

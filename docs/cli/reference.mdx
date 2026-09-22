@@ -5953,7 +5953,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Platform agents:*
 
-* `analyst`: Analyze agent telemetry and record what the agent gets...
 * `experimentalist`: NeMo Experimentalist commands.
 
 #### nemo agents create
@@ -7480,76 +7479,6 @@ nemo agents package [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo agents analyst
-
-Analyze agent telemetry and record what the agent gets wrong.
-
-**Usage:**
-
-```shell
-nemo agents analyst [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `run`: Run the analyst agent against a running NMP instance.
-* `doctor`: Check whether the current profile is ready for analysis.
-
-##### nemo agents analyst run
-
-Run the analyst agent against a running NMP instance.
-
-Builds the analyst agent with ``--agent`` (and optional ``--ethos``)
-formatted into its instructions and tools scoped
-to ``--agent`` / ``--workspace`` / ``--base-url``, runs it, and
-prints whatever the agent returns. Insights are written to the
-platform, and mirrored to ``--insights-file-output`` when given.
-
-**Usage:**
-
-```shell
-nemo agents analyst run [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Name of the agent (agent under test) the analyst should focus on.
-* `--ethos <PATH>`: Path to a markdown file describing the agent under test (its Ethos).
-* `--workspace, -w`: Workspace the analyst should operate in. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NMP instance the analyst's tools should call.
-* `--profile <FILE>`: Path to optimizer.yaml. Default: discovered by walking up from cwd.
-* `--insights-file-output <PATH>`: Also write insights to this local YAML file. Insights always go to the platform first; the file mirrors what was stored, platform ids included, and each run merges into it.
-* `--verbose, -v`: Stream the analyst's tool calls and reasoning to stderr while it runs. Off by default so that stdout stays clean for piping the final answer.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents analyst doctor
-
-Check whether the current profile is ready for analysis.
-
-**Usage:**
-
-```shell
-nemo agents analyst doctor [OPTIONS]
-```
-
-**Options:**
-
-* `--profile <FILE>`: Path to optimizer.yaml. Default: discovered by walking up from cwd.
-* `--base-url`: Base URL of the running NMP instance to check.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
 #### nemo agents experimentalist
 
 NeMo Experimentalist commands.
@@ -7586,7 +7515,7 @@ nemo agents experimentalist run [OPTIONS]
 
 * `--agent`: Baseline agent: a local directory or a git URL with an optional ref (e.g. ssh://git@host/group/repo.git@main). Optional in Mode 1 (the insight supplies the agent) and overrides the insight's agent when given. A git source records provenance and enables --config storage.publish_winner to open a draft PR/MR for the winner against that ref.
 * `--ethos`: URI of a markdown file describing the agent under test (its Ethos).
-* `--insight`: Insight for Mode 1: a local insight file OR a platform insight id (surfaced in Studio). A path that exists on disk is read locally; otherwise it is fetched from the platform. Default: \<profile-dir>/.nemo-optimizer/insights.yaml when it exists (where `nemo agents analyst run` writes by default).
+* `--insight`: Insight for Mode 1: a local insight file OR a platform insight id (surfaced in Studio). A path that exists on disk is read locally; otherwise it is fetched from the platform. Default: \<profile-dir>/.nemo-optimizer/insights.yaml when it exists. Create Platform insights with `nemo insights analysis-runs create --agent <agent> --wait`.
 * `--insight-id`: Selector for a local multi-insight file: exact id/title first; if none matches, a decimal value is a zero-based index.
 * `--no-insight`: Disable insight use (Mode 2), including the shared profile insight file.
 * `--profile <FILE>`: Path to optimizer.yaml. Default: discovered by walking up from the cwd.

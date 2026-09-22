@@ -22,8 +22,7 @@ registered under the `nemo.cli.agents` entry-point group, which the `nemo-agents
 plugin's `AgentsCLI` discovers and mounts. There is no top-level
 `nemo experimentalist` alias.
 
-The Analyst follows the same rule: `nemo agents analyst run` (was `nemo insights
-analyze`). Prefer `ctx.command_path` over a hardcoded path when a message quotes the
+Analysis is submitted through `nemo insights analysis-runs create --agent <agent> --wait`. Prefer `ctx.command_path` over a hardcoded path when a message quotes the
 command back to the user.
 
 ### 2026-07-24: Optimizer renamed to Experimentalist
@@ -48,10 +47,10 @@ aliases:
 Two names deliberately did **not** change. `optimizer.yaml` and the
 `.nemo-optimizer/` state directory are a shared contract with
 `nemo-insights-plugin`: `PROFILE_FILENAME` and `discover_profile()` live in
-`nemo_insights_plugin.contracts.profile`, and `nemo agents analyst run` writes
-`<profile-dir>/.nemo-optimizer/insights.yaml`, which this plugin reads as the
-default insight. Rename them only in lockstep with a Platform change to that
-contract.
+`nemo_insights_plugin.contracts.profile`. Existing local insight files can still
+be read from `<profile-dir>/.nemo-optimizer/insights.yaml`; AnalysisRuns write to
+Platform, so pass the resulting Insight ID explicitly with `--insight`.
+
 
 `EvolutionaryOptimizer` is now `EvolutionaryStrategy`, in
 `experimentalist/strategies/evolutionary.py`, and is resolved by name like any other

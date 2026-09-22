@@ -34,10 +34,6 @@ from nooa.events import LLMComplete, PythonOutput
 _VERBOSE_TRUNCATE = 2000
 
 
-class ClientConstructionError(Exception):
-    """The analyst's NeMo Platform client could not be constructed."""
-
-
 async def run_analyst(
     *,
     agent: str,

@@ -167,19 +167,11 @@ least three representative traces as evidence before filing a new Insight, and
 when it finds more evidence for an existing Insight it *appends* trace refs
 rather than restating the problem.
 
-#### Insight Persistence: Platform Versus Local File
+#### Insight Persistence
 
-When no profile is
-discovered, the Analyst reads and writes Insights through the Insights application programming
-interface (API).
-When a profile governs the run, the Analyst reads and writes the shared local
-file at `<profile-dir>/.nemo-optimizer/insights.yaml` instead, which is the
-same default the Experimenter reads. Pass `--insights-file-output <path>`
-to point at a different file explicitly. Trace and feedback reads still hit
-the live platform at `--base-url` either way, so the local file also covers
-deployments that host Intake data but do not have the Insights plugin
-installed. Each run merges into the file (de-duplicating trace refs) rather
-than overwriting it.
+AnalysisRuns execute on NeMo Platform. The Insights plugin stores new insights
+and appends evidence to existing insights through the Insights API. Submission
+does not discover a local profile or write a local Insights mirror.
 
 #### Telemetry Hierarchy
 
@@ -311,7 +303,7 @@ the `NMP_ACCESS_TOKEN` command and the `Authorization` header in the API example
 Confirm the plugins are installed and discoverable:
 
 ```bash
-nemo agents analyst --help
+nemo insights analysis-runs --help
 nemo agents experimentalist --help
 ```
 
@@ -319,7 +311,6 @@ From an agent directory with an `optimizer.yaml` profile, check that the
 effective inputs and credentials resolve:
 
 ```bash
-nemo agents analyst doctor
 nemo agents experimentalist doctor
 ```
 
@@ -333,7 +324,7 @@ before it can generate Insights.
 Run the Analyst against the target agent's traces:
 
 ```bash
-nemo agents analyst run \
+nemo insights analysis-runs create --wait \
   --agent "$AGENT" \
   --workspace "$WORKSPACE" \
   --base-url "$NMP_BASE_URL"
@@ -343,40 +334,19 @@ Useful flags:
 
 - `--ethos ETHOS.md`: Append [Ethos](/documentation/agents/optimize-agents/ethos) so the Analyst can flag
   divergence from intended behavior.
-- `--insights-file-output tmp/insights.yaml`: Read and write Insights from a
-  specific local YAML file. Trace reads still hit `--base-url`.
-- `--verbose` or `-v`: Stream the Analyst's tool calls and reasoning to
-  standard error.
+- `--evaluation-id <id>`: Restrict analysis to one evaluation.
+- `--since <ISO-8601 timestamp>`: Set the lower time bound.
 
 ### Confirm It Worked
 
-The persistence target depends on whether the Analyst discovered an
-`optimizer.yaml` profile.
+Inspect the AnalysisRun and its backing job with
+`nemo insights analysis-runs get <run-name> --workspace "$WORKSPACE"`.
+Confirm the job completed and inspect its analysis report. A successful run
+may create no insights if it finds no new recurring problems.
 
-For a profile-based run, confirm that the local Insights file exists and
-contains the generated records:
-
-```bash
-test -s .nemo-optimizer/insights.yaml
-sed -n '1,120p' .nemo-optimizer/insights.yaml
-```
-
-If no profile was discovered and you did not pass `--insights-file-output`,
-list the Insights stored through the API:
-
-```bash
-curl --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/insights/v2/workspaces/$WORKSPACE/insights?agent=$AGENT&page=1&page_size=20"
-```
-
-API-stored Insights also appear in Studio at
-`$NMP_STUDIO_URL/workspaces/$WORKSPACE/optimizer`. Profile-based Insights do
-not appear there because they are stored in the local YAML file.
-
-A successful result contains at least one Insight for the agent. Each Insight
-has a clear `title`, an actionable `description`, and `trace_refs` that point
-to Intake traces.
+Insights are stored in NeMo Platform and appear in Studio at
+`$NMP_STUDIO_URL/workspaces/$WORKSPACE/optimizer`. Each finding should have a
+clear `title`, an actionable `description`, and supporting `trace_refs`.
 
 ### Run an Experiment
 
@@ -472,7 +442,7 @@ the run, and `./tmp` otherwise:
 
 ### Opt an Agent into Periodic Analysis
 
-Instead of running `nemo agents analyst run` manually, opt an agent in and let
+Instead of running `nemo insights analysis-runs create --wait` manually, opt an agent in and let
 the platform run the Analyst on a schedule:
 
 ```bash
@@ -515,24 +485,14 @@ seconds and submits a run after the scheduled daily or weekly window is reached.
 
 ## Command Reference
 
-The Analyst lives under `nemo agents analyst`, and the Experimenter lives under
-`nemo agents experimentalist`. These command namespaces share the `optimizer.yaml`
-profile, and each validates its own configuration. Scheduled analysis remains
-under `nemo insights analysis`.
+Submit analysis through `nemo insights analysis-runs`.
 
-### `nemo agents analyst run`
+### `nemo insights analysis-runs create`
 
-Run the Analyst for one analysis of an agent's traces.
-
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--agent` | yes, unless a profile supplies it | profile `agent` | Agent under test the Analyst should focus on. |
-| `--ethos` | no | profile `ethos`, else `ETHOS.md` or `README.md` beside the profile | Path to [Ethos](/documentation/agents/optimize-agents/ethos) Markdown for the AUT. |
-| `--workspace` | no | profile `workspace`, else `default` | Workspace to operate in. |
-| `--base-url` | no | `NMP_BASE_URL`, else `http://localhost:8080` | Running platform instance the Analyst's tools call. |
-| `--profile` | no | discovered by walking up from the current working directory | Path to `optimizer.yaml`. |
-| `--insights-file-output` | no | off — Insights go to the platform only | Additionally mirror the Insights the platform stored into a local YAML file, platform ids included. Each run merges into the file. |
-| `--verbose` / `-v` | no | off | Stream tool calls and reasoning to standard error. |
+Submit one analysis of an agent's traces. `--agent` is required. Optional flags
+include `--workspace`, `--base-url`, `--ethos`, `--since`, `--evaluation-id`,
+`--default-model`, and `--fast-model`. Use `--wait` to wait for the backing job.
+This command does not discover `optimizer.yaml` or support local file mirrors.
 
 ### `nemo insights analysis enable | disable | status`
 
@@ -540,11 +500,6 @@ Manage per-agent opt-in for periodic analysis. `enable` and `disable` require
 `--agent`; `status` takes an optional `--agent` (omit it to list all configs in
 the workspace). `enable` stores the active default/fast model pair for future
 scheduled jobs. All three accept `--workspace` and `--base-url`.
-
-### `nemo agents analyst doctor`
-
-Check whether the current profile is ready for analysis. Exits non-zero when a
-required check fails.
 
 ### `nemo agents experimentalist run`
 
@@ -612,10 +567,9 @@ selection, re-run `nemo insights analysis enable` after `nemo setup`.
 
 ### Insights Are Not in the Platform
 
-A discovered `optimizer.yaml` profile
-routes Insights to `.nemo-optimizer/insights.yaml` instead of the Insights API,
-as does an explicit `--insights-file-output`. Check that file, or run without a
-profile to write through the API.
+Check the AnalysisRun's backing job and analysis report, then confirm that
+Studio is showing the workspace and agent supplied when the run was submitted.
+A completed run may produce no new insights.
 
 ### The Experiment Cannot Score or Rewards Are Zero
 

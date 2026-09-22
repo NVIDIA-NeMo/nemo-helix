@@ -179,8 +179,8 @@ before starting a run.
 
 ## Choose a run mode
 
-- **Insight-driven:** use an Insight ID or the default Insight written by
-  `nemo agents analyst run` in the agent profile. An Insight is a systematic
+- **Insight-driven:** use a Platform Insight ID created through
+  `nemo insights analysis-runs create --agent <agent> --wait`. An Insight is a systematic
   symptom inferred from a set of traces. Use this mode when the agent has no
   reliable, verifiable reward for the behavior you need to improve.
 - **Explicit evaluation:** pass `--no-insight`, an agent, and separate train
@@ -341,7 +341,7 @@ you need to disconnect, then follow it with `tail -f`.
 ## 2. Run from an Insight
 
 Before this mode, install the Experimentalist plugin, record agent traces in
-Intake, and run `nemo agents analyst run` to create the Insight. Use explicit
+Intake, and run `nemo insights analysis-runs create --agent <agent> --wait` to create the Insight. Use explicit
 evaluation instead if you already have a reliable reward and do not need an
 Insight.
 

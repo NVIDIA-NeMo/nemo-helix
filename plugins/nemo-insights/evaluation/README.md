@@ -4,8 +4,8 @@
 # Insights analyst evaluation (maintainer tooling)
 
 Evaluates the Insights analyst against registered telemetry **subjects** and
-emits Insights for comparison. This maintainer tooling drives
-`nemo agents analyst`; it is not the product CLI and is not shipped in the
+emits Insights for comparison. This maintainer tooling calls the shared Python
+analysis runner; it is not the product CLI and is not shipped in the
 wheel.
 
 ## Prerequisites
