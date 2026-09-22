@@ -29,7 +29,6 @@ import logging
 import os
 from typing import Any, cast
 
-import click
 import typer
 from nemo_platform_plugin.entities import DEFAULT_WORKSPACE
 
@@ -84,36 +83,7 @@ def resolve_cli_workspace(typer_ctx: typer.Context, explicit: str | None = None)
     ``None``, and the lookup below is the only thing that honors
     ``$NMP_WORKSPACE`` — the documented way to pick a workspace in a fresh
     container or CI job.
-
-    Use :func:`resolve_workspace` instead when the command does not already
-    take a :class:`typer.Context`.
     """
     if explicit is not None:
         return explicit
     return _workspace_from_state(typer_ctx.obj) or os.environ.get("NMP_WORKSPACE") or DEFAULT_WORKSPACE
-
-
-def resolve_workspace(explicit: str | None = None) -> str:
-    """Ambient twin of :func:`resolve_cli_workspace`.
-
-    Reads the *current* Click context rather than one passed in, so
-    plugin-authored commands can honor the active workspace without threading
-    ``typer.Context`` through every signature. ``Context.obj`` is inherited
-    from parent contexts, so this resolves the same state object the top-level
-    ``nemo`` callback installed.
-
-    Same resolution as its twin. Outside a Click invocation (e.g. a direct
-    unit test) there is no state object, so it falls back to
-    ``$NMP_WORKSPACE`` then ``"default"`` — matching the pre-existing
-    behavior of the commands that call it.
-
-    Declare the option as ``typer.Option(None, "--workspace", ...)`` and pass
-    the flag value here. A literal ``"default"`` as the Typer default is the
-    bug this exists to prevent: it makes an omitted flag indistinguishable
-    from an explicit one, so the active context can never win.
-    """
-    if explicit is not None:
-        return explicit
-    ctx = click.get_current_context(silent=True)
-    state = ctx.obj if ctx is not None else None
-    return _workspace_from_state(state) or os.environ.get("NMP_WORKSPACE") or DEFAULT_WORKSPACE

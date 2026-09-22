@@ -22,8 +22,7 @@ from nemo_anonymizer_plugin.app.task_config import (
     AnonymizerStepConfig,
 )
 from nemo_anonymizer_plugin.tasks.anonymizer.run import run_step_config
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import AsyncPlatformClient
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import (
@@ -37,18 +36,6 @@ from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSIS
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.jobs.image import get_qualified_image
 from pydantic import BaseModel
-
-
-def _generated_sdk(handle: AsyncPlatformClient) -> AsyncNeMoPlatform:
-    """Anonymizer's model-provider and input staging code still speaks the generated SDK.
-
-    The job contract hands over any platform client; until those internals move to the
-    typed clients, refuse anything else up front instead of failing on an attribute deep
-    inside the run.
-    """
-    if isinstance(handle, AsyncNeMoPlatform):
-        return handle
-    raise TypeError(f"nemo-anonymizer jobs require the generated AsyncNeMoPlatform handle; got {type(handle).__name__}")
 
 
 class RunJob(NemoJob):
@@ -72,7 +59,7 @@ class RunJob(NemoJob):
     ) -> AnonymizerStepConfig:
         del entity_client, is_local
         input_spec = cast(AnonymizerRequest, input_spec)
-        anon_ctx = create_anonymizer_context(_generated_sdk(async_sdk), workspace)
+        anon_ctx = create_anonymizer_context(async_sdk, workspace)
 
         try:
             cls._validate_anonymizer_config(input_spec.config)
@@ -144,7 +131,7 @@ class RunJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform,
+        sdk: SyncPlatformClient,
     ) -> dict:
         step_config = AnonymizerStepConfig.model_validate(config)
         return {"exit_code": run_step_config(step_config, ctx=ctx, sdk=sdk)}

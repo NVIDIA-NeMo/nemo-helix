@@ -285,8 +285,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoPlatform, 
     assert final.run.default_model == default_model
     assert final.run.fast_model == fast_model
 
-    # The report is the durable record of what the run did — the same result
-    # name AnalyzeJob saves, so the two paths stay comparable.
+    # The execute extension saves a durable report of what the run did.
     result_names = {str(result["name"]) for result in _list_job_results(sdk, workspace, run_name)["data"]}
     assert REPORT_RESULT_NAME in result_names, f"Saved results: {sorted(result_names)}"
     report = _download_job_result(sdk, workspace, run_name, REPORT_RESULT_NAME)

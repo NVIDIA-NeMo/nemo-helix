@@ -5,7 +5,7 @@
 name = "nemo-experimentalist-plugin"
 version = "0.1.0"
 description = "NeMo Experimentalist plugin for NeMo Platform."
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "pydantic>=2",
     "httpx",

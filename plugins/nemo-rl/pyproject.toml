@@ -6,7 +6,7 @@ name = "nemo-rl-plugin"
 version = "0.1.0"
 description = "NeMo-RL DPO customization contributor for NeMo Platform (Ray on Kubernetes)."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nemo-platform-plugin",
     "nmp-rl",

@@ -116,7 +116,29 @@ def test_descriptor_carries_endpoint_identity() -> None:
     assert descriptor.__name__ == "delete_deployment"
     assert descriptor.__doc__ == descriptor.endpoint.__doc__
     assert descriptor.__doc__  # the endpoint really does carry one
+    assert descriptor.endpoint.__name__ == "delete_deployment"
+
+
+def test_sync_descriptor_unwraps_to_its_endpoint() -> None:
+    """On a sync client the endpoint *is* the unwrap target, so nothing indirects."""
+    descriptor = inspect.getattr_static(ModelsClient, "delete_deployment")
+
     assert descriptor.__wrapped__ is descriptor.endpoint
+
+
+def test_async_descriptor_unwraps_to_a_coroutine_function() -> None:
+    """``inspect.unwrap`` has to land on something awaitable for the async client.
+
+    Python 3.14's ``unittest.mock`` classifies a spec'd attribute with ``getattr_static`` +
+    ``inspect.unwrap`` instead of ``getattr``, so it never sees the async stub that ``__get__``
+    hands out. Unwrapping has to terminate at a coroutine function or every endpoint on an async
+    client specs as a sync ``MagicMock`` and cannot be awaited. The endpoint itself stays reachable
+    via ``.endpoint``.
+    """
+    descriptor = _descriptor("delete_deployment")
+
+    assert asyncio.iscoroutinefunction(inspect.unwrap(descriptor))
+    assert descriptor.endpoint.__name__ == "delete_deployment"
 
 
 def test_signature_is_reachable_at_class_level() -> None:

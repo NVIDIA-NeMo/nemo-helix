@@ -56,6 +56,8 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
 };
 
 describe('WorkspaceSideNav', () => {
+  beforeEach(() => window.localStorage.clear());
+
   it('links to the traces view by default', () => {
     renderSideNav();
 
@@ -83,18 +85,19 @@ describe('WorkspaceSideNav', () => {
     expect(screen.queryByText('Evaluate')).not.toBeInTheDocument();
   });
 
-  it('links the Agents and Models parents to their own entity list pages', () => {
-    renderSideNav();
+  it('links Agents to its entity list page and exposes Model Catalog under Models', () => {
+    renderSideNav('/workspaces/test-workspace/base-models');
 
     expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute(
       'href',
       '/workspaces/test-workspace/agents'
     );
-    expect(screen.getByRole('link', { name: 'Models' })).toHaveAttribute(
+    // Models is a pure disclosure, not a link to a page of its own.
+    expect(screen.queryByRole('link', { name: 'Models' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Model Catalog' })).toHaveAttribute(
       'href',
       '/workspaces/test-workspace/base-models'
     );
-    expect(screen.queryByRole('link', { name: 'Base Models' })).not.toBeInTheDocument();
   });
 
   it('expands and collapses a parent from the chevron alone', async () => {
@@ -130,7 +133,7 @@ describe('WorkspaceSideNav', () => {
     expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('collapses a manually opened Datasets once the route moves elsewhere', async () => {
+  it('keeps a manually opened Datasets open after the route moves elsewhere', async () => {
     const user = userEvent.setup();
     renderSideNav();
 
@@ -140,21 +143,24 @@ describe('WorkspaceSideNav', () => {
     await user.click(disclosure('Datasets'));
     expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'true');
 
+    // The manual open is the user's preference now; navigating elsewhere does not undo it.
     await user.click(screen.getByRole('link', { name: 'Agents' }));
     expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('reopens a chevron-collapsed parent when the route comes back to it', async () => {
+  it('keeps a chevron-collapsed parent collapsed when the route comes back to it', async () => {
     const user = userEvent.setup();
     renderSideNav('/workspaces/test-workspace/agents');
 
     await user.click(disclosure('Agents'));
     expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
 
-    await user.click(screen.getByRole('link', { name: 'Models' }));
+    await user.click(disclosure('Models'));
+    await user.click(screen.getByRole('link', { name: 'Model Catalog' }));
     await user.click(screen.getByRole('link', { name: 'Agents' }));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
+    // The collapse is a saved preference; returning to the section must not reopen it.
+    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('folds a plugin group into the core group of the same name', () => {

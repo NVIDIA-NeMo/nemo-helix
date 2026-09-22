@@ -250,7 +250,7 @@ cpu-tasks = [
   # deepagents, hermes). Without this the job's declared `container = "cpu-tasks"`
   # is not true: nemo_agents_plugin.tasks.execute is not importable here.
   "nemo-agents-plugin",
-  # insights.analyze bridge, which is a ModuleNotFoundError in a built image otherwise.
+  # Insights Analyst Fabric adapter and insights.analysis execute extension.
   "nemo-insights-plugin",
   "nemo-evaluator-plugin",
   "nemo-sandboxed-gym[server,opensandbox]",

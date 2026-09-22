@@ -70,7 +70,7 @@ class Insight(NemoEntity, entity_type="insights_insight"):
 
 
 class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
-    """One on-demand Insights analysis run — what was asked for, not how it went.
+    """One Insights analysis run — what was asked for, not how it went.
 
     The record's ``name`` is also the name of the backing ``agents.execute``
     job. Insights mints that name before submitting, so the link between a run

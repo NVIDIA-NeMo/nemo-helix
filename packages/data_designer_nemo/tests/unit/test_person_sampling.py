@@ -9,7 +9,7 @@ from data_designer_nemo.errors import NDDInternalError
 from data_designer_nemo.person_sampling import (
     ensure_nemotron_personas_filesets,
 )
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
 
 
@@ -38,7 +38,7 @@ def _mock_http_response(status_code: int) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_checks_each_locale() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock()
     config = _make_config(
@@ -54,7 +54,7 @@ async def test_ensure_nemotron_personas_filesets_checks_each_locale() -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_raises_error_for_missing_fileset() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock(side_effect=NotFoundError(_mock_http_response(404)))
     config = _make_config(_make_person_sampler_column("person", "en_US"))
@@ -66,7 +66,7 @@ async def test_ensure_nemotron_personas_filesets_raises_error_for_missing_filese
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_raises_error_for_permission_error() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock(side_effect=PermissionDeniedError(_mock_http_response(403)))
     config = _make_config(_make_person_sampler_column("person", "en_US"))
@@ -78,7 +78,7 @@ async def test_ensure_nemotron_personas_filesets_raises_error_for_permission_err
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_raises_internal_error_on_other_errors() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock(side_effect=RuntimeError("something went wrong"))
     config = _make_config(_make_person_sampler_column("person", "en_US"))

@@ -90,7 +90,8 @@ nemo-platform = [
 #   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
 #     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
-#     Python<3.14-gated upstream, which the lock's own <3.14 ceiling already satisfies.
+#     It is Python<3.14-gated upstream, and the lock now reaches 3.14, so the marker below really does
+#     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [

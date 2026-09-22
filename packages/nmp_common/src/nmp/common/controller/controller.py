@@ -164,11 +164,16 @@ class Loop(threading.Thread):
         self._shutdown_func = shutdown_func
         self._unhealthy_reason: str | None = None
 
-        # Capture the current context so it can be used in the thread
-        self._context = contextvars.copy_context()
+        # Capture the creating thread's context so the loop runs with it. Deliberately not
+        # `self._context`: Python 3.14 added that exact attribute to `threading.Thread` and enters
+        # it in `_bootstrap_inner`, so assigning to it here made the thread enter this context and
+        # then `run()` re-enter the *same* object -- `RuntimeError: cannot enter context: ... is
+        # already entered`. 3.12 and 3.13 have no such attribute, which is why this only broke on
+        # 3.14.
+        self._loop_context = contextvars.copy_context()
 
     def run(self):
-        self._context.run(self._run_loop)
+        self._loop_context.run(self._run_loop)
 
     def _run_loop(self):
         initialize_app_ctx(AppContext(service_name=self.name))

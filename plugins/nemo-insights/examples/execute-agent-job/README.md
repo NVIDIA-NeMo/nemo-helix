@@ -3,9 +3,8 @@
 
 # Insights Analyst as ExecuteAgentJob Demo
 
-This directory contains additive demo scaffolding for running the Insights
-Analyst through the generic `agents.execute` job while the existing `AnalyzeJob`
-continues to run side-by-side.
+This directory demonstrates running the Insights Analyst through AnalysisRuns
+backed by the generic `agents.execute` job.
 
 ## Pieces
 
@@ -164,15 +163,13 @@ entity — the Analyst only matches it against each span's normalized
    ```
 
    The report is what tells you which Insights the run created or updated:
-   insights carry no per-run provenance, by either path. The agent's current
+   insights carry no per-run provenance. The agent's current
    insights are read with `client.insights.insights.list_insights(...)`, or
    from a shell with
    `GET /apis/insights/v2/workspaces/default/insights?agent=demo-agent`.
 
 ## Notes
 
-- The existing `AnalyzeJob` remains untouched for comparison. It is submitted at
-  `/apis/insights/v2/workspaces/{workspace}/jobs/analyze-job`.
 - There is no Analyst Agent entity in the database; the route delivers an inline
   configuration to the agents service.
 - Dynamic read settings such as `since` and `evaluation_id` are request fields

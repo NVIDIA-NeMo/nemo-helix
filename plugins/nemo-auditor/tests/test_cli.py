@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import click
 import httpx
 import pytest
+import typer
 from nemo_auditor.cli import AuditorPluginCLI
 from typer.testing import CliRunner
 
@@ -298,3 +300,174 @@ class TestStructure:
 
         assert result.exit_code == 0, result.stdout + result.stderr
         assert str(captured[0].url).startswith("http://custom:9999/")
+
+
+# ---------------------------------------------------------------------------
+# workspace resolution
+# ---------------------------------------------------------------------------
+
+
+class _ContextState:
+    """Minimal stand-in for ``CLIContext`` with a non-'default' workspace."""
+
+    def __init__(self, workspace: str | None = "my-team-ws") -> None:
+        self._workspace = workspace
+
+    def get_workspace(self) -> str | None:
+        return self._workspace
+
+
+def _app_with_state(app: typer.Typer, state: object | None) -> typer.Typer:
+    """Wrap *app* in a parent group whose callback seeds ``ctx.obj`` with *state*.
+
+    Mirrors how the top-level ``nemo`` CLI installs its state object, which is
+    what ``resolve_cli_workspace`` reads off the ``typer.Context`` the command
+    receives.
+    """
+    parent = typer.Typer()
+
+    @parent.callback()
+    def _root(ctx: typer.Context) -> None:
+        ctx.obj = state
+
+    parent.add_typer(app, name="auditor")
+    return parent
+
+
+def _collect_workspace_params(app: typer.Typer) -> dict[str, click.Parameter]:
+    """Map ``"<command path>"`` -> the ``--workspace`` param of every subcommand."""
+    found: dict[str, click.Parameter] = {}
+
+    def _walk(command: click.Command, path: str) -> None:
+        for param in command.params:
+            if "--workspace" in getattr(param, "opts", []):
+                found[path or command.name or "<root>"] = param
+        if isinstance(command, click.Group):
+            for name, sub in command.commands.items():
+                _walk(sub, f"{path} {name}".strip())
+
+    _walk(typer.main.get_command(app), "")
+    return found
+
+
+class TestWorkspaceResolution:
+    """The auditor CRUD verbs must not fall back to a hardcoded 'default'.
+
+    Regression guard: ``--workspace`` used to be declared with a literal
+    ``"default"`` Typer default, so the command body could never tell an
+    omitted flag from an explicit one and the workspace selected via
+    ``nemo config use-context`` (or ``$NMP_WORKSPACE``) was silently
+    discarded.
+    """
+
+    def test_list_uses_context_workspace(self, runner, app) -> None:
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": []})
+
+        captured, ctx = _install_mock_transport(handler)
+        with ctx:
+            result = runner.invoke(_app_with_state(app, _ContextState()), ["auditor", "configs", "list"])
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert captured[0].url.path == "/apis/auditor/v2/workspaces/my-team-ws/configs"
+
+    def test_explicit_flag_wins_over_context(self, runner, app) -> None:
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": []})
+
+        captured, ctx = _install_mock_transport(handler)
+        with ctx:
+            result = runner.invoke(
+                _app_with_state(app, _ContextState()),
+                ["auditor", "configs", "list", "--workspace", "team-alpha"],
+            )
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert captured[0].url.path == "/apis/auditor/v2/workspaces/team-alpha/configs"
+
+    def test_falls_back_to_default_without_state(self, runner, app, monkeypatch) -> None:
+        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": []})
+
+        captured, ctx = _install_mock_transport(handler)
+        with ctx:
+            result = runner.invoke(_app_with_state(app, None), ["auditor", "configs", "list"])
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert captured[0].url.path == "/apis/auditor/v2/workspaces/default/configs"
+
+    def test_falls_back_to_env_without_state(self, runner, app, monkeypatch) -> None:
+        monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": []})
+
+        captured, ctx = _install_mock_transport(handler)
+        with ctx:
+            result = runner.invoke(_app_with_state(app, None), ["auditor", "configs", "list"])
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert captured[0].url.path == "/apis/auditor/v2/workspaces/env-ws/configs"
+
+    @pytest.mark.parametrize(
+        ("argv", "method", "expected_path"),
+        [
+            (
+                ["auditor", "configs", "create", "cfg-1", "--data", "{}"],
+                "POST",
+                "/apis/auditor/v2/workspaces/my-team-ws/configs",
+            ),
+            (["auditor", "configs", "list"], "GET", "/apis/auditor/v2/workspaces/my-team-ws/configs"),
+            (["auditor", "configs", "get", "cfg-1"], "GET", "/apis/auditor/v2/workspaces/my-team-ws/configs/cfg-1"),
+            (
+                ["auditor", "configs", "update", "cfg-1", "--data", "{}"],
+                "PUT",
+                "/apis/auditor/v2/workspaces/my-team-ws/configs/cfg-1",
+            ),
+            (
+                ["auditor", "configs", "delete", "cfg-1"],
+                "DELETE",
+                "/apis/auditor/v2/workspaces/my-team-ws/configs/cfg-1",
+            ),
+            (
+                ["auditor", "targets", "create", "tgt-1", "--data", "{}"],
+                "POST",
+                "/apis/auditor/v2/workspaces/my-team-ws/targets",
+            ),
+            (["auditor", "targets", "list"], "GET", "/apis/auditor/v2/workspaces/my-team-ws/targets"),
+            (["auditor", "targets", "get", "tgt-1"], "GET", "/apis/auditor/v2/workspaces/my-team-ws/targets/tgt-1"),
+            (
+                ["auditor", "targets", "update", "tgt-1", "--data", "{}"],
+                "PUT",
+                "/apis/auditor/v2/workspaces/my-team-ws/targets/tgt-1",
+            ),
+            (
+                ["auditor", "targets", "delete", "tgt-1"],
+                "DELETE",
+                "/apis/auditor/v2/workspaces/my-team-ws/targets/tgt-1",
+            ),
+        ],
+    )
+    def test_every_crud_verb_honors_context_workspace(
+        self, runner, app, argv: list[str], method: str, expected_path: str
+    ) -> None:
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"ok": True})
+
+        captured, ctx = _install_mock_transport(handler)
+        with ctx:
+            result = runner.invoke(_app_with_state(app, _ContextState()), argv)
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert captured[0].method == method
+        assert captured[0].url.path == expected_path
+
+    def test_no_workspace_option_declares_a_literal_default(self, app) -> None:
+        """A literal Typer default makes the active context unable to win."""
+        params = _collect_workspace_params(app)
+        assert params, "no --workspace option found; this guard would be vacuous"
+        assert len(params) == 10, f"expected 10 --workspace options, found {sorted(params)}"
+        offenders = {path: param.default for path, param in params.items() if param.default is not None}
+        assert not offenders, f"--workspace must default to None so the CLI context can win: {offenders}"

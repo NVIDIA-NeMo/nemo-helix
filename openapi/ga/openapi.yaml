@@ -10704,6 +10704,7 @@ components:
           description: Optional reference to the base model entity ID for this deployment
           type: string
           maxLength: 255
+      additionalProperties: false
       type: object
       required:
       - name
@@ -10741,6 +10742,7 @@ components:
           description: Reference to a specific ModelDeploymentConfig version. If not
             specified, uses latest.
           type: integer
+      additionalProperties: false
       type: object
       required:
       - name
@@ -20096,6 +20098,7 @@ components:
           description: Optional reference to the base model entity ID for this deployment
           type: string
           maxLength: 255
+      additionalProperties: false
       type: object
       required:
       - engine
@@ -20116,6 +20119,7 @@ components:
           description: Reference to a specific ModelDeploymentConfig version. If not
             specified, uses latest.
           type: integer
+      additionalProperties: false
       type: object
       required:
       - config
@@ -20139,6 +20143,7 @@ components:
             (format: workspace/name)'
           type: string
           maxLength: 255
+      additionalProperties: false
       type: object
       required:
       - status

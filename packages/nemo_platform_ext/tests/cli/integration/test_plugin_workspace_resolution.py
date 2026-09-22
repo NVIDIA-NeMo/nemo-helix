@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generated job/function verbs resolve the workspace from a real config file.
+"""CLI commands resolve the workspace from a real config file.
 
 The unit coverage in ``packages/nemo_platform_plugin/tests/test_commands.py``
 injects a hand-written stand-in for the state object, so it pins the resolver
@@ -14,13 +14,19 @@ That link is worth an integration test because
 ``None``, which the resolver then turns into ``"default"``. Any future
 breakage in config loading therefore degrades silently back to the original
 bug -- wrong workspace, no error, no failing unit test. These tests drive the
-generated verbs with a real :class:`CLIContext` over a real config file on
-disk so that regression surfaces.
+commands with a real :class:`CLIContext` over a real config file on disk so
+that regression surfaces.
+
+Both command surfaces are covered: the generated verbs and the hand-written
+plugin commands. They are built differently -- programmatic signatures versus
+an ``Annotated`` option alias -- so exercising only one would leave the
+other's real-config path untested.
 """
 
 import json
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import patch
 
 import pytest
 import typer
@@ -228,3 +234,46 @@ def test_falls_back_to_default_when_config_has_no_workspace(
     result = runner.invoke(_function_app(), ["echo-workspace", "run", "--spec", "{}"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"workspace": "default"}
+
+
+# ---------------------------------------------------------------------------
+# Hand-written plugin commands
+# ---------------------------------------------------------------------------
+
+
+def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Path) -> None:
+    """A real hand-written plugin command resolves from the config file.
+
+    ``nemo auditor configs list`` is hand-written (not a generated verb): it
+    declares the flag with the shared ``WorkspaceOption`` alias rather than a
+    programmatic signature, so it exercises a different construction path from
+    the generated verbs above against the same state object the top-level
+    ``nemo`` callback installs.
+    """
+    del config_file
+    import httpx
+    from nemo_platform_ext.cli.app import app
+
+    captured: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.Client
+
+    def _factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    with patch.object(httpx, "Client", _factory):
+        result = runner.invoke(
+            app,
+            ["auditor", "configs", "list"],
+            obj=CLIContext(overrides={}),
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured, "no HTTP request was issued"
+    assert f"/workspaces/{CONTEXT_WORKSPACE}/" in str(captured[0].url), captured[0].url

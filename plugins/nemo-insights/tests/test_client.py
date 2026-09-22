@@ -6,12 +6,39 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from nemo_insights_plugin.client import AsyncInsightsClient
 from nemo_insights_plugin.platform_client import make_client
-from nemo_insights_plugin.sdk_resources.analysis_jobs import AsyncAnalysisJobsClient, CreateAnalysisJobRequest
-from nemo_insights_plugin.types import AnalyzeSpec
+from nemo_insights_plugin.schema import CreateAnalysisRunRequest
 from nemo_platform_ext.auth.helpers import NMPOIDCConfig
 
 REMOTE_URL = "https://nemo-platform.example.com"
+
+
+@pytest.mark.asyncio
+async def test_async_client_submits_analysis_run() -> None:
+    body = CreateAnalysisRunRequest(agent="research-agent", default_model="default/model", fast_model="default/fast")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/apis/insights/v2/workspaces/default/analysis-runs"
+        payload = json.loads(request.content)
+        assert payload["agent"] == body.agent
+        assert payload["default_model"] == body.default_model
+        assert payload["fast_model"] == body.fast_model
+        assert "spec" not in payload
+        return httpx.Response(
+            201,
+            json={
+                "run": {"name": "analysis-run", "workspace": "default", "agent": body.agent},
+                "job": {"name": "analysis-run", "status": "created"},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = AsyncInsightsClient(base_url=REMOTE_URL, http_client=http_client)
+        response = (await client.create_analysis_run(workspace="default", body=body)).data()
+    assert response.run.name == "analysis-run"
+    assert response.job_status == "created"
 
 
 def test_remote_no_auth_ignores_unrelated_local_oauth_context() -> None:
@@ -112,117 +139,3 @@ def test_remote_no_auth_allows_http_without_credentials() -> None:
 
     client_cls.assert_called_once_with(base_url=base_url)
     assert client is client_cls.return_value
-
-
-def _analysis_spec() -> AnalyzeSpec:
-    return AnalyzeSpec(
-        agent="research-agent",
-        default_model="default/gpt-5",
-        fast_model="default/gpt-5-mini",
-        update_analysis_config=True,
-    )
-
-
-def _analysis_jobs_client(handler: httpx.AsyncBaseTransport) -> tuple[AsyncAnalysisJobsClient, httpx.AsyncClient]:
-    http_client = httpx.AsyncClient(transport=handler)
-    client = AsyncAnalysisJobsClient(base_url=REMOTE_URL, http_client=http_client)
-    return client, http_client
-
-
-@pytest.mark.asyncio
-async def test_async_analysis_jobs_client_posts_to_insights_job_route() -> None:
-    requests: list[httpx.Request] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        body = json.loads(request.content)
-        assert body == {
-            "name": "analysis-job",
-            "spec": {
-                "agent": "research-agent",
-                "default_model": "default/gpt-5",
-                "fast_model": "default/gpt-5-mini",
-                "update_analysis_config": True,
-            },
-            "custom_fields": {"insights_analysis_agent": "research-agent"},
-        }
-        return httpx.Response(
-            201,
-            request=request,
-            json={
-                "name": "analysis-job",
-                "spec": body["spec"],
-                "custom_fields": body["custom_fields"],
-            },
-        )
-
-    client, http_client = _analysis_jobs_client(httpx.MockTransport(handler))
-    try:
-        job = (
-            await client.create_analysis_job(
-                workspace="default",
-                body=CreateAnalysisJobRequest(
-                    name="analysis-job",
-                    spec=_analysis_spec(),
-                    custom_fields={"insights_analysis_agent": "research-agent"},
-                ),
-            )
-        ).data()
-    finally:
-        await http_client.aclose()
-
-    assert requests[0].method == "POST"
-    assert requests[0].url.path == "/apis/insights/v2/workspaces/default/jobs/analyze-job"
-    assert job.name == "analysis-job"
-    assert job.spec.agent == "research-agent"
-
-
-@pytest.mark.asyncio
-async def test_async_analysis_jobs_client_lists_with_json_filter() -> None:
-    requests: list[httpx.Request] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        filter_param = request.url.params["filter"]
-        assert json.loads(filter_param) == {"status": {"$in": ["active"]}}
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "data": [
-                    {
-                        "name": "analysis-job",
-                        "spec": _analysis_spec().model_dump(mode="json"),
-                        "status": "active",
-                        "custom_fields": {"insights_analysis_agent": "research-agent"},
-                    }
-                ],
-                "pagination": {
-                    "page": 1,
-                    "page_size": 100,
-                    "current_page_size": 1,
-                    "total_pages": 1,
-                    "total_results": 1,
-                },
-                "sort": "-created_at",
-                "filter": {"status": {"$in": ["active"]}},
-            },
-        )
-
-    client, http_client = _analysis_jobs_client(httpx.MockTransport(handler))
-    try:
-        page = (
-            await client.list_analysis_jobs(
-                workspace="default",
-                query_params={
-                    "page_size": 100,
-                    "filter": json.dumps({"status": {"$in": ["active"]}}),
-                },
-            )
-        ).page()
-    finally:
-        await http_client.aclose()
-
-    assert requests[0].method == "GET"
-    assert requests[0].url.path == "/apis/insights/v2/workspaces/default/jobs/analyze-job"
-    assert page.items[0].spec.agent == "research-agent"
