@@ -982,6 +982,7 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
         needs.changes.outputs.tools == 'true'
       )
     runs-on: ubuntu-latest
@@ -1102,7 +1103,7 @@ jobs:
     needs: [changes]
     if: >
       !cancelled() &&
-      needs.changes.outputs.scaled-evals == 'true'
+      (needs.changes.outputs.deps == 'true' || needs.changes.outputs.scaled-evals == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -2056,6 +2057,7 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
         needs.changes.outputs.deployments-openshell == 'true'
       )
     runs-on: ubuntu-latest
@@ -2090,6 +2092,7 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
         needs.changes.outputs.guardrails-benchmark == 'true'
       )
     runs-on: ubuntu-latest
@@ -2153,6 +2156,7 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
         needs.changes.outputs.guardrails-benchmark == 'true'
       )
     runs-on: ubuntu-latest
