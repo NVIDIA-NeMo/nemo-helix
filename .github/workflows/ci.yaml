@@ -1005,16 +1005,11 @@ jobs:
     permissions:
       contents: read
     strategy:
-      # Both legs run to completion: when one interpreter breaks, the useful question is
-      # whether the other one did too, and fail-fast would hide that.
       fail-fast: false
       matrix:
-        # Every interpreter the support matrix claims. This is the only job that answers
-        # "does the code work on this Python", so it has to ask once per supported version:
-        # the wheel matrices cover packaging and install, and e2e covers the shipped 3.13
-        # runtime, but neither executes this suite. Running it on 3.12 alone is how #996
-        # could silently undo #237's 3.14 support for seven weeks, and 3.13 has never had
-        # unit coverage at all despite being supported the longest.
+        # Every supported interpreter: this is the only job that executes the suite, so it is
+        # the only one that answers "does the code work here". Packaging and install are
+        # covered elsewhere; running them is not the same as running the tests.
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
@@ -1139,17 +1134,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One leg per distinct dependency closure, not one per interpreter. nemo-fabric-runtime ships
-        # a single cp311-abi3 wheel and the adapters are pure Python, so 3.13 would re-install exactly
-        # what 3.12 does — that range is already asserted by uv.lock resolving universally.
-        #
-        # 3.14 is not a duplicate: the `fabric` extra pins
-        # `nemo-fabric-adapters-hermes; python_version < '3.14'`, so a 3.14 sync resolves a genuinely
-        # different closure (no hermes adapter). This job is the only place that install path runs, and
-        # test_fabric_surface.py's hermes case degrades to a skip there rather than failing.
-        #
-        # Every leg must satisfy uv.lock's `requires-python` (>=3.12,<3.15) because this job runs
-        # `uv sync` on the WORKSPACE — that ceiling is the intersection across workspace members.
+        # One leg per distinct dependency closure. 3.13 resolves exactly what 3.12 does; 3.14
+        # does not, because the `fabric` extra pins `nemo-fabric-adapters-hermes` to
+        # `python_version < '3.14'`, and nothing else in CI installs that closure.
         python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout code
@@ -2219,10 +2206,9 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          # The unit suite runs once per interpreter; coverage is reported from the default
-          # one so the table stays a single number. Pinned rather than globbed because this
-          # download is `continue-on-error`, so a name that stops matching would quietly
-          # render "N/A" instead of failing.
+          # One interpreter's results, so the coverage table stays a single number. Pinned
+          # rather than globbed: this download is `continue-on-error`, so a name that stops
+          # matching would quietly render "N/A" instead of failing.
           name: python-unit-test-results-py3.12
           path: unit-coverage
       - name: Download integration test coverage
