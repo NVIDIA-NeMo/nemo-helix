@@ -330,6 +330,47 @@ transaction, or changing the foreign key from `ON DELETE CASCADE` to `RESTRICT` 
 handling the error — a schema change with its own blast radius, out of scope here and
 worth its own discussion.
 
+## Run 5 — principals without access to the global workspace
+
+Run 2 covered the two obvious cases: a principal with no binding in `default` but a read
+role elsewhere (allowed, that is the feature), and a principal with no bindings at all
+(denied). Two refinements it did not cover.
+
+### Holding a role somewhere is not enough — it must be the right permission
+
+`dave` holds `WorkspaceCreator` in `team-a`, a role that grants no model permissions.
+
+| Request | Result |
+| --- | --- |
+| `dave` GET a model in the global workspace | `403` |
+| `dave` GET a model in his own workspace | `403` |
+
+So the rule requires the specific permission the endpoint declares, not merely the
+existence of a binding somewhere. Together with the `bob` (no bindings) and `secrets`
+(permission not on the allowlist) rows from run 2, the widening is pinned on all three
+axes: which workspace, which permission, and whether the caller holds it at all.
+
+### Revoking a binding on the global workspace does not remove read access
+
+| Principal | Bindings | GET global model before | After revoking the `default` binding |
+| --- | --- | --- | --- |
+| `frank` | `Editor` in `default` only | `200` | `403` |
+| `erin` | `Editor` in `default` **and** `team-a` | `200` | **`200`** (write correctly drops to `403`) |
+
+Revocation works normally for a principal who holds nothing elsewhere. For a principal who
+holds `models.read` in any other workspace, revoking their `default` binding removes their
+ability to **write** there but not to **read**.
+
+This is the design working as specified rather than a defect: criterion 1 asks for shared
+models to be *available across all workspaces*, and universal read availability is what
+that means. The consequence is worth stating plainly because it removes a capability
+operators have today — there is no longer a way to deny one user read access to the global
+workspace while leaving them a read role anywhere else. An admin who revokes a binding on
+`default` expecting that user to stop seeing its models will be wrong.
+
+If per-user exclusion from the global workspace is a requirement, this design cannot
+express it, and that is a reason to revisit the approach rather than something to patch.
+
 ## Totals
 
 | Run | Focus | Scenarios | Result |
@@ -340,6 +381,7 @@ worth its own discussion.
 | 4 | PostgreSQL re-run | 22 | all pass |
 | 4 | Scan limit, before and after the fix | 2 | bug found, fixed, re-verified |
 | 4 | Concurrency | 2 | one clean, one known limitation |
+| 5 | Principals lacking global-workspace access | 6 | all as designed; one consequence recorded |
 
 ## Known limitations
 
@@ -347,3 +389,6 @@ worth its own discussion.
   replaces, but open.
 - **No automated PostgreSQL coverage.** Run 4 checked it by hand. Nothing in CI will
   catch a future Postgres-only regression in this path.
+- **No per-user exclusion from the global workspace.** See run 5. Revoking a binding on
+  `default` removes write access but not read, for anyone holding the permission
+  elsewhere. Inherent to the design, not an implementation gap.
