@@ -88,6 +88,20 @@ async def test_resolved_account_input_skips_storage(fake_store: _FakeStore):
 
 
 @pytest.mark.asyncio
+async def test_extended_non_service_subject_materializes_user_account(fake_store: _FakeStore):
+    resolver = AccountResolver(AuthServiceConfig())
+
+    context = await resolver.resolve_authz_input({"principal_id": "auth0|abc"})
+
+    assert context.to_policy_fields() == {
+        "caller_kind": "principal",
+        "actor_account_id": "account-for-auth0|abc",
+    }
+    assert fake_store.calls[0]["subject"] == "auth0|abc"
+    assert fake_store.calls[0]["account_type"] == "user"
+
+
+@pytest.mark.asyncio
 async def test_input_caller_kind_is_ignored_for_resolved_account_context(fake_store: _FakeStore):
     resolver = AccountResolver(AuthServiceConfig())
 
@@ -172,6 +186,29 @@ async def test_platform_controller_service_principal_is_allowed(fake_store: _Fak
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "principal_id",
+    [
+        "service:",
+        "service:has spaces",
+        "service:bad$name",
+        "service:/path",
+        "service:*",
+    ],
+)
+async def test_malformed_service_principal_fails_closed_without_materializing(
+    fake_store: _FakeStore,
+    principal_id: str,
+):
+    resolver = AccountResolver(AuthServiceConfig())
+
+    with pytest.raises(ServicePrincipalNotAllowedError):
+        await resolver.resolve_authz_input({"principal_id": principal_id})
+
+    assert fake_store.calls == []
+
+
+@pytest.mark.asyncio
 async def test_unknown_service_principal_fails_closed(fake_store: _FakeStore):
     resolver = AccountResolver(AuthServiceConfig())
 
@@ -191,6 +228,58 @@ async def test_unknown_service_principal_fails_closed(fake_store: _FakeStore):
         )
 
     assert fake_store.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "on_behalf_of",
+    [
+        "service:",
+        "service:has spaces",
+        "service:bad$name",
+        "service:/path",
+        "service:*",
+    ],
+)
+async def test_malformed_on_behalf_service_principal_fails_closed_without_materializing(
+    fake_store: _FakeStore,
+    on_behalf_of: str,
+):
+    resolver = AccountResolver(AuthServiceConfig())
+
+    with pytest.raises(ServicePrincipalNotAllowedError):
+        await resolver.resolve_authz_input(
+            {
+                "principal_id": "alice-subject",
+                "actor_account_id": "account-existing",
+                "on_behalf_of_principal_id": on_behalf_of,
+            }
+        )
+
+    assert fake_store.calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_behalf_service_principal_materializes_service_account(fake_store: _FakeStore):
+    resolver = AccountResolver(AuthServiceConfig())
+
+    context = await resolver.resolve_authz_input(
+        {
+            "principal_id": "service:jobs",
+            "on_behalf_of_principal_id": "service:models",
+        }
+    )
+
+    assert context.to_policy_fields() == {
+        "caller_kind": "service_principal",
+        "actor_account_id": "account-for-jobs",
+        "actor_aliases": ["service:jobs"],
+        "subject_account_id": "account-for-models",
+        "subject_aliases": ["service:models"],
+    }
+    assert fake_store.calls[1]["issuer"] == "nemo:service"
+    assert fake_store.calls[1]["subject"] == "models"
+    assert fake_store.calls[1]["account_type"] == "service"
 
 
 @pytest.mark.asyncio

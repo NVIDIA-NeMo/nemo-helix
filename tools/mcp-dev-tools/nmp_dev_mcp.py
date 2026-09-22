@@ -714,8 +714,7 @@ def create_server(working_dir: str | None = None) -> FastMCP:
                             test-failed, test-list, test-markers, test-clean,
                             test-policy, test-jobs-launcher, test-gpu-integration
                    SDK/CLI: refresh-openapi, stainless, update-sdk, update-cli,
-                            generate-cli-commands, generate-cli-reference-docs,
-                            generate-config-reference-docs
+                            generate-cli-reference-docs, generate-config-reference-docs
                    Vendoring: vendor, vendor-nemo-platform-ext
                    Policy: build-policy, check-policy
                    Licenses: update-licenses, check-licenses
@@ -761,7 +760,6 @@ def create_server(working_dir: str | None = None) -> FastMCP:
             "stainless",
             "update-sdk",
             "update-cli",
-            "generate-cli-commands",
             "generate-cli-reference-docs",
             "generate-config-reference-docs",
             # Vendoring

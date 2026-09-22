@@ -5,13 +5,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Annotated, Any, Literal, cast
 
 import typer
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.response import NemoPaginatedResponse
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.jobs.client import JobsClient
 from nemo_platform_plugin.jobs.schemas import PlatformJobResultCreateRequest
 from nemo_platform_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
@@ -40,9 +37,9 @@ from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_t
 from nemo_platform_ext.cli.core.job_log_renderer import render_job_logs
 from nemo_platform_ext.cli.core.job_watch_renderer import JobWatchRenderResult, render_job_watch_events
 from nemo_platform_ext.cli.core.pagination import (
-    AllCursorPagesResponse,
-    AllPagesResponse,
     PaginationType,
+    collect_cursor_pages,
+    collect_offset_pages,
     warn_if_more_pages,
 )
 from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
@@ -78,49 +75,9 @@ app.add_typer(steps_app, name="steps")
 app.add_typer(tasks_app, name="tasks")
 
 
-class _OffsetPageResponse:
-    def __init__(self, items: list[Any], metadata: dict[str, Any]) -> None:
-        self.data = items
-        self.sort = None
-        self.pagination = SimpleNamespace(**metadata)
-
-    def model_dump(self, mode: str = "json") -> dict[str, Any]:
-        return {
-            "data": [_model_dump_item(item, mode=mode) for item in self.data],
-            "sort": self.sort,
-            "pagination": vars(self.pagination),
-        }
-
-
-class _CursorPageResponse:
-    def __init__(self, items: list[Any], metadata: dict[str, Any]) -> None:
-        self.data = items
-        self.total = metadata.get("total", len(items))
-        self.next_page = metadata.get("next_page")
-        self.prev_page = metadata.get("prev_page")
-
-    def model_dump(self, mode: str = "json") -> dict[str, Any]:
-        return {
-            "data": [_model_dump_item(item, mode=mode) for item in self.data],
-            "total": self.total,
-            "next_page": self.next_page,
-            "prev_page": self.prev_page,
-        }
-
-
-def _model_dump_item(item: Any, *, mode: str) -> Any:
-    if hasattr(item, "model_dump"):
-        return item.model_dump(mode=mode)
-    if isinstance(item, list):
-        return [_model_dump_item(child, mode=mode) for child in item]
-    if isinstance(item, dict):
-        return {key: _model_dump_item(value, mode=mode) for key, value in item.items()}
-    return item
-
-
-def _jobs_client_from_state(state: CLIContext) -> tuple[NeMoPlatform, JobsClient]:
+def _jobs_client_from_state(state: CLIContext) -> tuple[NemoClient, JobsClient]:
     platform_client = state.get_client()
-    return platform_client, client_from_platform(platform_client, JobsClient)
+    return platform_client, JobsClient.from_client(platform_client)
 
 
 def _source_filter_query(value: str | dict[str, Any] | None) -> str | None:
@@ -165,48 +122,6 @@ def _list_steps_query_params(
     if sort is not None:
         query_params["sort"] = sort
     return query_params or None
-
-
-def _source_offset_page(
-    response: NemoPaginatedResponse[Any, Any],
-    *,
-    all_pages: bool,
-) -> _OffsetPageResponse | AllPagesResponse:
-    if not all_pages:
-        page = response.page()
-        return _OffsetPageResponse(list(page.items), dict(page.metadata))
-
-    items: list[Any] = []
-    total_results = 0
-    total_pages = 0
-    page_size: int | None = None
-    for page in response.pages():
-        items.extend(page.items)
-        metadata = dict(page.metadata)
-        total_results = int(metadata.get("total_results") or total_results)
-        total_pages = int(metadata.get("total_pages") or total_pages)
-        page_size = cast(int | None, metadata.get("page_size") or page_size)
-
-    return AllPagesResponse(
-        data=items,
-        total_items=total_results or len(items),
-        total_pages=total_pages or 1,
-        page_size=page_size,
-    )
-
-
-def _source_cursor_page(
-    response: NemoPaginatedResponse[Any, Any],
-    *,
-    all_pages: bool,
-    limit: int | None,
-) -> _CursorPageResponse | AllCursorPagesResponse:
-    if not all_pages:
-        page = response.page()
-        return _CursorPageResponse(list(page.items), dict(page.metadata))
-
-    items = [item for page in response.pages() for item in page.items]
-    return AllCursorPagesResponse(data=items, limit=limit)
 
 
 def _without_keys(payload: dict[str, Any], keys: set[str]) -> dict[str, Any]:
@@ -263,8 +178,6 @@ def _generate_jobs_python_code(
     lines = [
         "from pathlib import Path",
         "",
-        "from nemo_platform import NeMoPlatform",
-        "from nemo_platform_plugin.client.adapter import client_from_platform",
         "from nemo_platform_plugin.jobs.client import JobsClient",
         "from nemo_platform_plugin.jobs.schemas import PlatformJobResultCreateRequest",
         (
@@ -277,10 +190,9 @@ def _generate_jobs_python_code(
     lines.extend(
         [
             "",
-            f"platform_client = NeMoPlatform(base_url={_format_python_literal(base_url)})"
+            f"jobs_client = JobsClient(base_url={_format_python_literal(base_url)})"
             if base_url
-            else "platform_client = NeMoPlatform()",
-            "jobs_client = client_from_platform(platform_client, JobsClient)",
+            else "jobs_client = JobsClient.from_config()",
             f"args = {_format_python_literal(args)}",
             "",
             *_render_source_jobs_call(resource_path, method),
@@ -811,7 +723,7 @@ def get_logs_jobs(
     query_params = cast(JobLogsQueryParams, _without_keys(kwargs, {"workspace"})) or None
     response = jobs_client.list_job_logs(workspace=workspace, name=name, query_params=query_params)
     pagination_type = PaginationType.CURSOR
-    items = _source_cursor_page(response, all_pages=all_pages, limit=limit)
+    items = collect_cursor_pages(response, all_pages=all_pages, limit=limit)
 
     format_output(
         items,
@@ -932,7 +844,7 @@ def list_jobs(
     _, jobs_client = _jobs_client_from_state(state)
     response = jobs_client.list_jobs(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    items = _source_offset_page(response, all_pages=all_pages)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
@@ -1493,7 +1405,7 @@ def list_steps(
     _, jobs_client = _jobs_client_from_state(state)
     response = jobs_client.list_steps(workspace=workspace, name=name, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    items = _source_offset_page(response, all_pages=all_pages)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,

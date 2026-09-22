@@ -830,6 +830,29 @@ async def test_validate_access_key_token_rejects_service_subject_without_service
     assert await validate_access_key_token(config, token, jwks_override=jwks) is None
 
 
+@pytest.mark.parametrize("subject", ["service:jobs", "service:", "service:/path", "service:*"])
+async def test_validate_access_key_token_rejects_service_principal_subjects(tmp_path, subject: str):
+    config = _access_key_config(tmp_path)
+    issuer = AccessKeyIssuerService(
+        config=config,
+        principal=Principal(id="alice@example.com"),
+        now=lambda: 1785280000,
+    )
+    created = await issuer.create_async(AccessKeyCreateRequest(expires_in_seconds=600))
+    claims = jwt.decode(created.token, options={"verify_signature": False})
+    claims["sub"] = subject
+    signing_key = await access_keys_mod._access_key_signing_key_async(config)
+    token = jwt.encode(
+        claims,
+        signing_key.private_key,
+        algorithm="RS256",
+        headers={"kid": config.token_signing.key_id},
+    )
+    jwks = {"keys": [await public_jwk_from_private_key_pem_async(config)]}
+
+    assert await validate_access_key_token(config, token, jwks_override=jwks) is None
+
+
 async def test_validate_access_key_token_rejects_expired_key(tmp_path):
     config = _access_key_config(tmp_path)
     issuer = AccessKeyIssuerService(

@@ -423,6 +423,12 @@ async def test_tail_prev_page_cursor_uses_compact_anchor_payload(log_storage, lo
     assert cursor.emitted_boundary_rows == 1
 
 
+async def test_query_logs_rejects_malformed_page_cursor(log_storage, local_storage):
+    """Malformed cursor values are reported as client cursor errors."""
+    with pytest.raises(InvalidPageCursorError, match="Invalid page cursor"):
+        await log_storage.query_logs(local_storage, page_cursor="garbage")
+
+
 async def test_query_logs_no_files(log_storage, local_storage):
     """Test querying when no log files exist."""
     result = await log_storage.query_logs(local_storage)

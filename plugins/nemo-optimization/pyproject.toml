@@ -5,7 +5,7 @@
 name = "nemo-optimization-plugin"
 description = "NeMo optimization library — Optuna numeric HPO and Agents optimize job."
 readme = "README.md"
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "nemo-platform-plugin",
     "nemo-platform",

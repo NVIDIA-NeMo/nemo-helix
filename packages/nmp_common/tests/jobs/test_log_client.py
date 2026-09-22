@@ -10,9 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import base58
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
 from nmp.common.jobs.log_client import JobLogsClient
 from nmp.common.jobs.schemas import (
+    InvalidPageCursorError,
     LogPageCursorV1,
     PageCursor,
     PaginationDirection,
@@ -47,8 +48,8 @@ def test_encode_decode_backward():
 
 
 def test_decode_invalid_cursor():
-    """Test decoding an invalid cursor raises ValueError."""
-    with pytest.raises(ValueError, match="Invalid page cursor"):
+    """Test decoding an invalid cursor raises InvalidPageCursorError."""
+    with pytest.raises(InvalidPageCursorError, match="Invalid page cursor"):
         PageCursor.decode("invalid_cursor_string")
 
 
@@ -88,7 +89,7 @@ def test_decode_log_page_cursor_rejects_invalid_v1_hash_length():
     }
     encoded = base58.b58encode(json.dumps(bad_payload).encode()).decode()
 
-    with pytest.raises(ValueError, match="Invalid page cursor"):
+    with pytest.raises(InvalidPageCursorError, match="Invalid page cursor"):
         decode_log_page_cursor(encoded)
 
 
@@ -213,6 +214,38 @@ async def test_query_logs_404_returns_empty_page(log_client):
     assert result.total == 0
     assert result.next_page is None
     assert result.prev_page is None
+
+
+async def test_query_logs_invalid_page_cursor_error_is_preserved(log_client):
+    """Downstream Files cursor validation errors stay client-visible to the Jobs endpoint."""
+    client, mock_files = log_client
+
+    mock_files.query_otlp_logs.side_effect = UnprocessableEntityError(
+        httpx.Response(status_code=422, json={"detail": "Invalid page cursor"}),
+    )
+
+    with pytest.raises(InvalidPageCursorError, match="Invalid page cursor"):
+        await client.query_logs(
+            fileset="logs",
+            workspace="test-workspace",
+            page_cursor="garbage",
+        )
+
+
+async def test_query_logs_page_cursor_scope_error_is_preserved(log_client):
+    """Cursor scope mismatches keep their specific diagnostic for callers."""
+    client, mock_files = log_client
+
+    mock_files.query_otlp_logs.side_effect = UnprocessableEntityError(
+        httpx.Response(status_code=422, json={"detail": "page_cursor does not match the current log filters."}),
+    )
+
+    with pytest.raises(InvalidPageCursorError, match="page_cursor does not match the current log filters"):
+        await client.query_logs(
+            fileset="logs",
+            workspace="test-workspace",
+            page_cursor="old",
+        )
 
 
 async def test_query_logs_other_error_raises(log_client):

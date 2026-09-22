@@ -19,8 +19,7 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.refs import FilesetRef
 
@@ -39,13 +38,14 @@ class FilesetDownloadError(RuntimeError):
 def fileset_path(
     ref: FilesetRef,
     *,
-    sdk: NeMoPlatform,
+    sdk: SyncPlatformClient,
     workspace: str,
 ) -> Iterator[Path]:
     """Download *ref* to a tempdir and yield the path.
 
-    *sdk* is a ``NeMoPlatform`` SDK instance.  Cleanup happens when the
-    context exits.
+    *sdk* is a platform handle (``NeMoPlatform`` or
+    :class:`~nemo_platform_plugin.client.client.NemoClient`).  Cleanup happens
+    when the context exits.
 
     The accepted shapes are ``name`` (uses *workspace* as the workspace) or
     ``workspace/name``.  Multi-segment refs (``a/b/c``) are rejected here

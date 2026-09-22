@@ -22,6 +22,11 @@ IAM_ROLE_BINDINGS_PATH = "/apis/auth/v2/iam/role-bindings"
 SERVICE_HEADERS = {"X-NMP-Principal-Id": "service:integration-test"}
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
 
+# Each test boots the full platform and reloads policy data on every PDP call
+# (bundle_cache_seconds=0); with coverage on a loaded CI runner that runs past
+# the 120s session default.
+pytestmark = pytest.mark.timeout(300)
+
 
 @dataclass(frozen=True)
 class IdentityRow:
@@ -83,7 +88,7 @@ def _identity_rows(*, issuer: str, subject: str) -> list[IdentityRow]:
 
 def _create_workspace(client: TestClient, workspace: str) -> None:
     response = client.post(
-        WORKSPACES_PATH,
+        f"{WORKSPACES_PATH}?wait_role_propagation=false",
         json={"name": workspace, "description": "Stable account migration test"},
         headers=SERVICE_HEADERS,
     )
@@ -92,7 +97,7 @@ def _create_workspace(client: TestClient, workspace: str) -> None:
 
 def _grant_workspace_role(client: TestClient, *, workspace: str, principal: str, role: str) -> None:
     response = client.post(
-        IAM_ROLE_BINDINGS_PATH,
+        f"{IAM_ROLE_BINDINGS_PATH}?wait_role_propagation=false",
         json={"principal": principal, "role": role, "workspace": workspace},
         headers=SERVICE_HEADERS,
     )

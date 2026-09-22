@@ -47,6 +47,22 @@ def _ctx(client: object) -> SimpleNamespace:
     return SimpleNamespace(obj=state)
 
 
+def _patch_jobs_client(jobs_client: MagicMock):
+    """Make ``JobsClient.from_client(...)`` in the jobs module hand back *jobs_client*."""
+    jobs_client_cls = MagicMock()
+    jobs_client_cls.from_client.return_value = jobs_client
+    return patch("nemo_platform_ext.cli.commands.jobs.JobsClient", jobs_client_cls)
+
+
+def _deployments_ctx(client: object, created: object) -> SimpleNamespace:
+    """CLI context whose typed ModelsClient returns *created* from ``create_deployment``."""
+    ctx = _ctx(client)
+    models_client = MagicMock()
+    models_client.create_deployment.return_value = _Response(created)
+    ctx.obj.typed_client.return_value = models_client
+    return ctx
+
+
 def _assert_created_job_request(jobs_client: MagicMock, *, workspace: str = "test-workspace") -> None:
     jobs_client.create_job.assert_called_once()
     call_kwargs = jobs_client.create_job.call_args.kwargs
@@ -82,7 +98,7 @@ def test_jobs_create_watch_uses_sdk_watcher_and_outputs_created_job() -> None:
             "nemo_platform_ext.cli.commands.jobs.handle_code_generation",
             return_value=False,
         ) as handle_code_generation,
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output") as format_output,
         patch(
             "nemo_platform_ext.cli.commands.jobs.render_job_watch_events",
@@ -147,7 +163,7 @@ def test_jobs_create_watch_exits_when_renderer_reports_failure() -> None:
 
     with (
         patch("nemo_platform_ext.cli.commands.jobs.handle_code_generation", return_value=False),
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch(
             "nemo_platform_ext.cli.commands.jobs.render_job_watch_events",
             return_value=JobWatchRenderResult.FAILED,
@@ -176,7 +192,7 @@ def test_jobs_create_watch_exits_130_when_renderer_reports_interrupted() -> None
 
     with (
         patch("nemo_platform_ext.cli.commands.jobs.handle_code_generation", return_value=False),
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch(
             "nemo_platform_ext.cli.commands.jobs.render_job_watch_events",
             return_value=JobWatchRenderResult.INTERRUPTED,
@@ -210,7 +226,7 @@ def test_jobs_create_watch_has_no_default_timeout() -> None:
             "nemo_platform_ext.cli.commands.jobs.handle_code_generation",
             return_value=False,
         ) as handle_code_generation,
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch(
             "nemo_platform_ext.cli.commands.jobs.render_job_watch_events",
             return_value=JobWatchRenderResult.SUCCEEDED,
@@ -245,7 +261,7 @@ def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
             "nemo_platform_ext.cli.commands.jobs.handle_code_generation",
             return_value=False,
         ) as handle_code_generation,
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output") as format_output,
         patch("nemo_platform_ext.cli.commands.jobs.wait_for_platform_job", return_value=True) as wait_for_job,
         patch("nemo_platform_ext.cli.commands.jobs.render_job_watch_events") as render_events,
@@ -312,7 +328,7 @@ def test_jobs_create_stamps_telemetry_custom_fields() -> None:
 
     with (
         patch("nemo_platform_ext.cli.commands.jobs.handle_code_generation", return_value=False),
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output"),
     ):
         create_jobs(
@@ -347,7 +363,7 @@ def test_jobs_create_wait_uses_waiter_default_timeout() -> None:
             "nemo_platform_ext.cli.commands.jobs.handle_code_generation",
             return_value=False,
         ) as handle_code_generation,
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.wait_for_platform_job", return_value=True) as wait_for_job,
     ):
         create_jobs(
@@ -373,7 +389,7 @@ def test_jobs_create_wait_exits_when_waiter_reports_failure() -> None:
 
     with (
         patch("nemo_platform_ext.cli.commands.jobs.handle_code_generation", return_value=False),
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.wait_for_platform_job", return_value=False),
         pytest.raises(typer.Exit) as exc_info,
     ):
@@ -416,7 +432,7 @@ def test_jobs_watch_command_uses_sdk_watcher() -> None:
     jobs_client.watch_job.return_value = events
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch(
             "nemo_platform_ext.cli.commands.jobs.render_job_watch_events",
             return_value=JobWatchRenderResult.SUCCEEDED,
@@ -455,7 +471,7 @@ def test_jobs_watch_command_exits_130_when_renderer_reports_interrupted() -> Non
     jobs_client.watch_job.return_value = object()
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch(
             "nemo_platform_ext.cli.commands.jobs.render_job_watch_events",
             return_value=JobWatchRenderResult.INTERRUPTED,

@@ -9,30 +9,46 @@ import click
 import httpx
 import pytest
 import typer
-from nemo_platform._exceptions import (
-    APIConnectionError,
-    APIError,
-    APIStatusError,
-    APITimeoutError,
-    AuthenticationError,
-    BadRequestError,
-    ConflictError,
-    InternalServerError,
-    NotFoundError,
-    PermissionDeniedError,
-    RateLimitError,
-)
 from nemo_platform_ext.cli.app import app
 from nemo_platform_ext.cli.core.errors import (
     InvalidSearchPatternError,
-    UnknownInputFieldsError,
     _format_api_error,
     handle_exception,
 )
 from nemo_platform_plugin.client import errors as plugin_errors
+from nemo_platform_plugin.client.errors import (
+    AuthenticationError,
+    BadRequestError,
+    ConflictError,
+    InternalServerError,
+    NemoClientError,
+    NemoHTTPError,
+    NemoTransportError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from typer.testing import CliRunner
 
 DOCUMENTED_REMOTE_ERROR_EXIT_CODE = 3
+
+
+def _http_error(
+    error_class: type[NemoHTTPError],
+    status_code: int,
+    body: dict | None = None,
+    *,
+    method: str = "GET",
+    url: str = "http://test/apis/test/v2/things",
+) -> NemoHTTPError:
+    """Build a typed-client HTTP error from a real response, as the client raises it."""
+    request = httpx.Request(method, url)
+    response = (
+        httpx.Response(status_code, request=request, json=body)
+        if body is not None
+        else httpx.Response(status_code, request=request, text="Error message")
+    )
+    return error_class(response)
 
 
 @pytest.mark.parametrize(
@@ -48,18 +64,31 @@ DOCUMENTED_REMOTE_ERROR_EXIT_CODE = 3
     ],
 )
 def test_format_api_error(body, message, expected):
-    error = Mock(spec=APIError)
+    error = Mock(spec=["body", "message"])
     error.body = body
     error.message = message
     assert _format_api_error(error) == expected
 
 
 def test_format_api_error_fallback_to_str():
-    error = Mock(spec=APIError)
-    error.body = None
-    error.message = None
-    error.__str__ = Mock(return_value="String representation of error")
-    assert _format_api_error(error) == "String representation of error"
+    class APIErrorLike:
+        body = None
+        message = None
+
+        def __str__(self) -> str:
+            return "String representation of error"
+
+    assert _format_api_error(APIErrorLike()) == "String representation of error"
+
+
+def test_format_api_error_uses_typed_http_error_detail():
+    error = _http_error(NotFoundError, 404, {"detail": "Workspace 'default' not found"})
+    assert _format_api_error(error) == "Workspace 'default' not found"
+
+
+def test_format_api_error_falls_back_to_response_text():
+    error = _http_error(NemoHTTPError, 418)
+    assert _format_api_error(error) == "Error message"
 
 
 def test_format_api_error_ignores_non_string_message():
@@ -86,9 +115,7 @@ def test_format_api_error_ignores_non_string_message():
     ],
 )
 def test_handle_api_status_errors(capsys, error_class, status_code, expected_prefix, expected_hint):
-    response = Mock()
-    response.status_code = status_code
-    error = error_class("Error message", response=response, body=None)
+    error = _http_error(error_class, status_code)
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -101,8 +128,8 @@ def test_handle_api_status_errors(capsys, error_class, status_code, expected_pre
 
 
 def test_handle_api_connection_error(capsys):
-    request = Mock()
-    error = APIConnectionError(message="Could not connect", request=request)
+    request = httpx.Request("GET", "http://test/apis/test/v2/things")
+    error = NemoTransportError(httpx.ConnectError("Could not connect", request=request))
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -170,8 +197,8 @@ def test_handle_plugin_unprocessable_entity_error(capsys):
 
 
 def test_handle_api_timeout_error(capsys):
-    request = Mock()
-    error = APITimeoutError(request=request)
+    request = httpx.Request("GET", "http://test/apis/test/v2/things")
+    error = NemoTransportError(httpx.ConnectTimeout("timed out", request=request))
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -183,9 +210,7 @@ def test_handle_api_timeout_error(capsys):
 
 
 def test_handle_api_status_error(capsys):
-    response = Mock()
-    response.status_code = 418
-    error = APIStatusError("I'm a teapot", response=response, body=None)
+    error = _http_error(NemoHTTPError, 418, {"detail": "I'm a teapot"})
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -197,9 +222,13 @@ def test_handle_api_status_error(capsys):
 
 
 def test_handle_api_status_error_prints_request_context(capsys):
-    request = httpx.Request("POST", "http://test/apis/models/v2/workspaces/default/models")
-    response = httpx.Response(418, request=request, json={"detail": "short and stout"})
-    error = APIStatusError("I'm a teapot", response=response, body={"detail": "short and stout"})
+    error = _http_error(
+        NemoHTTPError,
+        418,
+        {"detail": "short and stout"},
+        method="POST",
+        url="http://test/apis/models/v2/workspaces/default/models",
+    )
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -212,8 +241,7 @@ def test_handle_api_status_error_prints_request_context(capsys):
 
 
 def test_handle_generic_api_error(capsys):
-    request = Mock()
-    error = APIError(message="Generic API error", request=request, body=None)
+    error = NemoClientError("Generic API error")
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -317,9 +345,7 @@ def test_handle_unexpected_error(capsys):
     ],
 )
 def test_verbose_mode_traceback(capsys, debug_enabled, should_show_traceback):
-    response = Mock()
-    response.status_code = 404
-    error = NotFoundError("Resource not found", response=response, body=None)
+    error = _http_error(NotFoundError, 404, {"detail": "Resource not found"})
 
     import logging
 
@@ -342,12 +368,9 @@ def test_verbose_mode_traceback(capsys, debug_enabled, should_show_traceback):
 def test_decorator_catches_and_handles_errors(capsys):
     from nemo_platform_ext.cli.core.errors import handle_errors
 
-    response = Mock()
-    response.status_code = 404
-
     @handle_errors
     def failing_function():
-        raise NotFoundError("Not found", response=response, body=None)
+        raise _http_error(NotFoundError, 404)
 
     with pytest.raises(typer.Exit) as exc_info:
         failing_function()
@@ -359,9 +382,7 @@ def test_decorator_catches_and_handles_errors(capsys):
 
 def test_not_found_prints_server_message(capsys):
     """NotFoundError prints the server's detail (e.g. workspace not found) on its own line."""
-    response = Mock()
-    response.status_code = 404
-    error = NotFoundError("Not found", response=response, body={"detail": "Workspace 'default' not found"})
+    error = _http_error(NotFoundError, 404, {"detail": "Workspace 'default' not found"})
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -373,9 +394,9 @@ def test_not_found_prints_server_message(capsys):
 
 
 def test_not_found_prints_request_context_and_404_hint(capsys):
-    request = httpx.Request("GET", "http://test/apis/agents/v2/workspaces/default/agents")
-    response = httpx.Response(404, request=request, json={"detail": "Not Found"})
-    error = NotFoundError("Not found", response=response, body={"detail": "Not Found"})
+    error = _http_error(
+        NotFoundError, 404, {"detail": "Not Found"}, url="http://test/apis/agents/v2/workspaces/default/agents"
+    )
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -391,9 +412,7 @@ def test_not_found_prints_request_context_and_404_hint(capsys):
 
 def test_not_found_hint_fallback_when_no_ctx(capsys):
     """NotFoundError hint without context only says to check the resource name/ID (no list command)."""
-    response = Mock()
-    response.status_code = 404
-    error = NotFoundError("Not found", response=response, body=None)
+    error = _http_error(NotFoundError, 404)
 
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(error)
@@ -482,9 +501,7 @@ def test_not_found_hint_shows_specific_list_cmd(capsys):
     group_ctx = _make_mock_context_with_commands("models", {"list": MagicMock(), "get": MagicMock()}, parent=root_ctx)
     cmd_ctx = _make_mock_context("get", parent=group_ctx)
 
-    response = Mock()
-    response.status_code = 404
-    error = NotFoundError("Not found", response=response, body=None)
+    error = _http_error(NotFoundError, 404)
 
     with pytest.raises(typer.Exit):
         handle_exception(error, ctx=cmd_ctx)
@@ -500,9 +517,7 @@ def test_not_found_hint_omits_list_when_no_list_subcommand(capsys):
     group_ctx = _make_mock_context_with_commands("models", {"get": MagicMock()}, parent=root_ctx)
     cmd_ctx = _make_mock_context("get", parent=group_ctx)
 
-    response = Mock()
-    response.status_code = 404
-    error = NotFoundError("Not found", response=response, body=None)
+    error = _http_error(NotFoundError, 404)
 
     with pytest.raises(typer.Exit):
         handle_exception(error, ctx=cmd_ctx)
@@ -528,9 +543,7 @@ def test_internal_server_error_hint(capsys, body_detail, has_list_cmd, expect_li
     group_ctx = _make_mock_context_with_commands("models", commands, parent=root_ctx)
     cmd_ctx = _make_mock_context("get", parent=group_ctx)
 
-    response = Mock()
-    response.status_code = 500
-    error = InternalServerError("Server error", response=response, body={"detail": body_detail})
+    error = _http_error(InternalServerError, 500, {"detail": body_detail})
 
     with pytest.raises(typer.Exit):
         handle_exception(error, ctx=cmd_ctx)
@@ -545,32 +558,6 @@ def test_internal_server_error_hint(capsys, body_detail, has_list_cmd, expect_li
         assert "list" not in captured.err
 
 
-# ---------------------------------------------------------------------------
-# Typed-client error shapes
-# ---------------------------------------------------------------------------
-
-
-def _typed_http_error(error_class, status_code, body=None):
-    request = httpx.Request("GET", "http://test/apis/test/v2/things")
-    response = httpx.Response(
-        status_code, json=body, request=request, text=None if body is not None else "Error message"
-    )
-    return error_class(response)
-
-
-def test_format_api_error_uses_typed_http_error_detail():
-    error = _typed_http_error(plugin_errors.NotFoundError, 404, {"detail": "Workspace 'default' not found"})
-    assert _format_api_error(error) == "Workspace 'default' not found"
-
-
-def test_generic_typed_client_error_maps_to_remote_exit_code(capsys):
-    with pytest.raises(typer.Exit) as exc_info:
-        handle_exception(plugin_errors.NemoClientError("Generic API error"))
-
-    assert exc_info.value.exit_code == 3
-    assert "API error:" in capsys.readouterr().err
-
-
 @pytest.mark.parametrize(
     "message",
     [
@@ -580,7 +567,7 @@ def test_generic_typed_client_error_maps_to_remote_exit_code(capsys):
     ],
 )
 def test_missing_workspace_value_error_is_usage_error(capsys, message):
-    """Both the generated SDK's and the typed client's unresolved-workspace ValueErrors map to exit 2."""
+    """The typed client's unresolved-workspace ValueErrors map to the friendly exit-2 message."""
     with pytest.raises(typer.Exit) as exc_info:
         handle_exception(ValueError(message))
 
@@ -608,14 +595,3 @@ def test_pydantic_validation_error_is_usage_error(capsys):
     assert "Invalid input:" in captured.err
     assert "name" in captured.err
     assert "--help" in captured.err
-
-
-def test_unknown_input_fields_error_is_usage_error(capsys):
-    with pytest.raises(typer.Exit) as exc_info:
-        handle_exception(UnknownInputFieldsError(["descripton"], "things create", ["description", "name"]))
-
-    assert exc_info.value.exit_code == 2
-    captured = capsys.readouterr()
-    assert "Unknown input fields: descripton" in captured.err
-    assert "Accepted fields: description, name" in captured.err
-    assert "things create --help" in captured.err

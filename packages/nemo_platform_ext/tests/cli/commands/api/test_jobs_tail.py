@@ -31,7 +31,7 @@ def test_jobs_tail_command_fetches_tail_page() -> None:
     jobs_client.list_job_logs.return_value = response
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.render_job_logs") as render_logs,
     ):
         tail_platform_job(
@@ -60,7 +60,7 @@ def test_jobs_tail_command_uses_explicit_workspace() -> None:
     jobs_client.list_job_logs.return_value = response
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.render_job_logs"),
     ):
         tail_platform_job(

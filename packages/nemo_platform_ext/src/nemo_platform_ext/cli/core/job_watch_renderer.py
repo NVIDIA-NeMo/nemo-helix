@@ -8,8 +8,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from enum import Enum
 
-from nemo_platform import NotFoundError as PlatformNotFoundError
-from nemo_platform_plugin.client.errors import NotFoundError as PluginNotFoundError
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.jobs.watch_types import (
     JobLogEvent,
     JobStatusEvent,
@@ -57,7 +56,7 @@ def render_job_watch_events(
     except JobWatchTimeoutError as exc:
         errors.print(str(exc), style="red")
         return JobWatchRenderResult.FAILED
-    except (PlatformNotFoundError, PluginNotFoundError) as exc:
+    except NotFoundError as exc:
         errors.print(str(exc), style="red")
         return JobWatchRenderResult.FAILED
 

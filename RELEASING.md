@@ -27,6 +27,17 @@ This regenerates the OpenAPI specifications and synchronizes the SDKs. The
 specifications intentionally retain `info.version: 0.0.0`; do not copy the
 release version into them.
 
+When containers are selected, their images must already be staged at
+`nvcr.io/0921617854601259/nemo-platform-dev/<id>:<source-sha>` by the existing
+build workflow. Stable releases reuse these images and publish them under the
+requested release version without rebuilding or changing their contents.
+Missing images use the downstream registration workflow's existing wait and
+timeout; there is no fallback build.
+
+Existing nSpect container registrations are reused only when the nSpect program,
+release version, and full image URL (including team and SHA tag) all match.
+Missing registrations still go through the existing registration process.
+
 ## Release catalog
 
 The catalog in [`release.yaml`](.github/workflows/release.yaml) is the source
@@ -87,9 +98,11 @@ America/Los_Angeles.
 2. Checks out the selected source and validates the selected wheel paths,
    Docker Bake targets, and NGC overview files.
 3. Optionally synchronizes NGC metadata, when requested on a non-dry-run.
-4. Dispatches wheel, container, and stable-release registration work to the
-   configured internal release repository. The selected source SHA, release
-   type, version, and selected IDs are passed with the dispatch.
+4. Dispatches wheel builds, nightly container builds, and stable-release
+   registration work to the configured internal release repository. Stable
+   registration includes `source_team: nemo-platform-dev` and
+   `container_version: <source-sha>` so containers are copied from the selected
+   SHA tag to the requested public release version.
 5. Packages the Helm chart with the planned chart version. A nightly chart uses
    the latest release or RC Git tag core reachable from the selected source with
    `-nightly-<UTC timestamp>` appended, falling back to the `Chart.yaml`
@@ -117,11 +130,13 @@ America/Los_Angeles.
 | --- | --- | --- |
 | Wheels | [pypi.nvidia.com](https://pypi.nvidia.com) | [PyPI](https://pypi.org) |
 | Containers | `ghcr.io/nvidia-nemo/nemo-platform/<id>:nightly-...` | `nvcr.io/nvidia/nemo-platform/<id>:<version>` and the public NGC catalog |
-| Helm chart | OCI chart at `oci://ghcr.io/nvidia-nemo/nemo-platform` | Initially staged at `0921617854601259/nemo-platform`, then promoted to the public [NGC Helm repository](https://helm.ngc.nvidia.com/nvidia/nemo-platform) |
+| Helm chart | OCI chart at `oci://ghcr.io/nvidia-nemo/nemo-platform` | Initially staged at `0921617854601259/nemo-platform-dev`, then promoted to the public [NGC Helm repository](https://helm.ngc.nvidia.com/nvidia/nemo-platform) |
 
 The stable Helm promotion is external to this workflow. The workflow polls the
 public NGC Helm repository, not the internal staging endpoint, before it marks
-the release complete.
+the release complete. Stable charts continue to reference public
+`nvcr.io/nvidia/nemo-platform` images tagged with the requested release version;
+the staging location does not change the images deployed by the chart.
 
 ## Notifications
 
