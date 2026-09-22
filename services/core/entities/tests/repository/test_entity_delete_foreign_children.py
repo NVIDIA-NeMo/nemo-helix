@@ -71,7 +71,7 @@ class TestDeleteRefusesForeignChildren:
         assert deleted == 1
 
     async def test_guard_is_opt_in(self, entity_repo: SQLAlchemyEntityRepository, setup_workspaces):
-        """Without the argument the delete cascades as before — this is what force=true uses."""
+        """Internal callers (projects, cleanup) keep the unguarded behaviour by omitting it."""
         await self._parent_with_child_in(entity_repo, "workspace-2", name="forced")
 
         deleted = await entity_repo.delete_entity_by_name(workspace="workspace-1", entity_type="model", name="forced")

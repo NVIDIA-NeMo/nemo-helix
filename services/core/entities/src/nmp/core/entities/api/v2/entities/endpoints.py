@@ -602,6 +602,10 @@ async def update_entity_by_name(
     description=textwrap.dedent("""
         Delete an entity by its name.
 
+        Refused with 409 when the entity has child entities in other workspaces, naming
+        them: ``entities.parent`` cascades, so deleting would remove another workspace's
+        work. Remove those entities first.
+
         Example:
         ```
         DELETE /apis/entities/v2/workspaces/default/entities/customization_config/my-config
@@ -619,13 +623,6 @@ async def delete_entity_by_name(
     expected_db_version: int | None = Query(
         default=None,
         description="Optional database version for optimistic locking. Delete only succeeds if the entity still has this version.",
-    ),
-    force: bool = Query(
-        default=False,
-        description=(
-            "Delete even when child entities in other workspaces would be cascaded away. "
-            "Without this the request is rejected with 409 and those workspaces are named."
-        ),
     ),
 ) -> DeleteResponse:
     """Delete entity by name."""
@@ -646,7 +643,7 @@ async def delete_entity_by_name(
             name=name,
             parent=parent,
             expected_db_version=expected_db_version,
-            refuse_children_outside=None if force else workspace,
+            refuse_children_outside=workspace,
         )
     except ForeignChildEntitiesError as e:
         raise HTTPException(
@@ -654,7 +651,7 @@ async def delete_entity_by_name(
             detail=(
                 f"Entity '{name}' has child entities in other workspaces "
                 f"({', '.join(e.workspaces)}). Deleting it would also delete them. "
-                f"Remove those entities first, or pass force=true to delete them along with it."
+                f"Remove those entities first."
             ),
         ) from e
     except EntityVersionConflictError as e:

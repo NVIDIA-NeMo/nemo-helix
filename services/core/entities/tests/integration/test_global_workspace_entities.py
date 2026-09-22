@@ -156,15 +156,6 @@ class TestGlobalWorkspaceDelete:
         assert (await client.get(_entities_url("default", SHAREABLE, "base-llm"))).status_code == 200
         assert (await self._get_adapter(client, parent_id)).status_code == 200
 
-    async def test_force_deletes_and_cascades(self, client: AsyncClient, workspaces):
-        parent_id = await self._shared_model_with_foreign_adapter(client)
-        assert (await self._get_adapter(client, parent_id)).status_code == 200
-
-        response = await client.delete(_entities_url("default", SHAREABLE, "base-llm") + "?force=true")
-
-        assert response.status_code == 200
-        assert (await self._get_adapter(client, parent_id)).status_code == 404
-
     async def test_same_workspace_children_do_not_block_delete(self, client: AsyncClient, workspaces):
         await _create(client, "team-a", SHAREABLE, "local-llm")
         parent_id = (await client.get(_entities_url("team-a", SHAREABLE, "local-llm"))).json()["id"]
