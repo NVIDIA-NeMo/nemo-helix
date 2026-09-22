@@ -999,11 +999,22 @@ jobs:
           path: report.xml
 
   python-unit-test:
-    name: Python unit tests
+    name: Python unit tests (py${{ matrix.python-version }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      # Both legs run to completion: when one interpreter breaks, the useful question is
+      # whether the other one did too, and fail-fast would hide that.
+      fail-fast: false
+      matrix:
+        # The floor and the ceiling. 3.13 sits between them and is covered by the wheel
+        # matrices; running the whole suite three times buys little over running it at
+        # both ends. The ceiling leg is the one that catches a regression like #996,
+        # which silently undid #237's 3.14 support and went unnoticed for seven weeks
+        # because nothing executed the suite above 3.12.
+        python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1018,7 +1029,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run unit tests
@@ -1032,7 +1043,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-test-results
+          name: python-unit-test-results-py${{ matrix.python-version }}
           retention-days: 30
           path: |
             report.xml
@@ -2171,7 +2182,11 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-unit-test-results
+          # The unit suite runs once per interpreter; coverage is reported from the default
+          # one so the table stays a single number. Pinned rather than globbed because this
+          # download is `continue-on-error`, so a name that stops matching would quietly
+          # render "N/A" instead of failing.
+          name: python-unit-test-results-py3.12
           path: unit-coverage
       - name: Download integration test coverage
         continue-on-error: true
