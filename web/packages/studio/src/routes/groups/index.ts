@@ -6,7 +6,10 @@ export {
   anonymizerRoutes,
   getAnonymizerSideNavItems,
 } from '@studio/routes/groups/anonymizerRoutes';
-export { baseModelsRoutes } from '@studio/routes/groups/baseModelsRoutes';
+export {
+  baseModelsRoutes,
+  getBaseModelsSideNavItems,
+} from '@studio/routes/groups/baseModelsRoutes';
 export {
   customizationRoutes,
   getCustomizationSideNavItems,
