@@ -183,8 +183,21 @@ def test_spans_with_equal_end_times_still_produce_an_answer() -> None:
     assert answer == "tied"
 
 
+#: Nesting depth that overflows the JSON decoder on every supported interpreter.
+#
+# It has to be tuned to the deepest one: CPython 3.14 parses 20_000 levels that 3.12 and 3.13
+# reject, so the old probe stopped reaching the guard there and these tests passed vacuously --
+# or worse, failed while the guard itself was still fine. 3.14 still raises somewhere between
+# 20_000 and 100_000.
+_OVERFLOWING_JSON_DEPTH = 100_000
+
+
+def _too_deeply_nested_json() -> str:
+    return "[" * _OVERFLOWING_JSON_DEPTH + "]" * _OVERFLOWING_JSON_DEPTH
+
+
 def test_a_deeply_nested_message_payload_does_not_escape_as_a_recursion_error() -> None:
-    payload = "[" * 20000 + "]" * 20000
+    payload = _too_deeply_nested_json()
 
     assert _answer(_span("a" * 16, end=5, **{"gen_ai.output.messages": payload})) == payload
 
@@ -193,7 +206,7 @@ def test_deeply_nested_trace_text_surfaces_as_a_value_error() -> None:
     # RecursionError is not a ValueError, so leaking it would escape every caller's guard
     # and abort trial adaptation instead of falling back to the ATIF trace.
     with pytest.raises(ValueError, match="nested too deeply"):
-        resource_spans_from_text("[" * 20000 + "]" * 20000)
+        resource_spans_from_text(_too_deeply_nested_json())
 
 
 def test_span_text_strings_reaches_every_nesting_the_attribute_schema_allows() -> None:
