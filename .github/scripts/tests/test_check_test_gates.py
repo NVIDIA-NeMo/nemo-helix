@@ -91,6 +91,40 @@ def test_installed_packages_are_not_our_gates(tmp_path: Path) -> None:
     assert check_test_gates.orphaned_gates(tmp_path, workflows) == {}
 
 
+CONSTANT_GATED = """
+import os
+import pytest
+
+ENV_NAME = "{var}"
+
+pytestmark = pytest.mark.skipif(not {read}, reason="opt-in")
+
+def test_thing():
+    pass
+"""
+
+
+@pytest.mark.parametrize(
+    "read",
+    ("os.environ.get(ENV_NAME)", "os.environ[ENV_NAME]", "os.getenv(ENV_NAME)"),
+)
+def test_a_gate_named_by_a_constant_is_reported(tmp_path: Path, read: str) -> None:
+    """Naming the variable once is ordinary style, and the repository already does it.
+
+    ``e2e/files/test_storage_backends.py`` gates on ``HF_TOKEN_ENV`` and the scaled-evals migration
+    tests on ``TEST_DSN_ENV``. Reading only string literals at the call site would report green over
+    every one of them, which is the failure this check exists to prevent.
+    """
+    tests = tmp_path / "pkg" / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_const.py").write_text(CONSTANT_GATED.format(var="RUN_VIA_CONSTANT", read=read), encoding="utf-8")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")
+
+    assert "RUN_VIA_CONSTANT" in check_test_gates.orphaned_gates(tmp_path, workflows)
+
+
 def test_the_other_pytest_filename_pattern_is_scanned(tmp_path: Path) -> None:
     # pytest.ini sets `python_files = test_*.py *_test.py`. Scanning one pattern would leave gates in
     # the other invisible here while pytest still skipped those tests.

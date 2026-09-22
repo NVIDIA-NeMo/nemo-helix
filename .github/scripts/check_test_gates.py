@@ -33,6 +33,7 @@ ALLOWED_UNSET = {
     "NVIDIA_API_KEY": "needs a real build.nvidia.com key",
     "NMP_INSIGHTS_E2E": "needs a live Insights deployment",
     "TRACE_FIXTURE_LIVE_CODEX": "regenerates fixtures against a live Codex CLI",
+    "SCALED_EVALS_TEST_DATABASE_URL": "needs a live Postgres for the scaled-evals migration tests",
 }
 
 #: Directory names that are not this repository's source: installed packages and build caches. Their
@@ -50,12 +51,64 @@ VENDORED_ROOTS = ("sdk/python",)
 #: leave gates in the other invisible to this check while pytest still skipped the tests.
 TEST_FILE_GLOBS = ("test_*.py", "*_test.py")
 
-#: ``os.environ["X"]``, ``os.environ.get("X")`` and ``os.getenv("X")`` are the same gate.
-_ENV_READ = re.compile(r"""os\.(?:environ(?:\.get)?|getenv)[(\[]\s*["']([A-Z][A-Z0-9_]*)["']""")
+
+def _module_constants(tree: ast.AST) -> dict[str, str]:
+    """Module-level ``NAME = "literal"`` bindings.
+
+    Naming the variable once and referring to it is ordinary style -- the repository already does it
+    in ``e2e/files/test_storage_backends.py`` (``HF_TOKEN_ENV``) and the scaled-evals migration tests
+    (``TEST_DSN_ENV``). Reading only string literals at the call site would miss every one of them.
+
+    Bindings imported from another module are not resolved. The variable still surfaces from the
+    module that defines it, so an orphan is never hidden outright -- only the list of files naming it
+    can be short.
+    """
+    constants: dict[str, str] = {}
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+            continue
+        if not isinstance(node.value.value, str):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                constants[target.id] = node.value.value
+    return constants
+
+
+def _env_name(node: ast.AST, constants: dict[str, str]) -> str | None:
+    """The environment variable a node names, whether written inline or via a constant."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    return None
+
+
+def _env_reads(node: ast.AST, constants: dict[str, str]) -> set[str]:
+    """Variables read by ``os.environ[X]``, ``os.environ.get(X)`` or ``os.getenv(X)`` under ``node``."""
+    found: set[str] = set()
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Subscript):
+            value = inner.value
+            if isinstance(value, ast.Attribute) and value.attr == "environ":
+                name = _env_name(inner.slice, constants)
+                if name:
+                    found.add(name)
+        elif isinstance(inner, ast.Call):
+            func = inner.func
+            reads_env = (isinstance(func, ast.Attribute) and func.attr in {"get", "getenv"}) or (
+                isinstance(func, ast.Name) and func.id == "getenv"
+            )
+            if reads_env and inner.args:
+                name = _env_name(inner.args[0], constants)
+                if name:
+                    found.add(name)
+    return found
 
 
 def gate_variables(tree: ast.AST) -> set[str]:
     """Environment variables read inside a ``pytest.mark.skipif`` condition."""
+    constants = _module_constants(tree)
     found: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -65,7 +118,7 @@ def gate_variables(tree: ast.AST) -> set[str]:
         if name != "skipif":
             continue
         for argument in [*node.args, *(keyword.value for keyword in node.keywords)]:
-            found.update(_ENV_READ.findall(ast.unparse(argument)))
+            found.update(_env_reads(argument, constants))
     return found
 
 
