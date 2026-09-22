@@ -219,3 +219,69 @@ Unrelated to this PR.
   that is not the problem.
 - Run 2 used a throwaway `NMP_DATA_DIR` so that seeded role bindings never touched the
   developer's real local database.
+
+---
+
+## Run 3 — edge cases and error handling
+
+Runs 1 and 2 covered happy paths and authorization denials. This run targets the
+error-handling and edge-case behaviour neither reached, on a clean throwaway database
+seeded with 30 global models, 10 local, 5 in an unrelated workspace, and 1 in `system`.
+
+The listing change is the reason this run exists: it replaces a `workspace = X` equality
+with a cross-workspace query plus an `IN` filter, so pagination, totals, sorting, and
+composition with a caller-supplied filter all move onto a different code path.
+
+22 scenarios, 22 passed, 0 failed.
+
+| # | Scenario | Expected | Actual | Result |
+| --- | --- | --- | --- | --- |
+| PG1 | Unioned list reports the correct total (30 global + 10 local) | `40` | `40` | PASS |
+| PG2 | total_pages consistent with page_size=1 | `40` | `40` | PASS |
+| PG3 | Paging through the union returns every row exactly once | `40 of 40 unique` | `40 of 40 unique` | PASS |
+| PG4 | Union contains exactly the request and global workspaces | `default,sad-team` | `default,sad-team` | PASS |
+| F1 | User filter composes with the workspace union (name like g-%) | `30 rows, all global: yes` | `30 rows, all global: yes` | PASS |
+| F2 | User filter can still select only local rows | `10` | `10` | PASS |
+| F3 | A filter cannot reach an unrelated workspace through the union | `0` | `0` | PASS |
+| F4 | Sort applies across the union, not per workspace | `yes` | `yes` | PASS |
+| SY1 | An entity in system does NOT leak (only default is global) | `404` | `404` | PASS |
+| SY2 | system rows never appear in another workspace listing | `no` | `no` | PASS |
+| M1 | Nonexistent workspace in path is 404, not a silent global read | `404` | `404` | PASS |
+| M2 | Creating a duplicate name still conflicts | `409` | `409` | PASS |
+| M3 | A local name equal to a global one is still creatable (shadowing, not conflict) | `201` | `201` | PASS |
+| M4 | Garbage force value is rejected, not treated as true | `422` | `422` | PASS |
+| M5 | force=false behaves like the default | `200` | `200` | PASS |
+| M6 | Wildcard workspace listing still works alongside sharing | `200` | `200` | PASS |
+| OL1 | Delete with a stale expected_db_version conflicts | `409` | `409` | PASS |
+| OL2 | Delete with the correct expected_db_version succeeds | `200` | `200` | PASS |
+| CG1 | 409 names every affected workspace, deduplicated | `yes` | `yes` | PASS |
+| CG2 | Each workspace is named once, not once per child | `1` | `1` | PASS |
+| IG1 | IGW GET on a model that exists nowhere is 404 | `404` | `404` | PASS |
+| IG2 | IGW GET from a nonexistent workspace does not fall through to global | `422` | `422` | PASS |
+
+Legend: `PG` pagination over the union · `F` filter and sort composition · `SY` scope
+(only `default` is global) · `M` malformed input · `OL` optimistic locking · `CG` cascade
+guard at scale · `IG` gateway misses.
+
+Two interactions probed separately:
+
+| Interaction | Result |
+| --- | --- |
+| `force=true` together with a stale `expected_db_version` | `409` — forcing does not bypass optimistic locking |
+| Foreign children *and* a stale `expected_db_version` | Children guard wins; both are `409`, and the message names the workspaces, which is the more actionable of the two. Entity survives either way |
+
+## Still untested
+
+- **The `MAX_DEPENDENT_CHILDREN_REPORTED = 1000` cap** on the dependent-children scan.
+  Exercising it needs more than a thousand children on one parent. Under the cap the scan
+  is exact; above it the guard still refuses (it only needs one foreign child to fire), but
+  the set of workspaces named in the message could be incomplete.
+- **Concurrent delete.** The guard is check-then-act rather than transactional: it queries
+  for foreign children, then deletes. A child created in another workspace between those
+  two steps is still cascaded away silently. The window is small and the pre-existing
+  behaviour was to cascade unconditionally, so this is narrower than what it replaces — but
+  it is a real limitation, not a closed hole.
+- **Postgres.** All three runs used the local SQLite-backed store. The repository has a
+  known SQLite/Postgres divergence in JSON path extraction (there is a skipped test citing
+  it), and the listing change routes through the filter layer, so CI's Postgres integration
+  run is the real check.
