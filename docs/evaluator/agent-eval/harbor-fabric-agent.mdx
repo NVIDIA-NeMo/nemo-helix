@@ -63,7 +63,7 @@ virtualenv. The package-manager step is retried three times with linear backoff,
 fetch is retried by `curl`, so a rate-limited or briefly unavailable package mirror does not end the
 trial — Harbor's own retry restarts the trial rather than the failed step. Every
 `agent_kwargs` key above still applies — they are passed through to the wrapped agent. The task's
-Dockerfile needs nothing.
+Dockerfile needs no Python, pip, or curl.
 
 Because the install runs through `BaseInstalledAgent`, its failures are classified by Harbor's
 `ERROR_PATTERNS` — a DNS or TLS failure fetching `uv` raises `NetworkConnectionError` for

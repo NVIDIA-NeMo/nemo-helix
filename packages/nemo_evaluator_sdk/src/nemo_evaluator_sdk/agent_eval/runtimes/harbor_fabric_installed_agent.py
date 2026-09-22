@@ -224,10 +224,12 @@ class FabricInstalledAgent(BaseInstalledAgent):
         """Install curl and CA certificates through whichever package manager the image has.
 
         Harbor 0.23 offers ``ensure_system_dependencies()`` for this; the repository pins 0.20, so
-        the same walk lives here. Both are short-circuited by an image that already has curl, except
-        that CA certificates are installed unconditionally: ``ubuntu:24.04`` ships neither, and
-        without the certificates the uv installer's HTTPS fetch fails with a bare curl exit code
-        that reads like a network outage.
+        the same walk lives here. Every package-manager branch installs CA certificates even when
+        curl is already present: ``ubuntu:24.04`` ships neither, and without the certificates the uv
+        installer's HTTPS fetch fails with a bare curl exit code that reads like a network outage.
+        The last branch -- curl present, no package manager -- is the one exception, because there
+        is nothing left to install certificates *with*; such an image has to bring its own CA store,
+        and the uv fetch fails with a TLS error if it does not.
 
         The chosen manager is retried with linear backoff. A rate-limited or briefly unreachable
         archive mirror is the most likely way this install fails, and a failure here costs the whole
