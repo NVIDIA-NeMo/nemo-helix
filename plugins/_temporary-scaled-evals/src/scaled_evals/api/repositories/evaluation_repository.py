@@ -716,6 +716,10 @@ class EvaluationRepository:
         q: str | None = None,
     ) -> builtins.list[dict]:
         direction = normalize_order(order)
+        # The Entity Store projection mirrors this one ordering with a single
+        # precomputed `sort_key`, because that store sorts one field. A second
+        # sortable column here needs its own key on the projection side, or
+        # projected reads silently lose the tiebreaker.
         ordering = order_by_clause(("created_at", "id"), direction)
         clauses = ["deleted_at IS NULL"]
         params: list[Any] = []

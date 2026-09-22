@@ -23,7 +23,12 @@ from nemo_platform_plugin.entities.base import EntityNotFoundError, SyncEntityCl
 from nemo_platform_plugin.entities.client import EntitiesClient
 from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_platform_plugin.sdk_provider import get_platform_sdk
-from nemo_scaled_evals_plugin.entities import PROJECTED_COLUMNS, ScaledEvaluation, searchable_blob
+from nemo_scaled_evals_plugin.entities import (
+    PROJECTED_COLUMNS,
+    ScaledEvaluation,
+    evaluation_sort_key,
+    searchable_blob,
+)
 from scaled_evals.api.repositories.base_repository import normalize_order, substring_search_pattern
 from scaled_evals.api.schemas.common import decode_cursor
 from scaled_evals.api.settings import settings
@@ -85,6 +90,7 @@ def row_to_entity(row: dict[str, Any], *, workspace: str) -> ScaledEvaluation:
         deleted=row.get("deleted_at") is not None,
         row_created_at=row["created_at"],
         row_updated_at=row["updated_at"],
+        sort_key=evaluation_sort_key(row["created_at"], str(row["id"])),
         search_blob=searchable_blob(row),
         detail=projected_detail(row),
     )
@@ -92,7 +98,13 @@ def row_to_entity(row: dict[str, Any], *, workspace: str) -> ScaledEvaluation:
 
 def entity_to_row(entity: ScaledEvaluation) -> dict[str, Any]:
     """Return the projected row, shaped as the SQL read paths returned it."""
-    return dict(entity.detail)
+    row = dict(entity.detail)
+    # `detail` is JSON-coerced, so its `created_at` is an ISO string, but SQL
+    # handed the routers a datetime and `encode_cursor` calls `.isoformat()` on
+    # it. Restore it from the typed column, or building `next_cursor` raises
+    # for every list with a page after it.
+    row["created_at"] = entity.row_created_at
+    return row
 
 
 class EvaluationProjectionWriter:
@@ -197,25 +209,18 @@ class EvaluationProjectionReader:
             conditions.append(keyset)
 
         prefix = "" if direction == "asc" else "-"
+        # `sort_key` is a total order, so the store's own page is already the
+        # page SQL would have returned. Sorting on `row_created_at` and
+        # re-applying the id tiebreaker locally could not do this: local
+        # sorting orders a page but does not decide which rows are in it.
         page = self._client.list(
             ScaledEvaluation,
             workspace=self._workspace,
             filter_operation=_all(conditions),
-            sort=f"{prefix}row_created_at",
+            sort=f"{prefix}sort_key",
             page_size=limit + 1,
         )
-        # ponytail: the store sorts one field, so the (created_at, id)
-        # tiebreaker is reapplied here. That orders the page correctly but does
-        # not decide which rows the store picked, so evaluations sharing a
-        # created_at across a page boundary can still repeat or be skipped.
-        # Ceiling accepted while Postgres is authoritative; the fix is a
-        # composite sort key in the store, not more local sorting.
-        entities = sorted(
-            page.data,
-            key=lambda item: (item.row_created_at, item.evaluation_id),
-            reverse=direction == "desc",
-        )
-        return [entity_to_row(entity) for entity in entities]
+        return [entity_to_row(entity) for entity in page.data]
 
     def get(self, evaluation_id: str) -> dict[str, Any] | None:
         """Return one projected row, or None when absent or soft-deleted."""
@@ -228,27 +233,19 @@ class EvaluationProjectionReader:
         return entity_to_row(entity)
 
     def _keyset(self, cursor: str | None, direction: str) -> FilterOperation | None:
-        """Return the `(created_at, id)` row comparison the SQL cursor encodes."""
+        """Return the `(created_at, id)` row comparison the SQL cursor encodes.
+
+        One bound on `sort_key` says what SQL says with a row comparison, since
+        the key orders lexicographically exactly as `(created_at, id)` does.
+        """
         position = decode_cursor(cursor)
         if position is None:
             return None
         operator = FilterOperator.GT if direction == "asc" else FilterOperator.LT
-        created_at = jsonable(position.created_at)
-        return LogicalOperation(
-            operator=FilterOperator.OR,
-            operations=[
-                ComparisonOperation(operator=operator, field=_field("row_created_at"), value=created_at),
-                _all(
-                    [
-                        _eq("row_created_at", created_at),
-                        ComparisonOperation(
-                            operator=operator,
-                            field=_field("evaluation_id"),
-                            value=position.id,
-                        ),
-                    ]
-                ),
-            ],
+        return ComparisonOperation(
+            operator=operator,
+            field=_field("sort_key"),
+            value=evaluation_sort_key(position.created_at, position.id),
         )
 
 
@@ -286,9 +283,13 @@ def parity_report(row: dict[str, Any], projected: dict[str, Any]) -> list[str]:
     """
     expected = projected_detail(row)
     # Compare through JSON so tuple/list and int/float encodings agree the way
-    # they would after a real round trip through the store.
+    # they would after a real round trip through the store. Both sides go
+    # through `jsonable` because the reader hands back real datetimes, which
+    # `json.dumps` would refuse outright rather than report as a difference.
     differences = []
     for key in sorted(set(expected) | set(projected)):
-        if json.dumps(expected.get(key), sort_keys=True) != json.dumps(projected.get(key), sort_keys=True):
+        if json.dumps(jsonable(expected.get(key)), sort_keys=True) != json.dumps(
+            jsonable(projected.get(key)), sort_keys=True
+        ):
             differences.append(key)
     return differences
