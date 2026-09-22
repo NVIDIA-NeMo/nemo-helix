@@ -75,6 +75,25 @@ for merged and full-SFT models, and not specific to sharing; and it fetches the 
 `default/qwen3-p1-180943` as a name in the model's own workspace, which returns `404`. The
 second is this PR's bug class on the Studio side. Chat works through the gateway directly.
 
+**Priority 3 — passed for eight of nine consumers; no sharing defect found.** All run from a
+non-default workspace against `default/openai-gpt-oss-20b` and the `default/nvidia-build`
+provider (NVIDIA Build credential, no GPU), each with a missing-name negative control. Real
+calls for switchyard, guardrails, evaluator, data designer, auditor, and agents (local
+config); optimization and experimentalist on their model-resolution paths only (a
+`prepare-fileset` preflight, and one completion through the Experimentalist's own resolver),
+because a full study/run adds nothing for sharing. `nemo-agent-hardener` was not run: it needs
+`agent-hardener setup`, the OpenShell CLI and a war-game against a chosen agent. Note that
+data designer and auditor resolve **providers**, and optimization **VirtualModels** — both
+shareable types — not model entities. Every consumer that resolves by name routes by the
+entity's own workspace. Per-plugin detail is in the coverage doc. Smaller findings:
+
+- The response `model` field is not a reliable resolution signal: through switchyard it
+  echoes the routed name (`marcus/<m>`), while a direct call returns `default/<m>`.
+- The evaluator's missing-`ModelRef` error names only the caller's workspace, not `default`.
+- The Experimentalist SKILL.md documents `NEMO_EXPERIMENTALIST_MODELS_SMART/MID/FAST`,
+  `NEMO_EXPERIMENTALIST_API_BASE` and `INFERENCE_API_KEY`, which no code reads. It actually
+  uses `NEMO_DEFAULT_MODEL` / `NEMO_FAST_MODEL` (two tiers, `workspace/name` form).
+
 **Local setup that is not in SETUP.md** — each cost a failed run:
 
 1. Build `my-registry/nmp-api:local` (the deployment weights puller runs in it) and, for
@@ -91,6 +110,14 @@ second is this PR's bug class on the Studio side. Chat works through the gateway
 4. **Do not trust the deployment puller's exit code.** When it cannot reach the platform it
    prints `✓ Downloaded`, exits `0`, and leaves `/model-store` empty; vLLM then fails with
    `Invalid repository ID or local directory specified: '/model-store'`. Read its log.
+5. **Auditor jobs need `--profile gpu` locally.** Local dev translates `cpu/default` steps
+   to subprocesses, so `nemo auditor audit submit` runs on the host and fails with *garak
+   interpreter not found*. `--profile gpu` selects the Docker-backed `cpu/gpu` profile and
+   the `my-registry/auditor-tasks:local` image (build target `auditor-tasks-docker`).
+6. **Keep a local `.python-version` at 3.12.** The Makefile and Flox use 3.12; a stray
+   3.13 pin makes plain `uv run` (e.g. the copyright pre-commit hook) rebuild `.venv` for
+   3.13, deleting files out from under a running platform — guardrails then failed with
+   `FileNotFoundError: …/nemoguardrails/rails/llm/llm_flows.co`.
 
 ## Priority 1 — the headline case (needs GPU)
 

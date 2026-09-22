@@ -68,20 +68,22 @@ compile a spec locally at all. The error text distinguishes a resolution failure
 
 ## Inference consumers
 
-These reach a model through the gateway (path 2) or an entity reference (path 1). None has
-been exercised against a shared model.
+These reach a model through the gateway (path 2), an entity reference (path 1), or a shared
+provider / VirtualModel. Exercised 2026-09-22 from a non-default workspace against
+`default/openai-gpt-oss-20b` and the `default/nvidia-build` provider (auth off); `<m>` below is
+that model. Every consumer that resolves by name then routes by the entity's own workspace.
 
-| Plugin | Path | Status | GPU | Notes |
+| Plugin | Path | Status | Needs | Notes |
 | --- | --- | --- | --- | --- |
-| `nemo-guardrails` | 2 | Inherits (untested) | Needs provider | Guardrail configs reference a model; rails run on the gateway |
-| `nemo-evaluator` | 2 | Inherits (untested) | Needs provider | Target model for a run; LLM-as-judge model too |
-| `nemo-data-designer` | 1, 2 | Inherits (untested) | Needs provider | Generation model reference |
-| `nemo-agents` | 2 | Inherits (untested) | Needs provider | Agent model via `utils.py:240` gateway URL |
-| `nemo-optimization` | 2 | Inherits (untested) | Needs provider | Compares models, so several refs per run |
-| `nemo-switchyard` | 2 | Inherits (untested) | Needs provider | Routing middleware — routes *between* models, highest chance of a workspace assumption |
-| `nemo-auditor` | 2 | Inherits (untested) | Needs provider | Audit target points at a model |
-| `nemo-agent-hardener` | 2 | Inherits (untested) | Needs provider | 44 model/gateway references, the largest surface |
-| `nemo-experimentalist` | 2 | Inherits (untested) | Needs provider | Candidate models per experiment |
+| `nemo-guardrails` | 2 | **Verified** | Provider | `/checks` blocked/allowed with `marcus/<m>` and `default/<m>`; a guarded VirtualModel in `marcus` backed by `marcus/<m>` blocked and allowed real requests |
+| `nemo-evaluator` | 1 | **Verified** | Provider | Real job in `marcus` with `ModelRef("marcus/<m>")`: generated via `default/<m>`, 2/2 exact-match; missing ref rejected at submit. `resolve_model_reference` routes by the entity's own workspace. Error text for a missing ref names only the caller's workspace |
+| `nemo-data-designer` | provider | **Verified** | Provider | Resolves *providers*, not models. `validate`, `check-models` and a 3-record `preview` in `marcus` with bare `provider="nvidia-build"` (shared from `default`); a missing provider is rejected |
+| `nemo-agents` | 2 | **Verified (local config)** | Provider | `agents invoke --agent-config` in `marcus` with a bare `model_name`: the injected `marcus` gateway URL resolved it; ReAct agent used its calculator tool correctly. Deployed (Fabric) agents not exercised |
+| `nemo-optimization` | VM | **Verified (preflight only)** | Provider | `prepare-fileset --dry-run` model check from `marcus` found the shared VirtualModel for a bare name and warned on a missing one. No study run (needs a hand-installed Hermes harness) |
+| `nemo-switchyard` | 2 | **Verified** | Provider | VirtualModels in `marcus` routing to `marcus/<m>` and to `default/<m>` both served; a missing target 404s after routing, so resolution happens post-middleware. The response `model` echoes the routed name, not where it resolved |
+| `nemo-auditor` | provider | **Verified** | Provider | Real garak scan (`test.Test`) from `marcus` with target provider `{workspace: marcus, provider: nvidia-build}`; requests went to `default/provider/nvidia-build`. Locally needs `--profile gpu`, or the job runs as a subprocess and fails with *garak interpreter not found* |
+| `nemo-agent-hardener` | 2 | **Not run** | Provider | Needs `agent-hardener setup`, the OpenShell CLI and a full war-game against a chosen agent. Its sandboxed agent is gateway-bound (`agent_resolver.py:131`), so it would use this path |
+| `nemo-experimentalist` | 1 | **Verified (model path)** | Provider | Its only model lookup is the `default`/`fast` refs (`NEMO_DEFAULT_MODEL`/`NEMO_FAST_MODEL`); with `marcus/<m>` both resolved and completed via `default/model/<m>`. `--workspace` never resolves models; the bundled agent under test uses a raw URL. No full run. Its SKILL.md documents env vars nothing reads (`NEMO_EXPERIMENTALIST_MODELS_*`, `…_API_BASE`) |
 | `nemo-insights` | — | Not applicable | — | Telemetry analysis; no model entity resolution |
 | `nemo-anonymizer`, `nemo-safe-synthesizer` | 1 | Inherits (untested) | Varies | Consume datasets more than models; datasets are ASTD-640 |
 | `nemo-deployments` | — | **Not applicable by design** | — | Manages `Deployment` / `DeploymentConfig` / `Volume`, not model entities. `model_deployment` is deliberately **not** shareable: the GPU saving comes from *not* deploying a second copy elsewhere. A workspace routes to the global deployment through the gateway instead |
@@ -121,10 +123,10 @@ fix follows from whichever option is chosen there.
 
 1. ~~Training submissions for `nemo-unsloth` and `nemo-rl`.~~ **Done** — both resolve a
    shared base model correctly; see the training-backends table.
-2. **One real inference call per inference consumer** against a shared model, using an
-   external provider credential rather than a local GPU deployment. Start with
-   `nemo-switchyard` (routes *between* models, so most likely to carry a workspace
-   assumption) and `nemo-agent-hardener` (largest surface, 44 references).
+2. ~~One real inference call per inference consumer.~~ **Done** 2026-09-22 for eight of
+   nine — see the inference consumers table. `nemo-agent-hardener` is not run (needs a
+   full war-game setup); optimization and experimentalist were exercised on their model
+   paths only, not with a full study/run.
 
 **On GPU:**
 
