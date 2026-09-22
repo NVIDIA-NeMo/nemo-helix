@@ -76,7 +76,7 @@ def inventory() -> None:
 
 def apply_content_replacements() -> None:
     for path in content_paths():
-        if path.is_symlink() or not path.exists():
+        if path.is_symlink() or not path.is_file():
             continue
         text = read_text(path)
         if text is None:

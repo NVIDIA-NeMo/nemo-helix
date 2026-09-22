@@ -48,6 +48,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     (repo / "dist").mkdir()
     (repo / "dist/index.js").write_text("window.product = 'NeMo Platform'; window.acronym = 'NMP';\n")
     (repo / "dist/binary.dat").write_bytes(b"NeMo Platform NMP should remain in undecodable content: \xff\n")
+    (repo / ".claude/skills").mkdir(parents=True)
     (repo / "docs/snmp/nmp-common").mkdir(parents=True)
     (repo / "docs/snmp/nmp-common/NMP_DATA.txt").write_text(
         " ".join(

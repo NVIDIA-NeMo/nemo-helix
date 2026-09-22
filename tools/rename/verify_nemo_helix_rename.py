@@ -23,7 +23,7 @@ from rename_common import (
 
 
 def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
-    if not path.exists() and not path.is_symlink():
+    if not path.is_file():
         return False
     text = read_text(path)
     if text is None:
