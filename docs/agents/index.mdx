@@ -135,7 +135,10 @@ to create a separate environment, then install the matching Fabric runtime and
 Hermes adapter into that environment:
 
 ```bash
-export ADAPTER_PYTHON=/path/to/hermes-environment/bin/python
+uv python install 3.12
+uv venv --python 3.12 .venv-hermes
+export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
+
 PLATFORM_PYTHON="$(sed -n '1s/^#!//p' "$(command -v nemo)")"
 FABRIC_VERSION="$("$PLATFORM_PYTHON" -c \
   'import importlib.metadata as m; print(m.version("nemo-fabric"))')"
