@@ -392,15 +392,43 @@ describe('NewCustomizationForm', () => {
       expect(screen.queryByText(/A LoRA adapter is served by/)).not.toBeInTheDocument();
     });
 
+    /** DPO: no `finetuning_type` at all, so it is always a full-weight run. */
+    const dpoValues = (): CustomizationFormFields => ({
+      ...FORM_DEFAULTS,
+      outputName: 'dpo-model',
+      backend: 'rl',
+      rl: { ...FORM_DEFAULTS.rl, model: 'default/base-model', dataset: 'default/my-dataset' },
+    });
+
     it('targets the output model for DPO, which is always full-weight', async () => {
-      const values: CustomizationFormFields = {
-        ...FORM_DEFAULTS,
-        outputName: 'dpo-model',
-        backend: 'rl',
-      };
-      renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={dpoValues()} />);
 
       expect(await screen.findByText(/This run produces dpo-model/)).toBeInTheDocument();
+    });
+
+    // Rendering the section is not the same as the job receiving the config. `formToRlCreate`
+    // serves both arms, and the DPO arm used to omit `deployment_config` — so the config was
+    // created and then orphaned, and the trained model was never served.
+    it('sends the config name on a DPO job, not just the GRPO one', async () => {
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={dpoValues()} />);
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateRl).toHaveBeenCalled());
+      expect(mockCreateUnboundConfig).toHaveBeenCalledWith(
+        'default',
+        expect.anything(),
+        'dpo-model-config',
+        expect.any(Function)
+      );
+      expect(mutateRl).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            spec: expect.objectContaining({ deployment_config: 'dpo-model-config' }),
+          }),
+        })
+      );
     });
 
     it('offers no deployment controls when the base already serves LoRA', async () => {
