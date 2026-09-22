@@ -23,8 +23,8 @@ export interface DeployActionTarget {
  * | ------------------------- | ------------------------------------------- |
  * | Not deployed              | Deploy                                      |
  * | Failed / Unavailable      | Deploy — nothing is serving it; redeploying is the fix |
- * | Not served (adapter)      | Deploy — points at the base model, with LoRA, which the wizard enables by default |
- * | Deployed / Served         | none — already serving                      |
+ * | Not active (adapter)      | Deploy — points at the base model, with LoRA, which the wizard enables by default |
+ * | Deployed / Active         | none — already serving                      |
  * | Deploying                 | none — a deployment is already on its way    |
  * | Available                 | none — reachable through an external provider |
  * | Unknown                   | none — we could not read the providers, so offering Deploy might duplicate a live one |
