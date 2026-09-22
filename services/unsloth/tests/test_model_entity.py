@@ -18,6 +18,7 @@ import json
 import types
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -160,6 +161,43 @@ class TestSanitizeName:
         # "/" is not in the allowed set, so each "/" becomes "-", then
         # the consecutive-hyphen collapse fires.
         assert sanitize_name("p", "a//b") == "p-a-b"
+
+    def test_discriminator_scopes_the_name(self) -> None:
+        from nmp.customization_common.tasks.model_entity.run import sanitize_name
+
+        assert sanitize_name("sft-cfg", "my-model", "tmpl-a") == "sft-cfg-my-model-tmpl-a"
+        assert sanitize_name("sft-cfg", "my-model") == "sft-cfg-my-model"
+
+    def test_discriminator_survives_truncation(self) -> None:
+        """The separation is only real if the discriminator cannot be truncated away.
+
+        A long model name must give up room to the discriminator, not the reverse --
+        otherwise two templates collapse back to one name and silently share a config.
+        """
+        from nmp.customization_common.tasks.model_entity.run import (
+            MAX_RESOURCE_NAME_LEN,
+            sanitize_name,
+        )
+
+        long_model = "x" * 200
+        a = sanitize_name("sft-cfg", long_model, "template-alpha")
+        b = sanitize_name("sft-cfg", long_model, "template-beta")
+
+        assert a != b
+        assert a.endswith("template-alpha")
+        assert b.endswith("template-beta")
+        assert len(a) <= MAX_RESOURCE_NAME_LEN
+        assert len(b) <= MAX_RESOURCE_NAME_LEN
+
+    def test_overlong_discriminator_is_capped_but_still_distinguishes(self) -> None:
+        from nmp.customization_common.tasks.model_entity.run import (
+            MAX_RESOURCE_NAME_LEN,
+            sanitize_name,
+        )
+
+        name = sanitize_name("sft-cfg", "m", "d" * 200)
+        assert len(name) <= MAX_RESOURCE_NAME_LEN
+        assert name.startswith("sft-cfg-m-d")
 
     def test_caps_length_below_60_and_strips_trailing_hyphen(self) -> None:
         from nmp.customization_common.tasks.model_entity.run import sanitize_name
@@ -503,10 +541,10 @@ class TestLaunchModel:
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
-        template = _resolved_config(model_entity_id=None, model_name=None, model_namespace=None)
+        template = _resolved_config(name="template-cfg", model_entity_id=None, model_name=None, model_namespace=None)
         models.get_deployment_config.return_value = _response(template)
         models.create_deployment_config.return_value = _response(
-            types.SimpleNamespace(workspace="default", name="sft-cfg-x")
+            types.SimpleNamespace(workspace="default", name="sft-cfg-x-template-cfg")
         )
         models.create_deployment.return_value = _response(
             types.SimpleNamespace(workspace="default", name="sft-deploy-x")
@@ -533,7 +571,9 @@ class TestLaunchModel:
 
         body = models.create_deployment_config.call_args.kwargs["body"]
         assert isinstance(body, CreateModelDeploymentConfigRequest)
-        assert body.name == "sft-cfg-x"
+        # Scoped to the template as well as the model, so a second template cannot
+        # overwrite this config.
+        assert body.name == "sft-cfg-x-template-cfg"
         assert body.model_spec.model_name == "x"
         assert body.model_spec.model_namespace == "default"
         # Engine, executor and serving options come from the template, not NIM defaults.
@@ -544,7 +584,11 @@ class TestLaunchModel:
 
         # The derived config is deployed; the template is left untouched for reuse.
         models.update_deployment_config.assert_not_called()
-        assert models.create_deployment.call_args.kwargs["body"].config == "sft-cfg-x"
+        deployment_body = models.create_deployment.call_args.kwargs["body"]
+        assert deployment_body.config == "sft-cfg-x-template-cfg"
+        # The deployment carries the same scope, or the second template would collide
+        # here and silently reuse this deployment and its pinned config version.
+        assert deployment_body.name == "sft-deploy-x-template-cfg"
 
     def test_unbound_string_ref_updates_a_derived_config_on_conflict(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
@@ -552,11 +596,11 @@ class TestLaunchModel:
 
         models, files = _make_clients()
         models.get_deployment_config.return_value = _response(
-            _resolved_config(model_entity_id=None, model_name=None, model_namespace=None)
+            _resolved_config(name="template-cfg", model_entity_id=None, model_name=None, model_namespace=None)
         )
         models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
         models.update_deployment_config.return_value = _response(
-            types.SimpleNamespace(workspace="default", name="sft-cfg-x")
+            types.SimpleNamespace(workspace="default", name="sft-cfg-x-template-cfg")
         )
         models.create_deployment.return_value = _response(
             types.SimpleNamespace(workspace="default", name="sft-deploy-x")
@@ -582,12 +626,80 @@ class TestLaunchModel:
         runner.launch_model(config, me)
 
         update_call = models.update_deployment_config.call_args
-        assert update_call.kwargs["name"] == "sft-cfg-x"
+        assert update_call.kwargs["name"] == "sft-cfg-x-template-cfg"
         body = update_call.kwargs["body"]
         assert isinstance(body, UpdateModelDeploymentConfigRequest)
         assert body.engine is Engine.VLLM
         assert body.model_spec.model_name == "x"
         models.create_deployment.assert_called_once()
+
+    def test_two_templates_for_one_model_do_not_overwrite_each_other(self) -> None:
+        """The collision @anubhutivyas caught: reuse is the whole point of a template.
+
+        Two jobs producing the same model entity from different templates used to
+        resolve to one ``sft-cfg-<model>``. The second create hit ConflictError and
+        updated it to a new version, while the deployment -- also named by model alone
+        -- stayed pinned to the version it was created with. The first job's settings
+        silently became the second's, and the second's deployment never happened.
+        """
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+
+        models, files = _make_clients()
+        created: list[str] = []
+        deployed: list[tuple[str, str]] = []
+
+        def _create_cfg(**kwargs: Any) -> MagicMock:
+            body = kwargs["body"]
+            if body.name in created:
+                _raise_runner_conflict()
+            created.append(body.name)
+            return _response(types.SimpleNamespace(workspace="default", name=body.name))
+
+        def _create_dep(**kwargs: Any) -> MagicMock:
+            body = kwargs["body"]
+            if any(name == body.name for name, _ in deployed):
+                _raise_runner_conflict()
+            deployed.append((body.name, body.config))
+            return _response(types.SimpleNamespace(workspace="default", name=body.name))
+
+        models.create_deployment_config.side_effect = _create_cfg
+        models.create_deployment.side_effect = _create_dep
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="d", status=ModelDeploymentStatus.PENDING)
+        )
+
+        runner = _make_runner(models, files)
+        me = _model_entity(name="mymodel", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        for template, gpu, engine in (("tmpl-nim", 1, Engine.NIM), ("tmpl-vllm", 8, Engine.VLLM)):
+            models.get_deployment_config.return_value = _response(
+                _resolved_config(
+                    name=template,
+                    model_entity_id=None,
+                    model_name=None,
+                    model_namespace=None,
+                    engine=engine,
+                    gpu=gpu,
+                )
+            )
+            runner.launch_model(
+                ModelEntityTaskConfig(
+                    name="mymodel",
+                    workspace="default",
+                    fileset=FileSetRef(workspace="default", name="fs"),
+                    model_entity="default/base",
+                    deployment_config=f"shared/{template}",
+                ),
+                me,
+            )
+
+        assert created == ["sft-cfg-mymodel-tmpl-nim", "sft-cfg-mymodel-tmpl-vllm"]
+        assert deployed == [
+            ("sft-deploy-mymodel-tmpl-nim", "sft-cfg-mymodel-tmpl-nim"),
+            ("sft-deploy-mymodel-tmpl-vllm", "sft-cfg-mymodel-tmpl-vllm"),
+        ]
+        # Neither job overwrote the other's config.
+        models.update_deployment_config.assert_not_called()
 
     def test_bound_string_ref_is_deployed_as_is(self) -> None:
         """A config that already names a model is used verbatim -- nothing to bind."""

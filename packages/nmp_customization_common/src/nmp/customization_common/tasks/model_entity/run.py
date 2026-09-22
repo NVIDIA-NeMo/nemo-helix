@@ -77,11 +77,39 @@ def get_config(config_path: Path) -> ModelEntityTaskConfig:
         return ModelEntityTaskConfig.model_validate(json.load(f))
 
 
-def sanitize_name(prefix: str, name: str) -> str:
-    """Build a deployment-safe name from a free-form model name."""
-    sanitized = re.sub(r"[^a-z0-9@.+_-]", "-", name.lower())
-    sanitized = re.sub(r"-+", "-", sanitized).strip("-")
-    return f"{prefix}-{sanitized}"[:59].rstrip("-")
+MAX_RESOURCE_NAME_LEN = 59
+MAX_DISCRIMINATOR_LEN = 16
+
+
+def _sanitize_segment(value: str) -> str:
+    """Reduce one free-form segment to the deployment-safe character set."""
+    segment = re.sub(r"[^a-z0-9@.+_-]", "-", value.lower())
+    return re.sub(r"-+", "-", segment).strip("-")
+
+
+def sanitize_name(prefix: str, name: str, discriminator: str | None = None) -> str:
+    """Build a deployment-safe name from a free-form model name.
+
+    ``discriminator`` separates resources that belong to the same model but come
+    from different sources -- two deployment templates targeting one trained model
+    being the case that matters. Without it both would resolve to the same name and
+    the second job would overwrite the first's config while its deployment kept
+    serving the old version.
+
+    The discriminator is budgeted for rather than appended, so it can never be
+    truncated away: it is capped, then the model segment gives up whatever room is
+    left. Two distinct discriminators therefore cannot collapse into one name, which
+    is the property the separation depends on.
+    """
+    model = _sanitize_segment(name)
+    if discriminator is None:
+        return f"{prefix}-{model}"[:MAX_RESOURCE_NAME_LEN].rstrip("-")
+
+    tail = _sanitize_segment(discriminator)[:MAX_DISCRIMINATOR_LEN].strip("-")
+    budget = MAX_RESOURCE_NAME_LEN - len(prefix) - len(tail) - 2  # two joining hyphens
+    parts = [prefix, model[: max(budget, 0)], tail]
+    joined = "-".join(part for part in parts if part)
+    return re.sub(r"-+", "-", joined).strip("-")[:MAX_RESOURCE_NAME_LEN]
 
 
 class ModelEntityRunner:
@@ -300,10 +328,16 @@ class ModelEntityRunner:
             logger.warning(f"Deployment requested but lora_enabled is false for a LoRA job: {dc}")
             return
 
+        # Set only when a template was bound: the derived config and its deployment are
+        # named after the template as well as the model, so two templates aimed at one
+        # model stay separate instead of overwriting each other.
+        template_name: str | None = None
+
         if isinstance(dc, str):
             logger.info(f"Resolving deployment config reference: {dc}")
             referenced = self._resolve_config_ref(dc, me.workspace)
             if is_unbound_deployment_config(referenced):
+                template_name = referenced.name
                 deployment_config = self._bind_deployment_config(referenced, me)
             else:
                 deployment_config = referenced
@@ -311,7 +345,7 @@ class ModelEntityRunner:
         else:
             deployment_config = self._create_deployment_config(dc, me)
 
-        self._create_deployment(deployment_config, me)
+        self._create_deployment(deployment_config, me, discriminator=template_name)
 
     def _has_active_deployment(self, me: ModelEntity) -> bool:
         """Check if the model entity already has an active deployment."""
@@ -403,6 +437,7 @@ class ModelEntityRunner:
             engine=template.engine,
             model_spec=model_spec,
             executor_config=template.executor_config,
+            discriminator=template.name,
         )
 
     def _create_or_update_config(
@@ -412,9 +447,13 @@ class ModelEntityRunner:
         engine: Engine,
         model_spec: ModelDeploymentConfigModelSpec,
         executor_config: ContainerExecutorConfig,
+        discriminator: str | None = None,
     ) -> ModelDeploymentConfig:
-        """Create the auto-deploy config for ``me``, updating it if it already exists."""
-        deployment_cfg_name = sanitize_name("sft-cfg", me.name)
+        """Create the auto-deploy config for ``me``, updating it if it already exists.
+
+        ``discriminator`` scopes the name to the config's source; see ``sanitize_name``.
+        """
+        deployment_cfg_name = sanitize_name("sft-cfg", me.name, discriminator)
         try:
             return self.models.create_deployment_config(
                 workspace=me.workspace,
@@ -437,14 +476,26 @@ class ModelEntityRunner:
                 ),
             ).data()
 
-    def _create_deployment(self, deployment_config: ModelDeploymentConfig, me: ModelEntity) -> None:
-        """Create a deployment from the given ``ModelDeploymentConfig``."""
+    def _create_deployment(
+        self,
+        deployment_config: ModelDeploymentConfig,
+        me: ModelEntity,
+        *,
+        discriminator: str | None = None,
+    ) -> None:
+        """Create a deployment from the given ``ModelDeploymentConfig``.
+
+        The deployment carries the same ``discriminator`` as the config it serves.
+        Naming it by model alone would defeat separating the configs: the second job
+        would collide on the deployment and reuse the first one, which is pinned to
+        the config version it was created with.
+        """
         logger.info(f"Using deployment config: {deployment_config.workspace}/{deployment_config.name}")
 
         if not me.spec:
             _ = self._wait_for_spec(me.workspace, me.name)
 
-        deployment_name = sanitize_name("sft-deploy", me.name)
+        deployment_name = sanitize_name("sft-deploy", me.name, discriminator)
         try:
             deployment = self.models.create_deployment(
                 workspace=deployment_config.workspace,
