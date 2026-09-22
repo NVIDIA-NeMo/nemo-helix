@@ -83,7 +83,7 @@ def _identity_rows(*, issuer: str, subject: str) -> list[IdentityRow]:
 
 def _create_workspace(client: TestClient, workspace: str) -> None:
     response = client.post(
-        WORKSPACES_PATH,
+        f"{WORKSPACES_PATH}?wait_role_propagation=false",
         json={"name": workspace, "description": "Stable account migration test"},
         headers=SERVICE_HEADERS,
     )
@@ -92,7 +92,7 @@ def _create_workspace(client: TestClient, workspace: str) -> None:
 
 def _grant_workspace_role(client: TestClient, *, workspace: str, principal: str, role: str) -> None:
     response = client.post(
-        IAM_ROLE_BINDINGS_PATH,
+        f"{IAM_ROLE_BINDINGS_PATH}?wait_role_propagation=false",
         json={"principal": principal, "role": role, "workspace": workspace},
         headers=SERVICE_HEADERS,
     )

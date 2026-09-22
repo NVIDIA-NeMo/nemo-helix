@@ -16,6 +16,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 from nemo_platform_plugin.client.auth import StaticToken, TokenProviderAuth
+from nmp.common.auth.principal_identifier import InvalidPrincipalIdentifier
 from nmp.common.auth.workload_proxy import main as workload_proxy_main
 from nmp.common.auth.workload_proxy.main import build_app
 from nmp.common.controller import ControllerManager, Loop
@@ -135,6 +136,12 @@ def test_forward_preserves_request_body_framing(chunked: bool) -> None:
     else:
         assert sent.headers["content-length"] == str(len(body))
         assert "transfer-encoding" not in sent.headers
+
+
+@pytest.mark.parametrize("principal", ["service:", "service:/path", "service:*", "has spaces"])
+def test_build_app_rejects_malformed_service_principal(principal: str) -> None:
+    with pytest.raises(InvalidPrincipalIdentifier):
+        build_app(base_url="http://nemo-platform-api:8080", principal=principal)
 
 
 @respx.mock

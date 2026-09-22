@@ -23,6 +23,15 @@ from .exceptions import AuthorizationError, InvalidPermissionFormatError, Invali
 from .middleware import AuthorizationMiddleware
 from .models import NMP_PRINCIPAL_ENVVAR, AuthContext, Principal
 from .permissions import ALL_WORKSPACES, compute_accessible_workspaces
+from .principal_identifier import (
+    InvalidPrincipalIdentifier,
+    PrincipalIdentifier,
+    is_service_principal,
+    normalize_service_principal_identifier,
+    parse_principal_identifier,
+    parse_service_name,
+    validate_principal_identifier,
+)
 from .tasks import principal_from_env
 from .workload_delegations import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
@@ -80,6 +89,7 @@ __all__ = [
     "AuthConfig",
     "AuthorizationError",
     "InvalidPermissionFormatError",
+    "InvalidPrincipalIdentifier",
     "InvalidScopeFormatError",
     "AuthorizationMiddleware",
     "AuthorizationResult",
@@ -101,6 +111,7 @@ __all__ = [
     "NMP_PRINCIPAL_ENVVAR",
     "ParsedOpaqueDockerProofToken",
     "Principal",
+    "PrincipalIdentifier",
     "SyncWorkloadDelegationStore",
     "WorkloadDelegationConflictError",
     "WorkloadDelegationEntity",
@@ -135,6 +146,11 @@ __all__ = [
     "compute_accessible_workspaces",
     "get_auth_client",
     "get_principal_auth_headers",
+    "is_service_principal",
+    "normalize_service_principal_identifier",
+    "parse_principal_identifier",
+    "parse_service_name",
     "validate_access_key_token",
+    "validate_principal_identifier",
     "verify_opaque_docker_proof_token_hash",
 ]

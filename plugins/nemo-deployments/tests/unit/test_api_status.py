@@ -42,6 +42,15 @@ def test_status_put_rejects_user(client: TestClient) -> None:
     assert resp.status_code == 403
 
 
+def test_status_put_rejects_malformed_service_principal(client: TestClient) -> None:
+    resp = client.put(
+        "/apis/deployments/v2/workspaces/default/deployments/dep1/status",
+        json={"status": "READY"},
+        headers={"X-NMP-Principal-Id": "service:"},
+    )
+    assert resp.status_code == 403
+
+
 def test_status_put_ignores_on_behalf_of_for_auth(client: TestClient) -> None:
     resp = client.put(
         "/apis/deployments/v2/workspaces/default/deployments/dep1/status",
