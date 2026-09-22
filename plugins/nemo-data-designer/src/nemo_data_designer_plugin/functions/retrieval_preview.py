@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from data_designer_nemo.context import create_validation_context
+from data_designer_nemo.context.validation import create_validation_context
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPreviewSpec
 from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers

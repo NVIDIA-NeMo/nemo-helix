@@ -5,7 +5,7 @@
 name = "nmp-customization-common"
 description = "Shared library for NeMo customization training backends (unsloth, automodel) — plugin SDK/contributor bases and service-side task/compile helpers."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nmp-common",
     "nemo-platform-plugin",

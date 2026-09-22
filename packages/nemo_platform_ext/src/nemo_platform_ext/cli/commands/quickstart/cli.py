@@ -291,7 +291,8 @@ quickstart_app = typer.Typer(help="Quickstart commands for managing the NeMo Pla
 def cluster_info(ctx: typer.Context) -> None:
     """Show information about the connected platform cluster."""
     import httpx
-    import nemo_platform
+
+    from nemo_platform_ext.cli.version import client_version
 
     base_url: str | None = None
     context_name: str | None = None
@@ -313,7 +314,7 @@ def cluster_info(ctx: typer.Context) -> None:
     if context_name:
         console.print(f"• Context: {context_name}")
     console.print(f"• URL: {base_url}")
-    console.print(f"• CLI Version: {nemo_platform.__version__}")
+    console.print(f"• CLI Version: {client_version()}")
 
     try:
         response = httpx.get(f"{base_url.rstrip('/')}/status", timeout=5.0)
@@ -966,8 +967,6 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
     """
     import uuid
 
-    from nemo_platform import NeMoPlatform
-    from nemo_platform_plugin.client.adapter import client_from_platform
     from nemo_platform_plugin.jobs.client import JobsClient
     from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
 
@@ -986,7 +985,7 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
         }
 
     try:
-        client = NeMoPlatform(
+        jobs_client = JobsClient(
             base_url=f"http://localhost:{port}",
             workspace="default",
             default_headers=default_headers,
@@ -1000,7 +999,6 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
         job_name = f"diagnostic-{uuid.uuid4().hex[:8]}"
         console.print(f"  • Creating diagnostic job: {job_name}")
 
-        jobs_client = client_from_platform(client, JobsClient)
         job = jobs_client.create_job(
             body=CreatePlatformJobRequest(
                 platform_spec={

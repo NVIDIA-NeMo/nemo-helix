@@ -6,7 +6,7 @@ name = "nemo-evaluator-sdk"
 description = "NeMo Evaluator SDK"
 readme = "README.md"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.12,<3.15"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -15,7 +15,6 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Human Machine Interfaces",
   "Topic :: Software Development",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
@@ -59,12 +58,13 @@ agent-runtimes = [
   "openai-agents[docker]>=0.17.3,<0.18",
 ]
 engine = []
-# Native Harbor execution and result adaptation need `harbor`, which requires Python >=3.12 while
-# the SDK floor remains >=3.11. The marker scopes the dependency to compatible interpreters.
-# Harbor is imported lazily, so importing the SDK and constructing Harbor configuration remain
-# valid on Python 3.11; invoking either execution or result adaptation requires this extra.
+# Native Harbor execution and result adaptation need `harbor`. It stays optional because it is
+# heavy, not because of the interpreter: the SDK floor now matches Harbor's own >=3.12, so the
+# `python_version` marker this entry used to carry is gone. Harbor is imported lazily, so importing
+# the SDK and constructing Harbor configuration work without the extra; execution and result
+# adaptation do not.
 harbor = [
-  "harbor>=0.20,<0.21; python_version >= '3.12'",
+  "harbor>=0.20,<0.21",
 ]
 nemo-platform = [
   "nemo-platform-sdk",
@@ -90,7 +90,8 @@ nemo-platform = [
 #   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
 #     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
-#     Python<3.14-gated upstream, which the lock's own <3.14 ceiling already satisfies.
+#     It is Python<3.14-gated upstream, and the lock now reaches 3.14, so the marker below really does
+#     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [

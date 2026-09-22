@@ -5,7 +5,7 @@
 name = "nemo-automodel-plugin"
 description = "NeMo Automodel customization contributor for NeMo Platform."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "nemo-platform-plugin",
     "nmp-automodel",

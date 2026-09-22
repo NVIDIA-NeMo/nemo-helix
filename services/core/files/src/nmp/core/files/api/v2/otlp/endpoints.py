@@ -132,7 +132,7 @@ async def query_otlp_logs(
         )
     except InvalidPageCursorError as e:
         logger.error(f"Invalid page cursor: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e))
     except InvalidFilterError as e:
         logger.error(f"Invalid filter: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Invalid filter: {str(e)}")

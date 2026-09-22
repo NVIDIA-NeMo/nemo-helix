@@ -71,13 +71,9 @@ version = "0.0.0"
 [dependency-groups]
 # Insights analyst plugin convenience group.
 insights = ["nemo-insights-plugin"]
-# Experimentalist and Eval Author support Python 3.12 and 3.13. Both are listed so the
-# `nemo agents eval-author` commands are installed alongside Experimentalist. The
-# dependency is one arrow: Eval Author borrows the Experimentalist platform client
-# (see plugins/nemo-eval-author/README.md).
+# Experimentalist supports Python 3.12 and 3.13.
 experimentalist = [
   "nemo-experimentalist-plugin ; python_full_version < '3.14'",
-  "nemo-eval-author-plugin ; python_full_version < '3.14'",
 ]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin stays out of `enabled-plugins` so a platform install does not
@@ -254,7 +250,7 @@ cpu-tasks = [
   # deepagents, hermes). Without this the job's declared `container = "cpu-tasks"`
   # is not true: nemo_agents_plugin.tasks.execute is not importable here.
   "nemo-agents-plugin",
-  # insights.analyze bridge, which is a ModuleNotFoundError in a built image otherwise.
+  # Insights Analyst Fabric adapter and insights.analysis execute extension.
   "nemo-insights-plugin",
   "nemo-evaluator-plugin",
   "nemo-sandboxed-gym[server,opensandbox]",
@@ -430,7 +426,6 @@ nmp-testing = { workspace = true }
 nmp-build-tools = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
-nemo-eval-author-plugin = { workspace = true }
 nemo-experimentalist-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
@@ -504,7 +499,6 @@ members = [
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
-  "plugins/nemo-eval-author",
   "plugins/nemo-experimentalist",
   # Not shipped. An out-of-tree component package, installed so the tests that prove the
   # plugin mechanism actually run instead of being skipped by `importorskip`.

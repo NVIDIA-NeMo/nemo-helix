@@ -227,18 +227,18 @@ Quote values with special characters: `--output-columns 'field.$name'`
 
 ## Development
 
-Built with [Typer](https://typer.tiangolo.com/), [Rich](https://rich.readthedocs.io/), and [nemo-platform](https://github.com/stainless-sdks/nemo-platform-v1-python).
+Built with [Typer](https://typer.tiangolo.com/), [Rich](https://rich.readthedocs.io/), and the typed clients in `nemo_platform_plugin`.
 
 See [docs/overview.md](docs/overview.md) for architecture details.
 
-### Auto-Generated Code
+### Command Groups
 
-**IMPORTANT:** Files in `src/nemo_platform_ext/cli/commands/api/` are auto-generated.
-- Do NOT manually edit these files
-- Do NOT include in code reviews
-- Generated from templates in `tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk/cli_generator/templates/`
+`nemo <group> *` commands are hand-written on the typed clients in `nemo_platform_plugin`
+(`src/nemo_platform_ext/cli/commands/`); the CLI has no dependency on the generated
+`nemo_platform` SDK. Functional groups (`guardrail`, `intake`, `experiments`, ...) are
+`nemo.cli` entry points shipped by the owning package.
 
-To regenerate (from repo root):
+To vendor the CLI and regenerate its reference docs (from repo root):
 ```shell
 make update-cli
 ```

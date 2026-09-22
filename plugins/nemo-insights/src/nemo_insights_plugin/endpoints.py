@@ -19,11 +19,7 @@ from nemo_insights_plugin.schema import (
     UpdateInsightRequest,
 )
 from nemo_insights_plugin.types import (
-    ANALYSIS_JOB_NAME,
-    AnalysisJob,
-    CreateAnalysisJobRequest,
     ListAnalysisConfigsQueryParams,
-    ListAnalysisJobsQueryParams,
     ListAnalysisRunsQueryParams,
     ListAnalysisRunStatusesQueryParams,
     ListInsightsQueryParams,
@@ -32,7 +28,6 @@ from nemo_platform_plugin.client.endpoint import delete, get, patch, post
 from nemo_platform_plugin.client.types import Paginated
 
 _INSIGHTS_BASE = "/apis/insights/v2/workspaces/{workspace}"
-_ANALYSIS_JOBS = f"{_INSIGHTS_BASE}/jobs/{ANALYSIS_JOB_NAME}"
 
 
 @post(f"{_INSIGHTS_BASE}/insights")
@@ -127,20 +122,3 @@ def list_analysis_runs(
 @get(f"{_INSIGHTS_BASE}/analysis-runs/{{name}}")
 @abstractmethod
 def get_analysis_run(*, workspace: str | None = None, name: str) -> AnalysisRunResponse: ...
-
-
-@post(_ANALYSIS_JOBS)
-@abstractmethod
-def create_analysis_job(*, workspace: str | None = None, body: CreateAnalysisJobRequest) -> AnalysisJob: ...
-
-
-@get(_ANALYSIS_JOBS)
-@abstractmethod
-def list_analysis_jobs(
-    *, workspace: str | None = None, query_params: ListAnalysisJobsQueryParams | None = None
-) -> Paginated[AnalysisJob]: ...
-
-
-@get(f"{_ANALYSIS_JOBS}/{{name}}")
-@abstractmethod
-def get_analysis_job(*, workspace: str | None = None, name: str) -> AnalysisJob: ...

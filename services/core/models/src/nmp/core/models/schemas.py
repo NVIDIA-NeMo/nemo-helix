@@ -25,6 +25,10 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, mode
 # NAME_PATTERN uses lookaround; rust-regex cannot compile it.
 ENTITY_NAME_CONFIG = ConfigDict(regex_engine="python-re")
 
+# Request-body config: reject unknown fields so plugin-style params (e.g. executor)
+# sent to a model deployment endpoint fail loudly instead of being silently ignored.
+REQUEST_CONFIG = ConfigDict(regex_engine="python-re", extra="forbid")
+
 
 def get_model_id(prefix: str) -> str:
     """Generate a unique model ID with the given prefix."""
@@ -1632,7 +1636,7 @@ class ModelDeployment(ModelEntityBaseModel):
 class CreateModelDeploymentConfigRequest(BaseModel):
     """Request model for creating a ModelDeploymentConfig."""
 
-    model_config = ENTITY_NAME_CONFIG
+    model_config = REQUEST_CONFIG
 
     name: str = Field(
         description=f"Name of the deployment configuration. {constants.NAME_PATTERN_DESCRIPTION}",
@@ -1667,6 +1671,8 @@ class CreateModelDeploymentConfigRequest(BaseModel):
 
 class UpdateModelDeploymentConfigRequest(BaseModel):
     """Request model for updating a ModelDeploymentConfig (creates new version)."""
+
+    model_config = REQUEST_CONFIG
 
     description: Optional[str] = Field(
         default=None,
@@ -1712,7 +1718,7 @@ class ListModelDeploymentConfigsRequest(BaseModel):
 class CreateModelDeploymentRequest(BaseModel):
     """Request model for creating a ModelDeployment."""
 
-    model_config = ENTITY_NAME_CONFIG
+    model_config = REQUEST_CONFIG
 
     name: str = Field(
         description=f"Name of the deployment. {constants.NAME_PATTERN_DESCRIPTION}",
@@ -1739,6 +1745,8 @@ class CreateModelDeploymentRequest(BaseModel):
 class UpdateModelDeploymentRequest(BaseModel):
     """Request model for updating a ModelDeployment (creates new version)."""
 
+    model_config = REQUEST_CONFIG
+
     config: str = Field(
         description="Reference to the ModelDeploymentConfig name",
         max_length=constants.MAX_LENGTH_255,
@@ -1751,6 +1759,8 @@ class UpdateModelDeploymentRequest(BaseModel):
 
 class UpdateModelDeploymentStatusRequest(BaseModel):
     """Request model for updating ModelDeployment status."""
+
+    model_config = REQUEST_CONFIG
 
     status: ModelDeploymentStatus = Field(description="New status for the deployment")
     status_message: str = Field(default="", description="Detailed status message", max_length=1000)

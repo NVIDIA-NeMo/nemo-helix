@@ -22,7 +22,7 @@ from nemo_anonymizer_plugin.app.task_config import (
     AnonymizerStepConfig,
 )
 from nemo_anonymizer_plugin.tasks.anonymizer.run import run_step_config
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import (
@@ -54,7 +54,7 @@ class RunJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         is_local: bool,
     ) -> AnonymizerStepConfig:
         del entity_client, is_local
@@ -103,7 +103,7 @@ class RunJob(NemoJob):
         spec: BaseModel,  # AnonymizerStepConfig
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -131,7 +131,7 @@ class RunJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform,
+        sdk: SyncPlatformClient,
     ) -> dict:
         step_config = AnonymizerStepConfig.model_validate(config)
         return {"exit_code": run_step_config(step_config, ctx=ctx, sdk=sdk)}

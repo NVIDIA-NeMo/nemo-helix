@@ -17,7 +17,7 @@ import re
 import shutil
 import signal
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.config import GymRuntimeConfig
@@ -190,10 +190,10 @@ async def terminate(proc: asyncio.subprocess.Process, *, grace_s: float = 30.0) 
         await proc.wait()
 
 
-def gym_invocation_env(config: GymRuntimeConfig) -> dict[str, str]:
+def gym_invocation_env(config: GymRuntimeConfig, secret_env: Mapping[str, str] | None = None) -> dict[str, str]:
     """The environment the ``gym`` CLI is invoked with.
 
-    Three layers, lowest precedence first:
+    Four layers, lowest precedence first:
 
     1. **This process's environment.** Gym reads credentials from its own gitignored ``env.yaml``,
        but honours plenty of ordinary variables (``HF_TOKEN``, proxies) a caller expects to carry
@@ -205,7 +205,10 @@ def gym_invocation_env(config: GymRuntimeConfig) -> dict[str, str]:
     3. **``config.env_vars``.** Named explicitly in the run config, so it wins over both. That
        includes the Ray setting: it is a default that makes Gym work, not an invariant, and someone
        debugging that hook needs a way to put it back.
+    4. **Resolved ``config.env_secrets``.** Last, though nothing should depend on that: naming a
+       variable in both ``env_vars`` and ``env_secrets`` is rejected when the config is built, so the
+       two layers cannot disagree.
 
     Lives here rather than in the runtime so the precedence is assertable without starting Ray.
     """
-    return {**os.environ, "RAY_ENABLE_UV_RUN_RUNTIME_ENV": "0", **config.env_vars}
+    return {**os.environ, "RAY_ENABLE_UV_RUN_RUNTIME_ENV": "0", **config.env_vars, **(secret_env or {})}

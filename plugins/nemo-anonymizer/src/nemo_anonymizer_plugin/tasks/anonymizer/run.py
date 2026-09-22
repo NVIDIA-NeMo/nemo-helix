@@ -10,6 +10,8 @@ import logging
 import os
 from pathlib import Path
 
+import pandas as pd
+from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
 from anonymizer.interface.anonymizer import Anonymizer
 from data_designer.config.models import ModelProvider as DDModelProvider
 from data_designer_nemo.model_provider import (
@@ -19,8 +21,7 @@ from data_designer_nemo.model_provider import (
 from nemo_anonymizer_plugin.app.input import prepare_anonymizer_input
 from nemo_anonymizer_plugin.app.task_config import AnonymizerStepConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import PlatformJobResults
@@ -40,7 +41,7 @@ ARTIFACTS_RESULT_NAME = "artifacts"
 _TASK_LOG_HANDLER_MARKER = "_nemo_anonymizer_task_handler"
 
 
-def run(sdk: NeMoPlatform | None = None) -> int:
+def run(sdk: SyncPlatformClient | None = None) -> int:
     try:
         service_sdk = sdk or get_platform_sdk(as_service="anonymizer")
         return run_step_config(_load_step_config(), ctx=_get_ctx(service_sdk), sdk=service_sdk)
@@ -53,7 +54,7 @@ def run_step_config(
     step_config: AnonymizerStepConfig,
     *,
     ctx: JobContext,
-    sdk: NeMoPlatform | None = None,
+    sdk: SyncPlatformClient | None = None,
 ) -> int:
     try:
         return _run_with_step_config(sdk, step_config, ctx=ctx)
@@ -63,7 +64,7 @@ def run_step_config(
 
 
 def _run_with_step_config(
-    service_sdk: NeMoPlatform | None,
+    service_sdk: SyncPlatformClient | None,
     step_config: AnonymizerStepConfig,
     *,
     ctx: JobContext,
@@ -101,7 +102,7 @@ def _run_with_step_config(
     artifacts_dir = storage_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     result.dataframe.to_parquet(artifacts_dir / "dataset.parquet", index=False)
-    result.trace_dataframe.to_parquet(artifacts_dir / "trace.parquet", index=False)
+    _encode_skipped_span_label_counts(result.trace_dataframe).to_parquet(artifacts_dir / "trace.parquet", index=False)
     with open(artifacts_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(
             {"original_text_column": _get_original_text_column(result.trace_dataframe, request.data.text_column)},
@@ -133,7 +134,7 @@ def _run_with_step_config(
 
 
 def _resolve_provider_endpoints(
-    sdk: NeMoPlatform,
+    sdk: SyncPlatformClient,
     step_config: AnonymizerStepConfig,
     workspace: str,
 ) -> list[DDModelProvider] | None:
@@ -176,6 +177,38 @@ def _get_task_log_handler(module_logger: logging.Logger) -> logging.Handler | No
     return None
 
 
+def _encode_skipped_span_label_counts(trace_dataframe: pd.DataFrame) -> pd.DataFrame:
+    """JSON-encode the nested ``skipped_span_label_counts`` mapping for Parquet.
+
+    ``ReplacementApplication`` carries ``skipped_span_label_counts`` as a nested dict.
+    When no spans were skipped it is ``{}`` on every row, and Arrow infers a struct
+    with no child fields, which Parquet cannot write ("Cannot write struct type ...
+    with no child field"). Encoding to a JSON string yields the same Arrow type
+    regardless of content.
+
+    This mirrors the encoding the upstream library applies in
+    ``anonymizer.engine.rewrite.rewrite_generation._prepare_rewrite_tagged_text``.
+    Upstream exposes the decode half as a reusable function but keeps the encode half
+    inline in a private row function, so the one ``json.dumps`` line is duplicated
+    here. ``AnonymizerJobResults.load_trace`` undoes it with upstream's
+    ``restore_empty_skipped_span_label_counts``; keep the two sides in step.
+    """
+    if COL_REPLACEMENT_APPLICATION not in trace_dataframe.columns:
+        return trace_dataframe
+
+    def _encode(value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        counts = value.get("skipped_span_label_counts")
+        if isinstance(counts, str):
+            return value
+        return {**value, "skipped_span_label_counts": json.dumps(counts, sort_keys=True)}
+
+    encoded = trace_dataframe.copy(deep=False)
+    encoded[COL_REPLACEMENT_APPLICATION] = trace_dataframe[COL_REPLACEMENT_APPLICATION].map(_encode)
+    return encoded
+
+
 def _get_original_text_column(trace_dataframe: object, fallback: str) -> str:
     attrs = getattr(trace_dataframe, "attrs", {})
     if isinstance(attrs, dict):
@@ -190,7 +223,7 @@ def _load_step_config() -> AnonymizerStepConfig:
         return AnonymizerStepConfig.model_validate_json(f.read())
 
 
-def _get_ctx(sdk: NeMoPlatform) -> JobContext:
+def _get_ctx(sdk: SyncPlatformClient) -> JobContext:
     workspace = _get_workspace()
     job_name = _get_job_name()
     storage = StoragePaths(

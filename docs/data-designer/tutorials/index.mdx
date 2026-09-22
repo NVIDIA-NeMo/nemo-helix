@@ -21,7 +21,7 @@ Data Designer separates **configuration** (building dataset schemas) from **exec
 
 **Part 1: Build Configs (Library)**
 
-Use `data_designer.config` to define your dataset. See the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/getting-started/welcome) for comprehensive guides on column types, constraints, and processors.
+Use `data_designer.config` to define your dataset. See the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/getting-started/welcome) for comprehensive guides on column types, constraints, and processors.
 
 ```python
 import data_designer.config as dd
@@ -75,6 +75,13 @@ Generate a product review dataset using samplers and LLM-generated text. Learn t
 Use external datasets to ground synthetic data generation. Generate realistic patient medical notes from symptom-to-diagnosis data.
 
 <small><span class="md-tag">intermediate</span> <span class="md-tag">data-designer</span></small>
+
+</Card>
+<Card title="Generate Retrieval Training Data" href="/documentation/design-synthetic-data/tutorials/retrieval-generate">
+
+Turn your own document corpus into judged question-and-answer pairs, ready for embedding fine-tuning. Hard-negative mining uses the current encoder to select non-answer passages that rank near each positive, giving the model useful examples to distinguish.
+
+<small><span class="md-tag">intermediate</span> <span class="md-tag">data-designer</span> <span class="md-tag">retrieval</span></small>
 
 </Card>
 

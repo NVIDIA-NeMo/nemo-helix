@@ -31,8 +31,10 @@ def test_auditor_authz_derivation_has_no_problems() -> None:
     assert contrib.endpoints[targets]["post"].permissions == ["auditor.targets.create"]
     assert {"auditor.targets.read", "auditor.targets.delete"} <= set(contrib.permissions)
 
-    # All routes are PRINCIPAL (no service-only routes in this plugin).
+    # No service-only routes in this plugin: every route stays reachable by a human.
+    # Not an equality check: the factory-generated job routes also carry
+    # ``service_principal`` (see authz.GENERATED_ROUTE_CALLERS).
     for methods in contrib.endpoints.values():
         for binding in methods.values():
-            assert binding.callers == ["principal"]
+            assert binding.callers is not None and "principal" in binding.callers
             assert binding.deny is False

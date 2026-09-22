@@ -999,11 +999,18 @@ jobs:
           path: report.xml
 
   python-unit-test:
-    name: Python unit tests
+    name: Python unit tests (py${{ matrix.python-version }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every supported interpreter: this is the only job that executes the suite, so it is
+        # the only one that answers "does the code work here". Packaging and install are
+        # covered elsewhere; running them is not the same as running the tests.
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1018,7 +1025,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run unit tests
@@ -1032,13 +1039,47 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-unit-test-results
+          name: python-unit-test-results-py${{ matrix.python-version }}
           retention-days: 30
           path: |
             report.xml
             coverage.xml
             coverage.json
             coverage-html/
+
+  # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
+  # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
+  # nothing carries the bare name -- the required check would sit on "Expected — Waiting for
+  # status to be reported" forever. This job reports that name, and is red whenever any leg is.
+  # Removing it means updating the ruleset, which needs repository admin.
+  python-unit-test-status:
+    name: Python unit tests
+    needs: [python-unit-test]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check unit test legs
+        shell: bash
+        env:
+          # A matrix job's `result` is already the aggregate: success only when every leg
+          # succeeded, failure when any leg failed.
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Python unit tests"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            printf '%s\n' "${NEEDS_JSON}" \
+              | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          printf '%s\n' "${NEEDS_JSON}" \
+            | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
 
   # The scaled-evals plugin stays out of `enabled-plugins`, so `python-unit-test` cannot
   # import it and skips its tests. Installing it into that shared run is not an option:
@@ -1093,16 +1134,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One interpreter on purpose. nemo-fabric-runtime ships a single cp311-abi3 wheel and the
-        # adapters are pure Python, so extra legs mostly re-check the same dependency closure; the
-        # 3.12-3.13 range is already asserted by uv.lock resolving universally.
-        #
-        # It must satisfy uv.lock's `requires-python` (currently >=3.12,<3.14) because this job runs
-        # `uv sync` on the WORKSPACE. That ceiling is the intersection across workspace members —
-        # nemo-rl, automodel, unsloth, deployments and experimentalist still cap at <3.14 — so it is
-        # narrower than the root pyproject's <3.15, and a 3.14 leg would fail at `uv sync` before
-        # installing anything.
-        python-version: ["3.12"]
+        # One leg per distinct dependency closure. 3.13 resolves exactly what 3.12 does; 3.14
+        # does not, because the `fabric` extra pins `nemo-fabric-adapters-hermes` to
+        # `python_version < '3.14'`, and nothing else in CI installs that closure.
+        python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1177,8 +1212,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Must satisfy uv.lock's requires-python (>=3.12,<3.14), which this job syncs against.
-        python-version: ["3.12"]
+        # Must satisfy uv.lock's requires-python (>=3.12,<3.15), which this job syncs against.
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1459,7 +1494,7 @@ jobs:
       fail-fast: false
       matrix:
         package: [nemo-platform, nemo-platform-plugin]
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1503,7 +1538,7 @@ jobs:
       fail-fast: false
       matrix:
         package: [nemo-platform, nemo-platform-plugin]
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
         # `uv tool install` is the documented front door for the CLI; `venv`
         # covers installs into an environment the user owns. The plugin is a
         # library with no CLI entry point, so it only gets the venv leg.
@@ -2171,7 +2206,10 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-unit-test-results
+          # One interpreter's results, so the coverage table stays a single number. Pinned
+          # rather than globbed: this download is `continue-on-error`, so a name that stops
+          # matching would quietly render "N/A" instead of failing.
+          name: python-unit-test-results-py3.12
           path: unit-coverage
       - name: Download integration test coverage
         continue-on-error: true
@@ -2188,10 +2226,10 @@ jobs:
               echo "| **${label}** | N/A | N/A | N/A |"
               return
             fi
-            LINE_RATE=$(grep -oP 'line-rate="\K[^"]+' "${xml_file}" | head -1)
-            LINE_COVERED=$(grep -oP 'lines-covered="\K[^"]+' "${xml_file}" | head -1)
-            LINE_VALID=$(grep -oP 'lines-valid="\K[^"]+' "${xml_file}" | head -1)
-            BRANCH_RATE=$(grep -oP 'branch-rate="\K[^"]+' "${xml_file}" | head -1)
+            LINE_RATE=$(grep -m1 -oP 'line-rate="\K[^"]+' "${xml_file}")
+            LINE_COVERED=$(grep -m1 -oP 'lines-covered="\K[^"]+' "${xml_file}")
+            LINE_VALID=$(grep -m1 -oP 'lines-valid="\K[^"]+' "${xml_file}")
+            BRANCH_RATE=$(grep -m1 -oP 'branch-rate="\K[^"]+' "${xml_file}")
             LINE_PCT=$(awk "BEGIN {printf \"%.1f\", ${LINE_RATE} * 100}")
             BRANCH_PCT=$(awk "BEGIN {printf \"%.1f\", ${BRANCH_RATE} * 100}")
             echo "| **${label}** | ${LINE_COVERED}/${LINE_VALID} | ${LINE_PCT}% | ${BRANCH_PCT}% |"

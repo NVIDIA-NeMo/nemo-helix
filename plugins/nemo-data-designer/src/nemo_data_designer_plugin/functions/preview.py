@@ -16,7 +16,8 @@ from anyio.lowlevel import current_token
 from data_designer.config.utils.io_helpers import serialize_data
 from data_designer.errors import DataDesignerError
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.context import create_execution_context, create_validation_context
+from data_designer_nemo.context.execution import create_execution_context
+from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError, raise_if_errors
 from data_designer_nemo.fileset_file_seed_reader import workspace_cvar
 from data_designer_nemo.runnable import resolve_runnable_config

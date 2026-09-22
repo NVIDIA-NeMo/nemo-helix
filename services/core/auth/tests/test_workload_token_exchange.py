@@ -1205,10 +1205,21 @@ def test_workload_exchange_requires_resolved_token_signing_key_id() -> None:
         )
 
 
-def test_workload_exchange_accepts_workload_key_id_when_shared_key_id_unset() -> None:
+def test_workload_exchange_requires_configured_signing_private_key_file() -> None:
+    with pytest.raises(ValidationError, match="workload_token_private_key_file or auth.token_signing.private_key_file"):
+        AuthConfig(
+            enabled=True,
+            oidc=OIDCConfig(
+                enabled=True,
+                workload_token_exchange_enabled=True,
+            ),
+        )
+
+
+def test_workload_exchange_accepts_workload_key_id_when_shared_key_id_unset(tmp_path: Path) -> None:
     config = AuthConfig(
         enabled=True,
-        token_signing=TokenSigningConfig(key_id=""),
+        token_signing=TokenSigningConfig(key_id="", private_key_file=str(tmp_path / "workload-token.pem")),
         oidc=OIDCConfig(
             enabled=True,
             workload_token_exchange_enabled=True,

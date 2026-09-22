@@ -76,7 +76,7 @@ def test_healthz() -> None:
 
 def test_healthz_responds_when_worker_thread_capacity_is_exhausted() -> None:
     async def probe() -> None:
-        limiter = anyio.to_thread.current_default_thread_limiter()  # type: ignore[unresolved-attribute]
+        limiter = anyio.to_thread.current_default_thread_limiter()  # ty: ignore[unresolved-attribute]
         original_capacity = limiter.total_tokens
         occupied_worker = object()
         limiter.total_tokens = 1
@@ -149,6 +149,8 @@ def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  #
     monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
     monkeypatch.setattr(ops, "_schema_probe", lambda: None)
     monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
+    # Required by default now that Platform Jobs is the default execution path.
+    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
 
     def fail_probe() -> None:
         raise AssertionError("disabled dependencies should not be probed")

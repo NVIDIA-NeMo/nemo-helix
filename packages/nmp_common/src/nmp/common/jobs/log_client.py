@@ -12,13 +12,23 @@ import logging
 
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.client.errors import NemoHTTPError, NotFoundError
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.files.types import OtlpLogQueryRequest
-from nmp.common.jobs.schemas import PlatformJobLogPage
+from nmp.common.jobs.schemas import InvalidPageCursorError, PlatformJobLogPage
 from nmp.common.sdk_factory import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
+
+_INVALID_PAGE_CURSOR_DETAILS = {
+    "Invalid page cursor",
+    "page_cursor does not match the current log filters.",
+}
+_INVALID_PAGE_CURSOR_STATUS_CODES = {400, 422}
+
+
+def _is_invalid_page_cursor_error(exc: NemoHTTPError) -> bool:
+    return exc.status_code in _INVALID_PAGE_CURSOR_STATUS_CODES and exc.detail in _INVALID_PAGE_CURSOR_DETAILS
 
 
 class JobLogsClient:
@@ -79,6 +89,11 @@ class JobLogsClient:
         except NotFoundError:
             logger.debug(f"Fileset '{fileset}' not found, returning empty page")
             return PlatformJobLogPage(data=[], total=0, next_page=None, prev_page=None)
+        except NemoHTTPError as e:
+            if _is_invalid_page_cursor_error(e):
+                raise InvalidPageCursorError(e.detail) from e
+            logger.error(f"Error querying logs: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error querying logs: {e}")
             raise

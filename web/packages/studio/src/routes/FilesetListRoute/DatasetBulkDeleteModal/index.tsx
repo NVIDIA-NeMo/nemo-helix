@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
@@ -42,7 +43,21 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
       },
     },
   });
-  const { mutateAsync: deleteDatasets } = useMutateMany(deleteDataset, { action: 'delete' });
+  const deleteDatasetWithMessage = async (variables: { workspace: string; name: string }) => {
+    try {
+      return await deleteDataset(variables);
+    } catch (error) {
+      throw new Error(
+        getErrorMessage(
+          error as Error,
+          `Fileset '${variables.workspace}/${variables.name}' could not be deleted. It may still be in use.`
+        )
+      );
+    }
+  };
+  const { mutateAsync: deleteDatasets } = useMutateMany(deleteDatasetWithMessage, {
+    action: 'delete',
+  });
 
   const handleDelete = async (datasets: FilesetOutput[]) => {
     const datasetsToDelete = datasets.filter(

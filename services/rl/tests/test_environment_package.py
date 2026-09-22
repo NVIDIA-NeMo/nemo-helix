@@ -1198,3 +1198,25 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
     )
 
     assert "--no-config" in commands[0]
+
+
+def test_build_step_keeps_subprocess_output_off_stdout(capfd) -> None:
+    """stdout is the CLI's JSON channel; uv and pip both write there by default."""
+    import sys
+
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    convert_mod._run_build_step([sys.executable, "-c", "print('resolver noise')"])
+
+    out, err = capfd.readouterr()
+    assert "resolver noise" not in out
+    assert "resolver noise" in err
+
+
+def test_converter_routes_every_subprocess_through_the_stderr_helper() -> None:
+    """A bare subprocess.run inherits stdout and would corrupt the JSON result again."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    source = Path(convert_mod.__file__).read_text(encoding="utf-8")
+    bare = [line.strip() for line in source.splitlines() if "subprocess.run(" in line and "stdout=" not in line]
+    assert bare == [], f"these bypass _run_build_step: {bare}"

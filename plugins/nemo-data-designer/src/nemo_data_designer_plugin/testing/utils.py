@@ -118,7 +118,7 @@ class MockHuggingFaceSeedReader(SeedReader[dd.HuggingFaceSeedSource]):
 
 @contextmanager
 def mock_hf_seed_reader() -> Generator[None]:
-    with patch("data_designer_nemo.context.HuggingFaceSeedReader", MockHuggingFaceSeedReader):
+    with patch("data_designer_nemo.context.execution.HuggingFaceSeedReader", MockHuggingFaceSeedReader):
         yield
 
 

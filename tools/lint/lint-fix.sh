@@ -7,18 +7,17 @@ set -euo pipefail
 #   1. OpenAPI spec regeneration (other steps depend on this)
 #   2. Web SDK regeneration (Orval reads openapi/ga/individual/platform.openapi.yaml)
 #   3. Python style (ruff; run before vendoring so generated files aren't re-linted)
-#   4. CLI command generation (the vendoring and docs are handled by the next step)
-#   5. Vendor all packages (covers nemo_platform_ext too) + CLI reference docs
-#   6. Copyright headers (after generated files are in place)
-#   7. License update (may change after vendoring)
-#   8. Config reference docs (independent, but run after structural changes)
-#   9. Auth docs (regenerate permissions reference from static-authz.yaml)
-#  10. Verification (optional) — run the same checks as CI (tools/lint/lint-all.sh)
+#   4. Vendor all packages (covers nemo_platform_ext too) + CLI reference docs
+#   5. Copyright headers (after generated files are in place)
+#   6. License update (may change after vendoring)
+#   7. Config reference docs (independent, but run after structural changes)
+#   8. Auth docs (regenerate permissions reference from static-authz.yaml)
+#   9. Verification (optional) — run the same checks as CI (tools/lint/lint-all.sh)
 #      Enable with LINT_FIX_VERIFY=1.
 #
-# Note: update-cli = generate-cli-commands + vendor-nemo-platform-ext + generate-cli-reference-docs,
-# but vendor-nemo-platform-ext is a subset of make vendor and generate-cli-reference-docs would
-# run twice. So we run generate-cli-commands alone, then let make vendor cover all vendoring.
+# Note: update-cli = vendor-nemo-platform-ext + generate-cli-reference-docs, but
+# vendor-nemo-platform-ext is a subset of make vendor, so we let make vendor cover
+# all vendoring and then regenerate the CLI reference docs once.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${CI_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 cd "${PROJECT_ROOT}" || exit 1
@@ -32,7 +31,6 @@ declare -a steps=(
   "refresh-openapi:make refresh-openapi"
   "web-sdk:bash tools/lint/lint-fix-web-sdk.sh"
   "python-style:uv run ruff format && uv run ruff check --fix"
-  "generate-cli-commands:make generate-cli-commands"
   "vendor+cli-reference-docs:make vendor && make generate-cli-reference-docs"
   "copyright-headers:make update-copyright-headers"
   "update-licenses:bash tools/lint/lint-fix-licenses.sh"

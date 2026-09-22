@@ -100,6 +100,14 @@ class ConvertEnvironmentSpec:
     openai_version: str | None = None
 
 
+def _run_build_step(cmd: list[str]) -> None:
+    """Run a resolve or build step with its chatter on stderr, never on stdout."""
+    # stdout carries this CLI's JSON result. `uv pip compile` echoes the compiled
+    # requirements even with --output-file, and pip download prints progress, so an
+    # inherited stdout lands both in front of the JSON and breaks a strict consumer.
+    subprocess.run(cmd, check=True, stdout=sys.stderr)
+
+
 def _compile_pinned_requirements(
     work_dir: Path,
     packages: list[str],
@@ -128,7 +136,7 @@ def _compile_pinned_requirements(
     if extra_index_url:
         cmd.extend(["--extra-index-url", extra_index_url, "--index-strategy", "unsafe-best-match"])
     logger.info("Running: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    _run_build_step(cmd)
     logger.info("Resolved closure:\n%s", pinned.read_text(encoding="utf-8").strip())
     return pinned
 
@@ -159,7 +167,7 @@ def _run_pip_download(
     if extra_index_url:
         cmd.extend(["--extra-index-url", extra_index_url])
     logger.info("Running: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    _run_build_step(cmd)
 
 
 def _build_downloaded_sdists(wheels_dir: Path) -> None:
@@ -184,7 +192,7 @@ def _build_downloaded_sdists(wheels_dir: Path) -> None:
             str(sdist),
         ]
         logger.info("Building wheel from source artifact: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True)
+        _run_build_step(cmd)
         sdist.unlink()
 
 
@@ -279,7 +287,7 @@ def _resolve_image_pins(spec: ConvertEnvironmentSpec) -> tuple[Path | None, str 
 def _build_gym_fork_wheel(gym_root: Path, dest: Path, expect_version: str | None) -> Path:
     """Build nemo-gym from ``gym_root`` so a fork is not replaced by the upstream release."""
     dest.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(dest), str(gym_root)], check=True)
+    _run_build_step(["uv", "build", "--wheel", "--out-dir", str(dest), str(gym_root)])
     built = sorted(dest.glob("nemo_gym-*.whl"))
     if len(built) != 1:
         raise RuntimeError(f"expected exactly one nemo_gym wheel, got {[p.name for p in built]}")
@@ -531,7 +539,7 @@ def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> Non
         sys.executable,
     )
     logger.info("Installing hub package for dataset load: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    _run_build_step(cmd)
 
 
 def _load_verifiers_environment(vf_env_id: str, vf_env_args: dict[str, Any]) -> Any:

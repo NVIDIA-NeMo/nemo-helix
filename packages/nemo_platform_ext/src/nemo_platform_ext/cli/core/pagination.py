@@ -13,9 +13,6 @@ shape.
 from __future__ import annotations
 
 import logging
-import typing
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 from enum import Enum
 from types import SimpleNamespace, TracebackType
 from typing import Any, cast
@@ -25,22 +22,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from nemo_platform_ext.cli.core.help_formatter import add_warning
 
-if typing.TYPE_CHECKING:
-    from nemo_platform.pagination import SyncDefaultPagination, SyncLogsPagination
-
 logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def _suppress_root_logging() -> Iterator[None]:
-    """Temporarily suppress noisy SDK pagination logs without leaking state."""
-    root_logger = logging.getLogger()
-    previous_level = root_logger.level
-    root_logger.setLevel(logging.CRITICAL)
-    try:
-        yield
-    finally:
-        root_logger.setLevel(previous_level)
 
 
 class PaginationType(str, Enum):
@@ -310,123 +292,6 @@ class _progress:
         traceback: TracebackType | None,
     ) -> None:
         self._progress.__exit__(exc_type, exc_value, traceback)
-
-
-def _fetch_all_pages_page_number(
-    list_method: Callable[..., SyncDefaultPagination[Any]],
-    progress: Progress,
-    task: Any,
-    path_args: tuple[Any, ...],
-    body_args: dict[str, Any],
-) -> AllPagesResponse:
-    """
-    Fetch all pages using page-number based pagination.
-
-    This is used for endpoints with `default_pagination` in the stainless config.
-    """
-    all_items: list[Any] = []
-    total_pages_count = 0
-    total_results = 0
-    original_page_size = None
-
-    # Fetch the first page
-    try:
-        response = list_method(*path_args, **body_args)
-    except Exception as e:
-        progress.stop()
-        raise e
-
-    if (total_pages := response.pagination.total_pages) is not None:
-        progress.update(task, total=total_pages)
-        total_pages_count = total_pages
-
-    with _suppress_root_logging():
-        for page in response.iter_pages():
-            page_num = page.pagination.page
-
-            for item in page.data:
-                all_items.append(item)
-
-            progress.update(
-                task, completed=page_num, description=f"Fetching pages... (page {page_num}/{total_pages_count})"
-            )
-
-    return AllPagesResponse(
-        data=all_items,
-        total_items=total_results or len(all_items),
-        total_pages=total_pages_count,
-        page_size=original_page_size,
-    )
-
-
-def _fetch_all_pages_cursor(
-    list_method: Callable[..., SyncLogsPagination],
-    progress: Progress,
-    task: Any,
-    path_args: tuple[Any, ...],
-    body_args: dict[str, Any],
-) -> AllCursorPagesResponse:
-    """
-    Fetch all pages using cursor-based pagination.
-
-    This is used for endpoints with `logs_pagination` in the stainless config.
-    """
-    all_items: list[Any] = []
-    # Fetch the first page
-    try:
-        response = list_method(*path_args, **body_args)
-    except Exception as e:
-        progress.stop()
-        raise e
-
-    with _suppress_root_logging():
-        for page_num, page in enumerate(response.iter_pages(), start=1):
-            for item in page.data:
-                all_items.append(item)
-
-            progress.update(task, completed=page_num, description=f"Fetching pages... (page {page_num})")
-
-    return AllCursorPagesResponse(
-        data=all_items,
-        limit=body_args.get("limit", None),
-    )
-
-
-def fetch_all_pages(
-    list_method: Callable[..., Any],
-    path_args: tuple[Any, ...] = (),
-    body_args: dict[str, Any] | None = None,
-    show_progress: bool = True,
-    pagination_type: PaginationType = PaginationType.PAGE_NUMBER,
-) -> AllPagesResponse | AllCursorPagesResponse:
-    """
-    Fetch all pages from a paginated endpoint.
-
-    Args:
-        list_method: The SDK list method to call (e.g., client.namespaces.list)
-        path_args: Positional arguments to pass to the list method (e.g., job_id)
-        body_args: Keyword arguments to pass to the list method (e.g., filter, search)
-        show_progress: Whether to show a progress indicator
-        pagination_type: Type of pagination - PAGE_NUMBER (default) or CURSOR
-
-    Returns:
-        AllPagesResponse for page-number pagination, AllCursorPagesResponse for cursor pagination
-    """
-    if body_args is None:
-        body_args = {}
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        transient=True,
-        disable=not show_progress,
-    ) as progress:
-        task = progress.add_task("Fetching pages...", total=None)
-
-        if pagination_type == PaginationType.CURSOR:
-            return _fetch_all_pages_cursor(list_method, progress, task, path_args, body_args)
-        else:
-            return _fetch_all_pages_page_number(list_method, progress, task, path_args, body_args)
 
 
 def warn_if_more_pages(

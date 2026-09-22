@@ -1,0 +1,138 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Run a NeMo Fabric harness inside Harbor on a task image that knows nothing about Fabric.
+
+The sibling ``run_fabric_deepagents_example`` needs a ``python:3.12-slim`` task image, because
+``FabricAgent`` installs Fabric with the image's own ``python3``. This one points at a bare
+``ubuntu:24.04`` image -- no python, no pip, no curl -- and swaps in
+:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent.FabricInstalledAgent`,
+which provisions curl, uv, and a uv-managed interpreter before installing Fabric. That is the only
+difference between the two scripts, and it is what makes Fabric runnable on an arbitrary Harbor task.
+
+Requires ``harbor`` installed, a running Docker daemon, and the model provider's API key exported
+(``NVIDIA_API_KEY`` from https://build.nvidia.com for the default model). Run it as a module from the
+repository root::
+
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_installed_example
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_installed_example \\
+        --dataset-dir path/to/your/harbor/dataset --workspace /testbed
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+from pathlib import Path
+
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import DEFAULT_API_KEY_ENV
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from pydantic import JsonValue
+
+logger = logging.getLogger(__name__)
+
+#: hello-world on a bare `ubuntu:24.04`: no Fabric, no Python, not even curl to fetch one with.
+BARE_HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "bare_hello_world_dataset"
+FABRIC_INSTALLED_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent"
+DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+DEFAULT_FABRIC_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0b1"
+
+
+def api_key_env_for(model: str, override: str | None) -> str:
+    """The environment variable holding the credential for ``model``'s provider."""
+    if override:
+        return override
+    provider = model.split("/", maxsplit=1)[0] if "/" in model else "openai"
+    try:
+        return DEFAULT_API_KEY_ENV[provider]
+    except KeyError:
+        raise SystemExit(f"no default credential variable for provider {provider!r}; pass --api-key-env") from None
+
+
+async def _main(
+    jobs_dir: Path,
+    *,
+    dataset_dir: Path,
+    model: str,
+    api_key_env: str,
+    fabric_package: str,
+    workspace: str,
+    job_name: str | None,
+) -> None:
+    agent_kwargs: dict[str, JsonValue] = {
+        "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
+        "fabric_package": fabric_package,
+        # The task image's working directory; Fabric's default `/testbed` does not exist there.
+        "fabric_workspace": workspace,
+    }
+    if api_key_env != DEFAULT_API_KEY_ENV.get(model.split("/", maxsplit=1)[0]):
+        agent_kwargs["fabric_model_api_key_env"] = api_key_env
+    config = HarborRuntimeConfig(
+        jobs_dir=jobs_dir,
+        job_name=job_name,
+        agent_import_path=FABRIC_INSTALLED_AGENT,
+        agent_kwargs=agent_kwargs,
+        agent_model_name=model,
+        agent_env_from_host=[api_key_env],
+        n_concurrent_trials=1,
+        # Provisioning uv, a CPython, and the harness in the container takes a few minutes the first
+        # time; Harbor's default agent-setup timeout is tuned for prebuilt agents.
+        agent_setup_timeout_multiplier=12.0,
+        agent_timeout_multiplier=5.0,
+        quiet=False,
+    )
+    result = await run_harbor_eval(config, dataset_dir)
+
+    print(f"run_id: {result.run_id}  tasks: {result.summary.task_count}  trials: {result.summary.trial_count}")
+    for aggregate in result.summary.scores.scores:
+        print(f"  {aggregate.name}: mean={aggregate.mean}")
+    for score in result.scores:
+        reward = score.outputs[0].value if score.outputs else None
+        print(f"  {score.task_id}: reward={reward} status={score.status.value}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--jobs-dir", type=Path, default=Path("./harbor-jobs"), help="Where Harbor writes results.")
+    parser.add_argument(
+        "--dataset-dir",
+        type=Path,
+        default=BARE_HELLO_WORLD_DATASET_DIR,
+        help="Harbor dataset to run. Defaults to the bare ubuntu hello-world dataset.",
+    )
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="`provider/model` slug for the harness.")
+    parser.add_argument("--workspace", default="/app", help="Task-container directory the harness works in.")
+    parser.add_argument(
+        "--fabric-package",
+        default=DEFAULT_FABRIC_PACKAGE,
+        help="Fabric distribution and harness extra installed into the task container.",
+    )
+    parser.add_argument("--job-name", default=None, help="Pin a job name to reuse its directory as a cache.")
+    parser.add_argument(
+        "--api-key-env",
+        default=None,
+        help="Environment variable holding the model API key. Defaults per provider: "
+        + ", ".join(f"{provider} -> {name}" for provider, name in DEFAULT_API_KEY_ENV.items()),
+    )
+    args = parser.parse_args()
+    api_key_env = api_key_env_for(args.model, args.api_key_env)
+    if not os.environ.get(api_key_env):
+        raise SystemExit(f"{api_key_env} is not set; the agent forwards it into the task container.")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    asyncio.run(
+        _main(
+            args.jobs_dir,
+            dataset_dir=args.dataset_dir,
+            model=args.model,
+            api_key_env=api_key_env,
+            fabric_package=args.fabric_package,
+            workspace=args.workspace,
+            job_name=args.job_name,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

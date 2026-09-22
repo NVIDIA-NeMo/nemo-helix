@@ -1,0 +1,142 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Generate Retrieval Training Data"
+description: ""
+---
+
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/data-designer/tutorials/retrieval-generate.ipynb)
+
+Run Nemotron Stage 0 on NeMo Platform: turn a document corpus into judged question-and-answer pairs with `nemo data-designer retrieval-generate`. Use this when the training data has to come from your own documents.
+
+The faster path skips generation entirely and starts from NVIDIA's published NVDocs dump in [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job).
+
+Generation on Platform calls an Inference Gateway provider, typically Nemotron Nano 30B, rather than the Nemotron Ultra 550B endpoint the upstream recipe uses, so quality differs from the published dump. This notebook stops after Stage 0; mining and fine-tuning continue in the embedding tutorial.
+
+## Prerequisites
+
+- A running NeMo Platform at `NMP_BASE_URL`, default `http://localhost:8080`
+- A corpus fileset of UTF-8 `.txt` or `.md` files, or an `hf://` URI
+- An Inference Gateway chat provider, plus the chat and embedding model names it serves
+- At least 50 documents, and 500 or more for good domain coverage. Below that, Stage 1 can put nearly every query in the test split
+
+Aim for documents of 200–2,000 tokens that are representative of the domain. Generation costs roughly four model calls per document, covering artifact extraction, Q&A generation, deduplication, and quality judging.
+
+```python
+import os
+from nemo_platform import NeMoPlatform, ConflictError
+from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
+
+NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
+print(NMP_BASE_URL)
+
+```
+
+## 1. Point Stage 0 at a corpus
+
+Upload local documents, or skip the upload and set `corpus` to an `hf://` URI.
+
+```bash
+nemo files filesets create my-docs --workspace default --purpose dataset --exist-ok
+nemo files upload /path/to/docs/ my-docs --workspace default
+```
+
+NVIDIA's sample corpus exercises the plumbing without standing in for your domain:
+
+`hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random`
+
+```python
+CORPUS = os.environ.get("RETRIEVAL_CORPUS", "default/my-docs")
+PROVIDER = os.environ.get("RETRIEVAL_PROVIDER", "default/nvidia-build")
+CHAT_MODEL = os.environ.get("RETRIEVAL_CHAT_MODEL", "nvidia/nemotron-3-nano-30b-a3b")
+EMBED_MODEL = os.environ.get("RETRIEVAL_EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
+print({"corpus": CORPUS, "provider": PROVIDER, "chat": CHAT_MODEL, "embed": EMBED_MODEL})
+
+```
+
+## 2. Preview, then generate
+
+`retrieval-preview` runs a single record through the pipeline so you can read the generated pairs before paying for a full pass; it writes no fileset. The full job writes Q&A JSONL plus `generation_result.json`, which Stage 1 reads as `sdg_input`.
+
+Equivalent CLI:
+
+```bash
+nemo data-designer retrieval-preview --workspace default --spec '{
+  "generate": {
+    "corpus": "default/my-docs",
+    "provider": "default/nvidia-build",
+    "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
+    "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
+    "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+    "embed_model": "nvidia/nemotron-3-embed-1b"
+  },
+  "num_records": 1
+}'
+
+nemo data-designer retrieval-generate --workspace default --spec '{
+  "corpus": "default/my-docs",
+  "provider": "default/nvidia-build",
+  "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
+  "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
+  "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+  "embed_model": "nvidia/nemotron-3-embed-1b"
+}'
+
+nemo jobs watch <generate-job> --workspace default
+nemo jobs results list <generate-job> --workspace default --output json
+```
+
+The `artifact_url` of the `artifacts` result is the `sdg_input` for Stage 1.
+
+```python
+gen_spec = RetrievalGenerateJobConfig(
+    corpus=CORPUS,
+    provider=PROVIDER,
+    artifact_extraction_model=CHAT_MODEL,
+    qa_generation_model=CHAT_MODEL,
+    quality_judge_model=CHAT_MODEL,
+    embed_model=EMBED_MODEL,
+)
+job = client.data_designer.retrieval_generate(gen_spec, workspace="default")
+print("Stage 0 job:", job.name)
+job.wait_until_done()
+gen_status = job.get_job_status()
+print("Stage 0 status:", gen_status)
+if gen_status != "completed":
+    raise RuntimeError(f"retrieval-generate finished with status {gen_status}")
+
+```
+
+```python
+results_page = client.jobs.results.list(job.name, workspace="default")
+data = getattr(results_page, "data", results_page)
+rows = list(data() if callable(data) else data or [])
+sdg_ref = None
+for row in rows:
+    url = getattr(row, "artifact_url", None) or (row.get("artifact_url") if isinstance(row, dict) else None)
+    name = getattr(row, "name", None) or (row.get("name") if isinstance(row, dict) else None)
+    print(name, url)
+    if name == "artifacts" and url:
+        sdg_ref = str(url).removeprefix("fileset://")
+if not sdg_ref:
+    raise RuntimeError("Could not resolve Stage 0 artifacts fileset")
+print("sdg_input for retrieval-prepare:", sdg_ref)
+
+```
+
+## Next: mine, then fine-tune
+
+Continue in [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job), keeping the fileset-backed Nemotron 3 Embed entity and passing the `sdg_input` printed above to Stage 1:
+
+```bash
+nemo data-designer retrieval-prepare --workspace default --spec '{
+  "sdg_input": "<sdg_input printed above>",
+  "enable_mining": true,
+  "model": "default/nemotron-3-embed-1b"
+}'
+```
+
+Check that `training.jsonl` has non-empty `neg_doc` lists before starting Automodel, and freeze the `eval_beir/` split so later runs stay comparable.
+
+Reference: [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg).

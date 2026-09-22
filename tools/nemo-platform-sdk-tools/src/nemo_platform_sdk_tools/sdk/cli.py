@@ -5,7 +5,6 @@ from typing import Annotated
 
 import typer
 from nemo_platform_sdk_tools.common.logging import setup_logging
-from nemo_platform_sdk_tools.sdk.generate_cli import generate_cli
 from nemo_platform_sdk_tools.sdk.is_up_to_date import is_up_to_date
 from nemo_platform_sdk_tools.sdk.openapi_stainless_mapper import app as openapi_stainless_mapper_app
 from nemo_platform_sdk_tools.sdk.post_generation_update import app as post_generation_update_app
@@ -24,4 +23,3 @@ app.command()(is_up_to_date)
 app.add_typer(openapi_stainless_mapper_app)
 app.add_typer(post_generation_update_app)
 app.add_typer(vendor_app)
-app.command()(generate_cli)

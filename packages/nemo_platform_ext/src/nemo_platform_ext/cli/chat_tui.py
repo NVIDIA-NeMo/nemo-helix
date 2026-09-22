@@ -9,12 +9,12 @@ import json
 import logging
 import re
 import sys
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from enum import Enum
-from types import TracebackType
 from typing import Any, Callable, Iterator, Protocol
 
 import click
-from nemo_platform._streaming import SSEDecoder
 from rich.align import Align
 from rich.console import Console
 from rich.live import Live
@@ -37,23 +37,76 @@ class ExitAction(Enum):
         self.successful_exit_text = successful_exit_text
 
 
-class StreamingBody(Protocol):
-    """Byte-streaming HTTP response returned by an SDK context manager."""
-
-    def iter_bytes(self) -> Iterator[bytes]: ...
-
-
 class StreamingResponse(Protocol):
-    """Context manager returned by generated SDK streaming wrappers."""
+    """Raw byte-streaming response, as returned by typed-client ``BinaryContent`` endpoints.
 
-    def __enter__(self) -> StreamingBody: ...
+    ``stream()`` yields the byte chunks of the SSE body; the HTTP status is
+    available through ``http_response`` once the stream has been entered.
+    """
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> bool | None: ...
+    def stream(self) -> AbstractContextManager[Iterator[bytes]]: ...
+
+    @property
+    def http_response(self) -> Any: ...
+
+
+@dataclass
+class ServerSentEvent:
+    """One decoded ``text/event-stream`` event."""
+
+    event: str | None = None
+    data: str = ""
+
+
+class SSEDecoder:
+    """Minimal ``text/event-stream`` decoder (event/data fields, blank-line dispatch)."""
+
+    def __init__(self) -> None:
+        self._event: str | None = None
+        self._data: list[str] = []
+
+    def iter_bytes(self, chunks: Iterator[bytes]) -> Iterator[ServerSentEvent]:
+        buffer = b""
+        for chunk in chunks:
+            buffer += chunk
+            while True:
+                newline = buffer.find(b"\n")
+                if newline == -1:
+                    break
+                line = buffer[:newline]
+                buffer = buffer[newline + 1 :]
+                event = self._decode_line(line.rstrip(b"\r").decode("utf-8", errors="replace"))
+                if event is not None:
+                    yield event
+        if buffer:
+            event = self._decode_line(buffer.decode("utf-8", errors="replace"))
+            if event is not None:
+                yield event
+        event = self._flush()
+        if event is not None:
+            yield event
+
+    def _decode_line(self, line: str) -> ServerSentEvent | None:
+        if not line:
+            return self._flush()
+        if line.startswith(":"):
+            return None
+        field, sep, value = line.partition(":")
+        if sep and value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            self._event = value
+        elif field == "data":
+            self._data.append(value)
+        return None
+
+    def _flush(self) -> ServerSentEvent | None:
+        if self._event is None and not self._data:
+            return None
+        event = ServerSentEvent(event=self._event, data="\n".join(self._data))
+        self._event = None
+        self._data = []
+        return event
 
 
 SendTurn = Callable[[str], StreamingResponse]
@@ -254,10 +307,10 @@ def _partial_tag_suffix_length(text: str, tag: str) -> int:
 
 def _iter_stream_deltas(response: StreamingResponse) -> Iterator[dict[str, Any]]:
     """Yield parsed OpenAI-compatible streaming delta payloads."""
-    with response as stream:
-        for event in SSEDecoder().iter_bytes(stream.iter_bytes()):
+    with response.stream() as chunks:
+        for event in SSEDecoder().iter_bytes(chunks):
             if event.event == "error":
-                raise click.ClickException(_format_streaming_error(stream, event.data))
+                raise click.ClickException(_format_streaming_error(response, event.data))
             if event.event is not None:
                 continue
             if not event.data:
@@ -271,11 +324,14 @@ def _iter_stream_deltas(response: StreamingResponse) -> Iterator[dict[str, Any]]
                 logging.debug("Failed to parse JSON stream event: %s", event.data)
 
 
-def _format_streaming_error(response: StreamingBody, data: str) -> str:
+def _format_streaming_error(response: StreamingResponse, data: str) -> str:
     if data:
         return f"Streaming chat request failed: {data}"
 
-    status_code = getattr(response, "status_code", None)
+    try:
+        status_code = getattr(response.http_response, "status_code", None)
+    except RuntimeError:
+        status_code = None
     if isinstance(status_code, int):
         return f"Streaming chat request failed (HTTP {status_code})"
     return "Streaming chat request failed"

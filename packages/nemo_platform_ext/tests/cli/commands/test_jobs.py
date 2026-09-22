@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
-from nemo_platform import NeMoPlatform
 from nemo_platform_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
     download_results,
@@ -21,6 +20,7 @@ from nemo_platform_ext.cli.commands.jobs import (
     tail_platform_job,
     update_status_steps,
 )
+from nemo_platform_plugin.client.client import NemoClient
 
 
 class _Response:
@@ -120,7 +120,7 @@ def test_list_jobs_uses_source_owned_client_and_keeps_first_page_semantics() -> 
     )
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output") as format_output,
         patch("nemo_platform_ext.cli.commands.jobs.warn_if_more_pages") as warn_if_more_pages,
     ):
@@ -155,7 +155,8 @@ def test_list_jobs_sends_serialized_filter_query_to_source_owned_client() -> Non
         return _job_page_response(request)
 
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
-    with NeMoPlatform(base_url="http://nemo.test", workspace="test-workspace", http_client=http_client) as platform:
+    platform = NemoClient(base_url="http://nemo.test", workspace="test-workspace", http_client=http_client)
+    if True:
         with (
             patch("nemo_platform_ext.cli.commands.jobs.format_output"),
             patch("nemo_platform_ext.cli.commands.jobs.warn_if_more_pages"),
@@ -197,7 +198,7 @@ def test_list_steps_serializes_json_filter_for_source_owned_client() -> None:
     )
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output") as format_output,
         patch("nemo_platform_ext.cli.commands.jobs.warn_if_more_pages") as warn_if_more_pages,
     ):
@@ -233,7 +234,7 @@ def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
     jobs_client.download_job_result.return_value = binary_response
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.typer.echo") as echo,
     ):
         download_results(
@@ -264,7 +265,7 @@ def test_get_logs_uses_source_owned_cursor_page() -> None:
     )
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output") as format_output,
         patch("nemo_platform_ext.cli.commands.jobs.warn_if_more_pages") as warn_if_more_pages,
     ):
@@ -305,7 +306,7 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
     jobs_client.list_job_logs.return_value = _PaginatedResponse(SimpleNamespace(items=[log], metadata={}))
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.render_job_logs") as render_job_logs,
     ):
         tail_platform_job(
@@ -338,7 +339,7 @@ def test_update_status_steps_maps_body_to_source_owned_request() -> None:
     jobs_client.update_job_step_status.return_value = _Response(updated_step)
 
     with (
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output") as format_output,
     ):
         update_status_steps(

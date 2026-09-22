@@ -24,7 +24,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from nemo_platform_plugin.client.adapter import PlatformClient, client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_platform_plugin.client.types import CursorPagination
@@ -205,7 +205,7 @@ def _print_transient_wait_error(live: Live, resource_label: str, error: Exceptio
 
 
 def wait_for_inference_deployment(
-    client: PlatformClient,
+    client: NemoClient,
     name: str,
     *,
     workspace: str | None = None,
@@ -216,8 +216,8 @@ def wait_for_inference_deployment(
     verbose: bool = True,
 ) -> bool:
     """Wait for an inference deployment to reach the requested status."""
-    models_client = client_from_platform(client, ModelsClient)
-    workspace = models_client.require_workspace(workspace)
+    workspace = client.require_workspace(workspace)
+    models_client = ModelsClient.from_client(client)
 
     start_time = time.monotonic()
     last_history_len = 0
@@ -387,7 +387,7 @@ def wait_for_platform_job(
 
 
 def wait_for_gateway(
-    client: PlatformClient,
+    client: NemoClient,
     provider_name: str,
     workspace: str,
     timeout: float = 60,
@@ -397,7 +397,7 @@ def wait_for_gateway(
     """Wait for the inference gateway to be able to route to a provider."""
     start_time = time.monotonic()
     start_timestamp = datetime.now().strftime("%H:%M:%S")
-    gateway_client = client_from_platform(client, InferenceGatewayClient)
+    gateway_client = InferenceGatewayClient.from_client(client)
 
     if verbose:
         console.print(f"[bold]Waiting for gateway to be ready for provider '{provider_name}'[/bold]\n")

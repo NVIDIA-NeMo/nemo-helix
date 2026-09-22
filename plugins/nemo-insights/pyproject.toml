@@ -5,7 +5,7 @@
 name = "nemo-insights-plugin"
 version = "0.1.0"
 description = "Agent telemetry analysis and persistent insights for NeMo Platform."
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 dependencies = [
   "fastapi>=0.115",
   "httpx",
@@ -34,9 +34,6 @@ insights = "nemo_insights_plugin.service:InsightsService"
 
 [project.entry-points."nemo.controllers"]
 insights-analysis = "nemo_insights_plugin.controller:InsightsAnalysisController"
-
-[project.entry-points."nemo.jobs"]
-"insights.analyze-job" = "nemo_insights_plugin.jobs.analyze:AnalyzeJob"
 
 [project.entry-points."nemo.agents.execute_extensions"]
 "insights.analysis" = "nemo_insights_plugin.execute_extensions:InsightsAnalysisExtension"

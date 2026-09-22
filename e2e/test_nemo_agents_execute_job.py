@@ -33,17 +33,21 @@ pytestmark = [pytest.mark.timeout(600)]
 # A well-formed reference that can never resolve: ``.invalid`` is reserved by
 # RFC 2606 and guaranteed not to exist, so the node fails the pull immediately
 # on NXDOMAIN rather than burning the test timeout on registry retries.
-_UNRESOLVABLE_IMAGE = "registry.invalid/nmp-e2e/no-such-image:missing"
+# Uppercase in the repository path makes this ref malformed, not merely
+# missing. A missing image is retried by both backends until
+# ``ttl_seconds_before_active`` (30 minutes by default), which is longer than
+# any test budget; a malformed one is rejected on the first attempt: the
+# kubelet reports ``InvalidImageName`` and Docker refuses to create the container.
+_UNRESOLVABLE_IMAGE = "registry.invalid/nmp-e2e/No-Such-Image:missing"
 
-# Evidence that the failure was about the image. The first three are the
-# waiting-state reasons the Kubernetes backend maps to a job error
-# (``kubernetes/common.py``); the last two are fragments of the ref itself,
-# which the Docker backend's pull error embeds. Matching any one of them keeps
-# the assertion specific to the image without pinning either backend's wording.
+# Evidence that the failure was about the image. The first is the waiting-state
+# reason the Kubernetes backend maps to a job error (``kubernetes/common.py``);
+# the rest are fragments of the ref itself, which both backends' errors embed.
+# Matching any one of them keeps the assertion specific to the image without
+# pinning either backend's wording.
 _IMAGE_FAILURE_MARKERS = (
-    "imagepullbackoff",
-    "errimagepull",
     "invalidimagename",
+    "invalid reference format",
     "registry.invalid",
     "no-such-image",
 )
@@ -435,9 +439,9 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
     Failure is the only outcome that can prove this today. A job that silently
     ignored ``image`` would run on the inherited task image and succeed, so a
     passing run says nothing -- and every image this test could legitimately
-    ask for is the one it would have inherited anyway. Because this ref cannot
-    resolve anywhere, an error whose diagnostics name the image or a pull
-    failure can only happen if the string travelled from the request through
+    ask for is the one it would have inherited anyway. Because this ref is
+    malformed, an error whose diagnostics name the image or reject its format
+    can only happen if the string travelled from the request through
     ``compile`` into the pod/container spec.
 
     The discriminating *positive* test needs an image that holds something the

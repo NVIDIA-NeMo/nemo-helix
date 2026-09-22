@@ -19,14 +19,18 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from pathlib import Path
+from typing import Iterator
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from click import UsageError
 from nemo_platform_ext.cli.app import app
 from nemo_platform_ext.cli.commands.use_cases.chat import _parse_model_and_workspace
+from nemo_platform_plugin.client.response import NemoBinaryResponse
 from typer.testing import CliRunner
 
 REMOTE_ERROR_EXIT_CODE = 3
@@ -98,37 +102,34 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     config_file.touch()
     monkeypatch.setenv("NMP_CONFIG_FILE", str(config_file))
     monkeypatch.setenv("NMP_BASE_URL", "http://localhost:9999")
+    monkeypatch.setenv("NMP_WORKSPACE", "default")
 
     return CliRunner()
 
 
-def _mock_streaming_response(*chunks: str, usage: dict | None = None) -> MagicMock:
-    response = MagicMock()
-    response.__enter__ = MagicMock(return_value=response)
-    response.__exit__ = MagicMock(return_value=False)
+def _binary_response(body: bytes, status_code: int = 200) -> NemoBinaryResponse:
+    @contextmanager
+    def stream_ctx():
+        yield httpx.Response(status_code, stream=httpx.ByteStream(body), request=httpx.Request("POST", "http://test"))
 
+    return NemoBinaryResponse(stream_ctx(), MagicMock())
+
+
+def _mock_streaming_response(*chunks: str, usage: dict | None = None) -> NemoBinaryResponse:
     events = [json.dumps({"choices": [{"delta": {"content": chunk}}]}) for chunk in chunks]
     if usage is not None:
         events.append(json.dumps({"choices": [], "usage": usage}))
     events.append("[DONE]")
-    response.iter_bytes = MagicMock(return_value=[("".join(f"data: {event}\n\n" for event in events)).encode()])
-    return response
+    return _binary_response("".join(f"data: {event}\n\n" for event in events).encode())
 
 
-def _mock_streaming_error_response(message: str, status_code: int | None = None) -> MagicMock:
-    response = MagicMock()
-    response.__enter__ = MagicMock(return_value=response)
-    response.__exit__ = MagicMock(return_value=False)
-    response.iter_bytes = MagicMock(return_value=[f"event: error\ndata: {message}\n\n".encode()])
-    if status_code is not None:
-        response.status_code = status_code
-    return response
+def _mock_streaming_error_response(message: str) -> NemoBinaryResponse:
+    return _binary_response(f"event: error\ndata: {message}\n\n".encode())
 
 
-def _mock_client_with_openai_response(response: MagicMock) -> MagicMock:
+def _mock_client_with_openai_response(response: object) -> MagicMock:
     mock_client = MagicMock()
-    mock_client._get_workspace_path_param.return_value = "default"
-    mock_client.inference.gateway.openai.with_streaming_response.post.return_value = response
+    mock_client.stream_openai.return_value = response
     return mock_client
 
 
@@ -234,7 +235,7 @@ def test_chat_prompt_runs_once_with_plain_text_output(runner: CliRunner) -> None
     mock_client = _mock_client_with_openai_response(response)
 
     with (
-        patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client),
+        patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_platform_ext.cli.chat_tui.Prompt.ask") as mock_prompt,
     ):
         result = runner.invoke(
@@ -248,13 +249,15 @@ def test_chat_prompt_runs_once_with_plain_text_output(runner: CliRunner) -> None
     assert "\x1b[" not in result.stdout
     mock_prompt.assert_not_called()
 
-    post = mock_client.inference.gateway.openai.with_streaming_response.post
+    post = mock_client.stream_openai
     post.assert_called_once()
     _, kwargs = post.call_args
     assert kwargs["workspace"] == "default"
-    assert kwargs["body"]["model"] == "default/my-model"
-    assert kwargs["body"]["messages"] == [{"role": "user", "content": "What is 17 * 23? Reply with just the number."}]
-    assert kwargs["body"]["stream"] is True
+    assert kwargs["body"].root["model"] == "default/my-model"
+    assert kwargs["body"].root["messages"] == [
+        {"role": "user", "content": "What is 17 * 23? Reply with just the number."}
+    ]
+    assert kwargs["body"].root["stream"] is True
 
 
 def test_chat_one_shot_includes_system_message(runner: CliRunner) -> None:
@@ -262,12 +265,12 @@ def test_chat_one_shot_includes_system_message(runner: CliRunner) -> None:
     response = _mock_streaming_response("ok")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi", "--system-message", "Be concise."])
 
     assert result.exit_code == 0
-    _, kwargs = mock_client.inference.gateway.openai.with_streaming_response.post.call_args
-    assert kwargs["body"]["messages"] == [
+    _, kwargs = mock_client.stream_openai.call_args
+    assert kwargs["body"].root["messages"] == [
         {"role": "system", "content": "Be concise."},
         {"role": "user", "content": "hi"},
     ]
@@ -278,7 +281,7 @@ def test_chat_text_output_strips_thinking_tags_when_no_regular_content(runner: C
     response = _mock_streaming_response("<think>scratch work</think>")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi"])
 
     assert result.exit_code == 0
@@ -291,7 +294,7 @@ def test_chat_text_output_strips_split_thinking_tags(runner: CliRunner) -> None:
     response = _mock_streaming_response("visible <thi", "nk>scratch", "</think> done")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi"])
 
     assert result.exit_code == 0
@@ -305,7 +308,7 @@ def test_chat_text_output_strips_split_closing_thinking_tag(runner: CliRunner) -
     response = _mock_streaming_response("<think>x</thi", "nk>after")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi"])
 
     assert result.exit_code == 0
@@ -317,7 +320,7 @@ def test_chat_stream_error_event_fails(runner: CliRunner) -> None:
     response = _mock_streaming_error_response("backend exploded")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi"])
 
     assert result.exit_code == 1
@@ -326,15 +329,15 @@ def test_chat_stream_error_event_fails(runner: CliRunner) -> None:
 
 
 def test_chat_empty_stream_error_event_includes_status_code(runner: CliRunner) -> None:
-    """Empty SSE error events should include HTTP status when available."""
-    response = _mock_streaming_error_response("", status_code=503)
+    """Empty SSE error events should include the HTTP status of the stream."""
+    response = _binary_response(b"event: error\ndata: \n\n", status_code=207)
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi"])
 
     assert result.exit_code == 1
-    assert "Streaming chat request failed (HTTP 503)" in result.output
+    assert "Streaming chat request failed (HTTP 207)" in result.output
 
 
 def test_chat_prompt_takes_precedence_over_piped_stdin(runner: CliRunner) -> None:
@@ -342,13 +345,13 @@ def test_chat_prompt_takes_precedence_over_piped_stdin(runner: CliRunner) -> Non
     response = _mock_streaming_response("from prompt")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "prompt wins"], input="stdin loses")
 
     assert result.exit_code == 0
     assert result.stdout == "from prompt\n"
-    _, kwargs = mock_client.inference.gateway.openai.with_streaming_response.post.call_args
-    assert kwargs["body"]["messages"] == [{"role": "user", "content": "prompt wins"}]
+    _, kwargs = mock_client.stream_openai.call_args
+    assert kwargs["body"].root["messages"] == [{"role": "user", "content": "prompt wins"}]
 
 
 def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner: CliRunner) -> None:
@@ -359,13 +362,13 @@ def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner:
 
     def capture_post(**kwargs):
         nonlocal captured_messages
-        captured_messages = deepcopy(kwargs["body"]["messages"])
+        captured_messages = deepcopy(kwargs["body"].root["messages"])
         return response
 
-    mock_client.inference.gateway.openai.with_streaming_response.post.side_effect = capture_post
+    mock_client.stream_openai.side_effect = capture_post
 
     with (
-        patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client),
+        patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_platform_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch("nemo_platform_ext.cli.chat_tui.Prompt.ask", side_effect=KeyboardInterrupt) as mock_prompt,
     ):
@@ -374,7 +377,7 @@ def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner:
     assert result.exit_code == 0
     mock_prompt.assert_called_once()
 
-    post = mock_client.inference.gateway.openai.with_streaming_response.post
+    post = mock_client.stream_openai
     post.assert_called_once()
     assert captured_messages == [{"role": "user", "content": "hi"}]
 
@@ -383,12 +386,16 @@ def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner:
 def test_chat_interactive_interrupt_during_initial_response_exits_gracefully(
     runner: CliRunner, exception: type[BaseException]
 ) -> None:
-    response = _mock_streaming_response("unused")
-    response.iter_bytes.side_effect = exception
+    def interrupted_stream() -> Iterator[bytes]:
+        raise exception
+        yield b""
+
+    response = MagicMock()
+    response.stream.return_value = nullcontext(interrupted_stream())
     mock_client = _mock_client_with_openai_response(response)
 
     with (
-        patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client),
+        patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_platform_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch("nemo_platform_ext.cli.chat_tui.Prompt.ask") as mock_prompt,
     ):
@@ -406,13 +413,13 @@ def test_chat_interactive_preserves_model_history_across_shared_tui_turns(runner
     captured_messages: list[list[dict[str, str]]] = []
 
     def capture_post(**kwargs):
-        captured_messages.append(deepcopy(kwargs["body"]["messages"]))
+        captured_messages.append(deepcopy(kwargs["body"].root["messages"]))
         return responses[len(captured_messages) - 1]
 
-    mock_client.inference.gateway.openai.with_streaming_response.post.side_effect = capture_post
+    mock_client.stream_openai.side_effect = capture_post
 
     with (
-        patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client),
+        patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_platform_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch(
             "nemo_platform_ext.cli.chat_tui.Prompt.ask",
@@ -438,13 +445,13 @@ def test_chat_interactive_discards_user_turn_after_empty_response(runner: CliRun
     captured_messages: list[list[dict[str, str]]] = []
 
     def capture_post(**kwargs):
-        captured_messages.append(deepcopy(kwargs["body"]["messages"]))
+        captured_messages.append(deepcopy(kwargs["body"].root["messages"]))
         return responses[len(captured_messages) - 1]
 
-    mock_client.inference.gateway.openai.with_streaming_response.post.side_effect = capture_post
+    mock_client.stream_openai.side_effect = capture_post
 
     with (
-        patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client),
+        patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_platform_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch("nemo_platform_ext.cli.chat_tui.Prompt.ask", side_effect=["second turn", KeyboardInterrupt]),
     ):
@@ -470,13 +477,13 @@ def test_chat_reads_prompt_from_stdin_in_non_tty_mode(runner: CliRunner) -> None
     response = _mock_streaming_response("from stdin")
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model"], input="hello from stdin")
 
     assert result.exit_code == 0
     assert result.stdout == "from stdin\n"
-    _, kwargs = mock_client.inference.gateway.openai.with_streaming_response.post.call_args
-    assert kwargs["body"]["messages"] == [{"role": "user", "content": "hello from stdin"}]
+    _, kwargs = mock_client.stream_openai.call_args
+    assert kwargs["body"].root["messages"] == [{"role": "user", "content": "hello from stdin"}]
 
 
 def test_chat_json_output_includes_content_thinking_model_and_usage(runner: CliRunner) -> None:
@@ -488,7 +495,7 @@ def test_chat_json_output_includes_content_thinking_model_and_usage(runner: CliR
     )
     mock_client = _mock_client_with_openai_response(response)
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model", "hi", "--output-format", "json"])
 
     assert result.exit_code == 0
@@ -503,9 +510,8 @@ def test_chat_json_output_includes_content_thinking_model_and_usage(runner: CliR
 def test_chat_non_tty_without_prompt_requires_prompt(runner: CliRunner) -> None:
     """Non-TTY mode fails fast instead of entering the prompt loop with no input."""
     mock_client = MagicMock()
-    mock_client._get_workspace_path_param.return_value = "default"
 
-    with patch("nemo_platform_ext.cli.core.context.CLIContext.get_client", return_value=mock_client):
+    with patch("nemo_platform_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
         result = runner.invoke(app, ["chat", "my-model"])
 
     assert result.exit_code == 2
@@ -529,7 +535,7 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
     captured_trailing_uri = None
     captured_kwargs = None
 
-    def mock_post(trailing_uri: str, **kwargs) -> MagicMock:
+    def mock_post(trailing_uri: str, **kwargs) -> NemoBinaryResponse:
         nonlocal captured_trailing_uri
         nonlocal captured_kwargs
         captured_trailing_uri = trailing_uri
@@ -537,11 +543,10 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
         return _mock_streaming_response("Hello")
 
     mock_client = MagicMock()
-    mock_client._get_workspace_path_param.return_value = "default"
-    mock_client.inference.gateway.provider.with_streaming_response.post = mock_post
+    mock_client.stream_provider = mock_post
 
     with patch(
-        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        "nemo_platform_ext.cli.core.context.CLIContext.typed_client",
         return_value=mock_client,
     ):
         result = runner.invoke(
@@ -566,7 +571,7 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
     assert captured_kwargs is not None
     assert captured_kwargs["workspace"] == "default"
     assert captured_kwargs["name"] == "build"
-    assert captured_kwargs["body"]["model"] == "nvidia/llama-3.3-nemotron-super-49b-v1"
-    assert captured_kwargs["body"]["messages"] == [{"role": "user", "content": "Hello!"}]
-    assert captured_kwargs["body"]["max_tokens"] == 50
-    assert captured_kwargs["body"]["stream"] is True
+    assert captured_kwargs["body"].root["model"] == "nvidia/llama-3.3-nemotron-super-49b-v1"
+    assert captured_kwargs["body"].root["messages"] == [{"role": "user", "content": "Hello!"}]
+    assert captured_kwargs["body"].root["max_tokens"] == 50
+    assert captured_kwargs["body"].root["stream"] is True

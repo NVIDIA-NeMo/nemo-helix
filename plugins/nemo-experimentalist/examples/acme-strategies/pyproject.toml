@@ -7,7 +7,7 @@
 name = "acme-strategies"
 version = "0.1.0"
 description = "An out-of-tree Experimentalist strategy, used to prove the plugin mechanism."
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 dependencies = ["nemo-experimentalist-plugin"]
 
 # The entry point's only job is to import the module, so the class registers itself.

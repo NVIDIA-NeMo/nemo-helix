@@ -67,7 +67,7 @@ export const flagDefinitions = {
   copilotStudioEnabled: previewFlag('VITE_FF_COPILOT_STUDIO_ENABLED', false),
   customizerEnabled: previewFlag('VITE_FF_CUSTOMIZER_ENABLED', true),
   dashboardEnabled: previewFlag('VITE_FF_DASHBOARD_ENABLED', false),
-  dashboardSandboxEnabled: previewFlag('VITE_FF_DASHBOARD_SANDBOX_ENABLED', false),
+  dashboardSandboxEnabled: previewFlag('VITE_FF_DASHBOARD_SANDBOX_ENABLED', true),
   dataDesignerEnabled: previewFlag('VITE_FF_DATA_DESIGNER_ENABLED', true),
   datasetsEnabled: previewFlag('VITE_FF_DATASETS_ENABLED', true),
   deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED'),

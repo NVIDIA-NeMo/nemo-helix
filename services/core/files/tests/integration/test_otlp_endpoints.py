@@ -433,6 +433,23 @@ def test_query_logs_rejects_tail_with_page_cursor(
     )
 
 
+def test_query_logs_rejects_invalid_page_cursor(
+    client: httpx.Client,
+    fileset: FilesetOutput,
+):
+    """Malformed pagination cursors are client validation errors."""
+    workspace = fileset.workspace
+    fileset_name = fileset.name
+
+    response = client.post(
+        f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
+        json={"filters": {"job": "tail-test-job"}, "page_cursor": "garbage"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid page cursor"
+
+
 def test_upload_logs_missing_attributes_partial_success(
     client: httpx.Client,
     fileset: FilesetOutput,

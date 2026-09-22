@@ -76,9 +76,6 @@ single leader, so complementary strengths stay alive across rounds.
   failure pattern inferred from traces — that the Experimentalist optimizes
   against. Run `nemo agents analyst run` first. The Experimentalist does not
   analyze traces or host an Insight API.
-- [Eval Author](src/nemo_experimentalist_plugin/eval_author/README.md) builds the
-  Insight-specific evaluation suite, and Insight mode invokes it automatically. It
-  ships inside this plugin.
 - **Harbor** runs the task containers that score every candidate.
 - **NeMo Experiments** mirrors each run and its candidates as an experiment
   group, so the lineage is visible in Studio. Structure only — rewards and
@@ -138,7 +135,7 @@ judge whether an agent got better; decide that on the full validation split.
 **Insight-driven** — optimize against a diagnosed failure pattern. Uses the
 local `.nemo-optimizer/insights.yaml` beside the profile by default; `--insight`
 names another local file or a platform Insight ID. Requires a `--task-template`
-so Eval Author can build the evaluation suite.
+so Experimentalist can build the evaluation suite.
 
 ```bash
 uv run nemo agents experimentalist run
@@ -171,7 +168,7 @@ win. "Required" below means required *when the profile does not supply it*.
 | `--no-insight` | Switches to dataset-driven mode. Cannot be combined with `--insight` or `--insight-id`. | Dataset-driven mode. |
 | `--train-dataset` | Local Harbor dataset or registry ref — the split candidates are proposed against. | Yes. |
 | `--validation-dataset` | The held-out split that selects the winner. | Yes. |
-| `--task-template` | Directory holding one Harbor task template (`task.toml` with placeholders); Eval Author fills a copy per failing trace. | Insight-driven mode only. |
+| `--task-template` | Directory holding one Harbor task template (`task.toml` with placeholders); Experimentalist fills a copy per failing trace. | Insight-driven mode only. |
 | `--config` | Run configuration: round and candidate limits plus `source`, `storage`, `goal_config`, `coder`, `analyzer`, `proposer`, `evaluator`, `eval_author`. Rejects a `models:` key. | No — defaults apply. |
 | `--workspace` | NeMo workspace for traces and run metadata. | No — profile, else `default`. |
 | `--base-url` | URL of the running platform. | No — `NMP_BASE_URL`, else `http://localhost:8080`. |
@@ -284,7 +281,7 @@ regression_metrics:
 
 Objectives are what candidates are Pareto-ranked on, with minimized metrics
 sign-inverted; regression metrics are deliberately kept out of that ranking. In
-an Insight-driven run, Eval Author's authored Insight metrics take over as the
+an Insight-driven run, the authored Insight metrics take over as the
 objective and your configured targets move to `regression_metrics`, so the
 Insight gets fixed without giving up what the run already cared about.
 
