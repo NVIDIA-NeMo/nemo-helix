@@ -80,6 +80,28 @@ function imageOverrides(
   };
 }
 
+/**
+ * The `executor_config` every workspace-sourced config sends.
+ *
+ * Shared by the bound and unbound creators so the two cannot drift: both render the
+ * same `AdvancedSettingsAccordion`, so a field collected by one is collected by both
+ * and must reach the API from both.
+ *
+ * Blank is meaningful for `disk_size`, as it is for the image overrides: omitting it
+ * lets the platform apply its own default (`"50Gi"`) rather than pinning that value
+ * from the client, which would silently outlive any change to the default.
+ */
+function executorConfigFromValues(values: WizardFormValues): ContainerExecutorConfig {
+  const diskSize = values.diskSize?.trim();
+  const additionalEnvs = additionalEnvsFormToApi(values.additionalEnvs);
+  return {
+    gpu: values.gpu,
+    ...(diskSize ? { disk_size: diskSize } : {}),
+    ...(additionalEnvs ? { additional_envs: additionalEnvs } : {}),
+    ...imageOverrides(values),
+  };
+}
+
 async function createNgcDeployment(
   workspace: string,
   values: WizardFormValues,
@@ -190,10 +212,7 @@ async function createHuggingFaceDeployment(
       model_name: modelEntityName,
       lora_enabled: values.loraEnabled,
     },
-    executor_config: {
-      gpu: values.gpu,
-      ...imageOverrides(values),
-    },
+    executor_config: executorConfigFromValues(values),
     model_entity_id: `${workspace}/${modelEntityName}`,
   });
 
@@ -260,10 +279,7 @@ export async function createWorkspaceDeploymentConfig(
       model_name: modelName,
       lora_enabled: values.loraEnabled,
     },
-    executor_config: {
-      gpu: values.gpu,
-      ...imageOverrides(values),
-    },
+    executor_config: executorConfigFromValues(values),
     model_entity_id: `${modelNamespace}/${modelName}`,
   });
 }
@@ -301,10 +317,7 @@ export async function createUnboundDeploymentConfig(
     model_spec: {
       lora_enabled: values.loraEnabled,
     },
-    executor_config: {
-      gpu: values.gpu,
-      ...imageOverrides(values),
-    },
+    executor_config: executorConfigFromValues(values),
   });
 }
 
@@ -453,12 +466,31 @@ export async function ensureUnboundDeploymentConfig(
   configName: string,
   reportStage: ReportStage
 ): Promise<EnsuredDeploymentConfig> {
-  return ensureDeploymentConfig(
+  const ensured = await ensureDeploymentConfig(
     workspace,
     configName,
     () => createUnboundDeploymentConfig(workspace, values, configName, reportStage),
     reportStage
   );
+
+  // Adoption is only safe here while the adopted config is itself unbound. A config
+  // under this name that names a model would be handed to a job that will produce a
+  // different one -- the compiler rejects that, but only once the job is submitted,
+  // so the user would see a backend error with no obvious link to the config the form
+  // silently reused. Fail here instead, where the name can be named.
+  //
+  // The predicate matches `is_unbound_deployment_config`: `model_namespace` alone is
+  // not a binding, so it is deliberately not checked.
+  const boundTo = ensured.config.model_entity_id || ensured.config.model_spec?.model_name;
+  if (ensured.reused && boundTo) {
+    throw new Error(
+      `A deployment configuration named "${configName}" already exists and is bound to ` +
+        `"${boundTo}". This run creates its own model, so it needs a configuration that ` +
+        'names none. Rename the output model, or delete that configuration.'
+    );
+  }
+
+  return ensured;
 }
 
 /** Shared create-or-adopt: only a 409 on the name is an adoption; everything else propagates. */
