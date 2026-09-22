@@ -469,6 +469,7 @@ nemo-insights-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-optimization-plugin = [
+  "nemo-agent-optimization-plugin",
   "nemo-agents-plugin",
   "nemo-helix-plugin",
   "nemo-evaluator-sdk",
