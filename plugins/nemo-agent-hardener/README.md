@@ -413,7 +413,7 @@ CLI-only. `uv tool uninstall openshell`, then use the curl installer above.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NEMO_AGENT_HARDENER_SPEC` | `agent-hardener` | Package spec `setup` installs. Override to pin a version (`agent-hardener==0.0.2`) or to develop against a local checkout |
+| `NEMO_AGENT_HARDENER_SPEC` | `nvidia-agent-hardener>=0.0.11` | Package spec `setup` installs. Override to pin a version (`nvidia-agent-hardener==0.0.11`) or to develop against a local checkout |
 | `NEMO_AGENT_HARDENER_VENV_PATH` | `~/.agent-hardener/venv` | agent-hardener venv |
 | `NEMO_AGENT_HARDENER_GARAK_VENV_PATH` | `~/.agent-hardener/garak-venv` | garak (attacker) venv |
 | `NEMO_AGENT_HARDENER_DEFAULT_WORKSPACE` | `default` | Workspace used by CLI commands |

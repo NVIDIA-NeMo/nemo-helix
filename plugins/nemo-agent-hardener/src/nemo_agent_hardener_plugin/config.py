@@ -36,9 +36,23 @@ GARAK_PYTHON_ENVVAR = "AGENT_HARDENER_GARAK_PYTHON"
 INFERENCE_API_KEY_ENVVAR = "INFERENCE_API_KEY"  # pragma: allowlist secret
 
 
+def _data_dir() -> Path:
+    """Agent Hardener's data directory, falling back to the pre-rename one.
+
+    A machine provisioned before the Iron Swarm rename keeps everything under
+    ``~/.iron-swarm``. Without this fallback an upgrade fails preflight and forces a full
+    re-provision, even though the venvs and credential it needs are already there.
+    """
+    current = Path.home() / ".agent-hardener"
+    legacy = Path.home() / ".iron-swarm"
+    if not current.exists() and legacy.exists():
+        return legacy
+    return current
+
+
 def _default_venv_path() -> Path:
     """Default location for agent-hardener's dedicated venv (created by ``nemo agent-hardener setup``)."""
-    return Path.home() / ".agent-hardener" / "venv"
+    return _data_dir() / "venv"
 
 
 def _default_garak_venv_path() -> Path:
@@ -47,12 +61,12 @@ def _default_garak_venv_path() -> Path:
     Matches agent-hardener's own default (``~/.agent-hardener/garak-venv``) so the
     ``AGENT_HARDENER_GARAK_PYTHON`` export and agent-hardener's fallback agree.
     """
-    return Path.home() / ".agent-hardener" / "garak-venv"
+    return _data_dir() / "garak-venv"
 
 
 def _default_operator_env_file() -> Path:
     """Default location for agent-hardener's own operator dotenv (provisioned by ``setup``)."""
-    return Path.home() / ".agent-hardener" / ".env"
+    return _data_dir() / ".env"
 
 
 def read_env_file(path: Path) -> dict[str, str]:
