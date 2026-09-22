@@ -650,6 +650,28 @@ class TestDiscoverCustomizationContributors:
             result = discover_customization_contributors()
         assert isinstance(result["fake"], _Contributor)
 
+    def test_contributor_without_a_cli_summary_loads(self) -> None:
+        """Contributing CLI help is optional; a backend without it must still load."""
+
+        class _Contributor:
+            name = "legacy"
+            dependencies = ["jobs"]
+
+            def get_routers(self) -> list[RouterSpec]:
+                return []
+
+            def get_cli(self) -> None:
+                return None
+
+            def get_sdk_resources(self):
+                return None
+
+        assert not hasattr(_Contributor, "get_cli_summary")
+        ep = _make_ep("legacy", _Contributor)
+        with patch("nemo_platform_plugin.discovery.entry_points", return_value=[ep]):
+            result = discover_customization_contributors()
+        assert isinstance(result["legacy"], _Contributor)
+
     def test_failing_contributor_raises(self) -> None:
         from nemo_platform_plugin.customization_contributor import CustomizationContributorDiscoveryError
 

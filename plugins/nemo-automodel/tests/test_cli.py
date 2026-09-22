@@ -218,7 +218,9 @@ def test_cli_help_lists_submit_and_explain_only() -> None:
     assert result.exit_code == 0
     assert "submit" in result.stdout
     assert "explain" in result.stdout
-    assert "run" not in result.stdout
+    # Match on the registered verbs, not the rendered text: the help prose
+    # legitimately contains words like "runs".
+    assert {cmd.name for cmd in automodel_cli.registered_commands} == {"submit", "explain"}
 
 
 def test_cli_expose_input_and_output_schemas() -> None:
