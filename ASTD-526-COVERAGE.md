@@ -15,7 +15,7 @@ the first two, so a consumer inherits it by using them — it does not need its 
 | --- | --- | --- | --- |
 | **1. Entity store** | `EntityClient.get(Model, workspace, name)`, directly or via the models service | `get_entity_by_name` tries the request workspace, then the global one | yes |
 | **2. Inference gateway** | `POST /workspaces/{ws}/openai/-/v1/...` with model id `ws/name` | `ModelCache` / `VirtualModelCache` lookups fall back to the global workspace | yes |
-| **3. Customization** | `fetch_model_entity(ref, workspace, platform)` | Path 1 plus a weights-fileset check against the model's **own** workspace | automodel only |
+| **3. Customization** | `fetch_model_entity(ref, workspace, platform)` at submission; `model_weights_ref(model)` for the compiled download | Path 1 plus a weights-fileset check against the model's **own** workspace; the download is pinned to that workspace too | submission: all three backends; download: unit tests only |
 
 All three require the caller to be entitled to the global workspace. A caller scoped to
 their own workspace resolves nothing from it.
@@ -43,7 +43,10 @@ their own workspace resolves nothing from it.
 ## Customization / training backends
 
 All three go through `fetch_model_entity`, so all three inherit path 3 and the weights fix.
-Only automodel has been exercised.
+A second instance of the same bug was in each compiler's download step: a bare weights
+fileset was passed on unqualified and resolved against the job's workspace at runtime.
+Fixed through `model_weights_ref`, with unit tests on the compiled download source; no real
+download has run yet.
 
 | Plugin | Resolution | Training | Notes |
 | --- | --- | --- | --- |

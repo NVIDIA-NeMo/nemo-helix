@@ -50,8 +50,21 @@ Run one real job per backend against a base model in `default`:
 - `nemo-unsloth` — GPU
 - `nemo-rl` — Kubernetes + Ray + GPU
 
-Test both a **qualified** (`default/llama-3`) and a **bare** (`llama-3`) model reference.
-The bare form is where the one bug so far appeared.
+Run each backend from a workspace that is **not** `default`, and cover both dimensions:
+
+| | model's fileset qualified (`default/llama-3-weights`) | model's fileset bare (`llama-3-weights`) |
+| --- | --- | --- |
+| job model ref qualified (`default/llama-3`) | | |
+| job model ref bare (`llama-3`) | | |
+
+The dimension that matters is the **fileset on the base model**, not the job's model
+reference: both defects so far only appeared when the model entity carried a bare fileset
+name. A matrix that only varies the model reference, with a qualified fileset throughout,
+passes whether or not the bug is there.
+
+A job that gets past submission can still fail in the `model-and-dataset-download` step
+before training starts. If it fails there, the download source in the compiled job spec
+shows which workspace it tried.
 
 ## Priority 3 — inference consumers (provider credential, NOT GPU)
 
@@ -69,11 +82,26 @@ can run anywhere.
 
 ## The bug class to watch for
 
-The one defect found so far: `fetch_model_entity` resolved a model out of `default`, then
-looked for its **weights fileset** in the *caller's* workspace. Fixed, but the pattern will
-recur. Anywhere code resolves an entity and then uses a *separate* workspace variable to
-fetch something belonging to it, check which workspace that second lookup uses. It must be
-the entity's own (`model.workspace`), not the reference's.
+This defect has been found twice, both times with a model in `default` carrying a bare
+fileset name:
+
+1. **At submission.** `fetch_model_entity` resolved the model out of `default`, then checked
+   its weights fileset in the *caller's* workspace.
+2. **At runtime.** The job compilers copied the bare fileset name into the download step
+   unchanged, and the file_io task fills in a missing workspace with the *job's* workspace.
+   Submission passed, then the download failed before training started. This affected the
+   automodel (student and teacher), unsloth and rl compilers, and data-designer retrieval
+   mining.
+
+Both are fixed. The runtime sites now go through `model_weights_ref(model)` in
+`nmp.customization_common.service.platform_client`, which qualifies the fileset with the
+model's own workspace. Unit tests cover the download source for every site, but none has
+run a real download yet; Priority 2 is what exercises that.
+
+The pattern will recur. Anywhere code resolves an entity and then fetches something
+belonging to it, check which workspace that second lookup uses. It must be the entity's
+own (`model.workspace`), not the reference's and not the job's. A bare name passed on to a
+later step is the same bug in disguise, because the later step fills in its own workspace.
 
 Filesets are deliberately NOT shared (deferred to ASTD-640), so anything reading a fileset
 cross-workspace is suspect.
