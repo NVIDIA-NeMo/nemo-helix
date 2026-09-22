@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from nemo_data_designer_plugin.jobs.retrieval_generate import RetrievalGenerateJob
 from nemo_data_designer_plugin.jobs.retrieval_prepare import RetrievalPrepareJob
@@ -11,7 +11,8 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalPrepareStepConfig,
     RetrievalRunJobConfig,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
@@ -31,9 +32,10 @@ class RetrievalRunJob(NemoJob):
     async def to_spec(
         cls,
         input_spec: BaseModel,
+        *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         is_local: bool,
     ) -> BaseModel:
         run = cast(RetrievalRunJobConfig, input_spec)
@@ -64,13 +66,14 @@ class RetrievalRunJob(NemoJob):
     @classmethod
     async def compile(
         cls,
+        *,
         workspace: str,
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
-        options: dict | None = None,
+        options: dict[str, Any] | None = None,
     ) -> PlatformJobSpec:
         spec = cast(RetrievalRunJobConfig, spec)
         generate_step = await RetrievalGenerateJob.to_spec(

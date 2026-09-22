@@ -10,8 +10,7 @@ handler / ``to_spec`` flow) to validate that the submitter's ``model`` and
 
 from dataclasses import dataclass
 
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.files.types import FilesetPurpose
@@ -30,9 +29,9 @@ class AsyncCustomizationPlatformClients:
 
 
 def async_customization_platform_clients_from_platform(
-    platform: AsyncNeMoPlatform,
+    platform: AsyncPlatformClient,
 ) -> AsyncCustomizationPlatformClients:
-    """Build the customization compile-time client bundle from the generated SDK."""
+    """Build the customization compile-time client bundle from an async platform handle."""
     return AsyncCustomizationPlatformClients(
         files=client_from_platform(platform, AsyncFilesClient),
         models=client_from_platform(platform, AsyncModelsClient),
