@@ -1139,16 +1139,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One interpreter on purpose. nemo-fabric-runtime ships a single cp311-abi3 wheel and the
-        # adapters are pure Python, so extra legs mostly re-check the same dependency closure; the
-        # 3.12-3.13 range is already asserted by uv.lock resolving universally.
+        # One leg per distinct dependency closure, not one per interpreter. nemo-fabric-runtime ships
+        # a single cp311-abi3 wheel and the adapters are pure Python, so 3.13 would re-install exactly
+        # what 3.12 does — that range is already asserted by uv.lock resolving universally.
         #
-        # It must satisfy uv.lock's `requires-python` (currently >=3.12,<3.14) because this job runs
-        # `uv sync` on the WORKSPACE. That ceiling is the intersection across workspace members —
-        # nemo-rl, automodel, unsloth, deployments and experimentalist still cap at <3.14 — so it is
-        # narrower than the root pyproject's <3.15, and a 3.14 leg would fail at `uv sync` before
-        # installing anything.
-        python-version: ["3.12"]
+        # 3.14 is not a duplicate: the `fabric` extra pins
+        # `nemo-fabric-adapters-hermes; python_version < '3.14'`, so a 3.14 sync resolves a genuinely
+        # different closure (no hermes adapter). This job is the only place that install path runs, and
+        # test_fabric_surface.py's hermes case degrades to a skip there rather than failing.
+        #
+        # Every leg must satisfy uv.lock's `requires-python` (>=3.12,<3.15) because this job runs
+        # `uv sync` on the WORKSPACE — that ceiling is the intersection across workspace members.
+        python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
