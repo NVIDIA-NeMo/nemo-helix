@@ -131,8 +131,11 @@ describe('IntakeTracesTable', () => {
     expect(help).not.toHaveTextContent('<workspace>');
 
     await user.click(screen.getByRole('radio', { name: 'CLI' }));
-    expect(help).toHaveTextContent(
-      descriptor.cliCommand!.replaceAll('<workspace>', 'test-workspace')
+    // CodeSnippet updates its highlighted content asynchronously after the toggle.
+    await waitFor(() =>
+      expect(help).toHaveTextContent(
+        descriptor.cliCommand!.replaceAll('<workspace>', 'test-workspace')
+      )
     );
     expect(help).not.toHaveTextContent('<workspace>');
   });
