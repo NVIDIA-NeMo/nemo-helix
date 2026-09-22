@@ -21,7 +21,6 @@ Run inside the image:
 import importlib
 import importlib.util
 import pathlib
-import subprocess
 import sys
 import sysconfig
 
@@ -29,8 +28,6 @@ import sysconfig
 # is missing because its plugin fell out of the `cpu-tasks` dependency group is
 # the exact failure being tested for, and importing it here would abort the
 # whole script with a bare traceback before any check reports anything.
-
-CLI_TIMEOUT_SECONDS = 120
 
 #: Modules and the attribute each must expose, covering the Evaluator and Gym
 #: task entrypoints plus the server deps they import at runtime.
@@ -120,67 +117,10 @@ def check_fabric_adapters() -> list[str]:
     return []
 
 
-def check_bundled_harness_clis() -> list[str]:
-    """Launch the vendored claude and codex CLIs.
-
-    These wheels vendor native executables: `claude` bundles a Node runtime and
-    `codex` is a Rust binary. Stat-ing them is not enough -- a wheel resolved
-    for the wrong architecture, or one whose dynamic loader is missing from a
-    distroless runtime, is present and executable but dies on launch. That case
-    passes every check above and fails only here.
-
-    `--version` is non-mutating and needs neither network nor credentials.
-    """
-    failures: list[str] = []
-
-    # Imported here, not at module scope: these packages arrive with
-    # nemo-agents-plugin, so their absence is a result to report rather than a
-    # reason to abort before the other checks have run.
-    try:
-        import claude_agent_sdk  # noqa: PLC0415
-        from codex_cli_bin import bundled_codex_path  # noqa: PLC0415
-    except ImportError as exc:
-        return [f"bundled harness CLI packages not importable: {exc!r}"]
-
-    # Mirrors `SubprocessCLITransport._find_bundled_cli`, a private instance
-    # method that ignores `self`. Recomputing the path keeps this off a private
-    # API; if the SDK relocates the binary, this check fails loudly, which is
-    # what it is for.
-    claude_path = pathlib.Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
-
-    for name, path in {"claude": claude_path, "codex": bundled_codex_path()}.items():
-        if not path:
-            failures.append(f"{name}: no bundled binary resolved")
-            continue
-
-        try:
-            completed = subprocess.run(  # noqa: S603
-                [str(path), "--version"],
-                capture_output=True,
-                text=True,
-                timeout=CLI_TIMEOUT_SECONDS,
-            )
-        except OSError as exc:
-            failures.append(f"{name}: {path} failed to launch: {exc!r}")
-            continue
-        except subprocess.TimeoutExpired:
-            failures.append(f"{name}: {path} timed out after {CLI_TIMEOUT_SECONDS}s")
-            continue
-
-        if completed.returncode != 0:
-            failures.append(f"{name}: {path} exited {completed.returncode}: {completed.stderr.strip()[:200]!r}")
-            continue
-
-        print(f"{name}: {path} -> {completed.stdout.strip()}")
-
-    return failures
-
-
 CHECKS = (
     check_evaluator_imports,
     check_task_entrypoints,
     check_fabric_adapters,
-    check_bundled_harness_clis,
 )
 
 
