@@ -86,12 +86,34 @@ been exercised against a shared model.
 | `nemo-anonymizer`, `nemo-safe-synthesizer` | 1 | Inherits (untested) | Varies | Consume datasets more than models; datasets are ASTD-640 |
 | `nemo-deployments` | — | **Not applicable by design** | — | Manages `Deployment` / `DeploymentConfig` / `Volume`, not model entities. `model_deployment` is deliberately **not** shareable: the GPU saving comes from *not* deploying a second copy elsewhere. A workspace routes to the global deployment through the gateway instead |
 
-## Studio
+## Studio — known gaps, out of scope for this PR
 
-| Area | Status | Notes |
-| --- | --- | --- |
-| Model pickers, customization UI, agent config | **Not started** | Studio has no awareness of shared entities. Since listings stay workspace-pure, a shared model will not appear in any picker — a user can only reach one by typing a qualified reference. This is the main gap between "works" and "usable" |
-| Model chat availability | **Broken for merged / full-SFT models** | `useModelChatAvailability.ts` checks the base model's deployment instead of the model's own, and looks the base up in the model's workspace with the qualified `base_model` as a name (`404`). A `marcus` merged model with a `READY` deployment in `marcus` shows *Chat Unavailable*; the gateway serves it fine. See the brief's results section |
+**No Studio changes are made in this PR.** Studio has no awareness of shared entities; these
+are logged for a follow-up. Only the first row was reproduced in a running Studio; the rest
+come from a code read on 2026-09-22 (paths under `web/packages/`). "Likely" marks a failure
+inferred from the code but not confirmed against it. Examples are a `marcus` user working
+with a model shared from `default`.
+
+| # | Where | Problem | Failure |
+| --- | --- | --- | --- |
+| S1 | `studio/src/hooks/useModelChatAvailability.ts` | For any model with `base_model` it checks the **base's** deployment, not the model's own `model_providers`; and fetches the base with `useModelsGetModel(model.workspace, model.base_model)`, passing a qualified ref as a name | **Reproduced:** `marcus/p2-us-merged` with a `READY` deployment in `marcus` shows *Chat Unavailable*; the base lookup `404`s. Also affects same-workspace full-SFT models whose base is undeployed |
+| S2 | `studio/src/components/dataViews/CustomModelsDataView/index.tsx:241` | Adapter delete uses the route workspace, never `adapter.workspace` | A `default` user can delete `marcus`'s adapter on the shared base; `marcus` never sees it to delete |
+| S3 | `CustomModelsDataView/index.tsx:158,177-189` | Adapter rows built from `model.adapters` of the current workspace's models | Adapters `marcus` trained on a `default` base never appear in `marcus`; they appear under the base in `default` |
+| S4 | `CustomModelsDataView/index.tsx:185`; `studio/src/components/ModelChatPanel/index.tsx:76`; `ModelSelectV2/ModelDropdownItem.tsx:88,178,182`; `studio/src/hooks/evaluation/useEvaluationModels.tsx:47` | Adapters keyed by name only, ignoring `adapter.workspace` | Two workspaces each with adapter `foo` on the shared base: the wrong one is chatted with, evaluated, or shown |
+| S5 | `studio/src/routes/CustomizationJobDetailsRoute/index.tsx:84,179` | Output model looked up as `workspace/output_model` | A LoRA job in `marcus` wrote its adapter to the `default` base, so the lookup `404`s and "Chat with your Model" never works (likely) |
+| S6 | `studio/src/util/evaluations.ts:75-85` | Provider ref reduced to its last segment; adapter sent as a bare name | Evaluating a `marcus` adapter sends the wrong served name (`{ws}--{name}` expected) — likely `404` |
+| S7 | `studio/src/components/evaluation/SubmitEvaluationModal.tsx:597-626`, `useJudgeModels.tsx:40` | Judge validity checked against the current workspace's models only | A metric whose judge is a shared `default` model is flagged invalid and forced to an override |
+| S8 | `studio/src/routes/WorkspaceBaseModelsRoute/index.tsx:215,227` | Opening a `default` model from `marcus` writes a bare name into a `marcus` URL | Reload or a shared link looks up `marcus/<name>` and `404`s (likely) |
+| S9 | `studio/src/components/sidePanels/ModelPanels/ModelPanel/components.tsx:259,273` | `base_model` shown as a raw string; job link built with `model.workspace` | No link to a cross-workspace base; job link points at the wrong workspace (likely) |
+| S10 | `studio/src/hooks/useCustomizationJobForModel/index.ts:30` | Jobs searched in the route workspace only | A `default` model/adapter produced by a `marcus` job does not link to its job |
+| S11 | `CustomModelsDataView/index.tsx:67-69`; `studio/src/components/FilterFields/SearchBaseModels.tsx:32-37` | Base-model filter compares `name` against `workspace/name`; filter lists one workspace | Filtering by base model never matches; only current-workspace bases offered |
+| S12 | `studio/src/routes/ModelCompareRoute/index.tsx:38,71`; `ModelColumnSelect.tsx:28` | `?model=` preselect ignored unless in the current workspace | `?model=default/<name>` is silently dropped |
+| S13 | `studio/src/components/NewCustomizationForm/ModelSelectionSection.tsx:31` | Base-model picker lists the current workspace only | A shared base cannot be picked for customization (reachable only via the `?model=` link) |
+| S14 | `JudgeModelSelect.tsx:62`, `useEvaluationModels.tsx:65`, `ModelChatPanel/index.tsx:159`, `ModelConfigPanel/index.tsx:136`, `AddModelPalette/index.tsx:40`, `InsightsModelPairFields.tsx:54,66`, `AnalysisConfigPanel.tsx:168,187`, `GuardrailConfigurationPanel.tsx:48`, `CreateGuardrailModal/index.tsx:51`, `CreateExampleAgentModal/index.tsx:68`, `CloneAgentModal/index.tsx:47`, `MetricRunSidePanel/index.tsx:165`, `DescribeWithAiPanel.tsx:30`, `NewDeploymentRoute/WorkspaceSourceFields.tsx:112` | Every other model picker lists the current workspace only | Shared models cannot be selected anywhere except by typing a reference. `common/src/api/models/useModelsFromDefaultAndWorkspace.ts` exists but nothing uses it; only the Base Models page queries `default` too. (The deployment picker is arguably correct, since deployments are not shared.) |
+
+S1, S4, S5, S6 and S8 are the PR's bug class on the Studio side — a related entity resolved in
+the wrong workspace. S2–S4 depend on the adapter-placement question raised on the PR; their
+fix follows from whichever option is chosen there.
 
 ## What to do on GPU, in order
 
