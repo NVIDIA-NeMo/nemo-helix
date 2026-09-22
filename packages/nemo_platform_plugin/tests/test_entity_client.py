@@ -10,6 +10,7 @@ from nemo_platform_plugin.client.errors import BadRequestError, NotFoundError
 from nemo_platform_plugin.entities import (
     EntityBase,
     EntityClient,
+    EntityNotFoundError,
     EntityStoreError,
     SyncEntityClient,
     _convert_filter_obj_to_filter_str,
@@ -272,3 +273,62 @@ async def test_delete_forwards_parent() -> None:
     call = mock_api.delete_entity_by_name.await_args
     assert call is not None
     assert call.kwargs["query_params"] == {"parent": "parent-1"}
+
+
+class _Shared(EntityBase):
+    __entity_type__ = "shared_probe"
+
+
+def _resolved_from(workspace: str) -> Mock:
+    """A get-by-name response the server answered out of *workspace*, as its global fallback does."""
+    entity = Entity(
+        entity_type="shared_probe",
+        id="shared-1",
+        workspace=workspace,
+        name="llm",
+        data={},
+        db_version=1,
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    resp = Mock()
+    resp.data = Mock(return_value=entity)
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_get_returns_an_entity_resolved_from_the_global_workspace_by_default() -> None:
+    mock_api = Mock()
+    mock_api.get_entity_by_name = AsyncMock(return_value=_resolved_from("default"))
+
+    fetched = await EntityClient(mock_api).get(_Shared, "llm", workspace="team-a")
+
+    assert fetched.workspace == "default"
+
+
+@pytest.mark.asyncio
+async def test_local_only_get_refuses_an_entity_resolved_from_another_workspace() -> None:
+    """A write path must not act on the shared entity a read would have resolved to."""
+    mock_api = Mock()
+    mock_api.get_entity_by_name = AsyncMock(return_value=_resolved_from("default"))
+
+    with pytest.raises(EntityNotFoundError, match="not found in workspace 'team-a'"):
+        await EntityClient(mock_api).get(_Shared, "llm", workspace="team-a", local_only=True)
+
+
+@pytest.mark.asyncio
+async def test_local_only_get_returns_an_entity_in_the_requested_workspace() -> None:
+    mock_api = Mock()
+    mock_api.get_entity_by_name = AsyncMock(return_value=_resolved_from("team-a"))
+
+    fetched = await EntityClient(mock_api).get(_Shared, "llm", workspace="team-a", local_only=True)
+
+    assert fetched.workspace == "team-a"
+
+
+def test_sync_local_only_get_refuses_an_entity_resolved_from_another_workspace() -> None:
+    mock_api = Mock()
+    mock_api.get_entity_by_name = Mock(return_value=_resolved_from("default"))
+
+    with pytest.raises(EntityNotFoundError):
+        SyncEntityClient(mock_api).get(_Shared, "llm", workspace="team-a", local_only=True)

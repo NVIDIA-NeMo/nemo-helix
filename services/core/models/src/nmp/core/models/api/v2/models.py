@@ -359,8 +359,9 @@ async def update_model(
     logger.info(f"Updating model entity: {workspace}/{model_name}")
 
     try:
-        # Get existing model
-        model: Model = await service.entity_client.get(Model, workspace=workspace, name=name)
+        # Get existing model. local_only: an update must never reach a model shared in from
+        # the global workspace, which the caller may be able to read but not write.
+        model: Model = await service.entity_client.get(Model, workspace=workspace, name=name, local_only=True)
     except EntityNotFoundError:
         logger.warning(f"Model entity not found for update: {workspace}/{name}")
         raise HTTPException(

@@ -104,7 +104,9 @@ class ModelProviderService:
         _validate_extra_headers(request.required_extra_headers, "required_extra_headers")
 
         try:
-            existing = await self.entity_client.get(ModelProviderEntity, name=request.name, workspace=workspace)
+            existing = await self.entity_client.get(
+                ModelProviderEntity, name=request.name, workspace=workspace, local_only=True
+            )
             if existing:
                 logger.warning(
                     "Model provider already exists", extra={"workspace": workspace, "provider_name": request.name}
@@ -219,6 +221,7 @@ class ModelProviderService:
                 ModelProviderEntity,
                 workspace=workspace,
                 name=name,
+                local_only=True,
             )
         except EntityNotFoundError:
             pass
@@ -285,6 +288,7 @@ class ModelProviderService:
                 ModelProviderEntity,
                 workspace=request.workspace,
                 name=request.name,
+                local_only=True,
             )
         except EntityNotFoundError:
             logger.warning(
@@ -322,7 +326,7 @@ class ModelProviderService:
                     )
                     continue
                 model_workspace, model_name = ref.workspace, ref.name
-                model = await self.entity_client.get(Model, workspace=model_workspace, name=model_name)
+                model = await self.entity_client.get(Model, workspace=model_workspace, name=model_name, local_only=True)
 
                 if provider_id in model.model_providers:
                     model.model_providers = [p for p in model.model_providers if p != provider_id]
@@ -365,6 +369,7 @@ class ModelProviderService:
                 ModelProviderEntity,
                 workspace=workspace,
                 name=name,
+                local_only=True,
             )
         except EntityNotFoundError:
             logger.warning(
