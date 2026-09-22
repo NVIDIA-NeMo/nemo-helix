@@ -59,6 +59,24 @@ SyncReturnT = TypeVar("SyncReturnT")
 AsyncReturnT = TypeVar("AsyncReturnT")
 
 
+def _async_unwrap_target(endpoint_fn: Callable[..., PreparedRequest]) -> Callable[..., Awaitable[object]]:
+    """An ``async def`` that ``inspect.unwrap`` stops at, used only for static classification.
+
+    It deliberately does *not* carry ``__wrapped__``. `functools.wraps` would set one pointing back
+    at the synchronous endpoint, and ``inspect.unwrap`` follows the chain to its end -- so wrapping
+    would hand the async client's endpoint straight back to the sync function we are trying to look
+    past. Name and docstring are copied by hand for anything that renders this.
+    """
+
+    async def unwrap_target(*args: object, **kwargs: object) -> object:  # pragma: no cover - never called
+        raise TypeError(f"{getattr(endpoint_fn, '__name__', 'endpoint')} must be called on a client instance")
+
+    unwrap_target.__name__ = getattr(endpoint_fn, "__name__", "unwrap_target")
+    unwrap_target.__qualname__ = getattr(endpoint_fn, "__qualname__", unwrap_target.__name__)
+    unwrap_target.__doc__ = endpoint_fn.__doc__
+    return unwrap_target
+
+
 class EndpointMethod(Generic[P, SyncReturnT, AsyncReturnT]):
     """Descriptor that binds an endpoint to a client instance.
 
@@ -74,7 +92,10 @@ class EndpointMethod(Generic[P, SyncReturnT, AsyncReturnT]):
     # Copied from the endpoint in __init__ so help() and autodoc describe the
     # endpoint. Declared here so the descriptor's introspection surface is part of
     # its type rather than something callers have to discover at runtime.
-    __wrapped__: Callable[P, PreparedRequest]
+    # The endpoint on a sync owner. On an async owner it is a coroutine-function marker
+    # instead, so `inspect.unwrap` terminates at something awaitable -- see `bound_to_owner`.
+    # `.endpoint` is the unambiguous way to reach the endpoint itself.
+    __wrapped__: Callable[..., object]
     __name__: str
     __qualname__: str
     __doc__: str | None
@@ -135,6 +156,26 @@ class EndpointMethod(Generic[P, SyncReturnT, AsyncReturnT]):
         stub.__dict__.pop("__isabstractmethod__", None)
         self._class_stubs[objtype] = stub
         return stub
+
+    def bound_to_owner(self, owner: type) -> EndpointMethod[P, SyncReturnT, AsyncReturnT]:
+        """A copy of this descriptor whose ``__wrapped__`` matches ``owner``'s sync/async flavour.
+
+        One ``EndpointMethod`` instance is shared by a sync client and its async twin, because both
+        inherit it from the same generated mixin. That is invisible to anything that resolves the
+        attribute -- ``__get__`` knows the owner and hands back a matching stub -- but
+        ``inspect.getattr_static`` does not call ``__get__``, so it sees one descriptor with one
+        ``__wrapped__``, and that wrapped endpoint builds a request synchronously.
+
+        Python 3.14's ``unittest.mock`` switched spec classification from ``getattr`` to
+        ``getattr_static`` + ``inspect.unwrap`` precisely so that specc'ing a class stops triggering
+        its descriptors. The consequence here is that every endpoint on an async client specced as a
+        sync ``MagicMock`` and could not be awaited. Installing an owner-specific copy on the async
+        class gives the static path something honest to unwrap.
+        """
+        clone = type(self)(self._endpoint_fn)
+        if issubclass(owner, AsyncNemoClient):
+            clone.__wrapped__ = _async_unwrap_target(self._endpoint_fn)
+        return clone
 
     @property
     def endpoint(self) -> Callable[P, PreparedRequest]:
