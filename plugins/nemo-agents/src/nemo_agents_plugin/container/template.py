@@ -78,7 +78,10 @@ def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool]:
         return "nemo-agents-plugin", False
 
     harnesses = payload.get("harnesses")
-    selected = harnesses.get(payload.get("default_harness")) if isinstance(harnesses, Mapping) else None
+    default_harness = payload.get("default_harness")
+    selected = (
+        harnesses.get(default_harness) if isinstance(harnesses, Mapping) and isinstance(default_harness, str) else None
+    )
     kind = selected.get("kind") if isinstance(selected, Mapping) else None
     if not isinstance(kind, str):
         return "nemo-agents-plugin", False

@@ -448,6 +448,24 @@ class TestRenderFabricDockerfile:
         assert "NAT_VERSION" not in result
         assert "ghcr.io/astral-sh/uv:0.9.14" in result
 
+    def test_non_string_default_harness_uses_base_plugin(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: fabric-agent\n"
+            "default_harness:\n"
+            "  name: deepagents\n"
+            "harnesses:\n"
+            "  deepagents:\n"
+            "    kind: deepagents\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        assert f'"nemo-platform[nemo-agents-plugin]=={get_contract_version()}"' in result
+
     def test_renders_platform_agent_oci_labels(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.metadata import extract_agent_metadata
         from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
