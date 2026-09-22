@@ -28,7 +28,7 @@ from nemo_agents_plugin.cli_context import (
 )
 from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset
 from nemo_platform_plugin.cli_options import workspace_help
-from nemo_platform_plugin.cli_state import resolve_workspace
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 from nemo_platform_plugin.client.client import NemoClient
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         help="Validate an optimize bundle and upload it to a fileset for `optimize`.",
     )
     def prepare_fileset(
+        typer_ctx: typer.Context,
         source: Annotated[
             Path,
             typer.Option(
@@ -94,7 +95,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         ] = False,
         base_url: BaseUrlOption = None,
     ) -> None:
-        workspace = resolve_workspace(workspace)
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
 
         from nemo_optimization.bundle import BundlePreflightError, preflight_bundle
 

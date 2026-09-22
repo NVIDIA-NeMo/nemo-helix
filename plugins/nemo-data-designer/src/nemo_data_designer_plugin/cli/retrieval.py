@@ -11,7 +11,7 @@ import shlex
 import typer
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalPrepareJobConfig
 from nemo_platform_plugin.cli_options import WorkspaceOption
-from nemo_platform_plugin.cli_state import resolve_workspace
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 
 retrieval_app = typer.Typer(
     name="retrieval",
@@ -26,6 +26,7 @@ retrieval_app = typer.Typer(
 
 @retrieval_app.command("generate")
 def retrieval_generate(
+    typer_ctx: typer.Context,
     corpus: str = typer.Option(..., "--corpus", help="Corpus fileset ref or hf:// URI."),
     provider: str = typer.Option(..., "--provider", help="Inference Gateway provider (workspace/name)."),
     chat_model: str = typer.Option(..., "--chat-model", help="Chat model for artifact extraction, Q&A, and judging."),
@@ -34,7 +35,7 @@ def retrieval_generate(
     spec_out: bool = typer.Option(False, "--print-spec", help="Print JSON spec instead of a submission command."),
 ) -> None:
     """Build a spec for the auto-generated ``retrieval-generate`` job command."""
-    workspace = resolve_workspace(workspace)
+    workspace = resolve_cli_workspace(typer_ctx, workspace)
     spec = RetrievalGenerateJobConfig(
         corpus=corpus,
         provider=provider,
@@ -52,6 +53,7 @@ def retrieval_generate(
 
 @retrieval_app.command("prepare")
 def retrieval_prepare(
+    typer_ctx: typer.Context,
     sdg_input: str | None = typer.Option(
         None,
         "--sdg-input",
@@ -71,7 +73,7 @@ def retrieval_prepare(
     workspace: WorkspaceOption = None,
 ) -> None:
     """Build a spec for the auto-generated ``retrieval-prepare`` job command."""
-    workspace = resolve_workspace(workspace)
+    workspace = resolve_cli_workspace(typer_ctx, workspace)
     if (sdg_input is None) == (train_input_file is None):
         raise typer.BadParameter("Provide exactly one of --sdg-input or --train-input-file.")
     if generation_file is None:
@@ -92,6 +94,7 @@ def retrieval_prepare(
 
 @retrieval_app.command("preview")
 def retrieval_preview(
+    typer_ctx: typer.Context,
     corpus: str = typer.Option(..., "--corpus", help="Corpus fileset ref or hf:// URI."),
     provider: str = typer.Option(..., "--provider", help="Inference Gateway provider (workspace/name)."),
     chat_model: str = typer.Option(..., "--chat-model", help="Chat model for artifact extraction, Q&A, and judging."),
@@ -99,7 +102,7 @@ def retrieval_preview(
     workspace: WorkspaceOption = None,
 ) -> None:
     """Build a spec for the auto-generated ``retrieval-preview`` function command."""
-    workspace = resolve_workspace(workspace)
+    workspace = resolve_cli_workspace(typer_ctx, workspace)
     generate = RetrievalGenerateJobConfig(
         corpus=corpus,
         provider=provider,

@@ -51,7 +51,7 @@ from nemo_insights_plugin.sdk_resources.analysis_runs import (
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatformError
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
-from nemo_platform_plugin.cli_state import resolve_workspace
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.nooa_model_client import configured_model_refs
 from nooa import GenerationError
@@ -134,6 +134,7 @@ def _run_command(coro: Coroutine[Any, Any, _T]) -> _T:
 
 def _resolve_analysis(
     *,
+    typer_ctx: typer.Context,
     agent: str | None,
     ethos: Path | None,
     workspace: str | None,
@@ -161,7 +162,7 @@ def _resolve_analysis(
         # the bare literal so `analyze` targets the workspace the user
         # selected instead of silently acting on "default".
         profile_workspace = profile.workspace if profile is not None else None
-        resolved_workspace = profile_workspace or resolve_workspace()
+        resolved_workspace = profile_workspace or resolve_cli_workspace(typer_ctx)
 
     ethos_path = ethos
     ethos_error: str | None = None
@@ -249,6 +250,7 @@ async def _run_analysis(analysis: _ResolvedAnalysis, *, verbose: bool) -> str:
 
 
 def analyze(
+    typer_ctx: typer.Context,
     agent: str | None = typer.Option(
         None,
         "--agent",
@@ -309,6 +311,7 @@ def analyze(
     """
     try:
         analysis = _resolve_analysis(
+            typer_ctx=typer_ctx,
             agent=agent,
             ethos=ethos,
             workspace=workspace,
@@ -324,6 +327,7 @@ def analyze(
 
 
 def doctor(
+    typer_ctx: typer.Context,
     profile_path: Path | None = typer.Option(
         None,
         "--profile",
@@ -359,7 +363,7 @@ def doctor(
             results.extend(
                 await check_environment(
                     agent=profile.agent if profile is not None else None,
-                    workspace=(profile.workspace if profile is not None else None) or resolve_workspace(),
+                    workspace=(profile.workspace if profile is not None else None) or resolve_cli_workspace(typer_ctx),
                     base_url=resolve_base_url(base_url),
                     profile_dir=profile.profile_dir if profile is not None else None,
                     probes=_PREFLIGHT_PROBES,
@@ -397,6 +401,7 @@ class InsightsCLI(NemoCLI):
 
         @analysis_app.command("enable")
         def enable_analysis(
+            typer_ctx: typer.Context,
             agent: str = typer.Option(
                 ...,
                 "--agent",
@@ -415,7 +420,7 @@ class InsightsCLI(NemoCLI):
             ),
         ) -> None:
             """Enable periodic analysis for an agent."""
-            workspace = resolve_workspace(workspace)
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
                 asyncio.run(
                     _analysis_config_command(
@@ -429,6 +434,7 @@ class InsightsCLI(NemoCLI):
 
         @analysis_app.command("disable")
         def disable_analysis(
+            typer_ctx: typer.Context,
             agent: str = typer.Option(
                 ...,
                 "--agent",
@@ -447,7 +453,7 @@ class InsightsCLI(NemoCLI):
             ),
         ) -> None:
             """Disable periodic analysis for an agent."""
-            workspace = resolve_workspace(workspace)
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
                 asyncio.run(
                     _analysis_config_command(
@@ -461,6 +467,7 @@ class InsightsCLI(NemoCLI):
 
         @analysis_app.command("status")
         def analysis_status(
+            typer_ctx: typer.Context,
             agent: str | None = typer.Option(
                 None,
                 "--agent",
@@ -479,7 +486,7 @@ class InsightsCLI(NemoCLI):
             ),
         ) -> None:
             """Show periodic analysis opt-in state."""
-            workspace = resolve_workspace(workspace)
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
                 asyncio.run(
                     _analysis_config_command(
@@ -499,6 +506,7 @@ class InsightsCLI(NemoCLI):
 
         @runs_app.command("create")
         def create_analysis_run(
+            typer_ctx: typer.Context,
             agent: str = typer.Option(
                 ...,
                 "--agent",
@@ -566,7 +574,7 @@ class InsightsCLI(NemoCLI):
             The run is backed by an agents.execute job that shares its name.
             With --wait, exits non-zero if that job does not complete.
             """
-            workspace = resolve_workspace(workspace)
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
             payload, completed = _run_command(
                 _create_analysis_run(
                     agent=agent,
@@ -589,6 +597,7 @@ class InsightsCLI(NemoCLI):
 
         @runs_app.command("list")
         def list_analysis_runs(
+            typer_ctx: typer.Context,
             agent: str | None = typer.Option(
                 None,
                 "--agent",
@@ -614,7 +623,7 @@ class InsightsCLI(NemoCLI):
             ),
         ) -> None:
             """List analysis runs. Job state is not joined — read one run to get it."""
-            workspace = resolve_workspace(workspace)
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
                 _run_command(
                     _list_analysis_runs(
@@ -630,6 +639,7 @@ class InsightsCLI(NemoCLI):
 
         @runs_app.command("get")
         def get_analysis_run(
+            typer_ctx: typer.Context,
             name: str = typer.Argument(..., help="Name of the analysis run."),
             workspace: str | None = typer.Option(
                 None,
@@ -663,7 +673,7 @@ class InsightsCLI(NemoCLI):
             A null job means submission never landed: no job exists under the
             run's name, and the run can be resubmitted.
             """
-            workspace = resolve_workspace(workspace)
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
             payload, completed = _run_command(
                 _get_analysis_run(
                     name=name,

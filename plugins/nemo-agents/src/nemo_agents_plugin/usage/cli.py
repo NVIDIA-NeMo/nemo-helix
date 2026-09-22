@@ -34,7 +34,7 @@ from nemo_agents_plugin.usage.models import (
 from nemo_agents_plugin.usage.sources.fileset import FilesetDownloadError, FilesetRefError, fileset_path
 from nemo_agents_plugin.usage.sources.local import UsageSourceError, local_path
 from nemo_platform_plugin.cli_options import WorkspaceOption
-from nemo_platform_plugin.cli_state import resolve_workspace
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.refs import FilesetRef, LocalDir, classify_output_target
 
@@ -62,6 +62,7 @@ def register_usage_commands(app: typer.Typer) -> None:
 
     @usage_app.command(name="show")
     def show_cmd(
+        typer_ctx: typer.Context,
         ref: str = typer.Argument(
             ...,
             metavar="<PATH | FILESET_REF>",
@@ -80,7 +81,7 @@ def register_usage_commands(app: typer.Typer) -> None:
         base_url: BaseUrlOption = None,
     ) -> None:
         """Show a usage report for *ref*."""
-        workspace = resolve_workspace(workspace)
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         _show(
             ref,
             total_params=total_params,
