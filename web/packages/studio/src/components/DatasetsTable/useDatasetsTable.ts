@@ -187,8 +187,11 @@ export function useDatasetsTable({
   const handleBulkDeleteSuccess = useCallback(() => {
     onDatasetsSelected?.([]);
     dataViewState.rowSelection.set({});
+    // Invalidate once for the whole batch (see DatasetBulkDeleteModal), after selection
+    // is already cleared, so other list views pick up the deletions too.
+    invalidateDatasetCaches(workspace, undefined, ['list']);
     refetch();
-  }, [dataViewState.rowSelection, onDatasetsSelected, refetch]);
+  }, [dataViewState.rowSelection, onDatasetsSelected, refetch, workspace]);
 
   const handleModalClose = () => setModalOpen('none');
 

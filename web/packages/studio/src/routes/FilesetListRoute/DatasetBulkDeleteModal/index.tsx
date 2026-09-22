@@ -6,7 +6,6 @@ import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
-import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { BulkDeleteModal as GenericBulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { Trash } from 'lucide-react';
 import {
@@ -36,13 +35,11 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
 
-  const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
-    mutation: {
-      onSuccess: (_data, variables) => {
-        invalidateDatasetCaches(variables.workspace, variables.name, ['list']);
-      },
-    },
-  });
+  // Cache invalidation happens once for the whole batch, in `onConfirmSuccess`, rather
+  // than per item here — invalidating the list query after each delete resolves would
+  // refetch and reshuffle rows mid-batch while selection state still reflects the full
+  // original selection, making unrelated rows flash as selected.
+  const { mutateAsync: deleteDataset } = useFilesDeleteFileset();
   const deleteDatasetWithMessage = async (variables: { workspace: string; name: string }) => {
     try {
       return await deleteDataset(variables);
