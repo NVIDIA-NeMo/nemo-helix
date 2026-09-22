@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi import FastAPI
@@ -29,7 +30,7 @@ from nemo_agents_plugin.entities import (
     McpFulfillment,
 )
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
-from nemo_agents_plugin.jobs import execute as execute_module
+from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_agents_plugin.jobs.execute import (
     DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
     FABRIC_ERROR_RESULT_NAME,
@@ -54,7 +55,6 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 )
 from nemo_agents_plugin.telemetry import intake_export
 from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.dependencies import get_entity_client, get_sdk_client
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
 from nemo_platform_plugin.job_context import JobContext
@@ -1918,7 +1918,7 @@ def test_telemetry_is_pointed_at_the_workspace_intake_ingest(monkeypatch: pytest
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
     config = _fabric_agent_config()
 
-    _configure_intake_telemetry(config, workspace="team-a", sdk=None)
+    _configure_intake_telemetry(config, workspace="team-a", proxy_origin=None)
 
     telemetry = config["telemetry"]
     assert telemetry["enabled"] is True
@@ -1931,22 +1931,24 @@ def test_telemetry_is_pointed_at_the_workspace_intake_ingest(monkeypatch: pytest
     assert AgentConfig.model_validate(config).telemetry.enabled is True
 
 
-def test_telemetry_credentials_go_to_the_environment_not_the_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fabric writes the config into artifacts that are uploaded as a job result."""
+def test_telemetry_is_pointed_at_the_proxy_and_carries_no_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fabric writes the config into artifacts that are uploaded as a job result.
+
+    The proxy authenticates the export as it forwards it, so nothing about
+    identity -- inline or by environment variable name -- belongs in the config.
+    """
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
-    # Registered before the call so pytest unsets it afterwards: the code writes
-    # this variable directly, and monkeypatch can only restore what it saw first.
-    header_var = "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"
-    monkeypatch.setenv(header_var, "overwritten-by-the-call")
-    sdk = cast(NeMoPlatform, SimpleNamespace(_custom_headers={"X-NMP-Principal-Id": "service:agents"}))
     config = _fabric_agent_config()
 
-    _configure_intake_telemetry(config, workspace="default", sdk=sdk)
+    _configure_intake_telemetry(config, workspace="team-a", proxy_origin="http://127.0.0.1:54321")
 
     storage = config["telemetry"]["atif"]["storage"][0]
-    assert storage["header_env"] == {"X-NMP-Principal-Id": "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"}
+    assert storage["endpoint"] == "http://127.0.0.1:54321/apis/intake/v2/workspaces/team-a/ingest/atif"
     assert "headers" not in storage, "an inline header would land in a downloadable artifact"
-    assert os.environ[header_var] == "service:agents"
+    assert "header_env" not in storage, "the proxy stamps identity; the config names no credential"
+    assert not [name for name in os.environ if name.startswith("NMP_AGENT_TELEMETRY_HEADER_")]
 
 
 @pytest.mark.parametrize(
@@ -1967,7 +1969,7 @@ def test_another_outputs_destination_does_not_speak_for_atif(
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
     config = _fabric_agent_config(telemetry={"enabled": True, output: declaration})
 
-    _configure_intake_telemetry(config, workspace="team-a", sdk=None)
+    _configure_intake_telemetry(config, workspace="team-a", proxy_origin=None)
 
     storage = config["telemetry"]["atif"]["storage"][0]
     assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
@@ -1980,7 +1982,7 @@ def test_an_agent_that_names_its_own_destination_keeps_it(monkeypatch: pytest.Mo
     mine = {"type": "http", "endpoint": "https://elsewhere.example/ingest"}
     config = _fabric_agent_config(telemetry={"enabled": True, "atif": {"enabled": True, "storage": [mine]}})
 
-    _configure_intake_telemetry(config, workspace="default", sdk=None)
+    _configure_intake_telemetry(config, workspace="default", proxy_origin=None)
 
     assert config["telemetry"]["atif"]["storage"] == [mine]
 
@@ -1990,7 +1992,7 @@ def test_telemetry_disabled_on_the_agent_is_an_opt_out(monkeypatch: pytest.Monke
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
     config = _fabric_agent_config(telemetry={"enabled": False})
 
-    _configure_intake_telemetry(config, workspace="default", sdk=None)
+    _configure_intake_telemetry(config, workspace="default", proxy_origin=None)
 
     assert config["telemetry"] == {"enabled": False}
 
@@ -2000,7 +2002,7 @@ def test_an_agent_that_only_names_itself_is_still_wired(monkeypatch: pytest.Monk
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
     config = _fabric_agent_config(telemetry={"agent_name": "my-agent-name"})
 
-    _configure_intake_telemetry(config, workspace="default", sdk=None)
+    _configure_intake_telemetry(config, workspace="default", proxy_origin=None)
 
     assert config["telemetry"]["enabled"] is True
     assert config["telemetry"]["agent_name"] == "my-agent-name"
@@ -2011,7 +2013,7 @@ def test_telemetry_is_skipped_when_no_platform_url_is_reachable(monkeypatch: pyt
     monkeypatch.delenv("NMP_BASE_URL", raising=False)
     config = _fabric_agent_config()
 
-    _configure_intake_telemetry(config, workspace="default", sdk=None)
+    _configure_intake_telemetry(config, workspace="default", proxy_origin=None)
 
     assert "telemetry" not in config
 
@@ -2021,7 +2023,7 @@ def test_an_unrecognized_telemetry_section_is_left_alone(monkeypatch: pytest.Mon
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
     config = _fabric_agent_config(telemetry={"enabled": True, "not_a_real_field": 1})
 
-    _configure_intake_telemetry(config, workspace="default", sdk=None)
+    _configure_intake_telemetry(config, workspace="default", proxy_origin=None)
 
     assert config["telemetry"] == {"enabled": True, "not_a_real_field": 1}
 
@@ -2060,6 +2062,63 @@ def test_an_adapter_without_the_atif_output_is_not_wired(
     assert "not its ATIF output" in caplog.text
 
 
+def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Telemetry is a reason to run a proxy on its own.
+
+    Sizing the proxy off the models alone would leave an agent that reaches no
+    gateway -- this one -- posting its trajectory unauthenticated.
+    """
+    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    token_file = tmp_path / "subject-token"
+    token_file.write_text("subject", encoding="utf-8")
+    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
+    monkeypatch.setattr(
+        gateway_proxy,
+        "resolve_workload_exchange_provider",
+        lambda **_kwargs: SimpleNamespace(get_access_token=lambda: "exchanged-token"),
+    )
+    agent = _resolved_agent()
+    assert not gateway_proxy.routes_inference_through_gateway(AgentConfig.model_validate(agent.config))
+    spec = ExecuteAgentStepConfig(request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=agent)
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["telemetry"] = request.agent_config.telemetry.model_dump(exclude_none=True)
+        return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        assert ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=MagicMock())["status"] == "completed"
+
+    storage = seen["telemetry"]["atif"]["storage"][0]
+    assert urlsplit(storage["endpoint"]).hostname == "127.0.0.1"
+    assert storage["endpoint"].endswith("/apis/intake/v2/workspaces/default/ingest/atif")
+    assert "header_env" not in storage
+
+
+def test_an_auth_disabled_platform_exports_straight_to_the_platform(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No identity to forward means no proxy, and the export goes where it always did."""
+    monkeypatch.delenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    spec = ExecuteAgentStepConfig(request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=_resolved_agent())
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["telemetry"] = request.agent_config.telemetry.model_dump(exclude_none=True)
+        return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        assert ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=MagicMock())["status"] == "completed"
+
+    storage = seen["telemetry"]["atif"]["storage"][0]
+    assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/default/ingest/atif"
+    assert "header_env" not in storage
+
+
 def test_declining_auto_telemetry_submits_the_agent_config_as_written(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2095,32 +2154,17 @@ def test_declining_auto_telemetry_submits_the_agent_config_as_written(
     assert seen["telemetry"]["opentelemetry"] == declared["opentelemetry"]
 
 
-def test_workload_identity_jobs_export_with_a_bearer_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The SDK adds this per request; Relay's raw POST to Intake does not go through it."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
-    token_file = tmp_path / "subject-token"
-    token_file.write_text("subject", encoding="utf-8")
-    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
-    monkeypatch.setenv("NMP_AGENT_TELEMETRY_HEADER_AUTHORIZATION", "unset")
-    monkeypatch.setattr(
-        execute_module,
-        "resolve_workload_exchange_provider",
-        lambda **_kwargs: SimpleNamespace(get_access_token=lambda: "exchanged-token"),
-    )
-    sdk = cast(NeMoPlatform, SimpleNamespace(_custom_headers={"X-NMP-Internal": "true"}))
-    config = _fabric_agent_config()
-
-    _configure_intake_telemetry(config, workspace="default", sdk=sdk)
-
-    storage = config["telemetry"]["atif"]["storage"][0]
-    assert storage["header_env"]["Authorization"] == "NMP_AGENT_TELEMETRY_HEADER_AUTHORIZATION"
-    assert os.environ["NMP_AGENT_TELEMETRY_HEADER_AUTHORIZATION"] == "Bearer exchanged-token"
-
-
-def test_a_failed_token_exchange_still_exports_rather_than_failing_the_run(
+def test_a_telemetry_only_job_runs_untraced_rather_than_failing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Telemetry is not worth failing an agent over."""
+    """Telemetry is not worth failing an agent over.
+
+    A job with no gateway models needs the proxy only to authenticate its
+    export, so a proxy that cannot start degrades to an unauthenticated post --
+    what a failed token exchange produced when the export carried its own
+    headers. A job whose inference depends on the proxy still fails; that is
+    ``test_workload_identity_takes_precedence_without_fallback``.
+    """
     monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
     token_file = tmp_path / "subject-token"
     token_file.write_text("subject", encoding="utf-8")
@@ -2129,13 +2173,12 @@ def test_a_failed_token_exchange_still_exports_rather_than_failing_the_run(
     def explode(**_kwargs: Any) -> Any:
         raise RuntimeError("auth discovery unavailable")
 
-    monkeypatch.setattr(execute_module, "resolve_workload_exchange_provider", explode)
-    config = _fabric_agent_config()
+    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", explode)
 
     with caplog.at_level(logging.WARNING):
-        _configure_intake_telemetry(config, workspace="default", sdk=None)
+        with gateway_proxy.optional_platform_auth_proxy() as origin:
+            assert origin is None
 
-    assert "Authorization" not in config["telemetry"]["atif"]["storage"][0].get("header_env", {})
     assert "without credentials" in caplog.text
 
 
@@ -2152,7 +2195,7 @@ def test_an_atif_block_turned_on_without_a_destination_is_filled(
     mine = {"endpoints": [{"type": "gen_ai", "endpoint": "https://mine/otlp"}]}
     config = _fabric_agent_config(telemetry={"enabled": True, "atif": {"enabled": True}, "opentelemetry": mine})
 
-    _configure_intake_telemetry(config, workspace="team-a", sdk=None)
+    _configure_intake_telemetry(config, workspace="team-a", proxy_origin=None)
 
     storage = config["telemetry"]["atif"]["storage"][0]
     assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
