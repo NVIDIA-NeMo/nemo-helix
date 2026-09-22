@@ -50,6 +50,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     delete_configmap,
     get_namespace_from_environment,
     get_pod_details,
+    image_pull_backoff_age_seconds,
     image_pull_failure_message,
     is_retrying_image_pull,
     list_pod_status,
@@ -406,9 +407,13 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         backstop is ``ttl_seconds_before_active``: 15x longer, and its message
         reports a scheduling timeout that never mentions the image. This bounds
         the unrecoverable case and says which image failed.
+
+        The budget runs from the first failed pull, not from when the step went
+        pending, so time the pod spent waiting to be scheduled does not eat into
+        the grace a transient registry fault gets.
         """
         ttl_seconds = self._execution_profile_config.ttl_seconds_image_pull
-        if ttl_seconds <= 0 or not self.check_step_ttl_before_active(step, ttl_seconds):
+        if ttl_seconds <= 0:
             return None
 
         stuck = [
@@ -419,12 +424,17 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if not stuck:
             return None
 
+        pod_info, error_details, _ = get_pod_details(self._core_v1, self.namespace, stuck[0].name)
+        events = pod_info.get("events") or []
+        backoff_age = image_pull_backoff_age_seconds(events)
+        if backoff_age is None or backoff_age < ttl_seconds:
+            return None
+
         # Only the pull reasons; a sibling container waiting on init is noise here.
         reasons = sorted(
             {reason for pod in stuck for reason in pod.waiting.values() if reason in RECOVERABLE_WAITING_REASONS}
         )
-        pod_info, error_details, _ = get_pod_details(self._core_v1, self.namespace, stuck[0].name)
-        detail = image_pull_failure_message(pod_info.get("events") or []) or error_details.get("failed", "")
+        detail = image_pull_failure_message(events) or error_details.get("failed", "")
         message = f"Image pull did not succeed within {ttl_seconds}s ({', '.join(reasons)})"
         if detail:
             message = f"{message}: {detail}"

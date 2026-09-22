@@ -2988,6 +2988,10 @@ def test_cancel_sweep_attempts_every_task_when_one_update_fails(kubernetes_job):
 # ---------------------------------------------------------------------------
 
 _KJ = "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job"
+_PULL_DETAIL = (
+    'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": '
+    "failed to resolve reference: dial tcp: lookup registry.invalid: no such host"
+)
 
 
 def _backing_off_pod(reason: str = "ImagePullBackOff") -> PodStatus:
@@ -3003,25 +3007,51 @@ def _backing_off_pod(reason: str = "ImagePullBackOff") -> PodStatus:
     )
 
 
-def _age_step(step, seconds: int) -> None:
-    old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=seconds)
+def _pod_details(backoff_age_seconds: float | None):
+    """get_pod_details output for a pod that began failing to pull *N* seconds ago."""
+    if backoff_age_seconds is None:
+        return ({"events": []}, {}, "")
+    started = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=backoff_age_seconds)
+    events = [
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": _PULL_DETAIL,
+            "first_timestamp": str(started),
+            "last_timestamp": str(datetime.datetime.now(datetime.timezone.utc)),
+        },
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": "Error: ImagePullBackOff",
+            "first_timestamp": str(started),
+            "last_timestamp": str(datetime.datetime.now(datetime.timezone.utc)),
+        },
+    ]
+    return ({"events": events}, {"failed": "Error: ImagePullBackOff"}, "")
+
+
+def _pending_step(step, age_seconds: int = 30) -> None:
+    old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=age_seconds)
     step.created_at = old
     step.updated_at = old
     step.status = HelixJobStatus.PENDING
 
 
-@pytest.fixture
-def pull_failure_details():
-    """The kubelet's Warning/Failed event for a reference that cannot resolve."""
-    return {
-        "failed": (
-            'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": '
-            "failed to resolve reference: dial tcp: lookup registry.invalid: no such host"
-        )
-    }
+def _sync_with(kubernetes_job, step, pods, details):
+    with (
+        patch(f"{_KJ}.list_pod_status", return_value=pods),
+        patch(f"{_KJ}.get_pod_details", return_value=details),
+        patch(f"{_KJ}.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+        patch.object(kubernetes_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
+    ):
+        return kubernetes_job._sync(step), terminate
 
 
-def test_stuck_image_pull_fails_the_step_and_names_the_image(kubernetes_job, test_step_pending, pull_failure_details):
+def test_stuck_image_pull_fails_the_step_and_names_the_image(kubernetes_job, test_step_pending):
     """A pull that never succeeds must fail well before ttl_seconds_before_active.
 
     Regression: ImagePullBackOff is classified recoverable, so such a step used
@@ -3029,18 +3059,10 @@ def test_stuck_image_pull_fails_the_step_and_names_the_image(kubernetes_job, tes
     a timeout that never mentioned the image.
     """
     ttl = kubernetes_job._execution_profile_config.ttl_seconds_image_pull
-    _age_step(test_step_pending, ttl + 5)
     assert ttl < kubernetes_job._execution_profile_config.ttl_seconds_before_active
+    _pending_step(test_step_pending)
 
-    with (
-        patch(f"{_KJ}.list_pod_status", return_value=[_backing_off_pod()]),
-        patch(f"{_KJ}.get_pod_details", return_value=({}, pull_failure_details, "")),
-        patch(f"{_KJ}.update_all_tasks", return_value=False),
-        patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
-        patch.object(kubernetes_job, "terminate_job") as terminate,
-        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
-    ):
-        update = kubernetes_job._sync(test_step_pending)
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(ttl + 5))
 
     assert update.status == HelixJobStatus.ERROR
     message = update.error_details["message"]
@@ -3052,15 +3074,26 @@ def test_stuck_image_pull_fails_the_step_and_names_the_image(kubernetes_job, tes
 
 def test_image_pull_ttl_does_not_fire_inside_the_grace_period(kubernetes_job, test_step_pending):
     """A transient registry fault must be given time to clear."""
-    _age_step(test_step_pending, kubernetes_job._execution_profile_config.ttl_seconds_image_pull - 5)
+    ttl = kubernetes_job._execution_profile_config.ttl_seconds_image_pull
+    _pending_step(test_step_pending)
 
-    with (
-        patch(f"{_KJ}.list_pod_status", return_value=[_backing_off_pod()]),
-        patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
-        patch.object(kubernetes_job, "terminate_job") as terminate,
-        patch.object(kubernetes_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
-    ):
-        update = kubernetes_job._sync(test_step_pending)
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(ttl - 5))
+
+    assert update.status == HelixJobStatus.PENDING
+    terminate.assert_not_called()
+
+
+def test_slow_scheduling_does_not_consume_the_image_pull_budget(kubernetes_job, test_step_pending):
+    """The budget runs from the first failed pull, not from when the step went pending.
+
+    Regression: measuring the step's pending age meant a pod that waited a long
+    time to be scheduled had already spent its budget, so its first
+    ImagePullBackOff failed it immediately with no grace at all.
+    """
+    ttl = kubernetes_job._execution_profile_config.ttl_seconds_image_pull
+    _pending_step(test_step_pending, age_seconds=ttl * 10)
+
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(2))
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()
@@ -3070,15 +3103,9 @@ def test_image_pull_ttl_ignores_a_step_pending_for_another_reason(kubernetes_job
     """Only a backing-off pull is fatal here; other pending states keep their own TTL."""
     unschedulable = _backing_off_pod()
     unschedulable.waiting = {"nemo-job-task": "waiting"}
-    _age_step(test_step_pending, kubernetes_job._execution_profile_config.ttl_seconds_image_pull + 5)
+    _pending_step(test_step_pending)
 
-    with (
-        patch(f"{_KJ}.list_pod_status", return_value=[unschedulable]),
-        patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
-        patch.object(kubernetes_job, "terminate_job") as terminate,
-        patch.object(kubernetes_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
-    ):
-        update = kubernetes_job._sync(test_step_pending)
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [unschedulable], _pod_details(600))
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()
@@ -3087,15 +3114,9 @@ def test_image_pull_ttl_ignores_a_step_pending_for_another_reason(kubernetes_job
 def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
     """Zero restores the old behaviour: only ttl_seconds_before_active applies."""
     kubernetes_job._execution_profile_config.ttl_seconds_image_pull = 0
-    _age_step(test_step_pending, 600)
+    _pending_step(test_step_pending)
 
-    with (
-        patch(f"{_KJ}.list_pod_status", return_value=[_backing_off_pod()]),
-        patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
-        patch.object(kubernetes_job, "terminate_job") as terminate,
-        patch.object(kubernetes_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
-    ):
-        update = kubernetes_job._sync(test_step_pending)
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(6000))
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()

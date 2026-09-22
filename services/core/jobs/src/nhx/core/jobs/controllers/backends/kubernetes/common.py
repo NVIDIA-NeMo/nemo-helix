@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import datetime
 import json
 import logging
 import os
@@ -311,6 +312,46 @@ def map_pod_to_pod_status(pod: V1Pod) -> PodStatus:
 
 
 _PULL_FAILURE_PREFIX = "Failed to pull image"
+_PULL_FAILURE_REASONS = frozenset({"Failed", "InspectFailed"})
+
+
+def _parse_event_timestamp(raw: object) -> datetime.datetime | None:
+    """Parse a timestamp in the form ``get_pod_events`` stringifies it to."""
+    if isinstance(raw, datetime.datetime):
+        parsed = raw
+    else:
+        text = str(raw or "").strip()
+        if not text or text == "None":
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=datetime.timezone.utc)
+
+
+def image_pull_backoff_age_seconds(events: list[dict[str, Any]], now: datetime.datetime | None = None) -> float | None:
+    """Seconds since the kubelet first failed to pull, or ``None`` if it never did.
+
+    The step's own pending age is the wrong clock to bound a pull by: a pod that
+    spent minutes unschedulable would have spent the whole budget before its
+    first pull attempt, so the very first ``ImagePullBackOff`` would fail it with
+    no grace at all. Only the pull's own history answers "how long has this been
+    failing", which is the question the budget is asking.
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    started = [
+        stamp
+        for event in events
+        if event.get("type") == "Warning" and event.get("reason") in _PULL_FAILURE_REASONS
+        for stamp in [
+            _parse_event_timestamp(event.get("first_timestamp")) or _parse_event_timestamp(event.get("last_timestamp"))
+        ]
+        if stamp is not None
+    ]
+    if not started:
+        return None
+    return (now - min(started)).total_seconds()
 
 
 def image_pull_failure_message(events: list[dict[str, Any]]) -> str:
@@ -325,7 +366,7 @@ def image_pull_failure_message(events: list[dict[str, Any]]) -> str:
     warnings = [
         str(event.get("message") or "")
         for event in events
-        if event.get("type") == "Warning" and event.get("reason") in {"Failed", "InspectFailed"}
+        if event.get("type") == "Warning" and event.get("reason") in _PULL_FAILURE_REASONS
     ]
     for message in warnings:
         if message.startswith(_PULL_FAILURE_PREFIX):
