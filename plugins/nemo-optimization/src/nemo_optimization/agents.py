@@ -8,7 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.agents.client import AgentsClient
+from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.errors import LocalRunError
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config
@@ -22,7 +23,7 @@ def resolve_agent_config(
     agent: str | None,
     *,
     workspace: str,
-    sdk: NeMoPlatform | None,
+    sdk: SyncPlatformClient | None,
 ) -> dict[str, Any] | None:
     """Fetch a platform-managed agent's config and return a Fabric agent package.
 
@@ -51,8 +52,7 @@ def resolve_agent_config(
             "stored agent config. Set NEMO_BASE_URL or include an inline Fabric agent package in optimize_config."
         )
 
-    agent_dict = sdk.agents.get(name=name, workspace=ws)
-    agent_config = agent_dict["config"] if isinstance(agent_dict, dict) else getattr(agent_dict, "config", {})
+    agent_config = client_from_platform(sdk, AgentsClient).get_agent(name=name, workspace=ws).data().config
     if not isinstance(agent_config, dict) or not agent_config:
         raise RuntimeError(f"Agent '{ws}/{name}' has an empty or invalid stored config; cannot optimize it.")
     logger.info("Resolved agent %r to platform agent %s/%s", agent, ws, name)

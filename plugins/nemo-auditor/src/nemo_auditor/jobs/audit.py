@@ -33,8 +33,8 @@ from uuid import uuid4
 import garakapi
 import yaml
 from nemo_auditor.entities import AuditConfig, AuditTarget
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.response import NemoResponse
 from nemo_platform_plugin.entities import parse_qualified_name
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
@@ -181,7 +181,7 @@ async def _resolve_ref(
 def _rewrite_options_uris(
     options: dict,
     sdk: NeMoPlatform | None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    async_sdk: AsyncPlatformClient | None = None,
 ) -> None:
     """Replace ``nmp_uri_spec`` sentinels in ``options`` with concrete ``uri`` values.
 
@@ -347,7 +347,7 @@ class AuditJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncPlatformClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve any name-string refs on ``input_spec`` into inline entities.
@@ -392,7 +392,7 @@ class AuditJob(NemoJob):
     @staticmethod
     def _resolve_entity_client(
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncPlatformClient | None,
     ) -> NemoEntitiesClient:
         """Return a ``NemoEntitiesClient`` from whatever the scheduler handed us.
 
@@ -404,7 +404,7 @@ class AuditJob(NemoJob):
         if entity_client is not None:
             return cast(NemoEntitiesClient, entity_client)
         if async_sdk is not None:
-            typed_client = client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncEntitiesClient)
+            typed_client = client_from_platform(async_sdk, AsyncEntitiesClient)
             return NemoEntitiesClient(typed_client)
         raise RuntimeError(
             "AuditInputSpec contained a name reference but no platform "
@@ -420,7 +420,7 @@ class AuditJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> object:
@@ -465,7 +465,7 @@ class AuditJob(NemoJob):
         *,
         ctx: JobContext,
         sdk: NeMoPlatform | None = None,
-        async_sdk: AsyncNeMoPlatform | None = None,
+        async_sdk: AsyncPlatformClient | None = None,
     ) -> dict:
         spec = AuditSpec.model_validate(config)
 

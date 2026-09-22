@@ -60,16 +60,17 @@ def mock_files_client():
 
 @pytest.fixture
 def mock_sdk(mock_files_client):
-    sdk = MagicMock()
-    sdk.inference.providers.retrieve = AsyncMock()
-    return sdk
+    return MagicMock()
 
 
 @pytest.fixture(autouse=True)
-def _patch_client_from_platform(mock_files_client):
+def models_client(mock_files_client):
     from nemo_platform_plugin.models.client import AsyncModelsClient
 
     models_client = MagicMock()
+    provider_response = MagicMock()
+    provider_response.data.return_value = MagicMock(name="provider")
+    models_client.get_provider = AsyncMock(return_value=provider_response)
     models_client.get_provider_route_openai_url = MagicMock(
         return_value="http://nmp-host/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
     )
@@ -83,7 +84,7 @@ def _patch_client_from_platform(mock_files_client):
         "nemo_safe_synthesizer_plugin.jobs.generate.client_from_platform",
         side_effect=_dispatch,
     ):
-        yield
+        yield models_client
 
 
 def _make_spec(data_source: str = DEFAULT_DATA_SOURCE, model_provider: str | None = None):
@@ -145,10 +146,10 @@ async def test_job_config_compiler_data_source_permission_denied(mock_sdk, mock_
 
 
 @pytest.mark.asyncio
-async def test_job_config_compiler_with_classify_provider(mock_sdk):
+async def test_job_config_compiler_with_classify_provider(mock_sdk, models_client):
     result = await _compile(_make_spec(model_provider="default/my-nim"), mock_sdk)
 
-    mock_sdk.inference.providers.retrieve.assert_awaited_once_with("my-nim", workspace="default")
+    models_client.get_provider.assert_awaited_once_with(name="my-nim", workspace="default")
     step = next(iter(result["steps"]))
     assert step["executor"]["provider"] == "gpu"
     env = {e["name"]: e.get("value") for e in step.get("environment", [])}

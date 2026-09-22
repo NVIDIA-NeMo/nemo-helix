@@ -3,36 +3,40 @@
 
 from __future__ import annotations
 
+import re
+
+import httpx
 import pytest
 from nemo_optimization.preflight import preflight_validate_llm_models
-from nemo_platform import NotFoundError
+from nemo_platform_plugin.client.client import NemoClient
 
-
-class _StubResponse:
-    status_code = 404
-    headers: dict[str, str] = {}
-    request = None
-
-
-def _not_found(message: str) -> NotFoundError:
-    return NotFoundError(message=message, response=_StubResponse(), body={"detail": message})  # type: ignore[arg-type]
+_VIRTUAL_MODELS_PATH = re.compile(
+    r"^/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/virtual-models/(?P<name>[^/]+)$"
+)
 
 
 class _RecordingVirtualModels:
+    """In-memory VirtualModels API: records each ``GET`` and answers 404 for ``missing`` names."""
+
     def __init__(self, *, missing: set[str] | None = None) -> None:
         self.missing = missing or set()
         self.calls: list[dict[str, str]] = []
 
-    def retrieve(self, *, name: str, workspace: str) -> object:
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        match = _VIRTUAL_MODELS_PATH.match(request.url.path)
+        assert request.method == "GET" and match is not None, f"unexpected request {request.method} {request.url}"
+        name, workspace = match["name"], match["workspace"]
         self.calls.append({"name": name, "workspace": workspace})
         if name in self.missing:
-            raise _not_found(f"VirtualModel {name!r} not found")
-        return object()
+            return httpx.Response(404, json={"detail": f"VirtualModel {name!r} not found"})
+        return httpx.Response(200, json={"name": name, "workspace": workspace})
 
 
-class _StubSDK:
-    def __init__(self, virtual_models: _RecordingVirtualModels) -> None:
-        self.inference = type("Inference", (), {"virtual_models": virtual_models})()
+def _StubSDK(virtual_models: _RecordingVirtualModels) -> NemoClient:
+    return NemoClient(
+        base_url="http://test",
+        http_client=httpx.Client(transport=httpx.MockTransport(virtual_models), base_url="http://test"),
+    )
 
 
 def test_preflight_noop_without_sdk() -> None:
@@ -52,7 +56,7 @@ def test_preflight_validates_fabric_models_without_base_url() -> None:
             }
         },
         workspace="ws",
-        sdk=sdk,  # type: ignore[arg-type]
+        sdk=sdk,
     )
     assert vms.calls == [{"name": "demo-model", "workspace": "ws"}]
 
@@ -71,7 +75,7 @@ def test_preflight_skips_fabric_models_with_external_base_url() -> None:
             }
         },
         workspace="ws",
-        sdk=sdk,  # type: ignore[arg-type]
+        sdk=sdk,
     )
     assert vms.calls == []
 
@@ -83,7 +87,7 @@ def test_preflight_still_validates_legacy_llms() -> None:
         preflight_validate_llm_models(
             {"llms": {"agent": {"_type": "openai", "model_name": "missing-model"}}},
             workspace="ws",
-            sdk=sdk,  # type: ignore[arg-type]
+            sdk=sdk,
         )
 
 
@@ -93,7 +97,7 @@ def test_preflight_merges_agent_config_models() -> None:
     preflight_validate_llm_models(
         {"optimizer": {"numeric": {"enabled": True}}},
         workspace="ws",
-        sdk=sdk,  # type: ignore[arg-type]
+        sdk=sdk,
         agent_config={"models": {"default": {"provider": "openai", "model": "agent-model"}}},
     )
     assert vms.calls == [{"name": "agent-model", "workspace": "ws"}]
@@ -106,5 +110,5 @@ def test_preflight_reports_missing_fabric_model() -> None:
         preflight_validate_llm_models(
             {"models": {"default": {"provider": "nvidia", "model": "gone"}}},
             workspace="ws",
-            sdk=sdk,  # type: ignore[arg-type]
+            sdk=sdk,
         )

@@ -12,6 +12,8 @@ from typing import Annotated, Any, Callable, Literal, TypedDict, cast
 
 import click
 import typer
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_platform_plugin.inference_gateway.types import JsonBody
 
 from nemo_platform_ext.cli.chat_tui import (
     StreamingResponse,
@@ -242,14 +244,9 @@ def chat(
     run_once, effective_prompt = _resolve_chat_mode(prompt, interactive)
     if run_once and not effective_prompt:
         raise click.UsageError("One-shot chat requires a prompt. Provide PROMPT or pipe text on stdin.")
-    client = state.get_client()
+    client = state.typed_client(InferenceGatewayClient)
     chat_output_format = _resolve_chat_output_format(state, output_format) if run_once else "text"
-
-    # Get workspace from client config if available
-    try:
-        workspace_from_config: str | None = client._get_workspace_path_param()
-    except ValueError:
-        workspace_from_config = None
+    workspace_from_config = state.get_workspace()
 
     if provider:
         # Provider routing: pass model directly to the provider
@@ -268,11 +265,11 @@ def chat(
             )
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
-            return client.inference.gateway.provider.with_streaming_response.post(
-                trailing_uri="v1/chat/completions",
+            return client.stream_provider(
                 workspace=resolved_workspace,
                 name=provider,
-                body=body,
+                trailing_uri="v1/chat/completions",
+                body=JsonBody(body),
             )
 
         model_for_body = model
@@ -282,10 +279,10 @@ def chat(
         resolved_workspace, model_entity_id = _parse_model_and_workspace(model, workspace, workspace_from_config)
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
-            return client.inference.gateway.openai.with_streaming_response.post(
-                trailing_uri="v1/chat/completions",
+            return client.stream_openai(
                 workspace=resolved_workspace,
-                body=body,
+                trailing_uri="v1/chat/completions",
+                body=JsonBody(body),
             )
 
         model_for_body = model_entity_id
