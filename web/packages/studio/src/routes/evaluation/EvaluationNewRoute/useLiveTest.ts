@@ -38,12 +38,12 @@ const POLL_TIMEOUT_MS = 120_000;
 export interface LiveTestResult {
   /** What the model actually answered, so a bad score can be read against it. */
   output: string;
-  scores: { name: string; value: number }[];
+  scores: { name: string; value: number; label?: string }[];
 }
 
 export type LiveTestState =
   | { status: 'idle' }
-  | { status: 'busy'; label: string }
+  | { status: 'busy'; label: string; output?: string }
   | { status: 'done'; result: LiveTestResult }
   | { status: 'error'; message: string };
 
@@ -83,6 +83,19 @@ const describeModelFailure = (role: string, modelRef: string, error: unknown): s
 
 const bareModelName = (modelRef: string): string =>
   modelRef.includes('/') ? modelRef.split('/').slice(1).join('/') : modelRef;
+
+/** Over a single row the aggregate mean IS that row's score, so it lands exactly
+ *  on a rubric value or on NaN. */
+const rubricLabel = (
+  values: EvaluationFormValues,
+  name: string,
+  value: number
+): string | undefined => {
+  const scoreName = name.split('.').pop();
+  const score = values.body.scores.find((entry) => entry.name === scoreName);
+  if (score?.scoreType !== 'rubric') return undefined;
+  return score.rubric.find((item) => item.value === value)?.label;
+};
 
 /** The aggregate-scores artifact is a LIST of per-score statistics, not a nested
  *  record. Verified against a live run: {"scores":[{"name":"exact-match.exact-match",
@@ -199,7 +212,7 @@ export function useLiveTest() {
       // Verified live: unavailable models return 502 (upstream 404) and an
       // exhausted account returns 429.
       if (values.body.metrics['llm-judge']) {
-        setState({ status: 'busy', label: 'Checking the judge model…' });
+        setState({ status: 'busy', label: 'Checking the judge model…', output });
         try {
           await createChatCompletion({
             model: bareModelName(values.body.judgeModel),
@@ -220,7 +233,7 @@ export function useLiveTest() {
       }
 
       if (superseded()) return;
-      setState({ status: 'busy', label: 'Scoring the row…' });
+      setState({ status: 'busy', label: 'Scoring the row…', output });
 
       const name = buildEvalJobName('livetest');
       const request: EvaluateJobRequest = {
@@ -266,9 +279,11 @@ export function useLiveTest() {
 
         const results = await evaluatorListEvaluateJobResults(workspace, job.name);
         const aggregate = results?.data?.find((entry) => entry.name === 'aggregate-scores');
-        const scores = aggregate?.download_url
-          ? flattenScores(await (await fetch(aggregate.download_url)).json())
-          : [];
+        const scores = (
+          aggregate?.download_url
+            ? flattenScores(await (await fetch(aggregate.download_url)).json())
+            : []
+        ).map((score) => ({ ...score, label: rubricLabel(values, score.name, score.value) }));
 
         if (superseded()) return;
         // Read before delete: once the score is in hand the job has no further use.

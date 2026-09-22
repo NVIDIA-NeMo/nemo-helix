@@ -81,6 +81,7 @@ export const flagDefinitions = {
   jobsEnabled: previewFlag('VITE_FF_JOBS_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED'),
   modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
+  modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', false),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
   pluginsEnabled: previewFlag('VITE_FF_PLUGINS_ENABLED', true),

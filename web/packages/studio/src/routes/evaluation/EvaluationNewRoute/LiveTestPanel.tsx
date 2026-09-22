@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
@@ -35,6 +36,7 @@ export const LiveTestPanel: FC = () => {
   const [rowIndex, setRowIndex] = useState(0);
   useEffect(() => setRowIndex(0), [dataset]);
   const { row, rowCount, isPartial } = useDatasetPreview(dataset ?? null, rowIndex);
+  const fileName = dataset ? parseFilesetLocation(dataset)?.objectPath.split('/').pop() : null;
   // Bindings, not fieldMapping: a messages dataset resolves its input and ground
   // truth positionally, and reading the mapping directly reports them unmapped.
   const bindings = useDatasetBindings();
@@ -63,6 +65,13 @@ export const LiveTestPanel: FC = () => {
    *
    *  Create never requires a live test; sharing the resolver only means Test cannot
    *  pass on a config Create would reject. */
+  const modelResponse =
+    state.status === 'done'
+      ? state.result.output
+      : state.status === 'busy'
+        ? (state.output ?? null)
+        : null;
+
   const runTest = handleSubmit((values) => {
     if (!row) return;
     void run(values, bindings, row);
@@ -76,6 +85,11 @@ export const LiveTestPanel: FC = () => {
               side of a "Row N of M" label. Disabled while a run is in flight --
               moving rows mid-run would leave the previews on one row and the
               result on another. */}
+          {fileName ? (
+            <Text kind="body/regular/sm" className="truncate text-center">
+              {fileName}
+            </Text>
+          ) : null}
           <Flex align="center" justify="center" gap="density-sm">
             <Button
               kind="secondary"
@@ -110,9 +124,12 @@ export const LiveTestPanel: FC = () => {
       {input !== null ? <PreviewField label="Input Prompt" value={input} /> : null}
       {reference !== null ? <PreviewField label="Ground Truth" value={reference} /> : null}
 
+      {modelResponse !== null ? (
+        <PreviewField label="Model Response" value={modelResponse} />
+      ) : null}
+
       {state.status === 'done' ? (
         <>
-          <PreviewField label="Model Response" value={state.result.output} />
           <Stack gap="density-xs">
             <Text kind="label/bold/lg">Score</Text>
             {state.result.scores.length === 0 ? (
@@ -122,7 +139,7 @@ export const LiveTestPanel: FC = () => {
             ) : (
               state.result.scores.map((score) => (
                 <Text key={score.name} kind="body/regular/md">
-                  {score.name}: {formatEvaluatorScore(score.value)}
+                  {score.name}: {score.label ?? formatEvaluatorScore(score.value)}
                 </Text>
               ))
             )}

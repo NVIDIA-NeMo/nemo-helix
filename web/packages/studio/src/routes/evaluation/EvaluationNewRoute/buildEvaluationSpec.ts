@@ -190,7 +190,7 @@ const buildMetricBundle = (
           // prompt_template. It is injected verbatim, so it carries rendered
           // prose rather than the SDK's Jinja template.
           system_prompt: renderScoreGuidance(scores),
-          prompt_template: composeJudgePromptTemplate(bindings),
+          prompt_template: composeJudgePromptTemplate(bindings, values.body.judgePrompt),
           scores: scores.map(toScorePayload),
         },
         outputs,

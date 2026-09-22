@@ -72,7 +72,7 @@ export const EvaluationResultsDataView = () => {
 
   const {
     data: jobsData,
-    isFetching,
+    isLoading,
     error,
   } = useEvaluatorListEvaluateJobs(
     workspace,
@@ -152,7 +152,7 @@ export const EvaluationResultsDataView = () => {
 
   const hasActiveFilters =
     !!dataViewState.debouncedSearchBar || dataViewState.debouncedColumnFilters.length > 0;
-  const isInitialEmpty = jobs.length === 0 && !isFetching && !error && !hasActiveFilters;
+  const isInitialEmpty = jobs.length === 0 && !isLoading && !error && !hasActiveFilters;
 
   if (error) {
     return <ErrorPanel errorMessage={getErrorMessage(error)} />;
@@ -174,7 +174,11 @@ export const EvaluationResultsDataView = () => {
         DataViewRoot: {
           data: jobs,
           totalCount: jobsData?.pagination?.total_results ?? 0,
-          requestStatus: isFetching ? 'loading' : undefined,
+          // `isLoading`, not `isFetching`: this list polls, and `isFetching` is
+          // true on every background refetch, which swapped the rows for
+          // skeletons every few seconds. `keepPreviousData` was already holding
+          // the rows -- the table was simply being told they were not there.
+          requestStatus: isLoading && !jobsData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: () =>

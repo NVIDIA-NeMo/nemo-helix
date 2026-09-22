@@ -10,23 +10,19 @@ import { ensureEvalConfigFileset } from '@studio/api/evaluation/eval-config-file
 import { evalConfigFilename } from '@studio/components/evaluation/experimentEvalConfig';
 import {
   buildEvalJobName,
-  generateEvalConfigName,
+  MODEL_EVAL_CONFIG_DESCRIPTION,
   serializeEvalConfig,
 } from '@studio/components/evaluation/submitEvaluationJob';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildEvaluationSpec } from '@studio/routes/evaluation/EvaluationNewRoute/buildEvaluationSpec';
-import type {
-  EvaluationFormValues,
-  DatasetBindings,
+import {
+  type DatasetBindings,
+  type EvaluationFormValues,
+  NEW_CONFIG,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
 import { getModelInferenceGatewayUrl } from '@studio/util/models';
 import { useNavigate } from 'react-router';
-
-/** Fileset holding a run's reusable configuration. The dataset is NOT copied in:
- *  it already lives in its own fileset and the spec references it, so a config
- *  records which dataset it was built against without duplicating the data. */
-const evalConfigFileset = (name: string) => `${name}-eval`;
 
 /** The bare model id the endpoint expects, without its workspace prefix. */
 const modelName = (modelRef: string): string =>
@@ -41,28 +37,33 @@ export function useCreateEvaluation() {
   const createEvaluation = async (values: EvaluationFormValues, bindings: DatasetBindings) => {
     const spec = buildEvaluationSpec(values, bindings, workspace);
 
-    const name = generateEvalConfigName();
-    const fileset = evalConfigFileset(name);
+    // Reusing a saved config: `configSource` IS the fileset it lives in, so the
+    // run takes its name from there and writes nothing. Authoring: the fileset
+    // takes the name the user typed, verbatim.
+    const reusing = Boolean(values.configSource) && values.configSource !== NEW_CONFIG;
+    const fileset = reusing ? values.configSource : values.name;
 
     try {
-      // Persist first: a config that cannot be stored is not worth running, and
-      // this way a failed upload leaves no orphan job behind.
-      await ensureEvalConfigFileset(
-        workspace,
-        fileset,
-        new AbortController().signal,
-        [
-          {
-            path: evalConfigFilename('json'),
-            content: serializeEvalConfig(spec, 'json'),
-            type: 'application/json',
-          },
-        ],
-        'Model Evaluation Config'
-      );
+      if (!reusing) {
+        // Persist first: a config that cannot be stored is not worth running, and
+        // this way a failed upload leaves no orphan job behind.
+        await ensureEvalConfigFileset(
+          workspace,
+          fileset,
+          new AbortController().signal,
+          [
+            {
+              path: evalConfigFilename('json'),
+              content: serializeEvalConfig(spec, 'json'),
+              type: 'application/json',
+            },
+          ],
+          MODEL_EVAL_CONFIG_DESCRIPTION
+        );
+      }
 
       const request: EvaluateJobRequest = {
-        name: buildEvalJobName(name),
+        name: buildEvalJobName(fileset),
         spec: {
           dataset: spec.dataset,
           metrics: spec.metrics as unknown as MetricInline[],
