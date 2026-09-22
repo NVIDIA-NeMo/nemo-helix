@@ -1000,7 +1000,10 @@ def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_
     kubernetes_job._execution_profile_config.workload_identity.token_audience = "test-audience"
     auth_config = SimpleNamespace(oidc=SimpleNamespace(workload_token_exchange_enabled=True))
 
-    with patch("nhx.common.config.get_auth_config", return_value=auth_config):
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=auth_config),
+        patch.object(kubernetes_job._workload_delegations, "ensure_for_target_after_initial_pod_wait"),
+    ):
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending_with_auth_context)
 
     call_args = kubernetes_job._batch_v1.create_namespaced_job.call_args
@@ -1023,6 +1026,31 @@ def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_
     mount = next(vm for vm in main_container.volume_mounts if vm.name == WORKLOAD_IDENTITY_VOLUME_NAME)
     assert mount.mount_path == WORKLOAD_IDENTITY_VOLUME_PATH
     assert mount.read_only is True
+
+
+def test_kubernetes_job_waits_for_initial_pod_uid_workload_delegation(
+    kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+):
+    kubernetes_job._batch_v1.create_namespaced_job.return_value = MagicMock()
+    kubernetes_job._execution_profile_config.workload_identity.token_audience = "test-audience"
+
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch.object(
+            kubernetes_job._workload_delegations,
+            "ensure_for_target_after_initial_pod_wait",
+            return_value=True,
+        ) as ensure_delegation,
+    ):
+        update = kubernetes_job.schedule(cpu_execution_provider, test_step_pending_with_auth_context)
+
+    assert update.status == HelixJobStatus.PENDING
+    ensure_delegation.assert_called_once()
+    step_arg, target_arg = ensure_delegation.call_args.args
+    assert step_arg is test_step_pending_with_auth_context
+    assert target_arg.namespace == "test-namespace"
+    assert target_arg.name == name_for_step(test_step_pending_with_auth_context)
+    assert target_arg.service_account_name == "default"
 
 
 def test_kubernetes_job_does_not_mount_workload_identity_without_auth_context(

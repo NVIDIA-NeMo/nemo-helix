@@ -138,6 +138,26 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             service_account_name=service_account_name,
         )
 
+    def _ensure_initial_workload_delegation(self, step: HelixJobStepWithContext, job: V1Job) -> None:
+        if not self._workload_delegations.should_manage_step(step):
+            return
+        target = self._workload_delegation_target_for_job(job)
+        if target is None:
+            return
+        try:
+            registered = self._workload_delegations.ensure_for_target_after_initial_pod_wait(step, target)
+        except Exception:
+            logger.exception(
+                "Failed initial Kubernetes workload delegation reconciliation; will retry on next sync",
+                extra={"job_name": target.name, "namespace": target.namespace},
+            )
+            return
+        if not registered:
+            logger.warning(
+                "Kubernetes workload delegation was not registered during initial pod wait",
+                extra={"job_name": target.name, "namespace": target.namespace},
+            )
+
     def get_job_by_name(self, name: str) -> V1Job | None:
         try:
             return self._batch_v1.read_namespaced_job(name=name, namespace=self.namespace)
@@ -245,6 +265,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             logger.info(
                 "Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
             )
+            self._ensure_initial_workload_delegation(step, k8s_job)
         except ApiException:
             logger.exception(
                 "Failed to create Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}

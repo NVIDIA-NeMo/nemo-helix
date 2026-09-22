@@ -9,7 +9,7 @@ from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import authenticate_authentik_device_flow, with_url_origin
+from tests.auth_idp.device_flow import with_url_origin
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, TokenSet
 
 pytestmark = [
@@ -48,8 +48,7 @@ def _interactive_user_access_token(auth_idp_case: AuthIdpCase, auth_idp_runtime:
     assert oidc.device_authorization_endpoint
     assert oidc.token_endpoint
     tls_config = runtime_tls_config(auth_idp_runtime)
-    token_response = authenticate_authentik_device_flow(
-        gateway_base_url=auth_idp_runtime.gateway_base_url,
+    token_response = auth_idp_runtime.authenticate_device_flow(
         device_authorization_endpoint=with_url_origin(
             oidc.device_authorization_endpoint,
             auth_idp_runtime.gateway_base_url,
@@ -122,6 +121,7 @@ def test_provider_interactive_user_is_allowed_by_email_alias_binding(
     auth_idp_workspace,
 ):
     require_capability(auth_idp_case, "workspace_rbac")
+    require_capability(auth_idp_case, "interactive_email_alias")
 
     access_token = _interactive_user_access_token(auth_idp_case, auth_idp_runtime)
     token_claims = jwt_claims(access_token)

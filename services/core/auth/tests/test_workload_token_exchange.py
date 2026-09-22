@@ -1282,15 +1282,15 @@ def test_workload_signing_key_reuses_cached_private_key_file(
     exchange_service: exchange.WorkloadTokenExchangeService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_load = signing_keys_mod._load_rsa_signing_key_async
+    original_load = signing_keys_mod._load_rsa_signing_key
     load_count = 0
 
-    async def counted_load(**kwargs: Any) -> signing_keys_mod.RSASigningKey:
+    def counted_load(**kwargs: Any) -> signing_keys_mod.RSASigningKey:
         nonlocal load_count
         load_count += 1
-        return await original_load(**kwargs)
+        return original_load(**kwargs)
 
-    monkeypatch.setattr(signing_keys_mod, "_load_rsa_signing_key_async", counted_load)
+    monkeypatch.setattr(signing_keys_mod, "_load_rsa_signing_key", counted_load)
 
     signing_key = exchange_service.workload_signing_key(exchange_config)
     public_jwk = exchange_service.public_jwk(exchange_config)

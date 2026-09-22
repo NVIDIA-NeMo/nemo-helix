@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
@@ -42,6 +43,8 @@ _REQUIRED_POD_SELECTOR_LABELS = (
     JOB_STEP_ID_LABEL,
     JOB_MANAGED_BY_LABEL,
 )
+INITIAL_POD_WAIT_TIMEOUT_SECONDS = 10.0
+INITIAL_POD_WAIT_INTERVAL_SECONDS = 0.25
 
 
 @dataclass(frozen=True)
@@ -82,9 +85,9 @@ class KubernetesPodBoundWorkloadDelegationManager:
         self,
         step: HelixJobStepWithContext,
         target: KubernetesPodBoundWorkloadDelegationTarget,
-    ) -> None:
+    ) -> bool:
         if not self.should_manage_step(step):
-            return
+            return False
 
         target_key = self._target_key(target.namespace, target.name)
         registered_delegations = self._delegations_by_target_key.setdefault(target_key, set())
@@ -112,6 +115,26 @@ class KubernetesPodBoundWorkloadDelegationManager:
                 )
                 continue
             registered_delegations.add(delegation_name)
+        return bool(registered_delegations)
+
+    def ensure_for_target_after_initial_pod_wait(
+        self,
+        step: HelixJobStepWithContext,
+        target: KubernetesPodBoundWorkloadDelegationTarget,
+        *,
+        timeout_seconds: float = INITIAL_POD_WAIT_TIMEOUT_SECONDS,
+        interval_seconds: float = INITIAL_POD_WAIT_INTERVAL_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> bool:
+        """Wait briefly for the first Job pod so its Pod UID-bound delegation exists before startup auth."""
+        deadline = monotonic() + max(0.0, timeout_seconds)
+        while True:
+            if self.ensure_for_target(step, target):
+                return True
+            if monotonic() >= deadline:
+                return False
+            sleep(max(0.0, interval_seconds))
 
     def revoke_for_target(self, target: KubernetesPodBoundWorkloadDelegationTarget) -> None:
         if not is_workload_identity_token_exchange_enabled():

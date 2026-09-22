@@ -77,7 +77,7 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
         sdk = NeMoHelix(
-            base_url="http://platform",
+            base_url="http://127.0.0.1:8000",
             default_headers={
                 "Authorization": "Bearer controller-token",
                 "X-NHX-Principal-On-Behalf-Of": "alice@example.com",
@@ -94,7 +94,7 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
     assert len(requests) == 1
     request = requests[0]
     assert request.method == "POST"
-    assert str(request.url) == "http://platform/apis/entities/v2/workspaces/system/entities/workload_delegation"
+    assert str(request.url) == "http://127.0.0.1:8000/apis/entities/v2/workspaces/system/entities/workload_delegation"
     assert request.headers["Authorization"] == "Bearer controller-token"
     assert request.headers["X-NHX-Principal-Id"] == "service:jobs"
     assert request.headers["X-NHX-Actor-Aliases"] == "service:jobs"

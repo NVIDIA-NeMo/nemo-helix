@@ -43,15 +43,37 @@ class TestHelixConfig:
         assert "NHX_JOBS_URL" in envvars
 
     def test_service_url_env_var_populates_service_discovery(self, monkeypatch):
-        """NHX_<SERVICE>_URL env vars are merged into service_discovery."""
+        """Known platform service URL env vars are merged into service_discovery."""
         monkeypatch.setenv("NHX_FILES_URL", "http://files:8000")
         config = HelixConfig()
 
         assert config.get_service_url("files") == "http://files:8000"
         assert config.service_discovery["files"] == "http://files:8000"
 
+    def test_multiword_service_url_env_var_populates_service_discovery(self, monkeypatch):
+        """Known multiword service URLs are merged without relying on env-name shape."""
+        monkeypatch.setenv("NHX_INFERENCE_GATEWAY_URL", "http://inference-gateway:8000")
+        config = HelixConfig()
+
+        assert config.get_service_url("inference-gateway") == "http://inference-gateway:8000"
+        assert config.service_discovery["inference-gateway"] == "http://inference-gateway:8000"
+
+    def test_backend_config_url_env_var_does_not_populate_service_discovery(self, monkeypatch):
+        """Config-only backend URLs are not platform service discovery routes."""
+        monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://clickhouse:8123")
+        config = HelixConfig()
+
+        assert "intake-clickhouse" not in config.service_discovery
+
+    def test_unknown_service_url_env_var_does_not_populate_service_discovery(self, monkeypatch):
+        """Unknown URL env vars are ignored even when their values are valid endpoints."""
+        monkeypatch.setenv("NHX_NOT_A_SERVICE_URL", "http://not-a-service:8000")
+        config = HelixConfig()
+
+        assert "not-a-service" not in config.service_discovery
+
     def test_service_url_env_var_overrides_config_file(self, monkeypatch):
-        """Env var NHX_*_URL overrides or adds to file service_discovery."""
+        """Known platform service URL env vars override or add to file service_discovery."""
         monkeypatch.setenv("NHX_JOBS_URL", "http://jobs-from-env:9000")
         settings = {
             "platform": {
@@ -156,14 +178,20 @@ class TestHelixConfig:
         pattern = config.create_service_pattern()
 
         assert pattern is not None
+
+        def matched_service(path: str) -> str:
+            match = pattern.search(path)
+            assert match is not None
+            return match.group(1)
+
         # Docstring examples: match and capture service name
-        assert pattern.search("/apis/jobs/v2").group(1) == "jobs"
-        assert pattern.search("/apis/my-service/v2").group(1) == "my-service"
-        assert pattern.search("/apis/jobs/v2/workspaces/ws1/jobs/123").group(1) == "jobs"
+        assert matched_service("/apis/jobs/v2") == "jobs"
+        assert matched_service("/apis/my-service/v2") == "my-service"
+        assert matched_service("/apis/jobs/v2/workspaces/ws1/jobs/123") == "jobs"
         # Other valid names
-        assert pattern.search("/apis/models/").group(1) == "models"
-        assert pattern.search("http://host/apis/entities/v2/workspaces").group(1) == "entities"
-        assert pattern.search("/apis/data-designer/v2/thing").group(1) == "data-designer"
+        assert matched_service("/apis/models/") == "models"
+        assert matched_service("http://host/apis/entities/v2/workspaces") == "entities"
+        assert matched_service("/apis/data-designer/v2/thing") == "data-designer"
         # Reject uppercase, digits, slash in name
         assert pattern.search("/apis/Jobs/") is None
         assert pattern.search("/apis/MyService/") is None

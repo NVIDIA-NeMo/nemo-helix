@@ -6,9 +6,21 @@
 import json
 
 import pytest
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.auth import get_principal_auth_headers, principal_from_env
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import OIDCConfig
+
+
+def _auth_config_with_token_exchange() -> AuthConfig:
+    return AuthConfig(
+        enabled=True,
+        oidc=OIDCConfig(
+            workload_token_exchange_enabled=True,
+            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+        ),
+    )
 
 
 @pytest.fixture
@@ -197,7 +209,6 @@ class TestDependencyProviderEntityClient:
         from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
-        from nhx.common.config import AuthConfig
         from nhx.common.service.base import DependencyProvider
 
         dp = DependencyProvider()
@@ -207,17 +218,24 @@ class TestDependencyProviderEntityClient:
         token = auth_client_context.set(auth_client)
 
         try:
-            with patch.object(dp, "get_sdk_client") as mock_sdk:
-                mock_base_sdk = mock_sdk.return_value
+            http_client = object()
+            nemo_client = object()
+            entities_client = object()
+            with (
+                patch.object(dp, "get_http_client", return_value=http_client),
+                patch("nhx.common.client_factory.get_async_nemo_client", return_value=nemo_client) as get_nemo_client,
+                patch("nemo_helix_plugin.client.adapter.client_from_platform", return_value=entities_client),
+                patch("nhx.common.entities.client.EntityClient", side_effect=lambda client: client),
+            ):
+                result = dp.get_entity_client()
 
-                dp._get_entity_sdk_on_behalf_of()
-
-                mock_base_sdk.with_options.assert_called_once()
-                call_kwargs = mock_base_sdk.with_options.call_args
-                headers = call_kwargs.kwargs.get("set_default_headers") or call_kwargs[1].get("set_default_headers")
-
-                assert headers["X-NHX-Principal-Id"] == "service:platform"
-                assert headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
+            assert result is entities_client
+            get_nemo_client.assert_called_once_with(
+                as_service="platform",
+                internal=True,
+                on_behalf_of=user_principal.effective_principal,
+                http_client=http_client,
+            )
         finally:
             auth_client_context.reset(token)
 
@@ -229,16 +247,60 @@ class TestDependencyProviderEntityClient:
 
         dp = DependencyProvider()
 
-        with patch.object(dp, "get_sdk_client") as mock_sdk:
-            mock_base_sdk = mock_sdk.return_value
+        http_client = object()
+        nemo_client = object()
+        entities_client = object()
+        with (
+            patch.object(dp, "get_http_client", return_value=http_client),
+            patch("nhx.common.client_factory.get_async_nemo_client", return_value=nemo_client) as get_nemo_client,
+            patch("nemo_helix_plugin.client.adapter.client_from_platform", return_value=entities_client),
+            patch("nhx.common.entities.client.EntityClient", side_effect=lambda client: client),
+        ):
+            result = dp.get_entity_client()
 
-            dp._get_entity_sdk_on_behalf_of()
+        assert result is entities_client
+        get_nemo_client.assert_called_once_with(
+            as_service="platform",
+            internal=True,
+            on_behalf_of=None,
+            http_client=http_client,
+        )
 
-            call_kwargs = mock_base_sdk.with_options.call_args
-            headers = call_kwargs.kwargs.get("set_default_headers") or call_kwargs[1].get("set_default_headers")
+    def test_entity_client_token_exchange_uses_service_workload_bearer(self):
+        """Entity client should not recreate trusted headers in token-exchange mode."""
+        from unittest.mock import patch
 
-            assert headers["X-NHX-Principal-Id"] == "service:platform"
+        from nhx.common.auth import auth_client_context
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+        from nhx.common.service.base import DependencyProvider
+
+        dp = DependencyProvider()
+
+        config = _auth_config_with_token_exchange()
+        user_principal = Principal(id="user@example.com", email="user@example.com", groups=["team-a"])
+        token = auth_client_context.set(AuthClient(principal=user_principal, config=config))
+
+        try:
+            with (
+                patch("nemo_helix_plugin.client.adapter.client_from_platform", return_value=object()) as adapter,
+                patch("nhx.common.entities.client.EntityClient", side_effect=lambda client: client),
+                patch("nhx.common.platform_client_context.get_auth_config", return_value=config),
+                patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls,
+            ):
+                entity_client = dp.get_entity_client()
+
+                adapted_client = adapter.call_args.args[0]
+
+            assert entity_client is adapter.return_value
+            assert isinstance(adapted_client, AsyncNemoClient)
+            headers = adapted_client.default_headers
+            assert "Authorization" not in headers
+            assert "X-NHX-Principal-Id" not in headers
             assert "X-NHX-Principal-On-Behalf-Of" not in headers
+            provider_cls.assert_called_once_with(config, "platform", user_principal.effective_principal)
+        finally:
+            auth_client_context.reset(token)
 
 
 class TestPrincipalOtlpHeaders:
@@ -361,6 +423,157 @@ class TestBuildServicePrincipalHeadersDelegation:
         finally:
             auth_client_context.reset(token)
 
+    def test_token_exchange_mode_mints_service_obo_bearer_without_trusted_headers(self):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        config = _auth_config_with_token_exchange()
+        user = Principal(
+            id="user@example.com",
+            email="user@example.com",
+            groups=["team-a"],
+            account_id="account-user",
+            authz_aliases=["user@example.com", "legacy-user"],
+        )
+        token = auth_client_context.set(AuthClient(principal=user, config=config))
+        try:
+            with patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls:
+                provider_cls.return_value.get_access_token.return_value = "service-obo-token"
+
+                h = build_service_principal_headers("guardrails")
+
+            assert h == {"Authorization": "Bearer service-obo-token"}
+            provider_cls.assert_called_once_with(config, "guardrails", user.effective_principal)
+        finally:
+            auth_client_context.reset(token)
+
+    def test_token_exchange_mode_rejects_service_bearer_for_remote_cleartext_platform(self, monkeypatch):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        config = _auth_config_with_token_exchange()
+        user = Principal(id="user@example.com", email="user@example.com")
+        token = auth_client_context.set(AuthClient(principal=user, config=config))
+        try:
+            with patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls:
+                with pytest.raises(ValueError, match="service principal headers.*cleartext remote endpoint"):
+                    build_service_principal_headers("guardrails")
+
+            provider_cls.assert_not_called()
+        finally:
+            auth_client_context.reset(token)
+            Configuration.clear_cache()
+
+    def test_token_exchange_mode_mints_service_only_bearer_for_service_context(self):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        config = _auth_config_with_token_exchange()
+        service = Principal(id="service:batch", authz_aliases=["service:batch"])
+        token = auth_client_context.set(AuthClient(principal=service, config=config))
+        try:
+            with patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls:
+                provider_cls.return_value.get_access_token.return_value = "service-token"
+
+                h = build_service_principal_headers("jobs")
+
+            assert h == {"Authorization": "Bearer service-token"}
+            provider_cls.assert_called_once_with(config, "jobs", None)
+        finally:
+            auth_client_context.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_token_exchange_mode_async_mints_service_obo_bearer_without_sync_file_load(self):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context, build_service_principal_headers_async
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        config = _auth_config_with_token_exchange()
+        user = Principal(id="user@example.com", email="user@example.com", groups=["team-a"])
+        token = auth_client_context.set(AuthClient(principal=user, config=config))
+        try:
+            with (
+                patch(
+                    "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+                    side_effect=AssertionError("sync token minting should not run in async handlers"),
+                ),
+                patch(
+                    "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+                    return_value="async-service-obo-token",
+                ) as get_access_token_async,
+            ):
+                h = await build_service_principal_headers_async("guardrails")
+
+            assert h == {"Authorization": "Bearer async-service-obo-token"}
+            get_access_token_async.assert_awaited_once()
+        finally:
+            auth_client_context.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_downstream_service_headers_async_reject_remote_cleartext_platform(self, monkeypatch):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+        from nhx.common.service.headers import build_downstream_service_headers_async
+
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        config = _auth_config_with_token_exchange()
+        token = auth_client_context.set(AuthClient(principal=Principal(id="user@example.com"), config=config))
+        try:
+            with patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async"
+            ) as mint:
+                with pytest.raises(ValueError, match="service principal headers.*cleartext remote endpoint"):
+                    await build_downstream_service_headers_async("guardrails")
+
+            mint.assert_not_called()
+        finally:
+            auth_client_context.reset(token)
+            Configuration.clear_cache()
+
+    @pytest.mark.asyncio
+    async def test_downstream_service_headers_async_ignores_backend_config_urls(self, monkeypatch: pytest.MonkeyPatch):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+        from nhx.common.service.headers import build_downstream_service_headers_async
+
+        monkeypatch.setenv("NHX_BASE_URL", "https://platform.example.test")
+        monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://clickhouse.example.internal:8123")
+        Configuration.clear_cache()
+        config = _auth_config_with_token_exchange()
+        token = auth_client_context.set(AuthClient(principal=Principal(id="user@example.com"), config=config))
+        try:
+            with patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+                return_value="guardrails-token",
+            ) as mint:
+                headers = await build_downstream_service_headers_async("guardrails")
+
+            assert headers == {"Authorization": "Bearer guardrails-token"}
+            mint.assert_awaited_once()
+        finally:
+            auth_client_context.reset(token)
+            Configuration.clear_cache()
+
 
 class TestGetPrincipalAuthHeadersDelegation:
     def test_includes_on_behalf_of_groups_and_email_on_principal(self):
@@ -380,6 +593,65 @@ class TestGetPrincipalAuthHeadersDelegation:
             h = get_principal_auth_headers()
             assert h["X-NHX-Principal-On-Behalf-Of-Groups"] == "data-science"
             assert h["X-NHX-Principal-On-Behalf-Of-Email"] == "creator@example.com"
+        finally:
+            auth_client_context.reset(token)
+
+    def test_token_exchange_mode_forwards_bearer_token_instead_of_trusted_headers(self):
+        from nhx.common.auth import auth_client_context, get_principal_auth_headers
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        config = _auth_config_with_token_exchange()
+        token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+                bearer_token="service-access-token",
+            )
+        )
+        try:
+            h = get_principal_auth_headers()
+            assert h == {"Authorization": "Bearer service-access-token"}
+        finally:
+            auth_client_context.reset(token)
+
+    def test_token_exchange_mode_rejects_forwarded_bearer_for_remote_cleartext_platform(self, monkeypatch):
+        from nhx.common.auth import auth_client_context, get_principal_auth_headers
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        config = _auth_config_with_token_exchange()
+        token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+                bearer_token="service-access-token",
+            )
+        )
+        try:
+            with pytest.raises(ValueError, match="forwarded principal headers.*cleartext remote endpoint"):
+                get_principal_auth_headers()
+        finally:
+            auth_client_context.reset(token)
+            Configuration.clear_cache()
+
+    def test_token_exchange_mode_does_not_recreate_trusted_headers_without_bearer(self):
+        from nhx.common.auth import auth_client_context, get_principal_auth_headers
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+
+        config = _auth_config_with_token_exchange()
+        token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+            )
+        )
+        try:
+            h = get_principal_auth_headers()
+            assert h == {}
         finally:
             auth_client_context.reset(token)
 

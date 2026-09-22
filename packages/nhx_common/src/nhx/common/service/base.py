@@ -20,10 +20,12 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.api.utils import register_query_param_schemas
+from nhx.common.auth import Principal
 from nhx.common.config import Configuration, HelixConfig, ServiceConfig, get_platform_config
 from nhx.common.controller import Controller
 from nhx.common.entities.client import EntityClient
-from nhx.common.platform_endpoint import resolve_platform_endpoint, resolve_service_endpoint
+from nhx.common.platform_client_context import HelixRuntimeContext, build_platform_runtime_context
+from nhx.common.platform_endpoint import resolve_service_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,7 @@ class DependencyProvider:
         self._sdk_client: Optional[AsyncNeMoHelix] = None
         self._sync_sdk_client: Optional[NeMoHelix] = None
         self._platform_config: Optional[HelixConfig] = None
+        self._runtime_context: Optional[HelixRuntimeContext] = None
         self._service_name: str = "platform"
 
     def get_http_client(self) -> httpx.AsyncClient:
@@ -133,96 +136,90 @@ class DependencyProvider:
         """
         with self._client_lock:
             if self._http_client is None:
-                self._http_client = resolve_platform_endpoint().async_sdk_http_client()
+                self._http_client = self.get_runtime_context().endpoint.async_sdk_http_client()
             return self._http_client
 
     def get_sync_http_client(self) -> httpx.Client:
         """Return the httpx.Client for sync-only SDK consumers."""
         with self._client_lock:
             if self._sync_http_client is None:
-                self._sync_http_client = resolve_platform_endpoint().sync_sdk_http_client()
+                self._sync_http_client = self.get_runtime_context().endpoint.sync_sdk_http_client()
             return self._sync_http_client
 
-    def get_sdk_client(self, as_service: str | None = None) -> AsyncNeMoHelix:
-        """Return the async platform SDK client.
-
-        Args:
-            as_service: If provided, creates a NEW SDK instance with service principal
-                       credentials (not cached). Use this for startup code, background
-                       tasks, and controllers that run without user request context.
-                       The EntityClient dynamically adds auth headers per-request,
-                       so for normal request handling the cached instance works fine.
-
-        Returns:
-            SDK client - cached instance if as_service is None, new instance otherwise.
-        """
+    def get_sdk_client(self) -> AsyncNeMoHelix:
+        """Return the cached async platform SDK client."""
         from nhx.common.sdk_factory import get_async_platform_sdk
 
-        # When as_service is specified, return a fresh SDK with service credentials.
-        # This is needed for startup/background code where no user auth context exists.
-        if as_service is not None:
-            return get_async_platform_sdk(as_service=as_service, internal=True, http_client=self.get_http_client())
-
-        # For request handling, use cached SDK. EntityClient adds auth headers per-request.
         with self._client_lock:
             if self._sdk_client is None:
                 self._sdk_client = get_async_platform_sdk(http_client=self.get_http_client())
             return self._sdk_client
 
-    def get_sync_sdk_client(self, as_service: str | None = None) -> NeMoHelix:
-        """Return the sync platform SDK client."""
-        from nhx.common.sdk_factory import get_platform_sdk
+    def get_service_sdk_client(self, service_name: str) -> AsyncNeMoHelix:
+        """Return a fresh async SDK client authenticated as ``service:{service_name}``."""
+        from nhx.common.sdk_factory import get_async_platform_sdk
 
-        if as_service is not None:
-            return get_platform_sdk(as_service=as_service, internal=True, http_client=self.get_sync_http_client())
+        return get_async_platform_sdk(as_service=service_name, internal=True, http_client=self.get_http_client())
+
+    def get_sync_sdk_client(self) -> NeMoHelix:
+        """Return the cached sync platform SDK client."""
+        from nhx.common.sdk_factory import get_platform_sdk
 
         with self._client_lock:
             if self._sync_sdk_client is None:
                 self._sync_sdk_client = get_platform_sdk(http_client=self.get_sync_http_client())
             return self._sync_sdk_client
 
-    def get_entity_client(self, as_service: str | None = None) -> Optional[EntityClient]:
-        """Return the EntityClient.
+    def get_service_sync_sdk_client(self, service_name: str) -> NeMoHelix:
+        """Return a fresh sync SDK client authenticated as ``service:{service_name}``."""
+        from nhx.common.sdk_factory import get_platform_sdk
 
-        Args:
-            as_service: If provided, creates a NEW EntityClient backed by an SDK with
-                       service principal credentials (not cached). Use this for startup
-                       code, background tasks, and controllers that run without user
-                       request context.
+        return get_platform_sdk(as_service=service_name, internal=True, http_client=self.get_sync_http_client())
 
-        Returns:
-            EntityClient - new instance with service principal + on-behalf-of SDK
-            for request handling, or new instance with explicit service credentials
-            if as_service is provided.
-        """
+    def get_entity_client(self) -> EntityClient:
+        """Return an entity client for the current request or service context."""
+        on_behalf_of = self._entity_client_on_behalf_of()
+        return self._entity_client_from_nemo_client(
+            self.get_service_nemo_client(self._service_name, on_behalf_of=on_behalf_of)
+        )
+
+    def get_service_entity_client(self, service_name: str) -> EntityClient:
+        """Return an entity client authenticated as ``service:{service_name}``."""
+        return self._entity_client_from_nemo_client(self.get_service_nemo_client(service_name))
+
+    def get_service_nemo_client(
+        self,
+        service_name: str,
+        *,
+        on_behalf_of: Principal | None = None,
+    ) -> AsyncNemoClient:
+        """Return a fresh async NemoClient authenticated as ``service:{service_name}``."""
+        from nhx.common.client_factory import get_async_nemo_client
+
+        return get_async_nemo_client(
+            as_service=service_name,
+            internal=True,
+            on_behalf_of=on_behalf_of,
+            http_client=self.get_http_client(),
+        )
+
+    def _entity_client_from_nemo_client(self, client: AsyncNemoClient) -> EntityClient:
         from nemo_helix_plugin.client.adapter import client_from_platform
         from nemo_helix_plugin.entities.client import AsyncEntitiesClient
         from nhx.common.entities.client import EntityClient
 
-        # When as_service is specified, return a fresh EntityClient with service credentials.
-        if as_service is not None:
-            sdk = self.get_sdk_client(as_service=as_service)
-            return EntityClient(client_from_platform(sdk, AsyncEntitiesClient))
+        return EntityClient(client_from_platform(client, AsyncEntitiesClient))
 
-        # For request handling, authenticate as the service principal with
-        # X-NHX-Principal-On-Behalf-Of set to the current user. This ensures
-        # the entity store authorizes the request via service principal bypass
-        # while preserving the user's identity for audit/attribution.
-        sdk = self._get_entity_sdk_on_behalf_of()
-        return EntityClient(client_from_platform(sdk, AsyncEntitiesClient))
+    def _entity_client_on_behalf_of(self) -> Principal | None:
+        from nhx.common.auth import auth_client_context
 
-    def _get_entity_sdk_on_behalf_of(self) -> AsyncNeMoHelix:
-        """Create a per-request SDK for entity operations using service principal + on-behalf-of.
-
-        Uses the cached base SDK and applies per-request headers via .with_options()
-        (lightweight — reuses the HTTP connection pool).
-        """
-        from nhx.common.service.headers import build_downstream_service_headers
-
-        base_sdk = self.get_sdk_client()
-        headers = build_downstream_service_headers(self._service_name)
-
-        return base_sdk.with_options(set_default_headers=headers)
+        auth_client = auth_client_context.get()
+        if auth_client is None or not auth_client.principal or not auth_client.principal.id:
+            return None
+        effective = auth_client.principal.effective_principal
+        if effective.caller_kind == "service_principal":
+            return None
+        return effective
 
     def get_platform_config(self) -> HelixConfig:
         """Return the HelixConfig (lazily initialized)."""
@@ -231,6 +228,14 @@ class DependencyProvider:
             platform_config = get_platform_config()
             self._platform_config = platform_config
         return platform_config
+
+    def get_runtime_context(self) -> HelixRuntimeContext:
+        """Return the provider-scoped platform runtime context."""
+        runtime_context = self._runtime_context
+        if runtime_context is None:
+            runtime_context = build_platform_runtime_context(platform_config=self.get_platform_config())
+            self._runtime_context = runtime_context
+        return runtime_context
 
     def get_request_scoped_sdk(self) -> AsyncNeMoHelix:
         """Return a request-scoped SDK with current auth and OTEL headers.
