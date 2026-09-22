@@ -26,7 +26,10 @@ export const ChainSpanContent: FC<SpanTemplateContentProps> = ({ span }) => {
   if (span.source === 'gym') {
     const recordedDuration = asNumber(attributes['gym.observed_duration_ms']);
     if (recordedDuration !== undefined && recordedDuration >= 0) {
-      fields.push({ label: 'Recorded rollout duration', value: formatDurationMs(recordedDuration) });
+      fields.push({
+        label: 'Recorded rollout duration',
+        value: formatDurationMs(recordedDuration),
+      });
     }
     if (attributes['gym.timing'] === 'observed_child_window') {
       fields.push({ label: 'Timing basis', value: 'Observed child operations' });
