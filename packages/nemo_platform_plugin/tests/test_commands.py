@@ -1221,12 +1221,9 @@ class TestFunctionAutoSpecFlags:
                 return {"in_spec": spec.workspace}
 
         app = _app_with_functions(_ConfusingFunction)
-        help_result = runner.invoke(app, ["confuse", "run", "--help"])
-        plain = _plain(help_result.output)
-        # The flag exists exactly once — the static-input version
-        # under the "Spec Source" panel, not duplicated under the
-        # "Function Spec" panel.
-        assert plain.count("--workspace") == 1
+        # Declared exactly once — the static-input version under the "Spec
+        # Source" panel, not duplicated by the spec field of the same name.
+        assert len(_workspace_params_on(app, "confuse", "run")) == 1
 
         # And --spec still wins for the spec-side workspace value.
         run_result = runner.invoke(
@@ -1424,12 +1421,10 @@ class TestJobAutoSpecFlags:
                 return {"in_spec": _WorkspaceSpec.model_validate(config).workspace}
 
         app = _app_with_jobs(_WorkspaceJob)
-        submit_help = runner.invoke(app, ["ws-confuse", "submit", "--help"])
-        plain = _plain(submit_help.output)
-        # The flag exists exactly once on ``submit`` — the static
+        # The flag is declared exactly once on ``submit`` — the static
         # submission-side version under the "Submission" panel, not
-        # duplicated under the "Job Spec" panel.
-        assert plain.count("--workspace") == 1
+        # duplicated by the spec field of the same name.
+        assert len(_workspace_params_on(app, "ws-confuse", "submit")) == 1
 
     def test_submit_help_lists_per_field_flags_under_job_spec_panel(self) -> None:
         app = _app_with_jobs(_GreetSpecJob)
@@ -1507,6 +1502,21 @@ def _app_with_state(app: typer.Typer, state: object | None) -> typer.Typer:
 
     parent.add_typer(app, name="plugin")
     return parent
+
+
+def _workspace_params_on(app: typer.Typer, *path: str) -> list[click.Parameter]:
+    """Every ``--workspace`` parameter declared on the command at *path*.
+
+    Inspects the resolved Click command rather than rendered ``--help`` text:
+    the shared help names ``--workspace`` while documenting its own resolution
+    order, so any text-based count reports the flag twice and says nothing
+    about whether it is declared twice.
+    """
+    command: click.Command = typer.main.get_command(app)
+    for segment in path:
+        assert isinstance(command, click.Group), f"{command.name!r} is not a group; cannot descend to {segment!r}"
+        command = command.commands[segment]
+    return [prm for prm in command.params if "--workspace" in getattr(prm, "opts", [])]
 
 
 def _collect_workspace_params(app: typer.Typer) -> dict[str, click.Parameter]:
