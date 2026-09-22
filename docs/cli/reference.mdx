@@ -98,7 +98,7 @@ nemo setup [OPTIONS]
 **Options:**
 
 * `--auto`: Non-interactive mode: register provider from environment variables
-* `--workspace, -w`: Target workspace. Defaults to the active CLI context's workspace. [default: default]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--start-services, --no-start-services`: Start local platform services
 * `--install-skills, --no-install-skills`: Install NeMo skills for coding agents
 * `--skills-agents`: Comma-separated list of agents to install skills for (e.g. 'codex,cursor'). Default: all detected. Only applied when --install-skills is set.

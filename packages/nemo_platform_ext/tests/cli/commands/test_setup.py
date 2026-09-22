@@ -17,7 +17,6 @@ import httpx
 import nemo_platform_ext.cli.commands.setup as setup_commands
 import pytest
 import typer
-from click.core import ParameterSource
 from click.exceptions import Exit as ClickExit
 from nemo_platform_ext.cli.commands.setup import (
     _AGENT_API_READINESS_POLL_INTERVAL,
@@ -1241,8 +1240,6 @@ class TestRemoteConnection:
         }
 
     def test_preserves_active_workspace_when_flag_not_explicit(self):
-        ctx = MagicMock(spec=typer.Context)
-        ctx.get_parameter_source.return_value = ParameterSource.DEFAULT
         cli_context = MagicMock()
         cli_context.get_sdk_context.return_value = Context(
             context_name="default",
@@ -1252,12 +1249,9 @@ class TestRemoteConnection:
             preferences={},
         )
 
-        assert _resolve_setup_workspace(ctx, cli_context, "default") == "team-a"
-        ctx.get_parameter_source.assert_called_once_with("workspace")
+        assert _resolve_setup_workspace(cli_context, None) == "team-a"
 
     def test_uses_explicit_workspace_flag_over_active_context(self):
-        ctx = MagicMock(spec=typer.Context)
-        ctx.get_parameter_source.return_value = ParameterSource.COMMANDLINE
         cli_context = MagicMock()
         cli_context.get_sdk_context.return_value = Context(
             context_name="default",
@@ -1267,7 +1261,7 @@ class TestRemoteConnection:
             preferences={},
         )
 
-        assert _resolve_setup_workspace(ctx, cli_context, "shared-workspace") == "shared-workspace"
+        assert _resolve_setup_workspace(cli_context, "shared-workspace") == "shared-workspace"
 
     def test_authenticates_when_context_has_no_credentials(self):
         cli_context = MagicMock()
@@ -4039,11 +4033,9 @@ def _make_setup_command_ctx(
     base_url: str = "http://localhost:8080",
     workspace: str = "default",
     certificate_authority: str | None = None,
-    workspace_source: ParameterSource = ParameterSource.DEFAULT,
 ) -> tuple[MagicMock, MagicMock]:
     """Build a typer Context + CLIContext pair for invoking ``setup_command``."""
     ctx = MagicMock(spec=typer.Context)
-    ctx.get_parameter_source.return_value = workspace_source
     cli_context = MagicMock()
     cli_context.overrides = {}
     cli_context.get_base_url.return_value = base_url
@@ -4237,17 +4229,17 @@ class TestSetupCommandRemoteFlow:
             setup_command(ctx)
 
         mocks.configure_remote.assert_called_once_with(cli_context, "https://remote.example.com", "team-a")
+        # Both bootstrap calls now see the resolved workspace. The first one
+        # used to receive the raw flag value, so a fresh config was seeded with
+        # "default" before resolution had run.
         assert mocks.bootstrap.call_args_list == [
-            call("https://remote.example.com", "default"),
+            call("https://remote.example.com", "team-a"),
             call("https://remote.example.com", "team-a"),
         ]
         assert mocks.run_interactive.call_args.args[2] == "team-a"
 
     def test_remote_choice_uses_explicit_workspace_flag(self):
-        ctx, cli_context = _make_setup_command_ctx(
-            workspace="team-a",
-            workspace_source=ParameterSource.COMMANDLINE,
-        )
+        ctx, cli_context = _make_setup_command_ctx(workspace="team-a")
         with _patch_setup_command(remote_url="https://remote.example.com") as mocks:
             setup_command(ctx, workspace="shared-workspace")
 
@@ -4292,8 +4284,32 @@ class TestSetupCommandRemoteFlow:
         assert mocks.run_interactive.call_args.args[2] == "team-a"
         assert mocks.bootstrap.call_args.args[1] == "team-a"
 
+    def test_ready_path_resolves_the_active_context_workspace(self):
+        """The most common path: the platform is already up, so neither branch runs.
+
+        `_maybe_start_services` returns "ready" when it finds a reachable
+        platform. Resolution used to live only inside the start-local and
+        connect-remote branches, so this path kept the Typer default and
+        provisioned the workspace, secrets, providers and demo agent into the
+        literal "default" while the user sat in another workspace.
+        """
+        ctx, cli_context = _make_setup_command_ctx(workspace="team-a")
+        with _patch_setup_command(maybe_start_services="ready") as mocks:
+            setup_command(ctx)
+
+        assert mocks.bootstrap.call_args.args[1] == "team-a"
+        assert mocks.run_interactive.call_args.args[2] == "team-a"
+
+    def test_ready_path_explicit_workspace_flag_wins(self):
+        ctx, cli_context = _make_setup_command_ctx(workspace="team-a")
+        with _patch_setup_command(maybe_start_services="ready") as mocks:
+            setup_command(ctx, workspace="flag-ws")
+
+        assert mocks.bootstrap.call_args.args[1] == "flag-ws"
+        assert mocks.run_interactive.call_args.args[2] == "flag-ws"
+
     def test_start_local_explicit_workspace_flag_wins(self):
-        ctx, cli_context = _make_setup_command_ctx(workspace="team-a", workspace_source=ParameterSource.COMMANDLINE)
+        ctx, cli_context = _make_setup_command_ctx(workspace="team-a")
         with _patch_setup_command(maybe_start_services=["start_local", "ready"]) as mocks:
             setup_command(ctx, workspace="flag-ws")
 
