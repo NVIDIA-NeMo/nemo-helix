@@ -309,6 +309,8 @@ jobs:
       ttl_seconds_active: 86400
       # default: 3600
       ttl_seconds_after_finished: 3600
+      # How long a step may sit in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 120
+      ttl_seconds_image_pull: 120
       # default: True
       cleanup_completed_jobs_immediately: true
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
@@ -337,6 +339,8 @@ jobs:
       ttl_seconds_active: 86400
       # default: 3600
       ttl_seconds_after_finished: 3600
+      # How long a step may sit in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 120
+      ttl_seconds_image_pull: 120
       # default: True
       cleanup_completed_jobs_immediately: true
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
@@ -417,6 +421,8 @@ jobs:
       ttl_seconds_active: 86400
       # default: 3600
       ttl_seconds_after_finished: 3600
+      # How long a step may sit in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 120
+      ttl_seconds_image_pull: 120
       # default: True
       cleanup_completed_jobs_immediately: true
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
@@ -505,6 +511,8 @@ jobs:
       ttl_seconds_active: 86400
       # default: 3600
       ttl_seconds_after_finished: 3600
+      # How long a step may sit in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 120
+      ttl_seconds_image_pull: 120
       # Keep subprocess working directories by default so runs remain inspectable. | default: False
       cleanup_completed_jobs_immediately: false
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'

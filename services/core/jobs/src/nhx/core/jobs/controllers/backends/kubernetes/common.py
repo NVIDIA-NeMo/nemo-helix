@@ -264,7 +264,7 @@ def build_metadata(labels: dict[str, str] | None, metadata: KubernetesObjectMeta
 FATAL_WAITING_REASONS = frozenset({"InvalidImageName", "CreateContainerConfigError"})
 
 # Kubelet retries these, so the pod has not started rather than failed. A pull
-# that never succeeds is caught by ttl_seconds_before_active.
+# that never succeeds is caught by ttl_seconds_image_pull.
 RECOVERABLE_WAITING_REASONS = frozenset({"ImagePullBackOff", "ErrImagePull"})
 
 
@@ -308,6 +308,29 @@ def map_pod_to_pod_status(pod: V1Pod) -> PodStatus:
     logger.debug("active %s", [name for name in status.errors.keys()])
     logger.debug("waiting %s", [name for name in status.errors.keys()])
     return status
+
+
+_PULL_FAILURE_PREFIX = "Failed to pull image"
+
+
+def image_pull_failure_message(events: list[dict[str, Any]]) -> str:
+    """The most specific pull failure among a pod's events, or ``""``.
+
+    The kubelet emits several ``Warning``/``Failed`` events per attempt and only
+    one of them carries the image ref and the resolver error; the others are the
+    bare ``Error: ErrImagePull`` and ``Error: ImagePullBackOff``. They arrive in
+    that order, so ``get_pod_details`` -- which keeps the last one it sees --
+    reports the least useful of the three.
+    """
+    warnings = [
+        str(event.get("message") or "")
+        for event in events
+        if event.get("type") == "Warning" and event.get("reason") in {"Failed", "InspectFailed"}
+    ]
+    for message in warnings:
+        if message.startswith(_PULL_FAILURE_PREFIX):
+            return message
+    return warnings[-1] if warnings else ""
 
 
 def is_retrying_image_pull(pod_status: PodStatus) -> bool:

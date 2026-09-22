@@ -96,6 +96,14 @@ class JobExecutionProfileConfig(BaseModel):
     ttl_seconds_before_active: int = 30 * 60  # 30 minutes
     ttl_seconds_active: int = 24 * 60 * 60  # 24 hours
     ttl_seconds_after_finished: int = 60 * 60  # 1 hour
+    # Long enough for a transient registry fault to clear on one of the kubelet's
+    # retries; short enough that a reference which never resolves does not wait
+    # out ttl_seconds_before_active and then report a bare scheduling timeout.
+    ttl_seconds_image_pull: int = Field(
+        default=2 * 60,
+        description="How long a step may sit in image-pull backoff before the pull is treated as "
+        "unrecoverable and the step fails naming the image. 0 disables it.",
+    )
     cleanup_completed_jobs_immediately: bool = True
     launcher_tool_path: str = Field(default="/tools/jobs-launcher", description="Path to the jobs launcher tool")
     default_task_image: str | None = Field(

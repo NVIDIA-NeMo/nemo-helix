@@ -38,6 +38,7 @@ from nhx.core.jobs.controllers.backends.base import (
     staleness_error_message,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    RECOVERABLE_WAITING_REASONS,
     BaseKubernetesExecutionProfileConfig,
     aggregate_pod_statuses_for_job_step,
     build_event_field_selector,
@@ -48,6 +49,9 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_pod_template_spec,
     delete_configmap,
     get_namespace_from_environment,
+    get_pod_details,
+    image_pull_failure_message,
+    is_retrying_image_pull,
     list_pod_status,
     load_kubernetes_config,
     name_for_step,
@@ -282,6 +286,8 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 )
             return self.sync_active(step, k8s_job)
         elif step.status == HelixJobStatus.PENDING:
+            if k8s_job is not None and (result := self.enforce_image_pull_ttl(step, k8s_job)):
+                return result
             if k8s_job is not None and (
                 result := self.enforce_sync_ttl(
                     step,
@@ -390,6 +396,46 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                     self._workload_delegations.ensure_for_target(step, target)
         error_details = {"message": error_message} if error_message is not None else {}
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
+
+    def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, k8s_job: V1Job) -> JobUpdate | None:
+        """Fail a step whose image the kubelet has been retrying for too long.
+
+        ``ImagePullBackOff`` is recoverable, so a single failed attempt must not
+        fail the step -- a registry blip resolves on its own. A reference that
+        can never resolve, though, backs off forever, and the only other
+        backstop is ``ttl_seconds_before_active``: 15x longer, and its message
+        reports a scheduling timeout that never mentions the image. This bounds
+        the unrecoverable case and says which image failed.
+        """
+        ttl_seconds = self._execution_profile_config.ttl_seconds_image_pull
+        if ttl_seconds <= 0 or not self.check_step_ttl_before_active(step, ttl_seconds):
+            return None
+
+        stuck = [
+            pod
+            for pod in list_pod_status(self._core_v1, self.namespace, common_labels_for_step(step))
+            if is_retrying_image_pull(pod)
+        ]
+        if not stuck:
+            return None
+
+        # Only the pull reasons; a sibling container waiting on init is noise here.
+        reasons = sorted(
+            {reason for pod in stuck for reason in pod.waiting.values() if reason in RECOVERABLE_WAITING_REASONS}
+        )
+        pod_info, error_details, _ = get_pod_details(self._core_v1, self.namespace, stuck[0].name)
+        detail = image_pull_failure_message(pod_info.get("events") or []) or error_details.get("failed", "")
+        message = f"Image pull did not succeed within {ttl_seconds}s ({', '.join(reasons)})"
+        if detail:
+            message = f"{message}: {detail}"
+
+        self.terminate_job(k8s_job)
+        update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+        return JobUpdate(
+            status=HelixJobStatus.ERROR,
+            status_details={"message": message, "events": self.get_kube_job_events(k8s_job)},
+            error_details={"message": message},
+        )
 
     def enforce_sync_ttl(
         self,

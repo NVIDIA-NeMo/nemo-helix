@@ -11351,6 +11351,13 @@ components:
           type: integer
           title: Ttl Seconds After Finished
           default: 3600
+        ttl_seconds_image_pull:
+          type: integer
+          title: Ttl Seconds Image Pull
+          description: How long a step may sit in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 120
         cleanup_completed_jobs_immediately:
           type: boolean
           title: Cleanup Completed Jobs Immediately
@@ -15283,6 +15290,13 @@ components:
           type: integer
           title: Ttl Seconds After Finished
           default: 3600
+        ttl_seconds_image_pull:
+          type: integer
+          title: Ttl Seconds Image Pull
+          description: How long a step may sit in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 120
         cleanup_completed_jobs_immediately:
           type: boolean
           title: Cleanup Completed Jobs Immediately
@@ -15454,6 +15468,13 @@ components:
           type: integer
           title: Ttl Seconds After Finished
           default: 3600
+        ttl_seconds_image_pull:
+          type: integer
+          title: Ttl Seconds Image Pull
+          description: How long a step may sit in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 120
         cleanup_completed_jobs_immediately:
           type: boolean
           title: Cleanup Completed Jobs Immediately
@@ -19512,6 +19533,13 @@ components:
           type: integer
           title: Ttl Seconds After Finished
           default: 3600
+        ttl_seconds_image_pull:
+          type: integer
+          title: Ttl Seconds Image Pull
+          description: How long a step may sit in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 120
         cleanup_completed_jobs_immediately:
           type: boolean
           title: Cleanup Completed Jobs Immediately
@@ -20774,6 +20802,13 @@ components:
           type: integer
           title: Ttl Seconds After Finished
           default: 3600
+        ttl_seconds_image_pull:
+          type: integer
+          title: Ttl Seconds Image Pull
+          description: How long a step may sit in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 120
         cleanup_completed_jobs_immediately:
           type: boolean
           title: Cleanup Completed Jobs Immediately
