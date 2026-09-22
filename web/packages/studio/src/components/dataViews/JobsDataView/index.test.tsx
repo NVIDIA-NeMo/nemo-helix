@@ -89,6 +89,21 @@ describe('JobsDataView', () => {
     });
   });
 
+  it('names the source the same way in the tag and its tooltip', async () => {
+    // The tooltip otherwise falls back to the raw accessor value — the API's own word for
+    // the service — so a row reads one thing and hovers another. Checked on data-designer
+    // because this file disables the customizer flag, which filters those rows out.
+    const jobs = [makeJob({ name: 'data-designer-run-1', source: 'data-designer' })];
+    server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage(jobs))));
+
+    renderComponent();
+
+    await screen.findByText('data-designer-run-1');
+
+    expect(screen.getByTitle('Data Designer')).toBeInTheDocument();
+    expect(screen.queryByTitle('data-designer')).not.toBeInTheDocument();
+  });
+
   it('hides customizer jobs when customizer is disabled', async () => {
     const jobs = [
       makeJob({ name: 'customizer-run-1', source: 'customization' }),
@@ -100,7 +115,7 @@ describe('JobsDataView', () => {
 
     expect(await screen.findByText('eval-run-2')).toBeInTheDocument();
     expect(screen.queryByText('customizer-run-1')).not.toBeInTheDocument();
-    expect(screen.queryByText('Customizer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fine-tuning')).not.toBeInTheDocument();
   });
 
   it('renders expected column headers', async () => {

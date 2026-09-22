@@ -139,6 +139,14 @@ export const JobsDataView = () => {
       header: 'Source',
       enableSorting: true,
       meta: {
+        // The cell renders a label for the source; without this the OS tooltip falls back
+        // to the raw accessor value and shows the API's own word for it instead.
+        title: (cell) => {
+          const value = cell.getValue();
+          return typeof value === 'string' && value
+            ? (SOURCE_DISPLAY[value]?.label ?? value)
+            : undefined;
+        },
         filter: {
           type: 'single-select' as const,
           label: 'Source',
