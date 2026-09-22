@@ -114,11 +114,11 @@ describe('WorkspaceSideNav', () => {
   });
 
   it('renders the customization screen as Fine-tune under Models', () => {
-    renderSideNav('/workspaces/test-workspace/customizations');
+    renderSideNav('/workspaces/test-workspace/fine-tune');
 
     expect(screen.getByRole('link', { name: 'Fine-tune' })).toHaveAttribute(
       'href',
-      '/workspaces/test-workspace/customizations'
+      '/workspaces/test-workspace/fine-tune'
     );
     expect(screen.queryByText('Custom Models')).not.toBeInTheDocument();
   });
