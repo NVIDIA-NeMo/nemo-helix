@@ -211,11 +211,14 @@ Stage 1 saves one `artifacts` fileset containing `training.jsonl`, `eval_beir/`
 (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`), and the wrapped `train.json`
 that hard-negative mining consumes.
 
-On **release 0.7 and later**, pass that fileset to both downstream consumers
-without repackaging it. Automodel and `retrieve-eval` resolve
-`workspace/fileset#path`, so the Stage 1 `artifacts` result can be the
-`dataset.training` and retrieve-eval `dataset` as-is. Current Stage 1 also
-unique-keys `eval_beir/qrels/test.tsv` before writing it.
+Automodel `dataset.training` and retrieve-eval `dataset` take a fileset name
+with no path fragment. Copy `training.jsonl` and `eval_beir/` to the root of a
+dataset fileset, and drop duplicate `(query-id, corpus-id)` rows from
+`eval_beir/qrels/test.tsv` before upload. Stage 1 unique-keys qrels when it
+writes them; unique-key again if you are uploading an older dump, because the
+BEIR loader still rejects duplicates. The copy-and-dedup cell in
+[Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job)
+does that procedure.
 
 - Automodel `dataset.training` — dataset discovery selects `training.jsonl` and
   ignores the non-JSONL `train.json` beside it. Stage 1 does not produce a
@@ -226,14 +229,6 @@ unique-keys `eval_beir/qrels/test.tsv` before writing it.
 - `nemo evaluator retrieve-eval` `dataset` — the BEIR loader accepts either the
   BEIR directory or a fileset root containing `eval_beir`. It still rejects
   duplicate `(query-id, corpus-id)` rows in `qrels/test.tsv`.
-
-On **release 0.6**, Automodel `dataset.training` and retrieve-eval `dataset`
-take a fileset name with no path fragment, and Stage 1 can emit duplicate
-qrels. Copy `training.jsonl` and `eval_beir/` to the root of a dataset
-fileset, and drop duplicate `(query-id, corpus-id)` rows from
-`eval_beir/qrels/test.tsv` before upload. The copy-and-dedup cell in
-[Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job)
-is that 0.6 procedure.
 
 The Automodel holdout is used for validation loss and checkpoint selection.
 The frozen `eval_beir/` split is separate and remains the dataset for comparing
