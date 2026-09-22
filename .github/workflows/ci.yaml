@@ -1009,12 +1009,13 @@ jobs:
       # whether the other one did too, and fail-fast would hide that.
       fail-fast: false
       matrix:
-        # The floor and the ceiling. 3.13 sits between them and is covered by the wheel
-        # matrices; running the whole suite three times buys little over running it at
-        # both ends. The ceiling leg is the one that catches a regression like #996,
-        # which silently undid #237's 3.14 support and went unnoticed for seven weeks
-        # because nothing executed the suite above 3.12.
-        python-version: ["3.12", "3.14"]
+        # Every interpreter the support matrix claims. This is the only job that answers
+        # "does the code work on this Python", so it has to ask once per supported version:
+        # the wheel matrices cover packaging and install, and e2e covers the shipped 3.13
+        # runtime, but neither executes this suite. Running it on 3.12 alone is how #996
+        # could silently undo #237's 3.14 support for seven weeks, and 3.13 has never had
+        # unit coverage at all despite being supported the longest.
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

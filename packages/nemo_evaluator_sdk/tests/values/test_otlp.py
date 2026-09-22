@@ -6,6 +6,7 @@ from base64 import b64decode
 from typing import Any
 
 import pytest
+from nemo_evaluator_sdk.values import otlp as otlp_module
 from nemo_evaluator_sdk.values.otlp import (
     final_output_text,
     parse_resource_spans,
@@ -183,30 +184,38 @@ def test_spans_with_equal_end_times_still_produce_an_answer() -> None:
     assert answer == "tied"
 
 
-#: Nesting depth that overflows the JSON decoder on every supported interpreter.
-#
-# It has to be tuned to the deepest one: CPython 3.14 parses 20_000 levels that 3.12 and 3.13
-# reject, so the old probe stopped reaching the guard there and these tests passed vacuously --
-# or worse, failed while the guard itself was still fine. 3.14 still raises somewhere between
-# 20_000 and 100_000.
-_OVERFLOWING_JSON_DEPTH = 100_000
+@pytest.fixture
+def json_overflows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``json.loads`` raise ``RecursionError``, as a payload too deeply nested would.
+
+    The contract under test is "a ``RecursionError`` never escapes as one", and forcing the error
+    tests exactly that. Feeding in real nesting tests the interpreter instead: the depth that
+    overflows depends on the available C stack, so it varies by version *and* platform. A literal
+    payload that overflowed CPython 3.12 sailed through 3.14, and one deep enough for 3.14 on macOS
+    still parsed on Linux, where the stack is larger. Every such probe is a number that silently
+    stops reaching the guard it exists to cover.
+    """
+
+    def _raise(*args: object, **kwargs: object) -> object:
+        raise RecursionError("maximum recursion depth exceeded while decoding a JSON object")
+
+    monkeypatch.setattr(otlp_module.json, "loads", _raise)
 
 
-def _too_deeply_nested_json() -> str:
-    return "[" * _OVERFLOWING_JSON_DEPTH + "]" * _OVERFLOWING_JSON_DEPTH
-
-
+@pytest.mark.usefixtures("json_overflows")
 def test_a_deeply_nested_message_payload_does_not_escape_as_a_recursion_error() -> None:
-    payload = _too_deeply_nested_json()
+    payload = "[[[nested]]]"
 
+    # Unparseable attribute text falls back to the raw string rather than blowing up the caller.
     assert _answer(_span("a" * 16, end=5, **{"gen_ai.output.messages": payload})) == payload
 
 
+@pytest.mark.usefixtures("json_overflows")
 def test_deeply_nested_trace_text_surfaces_as_a_value_error() -> None:
     # RecursionError is not a ValueError, so leaking it would escape every caller's guard
     # and abort trial adaptation instead of falling back to the ATIF trace.
     with pytest.raises(ValueError, match="nested too deeply"):
-        resource_spans_from_text(_too_deeply_nested_json())
+        resource_spans_from_text('{"resourceSpans": []}')
 
 
 def test_span_text_strings_reaches_every_nesting_the_attribute_schema_allows() -> None:
