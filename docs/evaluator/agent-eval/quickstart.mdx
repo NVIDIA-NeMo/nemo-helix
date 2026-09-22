@@ -230,7 +230,11 @@ Expected output (both answers contain the expected keyword, so the mean is `1.0`
 
 ```
 keyword_match.score: 1.0
+keyword_match.score.pass@1: 1.0
 ```
+
+Alongside each metric's mean, the SDK reports a `pass@k` aggregate — here `pass@1`, because each
+task ran a single trial. See [Reading Results](/documentation/evaluate-models/agent-eval/reading-results).
 
 Open `./agent-eval-run/report.html` to see the run in a browser.
 

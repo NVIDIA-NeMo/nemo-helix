@@ -35,7 +35,7 @@ Establish these inputs before building an evaluation:
    [task-driven agent work](references/evaluation-shapes.md#task-driven-evaluation), or a
    [BEIR retrieval corpus](references/evaluation-shapes.md#retrieval-driven-evaluation).
    If the user wants the full embed/rerank fine-tune recipe, hand off to `nemo-retrieval-recipes`
-   and use this skill only for retrieve-eval submit/debug.
+   and use this skill only to run and debug retrieve-eval.
 2. Choose the simplest metric that measures the requested behavior. Prefer deterministic metrics when possible.
 3. Build a tiny smoke case with one expected pass and one expected failure.
 4. Validate metric behavior with the standalone SDK. Inspect row-level output, aggregate `count` and
@@ -51,10 +51,10 @@ metric for a rubric, RAG workflow, or tool-calling evaluation.
 | Need | Interface |
 | --- | --- |
 | Fast metric iteration without NeMo Helix | `nemo_evaluator_sdk.Evaluator` |
-| Dataset-driven platform job | `client.evaluator.submit(...)` or `nemo evaluator evaluate submit` |
-| Multiple inline/stored metric refs in one job | `nemo evaluator evaluate submit` with an `EvaluateInputSpec` |
-| Task-driven platform job | `client.evaluator.submit(tasks=..., target=<runner>)` or `nemo evaluator agent-evaluate submit` |
-| Retrieval-driven platform job | `nemo evaluator retrieve-eval submit` |
+| Dataset-driven platform job | `client.evaluator.submit(...)` or `nemo evaluator evaluate` |
+| Multiple inline/stored metric refs in one job | `nemo evaluator evaluate` with an `EvaluateInputSpec` |
+| Task-driven platform job | `client.evaluator.submit(tasks=..., target=<runner>)` or `nemo evaluator agent-evaluate` |
+| Retrieval-driven platform job | `nemo evaluator retrieve-eval` |
 | Reusable platform definitions and result indexes | `client.evaluator.metrics`, `.tasks`, `.tasksets`, `.eval_results`, `.agent_eval_results` |
 
 Default to `submit` for every plugin evaluation. The plugin's local execution
@@ -158,7 +158,7 @@ Use `AgentEvaluator().run(...)` for standalone task-driven SDK evaluation. Its
 
 **Platform job evaluation**
 
-Use the plugin `agent-evaluate submit` job for platform task evaluation. Its
+Use the plugin `agent-evaluate` job for platform task evaluation. Its
 target is a `ModelTarget`, `AgentTarget`, `FabricRunnerTarget`,
 `HarborRunnerTarget`, or `GymRunnerTarget`; alternatively provide precomputed
 `trials`. Provide exactly one of `target` or `trials`.

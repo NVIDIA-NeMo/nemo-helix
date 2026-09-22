@@ -93,7 +93,7 @@ def _harbor_cli() -> str:
         return str(candidate)
     found = shutil.which("harbor")
     if found is None:
-        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.16.1"')
+        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.20,<0.21"')
     return found
 
 
@@ -214,7 +214,7 @@ def _preflight(base_url: str, agent: str, model: str | None) -> None:
     A real-agent run costs both time and tokens, so a missing prerequisite should surface now.
     """
     if find_spec("harbor") is None:
-        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.16.1"')
+        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.20,<0.21"')
     if subprocess.run(["docker", "info"], capture_output=True, check=False).returncode != 0:
         raise SystemExit("Docker is not available; Harbor runs every task in a container.")
     # Only the NIM provider reads this key. Other agents authenticate their own way, so demanding

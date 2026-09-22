@@ -11,7 +11,7 @@
 | 1 Prep | `nemo data-designer retrieval-prepare` | `training.jsonl` + `eval_beir/` |
 | 0+1 | `nemo data-designer retrieval-run` | both |
 | 2 Finetune | `nemo customization automodel submit` `recipe: bi_encoder` | model entity |
-| 3 Eval | `nemo evaluator retrieve-eval submit` | `eval_results.json` |
+| 3 Eval | `nemo evaluator retrieve-eval` | `eval_results.json` |
 | 4 Export | Automodel job writes both layouts. Set `training.retrieval.export.primary` to `onnx` or `hf`. Newer Retriever NIMs (2.2.0+) need `hf` at the fileset root. | Retriever NIM layout |
 | 5 Deploy | ModelDeployment + Retriever NIM 2.2.0 | `/v1/embeddings` |
 
@@ -105,7 +105,7 @@ Both `target` and `baseline` must already have IGW providers (`deploy.md`) befor
 training and Stage 1 mining.
 
 ```bash
-nemo evaluator retrieve-eval submit --spec '{
+nemo evaluator retrieve-eval --spec '{
   "dataset": "default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**",
   "target": {
     "embeddings": "default/nemotron-3-embed-1b-tuned",
@@ -136,4 +136,4 @@ Unmerged LoRA cannot be served.
 ## Invariants
 
 - Same prefixes, max length, pooling, and `eval_beir` for base and tuned.
-- Do not use CHAT `evaluate submit` or RAGAS for this path.
+- Do not use CHAT `evaluate` or RAGAS for this path.

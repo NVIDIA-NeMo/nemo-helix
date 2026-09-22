@@ -83,7 +83,7 @@ merge LoRA with a causal-LM merge path.
 Stage 3 (two-stage):
 
 ```bash
-nemo evaluator retrieve-eval submit --spec '{
+nemo evaluator retrieve-eval --spec '{
   "dataset": "default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**",
   "target": {
     "embeddings": "default/llama-nemotron-embed-1b-v2",

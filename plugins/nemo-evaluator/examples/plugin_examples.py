@@ -80,7 +80,7 @@ LOCAL_HELPSTEER2_ROWS = (
 
 model = Model(
     url="https://integrate.api.nvidia.com/v1/chat/completions",
-    name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3-nano-30b-a3b"),
+    name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
     # Local evaluator and local plugin execution resolve this as an environment variable name.
     api_key_secret=SecretRef(root=DEFAULT_API_KEY_SECRET),
 )

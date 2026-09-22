@@ -109,7 +109,7 @@ tokens `{instruction}`, `{workspace}`, and `{input_json}`. The default runs the
 bundled `mini_agent.py`; supply your own command to drive a real agent:
 
 ```python
-from nemo_evaluator_sdk.examples.run_agent_eval.workflow_runtime import (
+from packages.nemo_evaluator_sdk.examples.run_agent_eval.workflow_runtime import (
     WorkflowAgentRuntime,
     WorkflowRuntimeConfig,
 )
