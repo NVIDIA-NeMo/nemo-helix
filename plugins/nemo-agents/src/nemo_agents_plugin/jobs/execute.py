@@ -454,7 +454,7 @@ class ExecuteAgentJob(NemoJob):
         # own calls -- staging a workdir, saving results -- need none of it; they
         # go through an SDK that authenticates them. The proxy stays open through
         # result saving, so an export posted as the agent exits still lands.
-        # A job that opted out of ATIF, or already named its own destination, should 
+        # A job that opted out of ATIF, or already named its own destination, should
         # not pay for the Fabric plan probe, nor for the proxy that probe would justify.
         exports_telemetry = (
             step_config.request.auto_telemetry
