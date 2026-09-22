@@ -20,9 +20,8 @@ export function useDatasetReady(): boolean {
   const values = useWatch({ control }) as EvaluationFormValues;
   const bindings = useDatasetBindings();
 
-  // A file plus BOTH bindings resolved -- either mapped columns or an
-  // auto-detected messages array. Input is what gets sent to the model; Ground
-  // Truth is what six of the seven metrics score against, so offering metric
-  // selection without it would list choices that cannot run.
-  return Boolean(values?.dataset && bindings.inputPath && bindings.referencePath);
+  // Input only: it is what gets sent to the model, so nothing can be scored
+  // without it. Ground Truth is deliberately not required -- llm-judge can score
+  // a response on its own, and the metrics that do need one say so at submit.
+  return Boolean(values?.dataset && bindings.inputPath);
 }

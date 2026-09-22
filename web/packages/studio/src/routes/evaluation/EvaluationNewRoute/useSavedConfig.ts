@@ -33,13 +33,13 @@ export function useSavedConfig(filesetName: string | null) {
     staleTime: Infinity,
     // A missing or malformed config is a dead end, not a flake.
     retry: false,
-    queryFn: async (): Promise<DatasetEvalSpec> => {
-      const signal = new AbortController().signal;
-      const path = await findEvalConfigFile(workspace, filesetName as string, signal);
+    queryFn: async ({ signal }): Promise<DatasetEvalSpec> => {
+      const name = filesetName as string;
+      const path = await findEvalConfigFile(workspace, name, signal);
       if (path === undefined) throw new Error('Could not read that configuration.');
       if (path === null) throw new Error('That fileset has no eval config in it.');
 
-      const blob = await filesDownloadFile(workspace, filesetName as string, path, signal);
+      const blob = await filesDownloadFile(workspace, name, path, signal);
       if (!blob) throw new Error('Could not download that configuration.');
 
       const parsed = parseEvalConfig(await blob.text());
