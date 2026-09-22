@@ -3,6 +3,7 @@
 
 """Recovery of the single scheduled attempt and active-job overlap checks."""
 
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -187,7 +188,9 @@ async def test_overlap_query_only_reads_active_jobs_and_matches_agent(agent, exp
 
     jobs.list_jobs.return_value = MagicMock(items=items)
     assert await controller._has_active_job(_config()) is expected
-    assert '"status"' in jobs.list_jobs.await_args.kwargs["query_params"]["filter"]
+    query = json.loads(jobs.list_jobs.await_args.kwargs["query_params"]["filter"])
+    assert set(query["status"]["$in"]) == {status.value for status in PlatformJobStatus.non_terminals()}
+    assert query["source"] == {"$in": ["nemo-agents-plugin-execute", "insights"]}
     jobs.get_job.assert_not_awaited()
 
 
@@ -255,3 +258,50 @@ async def test_same_prefix_agents_submitted_together_reconcile_only_their_own_jo
         completed = await controller._reconcile_run(config, pending)
         assert completed.status == AnalysisConfigStatus.IDLE
         assert completed.last_successful_run_at == NOW
+
+
+@pytest.mark.asyncio
+async def test_config_listing_includes_enabled_and_disabled_configs_beyond_first_page() -> None:
+    controller, entities, _ = _controller()
+    first_page = [
+        _config().model_copy(update={"name": f"disabled-{i}", "agent": f"disabled-{i}", "enabled": False})
+        for i in range(100)
+    ]
+    enabled = _config().model_copy(update={"workspace": "another-workspace", "enabled": True})
+    disabled = _config().model_copy(update={"enabled": False})
+    entities.list.side_effect = [
+        MagicMock(data=first_page, pagination=MagicMock(total_pages=2)),
+        MagicMock(data=[enabled, disabled], pagination=MagicMock(total_pages=2)),
+    ]
+    configs = await controller.list_objects()
+    assert configs == [*first_page, enabled, disabled]
+    assert [call.kwargs for call in entities.list.await_args_list] == [
+        {"workspace": "-", "page": 1, "page_size": 100},
+        {"workspace": "-", "page": 2, "page_size": 100},
+    ]
+    # A disabled config on page two must still complete its pending bookkeeping.
+    controller._has_active_job = AsyncMock(return_value=False)
+    controller._submit_analysis_job = AsyncMock()
+    entities.get.return_value = _pending()
+    await controller.reconcile_one(configs[-1])
+    assert entities.update.await_args.args[0].status == AnalysisConfigStatus.IDLE
+    controller._submit_analysis_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_config_listing_does_not_return_partial_results_on_page_failure() -> None:
+    controller, entities, _ = _controller()
+    entities.list.side_effect = [
+        MagicMock(data=[_config()], pagination=MagicMock(total_pages=2)),
+        RuntimeError("Entities unavailable"),
+    ]
+    assert await controller.list_objects() == []
+    assert entities.list.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_empty_config_listing_stops_after_first_page() -> None:
+    controller, entities, _ = _controller()
+    entities.list.return_value = MagicMock(data=[], pagination=MagicMock(total_pages=0))
+    assert await controller.list_objects() == []
+    entities.list.assert_awaited_once_with(AnalysisConfig, workspace="-", page=1, page_size=100)

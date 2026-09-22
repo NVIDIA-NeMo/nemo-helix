@@ -24,12 +24,14 @@ from nemo_insights_plugin.analysis_runs import (
     mint_analysis_run_name,
     submit_analysis_run,
 )
+from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.agents.client import AsyncAgentsClient
 from nemo_platform_plugin.agents.types import CreateExecuteJobRequest
 from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
+from nemo_platform_plugin.config import clear_nemo_config_override, set_nemo_config_override
 from nemo_platform_plugin.entities.base import ListResponse, PaginationInfo
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_platform_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
@@ -386,6 +388,20 @@ async def test_the_job_takes_the_run_name_so_the_link_needs_no_write_back() -> N
     assert jobs.calls[0]["name"] == response.run.name
     assert jobs.requests[0].custom_fields == {"insights_analysis_agent": "demo-agent"}
     assert response.run.name.startswith(ANALYSIS_RUN_NAME_PREFIX)
+
+
+@pytest.mark.parametrize("profile", ["default", "cpu-cluster"])
+async def test_on_demand_submission_uses_configured_job_profile(profile: str) -> None:
+    config = InsightsConfig()
+    config.analyst.job_profile = profile
+    set_nemo_config_override(config)
+    try:
+        jobs = _StubExecuteJobs()
+        response = await create_analysis_run("default", _request(), _sdk(jobs), _entities(_StubEntities()))
+        assert response.job is not None
+        assert jobs.requests[0].profile == profile
+    finally:
+        clear_nemo_config_override(InsightsConfig)
 
 
 async def test_scheduler_submission_preserves_name_profile_and_platform_url() -> None:

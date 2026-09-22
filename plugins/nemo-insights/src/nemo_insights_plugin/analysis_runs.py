@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_insights_plugin._perms import AnalysisRunPerms
 from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build_analyst_agent_config
 from nemo_insights_plugin.authz import scope
+from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
 from nemo_platform import AsyncNeMoPlatform
@@ -36,6 +37,7 @@ from nemo_platform_plugin.authz import CallerKind, path_rule
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_platform_plugin.client.response import NemoResponse
+from nemo_platform_plugin.config import get_nemo_config
 from nemo_platform_plugin.dependencies import get_sdk_client
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
 from nemo_platform_plugin.models.client import AsyncModelsClient
@@ -89,7 +91,14 @@ async def create_analysis_run(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
-    return await submit_analysis_run(workspace=workspace, request=request, sdk=sdk, entity_client=entity_client)
+    config = get_nemo_config(InsightsConfig)
+    return await submit_analysis_run(
+        workspace=workspace,
+        request=request,
+        sdk=sdk,
+        entity_client=entity_client,
+        profile=config.analyst.job_profile,
+    )
 
 
 async def submit_analysis_run(
@@ -106,6 +115,8 @@ async def submit_analysis_run(
 
     The scheduler supplies a name so a persisted intent remains discoverable
     even if submission or the subsequent scheduler-status write fails.
+    On-demand runs do not advance the scheduled cursor: their evaluation or
+    time scope may omit telemetry that the next scheduled run must still cover.
     """
     agents_client = client_from_platform(sdk, AsyncAgentsClient)
     models_client = client_from_platform(sdk, AsyncModelsClient)

@@ -109,13 +109,19 @@ class InsightsAnalysisController(NemoController):
     async def on_shutdown(self) -> None:
         logger.info("InsightsAnalysisController shut down.")
 
-    async def list_objects(self) -> list:
+    async def list_objects(self) -> list[AnalysisConfig]:
         """Include disabled configs so in-flight runs still get reconciled."""
         if not self.insights_config.analyst.enabled:
             return []
         try:
-            result = await self.entities.list(AnalysisConfig, workspace="-")
-            return result.data
+            configs: list[AnalysisConfig] = []
+            page = 1
+            while True:
+                result = await self.entities.list(AnalysisConfig, workspace="-", page=page, page_size=100)
+                configs.extend(result.data)
+                if page >= result.pagination.total_pages:
+                    return configs
+                page += 1
         except Exception:
             logger.exception("Failed to list insights analysis configs")
             return []
@@ -235,7 +241,13 @@ class InsightsAnalysisController(NemoController):
     async def _has_active_job(self, config: AnalysisConfig) -> bool:
         try:
             query_params: ListJobsQueryParams = {
-                "filter": json.dumps({"status": {"$in": _ACTIVE_JOB_STATUSES}}),
+                "filter": json.dumps(
+                    {
+                        "status": {"$in": _ACTIVE_JOB_STATUSES},
+                        # Include legacy analysis jobs that may still be running.
+                        "source": {"$in": ["nemo-agents-plugin-execute", "insights"]},
+                    }
+                ),
                 "page_size": 100,
                 "sort": "-created_at",
             }
