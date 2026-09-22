@@ -1,0 +1,186 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The control plane, in-cluster, for LOCAL verification.
+#
+# This is deliberately NOT the Helm chart. The chart deploys the whole platform -- Studio,
+# ClickHouse, every service -- and none of that is what the builder needs proving. This runs the
+# five services the builder actually touches plus the builder itself, against SQLite, in one pod.
+#
+# It exists because of the single thing that stopped the first PoC run: **build pods call back to
+# the platform**. `fetch` reads Files, the launcher resolves Secrets, steps report status. A
+# control plane on a laptop has no address a cluster pod can reach, so the spine could not be
+# closed. In-cluster, `nemo-platform.nmp-platform.svc` resolves and the loop closes.
+#
+# What this does NOT prove, precisely because it is one pod with SQLite: the chart's own
+# correctness, Postgres, multi-replica behaviour, or the single-writer property of the reconciler
+# under more than one replica. `replicas: 1` here is load-bearing, not incidental.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nmp-platform
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nemo-platform
+  namespace: nmp-platform
+---
+# The jobs controller's reach into the namespaces it manages Jobs in.
+#
+# A ClusterRole with two namespaced RoleBindings rather than two Roles: the grant is identical in
+# both places, and duplicating it is how the two drift. It is still namespace-scoped -- a
+# RoleBinding to a ClusterRole grants only within its own namespace.
+#
+# TWO namespaces, and the second one is easy to miss. `nmp-builds` is where builds run. But the
+# jobs controller also reconciles its DEFAULT execution profile, which targets whatever
+# POD_NAMESPACE says -- the platform's own namespace. Without that grant the controller logs a
+# 403 on every poll, forever, while builds themselves work fine.
+#
+# Note this is a different grant from `nmp-build-pod-control` in ../20-rbac.yaml: that one is
+# held by the `supervise` STEP so it can create a sandbox. This one is held by the CONTROL PLANE
+# so it can create the job. Neither implies the other, and collapsing them would hand the step
+# that orchestrates untrusted code the ability to create Jobs -- which is a workspace escape.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nemo-platform-jobs
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nemo-platform-jobs
+  namespace: nmp-builds
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nemo-platform-jobs
+subjects:
+  - kind: ServiceAccount
+    name: nemo-platform
+    namespace: nmp-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nemo-platform-jobs
+  namespace: nmp-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nemo-platform-jobs
+subjects:
+  - kind: ServiceAccount
+    name: nemo-platform
+    namespace: nmp-platform
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nemo-platform-data
+  namespace: nmp-platform
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nemo-platform
+  namespace: nmp-platform
+spec:
+  selector: { app: nemo-platform }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemo-platform
+  namespace: nmp-platform
+spec:
+  # ONE replica, and `Recreate`. The builder reconciler is single-writer as a DEPLOYMENT
+  # property -- that is why it carries no leader election and no optimistic concurrency. Scaling
+  # this to two makes the reconciler wrong rather than merely faster.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: nemo-platform }
+  template:
+    metadata:
+      labels: { app: nemo-platform }
+    spec:
+      serviceAccountName: nemo-platform
+      containers:
+        - name: platform
+          image: nmp-api-builder:local
+          imagePullPolicy: IfNotPresent
+          command: ["/app/.venv/bin/nemo"]
+          args:
+            - services
+            - run
+            # The five the builder touches, plus the builder. The full set pulls in services
+            # this has no use for and cannot fit in the memory a local cluster has.
+            - --services
+            - auth,entities,jobs,files,secrets,builder
+            - --controllers
+            - entities,jobs,builder
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+          env:
+            # Where the jobs controller looks when an execution profile names no namespace. The
+            # three build profiles name theirs explicitly; this is for the default profile.
+            - { name: POD_NAMESPACE, valueFrom: { fieldRef: { fieldPath: metadata.namespace } } }
+            - { name: NMP_CONFIG_FILE_PATH, value: /etc/nmp/config.yaml }
+            - { name: NMP_DATA_DIR, value: /var/lib/nemo }
+            - { name: NMP_BASE_URL, value: "http://nemo-platform.nmp-platform.svc.cluster.local:8080" }
+            - { name: DATABASE_DIALECT, value: sqlite }
+            - { name: DATABASE_PATH, value: /var/lib/nemo/nmp-platform.db }
+            - { name: NMP_CONFIG_WARNINGS_DISABLED, value: "1" }
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - { name: config, mountPath: /etc/nmp }
+            - { name: data, mountPath: /var/lib/nemo }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests: { cpu: "200m", memory: 768Mi }
+      volumes:
+        - name: config
+          configMap: { name: nemo-platform-config }
+        - name: data
+          # A claim, not an emptyDir. The SQLite database, the Files store and the Secrets
+          # encryption key all live here, so an emptyDir means every pod restart silently
+          # discards the workspace -- filesets, secrets, and every ContainerImage row. The
+          # symptom is a 500 on submit reporting a secret that was definitely created, which
+          # reads as an auth problem rather than as lost state.
+          persistentVolumeClaim: { claimName: nemo-platform-data }

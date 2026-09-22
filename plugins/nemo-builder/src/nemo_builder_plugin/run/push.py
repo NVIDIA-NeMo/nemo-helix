@@ -124,6 +124,15 @@ def validate_layout(layout: Path) -> str:
     if not layout.is_dir():
         raise LayoutRejected(f"no layout at {layout}")
 
+    # Resolve ONCE, here, and use the resolved path for everything below.
+    #
+    # `_verify_no_escape` resolves internally and returns resolved paths. Comparing those against
+    # an UNRESOLVED `layout` is wrong the moment any parent component is a symlink -- and one
+    # always is: the work volume mounts under `/var/run`, which is a symlink to `/run` on every
+    # mainstream base image. The observed failure was `relative_to` raising "is not in the
+    # subpath of", and before that every file compared unequal to the markers and was rejected as
+    # "unexpected file in layout". A correct layout was refused for being correct.
+    layout = layout.resolve(strict=True)
     files = _verify_no_escape(layout)
 
     marker = layout / "oci-layout"
@@ -170,21 +179,26 @@ def _run(args: list[str]) -> str:
     return result.stdout.strip()
 
 
-def _push_one(image: PushImage, signing: SigningConfig) -> None:
+def _push_one(image: PushImage, signing: SigningConfig, insecure: bool = False) -> None:
     layout = Path(image.layout)
     digest = validate_layout(layout)
 
     # Destinations come from the compiler. Nothing read off the volume reaches this list.
     for tag in image.tags:
-        _run(["crane", "push", str(layout), tag])
+        args = ["crane", "push", str(layout), tag]
+        if insecure:
+            args.append("--insecure")
+        _run(args)
 
     # Sign BY DIGEST, never by tag: a tag is mutable and signing one races anything that could
     # move it. The digest was derived from bytes validated above.
     repository = image.tags[0].rsplit(":", 1)[0]
+    sign_args = ["cosign", "sign"]
+    if insecure:
+        sign_args.append("--allow-insecure-registry")
     _run(
         [
-            "cosign",
-            "sign",
+            *sign_args,
             f"--key={signing.key}",
             # Mandatory, not optional: cosign v2 uploads to the PUBLIC Rekor transparency log by
             # default, which would publish internal image names.
@@ -211,7 +225,7 @@ def main() -> int:
             failures += 1
             continue
         try:
-            _push_one(image, config.signing)
+            _push_one(image, config.signing, config.insecure)
             published += 1
         except (LayoutRejected, RuntimeError):
             logger.exception("refusing to publish %s", image.image)

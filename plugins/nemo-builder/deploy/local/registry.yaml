@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# A registry for LOCAL verification only, deliberately in its own directory so that
+# `kubectl apply -f ../` does not pull it into a real deployment.
+#
+# Not part of the design: RFC 001 Requirement 5 says the platform must not require operating a
+# registry that holds build output, and a real deployment points at a tenant registry.
+#
+# It is ANONYMOUS, which is the thing to keep in mind when reading a green local run: the
+# reconciler's Bearer-challenge/token-endpoint path never executes against it, and neither does
+# push's credential handling. Both are exercised only against a real registry -- measured
+# against GAR, not here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: nmp-builds
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: registry }
+  template:
+    metadata:
+      labels: { app: registry }
+    spec:
+      containers:
+        - name: registry
+          image: registry:3.0.0
+          ports: [{ containerPort: 5000 }]
+          env:
+            - { name: REGISTRY_STORAGE_DELETE_ENABLED, value: "true" }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/registry }
+          resources:
+            requests: { cpu: "50m", memory: 128Mi }
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: nmp-builds
+spec:
+  selector: { app: registry }
+  ports:
+    - port: 5000
+      targetPort: 5000

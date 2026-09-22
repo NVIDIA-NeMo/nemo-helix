@@ -154,6 +154,30 @@ class TestResultParsing:
         log = f"noise\n{RESULT_MARKER} demo-1-0 0\nmore noise\n{RESULT_MARKER} demo-1-1 1\n"
         assert _results_from_log(log) == {"demo-1-0": 0, "demo-1-1": 1}
 
+    def test_reads_a_bytes_log_too(self) -> None:
+        """The Kubernetes client returns BYTES when the log is not valid UTF-8, and kaniko's
+        output never is -- it is ANSI-coloured. A `str` marker compared against `bytes` lines
+        matches nothing and raises nothing, so every image reported "no result recorded" while
+        every build had actually succeeded. Found end-to-end; unit tests fed it a `str`."""
+        log = f"\x1b[36mINFO\x1b[0m noise\n{RESULT_MARKER} demo-1-0 0\n".encode()
+        assert _results_from_log(log) == {"demo-1-0": 0}
+
+    def test_undecodable_bytes_do_not_lose_the_verdict(self) -> None:
+        log = b"\xff\xfe garbage\n" + f"{RESULT_MARKER} demo-1-0 0\n".encode()
+        assert _results_from_log(log) == {"demo-1-0": 0}
+
+    def test_a_bytes_repr_string_finds_nothing_which_is_why_the_source_is_fixed(self) -> None:
+        """This is the shape that broke it, kept as a regression witness.
+
+        When the Kubernetes client deserializes a non-UTF-8 log body into its declared `str`
+        return type, the result is the REPR of a bytes object: newlines are literal backslash-n.
+        `splitlines()` yields one line and every marker disappears -- silently, because nothing
+        raises. `_read_pod_log` avoids producing this at all by decoding the raw body itself.
+        """
+        broken = "b'" + f"noise\\n{RESULT_MARKER} demo-1-0 0\\n" + "'"
+        assert "\n" not in broken.replace("\\n", "")  # the newlines really are escaped
+        assert _results_from_log(broken) == {}
+
     def test_ignores_lines_that_only_look_like_markers(self) -> None:
         """A Dockerfile can print anything it likes into this log."""
         log = f"{RESULT_MARKER} demo-1-0 notanumber\n{RESULT_MARKER} oops\n"

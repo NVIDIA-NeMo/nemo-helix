@@ -189,12 +189,40 @@ def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
     return "Unknown"
 
 
-def _results_from_log(log: str) -> dict[str, int]:
+def _read_pod_log(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
+    """The sandbox's log, decoded by us rather than by the client library.
+
+    `_preload_content=False` is the whole point. With the default, the generated client tries to
+    deserialize the body into the declared return type -- `str` -- and when the body is not valid
+    UTF-8 it ends up doing the equivalent of `str(some_bytes)`. What comes back is then the
+    **repr** of a bytes object: a string that starts with `b'` and whose newlines are the two
+    characters backslash-n rather than actual newlines.
+
+    That is not a cosmetic difference. `splitlines()` on it returns ONE line, so every per-image
+    result marker becomes invisible, and the observed symptom is every image reporting "no result
+    recorded" while every build in fact succeeded. kaniko's output is ANSI-coloured, so this is
+    the normal case here, not an edge one.
+    """
+    response = api.read_namespaced_pod_log(name=name, namespace=namespace, _preload_content=False)
+    return response.data.decode("utf-8", errors="replace")
+
+
+def _results_from_log(log: str | bytes) -> dict[str, int]:
     """Per-image exit codes, parsed out of the sandbox's own output.
 
     Reading the log is how this step learns anything at all, because it mounts no volume. The
     marker lines are appended by the script it generated, so the format is not a guess.
+
+    **Takes bytes or str deliberately.** `read_namespaced_pod_log` returns BYTES when the log
+    contains non-UTF-8 -- and kaniko's output always does, because it is ANSI-coloured. Comparing
+    a `str` marker against `bytes` lines never matches and never raises, so the observed symptom
+    was every image reporting "no result recorded" while every build had in fact succeeded. Decode
+    first; `errors="replace"` because this is a log, and one bad byte must not lose the verdict
+    for a build that worked.
     """
+    if isinstance(log, bytes):
+        log = log.decode("utf-8", errors="replace")
+
     results: dict[str, int] = {}
     for line in log.splitlines():
         if not line.startswith(RESULT_MARKER):
@@ -228,7 +256,7 @@ def main() -> int:
         api.create_namespaced_pod(namespace=config.sandbox.namespace, body=manifest)
         try:
             phase = _await_pod(api, name=pod_name, namespace=config.sandbox.namespace)
-            log = api.read_namespaced_pod_log(name=pod_name, namespace=config.sandbox.namespace)
+            log = _read_pod_log(api, name=pod_name, namespace=config.sandbox.namespace)
             logger.info("sandbox %s log:\n%s", pod_name, log)
             results = _results_from_log(log)
 

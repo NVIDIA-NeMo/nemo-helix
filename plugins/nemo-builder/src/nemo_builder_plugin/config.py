@@ -91,6 +91,18 @@ class BuilderConfig(NemoConfig):
             "StorageClass; see deploy/40-work-volume.yaml. Empty it once the work volume is RWX."
         ),
     )
+    sandbox_cpu: str = Field(
+        default="2",
+        description=(
+            "CPU request for the sandbox. Sizing is a property of the DEPLOYMENT, not of the "
+            "request -- a caller cannot make its build bigger by asking.\n\n"
+            "Worth knowing why this is settable at all: `CPUKubernetesJobBackend.schedule` "
+            "forwards only a step's `container`, so `executor.resources` reaches nothing and a "
+            "Jobs step is sized by its profile. The sandbox escapes that because the build step "
+            "writes its pod spec directly -- a small unplanned benefit of this architecture."
+        ),
+    )
+    sandbox_memory: str = Field(default="8Gi", description="Memory request for the sandbox. See `sandbox_cpu`.")
     sandbox_dns_nameservers: list[str] = Field(
         default_factory=lambda: ["8.8.8.8", "1.1.1.1"],
         description=(
@@ -172,6 +184,15 @@ class BuilderConfig(NemoConfig):
         ),
     )
     registry_password: str = Field(default="", description="See `registry_username`.")
+    registry_insecure: bool = Field(
+        default=False,
+        description=(
+            "Reach the registry over plain HTTP, for an in-cluster dev registry. Off by default "
+            "and never a fallback: a registry reached over HTTP cannot establish that the digest "
+            "it reports is the digest anyone else would see, which is the whole point of reading "
+            "identity from a registry rather than from the build."
+        ),
+    )
     reconcile_interval_seconds: float = Field(
         default=10.0,
         description="How often the reconciler looks for `pending` rows. It queries rather than watching.",

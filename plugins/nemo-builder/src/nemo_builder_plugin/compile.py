@@ -248,6 +248,8 @@ def _build_step(build_set: BuildSet, config: BuilderConfig, job_name: str) -> Pl
                 registry_mirror=config.registry_mirror,
                 node_selector=config.node_selector,
                 dns_nameservers=config.sandbox_dns_nameservers,
+                cpu=config.sandbox_cpu,
+                memory=config.sandbox_memory,
             ),
             groups=groups,
         ).model_dump(),
@@ -297,6 +299,7 @@ def _push_step(
         config=PushStepConfig(
             signing=SigningConfig(key=resolved.signing_key, storage=config.signature_storage),
             images=images,
+            insecure=config.registry_insecure,
         ).model_dump(),
     )
 

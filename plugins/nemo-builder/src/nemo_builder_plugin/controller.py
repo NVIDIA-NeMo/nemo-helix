@@ -133,6 +133,7 @@ class BuilderController(NemoController):
         self._registry = RegistryClient(
             username=config.registry_username or None,
             password=config.registry_password or None,
+            insecure=config.registry_insecure,
         )
         self._interval_seconds = float(config.reconcile_interval_seconds)
         logger.info("builder reconciler started; signature storage=%s", config.signature_storage)

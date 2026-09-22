@@ -28,7 +28,13 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: standard-rwo
+  # No `storageClassName`, deliberately: the cluster's default class is used.
+  #
+  # An earlier version pinned `standard-rwo`, which is a GKE name. Applied to any other cluster
+  # the claim simply stays `Pending` and every build pod sits unschedulable with
+  # "pod has unbound immediate PersistentVolumeClaims" -- a failure that reads as a scheduling
+  # problem rather than as a one-word portability bug. Set this explicitly only where a
+  # deployment needs a class other than its default, and then it is an operator's edit.
   resources:
     requests:
       storage: 100Gi

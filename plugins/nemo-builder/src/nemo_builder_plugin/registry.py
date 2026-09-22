@@ -86,9 +86,21 @@ class RegistryClient:
     cannot push, and it holds a credential that does not need to.
     """
 
-    def __init__(self, *, username: str | None = None, password: str | None = None, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        username: str | None = None,
+        password: str | None = None,
+        insecure: bool = False,
+        timeout: float = 30.0,
+    ) -> None:
         self._username = username
         self._password = password
+        # `http` for a dev registry only. A registry reached over plain HTTP offers no assurance
+        # that the digest it reports is the digest anyone else would see, which is the one thing
+        # this client exists to establish -- so it is opt-in, off by default, and never a
+        # fallback after an HTTPS attempt fails.
+        self._scheme = "http" if insecure else "https"
         self._client = httpx.Client(timeout=timeout, follow_redirects=True)
         self._tokens: dict[str, str] = {}
 
@@ -128,7 +140,7 @@ class RegistryClient:
         return token
 
     def _get(self, registry: str, repository: str, path: str, *, accept: str) -> httpx.Response:
-        url = f"https://{registry}/v2/{repository}/{path}"
+        url = f"{self._scheme}://{registry}/v2/{repository}/{path}"
         headers = {"Accept": accept}
         response = self._client.get(url, headers=headers)
         if response.status_code == 401:
@@ -142,7 +154,7 @@ class RegistryClient:
 
     def ping(self, registry: str) -> bool:
         """The ``GET /v2/`` handshake. A 401 counts as reachable -- it means the API is there."""
-        response = self._client.get(f"https://{registry}/v2/")
+        response = self._client.get(f"{self._scheme}://{registry}/v2/")
         return response.status_code in (200, 401)
 
     def resolve(self, registry: str, repository: str, reference: str) -> ResolvedImage:

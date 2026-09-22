@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# nmp-api plus this plugin.
+#
+# The plugin is not a workspace member and is not in `enabled-plugins`, so a stock nmp-api does
+# not carry it. Adding it there is the right long-term move and it is NOT what this does: that
+# edit requires a `uv lock` refresh, which is a change to the whole repo's dependency graph for
+# the sake of a proof of concept.
+#
+# Instead the wheel is built separately and dropped into the runtime venv's site-packages.
+# Entry points are read from `<dist-info>/entry_points.txt` in site-packages, so copying the
+# package and its dist-info together is enough for `nemo.services` and `nemo.controllers`
+# discovery to find it -- no reinstall, and nothing else in the image moves.
+ARG NMP_API_IMAGE=my-registry/nmp-api:local
+ARG VENV_PY=python3.13
+
+FROM python:3.13-slim AS pkg
+WORKDIR /src
+# The workspace paths the plugin's path-dependencies resolve through.
+COPY pyproject.toml uv.lock ./
+COPY sdk ./sdk
+COPY packages ./packages
+COPY plugins/nemo-builder ./plugins/nemo-builder
+# `--no-deps`: every dependency is already in the api image. Installing them again here would
+# shadow the image's pinned versions with whatever resolves today, which is how a derived image
+# quietly stops being the thing it was derived from.
+RUN pip install --no-cache-dir --target /pkg --no-deps ./plugins/nemo-builder \
+ && test -f /pkg/nemo_builder_plugin/service.py \
+ && ls -d /pkg/nemo_builder_plugin-*.dist-info \
+ && grep -q "nemo.services" /pkg/nemo_builder_plugin-*.dist-info/entry_points.txt
+
+FROM ${NMP_API_IMAGE}
+ARG VENV_PY
+COPY --from=pkg /pkg/ /app/.venv/lib/${VENV_PY}/site-packages/

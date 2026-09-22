@@ -36,6 +36,8 @@ def _config(
     *,
     default_registry: str | None = "reg.example.com",
     repository_prefix: str = "",
+    sandbox_cpu: str = "2",
+    sandbox_memory: str = "8Gi",
     push_secret: str | None = "my-reg-secret",
     signing_key: str | None = "k8s://nmp-builds/cosign-key",
     execution_enabled: bool = True,
@@ -43,6 +45,8 @@ def _config(
     return BuilderConfig(
         default_registry=default_registry,
         repository_prefix=repository_prefix,
+        sandbox_cpu=sandbox_cpu,
+        sandbox_memory=sandbox_memory,
         push_secret=push_secret,
         signing_key=signing_key,
         execution_enabled=execution_enabled,
@@ -160,6 +164,13 @@ class TestTheSandboxIsToldNothingAboutPublishing:
         spec = compile_build_set(_set(), config=_config(), system_tag=SYSTEM_TAG)
         sandbox = SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox
         assert sandbox.service_account == ""
+
+    def test_the_sandbox_is_sized_by_the_deployment_not_the_request(self) -> None:
+        """A caller cannot make its build bigger by asking; there is no field for it to ask with."""
+        config = _config(sandbox_cpu="1", sandbox_memory="2Gi")
+        spec = compile_build_set(_set(), config=config, system_tag=SYSTEM_TAG)
+        sandbox = SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox
+        assert (sandbox.cpu, sandbox.memory) == ("1", "2Gi")
 
     def test_the_sandbox_uses_public_dns_not_cluster_dns(self) -> None:
         """Measured: cluster DNS here is link-local, and re-allowing it reopens the Pod CIDR."""

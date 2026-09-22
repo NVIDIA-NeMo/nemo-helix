@@ -199,3 +199,10 @@ class PushStepConfig(BaseModel):
 
     signing: SigningConfig
     images: list[PushImage] = Field(min_length=1)
+    insecure: bool = Field(
+        default=False,
+        description=(
+            "Push over plain HTTP. Dev registries only -- it means the bytes and the credential "
+            "cross the network unprotected, and the digest the registry reports is unauthenticated."
+        ),
+    )

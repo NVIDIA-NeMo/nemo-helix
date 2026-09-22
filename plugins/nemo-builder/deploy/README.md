@@ -7,6 +7,10 @@ The cluster side of [RFC 001](../../../../journal/RFCs/001-in-cluster-container-
 execution mode: the namespace a build runs in, and everything bounding the pod inside it. No
 platform code is involved — this is `kubectl apply` and two assertion scripts.
 
+Everything here is a manifest -- `kubectl apply -f` this directory and nothing else. The
+platform config that pairs with it lives in `../config/`, deliberately outside, because `apply`
+on a directory tries to apply every file in it.
+
 ```
 00-namespace.yaml         nmp-builds, enforcing the `baseline` Pod Security Standard
 10-serviceaccounts.yaml   three SAs -- the trust split IS these three strings

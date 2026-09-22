@@ -56,6 +56,23 @@ class TestAcceptsAWellFormedLayout:
         assert validate_layout(layout) == expected
 
 
+class TestPathsResolveConsistently:
+    def test_a_symlinked_parent_directory_is_not_mistaken_for_an_escape(self, tmp_path: Path) -> None:
+        """The work volume mounts under `/var/run`, which is a symlink to `/run` on every
+        mainstream base image. An earlier version resolved the walk root but compared the results
+        against the unresolved path, so every file looked "unexpected" and a correct layout was
+        refused for being correct."""
+        real = tmp_path / "real"
+        real.mkdir()
+        layout, expected = _good_layout(real)
+
+        link = tmp_path / "link"
+        link.symlink_to(real, target_is_directory=True)
+
+        # Reached through the symlink, exactly as the push step reaches it.
+        assert validate_layout(link / "img") == expected
+
+
 class TestRefusesHostileLayouts:
     def test_a_symlink_is_refused_rather_than_resolved(self, tmp_path: Path) -> None:
         """There is no legitimate symlink in an OCI layout, which makes refusal both safe and

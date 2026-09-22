@@ -34,61 +34,55 @@ those steps runs in. `fetch` holds a Files client. `build` holds pod-create RBAC
 thing holding nothing at all: no Files client, no registry credential, no service account token.
 Identity is a digest the *reconciler* reads from the registry, never one the build reported.
 
-## Status — what is proven, and what is not
+## Status — the spine closes
 
-The spine is proven in **two halves that do not yet touch.**
+**A `POST /builds` now produces signed images whose digests the control plane observed from a
+registry.** End to end, on minikube with Calico, against an in-cluster registry.
 
-### Proven on the cluster, by hand (`deploy/README.md`)
+```
+submit ──▶ 2 rows `pending`
+       ──▶ fetch      (SA nmp-build-fetch,   has work volume)   Completed
+       ──▶ supervise  (SA nmp-build-control, NO work volume)    Completed
+             └─ 2 sandbox pods, baseline PSS, no SA token, kaniko
+       ──▶ push       (SA nmp-build-push,    has work volume)   Completed
+       ──▶ reconciler ──▶ 2 rows `ready`
+```
 
-| | |
-|---|---|
-| `nmp-builds` refuses the BuildKit posture | ✅ `violates PodSecurity "baseline:latest"` |
-| kaniko's posture clears `baseline` | ✅ zero relaxations, `drop: [ALL]` + five capabilities |
-| a `RUN pip install` reaches the internet through the policy | ✅ |
-| metadata server, Service CIDR, Pod CIDR, API server reachable | ✅ **no** — all four closed |
-| kaniko writes a usable OCI layout to the shared PVC | ✅ |
-| `crane push` accepts an OCI **layout directory** | ✅ no skopeo fallback needed |
-| registry digest == kaniko's offline digest | ✅ byte for byte |
-| cosign `.sig` tag present, `cosign verify` passes | ✅ |
-
-### Proven through the platform
+Verified independently of the control plane, from inside the cluster:
 
 | | |
 |---|---|
-| `POST /builds` → rows `pending` → three-step job | ✅ |
-| three steps carry three distinct profiles → three ServiceAccounts | ✅ |
-| job schedules into `nmp-builds`, pods run under the right SAs | ✅ |
-| the `nmp-build` image runs on a cluster node, dispatcher works | ✅ |
-| step config delivered via ConfigMap and parsed | ✅ |
-| reconciler loop runs, retries registry errors, fails unsigned rows | ✅ |
-| 106 unit tests, `ruff` and `ty` clean | ✅ |
+| row digest == what the registry serves | ✅ both images, exactly |
+| signature artifact at the `.sig` tag | ✅ both |
+| `cosign verify` against the public key | ✅ |
+| three steps, three ServiceAccounts | ✅ observed on the real pods |
+| `supervise` has **no** work-volume mount | ✅ observed — absence is the control, and it holds |
+| namespace still refuses the BuildKit posture | ✅ re-run after the green build |
+| sandbox reaches the internet and nothing private | ✅ 7/7, against cluster-derived addresses |
+| 111 unit tests, `ruff` and `ty` clean | ✅ |
 
-### Not proven — one blocker, and it is not in this code
+### The two environments, and why both exist
 
-**Build pods cannot call back to a control plane running on a laptop.** `fetch` started
-correctly and died at `NemoTransportError: [Errno -2] Name or service not known`, resolving
-`host.docker.internal:8080`. The Jobs Kubernetes backend happily *creates* pods from a laptop via
-`load_kube_config()` — but the steps then call *back* to the platform (Files, Secrets, status),
-and a laptop behind NAT has no address a GKE pod can reach.
+Neither alone is sufficient, and it is worth being precise about which answers what.
 
-That was a planning error rather than a code defect: running the control plane locally was chosen
-for the fast iteration loop, on the assumption that traffic only flowed outward.
+**minikube (`deploy/local/`) — the regression environment.** It closes the spine, because the
+control plane runs *in* the cluster and build pods can call back to it. That was the single thing
+that blocked the first run. Everything about the builder's own logic is provable here.
 
-So these remain untested end-to-end:
+**GKE (`deploy/README.md`) — the fidelity environment.** It holds the cloud-shaped facts, and a
+green local run would not have caught any of them:
 
-- `fetch` actually downloading a fileset as the submitting principal
-- `supervise` creating a sandbox from a real job
-- `push` publishing and signing from a real job
-- the reconciler flipping a real build's row to `ready`
+- the **metadata server** does not exist locally, so threat-model path A cannot be exercised —
+  `sandbox-egress-probe.sh` says so rather than claiming a pass it did not earn
+- **NodeLocal DNSCache** is a GKE addon, so the link-local DNS collision — the most surprising
+  finding in this work — cannot reproduce locally
+- the registry is **anonymous and plain HTTP**, so `push`'s credential handling and the
+  reconciler's Bearer-challenge/token-endpoint path never execute
+- single-node **hides the ReadWriteOnce constraint** entirely; node pinning is a no-op here
+- SQLite and one replica, so nothing about Postgres or the reconciler's single-writer property
+  under more than one replica is tested. `replicas: 1` is load-bearing.
 
-Every one of them is exercised by unit tests against fakes, and every underlying mechanism is
-measured by hand in `deploy/README.md`. What is missing is the join.
-
-**To close it:** deploy the platform into the cluster (a platform image plus chart config), or
-expose the local one through a tunnel. The tunnel is faster and publishes an auth-disabled
-control plane at a public URL, which is why it was not done unilaterally.
-
-## Four defects the first real submit found
+## Eight defects the real runs found
 
 Recorded because none was visible to a test that only looked at objects in memory.
 
@@ -104,8 +98,27 @@ Recorded because none was visible to a test that only looked at objects in memor
    ServiceAccount, so `nmp-build-push` needs `get` on that one Secret — by `resourceName`, not
    `list`.
 
-And one from `deploy/README.md` worth repeating, because it generalises past this cluster: **the
-link-local denial that closes the metadata server also closes NodeLocal DNSCache.** Allowing
+And four more that only the in-cluster run could surface:
+
+5. **The sandbox log arrives as the repr of a bytes object.** When the Kubernetes client
+   deserializes a non-UTF-8 log body into its declared `str` return type, newlines come back as
+   the two characters backslash-n. `splitlines()` then yields one line, every result marker
+   disappears, and the symptom is *every image reporting "no result recorded" while every build
+   succeeded*. Nothing raises. kaniko's output is ANSI-coloured, so this is the normal case.
+   Fixed by reading the raw body with `_preload_content=False` and decoding it directly.
+6. **`/var/run` is a symlink to `/run`.** `validate_layout` resolved its walk root but compared
+   the results against the unresolved path, so every file looked "unexpected" and a correct
+   layout was refused for being correct.
+7. **`storageClassName: standard-rwo` is a GKE name.** On any other cluster the claim stays
+   `Pending` and every build pod is unschedulable with "pod has unbound immediate
+   PersistentVolumeClaims" — which reads as a scheduling problem, not a portability bug. Now the
+   cluster default.
+8. **The jobs controller also reconciles its own namespace.** Its default execution profile
+   targets `POD_NAMESPACE`, so without a grant there it logs a 403 on every poll forever, while
+   builds themselves work fine.
+
+And one from `deploy/README.md` worth repeating, because it generalises past any one cluster:
+**the link-local denial that closes the metadata server also closes NodeLocal DNSCache.** Allowing
 kube-dns back reopened the Pod CIDR, measured. The sandbox now uses public resolvers via
 `dnsPolicy: None` — it needs to resolve `pypi.org`, not `kubernetes.default.svc` — which is
 strictly more closed than the version with a DNS hole in it.
@@ -136,25 +149,50 @@ Each of these is a real gap, not an oversight:
 
 ## Running it
 
-```bash
-# 1. substrate, and the two assertions that make a green build mean anything
-kubectl apply -f plugins/nemo-builder/deploy/
-kubectl label node <one-node> nmp.nvidia.com/build-node=true
-plugins/nemo-builder/deploy/negative-control.sh
-plugins/nemo-builder/deploy/sandbox-egress-probe.sh
+Two environments. The local one proves the builder; the cloud one proves the cloud-shaped facts.
 
-# 2. the fast loop -- no cluster, no registry, no database
+### Local (minikube) — closes the spine
+
+```bash
+# Calico, NOT the default CNI. kind's kindnet and minikube's default do not enforce
+# NetworkPolicy at all, which makes the sandbox policy decorative -- silently.
+minikube start --driver=docker --cni=calico --cpus=3 --memory=5500
+kubectl label node minikube nmp.nvidia.com/build-node=true
+
+kubectl apply -f plugins/nemo-builder/deploy/          # substrate (manifests only)
+plugins/nemo-builder/deploy/negative-control.sh        # MUST report refused
+plugins/nemo-builder/deploy/sandbox-egress-probe.sh    # MUST report 7/7
+
+# images. `nmp-api` needs the Studio UI context stubbed out -- it is a Node build this does
+# not use, and it is the slowest and flakiest part of the chain.
+mkdir -p /tmp/empty-studio/artifacts && touch /tmp/empty-studio/artifacts/.keep
+docker buildx bake -f docker-bake.hcl nmp-api-docker --load \
+  --allow=fs.read=/tmp/empty-studio --set '*.platform=linux/arm64' \
+  --set nmp-api-docker.contexts.nmp-studio-ui=/tmp/empty-studio
+docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile.platform \
+  --build-arg NMP_API_IMAGE=my-registry/nmp-api:local -t nmp-api-builder:local --load .
+docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile \
+  -t nmp-build:v3 --load .
+for i in nmp-api-builder:local nmp-build:v3 nmp-jobs-launcher:local; do minikube image load $i; done
+
+kubectl apply -f plugins/nemo-builder/deploy/local/
+kubectl create configmap nemo-platform-config -n nmp-platform \
+  --from-file=config.yaml=plugins/nemo-builder/config/platform-config.minikube.yaml
+kubectl -n nmp-platform port-forward svc/nemo-platform 8080:8080
+```
+
+**Use a new image tag for every rebuild.** `minikube image load` over an existing tag does not
+reliably replace what the kubelet already cached, and the symptom is a fix that appears not to
+work — which costs a full debugging cycle chasing the wrong thing.
+
+### The fast loop — no cluster at all
+
+```bash
 .venv/bin/pytest plugins/nemo-builder/tests -q
 .venv/bin/ruff check plugins/nemo-builder && .venv/bin/ty check plugins/nemo-builder
-
-# 3. the platform. See deploy/platform-config.example.yaml; every CHANGE_ME must go.
-#    NOTE the blocker above: with the control plane off-cluster, steps cannot call back.
-export NMP_CONFIG_FILE_PATH=$PWD/plugins/nemo-builder/deploy/platform-config.example.yaml
-export POD_NAMESPACE=nmp-builds
-export NMP_DATA_DIR="$HOME/.local/share/nemo"
-.venv/bin/nemo services run --services auth,entities,jobs,files,secrets,builder \
-                            --controllers entities,jobs,builder --port 8080
 ```
+
+### Cloud (GKE) — see `config/platform-config.example.yaml`
 
 Two environment notes that cost time:
 
