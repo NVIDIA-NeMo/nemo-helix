@@ -5,6 +5,9 @@
 
 NeMo Platform plugin for analyzing agent telemetry and persisting actionable insights.
 
+Analysis uses [trace-intel](https://github.com/NVIDIA-NeMo/labs-trace-intel).
+Platform supplies authenticated trace and model access and stores the resulting insights.
+
 ## Install from the monorepo
 
 ```bash
@@ -26,8 +29,8 @@ uv run nemo agents analyst run
 ```
 
 Run `nemo setup` first to select the default and fast Platform Model Entities.
-The Analyst uses the default model for analysis and the fast model for context
-summarization; an existing context without `fast_model` reuses `default_model`.
+The Analyst uses the default model to compile insights and the fast model for
+evidence streams; an existing context without `fast_model` reuses `default_model`.
 Provider credentials remain in Platform Secrets.
 
 The profile contract consumed by Insights is deliberately small:
