@@ -86,7 +86,7 @@ def test_list_entities(workspace):
     response = entities_client.list_entities(
         workspace=workspace.name,
         entity_type="test-type",
-        query_params={"sort": "created_at"},
+        query_params={"sort": "-created_at"},
     )
     entities = response.page().items
     assert len(entities) == 10

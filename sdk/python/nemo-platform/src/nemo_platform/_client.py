@@ -130,7 +130,6 @@ def _copy_requires_bootstrap(
 class NeMoPlatform(SyncAPIClient):
     # client options
     workspace: str | None
-
     def __init__(
         self,
         *,
@@ -172,7 +171,6 @@ class NeMoPlatform(SyncAPIClient):
         .. code-block:: python
 
             from nemo_platform import NeMoPlatform
-
             client = NeMoPlatform()
 
         Example — explicit token for automation:
@@ -181,7 +179,6 @@ class NeMoPlatform(SyncAPIClient):
 
             import os
             from nemo_platform import NeMoPlatform
-
             client = NeMoPlatform(
                 base_url=os.environ["NMP_BASE_URL"],
                 access_token=os.environ["NMP_ACCESS_TOKEN"],
@@ -538,13 +535,11 @@ class AsyncNeMoPlatform(AsyncAPIClient):
             from nemo_platform_plugin.client.adapter import client_from_platform
             from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 
-
             async def main() -> None:
                 client = AsyncNeMoPlatform()
                 workspaces = await client_from_platform(client, AsyncWorkspacesClient).list_workspaces()
                 async for ws in workspaces.items():
                     print(ws.name)
-
 
             asyncio.run(main())
 
@@ -557,7 +552,6 @@ class AsyncNeMoPlatform(AsyncAPIClient):
             from nemo_platform_plugin.client.adapter import client_from_platform
             from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 
-
             async def main() -> None:
                 client = AsyncNeMoPlatform(
                     base_url=os.environ["NMP_BASE_URL"],
@@ -567,7 +561,6 @@ class AsyncNeMoPlatform(AsyncAPIClient):
                 workspaces = await client_from_platform(client, AsyncWorkspacesClient).list_workspaces()
                 async for ws in workspaces.items():
                     print(ws.name)
-
 
             asyncio.run(main())
 
