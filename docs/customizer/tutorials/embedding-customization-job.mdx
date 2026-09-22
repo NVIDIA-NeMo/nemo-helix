@@ -9,7 +9,7 @@ description: ""
 
 Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Platform mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
 
-Pre-trained embeddings handle general retrieval well but underperform on specialized vocabulary, document structure, and query phrasing. Fine-tuning adapts the model to your corpus. Enterprise domains typically gain +5 to +20 absolute points of nDCG@10, with the largest gains where the base model has the least prior exposure, such as legal, biomedical, and internal engineering documents. Anything under +5 points usually points at data quality or coverage rather than at the recipe.
+Pre-trained embeddings handle general retrieval well but underperform on specialized vocabulary, document structure, and query phrasing. Fine-tuning adapts the model to your corpus. On the NVDocs split used here, three epochs on mined hard negatives lift nDCG@10 from 0.567 to 0.613 and Recall@10 from 0.638 to 0.696 against the base checkpoint. Expect larger gains where the base model has the least prior exposure, such as legal, biomedical, and internal engineering documents, and smaller ones on corpora close to its pre-training mix.
 
 This notebook starts from NVIDIA's published NVDocs Stage 0 dump instead of generating Q&A pairs, so the first job it runs is hard-negative mining.
 
@@ -568,6 +568,17 @@ if status.status != "completed":
 for row in client.jobs.results.list(eval_job_name, workspace="default").data:
     print(json.dumps(row.model_dump(), default=str, indent=2)[:4000])
 ```
+
+## Reference results
+
+Reference scores on the 20,909-query NVDocs `eval_beir` split, from full three-epoch runs of this recipe on 2 GPUs:
+
+| Model | nDCG@10 | Recall@10 | Recall@100 | MAP@10 |
+| --- | --- | --- | --- | --- |
+| Base `nemotron-3-embed-1b` | 0.5671 | 0.6375 | 0.8238 | 0.4787 |
+| Fine-tuned, 3 epochs | 0.6131 | 0.6960 | 0.8794 | 0.5219 |
+
+Judge a run by the gap between target and baseline in the same job, not by the absolute number: the eval split, corpus size, and mining depth all move the scale. Runs shortened for a smoke test land within a few thousandths of the base model, which confirms the plumbing but says nothing about the recipe.
 
 ## Hyperparameters
 
