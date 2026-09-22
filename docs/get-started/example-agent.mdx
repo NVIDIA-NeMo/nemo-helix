@@ -6,7 +6,7 @@ title: "Get started with an example agent"
 description: "Run the optimization loop from end to end on τ-Bench"
 ---
 
-This provides a guide for how you can quickly load agent traces into your NeMo Platform, run the analyst agent to discover issues with that agent, and launch an experimentalist to fix those issues. This is meant as an example to show how the whole platform works. You can also jump straight to setting up your agent with NeMo Platform.
+This provides a guide for how you can quickly load agent traces into your NeMo Helix, run the analyst agent to discover issues with that agent, and launch an experimentalist to fix those issues. This is meant as an example to show how the whole platform works. You can also jump straight to setting up your agent with NeMo Helix.
 
 ## Prerequisites
 
@@ -15,17 +15,17 @@ This provides a guide for how you can quickly load agent traces into your NeMo P
 - [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) 0.37.1 or later
 - An API key for the inference provider used by the Tau3 agent under test.
 
-## 1. Clone and bootstrap NeMo Platform
+## 1. Clone and bootstrap NeMo Helix
 
-This step will walk you through setting up NeMo Platform on your local computer. It will install the platform and its dependencies.
+This step will walk you through setting up NeMo Helix on your local computer. It will install the platform and its dependencies.
 
 ```bash
-git clone https://github.com/NVIDIA-NeMo/nemo-platform.git
-cd nemo-platform
+git clone https://github.com/NVIDIA-NeMo/nemo-helix.git
+cd nemo-helix
 make bootstrap
 ```
 
-## 2. Start NeMo Platform
+## 2. Start NeMo Helix
 
 Agent traces are stored in ClickHouse. Make sure Docker Desktop or the Docker daemon is running, then
 run setup. Intake automatically provisions and reuses a local ClickHouse container. Setup starts the
@@ -41,13 +41,13 @@ work. Press Enter at the fast-model prompt to reuse the default. These
 workspace-qualified Model Entities are used by the Analyst and
 Experimentalist; their provider credentials stay in Platform Secrets.
 
-To use an external ClickHouse instead, set `NMP_INTAKE_CLICKHOUSE_URL` before running setup.
+To use an external ClickHouse instead, set `NHX_INTAKE_CLICKHOUSE_URL` before running setup.
 
-You should now be able to navigate to `http://localhost:8080` and see the NeMo Platform web UI.
+You should now be able to navigate to `http://localhost:8080` and see the NeMo Helix web UI.
 
 ## 3. Prepare τ-Bench and run the airline agent
 
-Now that we have a running NeMo Platform, it's time to load up some data! This example uses the τ-Bench from Sierra. It's a great representation of a simplified agent that performs a business-critical task. Our first step will be to set up our environment variables so that we can run models properly.
+Now that we have a running NeMo Helix, it's time to load up some data! This example uses the τ-Bench from Sierra. It's a great representation of a simplified agent that performs a business-critical task. Our first step will be to set up our environment variables so that we can run models properly.
 
 ```bash
 cp plugins/nemo-experimentalist/examples/tau3-nooa-agent/.env.example plugins/nemo-experimentalist/examples/tau3-nooa-agent/.env
@@ -68,7 +68,7 @@ Then, we'll run a script to download the benchmark datasets and put it into the 
 plugins/nemo-experimentalist/examples/tau3-nooa-agent/prepare-airline-datasets.sh
 ```
 
-Finally, we'll run our agent using the dataset tasks and record the data to NeMo Platform:
+Finally, we'll run our agent using the dataset tasks and record the data to NeMo Helix:
 
 ```bash
 uv run --frozen plugins/nemo-experimentalist/examples/tau3-nooa-agent/record_tau_airline_traces.py
@@ -92,7 +92,7 @@ Let's run it:
 uv run --frozen nemo agents analyst run \
   --agent nemo-experimentalist-tau3-nooa \
   --workspace tau3-airline \
-  --base-url "$NMP_BASE_URL"
+  --base-url "$NHX_BASE_URL"
 ```
 
 This will take a few minutes to run. Once it's done, you can navigate to the [insights tab](http://localhost:8080/studio/workspaces/tau3-airline/optimizer) to see the issues the analyst discovered in the τ-Bench Airline Agent.
@@ -166,7 +166,7 @@ sbx exec --workdir "$repo" nemo-experimentalist-git gh auth setup-git
 sbx exec --workdir "$repo" nemo-experimentalist-git \
   git clone "$AGENT_REPO_URL" /tmp/tau3-nooa-agent
 sbx exec --workdir "$repo" \
-  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-platform \
+  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-helix \
   --env INFERENCE_API_KEY \
   --env INFERENCE_API_BASE \
   --env OPENAI_API_KEY \
@@ -211,14 +211,14 @@ review the code change that was evaluated.
 
 Use this alternative if you do not want to create or push to a repository. It
 changes only a private sandbox clone and never creates a PR/MR. The sandbox
-uses `host.docker.internal` to reach the NeMo Platform services running on the
+uses `host.docker.internal` to reach the NeMo Helix services running on the
 host:
 
 ```bash
 repo="$(git rev-parse --show-toplevel)"
 sbx create --clone --name nemo-experimentalist shell "$repo"
 sbx exec --workdir "$repo" \
-  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-platform \
+  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-helix \
   --env INFERENCE_API_KEY \
   --env INFERENCE_API_BASE \
   --env OPENAI_API_KEY \
@@ -243,9 +243,9 @@ sbx exec --workdir "$repo" \
   --base-url http://host.docker.internal:8080
 ```
 The sandbox needs outbound access to the package, model, registry, Harbor
-dataset, and NeMo Platform endpoints used by the run. `host.docker.internal`
+dataset, and NeMo Helix endpoints used by the run. `host.docker.internal`
 is translated to the host's loopback interface so the sandbox can reach the
-NeMo Platform service on port 8080.
+NeMo Helix service on port 8080.
 
 <Warning>
 Clone mode protects the host checkout from writes, but it does not isolate

@@ -42,7 +42,7 @@ Each API has a read and write scope. A token with an API-specific scope can only
 
 <Note>
 
-The `entities:read` and `entities:write` scopes are for internal service-to-service usage. The generic entities API is not accessible to regular users — only PlatformAdmin and service principals can access it. Users interact with entities through feature-specific APIs (Models, Evaluation, etc.) which use their own scopes.
+The `entities:read` and `entities:write` scopes are for internal service-to-service usage. The generic entities API is not accessible to regular users — only HelixAdmin and service principals can access it. Users interact with entities through feature-specific APIs (Models, Evaluation, etc.) which use their own scopes.
 
 </Note>
 ### Platform Scopes
@@ -93,7 +93,7 @@ This enables least-privilege tokens: an Editor can create a read-only token (`pl
 
 Scopes must be registered in your IdP as custom API scopes. The CLI requests them during the OAuth flow, and the IdP includes granted scopes in the access token.
 
-If your IdP prefixes scopes (e.g., Azure AD uses `api://client-id/platform:read`), configure `scope_prefix` in the NeMo Platform OIDC settings so the platform strips the prefix before authorization:
+If your IdP prefixes scopes (e.g., Azure AD uses `api://client-id/platform:read`), configure `scope_prefix` in the NeMo Helix OIDC settings so the platform strips the prefix before authorization:
 
 ```yaml
 auth:
@@ -101,7 +101,7 @@ auth:
  scope_prefix: "api://your-client-id/"
 ```
 
-If you use per-API scopes, each scope (e.g., `api://nmp/models:read`) must be exposed individually in the IdP app registration.
+If you use per-API scopes, each scope (e.g., `api://nhx/models:read`) must be exposed individually in the IdP app registration.
 
 ## Scope Checking Behavior
 
@@ -110,7 +110,7 @@ The PDP distinguishes between OIDC standard scopes and platform scopes:
 - **No scopes in token**: Scope checking is skipped (backward compatible)
 - **Only OIDC scopes** (`openid`, `profile`, `email`): Treated as no platform scopes — checking skipped
 - **Platform scopes present** (contain `:`): At least one required scope must match
-- **PlatformAdmin**: Bypasses scope checking entirely
+- **HelixAdmin**: Bypasses scope checking entirely
 
 ## When to Restrict Scopes
 

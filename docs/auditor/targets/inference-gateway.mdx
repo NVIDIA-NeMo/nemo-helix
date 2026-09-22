@@ -7,11 +7,11 @@ description: ""
 ---
 <a id="auditor-targets-inference-gateway"></a>
 
-`AuditTarget.options` is passed through to garak unchanged, with one exception: the plugin recognizes a `nmp_uri_spec` sentinel and resolves it to a concrete URI at run time using the NeMo Platform Inference Gateway. This keeps target definitions portable — you store provider references instead of host-specific URLs.
+`AuditTarget.options` is passed through to garak unchanged, with one exception: the plugin recognizes a `nhx_uri_spec` sentinel and resolves it to a concrete URI at run time using the NeMo Helix Inference Gateway. This keeps target definitions portable — you store provider references instead of host-specific URLs.
 
-## What `nmp_uri_spec` Is
+## What `nhx_uri_spec` Is
 
-`nmp_uri_spec` is a nested dict placed inside `options.<generator>` that names an Inference Gateway provider. When `client.auditor.run(...)` starts, the plugin walks the options tree, looks each `nmp_uri_spec` block up via `sdk.inference.providers.retrieve(...)`, replaces it with a `uri` key whose value is the provider's resolved OpenAI-compatible URL, and hands the rewritten options dict to garak.
+`nhx_uri_spec` is a nested dict placed inside `options.<generator>` that names an Inference Gateway provider. When `client.auditor.run(...)` starts, the plugin walks the options tree, looks each `nhx_uri_spec` block up via `sdk.inference.providers.retrieve(...)`, replaces it with a `uri` key whose value is the provider's resolved OpenAI-compatible URL, and hands the rewritten options dict to garak.
 
 The original `AuditTarget` entity stays untouched — only the in-memory copy garak receives is rewritten.
 
@@ -19,7 +19,7 @@ The original `AuditTarget` entity stays untouched — only the in-memory copy ga
 
 ```python
 {
-    "nmp_uri_spec": {
+    "nhx_uri_spec": {
         "inference_gateway": {
             "workspace": "<provider workspace>",
             "provider": "<provider name>",
@@ -28,12 +28,12 @@ The original `AuditTarget` entity stays untouched — only the in-memory copy ga
 }
 ```
 
-Both `workspace` and `provider` are required. Other keys inside `nmp_uri_spec` are ignored — only `inference_gateway` is currently honored.
+Both `workspace` and `provider` are required. Other keys inside `nhx_uri_spec` are ignored — only `inference_gateway` is currently honored.
 
 ## Conflict Rules
 
-- A dict cannot contain both `uri` and `nmp_uri_spec` — the plugin raises `ValueError` if it finds both. Pick one.
-- The plugin requires a connected SDK to resolve a `nmp_uri_spec`. If `client.auditor.run(...)` is invoked without an SDK handle (a code path reserved for tests), and the target's options contain a sentinel, the run raises `RuntimeError`.
+- A dict cannot contain both `uri` and `nhx_uri_spec` — the plugin raises `ValueError` if it finds both. Pick one.
+- The plugin requires a connected SDK to resolve a `nhx_uri_spec`. If `client.auditor.run(...)` is invoked without an SDK handle (a code path reserved for tests), and the target's options contain a sentinel, the run raises `RuntimeError`.
 - If the named provider does not exist, or the provider lookup fails for any other reason, the run raises `RuntimeError` with the provider workspace and name embedded in the message.
 
 ## Worked Example
@@ -49,7 +49,7 @@ target = client.auditor.targets.create(
     options={
         "nim": {
             "max_tokens": 1024,
-            "nmp_uri_spec": {
+            "nhx_uri_spec": {
                 "inference_gateway": {
                     "workspace": "default",
                     "provider": "nvidia-inference-api",
@@ -73,9 +73,9 @@ When you run an audit against this target, the plugin internally rewrites `optio
 
 The resolved `uri` reflects whatever the provider is configured to point at — change the provider once and every target that references it picks up the new endpoint on the next run.
 
-## When Not to Use `nmp_uri_spec`
+## When Not to Use `nhx_uri_spec`
 
-For ad-hoc audits against a local endpoint you don't intend to keep around, you can specify `uri` directly and skip `nmp_uri_spec`:
+For ad-hoc audits against a local endpoint you don't intend to keep around, you can specify `uri` directly and skip `nhx_uri_spec`:
 
 ```python
 target = client.auditor.targets.create(
@@ -91,4 +91,4 @@ target = client.auditor.targets.create(
 )
 ```
 
-This is fine for one-off testing. For anything you expect to re-run as the platform's providers evolve, prefer `nmp_uri_spec` so the indirection is preserved.
+This is fine for one-off testing. For anything you expect to re-run as the platform's providers evolve, prefer `nhx_uri_spec` so the indirection is preserved.

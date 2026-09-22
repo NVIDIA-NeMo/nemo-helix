@@ -40,10 +40,10 @@ import os
 
 from nemo_evaluator.sdk import Evaluator
 from nemo_evaluator_sdk import RunConfig, ExactMatchMetric
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = sdk.evaluator  # this object is an Evaluator resource

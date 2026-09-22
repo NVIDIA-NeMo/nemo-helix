@@ -30,7 +30,7 @@ import pytest
 from nemo_evaluator.sdk import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackagerPolicyError
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 
 class _CustomMetric:
@@ -88,7 +88,7 @@ def _evaluator() -> Evaluator:
     Client construction and the ``submit`` argument guard are both offline; the
     guard runs before any executor/HTTP work.
     """
-    client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+    client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
     return client.evaluator
 
 

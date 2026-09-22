@@ -3,7 +3,7 @@
 
 # Identity Provider References
 
-This directory contains NeMo Platform identity-provider reference bundles.
+This directory contains NeMo Helix identity-provider reference bundles.
 
 Available references:
 
@@ -14,7 +14,7 @@ Each provider bundle defines one contract for local validation and production
 adaptation:
 
 - expose OIDC discovery metadata
-- include a gateway layer that strips inbound `X-NMP-Principal-*` headers
+- include a gateway layer that strips inbound `X-NHX-Principal-*` headers
 - define one human identity and one machine identity for shared auth testing
 - treat external machine identities as ordinary OIDC principals authorized by
   group binding, not as internal `service:*` principals
@@ -26,9 +26,9 @@ a namespace-local Secret and patch only the demo ConfigMap values that cannot be
 known before the IdP is initialized.
 
 Managed job OBO tests use the provider for user and controller authentication,
-but the workload-to-submitter binding is NeMo Platform auth state. Jobs receive
-`NMP_WORKLOAD_IDENTITY_TOKEN_FILE`, exchange that subject token through
-`/apis/auth/token`, and receive a NeMo Platform token whose top-level subject
+but the workload-to-submitter binding is NeMo Helix auth state. Jobs receive
+`NHX_WORKLOAD_IDENTITY_TOKEN_FILE`, exchange that subject token through
+`/apis/auth/token`, and receive a NeMo Helix token whose top-level subject
 is the job submitter and whose RFC 8693 `act.sub` is the workload actor. Provider
 manifests may include workload-provider token grants for contract tests, but
 managed Docker job OBO must not depend on provider-specific fields such as

@@ -7,7 +7,7 @@ description: "Generate and prepare retrieval training data with the Nemotron Sta
 ---
 <a id="retrieval-sdg"></a>
 
-NeMo Platform exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
+NeMo Helix exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
 (`prep`) as dedicated Data Designer jobs. They wrap
 `data-designer-retrieval-sdg` and do **not** go through
 `nemo data-designer create`.
@@ -96,10 +96,10 @@ nemo data-designer retrieval-prepare --spec '{
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 
 client.data_designer.retrieval_prepare(
     RetrievalPrepareJobConfig(
@@ -183,10 +183,10 @@ against the same `eval_beir` split.
 ## SDK
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 
 client.data_designer.retrieval_generate(
     RetrievalGenerateJobConfig(

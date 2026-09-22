@@ -8,7 +8,7 @@ description: ""
 
 <a id="agents"></a>
 
-An agent on NeMo Platform calls tools, accesses models through shared Platform
+An agent on NeMo Helix calls tools, accesses models through shared Platform
 infrastructure, and runs as a service you can register, deploy, and
 invoke. New agents use the Platform-managed `nemo-agents-spec-v1` `agent.yaml`
 contract. Legacy NVIDIA NeMo Agent Toolkit (NAT) workflow configurations remain
@@ -21,7 +21,7 @@ A platform-managed agent consists of three components:
 
 1. **The agent entity.** `nemo agents create` stores the agent YAML as an entity in the workspace. The same configuration can be redeployed without re-registering it.
 1. **The deployment controller.** `nemo agents deploy` passes the stored config to the Agents service controller. By default it launches a FastAPI server, assigns a port, watches its health, and tears it down on `nemo agents undeploy`. With `--mode docker` or `--mode k8s` it instead runs the agent as a durable container through the deployments plugin — see [Deploy Agents](/documentation/agents/deploy-agents).
-1. **The Agents gateway.** The gateway resolves the agent to its current running deployment and proxies client requests to it, including streaming responses. From a client's perspective, the agent is an OpenAI-compatible endpoint owned by NeMo Platform.
+1. **The Agents gateway.** The gateway resolves the agent to its current running deployment and proxies client requests to it, including streaming responses. From a client's perspective, the agent is an OpenAI-compatible endpoint owned by NeMo Helix.
 
 Model traffic from inside the agent process routes back through the Inference Gateway, which resolves model entity names to upstream providers and supplies their credentials. This is why agent configs do not carry `base_url` or `api_key` values — the deployment injects the gateway URL automatically, and the gateway looks up the rest.
 
@@ -85,7 +85,7 @@ It standardizes configuration, lifecycle management, and results without requiri
 To learn more about Fabric, see
 [NeMo Fabric](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/).
 
-NeMo Platform uses Fabric as the runtime wrapper around your agent so the
+NeMo Helix uses Fabric as the runtime wrapper around your agent so the
 platform can deploy it and route its model traffic
 through shared infrastructure.
 
@@ -175,7 +175,7 @@ NVIDIA NeMo Agent Toolkit is a flexible, lightweight, and unifying library
 that allows you to easily connect existing enterprise agents to data sources
 and tools across any framework.
 
-NeMo Platform uses NAT as the runtime wrapper around your agent so the
+NeMo Helix uses NAT as the runtime wrapper around your agent so the
 platform can deploy it, evaluate it, optimize it, and route its model traffic
 through shared infrastructure. For the toolkit itself, see the
 [NeMo Agent Toolkit documentation](https://docs.nvidia.com/nemo/agent-toolkit/latest/).
@@ -218,7 +218,7 @@ route through middleware on the agent's behalf. Two conventions apply when a
 config targets a deployed agent:
 
 - **Model names use the Inference Gateway entity form**, with slashes and dots converted to hyphens (`nvidia/nemotron-3-nano-30b-a3b` becomes `nvidia-nemotron-3-nano-30b-a3b`). The Inference Gateway resolves the entity to the upstream provider that owns it.
-- **Leave `base_url` and `api_key` unset on `openai` and `nim` LLMs.** NeMo Platform injects an Inference Gateway URL when it deploys the agent, and the gateway retrieves upstream credentials from the secrets service. Setting `base_url` explicitly bypasses both.
+- **Leave `base_url` and `api_key` unset on `openai` and `nim` LLMs.** NeMo Helix injects an Inference Gateway URL when it deploys the agent, and the gateway retrieves upstream credentials from the secrets service. Setting `base_url` explicitly bypasses both.
 
 ## Common Tasks
 

@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="data-designer-cli"></a>
 
-The NeMo Data Designer plugin adds the `nemo data-designer` command group. Use it to execute Data Designer workloads on NeMo Platform.
+The NeMo Data Designer plugin adds the `nemo data-designer` command group. Use it to execute Data Designer workloads on NeMo Helix.
 
 ## Configuration Sources
 
@@ -51,15 +51,15 @@ nemo data-designer validate product_reviews.py
   ✅    ✔ Configuration is valid
 ```
 
-Validation covers both the configuration itself and the NeMo Platform resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
+Validation covers both the configuration itself and the NeMo Helix resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
 
 It does **not** check whether the models you reference actually respond. A provider can resolve while still refusing to serve the model named alongside it, so a green `validate` is not a promise that a preview will run. Use [`check-models`](#check-models) for that.
 
 A single run reports every problem it detects rather than stopping at the first one:
 
 ```text
-  ❌    ✘ The NeMo Platform Data Designer service only supports seed data from
-HuggingFace or the NeMo Platform Files service (FilesetFile, Directory, or
+  ❌    ✘ The NeMo Helix Data Designer service only supports seed data from
+HuggingFace or the NeMo Helix Files service (FilesetFile, Directory, or
 FileContents seed sources referencing fileset paths). Upload your data to the
 Files service, adjust your config, and try again.
   ❌    ✘ Errors in model configs: ["Cannot access provider

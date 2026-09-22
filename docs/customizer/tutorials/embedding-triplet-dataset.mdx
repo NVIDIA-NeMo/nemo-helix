@@ -5,7 +5,7 @@ title: "Train on SPECTER or Triplet JSONL"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/embedding-triplet-dataset.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-triplet-dataset.ipynb)
 
 Register an existing embedding dataset as a platform fileset so Stage 2 Automodel can train on it. This replaces the NVDocs data, not the Nemotron 3 Embed model entity.
 
@@ -40,10 +40,10 @@ import json
 import os
 from pathlib import Path
 from datasets import load_dataset
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
 
 DATASET_SIZE = int(os.environ.get("SPECTER_ROWS", "3000"))
 VALIDATION_SPLIT = 0.05

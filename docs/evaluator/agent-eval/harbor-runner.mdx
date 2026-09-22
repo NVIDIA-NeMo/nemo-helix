@@ -22,7 +22,7 @@ Unlike the quickstart, this runner is **not** zero-dependency — it shells out 
 - **Python `>=3.12,<3.14`** — the SDK's own floor is `>=3.12`, matching Harbor's. Harbor is still
   imported lazily, so importing the SDK and building a Harbor config work without the extra
   installed; execution and existing-result adaptation need it. The upper bound is
-  `nemo-platform`'s own; a source checkout resolves up to 3.14.
+  `nemo-helix`'s own; a source checkout resolves up to 3.14.
 - **A Docker-compatible container runtime** — Harbor invokes the `docker` executable on `PATH`
   (`docker info` must succeed) and uses `docker compose`.
 - **Harbor** `>=0.20,<0.21` — see [Install Harbor](#install-harbor).
@@ -32,17 +32,17 @@ Unlike the quickstart, this runner is **not** zero-dependency — it shells out 
 ## Install Harbor
 
 `nemo-evaluator-sdk` is not published as a standalone package, so how you add Harbor depends on how
-you installed NeMo Platform.
+you installed NeMo Helix.
 
 <Tabs>
 
 <Tab title="Installed package">
 
-Harbor ships with the `nemo-platform` `all` extra — `services`, `plugins`, and
+Harbor ships with the `nemo-helix` `all` extra — `services`, `plugins`, and
 `nemo-experimentalist-plugin` include it as well:
 
 ```bash
-uv pip install "nemo-platform[all]"
+uv pip install "nemo-helix[all]"
 ```
 
 To add Harbor to an environment you already have, install it against the same constraint the SDK
@@ -61,7 +61,7 @@ Use `pip install` in place of `uv pip install` if you prefer; both work here.
 `uv sync --package` resolves `nemo-evaluator-sdk` as a member of the repository's uv workspace, so
 it requires the workspace root `pyproject.toml` and does not work outside a checkout. Run it from
 the repository root (see the
-[setup guide](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/SETUP.md) for toolchain
+[setup guide](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/SETUP.md) for toolchain
 prerequisites):
 
 ```bash
@@ -110,7 +110,7 @@ the full task format and the rest of its CLI.
 <Note>
 
 The repo ships a one-task
-[example dataset](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/packages/nemo_evaluator_sdk/examples/harbor/hello_world_dataset)
+[example dataset](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/packages/nemo_evaluator_sdk/examples/harbor/hello_world_dataset)
 you can clone and point at (it is not shipped in the installed wheel). Or point the dataset path at
 your own Harbor suite.
 
@@ -251,7 +251,7 @@ config = HarborRuntimeConfig(
 The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
 `AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate submit`. Instead of
 `agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
-to NeMo Platform secret reference. The service resolves each reference into the job's environment at
+to NeMo Helix secret reference. The service resolves each reference into the job's environment at
 compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
 spec, the run bundle, nor `config.json`:
 

@@ -5,16 +5,16 @@ workloadTokenSigningKey:
   create: true
   secretName: &workloadTokenSigningKeySecretName nemo-workload-token-signing-key
   key: private-key.pem
-  mountPath: &workloadTokenSigningKeyMountPath /etc/nmp/workload-token
+  mountPath: &workloadTokenSigningKeyMountPath /etc/nhx/workload-token
   privateKeyPem: ""
 
 workloadTokenTls:
   create: true
-  secretName: &workloadTokenTlsSecretName nemo-platform-envoy-tls
+  secretName: &workloadTokenTlsSecretName nemo-helix-envoy-tls
   durationDays: 365
-  mountPath: &workloadTokenTlsMountPath /etc/nmp/workload-token-tls
-  caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nmp/workload-token-ca
-  caBundleFile: &workloadTokenTlsCaBundleFile /etc/nmp/workload-token-ca/ca.crt
+  mountPath: &workloadTokenTlsMountPath /etc/nhx/workload-token-tls
+  caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nhx/workload-token-ca
+  caBundleFile: &workloadTokenTlsCaBundleFile /etc/nhx/workload-token-ca/ca.crt
   # Additional DNS SANs. Envoy Service DNS SANs are generated from the configured Envoy service name/namespace.
   dnsNames:
     - localhost
@@ -65,7 +65,7 @@ sharedPostgresql:
     database: authentik
     username: authentik
   nemo:
-    database: nemoplatform
+    database: nemohelix
     username: nemo
     password: nemo
 
@@ -99,8 +99,8 @@ authentik:
   postgresql:
     enabled: false
 
-nemo-platform:
-  fullnameOverride: nemo-platform
+nemo-helix:
+  fullnameOverride: nemo-helix
   existingSecret: ""
   ngcAPIKey: demo-ngc-api-key
   authentikPublicGateway:
@@ -124,7 +124,7 @@ nemo-platform:
     host: shared-postgresql
     port: 5432
     user: nemo
-    database: nemoplatform
+    database: nemohelix
     existingSecret: shared-postgresql-nemo
     existingSecretPasswordKey: password
   core:
@@ -138,8 +138,8 @@ nemo-platform:
         - entities
         - deployments
       env:
-        NMP_PLATFORM_URL: "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
-        NMP_AUTH_URL: "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+        NHX_PLATFORM_URL: "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+        NHX_AUTH_URL: "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
     storage:
       accessModes:
         - ReadWriteOnce
@@ -160,7 +160,7 @@ nemo-platform:
       - entities
       - deployments
     env:
-      NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nmp/workload-token/private-key.pem"
+      NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nhx/workload-token/private-key.pem"
     extraVolumes:
       - name: workload-token-signing-key
         secret:
@@ -211,7 +211,7 @@ nemo-platform:
           secretName: *workloadTokenTlsSecretName
     timeouts:
       upstreamIdle: "4s"
-    configOverride: '{{ include "nemo-platform-authentik.envoyConfig" . }}'
+    configOverride: '{{ include "nemo-helix-authentik.envoyConfig" . }}'
   platformConfig:
     auth:
       enabled: true
@@ -222,31 +222,31 @@ nemo-platform:
       bundle_cache_seconds: 15
       admin_email: "admin@example.com"
       token_signing:
-        issuer: '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth'
-        key_id: "nemo-platform-signing"
-        private_key_file: "/etc/nmp/workload-token/private-key.pem"
+        issuer: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth'
+        key_id: "nemo-helix-signing"
+        private_key_file: "/etc/nhx/workload-token/private-key.pem"
       access_keys:
         enabled: false
       oidc:
         enabled: true
-        issuer: '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-cli/'
+        issuer: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-cli/'
         additional_issuers:
-          - '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo/'
-          - '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}/application/o/nemo-cli/'
-          - '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}/application/o/nemo/'
-        client_id: "nemo-platform-cli"
-        token_endpoint: '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}/application/o/token/'
-        device_authorization_endpoint: '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}/application/o/device/'
+          - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo/'
+          - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-cli/'
+          - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo/'
+        client_id: "nemo-helix-cli"
+        token_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/token/'
+        device_authorization_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/device/'
         workload_token_exchange_enabled: true
-        workload_client_id: "nemo-platform-workload"
-        workload_audience: "nemo-platform"
+        workload_client_id: "nemo-helix-workload"
+        workload_audience: "nemo-helix"
         workload_scope: "openid email groups"
-        workload_token_endpoint: '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
-        workload_subject_jwks_uri: '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/jwks/'
+        workload_token_endpoint: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
+        workload_subject_jwks_uri: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/jwks/'
         workload_subject_issuers:
-          - '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/'
-          - '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/application/o/nemo-workload/'
-          - '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}/application/o/nemo-workload/'
+          - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/'
+          - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/application/o/nemo-workload/'
+          - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-workload/'
         workload_kubernetes_token_review_enabled: true
         subject_claim: "sub"
         email_claim: "email"
@@ -275,7 +275,7 @@ nemo-platform:
           profile: workload
           backend: kubernetes_job
           config:
-            launcher_image: '{{ include "nmp-core.image" . }}'
+            launcher_image: '{{ include "nhx-core.image" . }}'
             env:
               SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
               REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
@@ -292,7 +292,7 @@ nemo-platform:
                   mount_path: *workloadTokenTlsCaBundleMountPath
                   read_only: true
             workload_identity:
-              token_audience: "nemo-platform-workload"
+              token_audience: "nemo-helix-workload"
               token_expiration_seconds: 600
     models:
       controller:
@@ -301,15 +301,15 @@ nemo-platform:
             enabled: true
 
 integration:
-  nemoPlatform:
+  nemoHelix:
     apiServiceAccountName: nemo
-    apiServiceName: nemo-platform-api
+    apiServiceName: nemo-helix-api
     apiServicePort: 8080
-    envoyServiceName: nemo-platform-envoy
+    envoyServiceName: nemo-helix-envoy
     envoyServicePort: 8080
   authentik:
     serviceName: *authentikServiceName
     servicePort: *authentikServicePort
-    workloadAudience: nemo-platform
-    cliAudience: nemo-platform-cli
-    workloadClientAudience: nemo-platform-workload
+    workloadAudience: nemo-helix
+    cliAudience: nemo-helix-cli
+    workloadClientAudience: nemo-helix-workload

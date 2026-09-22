@@ -3,7 +3,7 @@
 
 # ZITADEL Kubernetes Reference Example
 
-This directory contains a Kubernetes-only ZITADEL-backed NeMo Platform auth
+This directory contains a Kubernetes-only ZITADEL-backed NeMo Helix auth
 reference. It is intentionally parallel to the Authentik Kubernetes runtime, but
 does not include a Docker Compose mode.
 
@@ -16,7 +16,7 @@ The local demo is designed around two ZITADEL traits:
   harness uses demo service applications for setup and workload-provider token
   acquisition, and device flow for the human login path.
 
-The example keeps NeMo Platform runtime changes minimal by configuring ZITADEL
+The example keeps NeMo Helix runtime changes minimal by configuring ZITADEL
 to emit a standard `groups` custom claim. NeMo can then use its existing
 `auth.oidc.groups_claim: groups` behavior instead of adding ZITADEL-specific
 role-claim parsing.
@@ -25,13 +25,13 @@ The Helm chart includes a post-install seed job that uses the ZITADEL
 FirstInstance admin PAT to create the demo project, OIDC client, machine users,
 project grants, and custom `groups` action. ZITADEL-generated client IDs and
 secrets are stored in the `nemo-zitadel-seed-state` Kubernetes Secret and are
-used to patch the NeMo Platform ConfigMap and Secret-backed API environment
+used to patch the NeMo Helix ConfigMap and Secret-backed API environment
 before API/controller pods are restarted. Client secrets stay in Kubernetes
 Secrets rather than being written into the ConfigMap.
 
 All credentials and generated secrets in this example are for local development
 only. The chart generates local Secrets for the ZITADEL master key, demo user
-password, embedded PostgreSQL passwords, and NeMo Platform placeholder NGC key.
+password, embedded PostgreSQL passwords, and NeMo Helix placeholder NGC key.
 Do not copy those Secrets into non-local deployments.
 
 ## Prerequisites
@@ -59,7 +59,7 @@ contrib/auth/zitadel/run.sh clean
 ```
 
 ZITADEL is Kubernetes-only in this reference, so the runner requires the `k8s`
-target. It keeps provider-specific defaults under the `NMP_ZITADEL_K8S_*`
+target. It keeps provider-specific defaults under the `NHX_ZITADEL_K8S_*`
 environment prefix.
 
 Runtime details live in:
@@ -74,7 +74,7 @@ The runtime seeds these local-only identities:
 - Human password: stored in the `interactive_user_password` key of the
   `nemo-zitadel-seed-state` Kubernetes Secret
 - Human email: `nemo-user@example.com`
-- CLI OIDC client name: `nemo-platform-cli`
+- CLI OIDC client name: `nemo-helix-cli`
 - Setup service user: `nemo-setup`
 - Workload identity: `svc-nemo`
 - Workload group claim: `nemo-workloads`

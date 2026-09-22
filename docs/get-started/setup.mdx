@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="nemo-setup"></a>
 
-Install NeMo Platform and start working with AI agents.
+Install NeMo Helix and start working with AI agents.
 
 <a id="nemo-setup-prerequisites"></a>
 ## Prerequisites
@@ -24,7 +24,7 @@ Choose the install path that matches what you want to do.
 
 ### Install from PyPI
 
-Use the [PyPI package](https://pypi.org/project/nemo-platform/) for the quickest local install. The `all` extra includes the SDK, CLI, platform services, and default first-party plugins; drop it for the SDK and CLI alone.
+Use the [PyPI package](https://pypi.org/project/nemo-helix/) for the quickest local install. The `all` extra includes the SDK, CLI, platform services, and default first-party plugins; drop it for the SDK and CLI alone.
 
 <Tabs>
 
@@ -33,7 +33,7 @@ Use the [PyPI package](https://pypi.org/project/nemo-platform/) for the quickest
 One command, `nemo` available everywhere, nothing to activate.
 
 ```bash
-uv tool install "nemo-platform[all]"
+uv tool install "nemo-helix[all]"
 ```
 
 </Tab>
@@ -45,10 +45,10 @@ Use when you also import the SDK from your own code. `nemo` works only while the
 ```bash
 uv venv
 source .venv/bin/activate
-uv pip install "nemo-platform[all]"
+uv pip install "nemo-helix[all]"
 ```
 
-Plain `pip install "nemo-platform[all]"` works in an environment you manage yourself.
+Plain `pip install "nemo-helix[all]"` works in an environment you manage yourself.
 
 </Tab>
 
@@ -58,15 +58,15 @@ Continue with `nemo setup`.
 
 ### Install from source
 
-Use the source checkout when you are contributing to NeMo Platform, editing local plugins, building Studio assets from source, or running development workflows:
+Use the source checkout when you are contributing to NeMo Helix, editing local plugins, building Studio assets from source, or running development workflows:
 
 <Note>
 Install [Flox](https://flox.dev/docs/install-flox/install) before running `make bootstrap` for the smoothest setup. It supplies the repository-pinned uv, Node.js, and pnpm toolchain; you do not need to activate it first.
 </Note>
 
 ```bash
-git clone https://github.com/NVIDIA-NeMo/nemo-platform.git
-cd nemo-platform
+git clone https://github.com/NVIDIA-NeMo/nemo-helix.git
+cd nemo-helix
 make bootstrap
 flox -q activate
 ```
@@ -125,19 +125,19 @@ To configure remote access without rerunning setup, or to keep separate local an
 For local single-process source runs, enable startup seeding before starting services:
 
 ```bash
-export NMP_SEED_ON_STARTUP=true
+export NHX_SEED_ON_STARTUP=true
 nemo services run
 ```
 
 You can set `platform.seed_on_startup: true` in platform config instead. If services are already running, wait for readiness and run the seed task manually from the repository root:
 
 ```bash
-# Set NMP_BASE_URL first if services are not on http://localhost:8080.
+# Set NHX_BASE_URL first if services are not on http://localhost:8080.
 curl -sf http://localhost:8080/health/ready
-uv run python -m nmp.platform_seed
+uv run python -m nhx.platform_seed
 ```
 
-`uv run nemo-platform run task --task nmp.platform_seed` is equivalent. The seed task is idempotent. It creates the **PlatformAdmin** binding in the `system` workspace for `auth.admin_email`, the wildcard **Editor** binding for the default workspace, the wildcard **Viewer** binding for the `system` workspace, and the wildcard **WorkspaceCreator** binding for the `system` workspace. Without this step, OIDC login can succeed but admin operations may still return `403 Forbidden` because the RBAC bindings are missing.
+`uv run nemo-helix run task --task nhx.platform_seed` is equivalent. The seed task is idempotent. It creates the **HelixAdmin** binding in the `system` workspace for `auth.admin_email`, the wildcard **Editor** binding for the default workspace, the wildcard **Viewer** binding for the `system` workspace, and the wildcard **WorkspaceCreator** binding for the `system` workspace. Without this step, OIDC login can succeed but admin operations may still return `403 Forbidden` because the RBAC bindings are missing.
 
 When setup completes, try chatting with the model you selected. Use the model name shown at the end of setup (or find it with `nemo models list`):
 
@@ -220,8 +220,8 @@ export OPENAI_API_KEY=sk-...
 nemo setup --auto
 
 # Connect to an authenticated remote platform without prompts
-export NMP_BASE_URL=https://nmp.example.com
-export NMP_ACCESS_TOKEN=...
+export NHX_BASE_URL=https://nhx.example.com
+export NHX_ACCESS_TOKEN=...
 export OPENAI_API_KEY=sk-...
 nemo setup --auto --no-start-services
 
@@ -243,22 +243,22 @@ nemo setup --no-install-skills --no-deploy-agent
 
 ## Python SDK
 
-The `nemo-platform` package includes a Python SDK. After running `nemo setup`, the simplest initialization uses your CLI context:
+The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization uses your CLI context:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 ```
 
 For scripts or CI where you want explicit control:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```
@@ -269,7 +269,7 @@ An asynchronous client is also available. See the [SDK reference](/documentation
 
 ### Platform won't start
 
-Check `~/.local/state/nmp/instances/<scope>/services.log` in the directory where you ran `nemo setup`. The most common cause is port 8080 already in use.
+Check `~/.local/state/nhx/instances/<scope>/services.log` in the directory where you ran `nemo setup`. The most common cause is port 8080 already in use.
 
 ### Studio returns 404 or unavailable
 
@@ -305,13 +305,13 @@ nemo services ls --all        # include stopped instance directories (with logs 
 nemo services rm <scope>      # remove one stopped instance directory
 nemo services prune           # remove all stopped instance directories
 curl -s http://localhost:8080/health/ready   # check if running
-cat ~/.local/state/nmp/instances/<scope>/services.log   # view service output
+cat ~/.local/state/nhx/instances/<scope>/services.log   # view service output
 nemo services stop            # stop the running instance for this scope
 ```
 
 ### Stopped instance directories cluttering `ls --all`
 
-After stopping or crashing local services, stopped scope directories can remain under `~/.local/state/nmp/instances/<scope>/`. Empty lock-only ghosts are cleaned automatically; directories with service logs stay until you remove them:
+After stopping or crashing local services, stopped scope directories can remain under `~/.local/state/nhx/instances/<scope>/`. Empty lock-only ghosts are cleaned automatically; directories with service logs stay until you remove them:
 
 ```bash
 nemo services ls --all        # see stopped scopes

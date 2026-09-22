@@ -5,9 +5,9 @@ title: "Generate Retrieval Training Data"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/data-designer/tutorials/retrieval-generate.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/data-designer/tutorials/retrieval-generate.ipynb)
 
-Run Nemotron Stage 0 on NeMo Platform: turn a document corpus into judged question-and-answer pairs with `nemo data-designer retrieval-generate`. Use this when the training data has to come from your own documents.
+Run Nemotron Stage 0 on NeMo Helix: turn a document corpus into judged question-and-answer pairs with `nemo data-designer retrieval-generate`. Use this when the training data has to come from your own documents.
 
 The faster path skips generation entirely and starts from NVIDIA's published NVDocs dump in [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job).
 
@@ -15,7 +15,7 @@ Generation on Platform calls an Inference Gateway provider, typically Nemotron N
 
 ## Prerequisites
 
-- A running NeMo Platform at `NMP_BASE_URL`, default `http://localhost:8080`
+- A running NeMo Helix at `NHX_BASE_URL`, default `http://localhost:8080`
 - A corpus fileset of UTF-8 `.txt` or `.md` files, or an `hf://` URI
 - An Inference Gateway chat provider, plus the chat and embedding model names it serves
 - At least 50 documents, and 500 or more for good domain coverage. Below that, Stage 1 can put nearly every query in the test split
@@ -24,12 +24,12 @@ Aim for documents of 200–2,000 tokens that are representative of the domain. G
 
 ```python
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
-print(NMP_BASE_URL)
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+print(NHX_BASE_URL)
 
 ```
 

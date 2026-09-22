@@ -5,18 +5,18 @@
 title: "Client APIs"
 description: ""
 ---
-The following reference provides detailed documentation for the synchronous and asynchronous clients of the NeMo Platform Python SDK.
+The following reference provides detailed documentation for the synchronous and asynchronous clients of the NeMo Helix Python SDK.
 
 ## Synchronous Client
 
-Use `nemo_platform.NeMoPlatform` from regular Python code when you want blocking API calls.
+Use `nemo_helix.NeMoHelix` from regular Python code when you want blocking API calls.
 The client reads the active CLI context by default, including the base URL,
 workspace, and authentication settings configured by `nemo auth login`.
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 for workspace in client.workspaces.list().data:
     print(workspace.name)
@@ -31,9 +31,9 @@ from collections.abc import Mapping
 
 import httpx
 
-from nemo_platform import DEFAULT_MAX_RETRIES, not_given
+from nemo_helix import DEFAULT_MAX_RETRIES, not_given
 
-class NeMoPlatform:
+class NeMoHelix:
     def __init__(
         self,
         *,
@@ -55,9 +55,9 @@ class NeMoPlatform:
 | Parameter | Description |
 | --- | --- |
 | `workspace` | Workspace name used by workspace-scoped routes. You can set it on the client or pass it to individual methods that accept a workspace argument. |
-| `base_url` | Base URL for the NeMo Platform API. If omitted, the client reads it from the active CLI context. |
+| `base_url` | Base URL for the NeMo Helix API. If omitted, the client reads it from the active CLI context. |
 | `inference_base_url` | Optional override for inference gateway requests. Defaults to `base_url`. |
-| `config_path` | Path to the CLI config file. Defaults to `~/.config/nmp/config.yaml`. |
+| `config_path` | Path to the CLI config file. Defaults to `~/.config/nhx/config.yaml`. |
 | `context_name` | Named CLI context to read from the config file. |
 | `access_token` | Explicit bearer token for automation. Token refresh is not performed for explicit tokens. |
 | `timeout` | Request timeout for API calls. Pass a float in seconds, an `httpx.Timeout`, or `None`. |
@@ -70,10 +70,10 @@ class NeMoPlatform:
 
 | Mode | Example | Behavior |
 | --- | --- | --- |
-| CLI context | `NeMoPlatform()` | Reads the active CLI context and uses configured authentication with token refresh. |
-| Named context | `NeMoPlatform(context_name="dev")` | Reads a specific CLI context instead of the active one. |
-| Direct API | `NeMoPlatform(base_url="http://localhost:8080")` | Uses the given URL without reading config or injecting auth headers. |
-| Explicit token | `NeMoPlatform(base_url=url, access_token=token)` | Uses the provided bearer token for API calls. |
+| CLI context | `NeMoHelix()` | Reads the active CLI context and uses configured authentication with token refresh. |
+| Named context | `NeMoHelix(context_name="dev")` | Reads a specific CLI context instead of the active one. |
+| Direct API | `NeMoHelix(base_url="http://localhost:8080")` | Uses the given URL without reading config or injecting auth headers. |
+| Explicit token | `NeMoHelix(base_url=url, access_token=token)` | Uses the provided bearer token for API calls. |
 
 Use `with_options(...)` to clone a client with request defaults changed:
 
@@ -83,16 +83,16 @@ short_timeout_client = client.with_options(timeout=10.0)
 
 ## Asynchronous Client
 
-Use `nemo_platform.AsyncNeMoPlatform` from `asyncio` applications. It exposes the same
-resource tree as `NeMoPlatform`, but API methods are awaited.
+Use `nemo_helix.AsyncNeMoHelix` from `asyncio` applications. It exposes the same
+resource tree as `NeMoHelix`, but API methods are awaited.
 
 ```python
 import asyncio
 
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 async def main() -> None:
-    client = AsyncNeMoPlatform()
+    client = AsyncNeMoHelix()
     page = await client.workspaces.list()
     for workspace in page.data:
         print(workspace.name)
@@ -109,9 +109,9 @@ from collections.abc import Mapping
 
 import httpx
 
-from nemo_platform import DEFAULT_MAX_RETRIES, not_given
+from nemo_helix import DEFAULT_MAX_RETRIES, not_given
 
-class AsyncNeMoPlatform:
+class AsyncNeMoHelix:
     def __init__(
         self,
         *,
@@ -130,18 +130,18 @@ class AsyncNeMoPlatform:
         ...
 ```
 
-`AsyncNeMoPlatform` accepts the same connection and authentication parameters as
-`NeMoPlatform`. Pass a custom `httpx.AsyncClient` through `http_client` only when
+`AsyncNeMoHelix` accepts the same connection and authentication parameters as
+`NeMoHelix`. Pass a custom `httpx.AsyncClient` through `http_client` only when
 you need to control the underlying transport directly.
 
 ```python
 import os
 
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-client = AsyncNeMoPlatform(
-    base_url=os.environ["NMP_BASE_URL"],
-    access_token=os.environ["NMP_ACCESS_TOKEN"],
+client = AsyncNeMoHelix(
+    base_url=os.environ["NHX_BASE_URL"],
+    access_token=os.environ["NHX_ACCESS_TOKEN"],
     workspace="default",
 )
 ```
@@ -152,7 +152,7 @@ Client construction raises `RuntimeError` if configuration or authentication boo
 Workspace-scoped methods raise `ValueError` when no workspace is provided on the client or
 method call.
 
-API calls raise typed exceptions from `nemo_platform`, including:
+API calls raise typed exceptions from `nemo_helix`, including:
 
 | Exception | Typical HTTP status |
 | --- | --- |
@@ -165,12 +165,12 @@ API calls raise typed exceptions from `nemo_platform`, including:
 | `RateLimitError` | `429` |
 | `InternalServerError` | `5xx` |
 
-Catch `APIStatusError` for all non-success HTTP responses, or `NeMoPlatformError`
+Catch `APIStatusError` for all non-success HTTP responses, or `NeMoHelixError`
 for SDK-level errors.
 
 ## Client Attributes
 
-The NeMo Platform clients provide access to API resources through the following attributes.
+The NeMo Helix clients provide access to API resources through the following attributes.
 For endpoint details, see the [REST API Reference](/documentation/reference/api-reference).
 
 ### Organization

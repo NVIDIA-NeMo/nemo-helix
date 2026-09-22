@@ -15,7 +15,7 @@ For detection and replacement strategy details, see the [open-source library doc
 
 Complete the [tutorials prerequisites](/documentation/anonymize-data/tutorials#prerequisites), which cover:
 
-- A running NeMo Platform cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
+- A running NeMo Helix cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
 - An inference provider configured (default examples use `nvidia-build`).
 - A fileset named `anonymizer-inputs` with `anonymizer-input.csv` uploaded.
 
@@ -52,8 +52,8 @@ from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
 
-WORKSPACE = os.environ.get("NMP_WORKSPACE", "default")
-MODEL_PROVIDER = os.environ.get("NMP_ANON_PROVIDER", "nvidia-build")
+WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
+MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
     replace=Redact(format_template="[REDACTED_{label}]"),
@@ -94,10 +94,10 @@ Field reference:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 preview = sdk.anonymizer.preview(request)
@@ -115,8 +115,8 @@ The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON 
 ```bash
 nemo anonymizer preview \
   --spec-file /tmp/anonymizer-preview.yaml \
-  --workspace "${NMP_WORKSPACE:-default}" \
-  --base-url "${NMP_BASE_URL:-http://localhost:8080}"
+  --workspace "${NHX_WORKSPACE:-default}" \
+  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
 ```
 
 <Accordion title="Async client">
@@ -125,10 +125,10 @@ nemo anonymizer preview \
 
 ```python
 import os
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-async_sdk = AsyncNeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+async_sdk = AsyncNeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 preview = await async_sdk.anonymizer.preview(request)

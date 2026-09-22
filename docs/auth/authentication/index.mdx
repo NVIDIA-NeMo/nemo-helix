@@ -5,15 +5,15 @@
 title: "Authentication"
 description: ""
 ---
-NeMo Platform authenticates requests using **OpenID Connect (OIDC)**. You register an OAuth application in your identity provider, configure NeMo Platform with the issuer and client ID, and users sign in via the CLI, SDK, or browser. NeMo Platform validates the JWT on every request and extracts the user's identity for authorization.
+NeMo Helix authenticates requests using **OpenID Connect (OIDC)**. You register an OAuth application in your identity provider, configure NeMo Helix with the issuer and client ID, and users sign in via the CLI, SDK, or browser. NeMo Helix validates the JWT on every request and extracts the user's identity for authorization.
 
 For the quickstart (no IdP), see the [email-based shortcut](/documentation/access-control). For the authorization model, see [Authorization Concepts](/documentation/access-control/concepts).
 
 ## Connect Your Identity Provider
 
-Start here — register an OAuth application in your IdP and configure NeMo Platform:
+Start here — register an OAuth application in your IdP and configure NeMo Helix:
 
-- [OIDC Setup](/documentation/access-control/authentication/oidc-setup) — Step-by-step: register an app, configure NeMo Platform, verify login.
+- [OIDC Setup](/documentation/access-control/authentication/oidc-setup) — Step-by-step: register an app, configure NeMo Helix, verify login.
 - [Azure AD (Entra ID)](/documentation/access-control/authentication/providers/azure-ad-entra-id) — Azure-specific walkthrough (app registration, scopes, claim mapping).
 - [Generic OIDC Provider](/documentation/access-control/authentication/providers/generic-oidc) — Checklist for any OIDC-compliant IdP.
 - IdP Integration References - provider manifests and runnable reference bundles under `contrib/auth/*`.
@@ -28,11 +28,11 @@ Once your IdP is connected, see [Using Authentication](/documentation/access-con
 | **Password grant** | `nemo auth login --username <user> --password <pass>` | CI/CD pipelines — non-interactive |
 | **Direct from IdP** | Use your IdP's token endpoint or workload identity | Custom integrations, service accounts |
 
-The CLI stores the token and auto-refreshes it before expiry. The SDK reads the stored token from the CLI config automatically — after `nemo auth login`, `NeMoPlatform()` works with no arguments.
+The CLI stores the token and auto-refreshes it before expiry. The SDK reads the stored token from the CLI config automatically — after `nemo auth login`, `NeMoHelix()` works with no arguments.
 
 ## Discovery Endpoint
 
-NeMo Platform exposes an unauthenticated endpoint that clients and the SDK use to discover OIDC settings:
+NeMo Helix exposes an unauthenticated endpoint that clients and the SDK use to discover OIDC settings:
 
 ```text
 GET {BASE_URL}/apis/auth/discovery
@@ -49,7 +49,7 @@ Response:
     "device_authorization_endpoint": "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode",
     "client_id": "...",
     "default_scopes": "platform:read platform:write openid profile email offline_access",
-    "scope_prefix": "api://nmp/"
+    "scope_prefix": "api://nhx/"
   }
 }
 ```

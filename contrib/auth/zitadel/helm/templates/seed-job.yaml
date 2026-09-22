@@ -8,20 +8,20 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ .Values.zitadelSeedJob.serviceAccountName }}
-  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  namespace: {{ include "nemo-helix-zitadel.namespace" . }}
   labels:
     app.kubernetes.io/component: zitadel-seed
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
 automountServiceAccountToken: true
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ .Values.zitadelSeedJob.serviceAccountName }}
-  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  namespace: {{ include "nemo-helix-zitadel.namespace" . }}
   labels:
     app.kubernetes.io/component: zitadel-seed
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["secrets", "configmaps"]
@@ -34,10 +34,10 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ .Values.zitadelSeedJob.serviceAccountName }}
-  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  namespace: {{ include "nemo-helix-zitadel.namespace" . }}
   labels:
     app.kubernetes.io/component: zitadel-seed
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.zitadelSeedJob.serviceAccountName }}
@@ -50,10 +50,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ printf "%s-zitadel-seed" .Release.Name | trunc 63 | trimSuffix "-" }}
-  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  namespace: {{ include "nemo-helix-zitadel.namespace" . }}
   labels:
     app.kubernetes.io/component: zitadel-seed
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
 data:
   seed.py: |-
     import base64
@@ -96,9 +96,9 @@ data:
     INTERACTIVE_USER_EMAIL = os.environ["INTERACTIVE_USER_EMAIL"]
     INTERACTIVE_USER_PASSWORD = os.environ["INTERACTIVE_USER_PASSWORD"]
     ACTION_NAME = os.environ["ACTION_NAME"]
-    PROJECT_NAME = "NeMo Platform"
-    API_APP_NAME = "nemo-platform-api"
-    CLI_APP_NAME = "nemo-platform-cli"
+    PROJECT_NAME = "NeMo Helix"
+    API_APP_NAME = "nemo-helix-api"
+    CLI_APP_NAME = "nemo-helix-cli"
     REQUEST_TIMEOUT_SECONDS = 15
     WAIT_TIMEOUT_SECONDS = int(os.environ.get("WAIT_TIMEOUT_SECONDS", "600"))
     REQUIRED_STATE_KEYS = {
@@ -570,18 +570,18 @@ data:
         _ensure_project_role(pat, project_id)
         api_app = _ensure_api_app(pat, project_id)
         cli_app = _ensure_cli_app(pat, project_id)
-        setup = _create_machine_user(pat, SETUP_USER_ID, SETUP_USER_NAME, "NeMo Platform setup test identity")
+        setup = _create_machine_user(pat, SETUP_USER_ID, SETUP_USER_NAME, "NeMo Helix setup test identity")
         workload = _create_machine_user(
             pat,
             WORKLOAD_USER_ID,
             WORKLOAD_USER_NAME,
-            "NeMo Platform workload provider test identity",
+            "NeMo Helix workload provider test identity",
         )
         login_client = _create_machine_user(
             pat,
             LOGIN_CLIENT_USER_ID,
             LOGIN_CLIENT_USER_NAME,
-            "NeMo Platform login client test identity",
+            "NeMo Helix login client test identity",
         )
         _add_instance_member(pat, login_client["user_id"], ["IAM_LOGIN_CLIENT"])
         login_client_pat = _create_personal_access_token(pat, login_client["user_id"])
@@ -662,7 +662,7 @@ data:
                         "template": {
                             "metadata": {
                                 "annotations": {
-                                    "nemo-platform.nvidia.com/zitadel-seeded-at": restarted_at,
+                                    "nemo-helix.nvidia.com/zitadel-seeded-at": restarted_at,
                                 },
                             },
                         },
@@ -694,10 +694,10 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ printf "%s-zitadel-seed" .Release.Name | trunc 63 | trimSuffix "-" }}
-  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  namespace: {{ include "nemo-helix-zitadel.namespace" . }}
   labels:
     app.kubernetes.io/component: zitadel-seed
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "20"
@@ -710,7 +710,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: zitadel-seed
-        {{- include "nemo-platform-zitadel.selectorLabels" . | nindent 8 }}
+        {{- include "nemo-helix-zitadel.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ .Values.zitadelSeedJob.serviceAccountName }}
       automountServiceAccountToken: true
@@ -732,9 +732,9 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: ZITADEL_INTERNAL_URL
-              value: {{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" .Values.integration.zitadel.serviceName "scheme" "http" "port" .Values.integration.zitadel.servicePort) | quote }}
+              value: {{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" .Values.integration.zitadel.serviceName "scheme" "http" "port" .Values.integration.zitadel.servicePort) | quote }}
             - name: ZITADEL_PUBLIC_URL
-              value: {{ include "nemo-platform-zitadel.publicGatewayUrl" . | quote }}
+              value: {{ include "nemo-helix-zitadel.publicGatewayUrl" . | quote }}
             - name: STATE_SECRET_NAME
               value: {{ .Values.zitadelSeedJob.stateSecretName | quote }}
             - name: PAT_SECRET_NAME

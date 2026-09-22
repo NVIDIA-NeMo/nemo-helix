@@ -5,9 +5,9 @@ title: "Embedding Model Customization"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb)
 
-Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Platform mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
+Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Helix mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
 
 Pre-trained embeddings handle general retrieval well but underperform on specialized vocabulary, document structure, and query phrasing. Fine-tuning adapts the model to your corpus. Expect larger gains where the base model has the least prior exposure, such as legal, biomedical, and internal engineering documents, and smaller ones on corpora close to its pre-training mix.
 
@@ -35,8 +35,8 @@ Stage 1 writes contrastive rows as JSONL:
 
 ## Prerequisites
 
-- A running NeMo Platform at `NMP_BASE_URL`, default `http://localhost:8080`. See the [Quickstart](/documentation/get-started).
-- The Python SDK: `pip install "nemo-platform[all]"`, or `make bootstrap` from the repo root.
+- A running NeMo Helix at `NHX_BASE_URL`, default `http://localhost:8080`. See the [Quickstart](/documentation/get-started).
+- The Python SDK: `pip install "nemo-helix[all]"`, or `make bootstrap` from the repo root.
 - An NGC API key for the `nvcr.io` NIM images.
 - GPU capacity: 80 GB for training, about 40 GB for mining and evaluation. Serving the base and tuned NIMs side by side takes two GPUs.
 - A fileset-backed encoder entity, created in the next section. Models that Inference Gateway discovers from a running endpoint have `fileset: null` and can be neither trained nor used as the mining encoder.
@@ -44,11 +44,11 @@ Stage 1 writes contrastive rows as JSONL:
 ## 1. Initialize the SDK
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 export NGC_API_KEY=<YOUR_NGC_API_KEY>
 ```
 
-The `nemo` CLI reads `NMP_BASE_URL` too, and `--base-url` overrides it per command. The NGC key becomes a Platform secret so the cluster can pull NIM images:
+The `nemo` CLI reads `NHX_BASE_URL` too, and `--base-url` overrides it per command. The NGC key becomes a Platform secret so the cluster can pull NIM images:
 
 ```bash
 echo "$NGC_API_KEY" | nemo secrets create ngc-api-key --workspace default --from-file -
@@ -60,11 +60,11 @@ import os
 import time
 import uuid
 from IPython.display import clear_output
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
-print(f"Platform: {NMP_BASE_URL}")
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+print(f"Platform: {NHX_BASE_URL}")
 
 ```
 
@@ -88,7 +88,7 @@ nemo models get nemotron-3-embed-1b --workspace default
 The entity is ready once `nemo models get` reports a non-null `fileset` and a populated `spec`. For a gated repo, create the token first with `nemo secrets create hf-token --value "$HF_TOKEN"` and add `"token_secret":"hf-token"` to `--storage`.
 
 ```python
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 NGC_API_KEY = os.environ.get("NGC_API_KEY")
 if not NGC_API_KEY:

@@ -212,14 +212,14 @@ nemo data-designer create product_reviews.py --workspace default --num-records 3
 
 ### SDK Execution
 
-The `DataDesignerResource` is your SDK interface for Data Designer execution on NeMo Platform. You can access it from an existing SDK instance:
+The `DataDesignerResource` is your SDK interface for Data Designer execution on NeMo Helix. You can access it from an existing SDK instance:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=base_url, workspace="default")
+base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=base_url, workspace="default")
 
 data_designer = client.data_designer
 ```

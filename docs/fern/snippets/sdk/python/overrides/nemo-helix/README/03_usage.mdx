@@ -3,16 +3,16 @@
 
 ## Usage
 
-This section describes how to use the NeMo Platform Python SDK.
+This section describes how to use the NeMo Helix Python SDK.
 
 ### Import the Main Client Class
 
-Import the main client class from the `nemo_platform` package and create a client instance as follows:
+Import the main client class from the `nemo_helix` package and create a client instance as follows:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
+client = NeMoHelix(
     base_url="http://nemo.test",
 )
 
@@ -21,17 +21,17 @@ page = client.workspaces.list()
 print(page.data)
 ```
 
-After creating the client instance, you can use the client to interact with the NeMo Platform APIs.
+After creating the client instance, you can use the client to interact with the NeMo Helix APIs.
 
 ## Async Usage
 
-If you want to use the asynchronous client, simply import `AsyncNeMoPlatform` instead of `NeMoPlatform` and use `await` with each API call:
+If you want to use the asynchronous client, simply import `AsyncNeMoHelix` instead of `NeMoHelix` and use `await` with each API call:
 
 ```python
 import asyncio
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-client = AsyncNeMoPlatform(
+client = AsyncNeMoHelix(
     base_url="http://nemo.test",
 )
 
@@ -52,18 +52,18 @@ By default, the async client uses `httpx` for HTTP requests. However, for improv
 You can enable this by installing `aiohttp`:
 
 ```sh
-pip install 'nemo-platform[aiohttp]'
+pip install 'nemo-helix[aiohttp]'
 ```
 
 Then you can enable it by instantiating the client with `http_client=DefaultAioHttpClient()`:
 
 ```python
 import asyncio
-from nemo_platform import DefaultAioHttpClient
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import DefaultAioHttpClient
+from nemo_helix import AsyncNeMoHelix
 
 async def main() -> None:
-    async with AsyncNeMoPlatform(
+    async with AsyncNeMoHelix(
         base_url="http://nemo.test",
         http_client=DefaultAioHttpClient(),
     ) as client:
@@ -84,14 +84,14 @@ Typed requests and responses provide autocomplete and documentation within your 
 
 ## Pagination
 
-List methods in the NeMo Platform API are paginated.
+List methods in the NeMo Helix API are paginated.
 
 This library provides auto-paginating iterators with each list response, so you do not have to request successive pages manually:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
+client = NeMoHelix(
     base_url="http://nemo.test",
 )
 
@@ -107,9 +107,9 @@ Or, asynchronously:
 
 ```python
 import asyncio
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-client = AsyncNeMoPlatform(
+client = AsyncNeMoHelix(
     base_url="http://nemo.test",
 )
 
@@ -150,9 +150,9 @@ for job in first_page.data:
 Nested parameters are dictionaries, typed using `TypedDict`, for example:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
+client = NeMoHelix(
     base_url="http://nemo.test",
 )
 
@@ -181,27 +181,27 @@ print(audit_config.plugins)
 
 The library raises errors when it cannot connect to the API or when the API returns a non-success status code.
 
-When the library cannot connect to the API (for example, due to network connection problems or a timeout), it raises a subclass of `nemo_platform.APIConnectionError`.
+When the library cannot connect to the API (for example, due to network connection problems or a timeout), it raises a subclass of `nemo_helix.APIConnectionError`.
 
 When the API returns a non-success status code (that is, 4xx or 5xx
-response), it raises a subclass of `nemo_platform.APIStatusError`, containing `status_code` and `response` properties.
+response), it raises a subclass of `nemo_helix.APIStatusError`, containing `status_code` and `response` properties.
 
-All errors inherit from `nemo_platform.APIError`.
+All errors inherit from `nemo_helix.APIError`.
 
 ```python
-import nemo_platform
-from nemo_platform import NeMoPlatform
+import nemo_helix
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 try:
     client.workspaces.list()
-except nemo_platform.APIConnectionError as e:
+except nemo_helix.APIConnectionError as e:
     print("The server could not be reached")
     print(e.__cause__)  # an underlying Exception, likely raised within httpx.
-except nemo_platform.RateLimitError as e:
+except nemo_helix.RateLimitError as e:
     print("A 429 status code was received; we should back off a bit.")
-except nemo_platform.APIStatusError as e:
+except nemo_helix.APIStatusError as e:
     print("Another non-200-range status code was received")
     print(e.status_code)
     print(e.response)
@@ -229,10 +229,10 @@ Connection errors (for example, due to a network connectivity problem), 408 Requ
 You can use the `max_retries` option to configure or disable retry settings:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # Configure the default for all requests:
-client = NeMoPlatform(
+client = NeMoHelix(
     base_url="http://nemo.test",
     # default is 2
     max_retries=0,
@@ -248,17 +248,17 @@ By default, requests time out after 1 minute. You can configure this with a `tim
 which accepts a float or an [`httpx.Timeout`](https://www.python-httpx.org/advanced/timeouts/#fine-tuning-the-configuration) object:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # Configure the default for all requests:
-client = NeMoPlatform(
+client = NeMoHelix(
     base_url="http://nemo.test",
     # 20 seconds (default is 1 minute)
     timeout=20.0,
 )
 
 # More granular control:
-client = NeMoPlatform(
+client = NeMoHelix(
     timeout=httpx.Timeout(60.0, read=5.0, write=10.0, connect=2.0),
 )
 
@@ -276,10 +276,10 @@ Note that requests that time out are [retried twice by default](#retries).
 
 We use the standard library [`logging`](https://docs.python.org/3/library/logging.html) module.
 
-You can enable logging by setting the environment variable `NMP_LOG` to `info`.
+You can enable logging by setting the environment variable `NHX_LOG` to `info`.
 
 ```shell
-$ export NMP_LOG=info
+$ export NHX_LOG=info
 ```
 
 Or to `debug` for more verbose logging.
@@ -301,9 +301,9 @@ if response.my_field is None:
 You can access the "raw" response object by prefixing `.with_raw_response.` to any HTTP method call, for example:
 
 ```py
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://nemo.test")
+client = NeMoHelix(base_url="http://nemo.test")
 response = client.workspaces.with_raw_response.list()
 print(response.headers.get('X-My-Header'))
 
@@ -375,9 +375,9 @@ You can directly override the [httpx client](https://www.python-httpx.org/api/#c
 
 ```python
 import httpx
-from nemo_platform import NeMoPlatform, DefaultHttpxClient
+from nemo_helix import NeMoHelix, DefaultHttpxClient
 
-client = NeMoPlatform(
+client = NeMoHelix(
     base_url="http://nemo.test",
     http_client=DefaultHttpxClient(
         proxy="http://my.test.proxy.example.com",
@@ -397,9 +397,9 @@ client.with_options(http_client=DefaultHttpxClient(...))
 By default the library closes underlying HTTP connections whenever the client is [garbage collected](https://docs.python.org/3/reference/datamodel.html#object.__del__). You can manually close the client using the `.close()` method if desired, or use a context manager that closes when exiting.
 
 ```py
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-with NeMoPlatform() as client:
+with NeMoHelix() as client:
   # make requests here
   ...
 

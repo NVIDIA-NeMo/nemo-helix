@@ -11,7 +11,7 @@ This tutorial walks through running a single audit end-to-end with the NeMo Audi
 
 **What you will learn:**
 
-- Initialize the NeMo Platform SDK and reach the `client.auditor` resource.
+- Initialize the NeMo Helix SDK and reach the `client.auditor` resource.
 - Create an `AuditConfig` selecting which garak probes to run.
 - Create an `AuditTarget` pointing at a model through the Inference Gateway.
 - Execute the audit locally with `client.auditor.run(...)`.
@@ -24,9 +24,9 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 </Tip>
 ## Prerequisites
 
-- Install and start NeMo Platform using the [Setup guide](/documentation/get-started).
+- Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
 - Install garak in a Python virtual environment so the plugin can shell out to it. By default the plugin invokes `~/.auditor/.venv/bin/python -m garak`. Override the interpreter path with `NEMO_AUDITOR_GARAK_PYTHON` if your install lives elsewhere.
-- Configure at least one Inference Gateway provider — this tutorial uses the `nvidia-inference-api` provider that is included in a default local setup, but any chat-completion-compatible provider works. Step 3 shows how to list the providers registered in your deployment. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nmp_uri_spec` block used below.
+- Configure at least one Inference Gateway provider — this tutorial uses the `nvidia-inference-api` provider that is included in a default local setup, but any chat-completion-compatible provider works. Step 3 shows how to list the providers registered in your deployment. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
 
 ---
 
@@ -45,10 +45,10 @@ Connect to the running platform and reach the auditor sub-resource:
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 auditor = client.auditor
@@ -57,7 +57,7 @@ print(auditor.plugin_status())
 # {'plugin': 'auditor', 'status': 'ok', ...}
 ```
 
-If `plugin_status()` raises a connection error, the platform is not running or `NMP_BASE_URL` is misconfigured. Refer back to [Setup](/documentation/get-started).
+If `plugin_status()` raises a connection error, the platform is not running or `NHX_BASE_URL` is misconfigured. Refer back to [Setup](/documentation/get-started).
 
 ---
 
@@ -112,7 +112,7 @@ target = auditor.targets.create(
     options={
         "nim": {
             "max_tokens": 1024,
-            "nmp_uri_spec": {
+            "nhx_uri_spec": {
                 "inference_gateway": {
                     "workspace": "default",
                     "provider": "nvidia-inference-api",
@@ -124,7 +124,7 @@ target = auditor.targets.create(
 print(target.model_dump_json(indent=2))
 ```
 
-The `nmp_uri_spec` sentinel inside `options.nim` tells the plugin to resolve a concrete URI from the Inference Gateway provider at run time. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for the full conflict rules and resolution behavior.
+The `nhx_uri_spec` sentinel inside `options.nim` tells the plugin to resolve a concrete URI from the Inference Gateway provider at run time. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for the full conflict rules and resolution behavior.
 
 ---
 
@@ -218,7 +218,7 @@ Report artifacts are left in place under the scheduler's temporary directory; th
 : The plugin couldn't find a garak install. Either install garak at `~/.auditor/.venv/bin/python`, or set `NEMO_AUDITOR_GARAK_PYTHON` to the absolute path of a Python interpreter that has garak installed.
 
 **`RuntimeError: Failed to resolve inference gateway provider '<workspace>/<provider>'`**
-: The `nmp_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List your providers with `client.inference.providers.list(workspace="default")` and update the target to reference an existing one.
+: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List your providers with `client.inference.providers.list(workspace="default")` and update the target to reference an existing one.
 
 **`status == "failed"` with empty `results`**
 : The audit could not complete any probe. Inspect `result.get("error")` for the failure reason, and verify the model is reachable through the provider you configured.

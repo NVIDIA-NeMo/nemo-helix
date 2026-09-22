@@ -40,7 +40,7 @@ want to automate portions of the agent improvement loop.
 
 ### Requirements
 
-- A NeMo Platform deployment (local or remote) with Intake enabled, so the
+- A NeMo Helix deployment (local or remote) with Intake enabled, so the
   Analyst has traces to read.
 - The optimization plugins installed in the same Python environment as the NeMo command-line
   interface (CLI). From a source checkout, `uv sync` installs Insights and Experimentalist
@@ -67,7 +67,7 @@ uv sync --only-group experimentalist  # Experimenter only
 
 ### Dependencies
 
-The optimization agents build on the following NeMo Platform service
+The optimization agents build on the following NeMo Helix service
 dependencies:
 
 - **NeMo Intake** is the first-party trace store that fuels the loop. The
@@ -111,7 +111,7 @@ The optional `ethos` path is the agent's [ETHOS.md](/documentation/agents/optimi
 When omitted, the Analyst looks for `ETHOS.md`, then `README.md`, beside the profile.
 Relative paths resolve against the profile. An adjacent `.env` is loaded when
 a profile is found, without replacing variables already set in the shell.
-`NMP_BASE_URL` is the base-URL environment variable for this workflow, and
+`NHX_BASE_URL` is the base-URL environment variable for this workflow, and
 `--base-url` takes precedence over it.
 
 ## How It Works
@@ -287,10 +287,10 @@ agents. The examples use a local platform; replace the base URL for a remote
 deployment.
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 export WORKSPACE=default
-export NMP_STUDIO_URL="$NMP_BASE_URL/studio"
-export NMP_ACCESS_TOKEN="$(nemo auth token)"
+export NHX_STUDIO_URL="$NHX_BASE_URL/studio"
+export NHX_ACCESS_TOKEN="$(nemo auth token)"
 export AGENT=your-agent-name           # This agent must have traces in Intake.
 
 nemo setup
@@ -303,10 +303,10 @@ prompt to reuse the default. The Analyst and Experimentalist both
 use this pair. Provider credentials are stored in Platform Secrets rather than
 plugin-specific environment variables.
 
-Set `NMP_STUDIO_URL` explicitly if Studio uses a different origin or path.
+Set `NHX_STUDIO_URL` explicitly if Studio uses a different origin or path.
 For an authenticated remote deployment, log in against that base URL before
 requesting the token. For local development with authentication disabled, omit
-the `NMP_ACCESS_TOKEN` command and the `Authorization` header in the API example.
+the `NHX_ACCESS_TOKEN` command and the `Authorization` header in the API example.
 
 Confirm the plugins are installed and discoverable:
 
@@ -336,7 +336,7 @@ Run the Analyst against the target agent's traces:
 nemo agents analyst run \
   --agent "$AGENT" \
   --workspace "$WORKSPACE" \
-  --base-url "$NMP_BASE_URL"
+  --base-url "$NHX_BASE_URL"
 ```
 
 Useful flags:
@@ -366,12 +366,12 @@ list the Insights stored through the API:
 
 ```bash
 curl --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/insights/v2/workspaces/$WORKSPACE/insights?agent=$AGENT&page=1&page_size=20"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/insights/v2/workspaces/$WORKSPACE/insights?agent=$AGENT&page=1&page_size=20"
 ```
 
 API-stored Insights also appear in Studio at
-`$NMP_STUDIO_URL/workspaces/$WORKSPACE/optimizer`. Profile-based Insights do
+`$NHX_STUDIO_URL/workspaces/$WORKSPACE/optimizer`. Profile-based Insights do
 not appear there because they are stored in the local YAML file.
 
 A successful result contains at least one Insight for the agent. Each Insight
@@ -435,7 +435,7 @@ nemo agents experimentalist run \
   --config ./experiment-config.yaml \
   --experiment-dir tmp/experiment \
   --workspace "$WORKSPACE" \
-  --base-url "$NMP_BASE_URL"
+  --base-url "$NHX_BASE_URL"
 ```
 
 From an agent directory with an `optimizer.yaml` profile, most of those flags
@@ -454,7 +454,7 @@ winner.
 #### Review the Results
 
 View the experiment in Studio at
-`$NMP_STUDIO_URL/workspaces/$WORKSPACE/experiment`. There you can see
+`$NHX_STUDIO_URL/workspaces/$WORKSPACE/experiment`. There you can see
 the originating Insight and compare evaluation runs across all the candidates.
 
 The Experimenter also writes intermediate artifacts along the way. Those
@@ -529,7 +529,7 @@ Run the Analyst for one analysis of an agent's traces.
 | `--agent` | yes, unless a profile supplies it | profile `agent` | Agent under test the Analyst should focus on. |
 | `--ethos` | no | profile `ethos`, else `ETHOS.md` or `README.md` beside the profile | Path to [Ethos](/documentation/agents/optimize-agents/ethos) Markdown for the AUT. |
 | `--workspace` | no | profile `workspace`, else `default` | Workspace to operate in. |
-| `--base-url` | no | `NMP_BASE_URL`, else `http://localhost:8080` | Running platform instance the Analyst's tools call. |
+| `--base-url` | no | `NHX_BASE_URL`, else `http://localhost:8080` | Running platform instance the Analyst's tools call. |
 | `--profile` | no | discovered by walking up from the current working directory | Path to `optimizer.yaml`. |
 | `--insights-file-output` | no | off — Insights go to the platform only | Additionally mirror the Insights the platform stored into a local YAML file, platform ids included. Each run merges into the file. |
 | `--verbose` / `-v` | no | off | Stream tool calls and reasoning to standard error. |
@@ -564,7 +564,7 @@ Run the local Experimenter loop.
 | `--framework-skills` | no | profile `framework_skills` | Directory of framework skills to load into the optimization agents. Repeatable. |
 | `--profile` | no | discovered by walking up from the current working directory | Path to `optimizer.yaml`. |
 | `--workspace` | no | profile `workspace` | Workspace for traces and run/candidate metadata. |
-| `--base-url` | no | `NMP_BASE_URL`, else `http://localhost:8080` | Running platform instance. |
+| `--base-url` | no | `NHX_BASE_URL`, else `http://localhost:8080` | Running platform instance. |
 | `--config` | no | profile `experiment_config` | YAML or JavaScript Object Notation (JSON) configuration for the run. |
 
 ### `nemo agents experimentalist doctor`
