@@ -432,9 +432,9 @@ def pytest_runtest_setup(item):
     if "container_only" in [marker.name for marker in item.iter_markers()]:
         if not os.environ.get("NMP_BASE_URL"):
             skip_test("Skipping container-only test (requires NMP_BASE_URL)")
-    if "needs_nmp_api_image" in [marker.name for marker in item.iter_markers()]:
+    if "needs_agents_e2e_image" in [marker.name for marker in item.iter_markers()]:
         if not (os.environ.get("NMP_E2E_IMAGE_REGISTRY") and os.environ.get("NMP_E2E_IMAGE_TAG")):
-            skip_test("Skipping nmp-api-image test (set NMP_E2E_IMAGE_REGISTRY and NMP_E2E_IMAGE_TAG)")
+            skip_test("Skipping agents-image test (set NMP_E2E_IMAGE_REGISTRY and NMP_E2E_IMAGE_TAG)")
     if "requires_gpu" in [marker.name for marker in item.iter_markers()]:
         if "gpu" not in _e2e_features_enabled(item.config):
             skip_test("Skipping GPU container e2e (pass --feature gpu)")

@@ -346,6 +346,7 @@ group "docker-cpu" {
 group "docker-cpu-ci" {
   targets = [
     "docker-cpu",
+    "nmp-agents-e2e-docker",
     "nmp-cpu-tasks-smoke-test",
     "nmp-gym-tasks-smoke-test",
   ]
@@ -659,6 +660,34 @@ target "nmp-api-docker" {
   cache-to   = maybe_registry_cache_to("nmp-api")
   cache-from = maybe_registry_cache_from("nmp-api")
   tags       = sha_and_maybe_latest_tags("nmp-api")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+# E2E-only nmp-api variant with the DeepAgents harness installed.
+target "nmp-agents-e2e-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/Dockerfile.nmp-api"
+  contexts = {
+    nmp-python-base           = "target:nmp-python-base"
+    nmp-workspace             = "target:nmp-workspace"
+    nmp-jobs-launcher         = "target:nmp-jobs-launcher"
+    nmp-studio-ui             = "target:nmp-studio-ui"
+    policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
+    root-busybox              = "target:root-busybox"
+    fastembed-cache           = FASTEMBED_CACHE_CONTEXT
+  }
+  args = {
+    NMP_PLATFORM_VERSION      = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
+    NMP_CODE_REVISION         = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
+    NMP_API_RUNTIME_BASE      = NMP_API_RUNTIME_BASE
+    NMP_API_DEPENDENCY_GROUP  = "agents-e2e-services"
+    NMP_COLLECT_SOURCES       = NMP_COLLECT_SOURCES
+  }
+  cache-to   = maybe_registry_cache_to("nmp-agents-e2e")
+  cache-from = maybe_registry_cache_from("nmp-agents-e2e")
+  tags       = sha_and_maybe_latest_tags("nmp-agents-e2e")
   output     = image_output()
   platforms  = get_platforms()
 }

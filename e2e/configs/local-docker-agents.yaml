@@ -48,7 +48,7 @@ deployments:
     - name: local-docker
       backend: docker
       config:
-        # The agent runs from the prebuilt nmp-api image, already present in the
+        # The agent runs from the prebuilt nmp-agents-e2e image, already present in the
         # local Docker daemon (pulled by the test's CI job), so disable the
         # per-run pull and use the image as-is.
         pull_images: false
