@@ -3090,8 +3090,12 @@ def test_slow_scheduling_does_not_consume_the_image_pull_budget(kubernetes_job, 
     time to be scheduled had already spent its budget, so its first
     ImagePullBackOff failed it immediately with no grace at all.
     """
-    ttl = kubernetes_job._execution_profile_config.ttl_seconds_image_pull
-    _pending_step(test_step_pending, age_seconds=ttl * 10)
+    config = kubernetes_job._execution_profile_config
+    ttl = config.ttl_seconds_image_pull
+    # Long past the pull budget but still inside the scheduling TTL, so this
+    # pins the pull budget rather than the one enforce_sync_ttl owns.
+    assert ttl < config.ttl_seconds_before_active
+    _pending_step(test_step_pending, age_seconds=(ttl + config.ttl_seconds_before_active) // 2)
 
     update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(2))
 

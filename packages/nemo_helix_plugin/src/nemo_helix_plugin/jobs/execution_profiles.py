@@ -272,11 +272,15 @@ class KubernetesWorkloadIdentityConfig(BaseModel):
 class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
     """Common configuration for Kubernetes execution environment."""
 
-    # Long enough for a transient registry fault to clear on one of the kubelet's
-    # retries; short enough that a reference which never resolves does not wait
-    # out ttl_seconds_before_active and then report a bare scheduling timeout.
+    # Only a pull that has already *failed* is counted -- a slow pull of a large
+    # image reports ContainerCreating and never reaches this budget -- so the
+    # question is how long a recoverable fault deserves. Registry rate limiting,
+    # a 5xx blip and a mid-rotation pull secret can all take minutes to clear,
+    # and killing a job that would have succeeded is worse than being slow to
+    # report one that never will. Hence generous, but still 3x faster than
+    # ttl_seconds_before_active and naming the image when it fires.
     ttl_seconds_image_pull: int = Field(
-        default=2 * 60,
+        default=10 * 60,
         ge=0,
         description="How long a pod may spend in image-pull backoff before the pull is treated as "
         "unrecoverable and the step fails naming the image. 0 disables it.",
