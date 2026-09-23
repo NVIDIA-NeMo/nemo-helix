@@ -41,16 +41,9 @@ export interface StartTemplateGroup {
   id: string;
   title: string;
   templates: StartTemplate[];
-  /**
-   * Renders the heading over placeholder tiles instead of the group's own. A group whose
-   * templates are still being fetched would otherwise be indistinguishable from an empty
-   * one, which is dropped — the section would vanish and then push the page down on arrival.
-   */
+  /** Holds the section's place while it fetches; an empty group is dropped instead. */
   loading?: boolean;
-  /**
-   * Colour for this group's tile icons, as a CSS colour or token reference. What it
-   * signifies is the caller's to decide; the page only applies it.
-   */
+  /** Icon colour for this group's tiles. What it signifies is the caller's to decide. */
   accent?: string;
 }
 
@@ -59,11 +52,7 @@ export interface StartPageProps {
   headingDescription: string;
   options: StartOption[];
   templateGroups?: StartTemplateGroup[];
-  /**
-   * The selected option or template id. Both live in one radio group: a template is
-   * picked outright rather than by first choosing an "and then pick one" option, so the
-   * two sets of ids share a namespace and must not collide.
-   */
+  /** Selected option or template id — one namespace, so the two sets must not collide. */
   value: string | null;
   onChange: (value: string) => void;
   /** Locks the whole group. Set while a selection is being acted on. */
@@ -74,10 +63,7 @@ export interface StartPageProps {
   continueLoading?: boolean;
   canContinue: boolean;
   onContinue: () => void;
-  /**
-   * Badge shown on the divider, beside "OR START FROM A TEMPLATE" — the templates'
-   * counterpart to the per-option tags.
-   */
+  /** Badge on the divider — the templates' counterpart to the per-option tags. */
   templatesTag?: StartOptionTag;
   /** Rendered above the footer — an error banner, typically. */
   slotBanner?: ReactNode;

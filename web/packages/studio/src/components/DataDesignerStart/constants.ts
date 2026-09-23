@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StartOption, StartOptionTag } from '@studio/components/CreateFilesetStart/types';
+import type { StartOption, StartOptionTag } from '@studio/components/DataDesignerStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
 import { Plus, Sparkles } from 'lucide-react';
 
@@ -27,10 +27,7 @@ export const PROMPT_SUGGESTIONS: PromptSuggestion[] = [
   },
 ];
 
-/**
- * Difficulty badges. The levels are the whole point of the set: they are only meaningful
- * relative to each other, so they live together rather than beside each option.
- */
+/** Difficulty levels, kept together because they only mean anything relative to each other. */
 const BEGINNER: StartOptionTag = { label: 'Beginner', color: 'gray', kind: 'solid' };
 const ADVANCED: StartOptionTag = { label: 'Advanced', color: 'gray', kind: 'solid' };
 export const TEMPLATES_TAG: StartOptionTag = {
@@ -39,10 +36,7 @@ export const TEMPLATES_TAG: StartOptionTag = {
   kind: 'solid',
 };
 
-/**
- * The non-template ways in. "Start from a template" is not among them — templates are
- * picked directly from the groups below the divider rather than behind an option.
- */
+/** The non-template ways in; templates are picked directly, below the divider. */
 export const START_OPTIONS: StartOption[] = [
   {
     id: 'ai',
@@ -63,18 +57,11 @@ export const START_OPTIONS: StartOption[] = [
   },
 ];
 
-/**
- * Section order for the template groups. A template's own tag names its section, and
- * anything outside this list falls into "Other" rather than earning a section of one.
- */
+/** Section order. Tags outside this list fall into "Other". */
 export const TEMPLATE_SECTIONS = ['Evaluation', 'Fine-tuning'] as const;
 export const OTHER_SECTION = 'Other';
 
-/**
- * One accent per section, which is what makes the groups readable as groups when the
- * headings scroll out of view. Theme tokens rather than the design's literals, so the
- * light theme gets its own shade.
- */
+/** One accent per section. Tokens rather than the design's literals, for the light theme. */
 export const SECTION_ACCENTS: Record<string, string> = {
   Evaluation: 'var(--text-color-accent-purple)',
   'Fine-tuning': 'var(--text-color-accent-yellow)',

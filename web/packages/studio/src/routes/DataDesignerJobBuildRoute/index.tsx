@@ -7,7 +7,7 @@ import { DEFAULT_LARGE_PAGE_SIZE } from '@nemo/common/src/constants/api';
 import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import { Flex, Stack } from '@nvidia/foundations-react-core';
-import { findTemplate } from '@studio/components/CreateFilesetStart/templates';
+import { findTemplate } from '@studio/components/DataDesignerStart/templates';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import { getCloneJobRequestFromState } from '@studio/components/NewDataDesignerJobForm/utils';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

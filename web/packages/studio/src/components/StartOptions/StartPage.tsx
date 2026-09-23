@@ -23,11 +23,7 @@ const CONTENT_WIDTH = 'w-full max-w-[768px]';
 /** The design's tile is `radius/md`; Card's own `radius-density-xl` is visibly rounder. */
 const TILE_RADIUS = 'rounded-[var(--radius-md)]';
 
-/**
- * Names the radio group. KUI gives the group its role but takes `aria-labelledby` only
- * from a wrapping FormField, so without this it is announced unnamed — and the design has
- * no visible prompt to point at, the page heading naming the page rather than the choice.
- */
+/** KUI names the group from a wrapping FormField only, and the design draws no prompt. */
 const GROUP_LABEL = 'How do you want to start?';
 
 /** The design's tile sets its title at 14px semibold over a 12px description. */
@@ -37,12 +33,7 @@ const TILE_DESCRIPTION_KIND = 'label/regular/sm' as const;
 /** Placeholders shown for a group that is still loading — the design's rows are pairs. */
 const PLACEHOLDER_TILES = 2;
 
-/**
- * "How do you want to start?" — the entry point shared by the create flows.
- *
- * Options and templates are one radio group rather than two steps: a template is picked
- * outright, so there is no "start from a template" option that then reveals a list.
- */
+/** Options and templates are one radio group: a template is picked outright. */
 export const StartPage: FC<StartPageProps> = ({
   heading,
   headingDescription,
@@ -93,10 +84,20 @@ export const StartPage: FC<StartPageProps> = ({
                       icon={<option.icon size={16} aria-hidden />}
                       slotEnd={
                         option.tag ? (
-                          <Badge kind={option.tag.kind} color={option.tag.color} size="medium">
+                          <Badge
+                            id={`${option.id}-tag`}
+                            kind={option.tag.kind}
+                            color={option.tag.color}
+                            size="medium"
+                          >
                             {option.tag.label}
                           </Badge>
                         ) : undefined
+                      }
+                      attributes={
+                        option.tag
+                          ? { RadioGroupInput: { 'aria-describedby': `${option.id}-tag` } }
+                          : undefined
                       }
                       compact
                       labelKind={TILE_LABEL_KIND}
@@ -110,8 +111,8 @@ export const StartPage: FC<StartPageProps> = ({
 
                 {groups.length > 0 && (
                   <>
-                    <Flex align="center" gap="density-lg" aria-hidden>
-                      <Divider className="flex-1" />
+                    <Flex align="center" gap="density-lg">
+                      <Divider className="flex-1" aria-hidden />
                       <Text kind="label/regular/sm" className="whitespace-nowrap text-secondary">
                         OR START FROM A TEMPLATE
                       </Text>
@@ -125,7 +126,7 @@ export const StartPage: FC<StartPageProps> = ({
                           {templatesTag.label}
                         </Badge>
                       )}
-                      <Divider className="flex-1" />
+                      <Divider className="flex-1" aria-hidden />
                     </Flex>
 
                     {groups.map((group) => (

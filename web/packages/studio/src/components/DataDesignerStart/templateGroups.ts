@@ -5,16 +5,11 @@ import {
   OTHER_SECTION,
   SECTION_ACCENTS,
   TEMPLATE_SECTIONS,
-} from '@studio/components/CreateFilesetStart/constants';
-import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
+} from '@studio/components/DataDesignerStart/constants';
+import { FILESET_TEMPLATES } from '@studio/components/DataDesignerStart/templates';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 
-/**
- * Groups the templates into the sections the page renders, in the order
- * {@link TEMPLATE_SECTIONS} names them. A template's own tag decides its section, and the
- * ones whose tag names no section collect under "Other" rather than each earning a
- * heading of one.
- */
+/** A template's tag names its section; tags naming none collect under "Other". */
 export const buildTemplateGroups = (): StartTemplateGroup[] => {
   const sections = new Map<string, StartTemplateGroup>(
     [...TEMPLATE_SECTIONS, OTHER_SECTION].map((title) => [

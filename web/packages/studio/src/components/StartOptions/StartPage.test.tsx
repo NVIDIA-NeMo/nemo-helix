@@ -54,6 +54,42 @@ describe('StartPage accessibility', () => {
 });
 
 describe('StartPage badges', () => {
+  it('ties an option tag to the choice it qualifies', () => {
+    renderPage([group()]);
+
+    // The tag is not part of the radio's name, so without this it is never read out
+    // against the option it belongs to.
+    expect(screen.getByRole('radio', { name: 'Build from scratch' })).toHaveAttribute(
+      'aria-describedby',
+      'scratch-tag'
+    );
+  });
+
+  it('leaves the divider label and tag readable', () => {
+    render(
+      <TestProviders>
+        <StartPage
+          heading="Page Title"
+          headingDescription="Page Description"
+          options={OPTIONS}
+          templateGroups={[group()]}
+          templatesTag={{ label: 'Intermediate', color: 'gray', kind: 'solid' }}
+          value={null}
+          onChange={() => undefined}
+          canContinue={false}
+          onContinue={() => undefined}
+        />
+      </TestProviders>
+    );
+
+    // Only the rules either side are decorative; the label and tag carry meaning.
+    // `getByText` reads hidden nodes too, so skip anything under aria-hidden — otherwise
+    // this passes whether or not the row is hidden.
+    const readable = { ignore: '[aria-hidden="true"], [aria-hidden="true"] *' } as const;
+    expect(screen.getByText('OR START FROM A TEMPLATE', readable)).toBeInTheDocument();
+    expect(screen.getByText('Intermediate', readable)).toBeInTheDocument();
+  });
+
   it('shows an option tag on its tile', () => {
     renderPage([group()]);
 
