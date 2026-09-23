@@ -4,7 +4,7 @@
 # Platform config for running the builder against a real cluster with the control plane on your
 # laptop. Point the platform at it:
 #
-#   export NMP_CONFIG_FILE_PATH=$PWD/plugins/nemo-builder/deploy/platform-config.example.yaml
+#   export NMP_CONFIG_FILE_PATH=$PWD/plugins/nemo-builder/config/platform-config.example.yaml
 #   export NMP_BASE_URL=http://localhost:8080
 #   export POD_NAMESPACE=nmp-builds   # the jobs controller's DEFAULT k8s profile carries no
 #                                     # namespace of its own and falls back to this. The three
