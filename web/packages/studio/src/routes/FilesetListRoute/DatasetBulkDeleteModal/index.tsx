@@ -6,7 +6,6 @@ import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
-import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { BulkDeleteModal as GenericBulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { Trash } from 'lucide-react';
 import {
@@ -25,6 +24,7 @@ interface TriggerProps {
 interface DatasetBulkDeleteModalProps {
   selectedDatasets: FilesetOutput[];
   onConfirmSuccess: () => void;
+  onSettled: () => void;
   /** Custom trigger element; when provided, used instead of the default Button */
   slotTrigger?: ReactNode;
 }
@@ -32,17 +32,12 @@ interface DatasetBulkDeleteModalProps {
 export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
   selectedDatasets,
   onConfirmSuccess,
+  onSettled,
   slotTrigger,
 }) => {
   const [open, setOpen] = useState(false);
 
-  const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
-    mutation: {
-      onSuccess: (_data, variables) => {
-        invalidateDatasetCaches(variables.workspace, variables.name, ['list']);
-      },
-    },
-  });
+  const { mutateAsync: deleteDataset } = useFilesDeleteFileset();
   const deleteDatasetWithMessage = async (variables: { workspace: string; name: string }) => {
     try {
       return await deleteDataset(variables);
@@ -67,10 +62,14 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
     if (datasetsToDelete.length !== datasets.length) {
       throw new Error('Cannot delete datasets without workspace and name.');
     }
-    await deleteDatasets(
-      datasetsToDelete.map((dataset) => ({ workspace: dataset.workspace, name: dataset.name }))
-    );
-    onConfirmSuccess();
+    try {
+      await deleteDatasets(
+        datasetsToDelete.map((dataset) => ({ workspace: dataset.workspace, name: dataset.name }))
+      );
+      onConfirmSuccess();
+    } finally {
+      onSettled();
+    }
   };
 
   const openTrigger = () => setOpen(true);
