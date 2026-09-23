@@ -1547,7 +1547,7 @@ def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch)
     )
 
 
-@pytest.mark.parametrize("status", [429, 500, 502, 503])
+@pytest.mark.parametrize("status", [403, 429, 500, 502, 503])
 def test_preflight_lets_a_non_auth_failure_through(monkeypatch, status: int) -> None:
     """Only authentication fails the run.
 
@@ -1796,20 +1796,16 @@ def test_captured_output_secrets_survive_an_unset_global_config(monkeypatch):
     assert "nvapi-fromenv123" in runtime._captured_output_secrets()
 
 
-def test_preflight_does_not_blame_the_credential_for_a_403(monkeypatch):
-    """A 403 is also how an egress proxy or an endpoint policy refuses.
+def test_preflight_lets_a_403_through_rather_than_refusing_to_start(monkeypatch):
+    """A 403 is equally an egress proxy, a per-path policy, or a quota rule.
 
-    The run still fails, because the rollouts post to the same URL with the same headers, but
-    naming the credential sends an operator to rotate a key that was never the problem.
+    Refusing to start is unrecoverable, so a status that does not single out the credential must
+    not spend it. The run proceeds and reports per-example, as it did before the preflight existed.
     """
-    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-fine")
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-key")
     monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(403)))
 
-    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
-        runtime._preflight_policy_credential(_policy_config())
-
-    assert "refused the request" in str(excinfo.value)
-    assert "rejected the configured credential" not in str(excinfo.value)
+    runtime._preflight_policy_credential(_policy_config())
 
 
 def test_a_secret_split_across_two_writes_is_still_masked(monkeypatch):

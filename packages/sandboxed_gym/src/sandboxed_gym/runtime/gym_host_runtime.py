@@ -267,16 +267,15 @@ def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
         with _NO_REDIRECT_OPENER.open(request, timeout=_PREFLIGHT_TIMEOUT_S):
             return
     except urllib.error.HTTPError as error:
-        if error.code not in (401, 403):
+        # Only 401. It can mean nothing but a credential the endpoint would not accept, whereas a
+        # 403 is equally an egress proxy, a per-path policy, or a quota rule -- and refusing to
+        # start is unrecoverable, where letting a run proceed costs only the diagnosis.
+        if error.code != 401:
             print(f"gym-host: policy preflight inconclusive (HTTP {error.code}); continuing", flush=True)
             return
-        # 403 is also returned by an egress proxy or an endpoint policy, so it does not prove the
-        # credential is at fault. It still fails the run: the rollouts post to this same URL with
-        # these same headers, so whatever refused the probe refuses all of them.
-        cause = "rejected the configured credential" if error.code == 401 else "refused the request"
         source = _policy_key_source(global_config)
         raise PolicyCredentialRejected(
-            f"the policy endpoint {base_url} {cause} (HTTP {error.code}) for model "
+            f"the policy endpoint {base_url} rejected the configured credential (HTTP 401) for model "
             f"{model_name}{source}. Every rollout would fail the same way."
         ) from error
     except Exception as error:
