@@ -104,14 +104,16 @@ curl -s "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/
   -d '{"model": "nvidia-nemotron-3-5-lightning-30b-a3b", "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
-Repeat with `nvidia-nemotron-3-super-120b-a12b`, the judge. The judge must answer
-with plain JSON: a reasoning model spends its reply thinking, runs out of
-tokens, and every trial scores 0 with `Error in evaluator from parsing judge LLM
+The same model is the judge. `optimize-chatonly-via-agent.yaml` turns its
+thinking off with
+`inference.extra_body.chat_template_kwargs.enable_thinking: false`;
+otherwise the judge can spend its token budget thinking, never emit the JSON
+score, and fail every trial with `Error in evaluator from parsing judge LLM
 response`.
 
 The gateway lists every model in the provider catalog, but a key can only call
-some of them; others return an upstream 404 or 410. If yours cannot call these,
-pick a `model_entity_id` that answers from
+some of them; others return an upstream 404 or 410. If yours cannot call this
+one, pick a `model_entity_id` that answers from
 `nemo inference providers get nvidia-build --workspace default` and set it in
 `agent.yaml`.
 
