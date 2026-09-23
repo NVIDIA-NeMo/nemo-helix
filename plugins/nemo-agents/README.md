@@ -110,7 +110,7 @@ nemo --help   # should show "agents" under Plugins
 ### Calculator agent demo — DeepAgents + Relay
 
 [`examples/nemo-agent-config/calculator-agent/agent.yaml`](examples/nemo-agent-config/calculator-agent/agent.yaml)
-uses DeepAgents as its harness and routes `nvidia-nemotron-3-nano-30b-a3b`
+uses DeepAgents as its harness and routes `nvidia-nemotron-3-5-lightning-30b-a3b`
 through the Platform Inference Gateway. The agent answers arithmetic and
 numeric comparison requests and records ATIF and ATOF telemetry with NeMo
 Relay.
@@ -623,7 +623,7 @@ to hyphens:
 
 | Provider model name | IGW entity name |
 |---|---|
-| `nvidia/nemotron-3-nano-30b-a3b` | `nvidia-nemotron-3-nano-30b-a3b` |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | `nvidia-nemotron-3-5-lightning-30b-a3b` |
 
 The calculator config therefore declares:
 
@@ -631,7 +631,7 @@ The calculator config therefore declares:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 ```
 
