@@ -52,9 +52,10 @@ python -c "import hermes_cli; print('ok')"
 export NVIDIA_API_KEY=...   # required for inference-api.nvidia.com
 ```
 
-The example YAMLs call `https://inference-api.nvidia.com/v1` with full model ids
-such as `nvidia/nvidia/nemotron-3-nano-30b-a3b`. Confirm your key can list those
-models (`GET /v1/models`).
+The MCP example YAMLs call `https://inference-api.nvidia.com/v1` with full model
+ids such as `nvidia/nvidia/nemotron-3-nano-30b-a3b`. Confirm your key can list
+those models (`GET /v1/models`). The chat-only examples go through the platform
+gateway instead (step 5).
 
 ### 4. Shell env used by every example
 
@@ -72,6 +73,52 @@ export NEMO_BASE_URL="${NEMO_BASE_URL:-$NHX_BASE_URL}"
 export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
 ```
 
+### 5. Route models through the platform gateway (platform submissions)
+
+A study submitted to the platform runs as a job, and jobs do **not** inherit
+provider keys such as `NVIDIA_API_KEY` from the platform process. A model that
+calls `inference-api.nvidia.com` or `integrate.api.nvidia.com` directly fails
+every trial with `NVIDIA_API_KEY is required for Hermes mode`. Route models
+through the platform inference gateway instead: the gateway holds the key as a
+platform secret, and optimize binds a placeholder key for gateway-routed models.
+
+[`optimize-chatonly.yaml`](optimize-chatonly.yaml) and
+[`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) are set up this way.
+`optimize-chatonly.yaml` writes the gateway address as `${NHX_BASE_URL}`, which
+the optimize job expands to the platform address reachable from wherever the job
+runs (subprocess, Docker or Kubernetes). `agent.yaml` is stored as-is when the
+agent is created, so it names `localhost:8080`; edit its `base_url` values first
+if your platform is elsewhere.
+Register a provider once:
+
+```bash
+printf '%s' "$NVIDIA_API_KEY" | nemo secrets create nvidia-build-key \
+  --from-file - --workspace default
+
+nemo inference providers create nvidia-build \
+  --workspace default \
+  --host-url "https://integrate.api.nvidia.com" \
+  --api-key-secret-name "nvidia-build-key"
+
+nemo wait inference provider nvidia-build --workspace default
+```
+
+Confirm the agent's model answers through the gateway:
+
+```bash
+curl -s "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+  -H "Authorization: Bearer not-used" -H "Content-Type: application/json" \
+  -d '{"model": "nvidia-nemotron-3-super-120b-a12b", "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+The same model is the judge.
+
+The gateway lists every model in the provider catalog, but a key can only call
+some of them; others return an upstream 404 or 410. If yours cannot call this
+one, pick a `model_entity_id` that answers from
+`nemo inference providers get nvidia-build --workspace default` and set it in
+`agent.yaml`.
+
 ### Common bundle rules
 
 - **`prepare-fileset` reads the bundle from your filesystem; `optimize` reads it
@@ -88,7 +135,9 @@ export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
 
 ## Example 1 — Chat-only
 
-No MCP, no extra checkouts. Good first smoke for optimize.
+No MCP, no extra checkouts. Good first smoke for optimize. Register the gateway
+provider first (setup step 5); both models in `optimize-chatonly.yaml` route
+through it.
 
 ```bash
 source "$REPO_ROOT/.venv/bin/activate"   # if not already
@@ -150,13 +199,9 @@ fail the fileset size check).
 ```bash
 source "$REPO_ROOT/.venv/bin/activate"
 
-# Optional: retarget models to your platform IGW before create, e.g.
-#   model: <your-igw-model-id>
-#   base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
-#   api_key_env: NEMO_AGENTS_IGW_API_KEY
-# (Replace host/model with your NHX_BASE_URL and IGW model id; values are
-# stored as-is at create time — no ${...} expansion for this path.)
-# Defaults in agent.yaml use inference-api (same as optimize-chatonly.yaml).
+# agent.yaml routes both models through the gateway at localhost:8080 (setup step 5).
+# Values are stored as-is at create time — no ${...} expansion — so edit
+# base_url before create if your NHX_BASE_URL differs.
 
 nemo agents create \
   --name hermes-optimize-chatonly \
@@ -248,6 +293,11 @@ nemo agents optimize \
 ```
 
 For the overlay example, add `--agent hermes-optimize-chatonly`.
+
+The MCP configs (`optimize-mcp*.yaml`) call `inference-api.nvidia.com`
+directly, so as written their trials fail on the platform with
+`NVIDIA_API_KEY is required for Hermes mode`. To submit one, route its models
+through the gateway first, as `optimize-chatonly.yaml` does (setup step 5).
 
 ### 3. Watch it
 
