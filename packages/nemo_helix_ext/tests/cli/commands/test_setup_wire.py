@@ -298,7 +298,6 @@ class TestSampleSetupWire:
                 "default",
                 "http://test",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         assert selected_path == "sample"
