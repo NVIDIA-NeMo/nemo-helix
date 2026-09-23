@@ -54,20 +54,21 @@ def mock_auth_client():
 
 
 @pytest.fixture
-def mock_sdk():
-    """Create a mock SDK for create/update endpoints that depend on get_sdk_client."""
-    sdk = AsyncMock()
-    sdk._custom_headers = {"authorization": "Bearer test"}
-    sdk.base_url = "http://localhost:8080"
-    sdk.workspace = "default"
-    return sdk
+def mock_files_client():
+    """Create a mock Files client for create/update endpoints that depend on get_files_client."""
+    files = AsyncMock()
+    files.get_fileset.return_value = MagicMock()
+    return files
 
 
 @pytest.fixture
-def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_client, mock_sdk):
+def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_client, mock_files_client):
     """Create a FastAPI test app with mocked dependencies."""
-    from nhx.common.service.dependencies import get_sdk_client
-    from nhx.core.models.api.dependencies import get_adapter_entity_service, get_model_entity_service
+    from nhx.core.models.api.dependencies import (
+        get_adapter_entity_service,
+        get_files_client,
+        get_model_entity_service,
+    )
 
     app = FastAPI()
 
@@ -80,7 +81,7 @@ def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_c
     app.dependency_overrides[get_model_entity_service] = override_model_entity_service
     app.dependency_overrides[get_adapter_entity_service] = override_adapter_entity_service
     app.dependency_overrides[get_auth_client] = lambda: mock_auth_client
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_files_client] = lambda: mock_files_client
     app.include_router(router, prefix="/apis/models")
 
     return app
@@ -537,19 +538,14 @@ def test_create_model_adapter_entity_validation_error_returns_422(client, mock_a
     """Test that entity store validation errors during adapter creation return 422."""
     mock_adapter_entity_service.create_adapter.side_effect = EntityValidationError("adapter name invalid")
 
-    with patch("nhx.core.models.api.permissions.client_from_platform") as mock_cfp:
-        mock_files = AsyncMock()
-        mock_files.get_fileset.return_value = MagicMock()
-        mock_cfp.return_value = mock_files
-
-        response = client.post(
-            "/apis/models/v2/workspaces/nvidia/models/my-model/adapters",
-            json={
-                "name": "my-adapter",
-                "fileset": "nvidia/my-fileset",
-                "finetuning_type": "lora",
-            },
-        )
+    response = client.post(
+        "/apis/models/v2/workspaces/nvidia/models/my-model/adapters",
+        json={
+            "name": "my-adapter",
+            "fileset": "nvidia/my-fileset",
+            "finetuning_type": "lora",
+        },
+    )
 
     assert response.status_code == 422
     assert "adapter name invalid" in response.json()["detail"]

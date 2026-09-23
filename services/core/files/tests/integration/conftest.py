@@ -7,7 +7,7 @@ This conftest provides fixtures for integration tests that require
 external services (like Huggingface Hub).
 """
 
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 
 import httpx
 import huggingface_hub
@@ -15,8 +15,7 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 from filesets.resources import FilesResource
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetOutput
 from nhx.common.auth import AuthClient, get_auth_client
@@ -30,7 +29,7 @@ from nhx.core.files.config import FilesConfig
 from nhx.core.files.service import FilesService
 from nhx.core.files.testing.utils import create_fileset
 from nhx.core.secrets.service import SecretsService
-from nhx.testing import SDKTestClientAdapter, create_test_client
+from nhx.testing import ClientContext, SDKTestClientAdapter, create_test_client
 from packaging import version
 
 # Mock auth client for fileset endpoints that depend on get_auth_client
@@ -57,106 +56,79 @@ def _get_auth_client_from_request(request: Request) -> AuthClient:
     )
 
 
-def _install_asgi_files_resource(sdk: NeMoHelix) -> None:
-    sdk.__dict__["files"] = FilesResource(
-        sdk,
-        files_client=client_from_platform(sdk, FilesClient),
-    )
-
-
 @pytest.fixture
-def sdk_user_and_service() -> Iterator[tuple[NeMoHelix, NeMoHelix]]:
-    """Two SDKs sharing the same app: default user principal and service:customizer.
+def client_user_and_service() -> Iterator[tuple[NemoClient, NemoClient]]:
+    """Two typed clients sharing the same app: default user principal and service:customizer.
 
-    Yields (sdk_user, sdk_service). Use when testing service_source immutability
+    Yields (client_user, client_service). Use when testing service_source immutability
     with both principals against the same fileset.
     """
     with create_test_client(
         FilesService,
         SecretsService,
+        client_type=TestClient,
         dependency_overrides={get_auth_client: _get_auth_client_from_request},
-    ) as sdk_base:
-        sdk_http_client = sdk_base._client
-        assert isinstance(sdk_http_client, SDKTestClientAdapter)
-        app = sdk_http_client.asgi_app
+    ) as base_test_client:
+        app = base_test_client.app
         base_url = "http://testserver"
-        client_user = TestClient(
+        test_client_user = TestClient(
             app,
             base_url=base_url,
             headers={"x-nhx-principal-id": "test@example.com"},
         )
-        client_service = TestClient(
+        test_client_service = TestClient(
             app,
             base_url=base_url,
             headers={"x-nhx-principal-id": "service:customizer"},
         )
         try:
-            sdk_user = NeMoHelix(
-                base_url=base_url,
-                http_client=SDKTestClientAdapter(client_user),
-                max_retries=0,
-            )
-            sdk_service = NeMoHelix(
-                base_url=base_url,
-                http_client=SDKTestClientAdapter(client_service),
-                max_retries=0,
-            )
-            _install_asgi_files_resource(sdk_user)
-            _install_asgi_files_resource(sdk_service)
-            yield (sdk_user, sdk_service)
+            client_user = NemoClient(base_url=base_url, http_client=SDKTestClientAdapter(test_client_user))
+            client_service = NemoClient(base_url=base_url, http_client=SDKTestClientAdapter(test_client_service))
+            yield (client_user, client_service)
         finally:
-            client_user.close()
-            client_service.close()
+            test_client_user.close()
+            test_client_service.close()
 
 
 @pytest.fixture
-def sdk() -> Iterator[NeMoHelix]:
-    """SDK client backed by the test client."""
+def client_context() -> Iterator[ClientContext]:
+    """All test client flavors backed by one in-process Files + Secrets app."""
     with create_test_client(
         FilesService,
         SecretsService,
+        client_type=ClientContext,
         dependency_overrides=FILESET_AUTH_DEPENDENCY_OVERRIDES,
-    ) as sdk:
-        _install_asgi_files_resource(sdk)
-        yield sdk
+    ) as ctx:
+        yield ctx
 
 
 @pytest.fixture
-def files_client(sdk: NeMoHelix) -> FilesClient:
-    """Provide a FilesClient derived from the SDK."""
-    return client_from_platform(sdk, FilesClient)
+def client(client_context: ClientContext) -> NemoClient:
+    """Sync typed platform client backed by the test app."""
+    return client_context.client
 
 
 @pytest.fixture
-async def async_files_client(sdk: NeMoHelix) -> AsyncIterator[AsyncFilesClient]:
-    """Provide an AsyncFilesClient backed by the SDK fixture's in-memory app."""
-    sdk_http_client = sdk._client
-    assert isinstance(sdk_http_client, SDKTestClientAdapter)
-    base_url = str(sdk.base_url).rstrip("/")
-    http_client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=sdk_http_client.asgi_app),
-        base_url=base_url,
-        headers=dict(sdk_http_client.headers),
-    )
-    try:
-        yield AsyncFilesClient(
-            base_url=base_url,
-            workspace=sdk.workspace,
-            http_client=http_client,
-        )
-    finally:
-        await http_client.aclose()
+def files_client(client: NemoClient) -> FilesClient:
+    """Provide a FilesClient derived from the platform client."""
+    return FilesClient.from_client(client)
 
 
 @pytest.fixture
-def files_resource(sdk: NeMoHelix) -> FilesResource:
+def async_files_client(client_context: ClientContext) -> AsyncFilesClient:
+    """Provide an AsyncFilesClient backed by the same in-memory app."""
+    return AsyncFilesClient.from_client(client_context.async_client)
+
+
+@pytest.fixture
+def files_resource(client: NemoClient, files_client: FilesClient) -> FilesResource:
     """Provide a FilesResource backed by the test FilesClient."""
-    return sdk.files
+    return FilesResource(client, files_client=files_client)
 
 
 @pytest.fixture
-def sdk_allow_user_local_storage(tmp_path) -> Iterator[NeMoHelix]:
-    """SDK client with allow_user_local_storage enabled."""
+def client_allow_user_local_storage(tmp_path) -> Iterator[NemoClient]:
+    """Typed client against a Files service with allow_user_local_storage enabled."""
     files_config = FilesConfig(
         default_storage_config=LocalStorageConfig(path=str(tmp_path / "default")),
         allow_user_local_storage=True,
@@ -164,18 +136,18 @@ def sdk_allow_user_local_storage(tmp_path) -> Iterator[NeMoHelix]:
     with create_test_client(
         FilesService,
         SecretsService,
+        client_type=NemoClient,
         service_configs={FilesService: files_config},
         tmp_dir=tmp_path,
         dependency_overrides=FILESET_AUTH_DEPENDENCY_OVERRIDES,
-    ) as sdk:
-        _install_asgi_files_resource(sdk)
-        yield sdk
+    ) as client:
+        yield client
 
 
 @pytest.fixture
-def client(sdk: NeMoHelix) -> httpx.Client:
-    """TestClient extracted from SDK, sharing the same app context."""
-    return sdk._client
+def test_client(client_context: ClientContext) -> TestClient:
+    """Raw TestClient sharing the same app context as the typed clients."""
+    return client_context.test_client
 
 
 @pytest.fixture
@@ -190,23 +162,23 @@ def files_config() -> FilesConfig:
 
 
 @pytest.fixture
-def fileset(sdk: NeMoHelix) -> Iterator[FilesetOutput]:
-    with create_fileset(sdk) as fileset:
+def fileset(files_client: FilesClient) -> Iterator[FilesetOutput]:
+    with create_fileset(files_client) as fileset:
         yield fileset
 
 
 @pytest.fixture
-def fileset_cleanup(sdk: NeMoHelix, files_client: FilesClient) -> Iterator[Callable[[str], None]]:
+def fileset_cleanup(client: NemoClient, files_client: FilesClient) -> Iterator[Callable[[str], None]]:
     """Fixture that provides a function to register filesets for cleanup.
 
     Usage:
-        def test_something(sdk, fileset_cleanup):
+        def test_something(client, fileset_cleanup):
             fileset_name = "my-test-fileset"
             fileset_cleanup(fileset_name)  # Register for cleanup
             # ... test code that creates the fileset ...
     """
     to_cleanup: list[tuple[str, str]] = []
-    workspace = sdk.workspace or "default"
+    workspace = client.workspace or "default"
 
     def register(name: str, ws: str | None = None) -> None:
         to_cleanup.append((name, ws or workspace))
@@ -300,7 +272,7 @@ else:
 
 
 class SharedASGIHttpxClient(httpx.Client):
-    """httpx client for huggingface_hub that forwards through the test SDK client."""
+    """httpx client for huggingface_hub that forwards through the test client."""
 
     def __init__(self, client: httpx.Client) -> None:
         self._client = client
@@ -323,7 +295,7 @@ class SharedASGIHttpxClient(httpx.Client):
 
     def close(self) -> None:
         # huggingface_hub owns and closes its global client between tests. The
-        # wrapped SDK client is owned by create_test_client and must remain open
+        # wrapped test client is owned by create_test_client and must remain open
         # for fixture cleanup.
         return None
 
@@ -333,7 +305,7 @@ def _default_hf_httpx_client_factory() -> httpx.Client:
 
 
 @pytest.fixture
-def hf_asgi_client(client: httpx.Client) -> Iterator[None]:
+def hf_asgi_client(test_client: TestClient) -> Iterator[None]:
     """Configure huggingface_hub to use ASGI transport for in-memory testing.
 
     This fixture injects a custom HTTP client that routes HuggingFace Hub
@@ -346,11 +318,12 @@ def hf_asgi_client(client: httpx.Client) -> Iterator[None]:
     For huggingface_hub v0.x (requests-based): We inject a custom requests
     Session with an adapter that forwards to the httpx test client.
     """
+    forwarder = SDKTestClientAdapter(test_client)
     if IS_HF_HUB_V1:
         # v1.0+: Use httpx client factory
 
         def asgi_client_factory() -> httpx.Client:
-            return SharedASGIHttpxClient(client)
+            return SharedASGIHttpxClient(forwarder)
 
         set_client_factory(asgi_client_factory)
         yield
@@ -358,8 +331,8 @@ def hf_asgi_client(client: httpx.Client) -> Iterator[None]:
         set_client_factory(_default_hf_httpx_client_factory)
     else:
         # v0.x: Use requests adapter
-        adapter = ASGIAdapter(client)
-        base_url = str(client.base_url).rstrip("/")
+        adapter = ASGIAdapter(forwarder)
+        base_url = str(forwarder.base_url).rstrip("/")
 
         def backend_factory() -> requests.Session:
             session = requests.Session()

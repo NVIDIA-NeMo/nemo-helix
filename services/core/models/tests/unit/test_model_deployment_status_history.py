@@ -99,13 +99,8 @@ def mock_entity_client() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_nhx_sdk() -> AsyncMock:
-    return AsyncMock()
-
-
-@pytest.fixture
-def deployment_service(mock_entity_client: AsyncMock, mock_nhx_sdk: AsyncMock) -> ModelDeploymentService:
-    return ModelDeploymentService(mock_entity_client, mock_nhx_sdk)
+def deployment_service(mock_entity_client: AsyncMock) -> ModelDeploymentService:
+    return ModelDeploymentService(mock_entity_client)
 
 
 def test_entity_to_schema_status_history_empty():

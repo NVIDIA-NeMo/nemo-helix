@@ -42,22 +42,21 @@ def mock_auth_client():
 
 
 @pytest.fixture
-def mock_sdk():
-    """Create a mock SDK for create/upsert endpoints that depend on get_sdk_client."""
+def mock_secrets_client():
+    """Create a mock Secrets client for create/upsert endpoints that depend on get_secrets_client."""
     return AsyncMock()
 
 
 @pytest.fixture
-def test_app(mock_model_provider_service, mock_auth_client, mock_sdk):
+def test_app(mock_model_provider_service, mock_auth_client, mock_secrets_client):
     """Create a FastAPI test app with mocked dependencies."""
-    from nhx.common.service.dependencies import get_sdk_client
-    from nhx.core.models.api.dependencies import get_model_provider_service
+    from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 
     app = FastAPI()
 
     app.dependency_overrides[get_model_provider_service] = lambda: mock_model_provider_service
     app.dependency_overrides[get_auth_client] = lambda: mock_auth_client
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_secrets_client] = lambda: mock_secrets_client
     app.include_router(router, prefix="/apis/models")
 
     return app

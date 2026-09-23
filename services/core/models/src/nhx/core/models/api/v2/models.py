@@ -4,9 +4,9 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -27,8 +27,7 @@ from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
 from nhx.common.sdk_factory import get_async_platform_sdk
-from nhx.common.service.dependencies import get_sdk_client
-from nhx.core.models.api.dependencies import get_adapter_entity_service, get_model_entity_service
+from nhx.core.models.api.dependencies import get_adapter_entity_service, get_files_client, get_model_entity_service
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 from nhx.core.models.api.service.model_entity_service import (
@@ -100,7 +99,7 @@ async def create_model(
     workspace: str,
     model_input: CreateModelEntityRequest,
     service: ModelEntityService = Depends(get_model_entity_service),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files: AsyncFilesClient = Depends(get_files_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> ModelEntity:
     """
@@ -114,12 +113,12 @@ async def create_model(
     try:
         fs = None
         if model_input.fileset:
-            fs = await check_fileset_access(nhx_sdk, model_input.fileset, workspace)
+            fs = await check_fileset_access(files, model_input.fileset, workspace)
 
         await _check_tool_call_plugin_permission(model_input, auth_client, workspace, fileset=fs)
 
         model_input.trust_remote_code = await set_trust_remote_code(
-            nhx_sdk,
+            files,
             model_input.trust_remote_code,
             model_input.fileset,
             auth_client,
@@ -346,7 +345,7 @@ async def update_model(
         description="Whether to include full spec details",
     ),
     service: ModelEntityService = Depends(get_model_entity_service),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files: AsyncFilesClient = Depends(get_files_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> ModelEntity:
     """
@@ -371,13 +370,13 @@ async def update_model(
     try:
         fs = None
         if model_update.fileset:
-            fs = await check_fileset_access(nhx_sdk, model_update.fileset, workspace)
+            fs = await check_fileset_access(files, model_update.fileset, workspace)
 
         await _check_tool_call_plugin_permission(model_update, auth_client, workspace, fileset=fs)
 
         if model_update.trust_remote_code or model_update.fileset:
             model_update.trust_remote_code = await set_trust_remote_code(
-                nhx_sdk,
+                files,
                 model_update.trust_remote_code or model.trust_remote_code,
                 model_update.fileset or model.fileset,
                 auth_client,
@@ -481,7 +480,7 @@ async def create_model_adapter(
     model_name: str,
     adapter_create: CreateModelAdapterRequest,
     adapter_service: AdapterEntityService = Depends(get_adapter_entity_service),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files: AsyncFilesClient = Depends(get_files_client),
 ) -> Adapter:
     """
     Adds an Adapter to the Model
@@ -489,7 +488,7 @@ async def create_model_adapter(
     logger.info(f"Creating model adapter entity: {workspace}/{model_name}")
 
     try:
-        await check_fileset_access(nhx_sdk, adapter_create.fileset, workspace)
+        await check_fileset_access(files, adapter_create.fileset, workspace)
         # create the adapter using service
         created_adapter = await adapter_service.create_adapter(
             workspace,
@@ -596,7 +595,7 @@ async def update_model_adapter(
     adapter: str,
     adapter_update: UpdateAdapterRequest,
     adapter_service: AdapterEntityService = Depends(get_adapter_entity_service),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files: AsyncFilesClient = Depends(get_files_client),
 ) -> Adapter:
     """
     Update Adapter deployment or description.
@@ -605,7 +604,7 @@ async def update_model_adapter(
 
     try:
         if adapter_update.fileset:
-            await check_fileset_access(nhx_sdk, adapter_update.fileset, workspace)
+            await check_fileset_access(files, adapter_update.fileset, workspace)
         # Update the model using service
         updated_adapter = await adapter_service.update_adapter(workspace, model_name, adapter, adapter_update)
 
@@ -650,7 +649,7 @@ async def update_model_adapter(
 
 
 async def set_trust_remote_code(
-    sdk: AsyncNeMoHelix,
+    files: AsyncFilesClient,
     desired_trust_remote_code: bool | None,
     fileset: str | None,
     auth_client: AuthClient,
@@ -659,7 +658,7 @@ async def set_trust_remote_code(
     if not desired_trust_remote_code:
         return False
 
-    is_trusted_repo = await is_trusted_repo_id(sdk, workspace, fileset)
+    is_trusted_repo = await is_trusted_repo_id(files, workspace, fileset)
     if is_trusted_repo:
         return True
 

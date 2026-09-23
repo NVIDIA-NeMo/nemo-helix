@@ -26,7 +26,7 @@ class OTLPRequest:
     content_type: str
 
     def post_kwargs(self) -> dict:
-        """Return kwargs for httpx client.post()."""
+        """Return kwargs for httpx test_client.post()."""
         if self.content_type == "application/json":
             return {"json": self.content}
         else:
@@ -154,7 +154,7 @@ def otlp_request_factory(otlp_format):
 
 
 def test_upload_and_query_logs_roundtrip(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
     otlp_request_factory,
     otlp_format: str,
@@ -169,7 +169,7 @@ def test_upload_and_query_logs_roundtrip(
         messages=["Log message 1", "Log message 2", "Log message 3"],
     )
 
-    upload_response = client.post(
+    upload_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         **request.post_kwargs(),
     )
@@ -177,7 +177,7 @@ def test_upload_and_query_logs_roundtrip(
     assert upload_response.json().get("partialSuccess") is None
 
     # Query logs back
-    query_response = client.post(
+    query_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={
             "filters": {"job": f"integration-test-job-{otlp_format}"},
@@ -196,7 +196,7 @@ def test_upload_and_query_logs_roundtrip(
 
 
 def test_query_logs_with_filters(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
     otlp_request_factory,
     otlp_format: str,
@@ -212,14 +212,14 @@ def test_query_logs_with_filters(
             job=job_name,
             messages=[message],
         )
-        response = client.post(
+        response = test_client.post(
             f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
             **request.post_kwargs(),
         )
         assert response.status_code == 200
 
     # Query for job-alpha only
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": f"job-alpha-{otlp_format}"}},
     )
@@ -229,7 +229,7 @@ def test_query_logs_with_filters(
     assert result["data"][0]["message"] == "Alpha log"
 
     # Query for job-beta only
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": f"job-beta-{otlp_format}"}},
     )
@@ -240,7 +240,7 @@ def test_query_logs_with_filters(
 
 
 def test_query_logs_pagination(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
     otlp_request_factory,
     otlp_format: str,
@@ -255,14 +255,14 @@ def test_query_logs_pagination(
         job=f"pagination-test-job-{otlp_format}",
         messages=messages,
     )
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         **request.post_kwargs(),
     )
     assert response.status_code == 200
 
     # Get first page (10 items)
-    page1_response = client.post(
+    page1_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={
             "filters": {"job": f"pagination-test-job-{otlp_format}"},
@@ -277,7 +277,7 @@ def test_query_logs_pagination(
     assert page1["prev_page"] is None
 
     # Get second page
-    page2_response = client.post(
+    page2_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={
             "filters": {"job": f"pagination-test-job-{otlp_format}"},
@@ -292,7 +292,7 @@ def test_query_logs_pagination(
     assert page2["prev_page"] is not None
 
     # Get third page (remaining 5)
-    page3_response = client.post(
+    page3_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={
             "filters": {"job": f"pagination-test-job-{otlp_format}"},
@@ -307,7 +307,7 @@ def test_query_logs_pagination(
 
 
 def test_multiple_batches_same_partition(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
     otlp_request_factory,
     otlp_format: str,
@@ -323,7 +323,7 @@ def test_multiple_batches_same_partition(
         messages=["Batch 1 message"],
         base_timestamp_ns=1704110400000000000,
     )
-    response1 = client.post(
+    response1 = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         **request1.post_kwargs(),
     )
@@ -335,14 +335,14 @@ def test_multiple_batches_same_partition(
         messages=["Batch 2 message"],
         base_timestamp_ns=1704110410000000000,  # 10 seconds later
     )
-    response2 = client.post(
+    response2 = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         **request2.post_kwargs(),
     )
     assert response2.status_code == 200
 
     # Query should return both
-    query_response = client.post(
+    query_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": job_name}},
     )
@@ -359,14 +359,14 @@ def test_multiple_batches_same_partition(
 
 
 def test_query_empty_fileset(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test querying a fileset with no logs returns empty result."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "nonexistent-job"}},
     )
@@ -379,14 +379,14 @@ def test_query_empty_fileset(
 
 
 def test_query_logs_accepts_tail(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """The Files log query endpoint accepts tail without limit."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "tail-test-job"}, "tail": 3},
     )
@@ -395,14 +395,14 @@ def test_query_logs_accepts_tail(
 
 
 def test_query_logs_rejects_tail_with_limit(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Tail controls window size and cannot be combined with limit."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "tail-test-job"}, "tail": 3, "limit": 3},
     )
@@ -414,14 +414,14 @@ def test_query_logs_rejects_tail_with_limit(
 
 
 def test_query_logs_rejects_tail_with_page_cursor(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Tail starts at the end, so previous-page cursors must be requested without tail."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "tail-test-job"}, "tail": 3, "page_cursor": "abc"},
     )
@@ -434,14 +434,14 @@ def test_query_logs_rejects_tail_with_page_cursor(
 
 
 def test_query_logs_rejects_invalid_page_cursor(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Malformed pagination cursors are client validation errors."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "tail-test-job"}, "page_cursor": "garbage"},
     )
@@ -451,7 +451,7 @@ def test_query_logs_rejects_invalid_page_cursor(
 
 
 def test_upload_logs_missing_attributes_partial_success(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test that logs with missing required attributes are rejected (JSON format)."""
@@ -502,7 +502,7 @@ def test_upload_logs_missing_attributes_partial_success(
         ]
     }
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         json=request_data,
     )
@@ -514,7 +514,7 @@ def test_upload_logs_missing_attributes_partial_success(
     assert result["partialSuccess"]["rejectedLogRecords"] == 1
 
     # Valid log should be queryable
-    query_response = client.post(
+    query_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "valid-job"}},
     )
@@ -525,14 +525,14 @@ def test_upload_logs_missing_attributes_partial_success(
 
 
 def test_upload_logs_invalid_json(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test that invalid JSON returns 400 error."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         content="not valid json",
         headers={"Content-Type": "application/json"},
@@ -542,14 +542,14 @@ def test_upload_logs_invalid_json(
 
 
 def test_upload_logs_invalid_protobuf(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test that invalid protobuf returns 400 error."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         content=b"not valid protobuf",
         headers={"Content-Type": "application/x-protobuf"},
@@ -559,10 +559,10 @@ def test_upload_logs_invalid_protobuf(
 
 
 def test_upload_logs_nonexistent_fileset(
-    client: httpx.Client,
+    test_client: httpx.Client,
 ):
     """Test that uploading to nonexistent fileset returns 404."""
-    response = client.post(
+    response = test_client.post(
         "/apis/files/v2/workspaces/nonexistent-workspace/filesets/nonexistent/otlp/v1/logs",
         json={
             "resourceLogs": [
@@ -593,14 +593,14 @@ def test_upload_logs_nonexistent_fileset(
 
 
 def test_query_logs_invalid_filter_key_returns_400(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test invalid filter key is rejected with a 400 response."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"not_a_real_column": "x"}},
     )
@@ -610,14 +610,14 @@ def test_query_logs_invalid_filter_key_returns_400(
 
 
 def test_query_logs_invalid_partition_value_does_not_leak_internal_details(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test invalid partition filter input does not leak internal details."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "bad'; SELECT 1; --"}},
     )
@@ -630,14 +630,14 @@ def test_query_logs_invalid_partition_value_does_not_leak_internal_details(
 
 
 def test_query_logs_invalid_partition_value_returns_400(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test unsafe partition filter values are rejected before query execution."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    response = client.post(
+    response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"job": "bad'; SELECT 1; --"}, "limit": 10},
     )
@@ -647,14 +647,14 @@ def test_query_logs_invalid_partition_value_returns_400(
 
 
 def test_query_logs_log_message_allows_apostrophe(
-    client: httpx.Client,
+    test_client: httpx.Client,
     fileset: FilesetOutput,
 ):
     """Test log_message filter remains usable for normal text with apostrophes."""
     workspace = fileset.workspace
     fileset_name = fileset.name
 
-    upload_response = client.post(
+    upload_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs",
         json={
             "resourceLogs": [
@@ -683,7 +683,7 @@ def test_query_logs_log_message_allows_apostrophe(
     )
     assert upload_response.status_code == 200
 
-    query_response = client.post(
+    query_response = test_client.post(
         f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
         json={"filters": {"log_message": "I'm testing apostrophes"}, "limit": 10},
     )

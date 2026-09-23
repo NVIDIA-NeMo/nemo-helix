@@ -7,13 +7,13 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import (
     EntityClient,
 )
 from nhx.common.jobs.schemas import HelixJobLogPage, InvalidPageCursorError
-from nhx.common.service.dependencies import get_entity_client, get_sdk_client
+from nhx.common.service.dependencies import get_entity_client, get_nemo_client
 from nhx.core.files.api.endpoint_helpers import (
     get_fileset,
     resolve_storage_secrets_for_user,
@@ -103,7 +103,7 @@ async def query_otlp_logs(
     request: LogQueryRequest,
     entity_store: EntityClient = Depends(get_entity_client),
     log_storage: LogStorage = Depends(dep_log_storage),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> HelixJobLogPage:
     """Query logs from parquet files in a fileset.
@@ -117,7 +117,7 @@ async def query_otlp_logs(
         workspace,
     )
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
     effective_limit = _validate_log_query_request(request)
 
@@ -158,7 +158,7 @@ async def upload_otlp_logs(
     artifact_base_path: str | None = Query(default=None, description="Folder inside the fileset to nest logs under"),
     entity_store: EntityClient = Depends(get_entity_client),
     log_storage: LogStorage = Depends(dep_log_storage),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> OtelExportLogsServiceResponse:
     """
@@ -173,7 +173,7 @@ async def upload_otlp_logs(
         workspace,
     )
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     # Parse request based on content type

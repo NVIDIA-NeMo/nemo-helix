@@ -61,16 +61,9 @@ def mock_entity_client() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_nhx_sdk() -> AsyncMock:
-    """Create a mock NeMo Helix SDK for testing secret validation."""
-    mock = AsyncMock()
-    return mock
-
-
-@pytest.fixture
-def deployment_service(mock_entity_client, mock_nhx_sdk):
-    """Create a ModelDeploymentService with mocked EntityClient and SDK."""
-    return ModelDeploymentService(mock_entity_client, mock_nhx_sdk)
+def deployment_service(mock_entity_client):
+    """Create a ModelDeploymentService with mocked EntityClient."""
+    return ModelDeploymentService(mock_entity_client)
 
 
 @pytest.fixture

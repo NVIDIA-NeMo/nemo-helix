@@ -10,10 +10,9 @@ Note: These tests are for the HuggingFace Hub API endpoints, not for
 HuggingFace storage backends.
 """
 
-import httpx
+from fastapi.testclient import TestClient
 from huggingface_hub import HfApi, hf_hub_download, hf_hub_url, snapshot_download
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import FilesetOutput
 from nhx.core.files.testing.utils import create_fileset
@@ -22,7 +21,7 @@ from nhx.core.files.testing.utils import create_fileset
 class TestHuggingFaceClientLibrary:
     """Test HuggingFace Hub client library compatibility with the files service."""
 
-    def test_hf_hub_download_nested_files(self, sdk: NeMoHelix, fileset: FilesetOutput, tmp_path, hf_asgi_client):
+    def test_hf_hub_download_nested_files(self, client: NemoClient, fileset: FilesetOutput, tmp_path, hf_asgi_client):
         """Test downloading nested files using huggingface_hub client.
 
         This test:
@@ -44,7 +43,7 @@ class TestHuggingFaceClientLibrary:
 
         # Upload all files
         for path, content in test_files.items():
-            client_from_platform(sdk, FilesClient).upload_file(
+            FilesClient.from_client(client).upload_file(
                 content=content,
                 path=path,
                 name=fileset.name,
@@ -52,7 +51,7 @@ class TestHuggingFaceClientLibrary:
             )
 
         # Configure HuggingFace Hub to use our files service
-        hf_endpoint = f"{sdk.base_url}/apis/files/v2/hf"
+        hf_endpoint = f"{client.base_url}/apis/files/v2/hf"
         repo_id = f"{fileset.workspace}/{fileset.name}"
 
         # Download all files using snapshot_download (model is the default repo_type)
@@ -70,19 +69,19 @@ class TestHuggingFaceClientLibrary:
             assert downloaded_file.exists(), f"File {path} was not downloaded"
             assert downloaded_file.read_bytes() == expected_content, f"Content mismatch for {path}"
 
-    def test_hf_hub_download_single_file(self, sdk: NeMoHelix, fileset: FilesetOutput, tmp_path, hf_asgi_client):
+    def test_hf_hub_download_single_file(self, client: NemoClient, fileset: FilesetOutput, tmp_path, hf_asgi_client):
         """Test downloading a single file using hf_hub_download."""
         test_content = b"This is a test file for single download"
         test_path = "single_file.txt"
 
-        client_from_platform(sdk, FilesClient).upload_file(
+        FilesClient.from_client(client).upload_file(
             content=test_content,
             path=test_path,
             name=fileset.name,
             workspace=fileset.workspace,
         )
 
-        hf_endpoint = f"{sdk.base_url}/apis/files/v2/hf"
+        hf_endpoint = f"{client.base_url}/apis/files/v2/hf"
         repo_id = f"{fileset.workspace}/{fileset.name}"
 
         local_path = hf_hub_download(
@@ -97,7 +96,7 @@ class TestHuggingFaceClientLibrary:
         with open(local_path, "rb") as f:
             assert f.read() == test_content
 
-    def test_hf_api_list_repo_files(self, sdk: NeMoHelix, fileset: FilesetOutput, hf_asgi_client):
+    def test_hf_api_list_repo_files(self, client: NemoClient, fileset: FilesetOutput, hf_asgi_client):
         """Test listing repository files using HfApi."""
         test_files = {
             "file1.txt": b"content1",
@@ -106,14 +105,14 @@ class TestHuggingFaceClientLibrary:
         }
 
         for path, content in test_files.items():
-            client_from_platform(sdk, FilesClient).upload_file(
+            FilesClient.from_client(client).upload_file(
                 content=content,
                 path=path,
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-        hf_endpoint = f"{sdk.base_url}/apis/files/v2/hf"
+        hf_endpoint = f"{client.base_url}/apis/files/v2/hf"
         repo_id = f"{fileset.workspace}/{fileset.name}"
 
         api = HfApi(endpoint=hf_endpoint, token="service:test")
@@ -124,7 +123,9 @@ class TestHuggingFaceClientLibrary:
         listed_files = {sibling.rfilename for sibling in repo_info.siblings}
         assert listed_files == set(test_files.keys())
 
-    def test_hf_hub_url_generates_valid_download_url(self, sdk: NeMoHelix, fileset: FilesetOutput):
+    def test_hf_hub_url_generates_valid_download_url(
+        self, client: NemoClient, fileset: FilesetOutput, test_client: TestClient
+    ):
         """Test that hf_hub_url generates a valid URL for file download.
 
         This test verifies that:
@@ -134,14 +135,14 @@ class TestHuggingFaceClientLibrary:
         test_content = b"Content for hf_hub_url test"
         test_path = "url_test_file.txt"
 
-        client_from_platform(sdk, FilesClient).upload_file(
+        FilesClient.from_client(client).upload_file(
             content=test_content,
             path=test_path,
             name=fileset.name,
             workspace=fileset.workspace,
         )
 
-        hf_endpoint = f"{sdk.base_url}/apis/files/v2/hf"
+        hf_endpoint = f"{client.base_url}/apis/files/v2/hf"
         repo_id = f"{fileset.workspace}/{fileset.name}"
 
         # Generate the URL using hf_hub_url
@@ -157,7 +158,7 @@ class TestHuggingFaceClientLibrary:
         assert "resolve" in url
 
         # Verify the URL can be used to download the file
-        response = sdk._client.get(url, headers={"Authorization": "Bearer service:test"})
+        response = test_client.get(url, headers={"Authorization": "Bearer service:test"})
         assert response.status_code == 200
         assert response.content == test_content
 
@@ -165,18 +166,18 @@ class TestHuggingFaceClientLibrary:
 class TestHfFileDownload:
     """Tests for /v2/hf/{workspace}/{name}/resolve/... endpoints."""
 
-    def test_head_file_returns_metadata(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_head_file_returns_metadata(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test HEAD request returns correct headers."""
-        with create_fileset(sdk) as fileset:
+        with create_fileset(FilesClient.from_client(client)) as fileset:
             content = b"test content"
-            client_from_platform(sdk, FilesClient).upload_file(
+            FilesClient.from_client(client).upload_file(
                 content=content,
                 path="data.txt",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response = client.head(
+            response = test_client.head(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/data.txt",
                 headers=hf_auth_headers,
             )
@@ -187,10 +188,10 @@ class TestHfFileDownload:
             assert "ETag" in response.headers
             assert response.headers["Accept-Ranges"] == "bytes"
 
-    def test_revision_is_ignored(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_revision_is_ignored(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test that revision parameter is ignored (we don't version filesets)."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"content",
                 path="data.txt",
                 name=fileset.name,
@@ -203,23 +204,23 @@ class TestHfFileDownload:
                 "v1.0",
                 "abc123def456abc123def456abc123def456abc1",
             ]:
-                response = client.get(
+                response = test_client.get(
                     f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/{revision}/data.txt",
                     headers=hf_auth_headers,
                 )
                 assert response.status_code == 200
 
-    def test_range_request(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_range_request(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test Range header is respected."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"0123456789",
                 path="data.txt",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response = client.get(
+            response = test_client.get(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/data.txt",
                 headers={**hf_auth_headers, "Range": "bytes=0-4"},
             )
@@ -227,39 +228,39 @@ class TestHfFileDownload:
             assert response.status_code == 206
             assert response.content == b"01234"
 
-    def test_file_not_found(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_file_not_found(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test 404 for missing file."""
-        with create_fileset(sdk) as fileset:
-            response = client.get(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            response = test_client.get(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/missing.txt",
                 headers=hf_auth_headers,
             )
             assert response.status_code == 404
 
-    def test_repo_not_found(self, client: httpx.Client, hf_auth_headers):
+    def test_repo_not_found(self, test_client: TestClient, hf_auth_headers):
         """Test 404 for missing repo."""
-        response = client.get(
+        response = test_client.get(
             "/apis/files/v2/hf/nonexistent/missing/resolve/main/file.txt",
             headers=hf_auth_headers,
         )
         assert response.status_code == 404
 
-    def test_service_principal_bearer_token(self, sdk: NeMoHelix, client: httpx.Client):
+    def test_service_principal_bearer_token(self, client: NemoClient, test_client: TestClient):
         """Test that service principal Bearer tokens work for HF endpoints.
 
         This verifies the HF_TOKEN=service:<name> authentication flow works,
         allowing huggingface-hub clients to authenticate via Bearer token.
         """
-        with create_fileset(sdk) as fileset:
+        with create_fileset(FilesClient.from_client(client)) as fileset:
             content = b"model weights"
-            client_from_platform(sdk, FilesClient).upload_file(
+            FilesClient.from_client(client).upload_file(
                 content=content,
                 path="model.bin",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response = client.get(
+            response = test_client.get(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/model.bin",
                 headers={"Authorization": "Bearer service:nim"},
             )
@@ -271,10 +272,10 @@ class TestHfFileDownload:
 class TestHfRepoInfo:
     """Tests for /v2/hf/api/models/... endpoints."""
 
-    def test_get_repo_info_at_revision(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_get_repo_info_at_revision(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test getting repository info with explicit revision."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"content",
                 path="file.txt",
                 name=fileset.name,
@@ -282,7 +283,7 @@ class TestHfRepoInfo:
             )
 
             # This endpoint is called by HfApi.model_info(repo_id, revision="main")
-            response = client.get(
+            response = test_client.get(
                 f"/apis/files/v2/hf/api/models/{fileset.workspace}/{fileset.name}/revision/main",
                 headers=hf_auth_headers,
             )
@@ -295,17 +296,17 @@ class TestHfRepoInfo:
             assert len(data["siblings"]) == 1
             assert data["siblings"][0]["rfilename"] == "file.txt"
 
-    def test_get_tree(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_get_tree(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test getting file tree."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"content",
                 path="file.txt",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response = client.get(
+            response = test_client.get(
                 f"/apis/files/v2/hf/api/models/{fileset.workspace}/{fileset.name}/tree/main",
                 headers=hf_auth_headers,
             )
@@ -317,17 +318,17 @@ class TestHfRepoInfo:
             assert data[0]["type"] == "file"
             assert "oid" in data[0]
 
-    def test_paths_info(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_paths_info(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test paths-info endpoint."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"content",
                 path="exists.txt",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response = client.post(
+            response = test_client.post(
                 f"/apis/files/v2/hf/api/models/{fileset.workspace}/{fileset.name}/paths-info/main",
                 json={"paths": ["exists.txt", "missing.txt"]},
                 headers=hf_auth_headers,
@@ -343,42 +344,42 @@ class TestHfRepoInfo:
 class TestCommitHashConsistency:
     """Tests for commit hash and ETag stability."""
 
-    def test_commit_hash_stable_for_same_fileset(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_commit_hash_stable_for_same_fileset(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test same fileset returns same commit hash."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"content",
                 path="file.txt",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response1 = client.head(
+            response1 = test_client.head(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/file.txt",
                 headers=hf_auth_headers,
             )
-            response2 = client.head(
+            response2 = test_client.head(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/file.txt",
                 headers=hf_auth_headers,
             )
 
             assert response1.headers["X-Repo-Commit"] == response2.headers["X-Repo-Commit"]
 
-    def test_etag_stable_for_same_file(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
+    def test_etag_stable_for_same_file(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test same file returns same ETag."""
-        with create_fileset(sdk) as fileset:
-            client_from_platform(sdk, FilesClient).upload_file(
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            FilesClient.from_client(client).upload_file(
                 content=b"content",
                 path="file.txt",
                 name=fileset.name,
                 workspace=fileset.workspace,
             )
 
-            response1 = client.head(
+            response1 = test_client.head(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/file.txt",
                 headers=hf_auth_headers,
             )
-            response2 = client.head(
+            response2 = test_client.head(
                 f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/file.txt",
                 headers=hf_auth_headers,
             )
