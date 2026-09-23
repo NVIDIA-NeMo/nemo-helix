@@ -992,7 +992,7 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
         )
 
         # Construct the CPU task image name from the registry and tag
-        cpu_image = f"{registry}/nhx-cpu-tasks:{tag}"
+        cpu_image = f"{registry}/nhx-tasks:{tag}"
         console.print(f"  • Task image: {cpu_image}")
 
         # Create a job that runs a simple diagnostic command

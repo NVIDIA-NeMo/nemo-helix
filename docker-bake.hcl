@@ -336,7 +336,7 @@ group "docker" {
 group "docker-cpu" {
   targets = [
     "nhx-api-docker",
-    "nhx-cpu-tasks-docker",
+    "nhx-tasks-docker",
     "nhx-gym-tasks-docker",
   ]
 }
@@ -347,7 +347,7 @@ group "docker-cpu-ci" {
   targets = [
     "docker-cpu",
     "nhx-agents-deepagents-e2e-docker",
-    "nhx-cpu-tasks-smoke-test",
+    "nhx-tasks-smoke-test",
     "nhx-gym-tasks-smoke-test",
   ]
 }
@@ -716,10 +716,10 @@ target "nhx-core-docker" {
 }
 
 # NHX CPU Tasks - CPU-only batch task execution
-target "nhx-cpu-tasks-docker" {
+target "nhx-tasks-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nhx-cpu-tasks"
+  dockerfile = "docker/Dockerfile.nhx-tasks"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
     nhx-workspace             = "target:nhx-workspace"
@@ -729,18 +729,18 @@ target "nhx-cpu-tasks-docker" {
     NHX_COLLECT_SOURCES        = NHX_COLLECT_SOURCES
     NHX_CPU_TASKS_RUNTIME_BASE = NHX_CPU_TASKS_RUNTIME_BASE
   }
-  cache-to   = maybe_registry_cache_to("nhx-cpu-tasks")
-  cache-from = maybe_registry_cache_from("nhx-cpu-tasks")
-  tags       = sha_and_maybe_latest_tags("nhx-cpu-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-tasks")
+  cache-from = maybe_registry_cache_from("nhx-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Cheap import validation for Evaluator's standard and sandboxed Gym task entrypoints.
-target "nhx-cpu-tasks-smoke-test" {
+target "nhx-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/Dockerfile.nhx-cpu-tasks"
+  dockerfile = "docker/Dockerfile.nhx-tasks"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
     nhx-workspace             = "target:nhx-workspace"
@@ -750,7 +750,7 @@ target "nhx-cpu-tasks-smoke-test" {
     NHX_COLLECT_SOURCES        = NHX_COLLECT_SOURCES
     NHX_CPU_TASKS_RUNTIME_BASE = NHX_CPU_TASKS_RUNTIME_BASE
   }
-  cache-from = maybe_registry_cache_from("nhx-cpu-tasks")
+  cache-from = maybe_registry_cache_from("nhx-tasks")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
@@ -762,7 +762,7 @@ target "nhx-gym-tasks-docker" {
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
   contexts = {
     nhx-python-base = "target:nhx-python-base"
-    nhx-cpu-tasks   = "target:nhx-cpu-tasks-docker"
+    nhx-tasks   = "target:nhx-tasks-docker"
     nhx-workspace   = "target:nhx-workspace"
   }
   cache-to   = maybe_registry_cache_to("nhx-gym-tasks")
@@ -779,7 +779,7 @@ target "nhx-gym-tasks-smoke-test" {
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
   contexts = {
     nhx-python-base = "target:nhx-python-base"
-    nhx-cpu-tasks   = "target:nhx-cpu-tasks-docker"
+    nhx-tasks   = "target:nhx-tasks-docker"
     nhx-workspace   = "target:nhx-workspace"
   }
   cache-from = maybe_registry_cache_from("nhx-gym-tasks")

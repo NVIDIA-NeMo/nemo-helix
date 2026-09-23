@@ -496,7 +496,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -510,7 +510,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     step = steps[0]
     assert step["name"] == "execute-agent"
     assert step["executor"]["provider"] == "cpu"
-    assert step["executor"]["container"]["image"] == "registry.example/nhx-cpu-tasks:test"
+    assert step["executor"]["container"]["image"] == "registry.example/nhx-tasks:test"
     assert step["executor"]["container"]["command"] == ["nemo_agents_plugin.tasks.execute"]
     assert step["config"] == spec.model_dump(mode="json")
     step_config = cast(dict[str, Any], step["config"])
@@ -823,7 +823,7 @@ async def test_compile_injects_secret_env_and_compute_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -851,7 +851,7 @@ async def test_compile_without_compute_omits_executor_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -877,7 +877,7 @@ async def test_compile_rejects_unsupported_compute_resource_key() -> None:
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(HelixJobCompilationError, match="Unsupported compute resource key"),
     ):
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -899,7 +899,7 @@ async def test_compile_rejects_secret_env_colliding_with_reserved_name() -> None
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(HelixJobCompilationError, match="reserved job env var name"),
     ):
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -1383,7 +1383,7 @@ def test_execute_job_create_route_maps_reserved_secret_env_to_422() -> None:
     app.dependency_overrides[get_sdk_client] = lambda: _sdk_with_files()
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         response = TestClient(app, raise_server_exceptions=False).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",
             json={"name": "execute-1", "spec": {"agent": "calc", "input": "hello", "environment": "default/prod"}},

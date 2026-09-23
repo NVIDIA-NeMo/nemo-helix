@@ -45,7 +45,7 @@ def compile_hello_world_job(
                     provider="cpu",
                     profile="default",
                     container=ContainerSpec(
-                        image=get_qualified_image("nhx-cpu-tasks"),
+                        image=get_qualified_image("nhx-tasks"),
                         entrypoint=["nemo-helix"],
                         command=[
                             "run",

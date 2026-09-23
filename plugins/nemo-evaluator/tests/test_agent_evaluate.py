@@ -933,7 +933,7 @@ async def _compile_harbor(*, async_sdk: AsyncNeMoHelix, profile: str | None = No
             FabricRunnerTarget(config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}),
             "fabric",
             None,
-            "nhx-cpu-tasks",
+            "nhx-tasks",
             ("python", "-m"),
         ),
         (
@@ -954,14 +954,14 @@ async def _compile_harbor(*, async_sdk: AsyncNeMoHelix, profile: str | None = No
             ),
             "model",
             "test-model",
-            "nhx-cpu-tasks",
+            "nhx-tasks",
             ("python", "-m"),
         ),
         (
             AgentTarget(agent=_agent(), params=RunConfigOnline()),
             "agent",
             "test-agent",
-            "nhx-cpu-tasks",
+            "nhx-tasks",
             ("python", "-m"),
         ),
     ],
@@ -1086,12 +1086,12 @@ async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocke
     assert [step.name for step in job_spec.steps] == ["stage-environment", "agent-evaluate"]
     stage, evaluate = job_spec.steps
     stage_container = cast(Any, stage.executor).container
-    assert stage_container.image == "registry.example/nhx-cpu-tasks:test"
+    assert stage_container.image == "registry.example/nhx-tasks:test"
     assert stage_container.entrypoint == ["python", "-m"]
     assert stage_container.command == ["nemo_evaluator.tasks.stage_environment"]
     assert stage.config == {"environment": "dev/custom-gym"}
     evaluate_container = cast(Any, evaluate.executor).container
-    assert evaluate_container.image == "registry.example/nhx-cpu-tasks:test"
+    assert evaluate_container.image == "registry.example/nhx-tasks:test"
     assert evaluate_container.entrypoint == ["python", "-m"]
     assert evaluate_container.command == ["nemo_evaluator.tasks.agent_evaluate"]
     evaluate_config = cast(dict[str, Any], evaluate.config)
@@ -1131,7 +1131,7 @@ async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_
     job_spec = HelixJobSpec.model_validate(compiled)
     _assert_agent_eval_step_entrypoint(
         job_spec,
-        expected_image="registry.example/nhx-cpu-tasks:test",
+        expected_image="registry.example/nhx-tasks:test",
         expected_entrypoint=("python", "-m"),
     )
 

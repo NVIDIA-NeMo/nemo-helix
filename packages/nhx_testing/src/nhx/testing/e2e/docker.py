@@ -189,7 +189,7 @@ class Docker(E2EBackend):
             self.container.with_env("MODELS_DOCKER_NETWORK", self.network.name)
             self.container.with_env("MODELS_DOCKER_CONTAINER_NAME", NHX_API_NETWORK_ALIAS)
             # Pass registry/tag overrides to the container so services use the correct images
-            # for job execution (e.g., nhx-cpu-tasks). Without these, the YAML config defaults
+            # for job execution (e.g., nhx-tasks). Without these, the YAML config defaults
             # would be used, which may not match the actual CI registry/tag.
             if self.registry:
                 self.container.with_env("NHX_IMAGE_REGISTRY", self.registry)
@@ -205,7 +205,7 @@ class Docker(E2EBackend):
                 logger.info("Passing NGC_API_KEY into API container for NIM model downloads")
 
             # Forward NEMO_JOBS_IMAGE_REGISTRY_* so the jobs controller can authenticate
-            # with a private registry to pull job images (e.g. nhx-cpu-tasks from nvcr.io).
+            # with a private registry to pull job images (e.g. nhx-tasks from nvcr.io).
             # Set when running tests against a private registry:
             #   NEMO_JOBS_IMAGE_REGISTRY=nvcr.io \
             #   NEMO_JOBS_IMAGE_REGISTRY_USER_NAME='$oauthtoken' \
