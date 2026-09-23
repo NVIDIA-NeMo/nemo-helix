@@ -383,13 +383,7 @@ async def update_model(
                 auth_client,
                 workspace,
             )
-        # Update the model using service
-        model_entity = await service.get_model_entity(workspace, model_name, verbose=False)
-
-        if model_entity is None:
-            logger.warning(f"Model not found: {workspace}/{model_name}")
-
-        original_fileset = model_entity.fileset
+        original_fileset = model.fileset
 
         updated_model = await service.update_model_entity(model, workspace, model_name, model_update, verbose=verbose)
 
