@@ -7,6 +7,7 @@ import pytest
 from nhx.common.entities.utils import (
     ModelEntityId,
     ParsedEntityRef,
+    format_adapter_composite,
     parse_adapters_suffix,
     parse_entity_ref,
     parse_model_entity_ref,
@@ -266,6 +267,44 @@ def test_parse_adapters_suffix_malformed_returns_none(name: str):
 def test_parse_adapters_suffix_rejects_surplus_segment():
     """A surplus '/' in the adapter tail is not a valid single-segment adapter name."""
     assert parse_adapters_suffix("base&adapters/ws/name/extra") is None
+
+
+# --- format_adapter_composite -------------------------------------------------
+
+
+def test_format_adapter_composite_joins_on_infix():
+    """The base prefix and adapter segments join into a well-formed composite."""
+    assert format_adapter_composite("base-ws/base", "a-ws", "a-name") == "base-ws/base&adapters/a-ws/a-name"
+
+
+def test_format_adapter_composite_uses_base_prefix_verbatim():
+    """The base prefix is emitted verbatim — unqualified or otherwise unrestricted.
+
+    The production construction sites (the reconciler's possibly-unqualified base id, the
+    IGW proxy's unrestricted ``default_model_entity``) pass an opaque prefix that must not
+    be parsed or split; it is joined as-is.
+    """
+    assert format_adapter_composite("bare-base", "a-ws", "a-name") == "bare-base&adapters/a-ws/a-name"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "base-ws/base&adapters/a-ws/a-name",
+        "bare-base&adapters/a-ws/a-name",
+    ],
+)
+def test_format_adapter_composite_round_trips_parse_adapters_suffix(raw: str):
+    """format is the inverse of parse for the suffix grammar: parse -> format == identity."""
+    parts = parse_adapters_suffix(raw)
+    assert parts is not None
+    assert format_adapter_composite(*parts) == raw
+
+
+def test_to_composite_matches_format_adapter_composite():
+    """ModelEntityId.to_composite delegates to the shared format helper for a LoRA id."""
+    mid = ModelEntityId(workspace="base-ws", base_name="base", adapter_workspace="a-ws", adapter_name="a-name")
+    assert mid.to_composite() == format_adapter_composite(mid.base_id, "a-ws", "a-name")
 
 
 @pytest.mark.parametrize(

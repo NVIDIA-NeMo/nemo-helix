@@ -29,7 +29,7 @@ from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nhx.common.datetime_utils import ensure_utc
 from nhx.common.entities.constants import NAME_PATTERN
-from nhx.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_entity_ref
+from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_entity_ref
 from nhx.core.models.app import (
     ModelWeightsType,
     get_model_weights_type,
@@ -1061,13 +1061,11 @@ class ModelProviderReconciler:
                     )
                     continue
 
-                # Build the LoRA composite id from the base id + recovered adapter
-                # segments using the shared ADAPTERS_INFIX (single home for the grammar).
-                # base_id is used verbatim as the prefix (as the prior f-string did) - we
-                # do NOT parse it, because _resolve_base_backend_model_id may return an
-                # unqualified id and parsing would raise here, aborting the whole mapping
-                # loop where the old code produced an id later dropped by validation.
-                model_entity_id = f"{base_id}{ADAPTERS_INFIX}{adapter_ws}/{adapter_name}"
+                # Build the LoRA composite id via the shared format_adapter_composite
+                # (single home for the grammar's format side). base_id is used verbatim as
+                # the prefix (not parsed): _resolve_base_backend_model_id may return an
+                # unqualified id, and parsing would raise mid-loop.
+                model_entity_id = format_adapter_composite(base_id, adapter_ws, adapter_name)
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
 
