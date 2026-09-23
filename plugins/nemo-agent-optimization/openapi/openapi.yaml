@@ -441,78 +441,6 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
-    OptimizationStrategy:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Value to pass as 'strategy' when submitting a run.
-        description:
-          type: string
-          title: Description
-          description: What this strategy optimizes, in the words of the plugin that
-            ships it.
-          default: ''
-      type: object
-      required:
-      - name
-      title: OptimizationStrategy
-      description: 'One installed strategy, as ``--strategy`` accepts it.
-
-
-        Also the declaration a strategy job makes: it is the type of the
-
-        ``nemo_agent_optimization_strategy`` class variable, so the name users pass
-
-        and the sentence explaining it are written once, by the plugin that owns the
-
-        strategy, and reach this listing unchanged.'
-    OptimizationStrategyList:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/OptimizationStrategy'
-          type: array
-          title: Data
-          description: Installed strategies, sorted by name.
-      type: object
-      title: OptimizationStrategyList
-      description: 'Every strategy installed on this platform.
-
-
-        Unpaginated on purpose: the list is whatever plugins the deployment installed,
-
-        so it is bounded by the install and does not grow with usage.'
-    PaginationData:
-      properties:
-        page:
-          type: integer
-          title: Page
-          description: The current page number.
-        page_size:
-          type: integer
-          title: Page Size
-          description: The page size used for the query.
-        current_page_size:
-          type: integer
-          title: Current Page Size
-          description: The size for the current page.
-        total_pages:
-          type: integer
-          title: Total Pages
-          description: The total number of pages.
-        total_results:
-          type: integer
-          title: Total Results
-          description: The total number of results.
-      type: object
-      required:
-      - page
-      - page_size
-      - current_page_size
-      - total_pages
-      - total_results
-      title: PaginationData
     HelixJobListResultResponse:
       properties:
         data:
@@ -755,6 +683,78 @@ components:
       - created_at
       - updated_at
       title: HelixJobTaskStatusResponse
+    OptimizationStrategy:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Value to pass as 'strategy' when submitting a run.
+        description:
+          type: string
+          title: Description
+          description: What this strategy optimizes, in the words of the plugin that
+            ships it.
+          default: ''
+      type: object
+      required:
+      - name
+      title: OptimizationStrategy
+      description: 'One installed strategy, as ``--strategy`` accepts it.
+
+
+        Also the declaration a strategy job makes: it is the type of the
+
+        ``nemo_agent_optimization_strategy`` class variable, so the name users pass
+
+        and the sentence explaining it are written once, by the plugin that owns the
+
+        strategy, and reach this listing unchanged.'
+    OptimizationStrategyList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/OptimizationStrategy'
+          type: array
+          title: Data
+          description: Installed strategies, sorted by name.
+      type: object
+      title: OptimizationStrategyList
+      description: 'Every strategy installed on this platform.
+
+
+        Unpaginated on purpose: the list is whatever plugins the deployment installed,
+
+        so it is bounded by the install and does not grow with usage.'
+    PaginationData:
+      properties:
+        page:
+          type: integer
+          title: Page
+          description: The current page number.
+        page_size:
+          type: integer
+          title: Page Size
+          description: The page size used for the query.
+        current_page_size:
+          type: integer
+          title: Current Page Size
+          description: The size for the current page.
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: The total number of pages.
+        total_results:
+          type: integer
+          title: Total Results
+          description: The total number of results.
+      type: object
+      required:
+      - page
+      - page_size
+      - current_page_size
+      - total_pages
+      - total_results
+      title: PaginationData
     RunStrategyJob:
       properties:
         id:
