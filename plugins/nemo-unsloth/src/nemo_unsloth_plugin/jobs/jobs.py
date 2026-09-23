@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from typing import ClassVar
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_unsloth_plugin.schema import UnslothJobInput
@@ -62,7 +62,7 @@ class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoHelix,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:

@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_unsloth_plugin.jobs.jobs import UnslothJob
 from nemo_unsloth_plugin.schema import UnslothJobInput
@@ -86,7 +86,7 @@ async def _make_canonical_async(workspace: str = "default", **overrides: Any) ->
         return httpx.Response(404, request=request, json={"detail": "unexpected request"})
 
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    async_sdk = AsyncNeMoHelix(base_url=BASE_URL, workspace="default", http_client=http_client)
+    async_sdk = AsyncNemoClient(base_url=BASE_URL, workspace="default", http_client=http_client)
     try:
         output = await UnslothJob.to_spec(
             spec,
@@ -105,8 +105,8 @@ def _make_canonical(workspace: str = "default", **overrides: Any) -> UnslothJobO
     return asyncio.run(_make_canonical_async(workspace, **overrides))
 
 
-def _compile_sdk() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(
+def _compile_sdk() -> AsyncNemoClient:
+    return AsyncNemoClient(
         base_url=BASE_URL,
         http_client=httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))

@@ -19,7 +19,7 @@ import httpx
 import pytest
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 from nemo_automodel_plugin.schema import AutomodelJobOutput
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
@@ -40,7 +40,7 @@ def _make_canonical(**parallelism: Any) -> AutomodelJobOutput:
 
 def _compile(canonical: AutomodelJobOutput) -> Any:
     async def run_compile() -> Any:
-        async_sdk = AsyncNeMoHelix(
+        async_sdk = AsyncNemoClient(
             base_url="http://test",
             workspace="default",
             http_client=httpx.AsyncClient(

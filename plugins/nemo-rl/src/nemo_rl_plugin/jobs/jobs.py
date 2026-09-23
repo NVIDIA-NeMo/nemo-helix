@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_rl_plugin.schema import RlJobInput
@@ -62,7 +62,7 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoHelix,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:

@@ -17,7 +17,7 @@ from typing import ClassVar
 from nemo_automodel_plugin.config import get_config
 from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, ValidationError
 from nemo_automodel_plugin.transform import transform_input_to_output
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -60,7 +60,7 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoHelix,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
