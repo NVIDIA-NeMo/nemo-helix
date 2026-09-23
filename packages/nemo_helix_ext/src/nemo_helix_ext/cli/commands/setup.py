@@ -33,6 +33,8 @@ from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
@@ -301,6 +303,11 @@ _POST_START_REACHABLE_DELAY = 2.0
 _DEMO_AGENT_NAME = "calculator-agent"
 _SAMPLE_AGENT_NAME = "email-security-triage"
 _SAMPLE_AGENT_DESCRIPTION = "Fabric email security triage sample agent created by the NeMo setup flow."
+_SAMPLE_DATASET_FILESET = "esec-eval-data"
+_SAMPLE_DATASET_FILENAME = "dataset.jsonl"
+_SAMPLE_DATASET_DESCRIPTION = "Evaluation dataset for the NeMo setup sample email security agent."
+_SAMPLE_EVAL_CONFIG_SOURCE = "eval-config.dataset-driven.yml"
+_SAMPLE_EVAL_CONFIG_FILENAME = "eval-config.yaml"
 _SAMPLE_WORKSPACE_NAME = "sample"
 _SAMPLE_WORKSPACE_DESCRIPTION = "Sample workspace created by the NeMo setup flow."
 _LOCAL_CONTEXT_NAME = "local"
@@ -1801,18 +1808,86 @@ def _agent_config_path() -> Traversable | None:
     return None
 
 
-def _sample_agent_config_path() -> Traversable | None:
-    """Return the packaged Email Security Triage config YAML, or None."""
+def _sample_asset_path(name: str) -> Traversable | None:
+    """Return a packaged Email Security Triage asset, or None."""
     try:
         from email_security_triage.resources import sample_file
 
-        candidate = sample_file("agent.yaml")
+        candidate = sample_file(name)
         if candidate.is_file():
             return candidate
     except (ImportError, ModuleNotFoundError):
-        logger.debug("email_security_triage package not importable; sample agent config unavailable", exc_info=True)
+        logger.debug("email_security_triage package not importable; sample assets unavailable", exc_info=True)
 
     return None
+
+
+def _sample_agent_config_path() -> Traversable | None:
+    """Return the packaged Email Security Triage config YAML, or None."""
+    return _sample_asset_path("agent.yaml")
+
+
+def _upload_sample_dataset(files_client: FilesClient, workspace: str) -> bool:
+    """Create the sample dataset fileset and upload its packaged JSONL data."""
+    dataset = _sample_asset_path(_SAMPLE_DATASET_FILENAME)
+    if dataset is None:
+        console.print(f"  {WARN} Could not find Email Security Triage dataset, skipping dataset upload")
+        return False
+
+    try:
+        fileset = files_client.create_fileset(
+            workspace=workspace,
+            body=CreateFilesetRequest(
+                name=_SAMPLE_DATASET_FILESET,
+                description=_SAMPLE_DATASET_DESCRIPTION,
+                purpose=FilesetPurpose.DATASET,
+            ),
+            exist_ok=True,
+        ).data()
+        if fileset.purpose != FilesetPurpose.DATASET:
+            files_client.update_fileset(
+                workspace=workspace,
+                name=_SAMPLE_DATASET_FILESET,
+                body=UpdateFilesetRequest(purpose=FilesetPurpose.DATASET),
+            ).data()
+        files_client.upload_file(
+            workspace=workspace,
+            name=_SAMPLE_DATASET_FILESET,
+            path=_SAMPLE_DATASET_FILENAME,
+            content=dataset.read_bytes(),
+        ).data()
+    except Exception as exc:
+        console.print(f"  {WARN} Sample dataset upload failed: {exc}")
+        return False
+
+    console.print(f"  {CHECK} Uploaded dataset '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}'")
+    return True
+
+
+def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> bool:
+    """Upload the sample's dataset-driven evaluation config for later use."""
+    config_asset = _sample_asset_path(_SAMPLE_EVAL_CONFIG_SOURCE)
+    if config_asset is None:
+        console.print(f"  {WARN} Could not find Email Security Triage eval config, skipping config upload")
+        return False
+
+    try:
+        config = _yaml.safe_load(config_asset.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("packaged eval config must be a mapping")
+        config["dataset"] = f"{workspace}/{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}"
+        files_client.upload_file(
+            workspace=workspace,
+            name=_SAMPLE_DATASET_FILESET,
+            path=_SAMPLE_EVAL_CONFIG_FILENAME,
+            content=_yaml.safe_dump(config, sort_keys=False).encode(),
+        ).data()
+    except Exception as exc:
+        console.print(f"  {WARN} Sample eval config upload failed: {exc}")
+        return False
+
+    console.print(f"  {CHECK} Uploaded evaluation config '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_EVAL_CONFIG_FILENAME}'")
+    return True
 
 
 def _agent_exists(
@@ -3026,6 +3101,9 @@ def _run_interactive_mode(
                 headers=_platform_request_headers(cli_context),
                 certificate_authority=certificate_authority,
             )
+            files_client = cli_context.typed_client(FilesClient)
+            if _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME):
+                _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
         return selected_path
 
     except UserCancelled:
