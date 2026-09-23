@@ -948,7 +948,7 @@ def task_create(
     visibility: str | None,
     tarball: Path | None,
 ) -> None:
-    """Create a task; prints the presigned upload URL for its tarball."""
+    """Create a task; prints its Files upload target for the tarball."""
     body: dict[str, object] = {"name": name}
     if slug:
         body["slug"] = slug
@@ -966,7 +966,7 @@ def task_create(
             f"task {data['id']}",
             f"  revision:   {data.get('revision')}",
             f"  status:     {data.get('status')}",
-            f"  upload url: {upload.get('url')}",
+            f"  upload target: {upload.get('remote_path')}",
         ],
     )
     if tarball:
@@ -1048,9 +1048,9 @@ def task_delete(ctx: click.Context, task_id: str) -> None:
 def task_upload(ctx: click.Context, task_id: str, tarball_path: Path) -> None:
     """Upload a tarball as a new revision of an existing task.
 
-    The presigned URL only comes from a POST: a new tarball means a new
-    revision, so this mints one via POST /tasks/{id}/revisions and PUTs
-    to the upload block it returns.
+    A new tarball means a new revision, so this mints one via
+    POST /tasks/{id}/revisions and streams the file to the Files upload
+    target that response returns.
     """
     data = request(ctx.obj["client"], "POST", f"/tasks/{task_id}/revisions")
     upload = data.get("upload")
