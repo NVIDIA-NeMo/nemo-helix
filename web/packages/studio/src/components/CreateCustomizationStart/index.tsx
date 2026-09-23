@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Banner } from '@nvidia/foundations-react-core';
+import { Banner, Flex, Spinner } from '@nvidia/foundations-react-core';
 import {
   START_OPTIONS,
   TEMPLATES_TAG,
@@ -13,15 +13,12 @@ import { StartPage } from '@studio/components/StartOptions/StartPage';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 import { CUSTOMIZATION_TEMPLATES } from '@studio/constants/customizationTemplates';
 import { Box } from 'lucide-react';
-import { useMemo, useState, type FC } from 'react';
+import { useMemo, type FC } from 'react';
 
 export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   workspace,
   onContinue,
 }) => {
-  // Only to mark the tile that is provisioning; nothing stays selected after a pick.
-  const [busyId, setBusyId] = useState<string | null>(null);
-
   const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
 
@@ -51,14 +48,9 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
 
     // Registering the model and loading the dataset has to finish before the form can
     // reference them, so it happens here rather than on the next screen.
-    setBusyId(id);
-    try {
-      const initialValues = await runTemplateSetup(template);
-      if (initialValues) {
-        onContinue({ optionId: 'template', initialValues });
-      }
-    } finally {
-      setBusyId(null);
+    const initialValues = await runTemplateSetup(template);
+    if (initialValues) {
+      onContinue({ optionId: 'template', initialValues });
     }
   };
 
@@ -73,10 +65,15 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       // Provisioning registers models and uploads a dataset, which takes long enough that
       // the other tiles would stay clickable and start a second setup over the first.
       disabled={isSettingUp}
-      busyId={busyId}
-      busyLabel={isSettingUp ? statusLabel : undefined}
       slotBanner={
-        templateError ? (
+        isSettingUp ? (
+          <Banner kind="inline" status="info">
+            <Flex gap="density-md" align="center">
+              <Spinner size="small" aria-label={statusLabel} />
+              {statusLabel}
+            </Flex>
+          </Banner>
+        ) : templateError ? (
           <Banner kind="inline" status="error">
             {templateError}
           </Banner>

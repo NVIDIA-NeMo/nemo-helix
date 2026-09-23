@@ -211,6 +211,10 @@ describe('CreateCustomizationStart', () => {
       await user.click(screen.getByText('Build from scratch'));
       expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title)).toBeInTheDocument();
 
+      // Progress reads from the banner, not the tile. The exact step depends on how far
+      // setup got, so this asserts a live label rather than pinning one.
+      expect(await screen.findByRole('status')).toHaveAccessibleName(/…$/);
+
       releaseRows();
       await waitFor(
         () =>

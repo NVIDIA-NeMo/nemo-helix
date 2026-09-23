@@ -56,13 +56,9 @@ export interface StartPageProps {
   onSelect: (id: string) => void;
   /** Locks every tile while a pick is being acted on. */
   disabled?: boolean;
-  /** The tile being acted on, marked active and given a spinner. */
-  busyId?: string | null;
-  /** Progress text shown on the busy tile. */
-  busyLabel?: string;
   /** Badge on the divider — the templates' counterpart to the per-option tags. */
   templatesTag?: StartOptionTag;
-  /** Rendered below the tiles — an error banner, typically. */
+  /** Rendered above the tiles, where it stays in view — progress or an error. */
   slotBanner?: ReactNode;
 }
 
@@ -74,9 +70,6 @@ export interface StartTileProps {
   slotEnd?: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
-  /** Swaps `slotEnd` for a spinner and marks the tile active. */
-  busy?: boolean;
-  busyLabel?: string;
   labelKind?: ComponentProps<typeof Text>['kind'];
   descriptionKind?: ComponentProps<typeof Text>['kind'];
   className?: string;

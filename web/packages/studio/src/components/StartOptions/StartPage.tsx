@@ -30,8 +30,6 @@ export const StartPage: FC<StartPageProps> = ({
   templateGroups = [],
   onSelect,
   disabled = false,
-  busyId = null,
-  busyLabel,
   templatesTag,
   slotBanner,
 }) => {
@@ -44,6 +42,8 @@ export const StartPage: FC<StartPageProps> = ({
 
         <Flex justify="center" className="w-full">
           <Stack gap="density-2xl" className={CONTENT_WIDTH}>
+            {slotBanner}
+
             <Stack gap="density-md" role="group" aria-label={GROUP_LABEL}>
               {options.map((option) => (
                 <StartTile
@@ -59,8 +59,6 @@ export const StartPage: FC<StartPageProps> = ({
                     ) : undefined
                   }
                   onSelect={() => onSelect(option.id)}
-                  busy={busyId === option.id}
-                  busyLabel={busyLabel}
                   labelKind={TILE_LABEL_KIND}
                   descriptionKind={TILE_DESCRIPTION_KIND}
                   className={TILE_RADIUS}
@@ -115,8 +113,6 @@ export const StartPage: FC<StartPageProps> = ({
                               description={template.description}
                               icon={<template.icon size={16} color={group.accent} aria-hidden />}
                               onSelect={() => onSelect(template.id)}
-                              busy={busyId === template.id}
-                              busyLabel={busyLabel}
                               labelKind={TILE_LABEL_KIND}
                               descriptionKind={TILE_DESCRIPTION_KIND}
                               className={TILE_RADIUS}
@@ -128,8 +124,6 @@ export const StartPage: FC<StartPageProps> = ({
                 ))}
               </>
             )}
-
-            {slotBanner}
           </Stack>
         </Flex>
       </Stack>

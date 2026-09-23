@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isDefined } from '@nemo/common/src/utils/isDefined';
-import { Card, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
+import { Card, Flex, Text } from '@nvidia/foundations-react-core';
 import type { StartTileProps } from '@studio/components/StartOptions/types';
 import cn from 'classnames';
 import type { FC } from 'react';
@@ -21,8 +21,6 @@ export const StartTile: FC<StartTileProps> = ({
   slotEnd,
   onSelect,
   disabled = false,
-  busy = false,
-  busyLabel,
   labelKind,
   descriptionKind,
   className,
@@ -46,7 +44,6 @@ export const StartTile: FC<StartTileProps> = ({
         className={cn(
           'w-full',
           !disabled && 'cursor-pointer hover:bg-interaction-hover',
-          busy && 'border-interaction-selected',
           contentClass,
           className
         )}
@@ -61,18 +58,7 @@ export const StartTile: FC<StartTileProps> = ({
 
         <Flex gap="density-md" align="center" className="col-start-2 row-start-1 w-full min-h-0">
           <Text kind={labelKind}>{label}</Text>
-          {busy ? (
-            <Flex gap="density-md" align="center" className="ml-auto shrink-0">
-              {isDefined(busyLabel) && (
-                <Text kind="label/regular/sm" color="secondary">
-                  {busyLabel}
-                </Text>
-              )}
-              <Spinner size="small" aria-label={busyLabel ?? 'Working'} />
-            </Flex>
-          ) : (
-            slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>
-          )}
+          {slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
         </Flex>
 
         {hasDescription && (
