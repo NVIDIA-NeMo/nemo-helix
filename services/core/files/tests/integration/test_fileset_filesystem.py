@@ -30,8 +30,7 @@ from filesets import (
     parse_fileset_path,
     parse_fileset_ref,
 )
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetOutput
 
@@ -297,9 +296,9 @@ class TestFilesetFileSystem:
     """Test fsspec operations via FilesetFileSystem."""
 
     @pytest.fixture
-    def fs(self, sdk: NeMoHelix) -> FilesetFileSystem:
+    def fs(self, client: NemoClient) -> FilesetFileSystem:
         """Create a FilesetFileSystem backed by the test SDK."""
-        return FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+        return FilesetFileSystem(client=FilesClient.from_client(client))
 
     def test_ls_empty_fileset(self, fs: FilesetFileSystem, fileset: FilesetOutput):
         """Test listing an empty fileset."""
@@ -530,14 +529,14 @@ class TestFilesetFileSystem:
 
     def test_fsspec_filesystem_registration(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         fileset: FilesetOutput,
     ):
         """Test that FilesetFileSystem can be instantiated via fsspec.filesystem()."""
         # Protocol is registered by the autouse fixture
         fs = fsspec.filesystem(
             "fileset",
-            client=client_from_platform(sdk, FilesClient),
+            client=FilesClient.from_client(client),
             skip_instance_cache=True,
         )
 
@@ -1830,7 +1829,7 @@ class TestDuckDBIntegration:
 
     def test_duckdb_parquet_query(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         fileset: FilesetOutput,
     ):
         """Test querying a parquet file with DuckDB via fileset:// protocol."""
@@ -1850,7 +1849,7 @@ class TestDuckDBIntegration:
         # Create filesystem via fsspec (how users would configure it)
         fs = fsspec.filesystem(
             "fileset",
-            client=client_from_platform(sdk, FilesClient),
+            client=FilesClient.from_client(client),
         )
         fs.pipe(f"{fileset.workspace}/{fileset.name}#{file_path}", parquet_bytes)
 
@@ -1878,7 +1877,7 @@ class TestDuckDBIntegration:
 
     def test_duckdb_parquet_range_read(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         fileset: FilesetOutput,
     ):
         """Test that DuckDB performs efficient range reads on parquet files.
@@ -1905,7 +1904,7 @@ class TestDuckDBIntegration:
         # Create filesystem via fsspec
         fs = fsspec.filesystem(
             "fileset",
-            client=client_from_platform(sdk, FilesClient),
+            client=FilesClient.from_client(client),
         )
         fs.pipe(f"{fileset.workspace}/{fileset.name}#{file_path}", parquet_bytes)
         fileset_url = f"fileset://{fileset.workspace}/{fileset.name}#{file_path}"
@@ -1921,7 +1920,7 @@ class TestDuckDBIntegration:
 
     def test_duckdb_legacy_path_format(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         fileset: FilesetOutput,
     ):
         """Test DuckDB queries using legacy workspace/fileset/path format.
@@ -1943,7 +1942,7 @@ class TestDuckDBIntegration:
         # Create filesystem via fsspec
         fs = fsspec.filesystem(
             "fileset",
-            client=client_from_platform(sdk, FilesClient),
+            client=FilesClient.from_client(client),
         )
         fs.pipe(f"{fileset.workspace}/{fileset.name}#{file_path}", parquet_bytes)
 
@@ -1965,9 +1964,9 @@ class TestDirCache:
     """
 
     @pytest.fixture
-    def fs(self, sdk: NeMoHelix) -> FilesetFileSystem:
+    def fs(self, client: NemoClient) -> FilesetFileSystem:
         """Create a FilesetFileSystem backed by the test SDK."""
-        return FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+        return FilesetFileSystem(client=FilesClient.from_client(client))
 
     def test_ls_populates_cache_for_nested_dirs(self, fs: FilesetFileSystem, fileset: FilesetOutput):
         """_ls should populate cache for all directory levels in the response."""
@@ -2175,12 +2174,12 @@ class TestDirCache:
 
     def test_cache_disabled(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         fileset: FilesetOutput,
     ):
         """When use_listings_cache=False, cache should not be used."""
         # Create filesystem with cache disabled
-        fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+        fs = FilesetFileSystem(client=FilesClient.from_client(client))
         fs.dircache.use_listings_cache = False
 
         base = f"{fileset.workspace}/{fileset.name}"
