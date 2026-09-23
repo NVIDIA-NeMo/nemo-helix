@@ -18,6 +18,8 @@ PATCH_PATH = Path("docker/rl/patches/nemo-rl-gym-host-hf-cache.patch")
 TEST_PATH = Path("tests/tools/rename/test_rename_tools.py")
 GITIGNORE_PATH = Path(".gitignore")
 IGNORE_PATHS = {
+    # These are existing GitHub team slugs, not product identifiers to rename.
+    Path(".github/CODEOWNERS"),
     RENAME_SCRIPT,
     RENAME_IMPL,
     VERIFY_SCRIPT,
