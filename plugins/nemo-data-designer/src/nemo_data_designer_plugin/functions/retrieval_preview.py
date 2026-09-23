@@ -14,7 +14,7 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPreviewSpec
 from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import Done, Error
@@ -37,8 +37,8 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
         self,
         spec: RetrievalPreviewSpec,
         ctx: FunctionContext,
-        sdk: NeMoHelix,
-        async_sdk: AsyncNeMoHelix,
+        sdk: NemoClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool = False,
     ) -> AsyncIterator[BaseModel]:
         job = spec.generate

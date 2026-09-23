@@ -15,8 +15,8 @@ Covers:
 - DI: ``ctx`` annotation gets a :class:`FunctionContext` with the
   workspace from the path and the request id from the
   ``X-Request-ID`` header.
-- DI: ``sdk`` and ``async_sdk`` annotations get the request-scoped platform
-  handle (overridden via ``app.dependency_overrides``).
+- DI: ``sdk`` and ``async_sdk`` annotations get the request-scoped typed
+  platform client (overridden via ``app.dependency_overrides``).
 
 The tests mount the auto-derived router under
 ``/apis/example/v2/workspaces/{workspace}`` so the full route matches
@@ -34,7 +34,7 @@ from typing import Annotated, Any, ClassVar, Literal
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from nemo_helix_plugin.dependencies import get_sdk_client, get_sync_sdk_client
+from nemo_helix_plugin.dependencies import get_nemo_client, get_sync_nemo_client
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import Done, FrameModel, Heartbeat
@@ -385,7 +385,7 @@ class TestSignatureDi:
 
     def test_async_sdk_resolved_from_dependency_override(self) -> None:
         app = _build_app(_SdkGreet)
-        app.dependency_overrides[get_sdk_client] = lambda: _MarkerSdk("fake-sdk")
+        app.dependency_overrides[get_nemo_client] = lambda: _MarkerSdk("fake-sdk")
         client = TestClient(app)
         resp = client.post(
             "/apis/example/v2/workspaces/default/sdk-greet",
@@ -408,7 +408,7 @@ class TestSignatureDi:
 
     def test_sync_sdk_resolved_from_dependency_override(self) -> None:
         app = _build_app(_SyncSdkGreet)
-        app.dependency_overrides[get_sync_sdk_client] = lambda: _MarkerSdk("fake-sync-sdk")
+        app.dependency_overrides[get_sync_nemo_client] = lambda: _MarkerSdk("fake-sync-sdk")
         client = TestClient(app)
         resp = client.post(
             "/apis/example/v2/workspaces/default/sync-sdk-greet",
@@ -419,8 +419,8 @@ class TestSignatureDi:
 
     def test_sync_and_async_sdks_resolved_independently(self) -> None:
         app = _build_app(_BothSdkGreet)
-        app.dependency_overrides[get_sync_sdk_client] = lambda: _MarkerSdk("fake-sync-sdk")
-        app.dependency_overrides[get_sdk_client] = lambda: _MarkerSdk("fake-async-sdk")
+        app.dependency_overrides[get_sync_nemo_client] = lambda: _MarkerSdk("fake-sync-sdk")
+        app.dependency_overrides[get_nemo_client] = lambda: _MarkerSdk("fake-async-sdk")
         client = TestClient(app)
         resp = client.post(
             "/apis/example/v2/workspaces/default/both-sdk-greet",
