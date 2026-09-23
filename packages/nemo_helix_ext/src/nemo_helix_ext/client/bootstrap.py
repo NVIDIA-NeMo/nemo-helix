@@ -49,6 +49,7 @@ See also: ``architecture/docs/auth/sdk-cli-oauth.md`` for a full design doc.
 """
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -542,7 +543,7 @@ def resolve_bootstrap(
             # discovery response — not on discovery failures, where the stored
             # token may still be valid and should be used as-is.
             return ResolvedBootstrap(base_url, resolved.workspace, headers, None, client_verify, certificate_authority)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, json.JSONDecodeError):
         logger.debug("Could not discover OIDC settings from %s", base_url, exc_info=True)
         oidc_config = _OIDC_DISCOVERY_FALLBACK
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -810,6 +811,26 @@ class TestFromConfig:
         ):
             with pytest.raises(ValueError, match="bearer_token_source"):
                 NemoClient.from_config(config_path=config_file)
+
+    def test_from_config_falls_back_for_non_json_discovery(self, tmp_path):
+        token = _make_jwt()
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [{"name": "test-user", "type": "oauth", "token": token}],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+
+        with patch(
+            "nemo_helix_plugin.client.oidc.discover_nhx_config",
+            side_effect=json.JSONDecodeError("Expecting value", "<html>", 0),
+        ):
+            client = NemoClient.from_config(config_path=config_file)
+
+        assert isinstance(client._auth, OIDCTokenProvider)
+        assert client._auth.tokens.access_token == token
 
     def test_from_config_with_no_auth(self, tmp_path):
         config_data = {

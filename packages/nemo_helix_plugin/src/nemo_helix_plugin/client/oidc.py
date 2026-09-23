@@ -214,7 +214,7 @@ def _discover_oidc_client_settings(base_url: str) -> NHXOIDCConfig:
     """Fetch OIDC config with a safe fallback if unreachable."""
     try:
         return discover_nhx_config(base_url)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, json.JSONDecodeError):
         logger.debug("Could not discover OIDC settings from %s", base_url, exc_info=True)
         return NHXOIDCConfig(
             auth_enabled=False,

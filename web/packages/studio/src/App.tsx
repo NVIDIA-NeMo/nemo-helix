@@ -17,6 +17,7 @@ import {
   OTEL_SERVICE_NAME,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { OidcIdTokenRenewal } from '@studio/providers/auth/OidcIdTokenRenewal';
 import { routes } from '@studio/routes';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { UI_THEME } from '@studio/util/localStorage';
@@ -94,6 +95,7 @@ export const App = () => {
             userStore={userStore}
             automaticSilentRenew
           >
+            <OidcIdTokenRenewal />
             <TooltipProvider>
               <RouterProvider router={router} />
             </TooltipProvider>
