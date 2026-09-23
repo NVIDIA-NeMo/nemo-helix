@@ -11,7 +11,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import type { GeneratedConfigPanelProps } from '@studio/components/CreateFilesetStart/types';
+import type { GeneratedConfigPanelProps } from '@studio/components/DataDesignerStart/types';
 import { FileJson } from 'lucide-react';
 import type { FC } from 'react';
 

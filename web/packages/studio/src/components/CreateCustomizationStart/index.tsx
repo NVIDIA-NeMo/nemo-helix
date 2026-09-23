@@ -63,7 +63,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   return (
     <StartPage
       heading="Fine-tune a Model"
-      headingDescription="Train a model on your own data. Start from a config you already have, pick a ready-made recipe, or set everything up yourself."
+      headingDescription="Train a model on your own data. Pick a ready-made recipe, or set everything up yourself."
       options={START_OPTIONS}
       templateGroups={templateGroups}
       templatesTag={TEMPLATES_TAG}

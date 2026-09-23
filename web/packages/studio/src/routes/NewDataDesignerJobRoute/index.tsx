@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { CreateFilesetStart } from '@studio/components/CreateFilesetStart';
-import type { StartSelection } from '@studio/components/CreateFilesetStart/types';
+import { DataDesignerStart } from '@studio/components/DataDesignerStart';
+import type { StartSelection } from '@studio/components/DataDesignerStart/types';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import type { DataDesignerGeneratedState } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
@@ -40,7 +40,7 @@ export const NewDataDesignerJobRoute: FC = () => {
 
   return (
     <AccessibleTitle title="Create a fileset">
-      <CreateFilesetStart workspace={workspace} onContinue={handleContinue} />
+      <DataDesignerStart workspace={workspace} onContinue={handleContinue} />
     </AccessibleTitle>
   );
 };

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
-import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
+import type { FilesetTemplate } from '@studio/components/DataDesignerStart/types';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_EMBEDDER_MODEL_NAME } from '@studio/constants/constants';
 import {
   Braces,

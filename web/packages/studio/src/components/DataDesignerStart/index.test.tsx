@@ -1,19 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { CreateFilesetStart } from '@studio/components/CreateFilesetStart';
+import { DataDesignerStart } from '@studio/components/DataDesignerStart';
 import { render, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 
 const renderStart = () => {
   const onContinue = vi.fn();
-  render(<CreateFilesetStart workspace="default" onContinue={onContinue} />);
+  render(<DataDesignerStart workspace="default" onContinue={onContinue} />);
   return { onContinue };
 };
 
 const continueButton = () => screen.getByRole('button', { name: /continue/i });
 
-describe('CreateFilesetStart', () => {
+describe('DataDesignerStart', () => {
   it('offers every way in at once', () => {
     renderStart();
 

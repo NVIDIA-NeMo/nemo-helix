@@ -21,10 +21,7 @@ export interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupIte
   label: ReactNode;
   /** Optional secondary description text */
   description?: ReactNode;
-  /**
-   * Tightens the card to a single-row tile: 12px of padding over a 4px gap, rather than
-   * the 24px and 8px a full-size card uses.
-   */
+  /** Single-row tile metrics: 12px padding over a 4px gap, not 24px and 8px. */
   compact?: boolean;
   /** Type scale for the label and description. Defaults suit a full-size card. */
   labelKind?: ComponentProps<typeof Text>['kind'];
@@ -81,10 +78,7 @@ export const RadioCard: FC<RadioCardProps> = ({
   const id = labelId ?? `${String(value).replace(/\s+/g, '-')}-label`;
   const hasDescription = isDefined(description);
 
-  /**
-   * With no radio indicator, the icon takes the column the indicator would have had, so
-   * the description lines up under the label rather than under the icon.
-   */
+  /** With no indicator the icon takes its column, so the description clears it too. */
   const iconColumn = !showIndicator && icon != null;
 
   const textStartClass =
@@ -106,8 +100,7 @@ export const RadioCard: FC<RadioCardProps> = ({
     : labelSide === 'right'
       ? '[&_.nv-radio-group-input]:col-start-1'
       : '[&_.nv-radio-group-input]:col-start-2';
-  // Compact emits its own row gap rather than overriding `gap-2!`, so the two never
-  // race on specificity.
+  // Compact emits its own row gap rather than overriding `gap-2!`, which would race.
   const gapClass = !hasDescription
     ? '[&_.nv-card-content]:gap-0! [&_.nv-card-content]:gap-x-2!'
     : compact

@@ -3,7 +3,7 @@
 
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import { Block, Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
-import { DescribeWithAiPanel } from '@studio/components/CreateFilesetStart/DescribeWithAiPanel';
+import { DescribeWithAiPanel } from '@studio/components/DataDesignerStart/DescribeWithAiPanel';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useState, type FC } from 'react';
 
@@ -13,11 +13,7 @@ interface Props {
   onContinue: (jobRequest: DataDesignerJobRequest) => void;
 }
 
-/**
- * The second screen of the "describe with AI" path. Kept apart from the options page
- * rather than folded into it: drafting is a whole screen's worth of work, and reaching it
- * is a step the user can go back from.
- */
+/** The second screen of the "describe with AI" path, reached from the options page. */
 export const AiDraftStep: FC<Props> = ({ workspace, onBack, onContinue }) => {
   const [jobRequest, setJobRequest] = useState<DataDesignerJobRequest | null>(null);
 
