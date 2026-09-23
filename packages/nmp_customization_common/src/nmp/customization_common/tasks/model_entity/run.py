@@ -49,6 +49,7 @@ from nemo_platform_plugin.models.types import (
     FinetuningType as ModelsFinetuningType,
 )
 from nmp.common.client_factory import get_task_nemo_client
+from nmp.common.entities.global_workspace import is_global_workspace
 from nmp.customization_common.schemas.model_entity import (
     ModelEntityCreationError,
     ModelEntityTaskConfig,
@@ -231,13 +232,12 @@ class ModelEntityRunner:
             return self._create_or_update_adapter(config, base_me, fileset_ref, adapter_workspace)
         return self._create_or_update_full_entity(config, fileset_ref, output_workspace)
 
-    def _shared_base_adapter_workspace(self, config: ModelEntityTaskConfig, base_me: ModelEntity) -> str | None:
-        """The job's workspace when *base_me* resolved through the global-workspace fallback, else None."""
-        fileset_workspace = config.fileset.workspace or self.job_ctx.workspace
-        requested_workspace, _ = self._parse_model_entity_ref(config.model_entity, fileset_workspace)
-        if base_me.workspace == requested_workspace:
-            return None
-        return config.workspace
+    @staticmethod
+    def _shared_base_adapter_workspace(config: ModelEntityTaskConfig, base_me: ModelEntity) -> str | None:
+        """The job's workspace when *base_me* is shared from the global workspace, else None."""
+        if is_global_workspace(base_me.workspace) and not is_global_workspace(config.workspace):
+            return config.workspace
+        return None
 
     def _create_or_update_adapter(
         self,

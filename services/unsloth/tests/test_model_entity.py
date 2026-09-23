@@ -518,17 +518,27 @@ class TestSharedBaseAdapter:
         assert isinstance(body, UpdateAdapterRequest)
         assert body.fileset == "marcus/adapter-x"
 
-    def test_explicit_reference_to_another_workspace_keeps_the_original_behaviour(self) -> None:
-        """Naming ``default/base`` resolved exactly where it pointed, so nothing changes for it."""
+    def test_explicitly_qualified_shared_base_puts_the_adapter_in_the_jobs_workspace(self) -> None:
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(workspace="default", name="base-model"))
-        models.create_adapter.return_value = _response(_model_entity(name="adapter-x"))
+        models.create_adapter.return_value = _response(_model_entity(workspace="marcus", name="adapter-x"))
 
         _marcus_runner(models, files).create_model_entity(_shared_base_lora_config(model_entity="default/base-model"))
 
         create_call = models.create_adapter.call_args
-        assert create_call.kwargs["workspace"] == "default"
+        assert create_call.kwargs["workspace"] == "marcus"
         assert create_call.kwargs["body"].model == "default/base-model"
+
+    def test_explicit_reference_to_a_non_global_workspace_keeps_the_original_behaviour(self) -> None:
+        models, files = _make_clients()
+        models.get_model.return_value = _response(_model_entity(workspace="team-b", name="base-model"))
+        models.create_adapter.return_value = _response(_model_entity(workspace="team-b", name="adapter-x"))
+
+        _marcus_runner(models, files).create_model_entity(_shared_base_lora_config(model_entity="team-b/base-model"))
+
+        create_call = models.create_adapter.call_args
+        assert create_call.kwargs["workspace"] == "team-b"
+        assert create_call.kwargs["body"].model == "team-b/base-model"
 
     def test_inline_deployment_goes_into_the_jobs_workspace(self) -> None:
         from nemo_platform_plugin.deployment import DeploymentParams
