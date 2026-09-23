@@ -9,21 +9,20 @@ agent keeps Fabric's spec/result protocol and replaces only the install step: it
 through whatever package manager the image has, installs ``uv``, and builds the Fabric virtualenv
 from a uv-managed interpreter. Nothing is required of the task's Dockerfile.
 
-Select it with ``agent_import_path`` and configure it with ``agent_kwargs``::
+Select it with ``agent_import_path`` and hand it the agent through ``agent_kwargs``::
 
     HarborRuntimeConfig(
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
-            "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-            "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0b1",
+            "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
+            "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
         },
-        agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
         agent_env_from_host=["NVIDIA_API_KEY"],
     )
 
-It accepts every ``FabricAgent`` keyword plus :class:`NemoFabricAgent`'s ``fabric_model_api_key_env``
-and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is required
--- the harness extra to install cannot be derived from the adapter id.
+It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabric's install/run
+keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
+required: the harness extra to install cannot be derived from the config.
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
 yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstalledAgent._exec``
@@ -162,8 +161,9 @@ class FabricInstalledAgent(BaseInstalledAgent):
             mcp_servers=mcp_servers,
             skills_dir=skills_dir,
         )
-        # An explicit `fabric_max_turns=None` still means unbounded; only absence takes the default.
-        fabric_kwargs.setdefault("fabric_max_turns", DEFAULT_FABRIC_MAX_TURNS)
+        # Applied only when the config sets no ``runtime.max_turns``; a config that names its own budget
+        # (including an explicit ``null``) is left alone.
+        fabric_kwargs.setdefault("fabric_default_max_turns", DEFAULT_FABRIC_MAX_TURNS)
         # `**fabric_kwargs` rather than an enumerated signature, so every FabricAgent constructor
         # argument stays reachable without this class tracking upstream's parameter list.
         self.fabric = NemoFabricAgent(

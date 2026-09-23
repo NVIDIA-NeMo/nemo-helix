@@ -35,19 +35,42 @@ and the harness is installed inside the container.
 
 ## The agent
 
-`nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent` is a thin subclass of
-`nemo_fabric.integrations.harbor:FabricAgent`, Fabric's custom Harbor agent. It accepts every `FabricAgent` constructor
-argument through `agent_kwargs`, and resolves what a non-OpenAI model provider needs from the
-`provider/model` slug in `agent_model_name`:
+`nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent` extends
+`nemo_fabric.integrations.harbor:FabricAgent`, Fabric's custom Harbor agent, and runs **one complete
+Fabric agent config** inside the task container. Hand it the agent through `agent_kwargs["fabric_config"]`
+— a Fabric `agent.yaml` as a JSON-shaped mapping, the same document the
+[Fabric runner](/documentation/evaluate-models/agent-eval/fabric-runner) runs on the host:
 
-| `agent_model_name` | provider | model sent to the endpoint | credential variable | endpoint |
-|---|---|---|---|---|
-| `nvidia/nemotron-3-super-120b-a12b` | `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` |
-| `openai/gpt-5.4` | `openai` | `gpt-5.4` | `OPENAI_API_KEY` | OpenAI default |
-| anything else | as given | as given | `fabric_model_api_key_env` (required) | `fabric_model_base_url` |
+```python
+from pathlib import Path
 
-Override the defaults with `fabric_model_api_key_env` and `fabric_model_base_url` in `agent_kwargs`,
-for example to point at a self-hosted NIM.
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig
+
+fabric_config = {
+    "metadata": {"name": "hello-world-deepagents"},
+    "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+    "models": {
+        "default": {
+            "provider": "nvidia",
+            "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "api_key_env": "NVIDIA_API_KEY",           # the harness reads the key from this variable
+            "base_url": "https://integrate.api.nvidia.com/v1",
+        }
+    },
+}
+```
+
+The config is used verbatim — harness, models, instructions, skills, MCP servers, tool policy, and
+telemetry all come from it, and so does the agent's identity (`metadata.name`, the Relay `agent_name`).
+Harbor decides only where a trial lives: the workspace and artifact paths inside the container, the
+`text`/`message` runner schemas, and where Relay writes so the trajectory is collected with the trial.
+Upstream `FabricAgent`'s flat keywords that *describe* an agent (`fabric_adapter_id`,
+`fabric_system_instruction`, `fabric_max_turns`, …) are refused: build the whole config and pass it in.
+The install/run keywords (`fabric_package`, `fabric_workspace`, `fabric_config_bundle`, …) are unchanged.
+
+`agent_model_name`, when given, swaps `models.default.model` only; the endpoint and credential wiring
+stay the config's. Files the config refers to by relative path (`skills.paths`) resolve against
+`fabric_config_target` when a `fabric_config_bundle` directory is uploaded.
 
 ## Run on task images without Python
 
@@ -78,11 +101,10 @@ config = HarborRuntimeConfig(
     jobs_dir=Path("./harbor-jobs"),
     agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
     agent_kwargs={
-        "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-        "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0b1",
+        "fabric_config": fabric_config,
+        "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
         "fabric_workspace": "/app",
     },
-    agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
     agent_env_from_host=["NVIDIA_API_KEY"],
     agent_setup_timeout_multiplier=12.0,
     agent_timeout_multiplier=5.0,
@@ -91,16 +113,17 @@ config = HarborRuntimeConfig(
 
 Four differences from `NemoFabricAgent`:
 
-- `fabric_package` is required — the harness extra cannot be derived from the adapter id.
+- `fabric_package` is required — the harness extra cannot be derived from the config.
 - `fabric_python_version` (default `"3.12"`) selects the interpreter uv provisions. Quote it in YAML
   so `3.10` does not parse as the float `3.1`.
 - `fabric_uv_version` (default `"0.12.17"`) pins the uv installer the task container fetches, so two
   runs of the same eval provision the same toolchain. Quote it in YAML for the same reason.
-- `fabric_max_turns` defaults to `50` instead of Fabric's unbounded `None`. When an unbounded harness
-  cannot finish a task, Harbor eventually kills the agent phase, and a killed phase produces no
-  `RunResult` — no trajectory and no error, only `AgentTimeoutError`. A turn budget lets the harness
-  stop on its own terms instead; in our sample runs it accounted for most of the lost trials. Size it
-  for your dataset, or pass `fabric_max_turns=None` for Fabric's unbounded behaviour.
+- A turn budget of `50` is applied when the config sets no `runtime.max_turns`, instead of Fabric's
+  unbounded `None`. When an unbounded harness cannot finish a task, Harbor eventually kills the agent
+  phase, and a killed phase produces no `RunResult` — no trajectory and no error, only
+  `AgentTimeoutError`. A budget lets the harness stop on its own terms; in our sample runs it accounted
+  for most of the lost trials. Size it in the config for your dataset, or pass
+  `fabric_default_max_turns=None` for Fabric's unbounded behaviour.
 
 The packaged example runs it against a deliberately bare `ubuntu:24.04` task — no Python, no pip, no
 curl — and `--dataset-dir` points it at any Harbor dataset, including one pulled from the Hub:
@@ -150,11 +173,10 @@ async def main() -> None:
         jobs_dir=Path("./harbor-jobs"),
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
         agent_kwargs={
-            "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-            "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+            "fabric_config": fabric_config,  # the mapping from "The agent" above
+            "fabric_package": "nemo-fabric[deepagents]==0.3.0",
             "fabric_workspace": "/app",  # the task image's working directory
         },
-        agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
         # Forwarded to the agent as a `${NVIDIA_API_KEY}` template; Harbor resolves it from this
         # process's environment and never writes the value into the job directory.
         agent_env_from_host=["NVIDIA_API_KEY"],
@@ -189,10 +211,9 @@ key travels through `agent_env_from_host` instead. Inspect the persisted agent e
 ```json
 {
   "import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
-  "model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "kwargs": {
-    "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-    "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+    "fabric_config": {"metadata": {"name": "hello-world-deepagents"}, "harness": {"...": "..."}, "models": {"...": "..."}},
+    "fabric_package": "nemo-fabric[deepagents]==0.3.0",
     "fabric_workspace": "/app"
   },
   "env": {"NVIDIA_API_KEY": "${NVIDIA_API_KEY}"}
@@ -210,10 +231,9 @@ the job's environment at compile time, which the job then forwards exactly as ab
   "target": {
     "kind": "harbor",
     "agent_import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
-    "agent_model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "agent_kwargs": {
-      "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-      "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+      "fabric_config": {"metadata": {"name": "hello-world-deepagents"}, "harness": {"...": "..."}, "models": {"...": "..."}},
+      "fabric_package": "nemo-fabric[deepagents]==0.3.0",
       "fabric_workspace": "/app"
     },
     "env_secrets": {
@@ -238,14 +258,51 @@ trajectory-aware metrics.
 
 ## Choosing the harness and model
 
-- **Harness**: `fabric_adapter_id` selects it; `fabric_package` must install the matching extra
-  (`nemo-fabric[deepagents]`, `nemo-fabric[codex]`, ...). Harness-specific settings go in
-  `fabric_harness_settings`.
-- **Model**: any Nemotron id from build.nvidia.com works with the `nvidia/` provider. The example
-  uses `nvidia/nemotron-3.5-lightning-30b-a3b` for speed; larger models such as
+- **Harness**: `harness.adapter_id` in the config selects it; `fabric_package` must install the
+  matching extra (`nemo-fabric[deepagents]`, `nemo-fabric[codex]`, ...). Harness-specific settings go
+  in `harness.settings`.
+- **Model**: any Nemotron id from build.nvidia.com works with the `nvidia` provider and
+  `base_url: https://integrate.api.nvidia.com/v1`. The example uses
+  `nvidia/nemotron-3.5-lightning-30b-a3b` for speed; larger models such as
   `nvidia/nemotron-3-super-120b-a12b` run the same way.
-- **Telemetry**: leave `fabric_telemetry` at its default `none` with deepagents; that adapter does
-  not support Fabric's Relay observability configuration.
+- **Telemetry**: leave `telemetry`/`relay` out of the config with deepagents; that adapter does not
+  support Fabric's Relay observability configuration.
+
+## Run a registered agent
+
+An agent registered on the platform with `nemo agents create` can be named directly on the Harbor
+target, in place of `agent_import_path`:
+
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "agent": "calculator-agent",
+    "n_attempts": 2,
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_kwargs": {"fabric_workspace": "/app"}
+  }
+}
+```
+
+At submit time the service resolves the agent exactly as `nemo agents deploy` would — its models bound
+to the workspace's Inference Gateway, the optional `environment` merged on top — and fills the target
+in: `agent_import_path` becomes `FabricInstalledAgent` (so any task image works) and
+`agent_kwargs.fabric_config` carries the whole translated config, with `fabric_package` derived from
+the harness and pinned to the platform's Fabric version unless you set it. Installing the agent into
+each task container takes minutes the first time, so raise `agent_setup_timeout_multiplier` as the
+example does — Harbor's default is tuned for prebuilt agents. The persisted job spec
+shows the filled-in target; the job never looks the agent up. If the agent's config refers to skills
+or prompts by relative path, its Ethos FileSet is staged into the job and uploaded into every task
+container as the Fabric config bundle.
+
+`environment` takes the same spec a deployment does — redirect the agent's declared MCP servers to
+mocks, add process env, bind secrets by reference — with one Harbor-specific caveat: fulfilment URLs
+must be reachable from *inside* the task container, so `localhost` on the host is not. The same is
+true of the Inference Gateway itself on a laptop, where the platform binds to `localhost`: point
+`environment.model_provider_override.base_url` at the gateway through `host.docker.internal` for a
+local run. `agent_model_name` cannot be combined with `agent` — a different model is a different
+registered agent.
 
 ## Next steps
 

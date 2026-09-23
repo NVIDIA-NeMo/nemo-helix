@@ -29,7 +29,7 @@ import logging
 import os
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import DEFAULT_API_KEY_ENV
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NVIDIA_MODEL_BASE_URL
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
 from pydantic import JsonValue
 
@@ -41,26 +41,47 @@ NEMO_FABRIC_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:
 DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 
+#: Credential variable and endpoint for the providers this example knows how to reach.
+PROVIDERS: dict[str, tuple[str, str | None]] = {
+    "nvidia": ("NVIDIA_API_KEY", NVIDIA_MODEL_BASE_URL),
+    "openai": ("OPENAI_API_KEY", None),
+}
+
+
 def api_key_env_for(model: str, override: str | None) -> str:
     """The environment variable holding the credential for ``model``'s provider."""
     if override:
         return override
     provider = model.split("/", maxsplit=1)[0] if "/" in model else "openai"
     try:
-        return DEFAULT_API_KEY_ENV[provider]
+        return PROVIDERS[provider][0]
     except KeyError:
         raise SystemExit(f"no default credential variable for provider {provider!r}; pass --api-key-env") from None
 
 
+def fabric_config_for(model: str, api_key_env: str) -> dict[str, JsonValue]:
+    """The whole agent, as the Fabric ``agent.yaml`` mapping ``NemoFabricAgent`` runs verbatim."""
+    provider = model.split("/", maxsplit=1)[0] if "/" in model else "openai"
+    default_model: dict[str, JsonValue] = {"provider": provider, "model": model, "api_key_env": api_key_env}
+    base_url = PROVIDERS.get(provider, (None, None))[1]
+    if base_url is not None:
+        default_model["base_url"] = base_url
+    return {
+        "metadata": {"name": "hello-world-deepagents"},
+        "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+        "models": {"default": default_model},
+    }
+
+
 async def _main(jobs_dir: Path, *, model: str, api_key_env: str, job_name: str | None) -> None:
     agent_kwargs: dict[str, JsonValue] = {
-        "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
+        # The agent itself: harness, model, endpoint, credential variable. Skills, MCP servers, and
+        # telemetry would go in here too -- NemoFabricAgent runs the config as given.
+        "fabric_config": fabric_config_for(model, api_key_env),
         "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
         # The task image's working directory; Fabric's default `/testbed` does not exist there.
         "fabric_workspace": "/app",
     }
-    if api_key_env != DEFAULT_API_KEY_ENV.get(model.split("/", maxsplit=1)[0]):
-        agent_kwargs["fabric_model_api_key_env"] = api_key_env
     config = HarborRuntimeConfig(
         jobs_dir=jobs_dir,
         job_name=job_name,
@@ -96,7 +117,7 @@ def main() -> None:
         "--api-key-env",
         default=None,
         help="Environment variable holding the model API key. Defaults per provider: "
-        + ", ".join(f"{provider} -> {name}" for provider, name in DEFAULT_API_KEY_ENV.items()),
+        + ", ".join(f"{provider} -> {name}" for provider, (name, _) in PROVIDERS.items()),
     )
     args = parser.parse_args()
     api_key_env = api_key_env_for(args.model, args.api_key_env)

@@ -163,6 +163,18 @@ target is a `ModelTarget`, `AgentTarget`, `FabricRunnerTarget`,
 `HarborRunnerTarget`, or `GymRunnerTarget`; alternatively provide precomputed
 `trials`. Provide exactly one of `target` or `trials`.
 
+A `FabricRunnerTarget` or `HarborRunnerTarget` may name a registered agent
+(`nemo agents create`) instead of describing one: `{"kind": "fabric",
+"agent": "<name>"}` in place of `config`, or `{"kind": "harbor", "agent":
+"<name>"}` in place of `agent_import_path`. At submit time the service resolves
+the agent exactly as a deployment would — models bound to the workspace
+Inference Gateway, no credentials in the spec — and runs it fresh for every
+trial; it never calls an existing deployment. An optional `environment` (the
+same spec `nemo agents deploy` takes) redirects the agent's declared MCP servers
+to mocks, adds process env, and binds secrets by reference. Only
+`nemo-agents-spec-v1` agents resolve; a different model is a different agent,
+so there is no model override.
+
 Submission accepts inline tasks or a stored `TasksetRef`. Stored tasksets are
 resolved in the target workspace.
 
