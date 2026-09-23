@@ -174,48 +174,6 @@ def test_build_agent_eval_tasks_preserves_judge_api_key_env(tmp_path: Path) -> N
     assert metric.model.api_key_secret.root == "NVIDIA_API_KEY"
 
 
-def test_build_agent_eval_tasks_passes_judge_inference_params(tmp_path: Path) -> None:
-    dataset = tmp_path / "rows.json"
-    dataset.write_text('[{"id": "1", "question": "q?", "answer": "a"}]\n', encoding="utf-8")
-    payload = _payload(dataset)
-    payload["eval"]["evaluators"]["accuracy"]["inference"] = {
-        "max_tokens": 256,
-        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
-    }
-
-    tasks = build_agent_eval_tasks(payload)
-
-    metric = tasks[0].metrics[0]
-    assert isinstance(metric, TunableRagEvaluatorMetric)
-    assert metric.inference is not None
-    assert metric.inference.model_dump(exclude_none=True) == {
-        "max_tokens": 256,
-        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
-    }
-
-
-def test_build_agent_eval_tasks_leaves_judge_inference_unset_by_default(tmp_path: Path) -> None:
-    dataset = tmp_path / "rows.json"
-    dataset.write_text('[{"id": "1", "question": "q?", "answer": "a"}]\n', encoding="utf-8")
-
-    tasks = build_agent_eval_tasks(_payload(dataset))
-
-    metric = tasks[0].metrics[0]
-    assert isinstance(metric, TunableRagEvaluatorMetric)
-    assert metric.inference is None
-
-
-@pytest.mark.parametrize("inference", ["enable_thinking=false", {"max_tokens": 0}])
-def test_build_agent_eval_tasks_rejects_invalid_judge_inference(tmp_path: Path, inference: object) -> None:
-    dataset = tmp_path / "rows.json"
-    dataset.write_text('[{"id": "1", "question": "q?", "answer": "a"}]\n', encoding="utf-8")
-    payload = _payload(dataset)
-    payload["eval"]["evaluators"]["accuracy"]["inference"] = inference
-
-    with pytest.raises(StudyDriverError, match="tunable_rag_evaluator inference"):
-        build_agent_eval_tasks(payload)
-
-
 def test_reduce_agent_eval_scores_averages_requested_output() -> None:
     scores = [
         AgentEvalTaskScore(

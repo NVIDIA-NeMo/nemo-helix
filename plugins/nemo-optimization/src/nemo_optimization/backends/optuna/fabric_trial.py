@@ -24,7 +24,6 @@ from nemo_evaluator_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluator
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_TRACE
 from nemo_evaluator_sdk.values.models import Model
-from nemo_evaluator_sdk.values.params import InferenceParams
 from pydantic import ValidationError
 
 from nemo_optimization.backends.optuna.atif_metadata import build_atif_trial_tags
@@ -289,20 +288,7 @@ def _build_tunable_rag_metric(payload: Mapping[str, Any], evaluator: Mapping[str
         judge_llm_prompt=str(evaluator.get("judge_llm_prompt") or ""),
         default_scoring=bool(evaluator.get("default_scoring", True)),
         default_score_weights=dict(evaluator.get("default_score_weights") or {}),
-        inference=_judge_inference(evaluator),
     )
-
-
-def _judge_inference(evaluator: Mapping[str, Any]) -> InferenceParams | None:
-    raw = evaluator.get("inference")
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise StudyDriverError(f"tunable_rag_evaluator inference must be a mapping, got {raw!r}.")
-    try:
-        return InferenceParams.model_validate(dict(raw))
-    except ValidationError as exc:
-        raise StudyDriverError(f"tunable_rag_evaluator inference is invalid: {exc}") from exc
 
 
 def _model_from_fabric(payload: Mapping[str, Any], model_name: str) -> Model:
