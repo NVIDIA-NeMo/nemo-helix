@@ -11,6 +11,7 @@ const renderStart = () => {
   return { onContinue };
 };
 
+/** The drafting step's own Continue; the landing page no longer has one. */
 const continueButton = () => screen.getByRole('button', { name: /continue/i });
 
 describe('CreateFilesetStart', () => {
@@ -40,48 +41,27 @@ describe('CreateFilesetStart', () => {
     expect(screen.getByText('Intermediate')).toBeInTheDocument();
   });
 
-  it('keeps Continue disabled until something is picked', async () => {
-    const user = userEvent.setup();
-    renderStart();
-    expect(continueButton()).toBeDisabled();
-
-    await user.click(screen.getByText('Build from scratch'));
-    expect(continueButton()).toBeEnabled();
-  });
-
-  it('hands "from scratch" straight over', async () => {
+  it('hands "from scratch" over on the click itself', async () => {
     const user = userEvent.setup();
     const { onContinue } = renderStart();
 
     await user.click(screen.getByText('Build from scratch'));
-    await user.click(continueButton());
 
-    expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
+    // No confirm step: the pick is the action.
+    expect(onContinue).toHaveBeenCalledExactlyOnceWith({ optionId: 'scratch' });
+    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
   });
 
-  it('hands a template over by id', async () => {
+  it('hands a template over by id on the click itself', async () => {
     const user = userEvent.setup();
     const { onContinue } = renderStart();
 
     await user.click(screen.getByText('Instruction fine-tuning (SFT)'));
-    await user.click(continueButton());
 
-    expect(onContinue).toHaveBeenCalledWith({
+    expect(onContinue).toHaveBeenCalledExactlyOnceWith({
       optionId: 'template',
       templateId: 'sft-instruction',
     });
-  });
-
-  it('replaces a template selection when an option is picked instead', async () => {
-    const user = userEvent.setup();
-    const { onContinue } = renderStart();
-
-    await user.click(screen.getByText('Instruction fine-tuning (SFT)'));
-    await user.click(screen.getByText('Build from scratch'));
-    await user.click(continueButton());
-
-    // One radio group across both, so the last pick wins rather than both being held.
-    expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
   });
 
   describe('describe with AI', () => {
@@ -91,7 +71,6 @@ describe('CreateFilesetStart', () => {
       const { onContinue } = renderStart();
 
       await user.click(screen.getByText('Describe with AI'));
-      await user.click(continueButton());
 
       expect(
         screen.getByRole('textbox', { name: /what do you want to generate/i })
@@ -104,7 +83,6 @@ describe('CreateFilesetStart', () => {
       renderStart();
 
       await user.click(screen.getByText('Describe with AI'));
-      await user.click(continueButton());
 
       expect(continueButton()).toBeDisabled();
     });
@@ -114,7 +92,6 @@ describe('CreateFilesetStart', () => {
       renderStart();
 
       await user.click(screen.getByText('Describe with AI'));
-      await user.click(continueButton());
       await user.click(screen.getByRole('button', { name: /generate/i }));
 
       expect(await screen.findByText('Choose a model to draft the config.')).toBeInTheDocument();
@@ -127,7 +104,6 @@ describe('CreateFilesetStart', () => {
       const { onContinue } = renderStart();
 
       await user.click(screen.getByText('Describe with AI'));
-      await user.click(continueButton());
       await user.click(screen.getByRole('button', { name: /back/i }));
 
       expect(screen.getByText('Build from scratch')).toBeInTheDocument();

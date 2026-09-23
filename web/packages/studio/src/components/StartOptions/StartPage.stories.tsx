@@ -4,7 +4,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { Box, Plus, Sparkles, Upload } from 'lucide-react';
-import { useState } from 'react';
 
 const meta: Meta<typeof StartPage> = {
   component: StartPage,
@@ -53,7 +52,6 @@ const group = (id: string, title: string, names: string[]) => ({
 });
 
 const Demo = (args: Partial<React.ComponentProps<typeof StartPage>>) => {
-  const [value, setValue] = useState<string | null>(null);
   return (
     <div className="h-screen">
       <StartPage
@@ -65,10 +63,7 @@ const Demo = (args: Partial<React.ComponentProps<typeof StartPage>>) => {
           group('b', 'Template Group Title', ['Template Name', 'Template Name']),
         ]}
         templatesTag={{ label: 'Intermediate', color: 'gray', kind: 'solid' }}
-        value={value}
-        onChange={setValue}
-        canContinue={value !== null}
-        onContinue={() => undefined}
+        onSelect={() => undefined}
         {...args}
       />
     </div>
@@ -108,7 +103,7 @@ export const AccentedGroups: Story = {
   ),
 };
 
-/** Locked while the picked entry point is being acted on. */
+/** Locked while the picked entry point is being acted on; the picked tile reports progress. */
 export const Working: Story = {
-  render: () => <Demo disabled continueLoading canContinue={false} continueLabel="Setting up…" />,
+  render: () => <Demo disabled busyId="a-Template Name" busyLabel="Setting up…" />,
 };
