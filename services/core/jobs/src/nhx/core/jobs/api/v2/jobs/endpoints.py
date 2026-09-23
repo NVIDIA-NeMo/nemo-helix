@@ -9,7 +9,8 @@ import re
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -20,7 +21,6 @@ from nhx.common.entities.client import EntityConflictError, EntityNotFoundError,
 from nhx.common.jobs.docker import validate_gpu_available_for_docker
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.jobs.log_client import JobLogsClient, dep_job_logs_client
-from nhx.common.jobs.result_manager import download_from_result_info
 from nhx.common.jobs.schemas import (
     HelixJobListResultResponse,
     HelixJobLogPage,
@@ -31,8 +31,7 @@ from nhx.common.jobs.schemas import (
     InvalidPageCursorError,
 )
 from nhx.common.observability import scoped_app_ctx
-from nhx.common.service.dependencies import get_sdk_client
-from nhx.core.jobs.api.dependencies import dep_dispatcher
+from nhx.core.jobs.api.dependencies import dep_dispatcher, dep_files_client
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
     HelixJobListSortField,
@@ -263,7 +262,6 @@ async def create_job(
     request: CreateHelixJobRequest,
     auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
 ) -> HelixJobResponse:
     """Create a new platform job."""
     platform_spec = translate_cpu_container_steps_to_subprocess(
@@ -277,7 +275,6 @@ async def create_job(
             request,
             workspace,
             auth_context=AuthContext.from_principal(auth_client.principal),
-            sdk=sdk,
         )
     except JobOutputLocationError as exc:
         logger.info("Invalid output_location for workspace '%s'", sanitize_for_log(workspace), exc_info=True)
@@ -724,7 +721,7 @@ async def download_job_result(
     workspace: str,
     background_tasks: BackgroundTasks,
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files_client: AsyncFilesClient = Depends(dep_files_client),
 ) -> FileResponse:
     """Download a job result file."""
     with scoped_app_ctx(JobContext(id=job, result_name=name)):
@@ -740,7 +737,7 @@ async def download_job_result(
             job_name=job,
             workspace=workspace,
             artifact_url=result.artifact_url,
-            sdk=sdk,
+            files_client=files_client,
         )
         background_tasks.add_task(lambda: tmp_dir_path.cleanup_tmp_dir())
         return FileResponse(path=tmp_dir_path.path, filename=filename, background=background_tasks)

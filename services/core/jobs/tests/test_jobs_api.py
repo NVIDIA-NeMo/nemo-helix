@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from httpx import AsyncClient
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.types import HelixJobTaskUpdate
@@ -1089,7 +1090,7 @@ async def test_job_result_download(
     ).data()
 
     with patch(
-        "nhx.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
+        "nemo_helix_plugin.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
     ) as factory:
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
         download_bytes = await download.read()
@@ -1097,7 +1098,8 @@ async def test_job_result_download(
     call_kwargs = factory.call_args.kwargs
     assert call_kwargs["job_name"] == sdk_job_resp.name
     assert call_kwargs["workspace"] == DEFAULT_WORKSPACE
-    assert call_kwargs["sdk"]._client is test_sdk._client
+    assert isinstance(call_kwargs["files_client"], AsyncFilesClient)
+    assert call_kwargs["files_client"]._http is test_sdk._client
 
     # make sure we deleted the temp files on the server
     assert not tmp_dir.exists()
@@ -1110,7 +1112,7 @@ async def test_job_result_download(
     mock_result_manager._tmp_dir = tmp_dir
     mock_result_manager._path = tmp_dir
 
-    with patch("nhx.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
+    with patch("nemo_helix_plugin.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
         tar_content = await download.read()
 
@@ -1469,7 +1471,7 @@ async def test_update_job_step_conflict_sanitizes_log_fields(
 @pytest.mark.asyncio
 async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: CreateHelixJobRequest):
     """Test that global step listing returns steps from all workspaces while workspaced calls are filtered."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock
 
     from nhx.common.entities.client import EntityClient
     from nhx.testing import create_test_client
@@ -1477,8 +1479,6 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-        # Create mock SDK with patched files client
-        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1486,49 +1486,48 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-            # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+        # Create dispatcher with the multi-workspace store
+        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
 
-            # Create jobs in "default" workspace
-            job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+        # Create jobs in "default" workspace
+        job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-            job2_request = CreateHelixJobRequest(
-                name="test-job-2",
-                description="Second test job",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
+        job2_request = CreateHelixJobRequest(
+            name="test-job-2",
+            description="Second test job",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
 
-            # Create jobs in "other-workspace"
-            job3_request = CreateHelixJobRequest(
-                name="test-job-3",
-                description="Third test job in other workspace",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
+        # Create jobs in "other-workspace"
+        job3_request = CreateHelixJobRequest(
+            name="test-job-3",
+            description="Third test job in other workspace",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
 
-            job4_request = CreateHelixJobRequest(
-                name="test-job-4",
-                description="Fourth test job in other workspace",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
+        job4_request = CreateHelixJobRequest(
+            name="test-job-4",
+            description="Fourth test job in other workspace",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
 
         # Test global listing with wildcard - should return steps from all workspaces
         step_filter = HelixJobStepsListFilter()

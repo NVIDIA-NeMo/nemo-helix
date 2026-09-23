@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.capabilities import reset_capability_cache
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import ContainerSpec as FactoryContainerSpec
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec as FactoryCPUExecutionProviderSpec
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable as FactoryEnvironmentVariable
@@ -140,11 +141,12 @@ def mock_store():
 
 
 @pytest_asyncio.fixture()
-async def mock_dispatcher(mock_store, mock_nhx_client) -> JobDispatcher:
-    """Create a JobDispatcher instance for testing with mock EntityStore."""
+async def mock_dispatcher(mock_store, mock_files_client, mock_secrets_client) -> JobDispatcher:
+    """Create a JobDispatcher instance for testing with mock EntityStore and typed clients."""
     return JobDispatcher(
         store=mock_store,
-        sdk=mock_nhx_client,
+        files=mock_files_client,
+        secrets=mock_secrets_client,
     )
 
 
@@ -268,7 +270,7 @@ def sample_job_dict():
 
 
 @fixture
-def _mock_files_client():
+def mock_files_client():
     """Create a mock AsyncFilesClient for testing."""
     mock_files = AsyncMock()
     mock_fileset = MagicMock()
@@ -309,13 +311,19 @@ def mock_jobs_client():
 
 
 @fixture
-def mock_nhx_client(_mock_files_client, mock_jobs_client):
-    """Create a flexible mock of NeMoHelix for testing.
+def mock_secrets_client():
+    """Create a mock AsyncSecretsClient for testing."""
+    return AsyncMock()
 
-    ``client_from_platform`` is patched in the dispatcher (returns the files client)
-    and in every controller module that builds a typed Jobs client. The controller
-    patches dispatch on the requested client type: ``JobsClient`` requests resolve to
-    ``mock_jobs_client``; anything else falls back to the files client.
+
+@fixture
+def mock_nhx_client(mock_files_client, mock_jobs_client):
+    """Create a flexible mock of NeMoHelix for the controllers.
+
+    ``client_from_platform`` is patched in every controller module that builds a
+    typed Jobs client. The patches dispatch on the requested client type:
+    ``JobsClient`` requests resolve to ``mock_jobs_client``; anything else falls
+    back to the files client.
     """
     mock_client = MagicMock()
     mock_client.beta = MagicMock()
@@ -325,10 +333,9 @@ def mock_nhx_client(_mock_files_client, mock_jobs_client):
     def _dispatch(_sdk, client_type):
         if client_type is JobsClient:
             return mock_jobs_client
-        return _mock_files_client
+        return mock_files_client
 
-    patchers = [patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=_mock_files_client)]
-    patchers += [
+    patchers = [
         patch(f"{module}.client_from_platform", side_effect=_dispatch) for module in _JOBS_CLIENT_CONTROLLER_MODULES
     ]
     with ExitStack() as stack:
@@ -583,7 +590,7 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
     # Mock the config.executors to have the test execution profiles, including
     # subprocess/default for cpu/default to subprocess/default translation.
     from nhx.common.auth.middleware import AuthorizationMiddleware
-    from nhx.common.service.dependencies import get_sdk_client
+    from nhx.common.service.dependencies import get_nemo_client, get_sdk_client
 
     with subprocess_job_executor_patch(job_config_with_many_profiles.executors):
         app = FastAPI()
@@ -599,12 +606,15 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
             def override_get_entity_client():
                 return mock_store
 
-            # Create SDK for dependency injection
+            # Clients for dependency injection: job_route_factory still resolves
+            # get_sdk_client, the jobs routes resolve get_nemo_client.
             test_sdk = AsyncNeMoHelix(base_url=ac.base_url, http_client=ac)
+            test_nemo_client = AsyncNemoClient(base_url=str(ac.base_url), http_client=ac)
 
             app.dependency_overrides[dep_dispatcher] = override_get_dispatcher
             app.dependency_overrides[get_entity_client] = override_get_entity_client
             app.dependency_overrides[get_sdk_client] = lambda: test_sdk
+            app.dependency_overrides[get_nemo_client] = lambda: test_nemo_client
 
             # Mount under /apis/jobs so SDK requests (e.g. /apis/jobs/v2/workspaces/default/jobs) hit the app
             api_prefix = "/apis/jobs"
