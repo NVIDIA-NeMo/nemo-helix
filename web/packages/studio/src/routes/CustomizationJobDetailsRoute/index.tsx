@@ -122,7 +122,6 @@ export const CustomizationJobDetailsRoute: FC = () => {
           }
           slotActions={
             <DetailActions
-              model={output_model}
               status={status}
               backend={backend}
               name={customizationJobName}
