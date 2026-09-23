@@ -69,6 +69,7 @@ describe('launchOptimizeStudy', () => {
         agent: 'hermes',
         workspace: 'ws',
       },
+      custom_fields: { studio_bundle_fileset: filesetName },
     });
     expect(filesDeleteFileset).not.toHaveBeenCalled();
   });

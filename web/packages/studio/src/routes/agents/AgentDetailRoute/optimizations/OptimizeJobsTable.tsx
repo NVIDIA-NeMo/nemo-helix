@@ -17,6 +17,8 @@ import {
 } from '@nemo/sdk/generated/agents/agents';
 import type { OptimizeJob, OptimizeJobsListFilter } from '@nemo/sdk/generated/agents/schema';
 import { Banner, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { rollbackFileset } from '@studio/api/agents/agentSpecFileset';
+import { studioBundleFileset } from '@studio/api/agents/useLaunchOptimizeStudy';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -201,6 +203,8 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
           onDelete={async () => {
             try {
               await deleteStudy({ workspace, name: deleteTarget.name });
+              const bundle = studioBundleFileset(deleteTarget);
+              if (bundle) await rollbackFileset(workspace, bundle);
               return true;
             } catch {
               return false;

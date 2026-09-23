@@ -164,7 +164,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             data-testid="study-in-progress"
           >
             <Spinner size="medium" aria-label={isQueued ? 'Study queued' : 'Study running'} />
-            <Text kind="body/regular/md" className="text-secondary">
+            <Text kind="body/regular/md" className="text-secondary" role="status">
               {isQueued
                 ? 'Waiting for the study to start. Trials appear once it finishes.'
                 : 'Trials appear once the study finishes.'}

@@ -21,8 +21,16 @@ export const uploadFilesetEntries = async (
   const queue = [...entries];
   const worker = async (): Promise<void> => {
     for (let entry = queue.shift(); entry; entry = queue.shift()) {
-      const blob = new Blob([await entry.file.arrayBuffer()], { type: 'application/octet-stream' });
-      await filesUploadFile(workspace, filesetName, entry.path, blob);
+      try {
+        const blob = new Blob([await entry.file.arrayBuffer()], {
+          type: 'application/octet-stream',
+        });
+        await filesUploadFile(workspace, filesetName, entry.path, blob);
+      } catch (error) {
+        // Stop the other workers; the caller rolls the fileset back on this error.
+        queue.length = 0;
+        throw error;
+      }
     }
   };
 

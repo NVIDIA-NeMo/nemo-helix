@@ -16,6 +16,14 @@ export interface LaunchOptimizeStudyParams {
   optimizeConfig: string;
 }
 
+// Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
+const STUDIO_BUNDLE_FIELD = 'studio_bundle_fileset';
+
+export const studioBundleFileset = (job: OptimizeJob): string | undefined => {
+  const name = job.custom_fields?.[STUDIO_BUNDLE_FIELD];
+  return typeof name === 'string' && name ? name : undefined;
+};
+
 // Every launch stages its own bundle, so re-running a study never mutates the inputs of an earlier one.
 export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): string =>
   `${agentName}-optimize-${now.toString(36)}`;
@@ -43,6 +51,7 @@ export const launchOptimizeStudy = async ({
         agent: agentName,
         workspace,
       },
+      custom_fields: { [STUDIO_BUNDLE_FIELD]: filesetName },
     });
   } catch (error) {
     await rollbackFileset(workspace, filesetName);

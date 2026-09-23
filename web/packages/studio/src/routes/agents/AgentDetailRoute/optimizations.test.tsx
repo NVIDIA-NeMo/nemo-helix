@@ -5,6 +5,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
 });
 
+import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -24,8 +25,12 @@ const workspace = workspace1.workspace;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/optimize`;
 const OPTIMIZE_JOB_URL = `${OPTIMIZE_JOBS_URL}/:name`;
 
-const listOnly = (studyName: string) => {
-  const data = mockOptimizeJobs.filter((job) => job.name === studyName);
+const FILESET_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`;
+
+const listOnly = (studyName: string, overrides: Partial<OptimizeJob> = {}) => {
+  const data = mockOptimizeJobs
+    .filter((job) => job.name === studyName)
+    .map((job) => ({ ...job, ...overrides }));
   server.use(
     http.get(OPTIMIZE_JOBS_URL, () =>
       HttpResponse.json({
@@ -109,23 +114,51 @@ describe('AgentDetailRoute optimizations tab', () => {
     }
   });
 
-  it('deletes a finished study from its row actions', async () => {
-    const user = userEvent.setup();
-    const deleted: string[] = [];
+  const captureDeletes = () => {
+    const deleted = { studies: [] as string[], filesets: [] as string[] };
     server.use(
       http.delete(OPTIMIZE_JOB_URL, ({ params }) => {
-        deleted.push(String(params.name));
+        deleted.studies.push(String(params.name));
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.delete(FILESET_URL, ({ params }) => {
+        deleted.filesets.push(String(params.name));
         return new HttpResponse(null, { status: 204 });
       })
     );
+    return deleted;
+  };
+
+  const deleteFromRow = async (user: ReturnType<typeof userEvent.setup>, studyName: string) => {
+    await user.click(await openRowActions(user, studyName));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Optimization Study' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+  };
+
+  it('deletes a finished study from its row actions and leaves filesets alone', async () => {
+    const user = userEvent.setup();
+    const deleted = captureDeletes();
     listOnly('brevity-sweep-3');
     renderDetail();
 
-    await user.click(await openRowActions(user, 'brevity-sweep-3'));
-    const dialog = await screen.findByRole('dialog', { name: 'Delete Optimization Study' });
-    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await deleteFromRow(user, 'brevity-sweep-3');
 
-    await waitFor(() => expect(deleted).toEqual(['brevity-sweep-3']));
+    await waitFor(() => expect(deleted.studies).toEqual(['brevity-sweep-3']));
+    expect(deleted.filesets).toEqual([]);
+  });
+
+  it('deletes the bundle fileset Studio created for the study', async () => {
+    const user = userEvent.setup();
+    const deleted = captureDeletes();
+    listOnly('brevity-sweep-3', {
+      custom_fields: { studio_bundle_fileset: 'react-agent-optimize-abc123' },
+    });
+    renderDetail();
+
+    await deleteFromRow(user, 'brevity-sweep-3');
+
+    await waitFor(() => expect(deleted.filesets).toEqual(['react-agent-optimize-abc123']));
+    expect(deleted.studies).toEqual(['brevity-sweep-3']);
   });
 
   it('does not offer delete while a study is still running', async () => {

@@ -44,6 +44,6 @@ describe('AgentOptimizationDetailRoute', () => {
 
     const inProgress = await screen.findByTestId('study-in-progress');
     expect(within(inProgress).getByLabelText(spinnerLabel)).toBeInTheDocument();
-    expect(inProgress).toHaveTextContent(message);
+    expect(within(inProgress).getByText(message)).toHaveAttribute('role', 'status');
   });
 });
