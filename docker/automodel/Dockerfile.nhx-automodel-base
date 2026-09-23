@@ -17,6 +17,7 @@ ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.07-py3
 
 FROM causal-conv1d-wheel-image AS causal-conv1d-wheel-src
 FROM mamba-ssm-wheel-image AS mamba-ssm-wheel-src
+FROM magi-attention-wheel-image AS magi-attention-wheel-src
 
 FROM alpine/git AS automodel-clone
 ARG AUTOMODEL_BRANCH
@@ -51,8 +52,8 @@ RUN cd /opt/Automodel && \
 # OpenCV and FFmpeg-bearing wheels (av, imageio-ffmpeg, decord) in the opt-in
 # vlm-media / diffusion-media extras; skipping them keeps those wheels out. We'll need
 # to re-examine when Customizer supports VLM and FFmpeg 8.xx only releases every 6 months
-# The magi group (MagiAttention) is a git-only CUDA build that Customizer does not
-# expose yet, so skip it rather than compiling it here.
+# The magi group is a git-only CUDA build; it is installed below from the prebuilt
+# magi-attention-wheel image instead.
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd /opt/Automodel && \
     UV_HTTP_TIMEOUT=120 uv sync --locked \
@@ -73,9 +74,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install AFTER Automodel sync - uv sync drops packages not in its lockfile.
 RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,readonly \
     --mount=from=mamba-ssm-wheel-src,target=/tmp/mamba-ssm-wheel-src,readonly \
+    --mount=from=magi-attention-wheel-src,target=/tmp/magi-attention-wheel-src,readonly \
     uv pip install --no-cache-dir --no-deps \
     /tmp/causal-conv1d-wheel-src/wheels/cu13.3/causal_conv1d-*cp312*.whl \
-    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl
+    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl \
+    /tmp/magi-attention-wheel-src/wheels/cu13.3/magi_attention-*cp312*.whl
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone https://github.com/fanshiqing/grouped_gemm.git /tmp/grouped_gemm && \
