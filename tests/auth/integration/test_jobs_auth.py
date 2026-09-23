@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 pytestmark = [
     pytest.mark.subprocess_only,
     pytest.mark.e2e_config("e2e/configs/local-subprocess.yaml", {"auth": {"enabled": True}}),
+    # services_pool_sdk is module-scoped: keep these tests on one xdist worker so they
+    # share the already-booted service pool instead of each worker re-provisioning it.
+    pytest.mark.xdist_group("jobs_auth"),
 ]
 
 
