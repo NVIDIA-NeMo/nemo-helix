@@ -13,6 +13,7 @@ from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
+    may_use_from_workspace,
 )
 from nmp.core.inference_gateway.api.dependencies import (
     global_http_client,
@@ -127,6 +128,21 @@ def resolve_vm_for_model(
     return virtual_model_cache.get(workspace, base_model_name)
 
 
+async def resolve_vm_for_request(
+    virtual_model_cache: VirtualModelCache,
+    workspace: str,
+    model_name: str,
+    permission: str,
+) -> "SDKVirtualModel | None":
+    """:func:`resolve_vm_for_model` for a caller: a VirtualModel shared in from another
+    workspace resolves only if the caller holds *permission* where it lives, and is
+    otherwise indistinguishable from a missing one."""
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    if virtual_model is not None and not await may_use_from_workspace(workspace, virtual_model.workspace, permission):
+        return None
+    return virtual_model
+
+
 class OpenAIModelResp(BaseModel):
     """Duplicated structure for an OpenAI /v1/models individual model response."""
 
@@ -202,7 +218,7 @@ async def openai_get_model(
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
-    if resolve_vm_for_model(virtual_model_cache, workspace, model_name) is None:
+    if await resolve_vm_for_request(virtual_model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION) is None:
         raise_virtual_model_not_found(workspace, model_name)
 
     return OpenAIModelResp(
@@ -298,7 +314,7 @@ async def openai_proxy(
 
     validate_model_entity_name(model_name, field_name="model")
 
-    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    virtual_model = await resolve_vm_for_request(virtual_model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION)
     logger.debug(
         "openai_proxy: workspace=%s model_name=%s body_model=%s vm_hit=%s",
         workspace,
@@ -320,5 +336,6 @@ async def openai_proxy(
         http_client=http_client,
         model_cache=model_cache,
         registry=registry,
+        permission=OPENAI_EXEC_PERMISSION,
         request_nemo_client=nemo_client,
     )

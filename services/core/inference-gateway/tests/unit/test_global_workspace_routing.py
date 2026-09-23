@@ -6,12 +6,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from nemo_platform.types.inference import ModelProvider
 from nemo_platform.types.inference.virtual_model import VirtualModel
+from nmp.common.auth.dependencies import auth_client_context
+from nmp.common.auth.models import Principal
 from nmp.common.entities.global_workspace import workspace_lookup_order
+from nmp.core.inference_gateway.api.authz import OPENAI_EXEC_PERMISSION
 from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nmp.core.inference_gateway.api.v2.openai import resolve_vm_for_model
+from nmp.core.inference_gateway.api.v2.openai import resolve_vm_for_model, resolve_vm_for_request
 from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
@@ -123,3 +128,41 @@ class TestModelCache:
         cache = ModelCache()
         cache.model_entity_info_map[("team-a", "llm")] = ModelEntityInfo(workspace="team-a", name="llm")
         assert cache.get_from_model_entity("team-b", "llm") is None
+
+
+class TestResolveVMForRequest:
+    """A shared VirtualModel resolves only for a caller entitled in the global workspace."""
+
+    @pytest.fixture(autouse=True)
+    def _user(self):
+        client = MagicMock()
+        client.auth_enabled = True
+        client.principal = Principal(id="user:bob", email="bob@example.com")
+        client.has_permissions = AsyncMock(return_value=False)
+        token = auth_client_context.set(client)
+        yield client
+        auth_client_context.reset(token)
+
+    async def test_shared_vm_is_hidden_from_a_caller_without_access_to_the_global_workspace(self, _user) -> None:
+        cache = VirtualModelCache()
+        cache.rebuild([_make_vm("default", "shared-llm")])
+
+        assert await resolve_vm_for_request(cache, "team-a", "shared-llm", OPENAI_EXEC_PERMISSION) is None
+        _user.has_permissions.assert_awaited_once_with("default", [OPENAI_EXEC_PERMISSION])
+
+    async def test_shared_vm_resolves_for_an_entitled_caller(self, _user) -> None:
+        _user.has_permissions.return_value = True
+        cache = VirtualModelCache()
+        cache.rebuild([_make_vm("default", "shared-llm")])
+
+        resolved = await resolve_vm_for_request(cache, "team-a", "shared-llm", OPENAI_EXEC_PERMISSION)
+
+        assert resolved is not None
+        assert resolved.workspace == "default"
+
+    async def test_local_vm_needs_no_access_to_the_global_workspace(self, _user) -> None:
+        cache = VirtualModelCache()
+        cache.rebuild([_make_vm("team-a", "llm")])
+
+        assert await resolve_vm_for_request(cache, "team-a", "llm", OPENAI_EXEC_PERMISSION) is not None
+        _user.has_permissions.assert_not_awaited()
