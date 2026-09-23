@@ -12,7 +12,10 @@ from fastapi.testclient import TestClient
 from nmp.common.api.common import Page, PaginationData
 from nmp.common.auth import AuthClient, Principal, get_auth_client
 from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
+from nmp.core.models.api.service.model_deployment_config_service import (
+    ModelDeploymentConfigService,
+    ShadowedSharedModelError,
+)
 from nmp.core.models.api.v2.deployment_configs import router
 from nmp.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED as _DEPLOYMENTS_NOT_ENABLED
 from nmp.core.models.schemas import (
@@ -269,6 +272,25 @@ def test_page_size_parameter_validation(client, mock_deployment_config_service, 
     # Valid page size
     response = client.get("/v2/workspaces/default/deployment-configs?page_size=10")
     assert response.status_code == 200
+
+
+def test_create_deployment_config_shadowed_shared_model_returns_422(client, mock_deployment_config_service):
+    mock_deployment_config_service.create_deployment_config.side_effect = ShadowedSharedModelError(
+        "Workspace 'team-a' has its own model named 'base'"
+    )
+
+    response = client.post(
+        "/v2/workspaces/team-a/deployment-configs",
+        json={
+            "name": "my-config",
+            "engine": "nim",
+            "model_spec": {"model_type": "llm", "model_namespace": "default", "model_name": "base"},
+            "executor_config": {"gpu": 1, "image_name": "nvcr.io/nvidia/nim/llm", "image_tag": "latest"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "has its own model named 'base'" in response.json()["detail"]
 
 
 def test_create_deployment_config_entity_validation_error_returns_422(client, mock_deployment_config_service):

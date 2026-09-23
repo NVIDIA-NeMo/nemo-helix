@@ -15,6 +15,7 @@ from nmp.core.models.api.permissions import check_model_entity_access
 from nmp.core.models.api.service.model_deployment_config_service import (
     ModelDeploymentConfigService,
     ReferentialIntegrityError,
+    ShadowedSharedModelError,
 )
 from nmp.core.models.api.service.model_entity_service import _has_tool_call_plugin, validate_tool_call_plugin_allowed
 from nmp.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, deployments_enabled
@@ -108,6 +109,9 @@ async def create_deployment_config(
     except PermissionError as e:
         logger.warning(f"Permission denied during deployment config creation: {e}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ShadowedSharedModelError as e:
+        logger.warning(f"Refused deployment config in {workspace}: {e}")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except ValueError as e:
         if "already exists" in str(e).lower():
             logger.warning(f"Deployment config already exists: {workspace}/{config_input.name}")
@@ -264,6 +268,9 @@ async def update_deployment_config(
     except PermissionError as e:
         logger.warning(f"Permission denied during deployment config update: {e}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ShadowedSharedModelError as e:
+        logger.warning(f"Refused deployment config in {workspace}: {e}")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except ValueError as e:
         logger.exception("Failed to update deployment config")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

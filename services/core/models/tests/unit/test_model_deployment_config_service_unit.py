@@ -8,10 +8,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import EntityClient
+from nmp.common.entities.client import EntityClient, EntityNotFoundError
 from nmp.core.models.api.service.model_deployment_config_service import (
     ModelDeploymentConfigService,
     ReferentialIntegrityError,
+    ShadowedSharedModelError,
 )
 from nmp.core.models.entities import ModelDeployment as ModelDeploymentEntity
 from nmp.core.models.entities import ModelDeploymentConfig as ModelDeploymentConfigEntity
@@ -761,3 +762,91 @@ async def test_nim_deployment_configuration_preserved(deployment_config_service,
     assert result.executor_config.disk_size == "100Gi"
     assert result.executor_config.image_name == "nvcr.io/nvidia/nim/custom-llm"
     assert result.executor_config.image_tag == "v1.2.3"
+
+
+def _shared_base_spec() -> ModelDeploymentConfigModelSpec:
+    return ModelDeploymentConfigModelSpec(model_type=ModelType.LLM, model_namespace="default", model_name="base")
+
+
+def _models_by_workspace(*workspaces: str):
+    async def get(*_args, **kwargs):
+        if kwargs["workspace"] not in workspaces:
+            raise EntityNotFoundError("not found")
+        model = MagicMock(workspace=kwargs["workspace"])
+        model.name = kwargs["name"]
+        return model
+
+    return get
+
+
+@pytest.mark.asyncio
+async def test_create_refuses_shared_model_shadowed_by_a_local_model(
+    deployment_config_service, mock_entity_client, sample_executor_config
+):
+    mock_entity_client.list.return_value = MagicMock(data=[])
+    mock_entity_client.get.side_effect = _models_by_workspace("default", "team-a")
+    request = CreateModelDeploymentConfigRequest(
+        name="cfg", engine="nim", model_spec=_shared_base_spec(), executor_config=sample_executor_config
+    )
+
+    with pytest.raises(ShadowedSharedModelError, match="'team-a' has its own model named 'base'"):
+        await deployment_config_service.create_deployment_config(request, "team-a")
+
+    mock_entity_client.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_allows_shared_model_without_a_local_namesake(
+    deployment_config_service, mock_entity_client, sample_executor_config, sample_config_entity
+):
+    mock_entity_client.list.return_value = MagicMock(data=[])
+    mock_entity_client.get.side_effect = _models_by_workspace("default")
+    mock_entity_client.create.return_value = sample_config_entity
+    request = CreateModelDeploymentConfigRequest(
+        name="cfg", engine="nim", model_spec=_shared_base_spec(), executor_config=sample_executor_config
+    )
+
+    await deployment_config_service.create_deployment_config(request, "team-a")
+
+    mock_entity_client.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_in_the_global_workspace_is_not_checked(
+    deployment_config_service, mock_entity_client, sample_executor_config, sample_config_entity
+):
+    mock_entity_client.list.return_value = MagicMock(data=[])
+    mock_entity_client.get.side_effect = _models_by_workspace("default")
+    mock_entity_client.create.return_value = sample_config_entity
+    request = CreateModelDeploymentConfigRequest(
+        name="cfg", engine="nim", model_spec=_shared_base_spec(), executor_config=sample_executor_config
+    )
+
+    await deployment_config_service.create_deployment_config(request, "default")
+
+    mock_entity_client.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_refuses_shared_model_shadowed_by_a_local_model(
+    deployment_config_service, mock_entity_client, sample_executor_config, sample_config_entity
+):
+    mock_entity_client.list.return_value = MagicMock(data=[sample_config_entity])
+
+    async def get(*_args, **kwargs):
+        if kwargs.get("local_only"):
+            return MagicMock()
+        return sample_config_entity
+
+    mock_entity_client.get.side_effect = get
+    request = UpdateModelDeploymentConfigRequest(
+        engine="nim",
+        model_spec=ModelDeploymentConfigModelSpec(model_type=ModelType.LLM),
+        executor_config=sample_executor_config,
+        model_entity_id="default/base",
+    )
+
+    with pytest.raises(ShadowedSharedModelError):
+        await deployment_config_service.update_deployment_config("team-a", "test-config", request)
+
+    mock_entity_client.create.assert_not_called()

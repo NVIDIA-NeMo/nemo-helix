@@ -10,6 +10,7 @@ from nemo_platform import PermissionDeniedError
 from nmp.common.api.common import Page, PaginationData
 from nmp.common.api.filter import FilterOperation
 from nmp.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nmp.common.entities.global_workspace import is_global_workspace
 from nmp.core.models.app.utils import parse_model_name_revision as parse_model_name_revision
 from nmp.core.models.entities import Model as ModelEntity
 from nmp.core.models.entities import ModelDeployment as ModelDeploymentEntity
@@ -107,11 +108,44 @@ def _entity_to_schema(entity: ModelDeploymentConfigEntity) -> ModelDeploymentCon
     )
 
 
+class ShadowedSharedModelError(ValueError):
+    """Raised when deploying a global model into a workspace that has its own model of that name."""
+
+
 class ModelDeploymentConfigService:
     """Service layer for ModelDeploymentConfig operations."""
 
     def __init__(self, entity_client: EntityClient):
         self.entity_client = entity_client
+
+    async def _refuse_shadowed_shared_model(
+        self,
+        workspace: str,
+        model_entity_id: str | None,
+        model_spec: ModelDeploymentConfigModelSpec,
+    ) -> None:
+        """A global model deployed elsewhere is routed under the deploying workspace's name for it."""
+        if model_entity_id:
+            model_workspace, model_name, _ = parse_model_name_revision(model_name=model_entity_id)
+        else:
+            model_workspace, model_name, _ = parse_model_name_revision(
+                model_namespace=model_spec.model_namespace,
+                model_name=model_spec.model_name,
+                model_revision=model_spec.model_revision,
+            )
+        if not model_workspace or not model_name:
+            return
+        if not is_global_workspace(model_workspace) or is_global_workspace(workspace):
+            return
+        try:
+            await self.entity_client.get(ModelEntity, workspace=workspace, name=model_name, local_only=True)
+        except EntityNotFoundError:
+            return
+        raise ShadowedSharedModelError(
+            f"Workspace '{workspace}' has its own model named '{model_name}', so a deployment of "
+            f"'{model_workspace}/{model_name}' here would be routed as that model. "
+            f"Rename the local model or deploy from a workspace without one."
+        )
 
     async def _get_latest_version(self, workspace: str, base_name: str) -> int | None:
         """Get the highest version number for a deployment config."""
@@ -176,6 +210,8 @@ class ModelDeploymentConfigService:
 
             except (EntityNotFoundError, PermissionDeniedError) as err:
                 logger.warning(f"Failed to fetch the model entity referenced in the model_spec {err}")
+
+        await self._refuse_shadowed_shared_model(workspace, request.model_entity_id, request.model_spec)
 
         # Create the entity with versioned name
         entity = ModelDeploymentConfigEntity(
@@ -309,6 +345,7 @@ class ModelDeploymentConfigService:
             raise ValueError(f"Deployment config with workspace '{workspace}' and name '{name}' does not exist")
 
         _validate_engine_config(request.engine, request.executor_config, request.model_spec)
+        await self._refuse_shadowed_shared_model(workspace, request.model_entity_id, request.model_spec)
 
         new_version = current.entity_version + 1
 
