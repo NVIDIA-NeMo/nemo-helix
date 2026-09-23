@@ -527,7 +527,11 @@ def _register_package_command(app: typer.Typer) -> None:
             ...,
             "--agent",
             "-c",
-            help="Path to a NAT workflow YAML config file.",
+            help=(
+                "Path to an agent YAML config file: a Fabric agent spec "
+                "('config_format: nemo-agents-spec-v1') or a NAT workflow "
+                "('config_format: nat-workflow-v1', the default when omitted)."
+            ),
             exists=True,
             file_okay=True,
             dir_okay=False,
@@ -605,7 +609,8 @@ def _register_package_command(app: typer.Typer) -> None:
             None,
             "--nat-version",
             help=(
-                "NAT release to install (e.g. '1.7.0').  Strongly recommended: "
+                "NAT release to install (e.g. '1.7.0').  NAT workflow configs only; "
+                "rejected for Fabric agent specs.  Strongly recommended: "
                 "pin explicitly so image tags/labels/deps are reproducible.  "
                 "When omitted, a baked-in default is used and a warning is printed."
             ),
@@ -635,7 +640,7 @@ def _register_package_command(app: typer.Typer) -> None:
             None, "--template", help="Path to an external Jinja2 Dockerfile template."
         ),
     ) -> None:
-        """Package a NAT agent -- render -> validate -> build -> publish.
+        """Package a Fabric or NAT agent -- render -> validate -> build -> publish.
 
         \b
         Progressive pipeline controlled by flags:
