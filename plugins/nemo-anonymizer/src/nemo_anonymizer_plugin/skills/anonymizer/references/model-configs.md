@@ -3,15 +3,15 @@
 
 # Model Configs
 
-`model_configs` is a YAML list that defines the model aliases the plugin resolves through NeMo Platform. `selected_models` can bind those aliases to Anonymizer library roles. The [NVIDIA NeMo Anonymizer library docs](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs) and library skills own the full role list and model-selection semantics.
+`model_configs` is a YAML list that defines the model aliases the plugin resolves through NeMo Helix. `selected_models` can bind those aliases to Anonymizer library roles. The [NVIDIA NeMo Anonymizer library docs](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs) and library skills own the full role list and model-selection semantics.
 
 ## When is `model_configs` required?
 
 | Surface                  | Status                  | `model_configs` required?                                                                                  |
 |--------------------------|-------------------------|------------------------------------------------------------------------------------------------------------|
-| `sdk.anonymizer.preview` | Available (SDK/service) | **Yes** — needed so requests route through the NeMo Platform Inference Gateway instead of build.nvidia.com directly. |
+| `sdk.anonymizer.preview` | Available (SDK/service) | **Yes** — needed so requests route through the NeMo Helix Inference Gateway instead of build.nvidia.com directly. |
 | `nemo anonymizer preview` | Available (plugin svc) | **Yes** — same service path as SDK preview.                                                                |
-| `nemo anonymizer run`    | Available (Jobs worker) | **Yes** — the job routes through the NeMo Platform Inference Gateway.                                      |
+| `nemo anonymizer run`    | Available (Jobs worker) | **Yes** — the job routes through the NeMo Helix Inference Gateway.                                      |
 | Strategy is `Substitute` | n/a                     | Provide a `replacement_generator`-capable alias.                                                           |
 | Mode is `rewrite`        | n/a                     | Provide aliases for the Anonymizer library rewrite roles.                                                  |
 
@@ -22,13 +22,13 @@
 ```yaml
 model_configs:
   - alias: gliner-pii-detector       # name your role bindings will reference
-    provider: nvidia-build           # name of a NeMo Platform inference provider in the target workspace
+    provider: nvidia-build           # name of a NeMo Helix inference provider in the target workspace
     model: nvidia/gliner-pii         # provider-specific model id
     # inference_parameters:          # optional, provider-dependent (temperature, max_tokens, ...)
     #   temperature: 0.0
 ```
 
-The `provider` field is resolved at request time against NeMo Platform. The string format is `provider-name` or `workspace/provider-name`. For provider discovery or creation, refer the user to the platform inference/model-provider docs or the relevant inference/model skill; keep this skill's executable commands limited to Anonymizer workflows.
+The `provider` field is resolved at request time against NeMo Helix. The string format is `provider-name` or `workspace/provider-name`. For provider discovery or creation, refer the user to the platform inference/model-provider docs or the relevant inference/model skill; keep this skill's executable commands limited to Anonymizer workflows.
 
 ## `selected_models` (role bindings)
 

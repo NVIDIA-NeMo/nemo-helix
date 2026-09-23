@@ -8,9 +8,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ .Values.sharedPostgresql.serviceName }}
-  namespace: {{ include "nemo-platform-authentik.namespace" . }}
+  namespace: {{ include "nemo-helix-authentik.namespace" . }}
   labels:
-    {{- include "nemo-platform-authentik.labels" . | nindent 4 }}
+    {{- include "nemo-helix-authentik.labels" . | nindent 4 }}
     app.kubernetes.io/component: shared-postgresql
 spec:
   type: ClusterIP
@@ -20,5 +20,5 @@ spec:
       targetPort: postgresql
       protocol: TCP
   selector:
-    {{- include "nemo-platform-authentik.sharedPostgresql.selectorLabels" . | nindent 4 }}
+    {{- include "nemo-helix-authentik.sharedPostgresql.selectorLabels" . | nindent 4 }}
 {{- end }}

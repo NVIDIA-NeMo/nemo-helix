@@ -11,17 +11,17 @@ from tests.auth_idp.providers import load_provider_configs_by_mode, load_provide
 pytestmark = [pytest.mark.auth_idp]
 
 AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS = {
-    "x-nmp-principal-id",
-    "x-nmp-actor-account-id",
-    "x-nmp-principal-email",
-    "x-nmp-principal-groups",
-    "x-nmp-actor-aliases",
-    "x-nmp-principal-on-behalf-of",
-    "x-nmp-subject-account-id",
-    "x-nmp-subject-aliases",
-    "x-nmp-principal-on-behalf-of-email",
-    "x-nmp-principal-on-behalf-of-groups",
-    "x-nmp-scopes",
+    "x-nhx-principal-id",
+    "x-nhx-actor-account-id",
+    "x-nhx-principal-email",
+    "x-nhx-principal-groups",
+    "x-nhx-actor-aliases",
+    "x-nhx-principal-on-behalf-of",
+    "x-nhx-subject-account-id",
+    "x-nhx-subject-aliases",
+    "x-nhx-principal-on-behalf-of-email",
+    "x-nhx-principal-on-behalf-of-groups",
+    "x-nhx-scopes",
 }
 SEALED_EXTERNAL_PRINCIPAL_HEADERS = AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS
 
@@ -60,8 +60,8 @@ def test_authentik_compose_disables_model_provider_seed_without_ngc_key():
     nemo_service = compose["services"]["nemo"]
     nemo_env = nemo_service["environment"]
 
-    assert nemo_env["NMP_SEED_ON_STARTUP"] == "true"
-    assert nemo_env["NMP_PLATFORM_SEED_MODEL_PROVIDER_ENABLED"] == "false"
+    assert nemo_env["NHX_SEED_ON_STARTUP"] == "true"
+    assert nemo_env["NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED"] == "false"
     assert "ports" not in nemo_service
 
 
@@ -86,16 +86,16 @@ def test_authentik_compose_defaults_support_direct_docker_compose_start():
     password_default = "${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-dev}"
     blueprint_mount = "${AUTHENTIK_BLUEPRINT_DIR:-../helm/files/blueprints}:/blueprints/custom:ro"
 
-    assert compose["name"] == "${COMPOSE_PROJECT_NAME:-nemo-platform-authentik}"
+    assert compose["name"] == "${COMPOSE_PROJECT_NAME:-nemo-helix-authentik}"
     assert compose["x-authentik-env"]["AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD"] == password_default
     assert compose["services"]["nemo"]["environment"]["AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD"] == password_default
     assert (
-        compose["services"]["nemo"]["environment"]["NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE"]
-        == "/var/run/secrets/nemo-platform/workload-token-signing/private-key.pem"
+        compose["services"]["nemo"]["environment"]["NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE"]
+        == "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem"
     )
     assert (
         "../.generated/workload-token-private-key.pem:"
-        "/var/run/secrets/nemo-platform/workload-token-signing/private-key.pem:ro"
+        "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem:ro"
     ) in compose["services"]["nemo"]["volumes"]
     assert "../gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro" in compose["services"]["gateway"]["volumes"]
     assert (
@@ -165,7 +165,7 @@ def test_authentik_compose_uses_liveness_for_container_health_and_routes_status_
     assert {"prefix": "/health/"} in route_matches
     assert {"path": "/status"} in route_matches
     for match in (
-        {"prefix": "/.well-known/nemo-platform/"},
+        {"prefix": "/.well-known/nemo-helix/"},
         {"prefix": "/apis/"},
         {"prefix": "/health/"},
         {"path": "/status"},
@@ -188,8 +188,8 @@ def test_authentik_compose_uses_liveness_for_container_health_and_routes_status_
         'gateway_ready_http_call(request_handle, "authentik", "authentik-server", '
         '"/application/o/nemo/.well-known/openid-configuration")'
     ) in lua_code
-    assert 'headers:remove("x-nmp-authorized")' in lua_code
-    assert 'headers:remove("x-nmp-scopes")' in lua_code
+    assert 'headers:remove("x-nhx-authorized")' in lua_code
+    assert 'headers:remove("x-nhx-scopes")' in lua_code
     for header in SEALED_EXTERNAL_PRINCIPAL_HEADERS:
         assert f'headers:remove("{header}")' in lua_code
 
@@ -238,13 +238,13 @@ def test_authentik_compose_mounts_workload_token_signing_key():
 
     key_mount = (
         "../.generated/workload-token-private-key.pem:"
-        "/var/run/secrets/nemo-platform/workload-token-signing/private-key.pem:ro"
+        "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem:ro"
     )
 
     assert key_mount in compose["services"]["nemo"]["volumes"]
     assert (
         config["auth"]["token_signing"]["private_key_file"]
-        == "/var/run/secrets/nemo-platform/workload-token-signing/private-key.pem"
+        == "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem"
     )
     assert "workload_token_private_key_file" not in config["auth"]["oidc"]
 
@@ -259,12 +259,12 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
 
     assert config["platform"]["base_url"] == "https://nemo-gateway:8080"
     assert config["auth"]["policy_decision_point_base_url"] == "http://127.0.0.1:8080"
-    assert nemo["environment"]["NMP_AUTH_POLICY_DECISION_POINT_BASE_URL"] == "http://127.0.0.1:8080"
+    assert nemo["environment"]["NHX_AUTH_POLICY_DECISION_POINT_BASE_URL"] == "http://127.0.0.1:8080"
     assert "loopback_address" not in config["platform"]
     assert "service_discovery" not in config["platform"]
     assert config["auth"]["oidc"]["token_endpoint"] == "https://127.0.0.1:18080/application/o/token/"
     assert config["auth"]["token_signing"]["issuer"] == "https://nemo-gateway:8080/apis/auth"
-    assert config["auth"]["token_signing"]["key_id"] == "nemo-platform-signing"
+    assert config["auth"]["token_signing"]["key_id"] == "nemo-helix-signing"
     assert config["auth"]["access_keys"]["enabled"] is True
     assert "workload_token_issuer" not in config["auth"]["oidc"]
     assert config["auth"]["oidc"]["workload_token_endpoint"] == "https://nemo-gateway:8080/apis/auth/token"
@@ -294,9 +294,9 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
     assert "chown 101:101 /target/tls/tls.crt /target/tls/tls.key" in gateway_tls_init["entrypoint"][2]
     assert "chmod 600 /target/tls/tls.key" in gateway_tls_init["entrypoint"][2]
     assert compose["volumes"]["gateway-tls"]["name"] == "${AUTHENTIK_GATEWAY_TLS_VOLUME:-authentik_gateway_tls}"
-    assert "gateway-tls:/etc/nmp/gateway-tls:ro" in nemo["volumes"]
-    assert nemo["environment"]["SSL_CERT_FILE"] == "/etc/nmp/gateway-tls/tls.crt"
-    assert nemo["environment"]["REQUESTS_CA_BUNDLE"] == "/etc/nmp/gateway-tls/tls.crt"
+    assert "gateway-tls:/etc/nhx/gateway-tls:ro" in nemo["volumes"]
+    assert nemo["environment"]["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert nemo["environment"]["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/tls.crt"
 
 
 def test_authentik_compose_mounts_gateway_ca_into_docker_workloads():
@@ -311,13 +311,13 @@ def test_authentik_compose_mounts_gateway_ca_into_docker_workloads():
     docker_config = workload_executor["config"]
 
     assert docker_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nmp/gateway-tls/tls.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nmp/gateway-tls/tls.crt",
+        "SSL_CERT_FILE": "/etc/nhx/gateway-tls/tls.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/gateway-tls/tls.crt",
     }
     assert docker_config["storage"]["additional_volume_mounts"] == [
         {
             "volume_name": gateway_tls_volume_name,
-            "mount_path": "/etc/nmp/gateway-tls",
+            "mount_path": "/etc/nhx/gateway-tls",
         }
     ]
 

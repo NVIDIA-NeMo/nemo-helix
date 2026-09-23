@@ -7,8 +7,8 @@ import re
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_optimization.preflight import preflight_validate_llm_models
-from nemo_platform_plugin.client.client import NemoClient
 
 _VIRTUAL_MODELS_PATH = re.compile(
     r"^/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/virtual-models/(?P<name>[^/]+)$"

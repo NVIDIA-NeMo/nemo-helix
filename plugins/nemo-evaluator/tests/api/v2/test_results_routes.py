@@ -21,8 +21,8 @@ from nemo_evaluator.api.service.result_service import ResultService
 from nemo_evaluator.api.v2 import results as results_routes
 from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.entities import ListResponse, PaginationInfo
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.entities import ListResponse, PaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 _ResultEntityT = TypeVar("_ResultEntityT", AgentEvalResultEntity, EvaluateResultEntity)
 
@@ -207,7 +207,7 @@ def test_filter_translates_custom_fields_to_data_namespace() -> None:
     # Custom (non-base) trait fields must be rewritten to data.* for the entity store; base columns
     # (workspace, created_at) pass through. The plain Filter does no translation and the store 500s.
     from nemo_evaluator.api.v2.results import EvaluateResultFilter
-    from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+    from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 
     assert EvaluateResultFilter._get_entity_field_map() == {
         "job_id": "data.job_id",

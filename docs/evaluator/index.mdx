@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Evaluate Agents & Models"
-description: "Score agents and models in NeMo Platform — dataset-driven metrics over labeled data and task-driven agent evaluation — with the same scoring interface across local and platform execution."
+description: "Score agents and models in NeMo Helix — dataset-driven metrics over labeled data and task-driven agent evaluation — with the same scoring interface across local and platform execution."
 ---
 
 <a id="nemo-ms-evaluator-about"></a>
@@ -15,7 +15,7 @@ tracking. Scoring covers deterministic and similarity checks, LLM-as-a-judge, an
 metrics for RAG and agentic behavior.
 
 <Button href="/documentation/evaluate-models/tutorials" variant="secondary">**Tutorials**</Button>
-<Button href="https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/packages/nemo_evaluator_sdk" variant="secondary">**Open Source SDK**</Button>
+<Button href="https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/packages/nemo_evaluator_sdk" variant="secondary">**Open Source SDK**</Button>
 
 ---
 
@@ -97,16 +97,16 @@ execution.
 | **Local SDK** | `Evaluator()` (`nemo_evaluator_sdk`) | `await evaluator.run(metrics=[metric], dataset=dataset, config=config)` | Fast in-process iteration with no platform services. |
 | **Remote job** | `client.evaluator` | `evaluator.submit(metric=metric, dataset=dataset, config=config)` | Durable, monitored platform jobs for production and regressions. |
 
-The platform caller is mounted on a `NeMoPlatform` client:
+The platform caller is mounted on a `NeMoHelix` client:
 
 ```python
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = client.evaluator
@@ -121,7 +121,7 @@ result = job.get_result()
 
 **Agent evaluation has local interfaces and durable platform interfaces.**
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
-that do not require running nemo-platform.
+that do not require running nemo-helix.
 - Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
 tasks or stored tasksets. A locally validated `GymAgentTaskRunner` can also be submitted with
 `client.evaluator.submit(tasks=TasksetRef(...), target=runner)`; other runner targets use an
@@ -137,10 +137,10 @@ the same and execution gains platform capabilities:
 | Capability | Local SDK | Platform (`client.evaluator`) |
 |------------|-----------|-------------------------------|
 | **Execution** | Local in-process run | Durable platform jobs |
-| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Platform [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
-| **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Platform [Filesets](/documentation/get-started/core-concepts/manage-files) |
+| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Helix [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
+| **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Helix [Filesets](/documentation/get-started/core-concepts/manage-files) |
 | **Results** | Returned in memory | Platform artifact storage with typed result download |
-| **Authentication** | Local environment variables | Local env vars for local runs; NeMo Platform [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |
+| **Authentication** | Local environment variables | Local env vars for local runs; NeMo Helix [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |
 
 ### Live vs. jobs, online vs. offline
 

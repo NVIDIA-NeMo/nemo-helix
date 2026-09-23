@@ -14,7 +14,7 @@ import os
 import time
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 WORKSPACE = "default"
 PROVIDER_NAME = "igw-mock-chat-model"
@@ -23,19 +23,19 @@ EXPECTED_CONTENT = "The capital of France is Paris. It is known as the City of L
 
 
 @pytest.fixture
-def client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE)
+def client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
-def test_mock_provider_exists(client: NeMoPlatform) -> None:
+def test_mock_provider_exists(client: NeMoHelix) -> None:
     """Verify the mock chat provider was created by the setup script."""
     response = client.inference.providers.list()
     provider_names = [p.name for p in response.data]
     assert PROVIDER_NAME in provider_names, f"Provider '{PROVIDER_NAME}' not found. Found providers: {provider_names}"
 
 
-def test_chat_completion_via_provider_route(client: NeMoPlatform) -> None:
+def test_chat_completion_via_provider_route(client: NeMoHelix) -> None:
     """Verify chat completions work through the provider gateway route."""
     response = client.inference.gateway.provider.post(
         "v1/chat/completions",
@@ -58,7 +58,7 @@ def test_chat_completion_via_provider_route(client: NeMoPlatform) -> None:
     assert content == EXPECTED_CONTENT, f"Expected mock content '{EXPECTED_CONTENT}', got '{content}'"
 
 
-def test_chat_completion_via_model_route(client: NeMoPlatform) -> None:
+def test_chat_completion_via_model_route(client: NeMoHelix) -> None:
     """Verify chat completions work through the model entity gateway route."""
     response = None
     last_error: Exception | None = None

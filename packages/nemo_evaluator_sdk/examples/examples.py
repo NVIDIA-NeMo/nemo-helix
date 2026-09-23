@@ -43,7 +43,7 @@ HELPFULNESS_PROMPT_V1 = (
     'Return only a JSON object with this shape: {"helpfulness": <integer>}.'
 )
 # Local evaluator execution resolves this as an environment variable name.
-DEFAULT_API_KEY_SECRET = os.getenv("NMP_EVALUATOR_DEFAULT_API_KEY_SECRET", "NVIDIA_API_KEY")
+DEFAULT_API_KEY_SECRET = os.getenv("NHX_EVALUATOR_DEFAULT_API_KEY_SECRET", "NVIDIA_API_KEY")
 
 
 def configure_example_logging() -> None:
@@ -118,7 +118,7 @@ ONLINE_CHAT_PROMPT_TEMPLATE = {"messages": [{"role": "user", "content": "{{item.
 model = Model(
     url="https://integrate.api.nvidia.com/v1/chat/completions",
     name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3-nano-30b-a3b"),
-    # looks up NVIDIA_API_KEY by default - override via NMP_EVALUATOR_DEFAULT_API_KEY_SECRET
+    # looks up NVIDIA_API_KEY by default - override via NHX_EVALUATOR_DEFAULT_API_KEY_SECRET
     api_key_secret=SecretRef(root=DEFAULT_API_KEY_SECRET),
 )
 

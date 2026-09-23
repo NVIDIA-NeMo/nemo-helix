@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from nemo_deployments_plugin.backends.openshell.policy import (
     PLATFORM_EGRESS_KEY,
-    PlatformEgress,
+    HelixEgress,
     SandboxFilesystem,
     build_sandbox_policy,
     generate_policy_dict,
@@ -92,8 +92,8 @@ def test_build_sandbox_policy_accepts_filesystem_alias() -> None:
     assert list(policy.filesystem.read_write) == ["/tmp"]
 
 
-def _egress() -> PlatformEgress:
-    return PlatformEgress(host="host.docker.internal", port=8080, binaries=("/workspace/.venv/bin/python3.13",))
+def _egress() -> HelixEgress:
+    return HelixEgress(host="host.docker.internal", port=8080, binaries=("/workspace/.venv/bin/python3.13",))
 
 
 def test_generate_policy_dict_is_default_deny() -> None:
@@ -171,7 +171,7 @@ def test_platform_egress_tls_omitted_when_empty() -> None:
 
     secure = generate_policy_dict(
         filesystem=SandboxFilesystem(),
-        egress=PlatformEgress(host="h", port=443, tls="terminate"),
+        egress=HelixEgress(host="h", port=443, tls="terminate"),
     )
     assert secure["network_policies"][PLATFORM_EGRESS_KEY]["endpoints"][0]["tls"] == "terminate"
 

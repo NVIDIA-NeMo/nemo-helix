@@ -160,8 +160,8 @@ def test_database_url_never_adopts_the_platform_database(
     # A platform database that is perfectly usable, so the only thing keeping us
     # off it is that we do not look.
     monkeypatch.setattr(
-        "nmp.common.config.DatabaseConfig.sqlalchemy_database_url",
-        lambda _self: _fixture_dsn("nmp", "platform-db", "nemo_platform"),
+        "nhx.common.config.DatabaseConfig.sqlalchemy_database_url",
+        lambda _self: _fixture_dsn("nhx", "platform-db", "nemo_helix"),
     )
     monkeypatch.setenv("DATABASE_HOST", "platform-db")
 
@@ -174,7 +174,7 @@ def test_database_url_never_adopts_the_platform_database(
 
 
 def test_dsn_carries_search_path_and_applier_refuses_a_public_fallback() -> None:
-    dsn = _dsn_for(_fixture_dsn("u", "h", "nemo_platform", "p"), "scaled_evals")
+    dsn = _dsn_for(_fixture_dsn("u", "h", "nemo_helix", "p"), "scaled_evals")
     assert "sslmode=disable" in dsn
     assert f"options={quote('-c search_path=scaled_evals,public', safe='')}" in dsn
 

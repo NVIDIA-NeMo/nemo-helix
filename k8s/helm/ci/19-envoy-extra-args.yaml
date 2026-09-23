@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/19-envoy-extra-args.yaml
+# CI validates by running: helm template nemo-helix . -f ci/19-envoy-extra-args.yaml
 # Ensures envoy deployment renders when envoyProxy.extraArgs is set (auth + envoy enabled).
 
 platformConfig:

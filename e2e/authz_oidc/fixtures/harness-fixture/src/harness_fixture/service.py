@@ -8,7 +8,7 @@ caller-kind service-only deny is not observable on the
 stock surface. This plugin provides:
 
 - ``GET /apis/harness-fixture/probe/service-only`` — ``callers=[SERVICE_PRINCIPAL]``:
-  humans (including PlatformAdmin, unless the exemption knob is set) must be
+  humans (including HelixAdmin, unless the exemption knob is set) must be
   denied; service principals allowed.
 - ``GET /apis/harness-fixture/probe/open`` — ``callers=[PRINCIPAL]``, no
   permissions: control proving the plugin is mounted and a plain
@@ -20,8 +20,8 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 router = APIRouter()
 

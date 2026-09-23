@@ -24,20 +24,20 @@ from typing import Any
 
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.jobs.spec import BaseExecutionProfile
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from pydantic import BaseModel, ConfigDict, Field
 
 #: Env-var names that look like a credential. Used to refuse a sandboxed run that would hand one to
 #: user-supplied environment code through `env_vars`; `env_secrets` is the supported route.
 _CREDENTIAL_PATTERN = re.compile(r"(API_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_?KEY)", re.IGNORECASE)
 #: Removed by the Gym host before handing the config to NeMo Gym.
-ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nmp_environment_component_selection"
-GYM_HOST_IMAGE = "nmp-gym-host"
+ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
+GYM_HOST_IMAGE = "nhx-gym-host"
 
 
 class SandboxUnavailableError(RuntimeError):

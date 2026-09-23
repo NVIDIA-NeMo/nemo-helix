@@ -10,14 +10,14 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.client.errors import NemoTransportError
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.auth import AuthClient, Principal, get_auth_client
-from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.adapter_entity_service import AdapterEntityService
-from nmp.core.models.api.service.model_entity_service import ModelEntityService
-from nmp.core.models.api.v2.models import router, start_update_model_spec_job
-from nmp.core.models.schemas import ModelEntity
+from nemo_helix_plugin.client.errors import NemoTransportError
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
+from nhx.core.models.api.service.model_entity_service import ModelEntityService
+from nhx.core.models.api.v2.models import router, start_update_model_spec_job
+from nhx.core.models.schemas import ModelEntity
 
 
 @pytest.fixture
@@ -66,8 +66,8 @@ def mock_sdk():
 @pytest.fixture
 def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_client, mock_sdk):
     """Create a FastAPI test app with mocked dependencies."""
-    from nmp.common.service.dependencies import get_sdk_client
-    from nmp.core.models.api.dependencies import get_adapter_entity_service, get_model_entity_service
+    from nhx.common.service.dependencies import get_sdk_client
+    from nhx.core.models.api.dependencies import get_adapter_entity_service, get_model_entity_service
 
     app = FastAPI()
 
@@ -460,8 +460,8 @@ async def test_model_spec_job_transport_failure_does_not_fail_persisted_model(sa
     )
 
     with (
-        patch("nmp.core.models.api.v2.models.get_async_platform_sdk"),
-        patch("nmp.core.models.api.v2.models.client_from_platform", return_value=jobs),
+        patch("nhx.core.models.api.v2.models.get_async_platform_sdk"),
+        patch("nhx.core.models.api.v2.models.client_from_platform", return_value=jobs),
     ):
         await start_update_model_spec_job(sample_model_entity)
 
@@ -537,7 +537,7 @@ def test_create_model_adapter_entity_validation_error_returns_422(client, mock_a
     """Test that entity store validation errors during adapter creation return 422."""
     mock_adapter_entity_service.create_adapter.side_effect = EntityValidationError("adapter name invalid")
 
-    with patch("nmp.core.models.api.permissions.client_from_platform") as mock_cfp:
+    with patch("nhx.core.models.api.permissions.client_from_platform") as mock_cfp:
         mock_files = AsyncMock()
         mock_files.get_fileset.return_value = MagicMock()
         mock_cfp.return_value = mock_files

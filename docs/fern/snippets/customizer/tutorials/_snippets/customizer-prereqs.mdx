@@ -9,15 +9,15 @@ description: ""
 
 Before starting, make sure you have:
 
-- NeMo Platform installed and deployed (see [Setup](/documentation/get-started))
-- The PyPI `nemo-platform` wrapper package installed (`pip install "nemo-platform[all]"`). If you are working from a source checkout, run `make bootstrap` from the repository root instead.
+- NeMo Helix installed and deployed (see [Setup](/documentation/get-started))
+- The PyPI `nemo-helix` wrapper package installed (`pip install "nemo-helix[all]"`). If you are working from a source checkout, run `make bootstrap` from the repository root instead.
 - (Optional) Weights & Biases account and API key for enhanced visualization
 
 **Set up environment variables:**
 
 ```bash
-# Set the base URL for NeMo Platform
-export NMP_BASE_URL="http://localhost:8080" # Or your deployed platform URL
+# Set the base URL for NeMo Helix
+export NHX_BASE_URL="http://localhost:8080" # Or your deployed platform URL
 
 # Optional: Weights & Biases for experiment tracking
 export WANDB_API_KEY="<your-wandb-api-key>"
@@ -27,10 +27,10 @@ export WANDB_API_KEY="<your-wandb-api-key>"
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```

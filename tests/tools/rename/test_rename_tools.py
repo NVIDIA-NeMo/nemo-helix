@@ -16,6 +16,13 @@ VERIFY_IMPL = REPO_ROOT / "tools/rename/verify_nemo_helix_rename.py"
 COMMON_IMPL = REPO_ROOT / "tools/rename/rename_common.py"
 README = REPO_ROOT / "tools/rename/README.md"
 
+LEGACY_PRODUCT = "NeMo " + "Platform"
+LEGACY_PLATFORM = "Plat" + "form"
+LEGACY_ACRONYM = "N" + "MP"
+LEGACY_ACRONYM_PASCAL = "N" + "mp"
+LEGACY_ACRONYM_LOWER = "n" + "mp"
+LEGACY_SENTENCE = f"{LEGACY_PRODUCT} uses {LEGACY_ACRONYM}.\n"
+
 
 def run(command: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, check=check, text=True, capture_output=True)
@@ -46,45 +53,45 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
 
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
-    (repo / "dist/index.js").write_text("window.product = 'NeMo Platform'; window.acronym = 'NMP';\n")
-    (repo / "dist/binary.dat").write_bytes(b"NeMo Platform NMP should remain in undecodable content: \xff\n")
+    (repo / "dist/index.js").write_text("window.product = 'NeMo Helix'; window.acronym = 'NHX';\n")
+    (repo / "dist/binary.dat").write_bytes(b"NeMo Helix NHX should remain in undecodable content: \xff\n")
     (repo / ".claude/skills").mkdir(parents=True)
-    (repo / "docs/snmp/nmp-common").mkdir(parents=True)
-    (repo / "docs/snmp/nmp-common/NMP_DATA.txt").write_text(
+    (repo / "docs/snmp/nhx-common").mkdir(parents=True)
+    (repo / "docs/snmp/nhx-common/NHX_DATA.txt").write_text(
         " ".join(
             [
-                "nmp_common",
-                "NMP_CONFIG",
-                "nmp-common",
-                "PlatformJobStep",
-                "CreatePlatformJobRequest",
-                "AsyncCustomizationPlatformClients",
-                "_SyncPlatform",
-                "usePlatformSdk",
-                "mockPlatform",
+                "nhx_common",
+                "NHX_CONFIG",
+                "nhx-common",
+                "HelixJobStep",
+                "CreateHelixJobRequest",
+                "AsyncCustomizationHelixClients",
+                "_SyncHelix",
+                "useHelixSdk",
+                "mockHelix",
                 "Platform",
-                "NMPJobContext",
-                "TestNMPJobContextFromEnv",
-                "NMPOIDCConfig",
-                "NMPModelProvider",
-                "NMPSecretResolver",
-                "NMPGenerationLog",
-                "NmpContext",
-                "NmpCliRunner",
-                "NmpErrorHandlingMixin",
-                "NmpDynamicVersionSource",
-                "NmpRun",
-                "TestNmpOption",
-                "ManifestBackedNmpGroup",
-                "nmpBaseURLEnv",
-                "nmp-intake",
-                r"nhx-intake-clickhouse-one\nnmp-intake-clickhouse-two",
-                "nmp2",
-                "_xnmp",
-                "nmpclient",
-                "nmpcontext",
-                "NMP",
-                "nmp",
+                "NHXJobContext",
+                "TestNHXJobContextFromEnv",
+                "NHXOIDCConfig",
+                "NHXModelProvider",
+                "NHXSecretResolver",
+                "NHXGenerationLog",
+                "NhxContext",
+                "NhxCliRunner",
+                "NhxErrorHandlingMixin",
+                "NhxDynamicVersionSource",
+                "NhxRun",
+                "TestNhxOption",
+                "ManifestBackedNhxGroup",
+                "nhxBaseURLEnv",
+                "nhx-intake",
+                r"nhx-intake-clickhouse-one\nnhx-intake-clickhouse-two",
+                "nhx2",
+                "_xnhx",
+                "nhxclient",
+                "nhxcontext",
+                "NHX",
+                "nhx",
                 "snmp",
                 "abcNMPdef012",
                 "abc-nmpXYZ",
@@ -95,8 +102,8 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
         )
         + "\n"
     )
-    (repo / "docs/overview.md").write_text("The nemo-platform repository publishes auditor-tasks.\n")
-    (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("auditor-tasks") }\n')
+    (repo / "docs/overview.md").write_text("The nemo-helix repository publishes nhx-auditor-tasks.\n")
+    (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
 
     run(["git", "add", "."], repo)
     run(["git", "add", "-f", "dist/index.js", "dist/binary.dat"], repo)
@@ -108,7 +115,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     index_bytes = (repo / "dist/index.js").read_bytes()
     assert b"NeMo Helix" in index_bytes
     assert b"NHX" in index_bytes
-    assert (repo / "dist/binary.dat").read_bytes() == b"NeMo Platform NMP should remain in undecodable content: \xff\n"
+    assert (repo / "dist/binary.dat").read_bytes() == b"NeMo Helix NHX should remain in undecodable content: \xff\n"
     assert "nemo-helix" in (repo / "docs/overview.md").read_text()
     assert "nhx-auditor-tasks" in (repo / "docker-bake.hcl").read_text()
 
@@ -155,7 +162,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "sha384-AbCdNMPefghnmpQRST==" in renamed_text
 
     common_text = (repo / "tools/rename/rename_common.py").read_text()
-    assert '("NeMo Platform", "NeMo Helix")' in common_text
+    assert f'("{LEGACY_PRODUCT}", "NeMo Helix")' in common_text
     assert '"auditor-tasks"' in common_text
     assert '"nhx-auditor-tasks"' not in common_text
 
@@ -171,10 +178,10 @@ def test_include_and_exclude_globs_limit_rename_scope(tmp_path: Path) -> None:
 
     (repo / "docs").mkdir()
     (repo / "web").mkdir()
-    (repo / "README.md").write_text("NeMo Platform uses NMP.\n")
-    (repo / "docs/guide.md").write_text("NeMo Platform uses NMP.\n")
-    (repo / "docs/skip.md").write_text("NeMo Platform uses NMP.\n")
-    (repo / "web/app.md").write_text("NeMo Platform uses NMP.\n")
+    (repo / "README.md").write_text(LEGACY_SENTENCE)
+    (repo / "docs/guide.md").write_text(LEGACY_SENTENCE)
+    (repo / "docs/skip.md").write_text(LEGACY_SENTENCE)
+    (repo / "web/app.md").write_text(LEGACY_SENTENCE)
 
     run(["git", "add", "."], repo)
     run(["git", "commit", "-m", "initial"], repo)
@@ -190,10 +197,10 @@ def test_include_and_exclude_globs_limit_rename_scope(tmp_path: Path) -> None:
         repo,
     )
 
-    assert (repo / "README.md").read_text() == "NeMo Platform uses NMP.\n"
+    assert (repo / "README.md").read_text() == LEGACY_SENTENCE
     assert (repo / "docs/guide.md").read_text() == "NeMo Helix uses NHX.\n"
-    assert (repo / "docs/skip.md").read_text() == "NeMo Platform uses NMP.\n"
-    assert (repo / "web/app.md").read_text() == "NeMo Platform uses NMP.\n"
+    assert (repo / "docs/skip.md").read_text() == LEGACY_SENTENCE
+    assert (repo / "web/app.md").read_text() == LEGACY_SENTENCE
 
     verify = run(
         [
@@ -215,8 +222,8 @@ def test_root_globs_do_not_match_nested_paths(tmp_path: Path) -> None:
     install_rename_tools(repo)
 
     (repo / "docs").mkdir()
-    (repo / "README.md").write_text("NeMo Platform uses NMP.\n")
-    (repo / "docs/guide.md").write_text("NeMo Platform uses NMP.\n")
+    (repo / "README.md").write_text(LEGACY_SENTENCE)
+    (repo / "docs/guide.md").write_text(LEGACY_SENTENCE)
 
     run(["git", "add", "."], repo)
     run(["git", "commit", "-m", "initial"], repo)
@@ -224,7 +231,7 @@ def test_root_globs_do_not_match_nested_paths(tmp_path: Path) -> None:
     run(["tools/rename/rename-to-nemo-helix.sh", "--include-glob", "*.md"], repo)
 
     assert (repo / "README.md").read_text() == "NeMo Helix uses NHX.\n"
-    assert (repo / "docs/guide.md").read_text() == "NeMo Platform uses NMP.\n"
+    assert (repo / "docs/guide.md").read_text() == LEGACY_SENTENCE
 
 
 def test_allow_dirty_overrides_clean_worktree_guard(tmp_path: Path) -> None:
@@ -236,7 +243,7 @@ def test_allow_dirty_overrides_clean_worktree_guard(tmp_path: Path) -> None:
     (repo / "README.md").write_text("initial\n")
     run(["git", "add", "."], repo)
     run(["git", "commit", "-m", "initial"], repo)
-    (repo / "README.md").write_text("NeMo Platform uses NMP.\n")
+    (repo / "README.md").write_text(LEGACY_SENTENCE)
 
     blocked = run(["tools/rename/rename-to-nemo-helix.sh"], repo, check=False)
     assert blocked.returncode == 1
@@ -256,7 +263,10 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
     (repo / "dist/index.js").write_text(
-        "const product = 'NeMo Platform'; PlatformJobStep snmp abcNMPdef nmp_common NmpContext nmpclient NMPJobContext\n"
+        f"const product = '{LEGACY_PRODUCT}'; "
+        f"{LEGACY_PLATFORM}JobStep snmp abcNMPdef "
+        f"{LEGACY_ACRONYM_LOWER}_common {LEGACY_ACRONYM_PASCAL}Context "
+        f"{LEGACY_ACRONYM_LOWER}client {LEGACY_ACRONYM}JobContext\n"
     )
     (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
 

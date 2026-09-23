@@ -16,9 +16,9 @@ from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_ext.auth.helpers import generate_unsigned_jwt
-from nmp.common.config import AuthConfig
-from nmp.testing.client import create_test_client
+from nemo_helix_ext.auth.helpers import generate_unsigned_jwt
+from nhx.common.config import AuthConfig
+from nhx.testing.client import create_test_client
 
 # Service principal for authenticated requests
 SERVICE_PRINCIPAL = "service:integration-test"
@@ -59,7 +59,7 @@ class TestRoleBindingPropagation:
         workspace_id = f"test-ws-{uuid.uuid4().hex[:8]}"
         group_name = f"group-{uuid.uuid4().hex[:8]}"
         member_email = f"member-{uuid.uuid4().hex[:8]}@example.com"
-        service_headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        service_headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         bearer_token = generate_unsigned_jwt(
             principal_id=f"subject-{uuid.uuid4().hex[:8]}",
             email=member_email,
@@ -110,7 +110,7 @@ class TestRoleBindingPropagation:
         bound_group = f"group-{uuid.uuid4().hex[:8]}"
         other_group = f"group-{uuid.uuid4().hex[:8]}"
         member_email = f"member-{uuid.uuid4().hex[:8]}@example.com"
-        service_headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        service_headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         bearer_token = generate_unsigned_jwt(
             principal_id=f"subject-{uuid.uuid4().hex[:8]}",
             email=member_email,
@@ -158,8 +158,8 @@ class TestRoleBindingPropagation:
         # Test data
         workspace_id = f"test-ws-{uuid.uuid4().hex[:8]}"
         editor_email = f"editor-{uuid.uuid4().hex[:8]}@example.com"
-        service_headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
-        user_headers = {"X-NMP-Principal-Id": editor_email, "X-NMP-Principal-Email": editor_email}
+        service_headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        user_headers = {"X-NHX-Principal-Id": editor_email, "X-NHX-Principal-Email": editor_email}
 
         # 1. Create workspace (as service principal)
         response = test_client.post(
@@ -207,8 +207,8 @@ class TestRoleBindingPropagation:
         """Test that a Viewer can read a workspace but not update it."""
         workspace_id = f"test-ws-{uuid.uuid4().hex[:8]}"
         viewer_email = f"viewer-{uuid.uuid4().hex[:8]}@example.com"
-        service_headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
-        user_headers = {"X-NMP-Principal-Id": viewer_email, "X-NMP-Principal-Email": viewer_email}
+        service_headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        user_headers = {"X-NHX-Principal-Id": viewer_email, "X-NHX-Principal-Email": viewer_email}
 
         # Create workspace
         response = test_client.post(

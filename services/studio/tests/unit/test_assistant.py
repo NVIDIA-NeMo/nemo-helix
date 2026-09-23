@@ -19,12 +19,12 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
-from nmp.common.entities.client import EntityConflictError, EntityNotFoundError
-from nmp.common.service.dependencies import get_entity_client
-from nmp.studio import assistant, assistant_artifacts, assistant_skills, studio_links
-from nmp.studio.config import StudioConfig
-from nmp.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
-from nmp.studio.service import StudioService
+from nhx.common.entities.client import EntityConflictError, EntityNotFoundError
+from nhx.common.service.dependencies import get_entity_client
+from nhx.studio import assistant, assistant_artifacts, assistant_skills, studio_links
+from nhx.studio.config import StudioConfig
+from nhx.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
+from nhx.studio.service import StudioService
 
 
 class FakeEntityStore:
@@ -123,7 +123,7 @@ def service_client_with_feature_flags(
     monkeypatch: pytest.MonkeyPatch, feature_flags: dict[str, bool | str]
 ) -> TestClient:
     monkeypatch.setattr(
-        "nmp.studio.config.Configuration.get_global_settings_from_env",
+        "nhx.studio.config.Configuration.get_global_settings_from_env",
         lambda: {"studio": {"feature_flags": feature_flags}},
     )
     return TestClient(StudioService().with_config(StudioConfig()).app)
@@ -250,7 +250,7 @@ def supported_destinations_from_description(description: str) -> set[str]:
 
 
 def _inference_source_dir(root: Path) -> Path:
-    source_dir = root / "packages" / "nemo_platform_ext" / "skills" / "inference"
+    source_dir = root / "packages" / "nemo_helix_ext" / "skills" / "inference"
     source_dir.mkdir(parents=True)
     return source_dir
 
@@ -258,13 +258,13 @@ def _inference_source_dir(root: Path) -> Path:
 def _inference_skill(source_dir: Path) -> assistant_skills.Skill:
     return assistant_skills.Skill(
         name="inference",
-        description="Use NeMo Platform inference.",
+        description="Use NeMo Helix inference.",
         version="0.1",
         content="# Inference",
         raw="# Inference",
         source_dir=source_dir,
         source_plugin="platform",
-        source_dist="nemo-platform-ext",
+        source_dist="nemo-helix-ext",
     )
 
 
@@ -272,9 +272,9 @@ def _expected_inference_skill_response(*, installed: bool) -> dict[str, Any]:
     return {
         "name": "inference",
         "claude_name": "nemo-inference",
-        "description": "Use NeMo Platform inference.",
-        "source": "nemo-platform",
-        "source_path": "packages/nemo_platform_ext/skills/inference",
+        "description": "Use NeMo Helix inference.",
+        "source": "nemo-helix",
+        "source_path": "packages/nemo_helix_ext/skills/inference",
         "install_path": ".claude/skills/nemo-inference/SKILL.md",
         "installed": installed,
     }
@@ -283,21 +283,21 @@ def _expected_inference_skill_response(*, installed: bool) -> dict[str, Any]:
 def test_vendored_load_skills_from_root_loads_selected_root_without_registry_private_helper(tmp_path: Path):
     source_dir = _inference_source_dir(tmp_path)
     (source_dir / "SKILL.md").write_text(
-        "---\nname: inference\ndescription: Use NeMo Platform inference.\nversion: 2\n---\n# Inference\n",
+        "---\nname: inference\ndescription: Use NeMo Helix inference.\nversion: 2\n---\n# Inference\n",
         encoding="utf-8",
     )
 
     loaded = assistant_skills.load_skills_from_root(
-        tmp_path / "packages" / "nemo_platform_ext" / "skills",
+        tmp_path / "packages" / "nemo_helix_ext" / "skills",
         source_plugin="platform",
-        source_dist="nemo-platform-ext",
+        source_dist="nemo-helix-ext",
     )
 
     assert list(loaded) == ["inference"]
-    assert loaded["inference"].description == "Use NeMo Platform inference."
+    assert loaded["inference"].description == "Use NeMo Helix inference."
     assert loaded["inference"].version == "2"
     assert loaded["inference"].source_plugin == "platform"
-    assert loaded["inference"].source_dist == "nemo-platform-ext"
+    assert loaded["inference"].source_dist == "nemo-helix-ext"
 
 
 def test_create_session_returns_uuid(service_client: TestClient):
@@ -313,7 +313,7 @@ def test_create_session_persists_workspace_and_owner(
 ):
     response = service_client.post(
         "/v2/assistant/sessions?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "alice@example.com"},
+        headers={"X-NHX-Principal-Id": "alice@example.com"},
     )
 
     session_id = response.json()["session_id"]
@@ -468,11 +468,11 @@ def test_history_is_scoped_to_workspace_and_owner(
 ):
     alice_id = service_client.post(
         "/v2/assistant/sessions?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "alice@example.com"},
+        headers={"X-NHX-Principal-Id": "alice@example.com"},
     ).json()["session_id"]
     bob_id = service_client.post(
         "/v2/assistant/sessions?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "bob@example.com"},
+        headers={"X-NHX-Principal-Id": "bob@example.com"},
     ).json()["session_id"]
     entity_store.entities[("team-a", f"assistant-{alice_id}")].messages = [
         AssistantMessage(role="user", content="Alice's private prompt"),
@@ -485,14 +485,14 @@ def test_history_is_scoped_to_workspace_and_owner(
 
     response = service_client.get(
         "/v2/assistant/history/sessions?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "alice@example.com"},
+        headers={"X-NHX-Principal-Id": "alice@example.com"},
     )
 
     assert response.status_code == 200
     assert [session["session_id"] for session in response.json()] == [alice_id]
     forbidden = service_client.get(
         f"/v2/assistant/history/sessions/{bob_id}?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "alice@example.com"},
+        headers={"X-NHX-Principal-Id": "alice@example.com"},
     )
     assert forbidden.status_code == 404
 
@@ -503,19 +503,19 @@ def test_delete_history_enforces_owner_and_removes_conversation(
 ):
     session_id = service_client.post(
         "/v2/assistant/sessions?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "alice@example.com"},
+        headers={"X-NHX-Principal-Id": "alice@example.com"},
     ).json()["session_id"]
 
     forbidden = service_client.delete(
         f"/v2/assistant/history/sessions/{session_id}?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "bob@example.com"},
+        headers={"X-NHX-Principal-Id": "bob@example.com"},
     )
     assert forbidden.status_code == 404
     assert ("team-a", f"assistant-{session_id}") in entity_store.entities
 
     deleted = service_client.delete(
         f"/v2/assistant/history/sessions/{session_id}?workspace=team-a",
-        headers={"X-NMP-Principal-Id": "alice@example.com"},
+        headers={"X-NHX-Principal-Id": "alice@example.com"},
     )
     assert deleted.status_code == 204
     assert ("team-a", f"assistant-{session_id}") not in entity_store.entities
@@ -2167,7 +2167,7 @@ def test_platform_route_stream_infers_studio_url_from_browser_headers(monkeypatc
 
 
 def test_assistant_url_uses_only_configured_base_url(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("NMP_BASE_URL", "https://platform.example.com")
+    monkeypatch.setenv("NHX_BASE_URL", "https://platform.example.com")
 
     assert assistant._studio_assistant_url("default") == (
         "https://platform.example.com/apis/agents/v2/workspaces/default/"

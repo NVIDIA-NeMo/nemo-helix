@@ -5,10 +5,10 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nmp.intake.config import IntakeConfig
-from nmp.intake.service import IntakeService
-from nmp.testing.client import SDKTestClientAdapter, create_test_client
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nhx.intake.config import IntakeConfig
+from nhx.intake.service import IntakeService
+from nhx.testing.client import SDKTestClientAdapter, create_test_client
 
 OTLP_TRACES_PATH = "/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
 OTLP_TRACES_ROUTE = "/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces"
@@ -49,7 +49,7 @@ def test_otlp_ingest_declares_a_protobuf_request_body(client: TestClient):
 def test_sdk_create_sends_the_protobuf_body(client: TestClient, make_otlp_request):
     # The generated SDK tests for this method are all skipped ("Mock server tests are
     # disabled"), so this is the only executed coverage that create() reaches the endpoint.
-    sdk = NeMoPlatform(base_url="http://testserver", http_client=SDKTestClientAdapter(client))
+    sdk = NeMoHelix(base_url="http://testserver", http_client=SDKTestClientAdapter(client))
     body = make_otlp_request(
         [
             {
@@ -73,14 +73,14 @@ def test_sdk_create_sends_the_protobuf_body(client: TestClient, make_otlp_reques
 def async_sdk(intake_config: IntakeConfig):
     with create_test_client(
         IntakeService,
-        client_type=AsyncNeMoPlatform,
+        client_type=AsyncNeMoHelix,
         service_configs={IntakeService: intake_config},
     ) as sdk:
         yield sdk
 
 
 @pytest.mark.asyncio
-async def test_async_sdk_create_sends_the_protobuf_body(async_sdk: AsyncNeMoPlatform, make_otlp_request):
+async def test_async_sdk_create_sends_the_protobuf_body(async_sdk: AsyncNeMoHelix, make_otlp_request):
     # The async resource builds its request body through a separate code path from the
     # sync one, and publish_to_intake is async — so it needs its own coverage.
     body = make_otlp_request(

@@ -8,12 +8,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from nemo_platform.types.inference import ServedModelMapping
-from nemo_platform_plugin.inference_middleware import BackendFormat
-from nmp.core.inference_gateway.api import model_cache as model_cache_module
-from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
-from nmp.core.inference_gateway.api.model_cache import (
+from nemo_helix.types.inference import ServedModelMapping
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nhx.core.inference_gateway.api import model_cache as model_cache_module
+from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
+from nhx.core.inference_gateway.api.model_cache import (
     ModelCache,
     ModelEntityInfo,
     ModelProvider,
@@ -22,7 +22,7 @@ from nmp.core.inference_gateway.api.model_cache import (
     refresh_model_cache,
     refresh_model_cache_task,
 )
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
 def new_model_infos() -> list[ModelProviderInfo]:
@@ -120,24 +120,24 @@ def test_add_model_provider(model_cache: ModelCache):
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache(model_cache: ModelCache, mock_nmp_sdk):
-    await refresh_model_cache(model_cache, async_new_model_providers, secrets_sdk=mock_nmp_sdk)
+async def test_refresh_model_cache(model_cache: ModelCache, mock_nhx_sdk):
+    await refresh_model_cache(model_cache, async_new_model_providers, secrets_sdk=mock_nhx_sdk)
     assert model_cache.get_from_provider("default", "new")
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_getter_failure(model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_getter_failure(model_cache: ModelCache, mock_nhx_sdk):
     """Test model cache refresh when getter fails."""
     mock_getter = AsyncMock(side_effect=Exception("API error"))
 
     with pytest.raises(ModelProviderRefreshError) as exc_info:
-        await refresh_model_cache(model_cache, mock_getter, secrets_sdk=mock_nmp_sdk)
+        await refresh_model_cache(model_cache, mock_getter, secrets_sdk=mock_nhx_sdk)
 
     assert "Error trying to refresh model provider cache" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_task(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_task(mocker, model_cache: ModelCache, mock_nhx_sdk):
     # Create side effect that allows looping twice, then raises exception to break loop
     mock_logger = Mock()
     mocker.patch.object(model_cache_module, "logger", mock_logger)
@@ -147,7 +147,7 @@ async def test_refresh_model_cache_task(mocker, model_cache: ModelCache, mock_nm
     # Throw an error first, and then return successful data
     mock_getter = AsyncMock(side_effect=[Exception("API Error"), await async_new_model_providers()])
     with pytest.raises(Exception, match="Break loop"):
-        await refresh_model_cache_task(model_cache, mock_getter, secrets_sdk=mock_nmp_sdk, sleep_duration_s=0)
+        await refresh_model_cache_task(model_cache, mock_getter, secrets_sdk=mock_nhx_sdk, sleep_duration_s=0)
 
     assert mock_pause.call_count == 3
     for call in mock_pause.call_args_list:
@@ -159,7 +159,7 @@ async def test_refresh_model_cache_task(mocker, model_cache: ModelCache, mock_nm
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_task_max_consecutive_failures(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_task_max_consecutive_failures(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """Test that refresh_model_cache_task raises an exception after max_consecutive_failures."""
     mock_logger = Mock()
     mocker.patch.object(model_cache_module, "logger", mock_logger)
@@ -174,7 +174,7 @@ async def test_refresh_model_cache_task_max_consecutive_failures(mocker, model_c
     # Test with max_consecutive_failures=3 for faster testing
     with pytest.raises(ModelProviderRefreshError) as exc_info:
         await refresh_model_cache_task(
-            model_cache, mock_getter, secrets_sdk=mock_nmp_sdk, sleep_duration_s=0, max_consecutive_failures=3
+            model_cache, mock_getter, secrets_sdk=mock_nhx_sdk, sleep_duration_s=0, max_consecutive_failures=3
         )
 
     # Verify the error message mentions consecutive failures
@@ -188,7 +188,7 @@ async def test_refresh_model_cache_task_max_consecutive_failures(mocker, model_c
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_task_failure_counter_resets(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_task_failure_counter_resets(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """Test that the failure counter resets after a successful refresh."""
     mock_logger = Mock()
     mocker.patch.object(model_cache_module, "logger", mock_logger)
@@ -213,7 +213,7 @@ async def test_refresh_model_cache_task_failure_counter_resets(mocker, model_cac
     # Test with max_consecutive_failures=3, but we never hit it because of successes
     with pytest.raises(Exception, match="Break loop"):
         await refresh_model_cache_task(
-            model_cache, mock_getter, secrets_sdk=mock_nmp_sdk, sleep_duration_s=0, max_consecutive_failures=3
+            model_cache, mock_getter, secrets_sdk=mock_nhx_sdk, sleep_duration_s=0, max_consecutive_failures=3
         )
 
     # Should have completed without hitting max_consecutive_failures
@@ -476,7 +476,7 @@ def test_rebuild_model_entity_map_skips_malformed_entity_ids(caplog):
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_rebuilds_entity_map(mock_nmp_sdk):
+async def test_refresh_model_cache_rebuilds_entity_map(mock_nhx_sdk):
     """Test that refresh_model_cache rebuilds the model entity map."""
     cache = ModelCache()
 
@@ -497,7 +497,7 @@ async def test_refresh_model_cache_rebuilds_entity_map(mock_nmp_sdk):
             )
         ]
 
-    await refresh_model_cache(cache, provider_getter, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter, secrets_sdk=mock_nhx_sdk)
 
     # Verify the entity map was rebuilt
     entity_info = cache.get_from_model_entity("test-ns", "test-model")
@@ -507,13 +507,13 @@ async def test_refresh_model_cache_rebuilds_entity_map(mock_nmp_sdk):
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_populates_model_entity_backend_format(mock_nmp_sdk):
+async def test_refresh_model_cache_populates_model_entity_backend_format(mock_nhx_sdk):
     cache = ModelCache()
 
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(_model_entity()),
     )
 
@@ -523,7 +523,7 @@ async def test_refresh_model_cache_populates_model_entity_backend_format(mock_nm
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_preserves_backend_format_when_metadata_refresh_fails(mock_nmp_sdk):
+async def test_refresh_model_cache_preserves_backend_format_when_metadata_refresh_fails(mock_nhx_sdk):
     cache = ModelCache()
 
     async def failing_model_entity_getter():
@@ -532,13 +532,13 @@ async def test_refresh_model_cache_preserves_backend_format_when_metadata_refres
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(_model_entity()),
     )
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=failing_model_entity_getter,
     )
 
@@ -548,7 +548,7 @@ async def test_refresh_model_cache_preserves_backend_format_when_metadata_refres
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_preserves_omitted_model_entity_metadata_fields(mock_nmp_sdk):
+async def test_refresh_model_cache_preserves_omitted_model_entity_metadata_fields(mock_nhx_sdk):
     cache = ModelCache()
     updated_spec = SimpleNamespace(context_length=2048)
     partial_model_entity = SimpleNamespace(
@@ -563,13 +563,13 @@ async def test_refresh_model_cache_preserves_omitted_model_entity_metadata_field
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(_model_entity(finetuning_type="lora")),
     )
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(partial_model_entity),
     )
 
@@ -581,19 +581,19 @@ async def test_refresh_model_cache_preserves_omitted_model_entity_metadata_field
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_clears_backend_format_when_successful_metadata_refresh_omits_model(mock_nmp_sdk):
+async def test_refresh_model_cache_clears_backend_format_when_successful_metadata_refresh_omits_model(mock_nhx_sdk):
     cache = ModelCache()
 
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(_model_entity()),
     )
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(),
     )
 
@@ -603,13 +603,13 @@ async def test_refresh_model_cache_clears_backend_format_when_successful_metadat
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_ignores_invalid_model_entity_backend_format(mock_nmp_sdk):
+async def test_refresh_model_cache_ignores_invalid_model_entity_backend_format(mock_nhx_sdk):
     cache = ModelCache()
 
     await refresh_model_cache(
         cache,
         _model_provider_getter_for(),
-        secrets_sdk=mock_nmp_sdk,
+        secrets_sdk=mock_nhx_sdk,
         model_entity_getter=_model_entity_getter_for(_model_entity(backend_format="NOT_A_FORMAT")),
     )
 
@@ -643,7 +643,7 @@ def test_resolve_backend_format_returns_none_for_invalid_values():
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_removes_stale_providers(mock_nmp_sdk):
+async def test_refresh_model_cache_removes_stale_providers(mock_nhx_sdk):
     """Test that refresh_model_cache removes providers that are no longer in the fetched list."""
     cache = ModelCache()
 
@@ -666,7 +666,7 @@ async def test_refresh_model_cache_removes_stale_providers(mock_nmp_sdk):
             ),
         ]
 
-    await refresh_model_cache(cache, provider_getter_initial, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter_initial, secrets_sdk=mock_nhx_sdk)
 
     # Verify both providers are in cache
     assert cache.get_from_provider("test", "provider1") is not None
@@ -685,7 +685,7 @@ async def test_refresh_model_cache_removes_stale_providers(mock_nmp_sdk):
             ),
         ]
 
-    await refresh_model_cache(cache, provider_getter_updated, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter_updated, secrets_sdk=mock_nhx_sdk)
 
     # Verify provider1 still exists but provider2 was removed
     assert cache.get_from_provider("test", "provider1") is not None
@@ -694,7 +694,7 @@ async def test_refresh_model_cache_removes_stale_providers(mock_nmp_sdk):
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_updates_existing_provider_config(mock_nmp_sdk):
+async def test_refresh_model_cache_updates_existing_provider_config(mock_nhx_sdk):
     """Test that refresh_model_cache updates existing providers with fresh configuration."""
     cache = ModelCache()
 
@@ -712,7 +712,7 @@ async def test_refresh_model_cache_updates_existing_provider_config(mock_nmp_sdk
             ),
         ]
 
-    await refresh_model_cache(cache, provider_getter_initial, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter_initial, secrets_sdk=mock_nhx_sdk)
 
     # Verify initial config
     provider_info = cache.get_from_provider("test", "provider1")
@@ -735,7 +735,7 @@ async def test_refresh_model_cache_updates_existing_provider_config(mock_nmp_sdk
             ),
         ]
 
-    await refresh_model_cache(cache, provider_getter_updated, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter_updated, secrets_sdk=mock_nhx_sdk)
 
     # Verify config was updated
     provider_info = cache.get_from_provider("test", "provider1")
@@ -747,7 +747,7 @@ async def test_refresh_model_cache_updates_existing_provider_config(mock_nmp_sdk
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_updates_existing_provider_served_models(mock_nmp_sdk):
+async def test_refresh_model_cache_updates_existing_provider_served_models(mock_nhx_sdk):
     """Test that refresh_model_cache updates served_models for existing providers.
 
     This catches a bug where existing providers in cache would not get their
@@ -770,7 +770,7 @@ async def test_refresh_model_cache_updates_existing_provider_served_models(mock_
             ),
         ]
 
-    await refresh_model_cache(cache, provider_getter_initial, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter_initial, secrets_sdk=mock_nhx_sdk)
 
     # Verify provider is cached but no model entities exist
     assert cache.get_from_provider("e2e-test", "llama-deployment") is not None
@@ -796,7 +796,7 @@ async def test_refresh_model_cache_updates_existing_provider_served_models(mock_
             ),
         ]
 
-    await refresh_model_cache(cache, provider_getter_with_served_models, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(cache, provider_getter_with_served_models, secrets_sdk=mock_nhx_sdk)
 
     # Verify the model entity map was updated with the new served_models
     entity_info = cache.get_from_model_entity("e2e-test", "meta-llama-3-2-1b-instruct")
@@ -813,26 +813,26 @@ async def test_refresh_model_cache_updates_existing_provider_served_models(mock_
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_without_registry_is_backward_compatible(model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_without_registry_is_backward_compatible(model_cache: ModelCache, mock_nhx_sdk):
     """refresh_model_cache without middleware_registry still works (backward compat)."""
-    await refresh_model_cache(model_cache, async_new_model_providers, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, async_new_model_providers, secrets_sdk=mock_nhx_sdk)
     assert model_cache.get_from_provider("default", "new")
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_passes_registry_to_vm_cache_refresh(model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_passes_registry_to_vm_cache_refresh(model_cache: ModelCache, mock_nhx_sdk):
     """When middleware_registry is provided it is forwarded to refresh_virtual_model_cache."""
     vm_cache = VirtualModelCache()
     registry = MiddlewareRegistry()
 
     with patch(
-        "nmp.core.inference_gateway.api.model_cache.refresh_virtual_model_cache",
+        "nhx.core.inference_gateway.api.model_cache.refresh_virtual_model_cache",
         new_callable=AsyncMock,
     ) as mock_vm_refresh:
         await refresh_model_cache(
             model_cache,
             async_new_model_providers,
-            secrets_sdk=mock_nmp_sdk,
+            secrets_sdk=mock_nhx_sdk,
             virtual_model_cache=vm_cache,
             middleware_registry=registry,
         )
@@ -842,7 +842,7 @@ async def test_refresh_model_cache_passes_registry_to_vm_cache_refresh(model_cac
 
 
 @pytest.mark.asyncio
-async def test_refresh_model_cache_task_passes_registry(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_model_cache_task_passes_registry(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """refresh_model_cache_task threads middleware_registry into each refresh cycle."""
     vm_cache = VirtualModelCache()
     registry = MiddlewareRegistry()
@@ -851,14 +851,14 @@ async def test_refresh_model_cache_task_passes_registry(mocker, model_cache: Mod
     mocker.patch.object(model_cache_module, "_async_pause", mock_pause)
 
     with patch(
-        "nmp.core.inference_gateway.api.model_cache.refresh_virtual_model_cache",
+        "nhx.core.inference_gateway.api.model_cache.refresh_virtual_model_cache",
         new_callable=AsyncMock,
     ) as mock_vm_refresh:
         with pytest.raises(Exception, match="stop"):
             await refresh_model_cache_task(
                 model_cache,
                 async_new_model_providers,
-                secrets_sdk=mock_nmp_sdk,
+                secrets_sdk=mock_nhx_sdk,
                 sleep_duration_s=1,
                 virtual_model_cache=vm_cache,
                 middleware_registry=registry,

@@ -3,7 +3,7 @@
 
 import { useEvaluatorGetEvalResult } from '@nemo/sdk/generated/evaluator/evaluator-plugin-eval-results-routes';
 import { useEvaluatorGetEvaluateJobResult } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useQuery } from '@tanstack/react-query';
 
@@ -36,7 +36,7 @@ export const useDatasetEvalResults = (workspace: string, jobName: string, status
     status === 'canceled' ||
     status === 'failed' ||
     status === 'cancelling';
-  const enabled = !!workspace && !!jobName && status === PlatformJobStatus.completed;
+  const enabled = !!workspace && !!jobName && status === HelixJobStatus.completed;
 
   const {
     data: evalResult,

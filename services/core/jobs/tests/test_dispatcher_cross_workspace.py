@@ -13,18 +13,18 @@ to the "default" workspace instead of searching across all workspaces.
 
 import pytest
 import pytest_asyncio
-from nmp.common.entities import ALL_WORKSPACES, EntityClient
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import (
-    CreatePlatformJobRequest,
-    PlatformJobSortField,
-    PlatformJobStepsListFilter,
-    PlatformJobTaskUpdate,
+from nhx.common.entities import ALL_WORKSPACES, EntityClient
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import (
+    CreateHelixJobRequest,
+    HelixJobSortField,
+    HelixJobStepsListFilter,
+    HelixJobTaskUpdate,
 )
-from nmp.core.jobs.app.dispatcher import JobDispatcher
-from nmp.core.jobs.app.test_helpers import TestConstants
-from nmp.core.jobs.entities import PlatformJobTask
-from nmp.testing import create_test_client
+from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.entities import HelixJobTask
+from nhx.testing import create_test_client
 
 
 @pytest.fixture(scope="function")
@@ -37,17 +37,17 @@ def multi_workspace_store():
 
 
 @pytest_asyncio.fixture()
-async def multi_workspace_dispatcher(multi_workspace_store, mock_nmp_client) -> JobDispatcher:
+async def multi_workspace_dispatcher(multi_workspace_store, mock_nhx_client) -> JobDispatcher:
     """Create a JobDispatcher with multi-workspace EntityStore."""
     return JobDispatcher(
         store=multi_workspace_store,
-        sdk=mock_nmp_client,
+        sdk=mock_nhx_client,
     )
 
 
-def create_job_request(job_name: str) -> CreatePlatformJobRequest:
+def create_job_request(job_name: str) -> CreateHelixJobRequest:
     """Create a job request."""
-    return CreatePlatformJobRequest(
+    return CreateHelixJobRequest(
         name=job_name,
         description=f"Test job {job_name}",
         project="test-project",
@@ -83,10 +83,10 @@ async def test_list_steps_finds_jobs_in_non_default_workspace(
     assert step.workspace == custom_workspace
 
     # Now test list_steps with workspace=None (should search ALL workspaces)
-    filter_obj = PlatformJobStepsListFilter(status=[PlatformJobStatus.CREATED])
+    filter_obj = HelixJobStepsListFilter(status=[HelixJobStatus.CREATED])
     steps, total = await multi_workspace_dispatcher.list_steps(
         filter=filter_obj,
-        sort=PlatformJobSortField.CREATED_AT_ASC,
+        sort=HelixJobSortField.CREATED_AT_ASC,
         limit=100,
         offset=0,
         workspace=ALL_WORKSPACES,  # This should search across all workspaces
@@ -168,10 +168,10 @@ async def test_list_steps_with_specific_workspace_only_returns_that_workspace(
     )
 
     # List steps only from the custom workspace
-    filter_obj = PlatformJobStepsListFilter(status=[PlatformJobStatus.CREATED])
+    filter_obj = HelixJobStepsListFilter(status=[HelixJobStatus.CREATED])
     steps, total = await multi_workspace_dispatcher.list_steps(
         filter=filter_obj,
-        sort=PlatformJobSortField.CREATED_AT_ASC,
+        sort=HelixJobSortField.CREATED_AT_ASC,
         limit=100,
         offset=0,
         workspace="custom-workspace",
@@ -206,13 +206,13 @@ async def test_update_job_step_status_works_across_workspaces(
     assert step is not None
 
     # Update the step status to PENDING
-    step.status = PlatformJobStatus.PENDING
+    step.status = HelixJobStatus.PENDING
     await multi_workspace_store.update(step)
 
     # Verify we can still find the step after update
     updated_step = await multi_workspace_dispatcher.get_current_job_step_by_name(job.name, "basic", custom_workspace)
     assert updated_step is not None
-    assert updated_step.status == PlatformJobStatus.PENDING
+    assert updated_step.status == HelixJobStatus.PENDING
 
 
 @pytest.mark.asyncio
@@ -242,8 +242,8 @@ async def test_create_or_update_task_finds_existing_task_by_name(
     task_name = "evaluation-task"
 
     # First call: create the task
-    task_update = PlatformJobTaskUpdate(
-        status=PlatformJobStatus.ACTIVE,
+    task_update = HelixJobTaskUpdate(
+        status=HelixJobStatus.ACTIVE,
         status_details={"progress": 0},
     )
     task1 = await multi_workspace_dispatcher.create_or_update_task(
@@ -255,14 +255,14 @@ async def test_create_or_update_task_finds_existing_task_by_name(
     )
     assert task1 is not None
     assert task1.name == task_name
-    assert task1.status == PlatformJobStatus.ACTIVE
+    assert task1.status == HelixJobStatus.ACTIVE
 
     # Second call: update the same task (should NOT create a duplicate)
     # This is where the bug manifests - if get_task doesn't find the existing
     # task, it tries to create another one with the same name, causing:
     # "unique constraint failed"
-    task_update2 = PlatformJobTaskUpdate(
-        status=PlatformJobStatus.COMPLETED,
+    task_update2 = HelixJobTaskUpdate(
+        status=HelixJobStatus.COMPLETED,
         status_details={"progress": 100},
     )
     task2 = await multi_workspace_dispatcher.create_or_update_task(
@@ -277,7 +277,7 @@ async def test_create_or_update_task_finds_existing_task_by_name(
     assert task2 is not None
     assert task2.id == task1.id, "Should update existing task, not create a new one"
     assert task2.name == task_name
-    assert task2.status == PlatformJobStatus.COMPLETED
+    assert task2.status == HelixJobStatus.COMPLETED
 
     # Verify only one task exists for this step
     tasks = await multi_workspace_dispatcher.list_tasks(step.id, workspace="default")
@@ -303,11 +303,11 @@ async def test_list_tasks_uses_step_workspace_for_non_default_jobs(
     assert step is not None
 
     task = await multi_workspace_store.add(
-        PlatformJobTask(
+        HelixJobTask(
             name="custom-task",
             workspace=custom_workspace,
             step_id=step.id,
-            status=PlatformJobStatus.ERROR,
+            status=HelixJobStatus.ERROR,
         )
     )
     assert task.id is not None
@@ -341,11 +341,11 @@ async def test_get_task_finds_task_by_name_not_entity_id(
 
     # Create a task directly in the store (simulating what create_or_update_task does)
     task = await multi_workspace_store.add(
-        PlatformJobTask(
+        HelixJobTask(
             name=task_name,
             workspace=step.workspace,
             step_id=step.id,
-            status=PlatformJobStatus.ACTIVE,
+            status=HelixJobStatus.ACTIVE,
         )
     )
     assert task.id is not None

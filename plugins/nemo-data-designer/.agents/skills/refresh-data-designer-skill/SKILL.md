@@ -14,9 +14,9 @@ This skill is for plugin contributors. End users do not run it — they get the 
 
 ## The governing principle
 
-**The shipped skill describes NeMo Platform execution only.** It is not a copy of the upstream skill with caveats bolted on.
+**The shipped skill describes NeMo Helix execution only.** It is not a copy of the upstream skill with caveats bolted on.
 
-Upstream's skill documents the standalone library, where models come from a local YAML registry, seed data is a file on disk, and persona locales are downloaded to `~/.data-designer/managed-assets/`. **None of that is true here.** Data Designer on NeMo Platform resolves inference through Inference Gateway, seed data through HuggingFace or the Files service, and persona data through `system` workspace filesets.
+Upstream's skill documents the standalone library, where models come from a local YAML registry, seed data is a file on disk, and persona locales are downloaded to `~/.data-designer/managed-assets/`. **None of that is true here.** Data Designer on NeMo Helix resolves inference through Inference Gateway, seed data through HuggingFace or the Files service, and persona data through `system` workspace filesets.
 
 Earlier versions of this playbook copied upstream wholesale and tried to teach agents the delta in a separate additions file. That failed: agents followed the standalone-library instructions that were still sitting in the bundle. Do not reintroduce that pattern. When upstream content contradicts platform behavior, **replace it**, don't annotate it.
 
@@ -134,7 +134,7 @@ Any `MISSING:` means upstream changed the command surface or `nemo data-designer
 grep -RniE '~/\.data-designer|managed-assets|LocalFileSeedSource|personas download|data-designer config' "$SKILLS"
 ```
 
-Every hit must be either absent or an explicit statement that the thing does *not* apply on NeMo Platform. A hit that reads as instruction is a failure.
+Every hit must be either absent or an explicit statement that the thing does *not* apply on NeMo Helix. A hit that reads as instruction is a failure.
 
 **Non-obvious claims are checked against the source**, not against upstream's docs:
 

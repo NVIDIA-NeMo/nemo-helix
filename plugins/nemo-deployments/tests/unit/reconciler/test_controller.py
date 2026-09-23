@@ -14,8 +14,8 @@ from nemo_deployments_plugin.backends.registry import ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.controller import DeploymentsController, _orphan_protected_ids
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite, StatusEvent
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 
 def _stub_registry() -> ExecutorRegistry:

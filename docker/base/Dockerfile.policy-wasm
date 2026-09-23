@@ -7,7 +7,7 @@ RUN apk add --no-cache curl tar
 ARG OPA_VERSION=v1.8.0
 WORKDIR /build
 COPY script/build_policy_wasm.sh /build/script/
-COPY services/core/auth/src/nmp/core/auth/app/policies /build/services/core/auth/src/nmp/core/auth/app/policies
+COPY services/core/auth/src/nhx/core/auth/app/policies /build/services/core/auth/src/nhx/core/auth/app/policies
 RUN OPA_VERSION="${OPA_VERSION}" REPO_ROOT=/build OUTPUT_DIR=/artifacts sh /build/script/build_policy_wasm.sh
 
 FROM scratch AS root-policy-wasm-artifacts

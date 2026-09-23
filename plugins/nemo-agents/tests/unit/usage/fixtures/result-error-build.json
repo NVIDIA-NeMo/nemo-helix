@@ -2,7 +2,7 @@
   "task": "models-list-mcp",
   "timestamp": "20260429T231000Z",
   "output_dir": "/tmp/nat-jobs/20260429T231000Z-models-list-mcp",
-  "image": "nmp-nat-models-list-mcp:latest",
+  "image": "nhx-nat-models-list-mcp:latest",
   "build": "error: docker build failed",
   "agent": null,
   "verify": null,

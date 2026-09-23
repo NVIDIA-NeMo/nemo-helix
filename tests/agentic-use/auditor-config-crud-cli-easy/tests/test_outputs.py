@@ -12,19 +12,19 @@ Checks:
 import os
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from trace_reader import get_session
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
-def client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE)
+def client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
-def test_harbor_test_config_deleted(client: NeMoPlatform) -> None:
+def test_harbor_test_config_deleted(client: NeMoHelix) -> None:
     """Test that harbor-test-config was deleted after CRUD operations."""
     configs = client.auditor.configs.list(workspace=WORKSPACE)
     config_names = [c["name"] for c in configs["data"]]
@@ -33,7 +33,7 @@ def test_harbor_test_config_deleted(client: NeMoPlatform) -> None:
     )
 
 
-def test_harbor_final_config_exists(client: NeMoPlatform) -> None:
+def test_harbor_final_config_exists(client: NeMoHelix) -> None:
     """Test that harbor-final-config was created and has correct metadata."""
     response = client.auditor.configs.get(workspace=WORKSPACE, name="harbor-final-config")
     assert response.name == "harbor-final-config", f"Expected config name 'harbor-final-config', got '{response.name}'"
@@ -42,7 +42,7 @@ def test_harbor_final_config_exists(client: NeMoPlatform) -> None:
     )
 
 
-def test_harbor_final_config_probe_spec(client: NeMoPlatform) -> None:
+def test_harbor_final_config_probe_spec(client: NeMoHelix) -> None:
     """Test that harbor-final-config uses the dan.DanInTheWild probe."""
     response = client.auditor.configs.get(workspace=WORKSPACE, name="harbor-final-config")
     probe_spec = response.plugins.probe_spec

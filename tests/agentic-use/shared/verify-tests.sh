@@ -5,9 +5,9 @@
 
 # Shared test runner for Harbor evals.
 # This file is sourced by test.sh scripts via: source /app/tests/agentic-use/shared/verify-tests.sh
-# Note: curl, uv, and Python are already installed in the nmp-agentic-base base image.
+# Note: curl, uv, and Python are already installed in the nhx-agentic-base base image.
 
-# This is installed in the nmp-agentic-base base image at /app/tests/agentic-use/shared/verify-tests.sh
+# This is installed in the nhx-agentic-base base image at /app/tests/agentic-use/shared/verify-tests.sh
 
 # Add shared utilities (trace_reader, etc.) to Python path
 export PYTHONPATH="/app/tests/agentic-use/shared:${PYTHONPATH}"

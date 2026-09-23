@@ -19,7 +19,7 @@ test("ACT reports an act-compatible repository_dispatch envelope", async () => {
     },
     env: { ACT: "true" },
     eventType: "stage-wheels",
-    clientPayload: { ref: "a".repeat(40), wheels: ["nemo-platform"] },
+    clientPayload: { ref: "a".repeat(40), wheels: ["nemo-helix"] },
   });
 
   assert.deepEqual(requests, []);
@@ -27,7 +27,7 @@ test("ACT reports an act-compatible repository_dispatch envelope", async () => {
     JSON.parse(logs[0].split("repository_dispatch event:\n")[1]),
     {
       action: "stage-wheels",
-      client_payload: { ref: "a".repeat(40), wheels: ["nemo-platform"] },
+      client_payload: { ref: "a".repeat(40), wheels: ["nemo-helix"] },
     },
   );
 });
@@ -45,7 +45,7 @@ test("GitHub dispatches the event to the configured destination", async () => {
     },
     env: { DISPATCH_REPO: "NVIDIA-NeMo/Platform-Deploy" },
     eventType: "release",
-    clientPayload: { ref: "a".repeat(40), containers: ["nmp-api"] },
+    clientPayload: { ref: "a".repeat(40), containers: ["nhx-api"] },
   });
 
   assert.deepEqual(requests, [
@@ -53,7 +53,7 @@ test("GitHub dispatches the event to the configured destination", async () => {
       owner: "NVIDIA-NeMo",
       repo: "Platform-Deploy",
       event_type: "release",
-      client_payload: { ref: "a".repeat(40), containers: ["nmp-api"] },
+      client_payload: { ref: "a".repeat(40), containers: ["nhx-api"] },
     },
   ]);
 });

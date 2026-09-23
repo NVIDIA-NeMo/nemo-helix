@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 #######
-# NeMo Platform Docker build target configuration.
+# NeMo Helix Docker build target configuration.
 #######
 
 variable "CACHE_REGISTRY" {
@@ -31,11 +31,11 @@ variable "USE_PREBUILT_BASES" {
   default = ""
 }
 
-variable "NMP_COLLECT_SOURCES" {
+variable "NHX_COLLECT_SOURCES" {
   default = "0"
 }
 
-variable "NMP_PYTHON_IMAGE" {
+variable "NHX_PYTHON_IMAGE" {
   default = "python:3.13.15-slim-trixie"
 }
 
@@ -48,16 +48,16 @@ variable "DISTROLESS_BASE_3_13" {
   default = "nvcr.io/nvidia/distroless/python:3.13-v4.1.3"
 }
 
-variable "NMP_API_RUNTIME_BASE" {
-  default = "nmp-python-base"
+variable "NHX_API_RUNTIME_BASE" {
+  default = "nhx-python-base"
 }
 
-variable "NMP_CORE_RUNTIME_BASE" {
-  default = "nmp-python-base"
+variable "NHX_CORE_RUNTIME_BASE" {
+  default = "nhx-python-base"
 }
 
-variable "NMP_CPU_TASKS_RUNTIME_BASE" {
-  default = "nmp-python-base"
+variable "NHX_CPU_TASKS_RUNTIME_BASE" {
+  default = "nhx-python-base"
 }
 
 variable "AUTOMODEL_BASE_CONTEXT" {
@@ -96,19 +96,19 @@ variable "BAKE_TAG" {
   default = "local"
 }
 
-# Tag for a published nmp-python-base image. Bake builds that target from
-# NMP_PYTHON_IMAGE (currently python:3.13.15-slim-trixie); this SHA is not
-# wired as a FROM pin. Rebuild the target in CI after changing NMP_PYTHON_IMAGE.
+# Tag for a published nhx-python-base image. Bake builds that target from
+# NHX_PYTHON_IMAGE (currently python:3.13.15-slim-trixie); this SHA is not
+# wired as a FROM pin. Rebuild the target in CI after changing NHX_PYTHON_IMAGE.
 variable "BASE_TAG_PYTHON" {
   default = "d9e1851f309d3cf5389c0fc0e1049bd3c87593f8"
 }
 
-# Pin for nmp-automodel-base.
+# Pin for nhx-automodel-base.
 variable "BASE_TAG_AUTOMODEL" {
   default = "2c1a9ef2535a6648a272d9b74dae97fb672b8234"
 }
 
-# Pin for nmp-rl-base (prebuilt-base tag) + the NeMo-RL / NeMo-Gym source the base builds from.
+# Pin for nhx-rl-base (prebuilt-base tag) + the NeMo-RL / NeMo-Gym source the base builds from.
 # Defaults point at the soluwalana/{RL,Gym} forks. If the RL fork's uv.lock and the Gym ref drift,
 # build with UV_SYNC_MODE= to relock.
 variable "BASE_TAG_RL" {
@@ -118,7 +118,7 @@ variable "NEMO_RL_REPO" {
   default = "https://github.com/soluwalana/RL.git"
 }
 # Pin to an immutable commit SHA, not the branch name. The base clones RL at this ref
-# (docker/rl/Dockerfile.nmp-rl-base, nemo-rl stage); a branch ref would let the fork move under us,
+# (docker/rl/Dockerfile.nhx-rl-base, nemo-rl stage); a branch ref would let the fork move under us,
 # silently invalidating the base's heavy uv-sync layer on every training rebuild (and breaking
 # `uv sync --frozen` if that commit's lock drifted). Bump deliberately, in lockstep with the fork's
 # uv.lock, when advancing RL.
@@ -126,7 +126,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "9932dc8aa63a55fd431670d1b7c9d0bf3b2d2373" # soluwalana/RL nmp/customizer
+  default = "9932dc8aa63a55fd431670d1b7c9d0bf3b2d2373" # soluwalana/RL nhx/customizer
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -211,12 +211,12 @@ function "base_tags" {
 
 function "automodel_base_context" {
   params = []
-  result = notequal(AUTOMODEL_BASE_CONTEXT, "") ? AUTOMODEL_BASE_CONTEXT : notequal(USE_PREBUILT_BASES, "") ? "docker-image://${BASE_REGISTRY}/nmp-automodel-base:${BASE_TAG_AUTOMODEL}" : "target:nmp-automodel-base-builder"
+  result = notequal(AUTOMODEL_BASE_CONTEXT, "") ? AUTOMODEL_BASE_CONTEXT : notequal(USE_PREBUILT_BASES, "") ? "docker-image://${BASE_REGISTRY}/nhx-automodel-base:${BASE_TAG_AUTOMODEL}" : "target:nhx-automodel-base-builder"
 }
 
 function "rl_base_context" {
   params = []
-  result = notequal(RL_BASE_CONTEXT, "") ? RL_BASE_CONTEXT : notequal(USE_PREBUILT_BASES, "") ? "docker-image://${BASE_REGISTRY}/nmp-rl-base:${BASE_TAG_RL}" : "target:nmp-rl-base-builder"
+  result = notequal(RL_BASE_CONTEXT, "") ? RL_BASE_CONTEXT : notequal(USE_PREBUILT_BASES, "") ? "docker-image://${BASE_REGISTRY}/nhx-rl-base:${BASE_TAG_RL}" : "target:nhx-rl-base-builder"
 }
 
 function "causal_conv1d_wheel_context" {
@@ -282,7 +282,7 @@ function "get_platforms" {
 # Auditor images
 group "docker-auditor" {
   targets = [
-    "auditor-tasks-docker",
+    "nhx-auditor-tasks-docker",
   ]
 }
 
@@ -295,14 +295,14 @@ group "all-multi-platform" {
 group "docker-multi-platform" {
   targets = [
     "docker-cpu",
-    "auditor-tasks-docker",
+    "nhx-auditor-tasks-docker",
   ]
 }
 
 group "docker-python-base" {
   targets = [
-    "nmp-python-base-builder",
-    "nmp-python-dev-base-builder",
+    "nhx-python-base-builder",
+    "nhx-python-dev-base-builder",
   ]
 }
 
@@ -335,9 +335,9 @@ group "docker" {
 # Build groups for consolidated containers
 group "docker-cpu" {
   targets = [
-    "nmp-api-docker",
-    "nmp-cpu-tasks-docker",
-    "nmp-gym-tasks-docker",
+    "nhx-api-docker",
+    "nhx-cpu-tasks-docker",
+    "nhx-gym-tasks-docker",
   ]
 }
 
@@ -346,59 +346,59 @@ group "docker-cpu" {
 group "docker-cpu-ci" {
   targets = [
     "docker-cpu",
-    "nmp-agents-deepagents-e2e-docker",
-    "nmp-cpu-tasks-smoke-test",
-    "nmp-gym-tasks-smoke-test",
+    "nhx-agents-deepagents-e2e-docker",
+    "nhx-cpu-tasks-smoke-test",
+    "nhx-gym-tasks-smoke-test",
   ]
 }
 
 group "docker-gpu" {
   targets = [
-    "safe-synthesizer-tasks-docker",
-    "safe-synthesizer-tasks-smoke-test",
+    "nhx-safe-synthesizer-tasks-docker",
+    "nhx-safe-synthesizer-tasks-smoke-test",
   ]
 }
 
-group "nmp-automodel-gpu-wheels" {
+group "nhx-automodel-gpu-wheels" {
   targets = [
     "causal-conv1d-wheel",
     "mamba-ssm-wheel",
   ]
 }
 
-group "nmp-automodel" {
+group "nhx-automodel" {
   targets = [
-    "nmp-automodel-base-builder",
-    "nmp-automodel-training-docker",
-    "nmp-automodel-training-smoke-test",
-    "nmp-customizer-tasks",
-    "nmp-customizer-tasks-smoke-test",
+    "nhx-automodel-base-builder",
+    "nhx-automodel-training-docker",
+    "nhx-automodel-training-smoke-test",
+    "nhx-customizer-tasks",
+    "nhx-customizer-tasks-smoke-test",
   ]
 }
 
-group "nmp-unsloth" {
+group "nhx-unsloth" {
   targets = [
-    "nmp-unsloth-training",
+    "nhx-unsloth-training",
   ]
 }
 
-group "nmp-rl" {
+group "nhx-rl" {
   targets = [
-    "nmp-rl-base-builder",
-    "nmp-rl-training",
-    "nmp-rl-training-smoke-test",
-    "nmp-customizer-tasks",
+    "nhx-rl-base-builder",
+    "nhx-rl-training",
+    "nhx-rl-training-smoke-test",
+    "nhx-customizer-tasks",
   ]
 }
 
-group "nmp-customizer" {
+group "nhx-customizer" {
   targets = [
-    "nmp-customizer-tasks",
-    "nmp-customizer-tasks-smoke-test",
+    "nhx-customizer-tasks",
+    "nhx-customizer-tasks-smoke-test",
   ]
 }
 
-# Pruned workspace slice for nmp-customizer-tasks (keep in sync with
+# Pruned workspace slice for nhx-customizer-tasks (keep in sync with
 # docker/customizer/pyproject.workspace.toml + Dockerfile.platform-workspace members).
 target "customizer-platform-workspace" {
   target     = "platform-workspace"
@@ -408,44 +408,44 @@ target "customizer-platform-workspace" {
   platforms  = get_platforms()
 }
 
-target "nmp-customizer-tasks" {
+target "nhx-customizer-tasks" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-customizer-tasks"
+  dockerfile = "docker/Dockerfile.nhx-customizer-tasks"
   contexts = {
     platform-workspace       = "target:customizer-platform-workspace"
     causal-conv1d-wheel-src  = causal_conv1d_wheel_context()
     mamba-ssm-wheel-src      = mamba_ssm_wheel_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-customizer-tasks")
-  cache-from = maybe_registry_cache_from("nmp-customizer-tasks")
-  tags       = sha_and_maybe_latest_tags("nmp-customizer-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-customizer-tasks")
+  cache-from = maybe_registry_cache_from("nhx-customizer-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-customizer-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }
 
-target "nmp-customizer-tasks-smoke-test" {
+target "nhx-customizer-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-customizer-tasks"
+  dockerfile = "docker/Dockerfile.nhx-customizer-tasks"
   contexts = {
     platform-workspace       = "target:customizer-platform-workspace"
     causal-conv1d-wheel-src  = causal_conv1d_wheel_context()
     mamba-ssm-wheel-src      = mamba_ssm_wheel_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
-    SMOKE_MARKER         = "smoke_nmp_customizer_tasks"
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    SMOKE_MARKER         = "smoke_nhx_customizer_tasks"
   }
-  cache-from = maybe_registry_cache_from("nmp-customizer-tasks")
+  cache-from = maybe_registry_cache_from("nhx-customizer-tasks")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
 
-# Pruned workspace slice for nmp-rl images (keep in sync with
+# Pruned workspace slice for nhx-rl images (keep in sync with
 # docker/rl/pyproject.workspace.toml + Dockerfile.platform-workspace members).
 target "rl-platform-workspace" {
   target     = "platform-workspace"
@@ -457,122 +457,122 @@ target "rl-platform-workspace" {
 
 # Heavy base: cuda-dl-base + NeMo-RL (with its Gym/Automodel/Megatron-Bridge submodules) built FROM
 # SOURCE (Python 3.13, CUDA 13). RL is pinned via NEMO_RL_REF; Gym rides in as RL's own submodule
-target "nmp-rl-base-builder" {
-  target     = "nmp-rl-base"
+target "nhx-rl-base-builder" {
+  target     = "nhx-rl-base"
   context    = "."
-  dockerfile = "docker/rl/Dockerfile.nmp-rl-base"
+  dockerfile = "docker/rl/Dockerfile.nhx-rl-base"
   args = {
     NEMO_RL_REPO        = NEMO_RL_REPO
     NEMO_RL_REF         = NEMO_RL_REF
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-rl-base")
-  cache-from = maybe_registry_cache_from("nmp-rl-base")
-  tags       = base_tags("nmp-rl-base")
+  cache-to   = maybe_registry_cache_to("nhx-rl-base")
+  cache-from = maybe_registry_cache_from("nhx-rl-base")
+  tags       = base_tags("nhx-rl-base")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # GPU DPO + GRPO training image (also the Gym environment runtime): base + platform glue.
 # Bootstraps Ray at runtime.
-target "nmp-rl-training" {
+target "nhx-rl-training" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/rl/Dockerfile.nmp-rl-training"
+  dockerfile = "docker/rl/Dockerfile.nhx-rl-training"
   contexts = {
     platform-workspace = "target:rl-platform-workspace"
-    nmp-rl-base        = rl_base_context()
+    nhx-rl-base        = rl_base_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-rl-training")
-  cache-from = maybe_registry_cache_from("nmp-rl-training")
-  tags       = sha_and_maybe_latest_tags("nmp-rl-training")
+  cache-to   = maybe_registry_cache_to("nhx-rl-training")
+  cache-from = maybe_registry_cache_from("nhx-rl-training")
+  tags       = sha_and_maybe_latest_tags("nhx-rl-training")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # CPU-only import smoke tests for the training image (smoke-test stage runs pytest during build).
-target "nmp-rl-training-smoke-test" {
+target "nhx-rl-training-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/rl/Dockerfile.nmp-rl-training"
+  dockerfile = "docker/rl/Dockerfile.nhx-rl-training"
   contexts = {
     platform-workspace = "target:rl-platform-workspace"
-    nmp-rl-base        = rl_base_context()
+    nhx-rl-base        = rl_base_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
-    SMOKE_MARKER         = "smoke_nmp_rl_training"
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    SMOKE_MARKER         = "smoke_nhx_rl_training"
   }
-  cache-from = maybe_registry_cache_from("nmp-rl-training")
+  cache-from = maybe_registry_cache_from("nhx-rl-training")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
 
 # Base images for consolidated containers
-target "nmp-python-base" {
-  target     = "nmp-python-base-builder"
+target "nhx-python-base" {
+  target     = "nhx-python-base-builder"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-python-base"
+  dockerfile = "docker/base/Dockerfile.nhx-python-base"
   args = {
-    NMP_PYTHON_IMAGE = "${NMP_PYTHON_IMAGE}"
+    NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
   }
-  cache-from = maybe_registry_cache_from("nmp-python-base")
+  cache-from = maybe_registry_cache_from("nhx-python-base")
   platforms  = get_platforms()
 }
 
-target "nmp-python-base-builder" {
-  target     = "nmp-python-base-builder"
+target "nhx-python-base-builder" {
+  target     = "nhx-python-base-builder"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-python-base"
+  dockerfile = "docker/base/Dockerfile.nhx-python-base"
   args = {
-    NMP_PYTHON_IMAGE = "${NMP_PYTHON_IMAGE}"
+    NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
   }
-  cache-to   = maybe_registry_cache_to("nmp-python-base")
-  cache-from = maybe_registry_cache_from("nmp-python-base")
-  tags       = base_tags("nmp-python-base")
+  cache-to   = maybe_registry_cache_to("nhx-python-base")
+  cache-from = maybe_registry_cache_from("nhx-python-base")
+  tags       = base_tags("nhx-python-base")
   output     = image_output()
   platforms  = get_platforms()
 }
 
-target "nmp-python-dev-base" {
-  target     = "nmp-python-dev-base-builder"
+target "nhx-python-dev-base" {
+  target     = "nhx-python-dev-base-builder"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-python-base"
+  dockerfile = "docker/base/Dockerfile.nhx-python-base"
   args = {
-    NMP_PYTHON_IMAGE = "${NMP_PYTHON_IMAGE}"
+    NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
   }
-  cache-from = maybe_registry_cache_from("nmp-python-dev-base")
+  cache-from = maybe_registry_cache_from("nhx-python-dev-base")
   platforms  = get_platforms()
 }
 
-target "nmp-python-dev-base-builder" {
-  target     = "nmp-python-dev-base-builder"
+target "nhx-python-dev-base-builder" {
+  target     = "nhx-python-dev-base-builder"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-python-base"
+  dockerfile = "docker/base/Dockerfile.nhx-python-base"
   args = {
-    NMP_PYTHON_IMAGE = "${NMP_PYTHON_IMAGE}"
+    NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
   }
-  cache-to   = maybe_registry_cache_to("nmp-python-dev-base")
-  cache-from = maybe_registry_cache_from("nmp-python-dev-base")
-  tags       = base_tags("nmp-python-dev-base")
+  cache-to   = maybe_registry_cache_to("nhx-python-dev-base")
+  cache-from = maybe_registry_cache_from("nhx-python-dev-base")
+  tags       = base_tags("nhx-python-dev-base")
   output     = image_output()
   platforms  = get_platforms()
 }
 
-target "nmp-jobs-launcher" {
+target "nhx-jobs-launcher" {
   target     = "artifacts"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-jobs-launcher"
+  dockerfile = "docker/base/Dockerfile.nhx-jobs-launcher"
   platforms  = get_platforms()
 }
 
-target "nmp-studio-ui" {
+target "nhx-studio-ui" {
   target     = "artifacts"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-studio-ui"
+  dockerfile = "docker/base/Dockerfile.nhx-studio-ui"
   platforms  = get_platforms()
   args = {
     VITE_VERSION_SHA = CI_COMMIT_SHA
@@ -580,244 +580,244 @@ target "nmp-studio-ui" {
   }
 }
 
-target "nmp-gpu-base" {
-  target     = "nmp-gpu-base"
+target "nhx-gpu-base" {
+  target     = "nhx-gpu-base"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-gpu-base"
+  dockerfile = "docker/base/Dockerfile.nhx-gpu-base"
   args = {
     CUDA_VERSION = CUDA_VERSION
   }
   platforms  = get_platforms()
 }
 
-target "nmp-gpu-base-py312" {
-  target     = "nmp-gpu-base-py312"
+target "nhx-gpu-base-py312" {
+  target     = "nhx-gpu-base-py312"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-gpu-base-py312"
+  dockerfile = "docker/base/Dockerfile.nhx-gpu-base-py312"
   args = {
     CUDA_VERSION = CUDA_VERSION
   }
   platforms  = get_platforms()
 }
 
-target "nmp-gpu-runtime-base" {
-  target     = "nmp-gpu-runtime-base"
+target "nhx-gpu-runtime-base" {
+  target     = "nhx-gpu-runtime-base"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-gpu-base"
+  dockerfile = "docker/base/Dockerfile.nhx-gpu-base"
   contexts = {
-    nmp-gpu-base = "target:nmp-gpu-base"
+    nhx-gpu-base = "target:nhx-gpu-base"
   }
   platforms  = get_platforms()
 }
 
 # Shared workspace layer (copy all workspace files for uv sync)
-target "nmp-workspace" {
-  target     = "nmp-workspace"
+target "nhx-workspace" {
+  target     = "nhx-workspace"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-workspace"
+  dockerfile = "docker/base/Dockerfile.nhx-workspace"
   contexts = {
-    nmp-python-base           = "target:nmp-python-base"
+    nhx-python-base           = "target:nhx-python-base"
   }
   args = {
-    NMP_BASE = "nmp-python-base"
+    NHX_BASE = "nhx-python-base"
   }
   platforms  = get_platforms()
 }
 
-target "nmp-gpu-workspace" {
-  target     = "nmp-workspace"
+target "nhx-gpu-workspace" {
+  target     = "nhx-workspace"
   context    = "."
-  dockerfile = "docker/base/Dockerfile.nmp-workspace"
+  dockerfile = "docker/base/Dockerfile.nhx-workspace"
   contexts = {
-    nmp-gpu-base               = "target:nmp-gpu-base"
+    nhx-gpu-base               = "target:nhx-gpu-base"
   }
   args = {
-    NMP_BASE = "nmp-gpu-base"
+    NHX_BASE = "nhx-gpu-base"
   }
   platforms  = get_platforms()
 }
 
-# NMP API - All Python services (core + application)
-target "nmp-api-docker" {
+# NHX API - All Python services (core + application)
+target "nhx-api-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-api"
+  dockerfile = "docker/Dockerfile.nhx-api"
   contexts = {
-    nmp-python-base           = "target:nmp-python-base"
-    nmp-workspace             = "target:nmp-workspace"
-    nmp-jobs-launcher         = "target:nmp-jobs-launcher"
-    nmp-studio-ui             = "target:nmp-studio-ui"
+    nhx-python-base           = "target:nhx-python-base"
+    nhx-workspace             = "target:nhx-workspace"
+    nhx-jobs-launcher         = "target:nhx-jobs-launcher"
+    nhx-studio-ui             = "target:nhx-studio-ui"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
   args = {
-    NMP_PLATFORM_VERSION = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
-    NMP_CODE_REVISION    = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
-    NMP_API_RUNTIME_BASE = NMP_API_RUNTIME_BASE
-    NMP_COLLECT_SOURCES  = NMP_COLLECT_SOURCES
+    NHX_PLATFORM_VERSION = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
+    NHX_CODE_REVISION    = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
+    NHX_API_RUNTIME_BASE = NHX_API_RUNTIME_BASE
+    NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-api")
-  cache-from = maybe_registry_cache_from("nmp-api")
-  tags       = sha_and_maybe_latest_tags("nmp-api")
+  cache-to   = maybe_registry_cache_to("nhx-api")
+  cache-from = maybe_registry_cache_from("nhx-api")
+  tags       = sha_and_maybe_latest_tags("nhx-api")
   output     = image_output()
   platforms  = get_platforms()
 }
 
-# E2E-only nmp-api variant with the DeepAgents harness installed.
-target "nmp-agents-deepagents-e2e-docker" {
+# E2E-only nhx-api variant with the DeepAgents harness installed.
+target "nhx-agents-deepagents-e2e-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-api"
+  dockerfile = "docker/Dockerfile.nhx-api"
   contexts = {
-    nmp-python-base           = "target:nmp-python-base"
-    nmp-workspace             = "target:nmp-workspace"
-    nmp-jobs-launcher         = "target:nmp-jobs-launcher"
-    nmp-studio-ui             = "target:nmp-studio-ui"
+    nhx-python-base           = "target:nhx-python-base"
+    nhx-workspace             = "target:nhx-workspace"
+    nhx-jobs-launcher         = "target:nhx-jobs-launcher"
+    nhx-studio-ui             = "target:nhx-studio-ui"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
   args = {
-    NMP_PLATFORM_VERSION      = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
-    NMP_CODE_REVISION         = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
-    NMP_API_RUNTIME_BASE      = NMP_API_RUNTIME_BASE
-    NMP_API_DEPENDENCY_GROUP  = "agents-deepagents-e2e-services"
-    NMP_COLLECT_SOURCES       = NMP_COLLECT_SOURCES
+    NHX_PLATFORM_VERSION      = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
+    NHX_CODE_REVISION         = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
+    NHX_API_RUNTIME_BASE      = NHX_API_RUNTIME_BASE
+    NHX_API_DEPENDENCY_GROUP  = "agents-deepagents-e2e-services"
+    NHX_COLLECT_SOURCES       = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-agents-deepagents-e2e")
-  cache-from = maybe_registry_cache_from("nmp-agents-deepagents-e2e")
-  tags       = sha_and_maybe_latest_tags("nmp-agents-deepagents-e2e")
+  cache-to   = maybe_registry_cache_to("nhx-agents-deepagents-e2e")
+  cache-from = maybe_registry_cache_from("nhx-agents-deepagents-e2e")
+  tags       = sha_and_maybe_latest_tags("nhx-agents-deepagents-e2e")
   output     = image_output()
   platforms  = get_platforms()
 }
 
-# NMP Core - Core infrastructure services only
-target "nmp-core-docker" {
+# NHX Core - Core infrastructure services only
+target "nhx-core-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-core"
+  dockerfile = "docker/Dockerfile.nhx-core"
   contexts = {
-    nmp-python-base           = "target:nmp-python-base"
-    nmp-workspace             = "target:nmp-workspace"
-    nmp-jobs-launcher         = "target:nmp-jobs-launcher"
+    nhx-python-base           = "target:nhx-python-base"
+    nhx-workspace             = "target:nhx-workspace"
+    nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
   }
   args = {
-    NMP_CORE_RUNTIME_BASE = NMP_CORE_RUNTIME_BASE
-    NMP_COLLECT_SOURCES   = NMP_COLLECT_SOURCES
+    NHX_CORE_RUNTIME_BASE = NHX_CORE_RUNTIME_BASE
+    NHX_COLLECT_SOURCES   = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-core")
-  cache-from = maybe_registry_cache_from("nmp-core")
-  tags       = sha_and_maybe_latest_tags("nmp-core")
+  cache-to   = maybe_registry_cache_to("nhx-core")
+  cache-from = maybe_registry_cache_from("nhx-core")
+  tags       = sha_and_maybe_latest_tags("nhx-core")
   output     = image_output()
   platforms  = get_platforms()
 }
 
-# NMP CPU Tasks - CPU-only batch task execution
-target "nmp-cpu-tasks-docker" {
+# NHX CPU Tasks - CPU-only batch task execution
+target "nhx-cpu-tasks-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-cpu-tasks"
+  dockerfile = "docker/Dockerfile.nhx-cpu-tasks"
   contexts = {
-    nmp-python-base           = "target:nmp-python-base"
-    nmp-workspace             = "target:nmp-workspace"
+    nhx-python-base           = "target:nhx-python-base"
+    nhx-workspace             = "target:nhx-workspace"
     root-busybox              = "target:root-busybox"
   }
   args = {
-    NMP_COLLECT_SOURCES        = NMP_COLLECT_SOURCES
-    NMP_CPU_TASKS_RUNTIME_BASE = NMP_CPU_TASKS_RUNTIME_BASE
+    NHX_COLLECT_SOURCES        = NHX_COLLECT_SOURCES
+    NHX_CPU_TASKS_RUNTIME_BASE = NHX_CPU_TASKS_RUNTIME_BASE
   }
-  cache-to   = maybe_registry_cache_to("nmp-cpu-tasks")
-  cache-from = maybe_registry_cache_from("nmp-cpu-tasks")
-  tags       = sha_and_maybe_latest_tags("nmp-cpu-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-cpu-tasks")
+  cache-from = maybe_registry_cache_from("nhx-cpu-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-cpu-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Cheap import validation for Evaluator's standard and sandboxed Gym task entrypoints.
-target "nmp-cpu-tasks-smoke-test" {
+target "nhx-cpu-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-cpu-tasks"
+  dockerfile = "docker/Dockerfile.nhx-cpu-tasks"
   contexts = {
-    nmp-python-base           = "target:nmp-python-base"
-    nmp-workspace             = "target:nmp-workspace"
+    nhx-python-base           = "target:nhx-python-base"
+    nhx-workspace             = "target:nhx-workspace"
     root-busybox              = "target:root-busybox"
   }
   args = {
-    NMP_COLLECT_SOURCES        = NMP_COLLECT_SOURCES
-    NMP_CPU_TASKS_RUNTIME_BASE = NMP_CPU_TASKS_RUNTIME_BASE
+    NHX_COLLECT_SOURCES        = NHX_COLLECT_SOURCES
+    NHX_CPU_TASKS_RUNTIME_BASE = NHX_CPU_TASKS_RUNTIME_BASE
   }
-  cache-from = maybe_registry_cache_from("nmp-cpu-tasks")
+  cache-from = maybe_registry_cache_from("nhx-cpu-tasks")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
 
 # Dedicated colocated Gym task image. Gym and Ray remain isolated from the shared CPU task image.
-target "nmp-gym-tasks-docker" {
+target "nhx-gym-tasks-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-gym-tasks"
+  dockerfile = "docker/Dockerfile.nhx-gym-tasks"
   contexts = {
-    nmp-python-base = "target:nmp-python-base"
-    nmp-cpu-tasks   = "target:nmp-cpu-tasks-docker"
-    nmp-workspace   = "target:nmp-workspace"
+    nhx-python-base = "target:nhx-python-base"
+    nhx-cpu-tasks   = "target:nhx-cpu-tasks-docker"
+    nhx-workspace   = "target:nhx-workspace"
   }
-  cache-to   = maybe_registry_cache_to("nmp-gym-tasks")
-  cache-from = maybe_registry_cache_from("nmp-gym-tasks")
-  tags       = sha_and_maybe_latest_tags("nmp-gym-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-gym-tasks")
+  cache-from = maybe_registry_cache_from("nhx-gym-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-gym-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Cheap import/CLI validation for the isolated Gym environment. Built in docker-cpu-ci.
-target "nmp-gym-tasks-smoke-test" {
+target "nhx-gym-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-gym-tasks"
+  dockerfile = "docker/Dockerfile.nhx-gym-tasks"
   contexts = {
-    nmp-python-base = "target:nmp-python-base"
-    nmp-cpu-tasks   = "target:nmp-cpu-tasks-docker"
-    nmp-workspace   = "target:nmp-workspace"
+    nhx-python-base = "target:nhx-python-base"
+    nhx-cpu-tasks   = "target:nhx-cpu-tasks-docker"
+    nhx-workspace   = "target:nhx-workspace"
   }
-  cache-from = maybe_registry_cache_from("nmp-gym-tasks")
+  cache-from = maybe_registry_cache_from("nhx-gym-tasks")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
 
 # Sandboxed Gym host. Evaluator provisions this image through OpenSandbox so
 # user-authored environments run outside the trusted task container.
-target "nmp-gym-host-docker" {
+target "nhx-gym-host-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/gym-host/Dockerfile"
   contexts = {
-    nmp-python-base = "target:nmp-python-base"
+    nhx-python-base = "target:nhx-python-base"
   }
   args = {
-    NMP_PYTHON_IMAGE = NMP_PYTHON_IMAGE
+    NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
   }
-  cache-to   = maybe_registry_cache_to("nmp-gym-host")
-  cache-from = maybe_registry_cache_from("nmp-gym-host")
-  tags       = sha_and_maybe_latest_tags("nmp-gym-host")
+  cache-to   = maybe_registry_cache_to("nhx-gym-host")
+  cache-from = maybe_registry_cache_from("nhx-gym-host")
+  tags       = sha_and_maybe_latest_tags("nhx-gym-host")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Validate the published host's CLI, runtime module, and locked dependencies.
-target "nmp-gym-host-smoke-test" {
+target "nhx-gym-host-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/gym-host/Dockerfile"
   contexts = {
-    nmp-python-base = "target:nmp-python-base"
+    nhx-python-base = "target:nhx-python-base"
   }
   args = {
-    NMP_PYTHON_IMAGE = NMP_PYTHON_IMAGE
+    NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
   }
-  cache-from = maybe_registry_cache_from("nmp-gym-host")
+  cache-from = maybe_registry_cache_from("nhx-gym-host")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
@@ -868,33 +868,33 @@ target "ffmpeg-vlm-wheel" {
   platforms  = get_platforms()
 }
 
-target "safe-synthesizer-tasks-docker" {
+target "nhx-safe-synthesizer-tasks-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/Dockerfile.safe-synthesizer-tasks"
+  dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
-    NMP_COLLECT_SOURCES  = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("safe-synthesizer-tasks")
-  cache-from = maybe_registry_cache_from("safe-synthesizer-tasks")
-  tags       = sha_and_maybe_latest_tags("safe-synthesizer-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-safe-synthesizer-tasks")
+  cache-from = maybe_registry_cache_from("nhx-safe-synthesizer-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-safe-synthesizer-tasks")
   output     = image_output()
   #platforms  = get_platforms()
   platforms  = ["linux/amd64"]
 }
 
-# Smoke test - built in parallel with safe-synthesizer-tasks-docker, never pushed.
+# Smoke test - built in parallel with nhx-safe-synthesizer-tasks-docker, never pushed.
 # Fails the build if any critical import fails (missing package or ABI mismatch).
-target "safe-synthesizer-tasks-smoke-test" {
+target "nhx-safe-synthesizer-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/Dockerfile.safe-synthesizer-tasks"
+  dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
-    NMP_COLLECT_SOURCES  = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
   }
-  cache-from = maybe_registry_cache_from("safe-synthesizer-tasks")
+  cache-from = maybe_registry_cache_from("nhx-safe-synthesizer-tasks")
   output     = ["type=cacheonly"]
   platforms  = ["linux/amd64"]
 }
@@ -996,28 +996,28 @@ target "root-busybox" {
   platforms  = get_platforms()
 }
 
-target "root-nmp-persistence-test" {
-  target          = "root-nmp-persistence-test"
+target "root-nhx-persistence-test" {
+  target          = "root-nhx-persistence-test"
   context         = "."
   dockerfile      = "docker/Dockerfile.bake"
   output          = ["type=cacheonly"]
-  no-cache-filter = ["root-nmp-persistence-test"]
+  no-cache-filter = ["root-nhx-persistence-test"]
 }
 
-target "root-nmp-common-test" {
-  target          = "root-nmp-common-test"
+target "root-nhx-common-test" {
+  target          = "root-nhx-common-test"
   context         = "."
   dockerfile      = "docker/Dockerfile.bake"
   output          = ["type=cacheonly"]
-  no-cache-filter = ["root-nmp-common-test"]
+  no-cache-filter = ["root-nhx-common-test"]
 }
 
-target "root-nemo-platform-test" {
-  target          = "root-nemo-platform-test"
+target "root-nemo-helix-test" {
+  target          = "root-nemo-helix-test"
   context         = "."
   dockerfile      = "docker/Dockerfile.bake"
   output          = ["type=cacheonly"]
-  no-cache-filter = ["root-nemo-platform-test"]
+  no-cache-filter = ["root-nemo-helix-test"]
 }
 
 target "buildkit-test" {
@@ -1038,56 +1038,56 @@ target "automodel-platform-workspace" {
   platforms  = get_platforms()
 }
 
-target "nmp-automodel-base-builder" {
-  target          = "nmp-automodel-base"
+target "nhx-automodel-base-builder" {
+  target          = "nhx-automodel-base"
   context         = "."
-  dockerfile      = "docker/automodel/Dockerfile.nmp-automodel-base"
+  dockerfile      = "docker/automodel/Dockerfile.nhx-automodel-base"
   no-cache-filter = ["automodel-clone"]
-  cache-to        = maybe_registry_cache_to("nmp-automodel-base")
-  cache-from      = maybe_registry_cache_from("nmp-automodel-base")
-  tags            = base_tags("nmp-automodel-base")
+  cache-to        = maybe_registry_cache_to("nhx-automodel-base")
+  cache-from      = maybe_registry_cache_from("nhx-automodel-base")
+  tags            = base_tags("nhx-automodel-base")
   output          = image_output()
   contexts = {
     causal-conv1d-wheel-image = causal_conv1d_wheel_context()
     mamba-ssm-wheel-image     = mamba_ssm_wheel_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   platforms = get_platforms()
 }
 
-target "nmp-automodel-training-docker" {
+target "nhx-automodel-training-docker" {
   target     = "runtime"
   context    = "."
-  dockerfile = "docker/automodel/Dockerfile.nmp-automodel-training"
+  dockerfile = "docker/automodel/Dockerfile.nhx-automodel-training"
   contexts = {
     platform-workspace = "target:automodel-platform-workspace"
-    nmp-automodel-base = automodel_base_context()
+    nhx-automodel-base = automodel_base_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-automodel-training")
-  cache-from = maybe_registry_cache_from("nmp-automodel-training")
-  tags       = sha_and_maybe_latest_tags("nmp-automodel-training")
+  cache-to   = maybe_registry_cache_to("nhx-automodel-training")
+  cache-from = maybe_registry_cache_from("nhx-automodel-training")
+  tags       = sha_and_maybe_latest_tags("nhx-automodel-training")
   output     = image_output()
   platforms = get_platforms()
 }
 
-target "nmp-automodel-training-smoke-test" {
+target "nhx-automodel-training-smoke-test" {
   target     = "smoke-test"
   context    = "."
-  dockerfile = "docker/automodel/Dockerfile.nmp-automodel-training"
+  dockerfile = "docker/automodel/Dockerfile.nhx-automodel-training"
   contexts = {
     platform-workspace = "target:automodel-platform-workspace"
-    nmp-automodel-base = automodel_base_context()
+    nhx-automodel-base = automodel_base_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
-    SMOKE_MARKER         = "smoke_nmp_automodel_training"
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    SMOKE_MARKER         = "smoke_nhx_automodel_training"
   }
-  cache-from = maybe_registry_cache_from("nmp-automodel-training")
+  cache-from = maybe_registry_cache_from("nhx-automodel-training")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
@@ -1100,9 +1100,9 @@ target "unsloth-platform-workspace" {
   platforms  = get_platforms()
 }
 
-target "nmp-unsloth-training" {
+target "nhx-unsloth-training" {
   context    = "."
-  dockerfile = "docker/Dockerfile.nmp-unsloth-training"
+  dockerfile = "docker/Dockerfile.nhx-unsloth-training"
   target     = "runtime"
   contexts = {
     platform-workspace        = "target:unsloth-platform-workspace"
@@ -1110,71 +1110,71 @@ target "nmp-unsloth-training" {
     mamba-ssm-wheel-image     = mamba_ssm_wheel_context()
   }
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nmp-unsloth-training")
-  cache-from = maybe_registry_cache_from("nmp-unsloth-training")
-  tags       = sha_and_maybe_latest_tags("nmp-unsloth-training")
+  cache-to   = maybe_registry_cache_to("nhx-unsloth-training")
+  cache-from = maybe_registry_cache_from("nhx-unsloth-training")
+  tags       = sha_and_maybe_latest_tags("nhx-unsloth-training")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Guardrails Callout service (Envoy ext_proc gRPC)
-target "guardrails-callout-test" {
+target "nhx-guardrails-callout-test" {
   target = "test"
   contexts = {
     root-golang-base = "target:root-golang-base-1-25"
   }
-  cache-from      = maybe_registry_cache_from("guardrails-callout")
+  cache-from      = maybe_registry_cache_from("nhx-guardrails-callout")
   context         = "services/guardrails/callouts"
   dockerfile      = "../../../docker/dockerfiles/services/guardrails/callouts/Dockerfile.bake"
   output          = ["type=cacheonly"]
   no-cache-filter = ["test"]
 }
 
-target "guardrails-callout-docker" {
+target "nhx-guardrails-callout-docker" {
   target = "docker"
   contexts = {
     root-golang-base = "target:root-golang-base-1-25"
   }
   context    = "services/guardrails/callouts"
   dockerfile = "../../../docker/dockerfiles/services/guardrails/callouts/Dockerfile.bake"
-  cache-to   = maybe_registry_cache_to("guardrails-callout")
-  cache-from = maybe_registry_cache_from("guardrails-callout")
-  tags       = sha_and_maybe_latest_tags("guardrails-callout")
+  cache-to   = maybe_registry_cache_to("nhx-guardrails-callout")
+  cache-from = maybe_registry_cache_from("nhx-guardrails-callout")
+  tags       = sha_and_maybe_latest_tags("nhx-guardrails-callout")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Optional: mock LLM backend
 # Do not add to the docker group to avoid publishing.
-target "guardrails-callout-mock-llm" {
+target "nhx-guardrails-callout-mock-llm" {
   target = "mock-llm"
   contexts = {
     root-golang-base = "target:root-golang-base-1-25"
   }
   context    = "services/guardrails/callouts"
   dockerfile = "../../../docker/dockerfiles/services/guardrails/callouts/Dockerfile.bake"
-  tags       = sha_and_maybe_latest_tags("guardrails-callout-mock-llm")
+  tags       = sha_and_maybe_latest_tags("nhx-guardrails-callout-mock-llm")
   output     = image_output()
   platforms  = get_platforms()
 }
 
 # Auditor
-target "auditor-tasks-docker" {
+target "nhx-auditor-tasks-docker" {
   target  = "release"
   context = "."
   contexts = {
     root-lib-source-artifacts = "target:root-lib-source-artifacts"
     root-busybox              = "target:root-busybox"
   }
-  dockerfile = "docker/Dockerfile.auditor-tasks"
+  dockerfile = "docker/Dockerfile.nhx-auditor-tasks"
   args = {
-    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("auditor-tasks")
-  cache-from = maybe_registry_cache_from("auditor-tasks")
-  tags       = sha_and_maybe_latest_tags("auditor-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-auditor-tasks")
+  cache-from = maybe_registry_cache_from("nhx-auditor-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-auditor-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }

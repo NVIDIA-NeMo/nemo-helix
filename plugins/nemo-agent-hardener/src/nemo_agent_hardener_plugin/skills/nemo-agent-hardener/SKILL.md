@@ -4,7 +4,7 @@
 
 name: nemo-agent-hardener
 description: >
-  A security war-game for an agent through NeMo Platform: register or upload the agent, resolve a
+  A security war-game for an agent through NeMo Helix: register or upload the agent, resolve a
   war-game manifest, synthesize a benign suite, attack/defend/validate, adopt the hardened image.
   Covers red-teaming, hardening, and every `nemo agent-hardener` command.
 triggers:
@@ -25,7 +25,7 @@ not-for:
 preconditions:
   - nemo_cli_available
 compatibility: >
-  nemo-platform >= 0.1.0 with the nemo-agent-hardener plugin; needs Docker, an OpenShell gateway, and
+  nemo-helix >= 0.1.0 with the nemo-agent-hardener plugin; needs Docker, an OpenShell gateway, and
   an inference credential — `nemo agent-hardener doctor` checks all three. Not sandbox-safe: it builds
   images, starts containers, and makes network calls. Give the Docker VM >= 8 GB memory.
 maturity: active
@@ -55,7 +55,7 @@ they pick. Do not dump every path at them.
 ## 1. Pre-flight
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080   # or wherever the platform runs
+export NHX_BASE_URL=http://localhost:8080   # or wherever the platform runs
 nemo agent-hardener doctor
 ```
 
@@ -132,7 +132,7 @@ Suggest the `auditor` skill for scan-only coverage.
 
 1. Collect credentials first: store each secret the agent needs with the platform `nemo-secrets`
    skill (or `nemo secrets` CLI) so the run can reference them.
-2. Open `$NMP_BASE_URL/studio/`, pick the workspace, choose **Agent Hardener** in the nav.
+2. Open `$NHX_BASE_URL/studio/`, pick the workspace, choose **Agent Hardener** in the nav.
 3. **Manifests → New manifest** — the source toggle offers *Registered agent* and *Bring your
    own* (BYO takes a project archive upload).
 4. Open the manifest page → **Run war-game** → fill env vars → submit.

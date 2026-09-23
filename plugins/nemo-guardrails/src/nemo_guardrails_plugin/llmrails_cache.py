@@ -36,9 +36,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from nemo_platform_plugin.guardrail.types import OutputRailsStreamingConfig
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
+from nemo_helix_plugin.guardrail.types import OutputRailsStreamingConfig
+from nemo_helix_plugin.guardrail.types import RailsConfig as HelixRailsConfig
+from nemo_helix_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails import RailsConfig as LibraryRailsConfig
 from nemoguardrails.rails.llm.config import Model
 from nemoguardrails.rails.llm.llmrails import LLMRails
@@ -64,7 +64,7 @@ class EntityGuardrailConfigSource:
     workspace: str
     name: str
     updated_at: str
-    rails: PlatformRailsConfig
+    rails: HelixRailsConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,14 +75,14 @@ class InlineGuardrailConfigSource:
     is a diagnostic name for logs only.
     """
 
-    rails: PlatformRailsConfig
+    rails: HelixRailsConfig
     label: str | None = None
 
 
 GuardrailConfigSource = EntityGuardrailConfigSource | InlineGuardrailConfigSource
 """Discriminated union from the IGW resolver methods.
 
-Both arms expose ``.rails: PlatformRailsConfig`` so callers that only need the
+Both arms expose ``.rails: HelixRailsConfig`` so callers that only need the
 payload can read the union directly.
 """
 
@@ -159,7 +159,7 @@ InferenceTargetResolver = Callable[[str], OpenAICompatibleInferenceTarget]
 """Resolve a VirtualModel ID to an OpenAI-compatible IGW target.
 
 Satisfied by
-:meth:`~nemo_platform_plugin.inference_middleware.NemoInferenceMiddleware.get_openai_compatible_inference_url_and_model`.
+:meth:`~nemo_helix_plugin.inference_middleware.NemoInferenceMiddleware.get_openai_compatible_inference_url_and_model`.
 """
 
 
@@ -256,7 +256,7 @@ class StableRailsConfig:
 
 
 def stabilize(
-    rails: PlatformRailsConfig,
+    rails: HelixRailsConfig,
     resolver: InferenceTargetResolver,
 ) -> StableRailsConfig:
     """Validate, strip per-request fields, resolve URLs, compute the hash.
@@ -266,7 +266,7 @@ def stabilize(
     config must share a cache key, and only the library shape determines
     the build.
 
-    The platform :class:`PlatformRailsConfig` makes ``models`` optional —
+    The platform :class:`HelixRailsConfig` makes ``models`` optional —
     under the IGW Plugin architecture, callers that don't run self-check
     are expected to omit it entirely (IGW owns main-LLM routing; the
     plugin only needs configs for task LLMs like content-safety and

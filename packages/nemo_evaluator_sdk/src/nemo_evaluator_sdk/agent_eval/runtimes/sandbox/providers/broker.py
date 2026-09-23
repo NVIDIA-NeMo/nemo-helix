@@ -89,7 +89,7 @@ def _extract_archive(archive: bytes, target_dir: Path) -> None:
     a separate validation loop into the bulk call, and `filter="data"` is a second line of defence
     rather than the only one.
 
-    This mirrors ``nemo_platform_plugin.jobs.archive.safe_extract_tar`` rather than importing it:
+    This mirrors ``nemo_helix_plugin.jobs.archive.safe_extract_tar`` rather than importing it:
     that lives in a platform-internal package, and this SDK is published standalone.
     """
     target_dir.mkdir(parents=True, exist_ok=True)

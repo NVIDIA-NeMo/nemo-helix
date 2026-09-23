@@ -5,9 +5,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.guardrails.app.llms.chat.nim import ChatNIM
-from nmp.guardrails.app.llms.completion.nim import NIM
-from nmp.guardrails.app.utils.context_utils import (
+from nhx.guardrails.app.llms.chat.nim import ChatNIM
+from nhx.guardrails.app.llms.completion.nim import NIM
+from nhx.guardrails.app.utils.context_utils import (
     api_key_var,
     set_x_model_auth_token_into_context,
 )
@@ -29,7 +29,7 @@ class TestSecretStrHandlingChat(unittest.TestCase):
         self.mock_openai_client_class.return_value = self.mock_openai_client
 
         # patch get_main_model_from_context to return None by default
-        self.main_model_patcher = patch("nmp.guardrails.app.llms.utils.get_main_model_from_context")
+        self.main_model_patcher = patch("nhx.guardrails.app.llms.utils.get_main_model_from_context")
         self.mock_get_main_model_from_context = self.main_model_patcher.start()
         self.mock_get_main_model_from_context.return_value = None
 
@@ -76,7 +76,7 @@ class TestSecretStrHandlingLLM:
         self.mock_httpx_async_client = self.mock_httpx_async_client_class.return_value
 
         # patch get_main_model_from_context to return None by default
-        self.main_model_patcher = patch("nmp.guardrails.app.llms.utils.get_main_model_from_context")
+        self.main_model_patcher = patch("nhx.guardrails.app.llms.utils.get_main_model_from_context")
         self.mock_get_main_model_from_context = self.main_model_patcher.start()
         self.mock_get_main_model_from_context.return_value = None
 

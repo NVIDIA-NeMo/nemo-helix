@@ -7,15 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from fastapi import HTTPException
-from nemo_platform_plugin.client.errors import InternalServerError, NemoTransportError
-from nmp.common.entities import EntityStoreError
-from nmp.core.files.api.v2.filesets.endpoints import (
+from nemo_helix_plugin.client.errors import InternalServerError, NemoTransportError
+from nhx.common.entities import EntityStoreError
+from nhx.core.files.api.v2.filesets.endpoints import (
     _count_entity_fileset_references,
     _count_fileset_references,
     _ModelFilesetReference,
     delete_fileset,
 )
-from nmp.core.files.entities import Fileset
+from nhx.core.files.entities import Fileset
 
 
 def _internal_server_error() -> InternalServerError:
@@ -50,7 +50,7 @@ async def test_count_fileset_references_uses_total_results() -> None:
 
 async def test_count_entity_fileset_references_includes_supported_ref_formats() -> None:
     with patch(
-        "nmp.core.files.api.v2.filesets.endpoints._count_fileset_references",
+        "nhx.core.files.api.v2.filesets.endpoints._count_fileset_references",
         new=AsyncMock(side_effect=[2, 1, 3, 4]),
     ) as count_references:
         count = await _count_entity_fileset_references(
@@ -80,14 +80,14 @@ async def test_delete_fileset_rejects_references_before_deleting_storage() -> No
 
     with (
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.get_fileset",
+            "nhx.core.files.api.v2.filesets.endpoints.get_fileset",
             new=AsyncMock(return_value=fileset),
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints._count_entity_fileset_references",
+            "nhx.core.files.api.v2.filesets.endpoints._count_entity_fileset_references",
             new=AsyncMock(side_effect=[1, 1]),
         ),
-        patch("nmp.core.files.api.v2.filesets.endpoints.storage_impl_factory") as storage_factory,
+        patch("nhx.core.files.api.v2.filesets.endpoints.storage_impl_factory") as storage_factory,
     ):
         with pytest.raises(HTTPException) as exc_info:
             await delete_fileset(
@@ -126,14 +126,14 @@ async def test_delete_fileset_fails_closed_when_references_cannot_be_checked(
 
     with (
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.get_fileset",
+            "nhx.core.files.api.v2.filesets.endpoints.get_fileset",
             new=AsyncMock(return_value=MagicMock(name="weights")),
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints._count_entity_fileset_references",
+            "nhx.core.files.api.v2.filesets.endpoints._count_entity_fileset_references",
             new=AsyncMock(side_effect=reference_results),
         ),
-        patch("nmp.core.files.api.v2.filesets.endpoints.storage_impl_factory") as storage_factory,
+        patch("nhx.core.files.api.v2.filesets.endpoints.storage_impl_factory") as storage_factory,
     ):
         with pytest.raises(HTTPException) as exc_info:
             await delete_fileset(
@@ -161,23 +161,23 @@ async def test_delete_unreferenced_fileset_deletes_storage_and_entity() -> None:
 
     with (
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.get_fileset",
+            "nhx.core.files.api.v2.filesets.endpoints.get_fileset",
             new=AsyncMock(return_value=fileset),
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints._count_entity_fileset_references",
+            "nhx.core.files.api.v2.filesets.endpoints._count_entity_fileset_references",
             new=AsyncMock(side_effect=[0, 0]),
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.resolve_storage_secrets_for_user",
+            "nhx.core.files.api.v2.filesets.endpoints.resolve_storage_secrets_for_user",
             new=AsyncMock(return_value={}),
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.storage_impl_factory",
+            "nhx.core.files.api.v2.filesets.endpoints.storage_impl_factory",
             return_value=storage,
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.fileset_output_from_entity",
+            "nhx.core.files.api.v2.filesets.endpoints.fileset_output_from_entity",
             return_value=deleted_output,
         ),
     ):

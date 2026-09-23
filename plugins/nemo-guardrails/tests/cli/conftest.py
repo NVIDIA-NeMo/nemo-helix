@@ -18,9 +18,9 @@ import pytest
 import typer
 from click.testing import Result
 from nemo_guardrails_plugin.cli import GuardrailCLI
-from nemo_platform_ext.cli.core.context import CLIContext
-from nemo_platform_ext.config.config import ConfigParams
-from nemo_platform_plugin.client.client import NemoClient
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.config.config import ConfigParams
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 
@@ -89,8 +89,8 @@ class CliHarness:
 def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     config_file = tmp_path / "config.yaml"
     config_file.touch()
-    monkeypatch.setenv("NMP_CONFIG_FILE", str(config_file))
-    for var in ("NMP_ACCESS_TOKEN", "NMP_BASE_URL", "NMP_WORKSPACE"):
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_file))
+    for var in ("NHX_ACCESS_TOKEN", "NHX_BASE_URL", "NHX_WORKSPACE"):
         monkeypatch.delenv(var, raising=False)
 
 

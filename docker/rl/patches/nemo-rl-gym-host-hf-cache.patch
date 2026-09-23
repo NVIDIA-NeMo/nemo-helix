@@ -9,18 +9,22 @@ diff --git a/nemo_rl/environments/sandbox/gym_host_runtime.py b/nemo_rl/environm
  import socket
  import subprocess
  import threading
-@@ -48,6 +49,10 @@
- ENVIRONMENT_PATH_ENV_KEY = "NMP_ENVIRONMENT_PATH"
+@@ -47,7 +48,11 @@
+-GYM_GLOBAL_CONFIG_ENV_KEY = "NMP_GYM_GLOBAL_CONFIG"
+-ENVIRONMENT_PATH_ENV_KEY = "NMP_ENVIRONMENT_PATH"
++GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
++ENVIRONMENT_PATH_ENV_KEY = "NHX_ENVIRONMENT_PATH"
  # Set by the platform, which knows whether the package vendors a complete closure.
- ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
-+DATASET_PATH_ENV_KEY = "NMP_DATASET_PATH"
-+WORK_PATH_ENV_KEY = "NMP_WORK_PATH"
+-ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
++ENVIRONMENT_OFFLINE_ENV_KEY = "NHX_ENVIRONMENT_OFFLINE"
++DATASET_PATH_ENV_KEY = "NHX_DATASET_PATH"
++WORK_PATH_ENV_KEY = "NHX_WORK_PATH"
 +# Vendored Hugging Face cache under the dataset FileSet (read-only mount).
 +HF_CACHE_DIRNAME = ".huggingface"
  UV_CACHE_DIR_KEY = "uv_cache_dir"
  # Mirrors DEFAULT_GYM_PORT_RANGE_{LOW,HIGH} in nemo_rl.distributed.virtual_cluster.
  DEFAULT_GYM_PORT_RANGE_LOW = 5000
-@@ -183,8 +188,43 @@
+@@ -183,8 +188,42 @@
      return os.environ.get(ENVIRONMENT_PATH_ENV_KEY, "").strip() or None
  
  
@@ -32,7 +36,7 @@ diff --git a/nemo_rl/environments/sandbox/gym_host_runtime.py b/nemo_rl/environm
 +    ``load_dataset("org/name")``; pointing the HF caches at a writable copy lets
 +    that resolve from disk. Do not point them at the dataset mount: ``datasets``
 +    writes lock files there and fails on a read-only filesystem. Offline flags
-+    follow ``NMP_ENVIRONMENT_OFFLINE`` so a job that allows internet can still
++    follow ``NHX_ENVIRONMENT_OFFLINE`` so a job that allows internet can still
 +    fetch Hub content missing from the snapshot. No-op when the FileSet has no
 +    ``.huggingface/`` snapshot.
 +    """
@@ -55,7 +59,6 @@ diff --git a/nemo_rl/environments/sandbox/gym_host_runtime.py b/nemo_rl/environm
 +    if os.environ.get(ENVIRONMENT_OFFLINE_ENV_KEY, "").strip().lower() in {"1", "true"}:
 +        os.environ["HF_HUB_OFFLINE"] = "1"
 +        os.environ["HF_DATASETS_OFFLINE"] = "1"
-+
 +
  def bootstrap_gym_host() -> tuple[Any, Any, Any]:
      """Start Gym servers and return (RunHelper, head_server_config, RolloutCollectionHelper)."""

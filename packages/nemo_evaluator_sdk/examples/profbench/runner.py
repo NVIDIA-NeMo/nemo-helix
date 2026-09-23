@@ -39,7 +39,7 @@ from .profbench import (
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "profbench-agent-eval-output"
 DEFAULT_MODEL_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 DEFAULT_MODEL_NAME = "nvidia/nemotron-3-nano-30b-a3b"
-DEFAULT_API_KEY_SECRET = os.getenv("NMP_EVALUATOR_DEFAULT_API_KEY_SECRET", "NVIDIA_API_KEY")
+DEFAULT_API_KEY_SECRET = os.getenv("NHX_EVALUATOR_DEFAULT_API_KEY_SECRET", "NVIDIA_API_KEY")
 DEFAULT_FABRIC_CODEX_MODEL = "gpt-5.4"
 
 

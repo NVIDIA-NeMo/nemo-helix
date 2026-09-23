@@ -13,9 +13,9 @@ Run directly::
     uv run pytest plugins/nemo-evaluator/tests/integration/test_publish_to_intake.py -v
 
 Requires Docker (Intake is ClickHouse-backed) and a free :8123. The platform binds the port from
-``NMP_BASE_URL`` (default :8080), so set it to run alongside a local dev platform::
+``NHX_BASE_URL`` (default :8080), so set it to run alongside a local dev platform::
 
-    NMP_BASE_URL=http://localhost:8096 uv run pytest ...
+    NHX_BASE_URL=http://localhost:8096 uv run pytest ...
 """
 
 from __future__ import annotations
@@ -42,15 +42,15 @@ from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialS
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_platform.types.intake.trace_filter_param import TraceFilterParam
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_helix.types.intake.trace_filter_param import TraceFilterParam
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 WORKSPACE = "default"
 GROUP_NAME = "intake-it-group"
 EXPERIMENT_NAME = "intake-it-exp"
@@ -120,7 +120,7 @@ _CLICKHOUSE_DATA_DIR = REPO_ROOT / "tmp" / "evaluator-intake-clickhouse"
 
 
 #: Bounds one provisioner call, so a wedged Docker fails this fixture instead of the worker.
-_CLICKHOUSE_SCRIPT_TIMEOUT_ENV = "NMP_EVALUATOR_CLICKHOUSE_SCRIPT_TIMEOUT"
+_CLICKHOUSE_SCRIPT_TIMEOUT_ENV = "NHX_EVALUATOR_CLICKHOUSE_SCRIPT_TIMEOUT"
 
 
 def _script_timeout_seconds() -> float:
@@ -186,7 +186,7 @@ def _clickhouse() -> Iterator[None]:
 @pytest.fixture(scope="session")
 def platform_base_url(_clickhouse: None) -> Iterator[str]:
     # Bind the port from BASE_URL rather than letting `services run` fall back to its 8080 default:
-    # NMP_BASE_URL is client-side only, so without this the suite silently requires 8080 to be free
+    # NHX_BASE_URL is client-side only, so without this the suite silently requires 8080 to be free
     # and cannot run alongside a local dev platform. Mirrors the sibling fixtures in conftest, which
     # each take their own port for the same reason.
     port = urlsplit(BASE_URL).port or 8080
@@ -195,8 +195,8 @@ def platform_base_url(_clickhouse: None) -> Iterator[str]:
         cwd=REPO_ROOT,
         env={
             **os.environ,
-            "NMP_BASE_URL": BASE_URL,
-            "NMP_INTAKE_CLICKHOUSE_URL": "http://localhost:8123",
+            "NHX_BASE_URL": BASE_URL,
+            "NHX_INTAKE_CLICKHOUSE_URL": "http://localhost:8123",
         },
     )
     try:
@@ -265,7 +265,7 @@ def _result() -> AgentEvalResult:
 
 
 async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
         # Precondition: the Experiment must exist before ingest.
         group = await async_sdk.experiments.create(
             workspace=WORKSPACE, name=GROUP_NAME, description="Intake IT", exist_ok=True
@@ -373,7 +373,7 @@ def _nan_result() -> AgentEvalResult:
 async def test_publish_skips_nan_and_failed_scores(platform_base_url: str) -> None:
     # A NaN value is not representable in JSON and a FAILED score is not a real measurement; neither
     # should reach Intake. Only the finite, completed output should be stored.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -438,7 +438,7 @@ async def test_republishing_the_same_result_is_idempotent(platform_base_url: str
     # double-count. Intake's spans table is a ReplacingMergeTree keyed on start_time, which is only
     # stable because the trajectory carries the run's started_at (see mapping.trial_to_atif_ingest);
     # without it each publish lands a second, uncollapsible row per trial.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -497,7 +497,7 @@ async def test_row_result_publishes_and_is_idempotent(platform_base_url: str) ->
     # The dataset-driven path adapts rows into the publisher's shape rather than using a second
     # mapping, so it inherits the same idempotency guarantee: re-publishing replaces rather than
     # duplicating. Row identity comes from the configured column, not the row's position.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -592,7 +592,7 @@ def _otlp_result() -> AgentEvalResult:
 
 
 async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_base_url: str) -> None:
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -629,7 +629,7 @@ async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_ba
 async def test_republishing_an_otlp_result_replaces_rather_than_duplicates(platform_base_url: str) -> None:
     # The session id we stamp is part of the ReplacingMergeTree key, so getting it wrong or
     # letting it vary per publish inserts a second uncollapsible row instead of replacing.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,

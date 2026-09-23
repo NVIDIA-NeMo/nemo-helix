@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.agent_resolver import ResolvedManifest
 from nemo_agent_hardener_plugin.api.v2 import manifests as manifests_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
 
 NOW = datetime.now(timezone.utc)
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"

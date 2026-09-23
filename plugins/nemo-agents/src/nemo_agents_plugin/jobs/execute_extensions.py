@@ -4,7 +4,7 @@
 """Discovery and dispatch for trusted ``agents.execute`` lifecycle extensions.
 
 The *contract* an extension implements lives in
-:mod:`nemo_platform_plugin.agents.execute_extensions`, so a plugin can write one
+:mod:`nemo_helix_plugin.agents.execute_extensions`, so a plugin can write one
 without depending on this package. This module is the host half: resolving an
 installed extension kind and running it.
 """
@@ -14,7 +14,7 @@ from __future__ import annotations
 from importlib.metadata import entry_points
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.agents.execute_extensions import (
+from nemo_helix_plugin.agents.execute_extensions import (
     EXECUTE_AGENT_EXTENSION_ENTRY_POINT_GROUP,
     ExecuteAgentAfterInvokeContext,
     ExecuteAgentExtension,
@@ -79,7 +79,7 @@ def _load_execute_agent_extension(kind: str) -> type[ExecuteAgentExtension]:
         raise ValueError(f"Unknown agents.execute extension {kind!r}.")
 
     # A kind may legitimately be declared by more than one installed
-    # distribution: the aggregate ``nemo-platform`` wheel re-declares every
+    # distribution: the aggregate ``nemo-helix`` wheel re-declares every
     # bundled plugin's entry points, so a standard install sees each of them
     # twice — once from the plugin, once from the aggregate. What must be
     # unique is the *implementation*, not the number of declarations, so

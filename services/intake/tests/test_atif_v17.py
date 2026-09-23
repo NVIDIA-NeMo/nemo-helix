@@ -8,18 +8,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from nmp.intake.spans.api.spans_schemas import Span
-from nmp.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, SpanKind, SpanStatus
-from nmp.intake.spans.ingest.atif import AtifIngestRequest
-from nmp.intake.spans.ingest.atif_domain import (
+from nhx.intake.spans.api.spans_schemas import Span
+from nhx.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, SpanKind, SpanStatus
+from nhx.intake.spans.ingest.atif import AtifIngestRequest
+from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
     AtifStepAgent,
     AtifStepUser,
     AtifSubagentTrajectoryRef,
     AtifTrajectory,
 )
-from nmp.intake.spans.ingest.atif_mapping import AtifTrajectoryDepthError, _step_observation, trajectory_to_spans
-from nmp.intake.spans.ingest.evaluation_context import EvaluationContext
+from nhx.intake.spans.ingest.atif_mapping import AtifTrajectoryDepthError, _step_observation, trajectory_to_spans
+from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from pydantic import ValidationError
 
 EVALUATION_CONTEXT: dict[str, Any] = {

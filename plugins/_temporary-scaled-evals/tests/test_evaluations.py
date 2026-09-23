@@ -513,7 +513,7 @@ def test_create_resolves_harbor_version_before_queueing() -> None:
         "0.13.2",
         "scaled-evals-api:dev",
         None,
-        "nemo-platform-plugin-overlay-v1",
+        "nemo-helix-plugin-overlay-v1",
         "0.1.13",
     )
     runner_metadata = insert_call.args[1][10].obj

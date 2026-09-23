@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="anonymizer-tutorials-run"></a>
 
-This tutorial walks through the `anonymizer.run` job: defining a run spec, submitting it to the NeMo Platform Jobs worker, and loading the parquet artifacts it produces.
+This tutorial walks through the `anonymizer.run` job: defining a run spec, submitting it to the NeMo Helix Jobs worker, and loading the parquet artifacts it produces.
 
 For detection, rewrite, and replacement strategy details, see the [open-source library documentation](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs).
 
@@ -15,7 +15,7 @@ For detection, rewrite, and replacement strategy details, see the [open-source l
 
 Complete the [tutorials prerequisites](/documentation/anonymize-data/tutorials#prerequisites), which cover:
 
-- A running NeMo Platform cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
+- A running NeMo Helix cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
 - An inference provider configured (default examples use `nvidia-build`).
 - A fileset named `anonymizer-inputs` with `anonymizer-input.csv` uploaded.
 
@@ -27,7 +27,7 @@ The CLI exposes one run command:
 
 | Command                 | Where it runs                 | Local paths | `model_configs` required | Artifacts                                              |
 |-------------------------|-------------------------------|-------------|--------------------------|--------------------------------------------------------|
-| `nemo anonymizer run`   | NeMo Platform Jobs worker     | Rejected    | Required                 | Stored in NeMo Platform job artifact storage; pull with `download_artifacts()` |
+| `nemo anonymizer run`   | NeMo Helix Jobs worker     | Rejected    | Required                 | Stored in NeMo Helix job artifact storage; pull with `download_artifacts()` |
 
 Job artifacts (under the `artifacts/` directory):
 
@@ -50,8 +50,8 @@ from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest
 
-WORKSPACE = os.environ.get("NMP_WORKSPACE", "default")
-MODEL_PROVIDER = os.environ.get("NMP_ANON_PROVIDER", "nvidia-build")
+WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
+MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
     replace=Redact(format_template="[REDACTED_{label}]"),
@@ -88,13 +88,13 @@ spec_path.write_text(yaml.safe_dump(request.model_dump(mode="json", exclude_none
 
 ## Step 3: Run the Job
 
-Submit the spec to the NeMo Platform Jobs worker:
+Submit the spec to the NeMo Helix Jobs worker:
 
 ```bash
 nemo anonymizer run \
   --spec-file /tmp/anonymizer-run.yaml \
-  --workspace "${NMP_WORKSPACE:-default}" \
-  --base-url "${NMP_BASE_URL:-http://localhost:8080}"
+  --workspace "${NHX_WORKSPACE:-default}" \
+  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
 ```
 
 The command prints the assigned job name. You need that name to poll status and download artifacts in Step 4.
@@ -103,10 +103,10 @@ The SDK equivalent is `sdk.anonymizer.run(request)`. It posts the request to the
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 job = sdk.anonymizer.run(request)
@@ -120,8 +120,8 @@ Track the platform job first. The job is ready for artifact download when its st
 
 ```bash
 # Replace with the job name printed by `nemo anonymizer run`.
-nemo jobs get-status <job-name> --workspace "${NMP_WORKSPACE:-default}"
-nemo jobs get-logs <job-name> --workspace "${NMP_WORKSPACE:-default}"
+nemo jobs get-status <job-name> --workspace "${NHX_WORKSPACE:-default}"
+nemo jobs get-logs <job-name> --workspace "${NHX_WORKSPACE:-default}"
 ```
 
 To download from the CLI, fetch the `artifacts` result and extract it:
@@ -129,7 +129,7 @@ To download from the CLI, fetch the `artifacts` result and extract it:
 ```bash
 nemo jobs results download artifacts \
   --job <job-name> \
-  --workspace "${NMP_WORKSPACE:-default}" \
+  --workspace "${NHX_WORKSPACE:-default}" \
   --output-file /tmp/anonymizer-artifacts.tar.gz
 
 mkdir -p /tmp/anonymizer-artifacts

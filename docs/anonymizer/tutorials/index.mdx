@@ -15,7 +15,7 @@ Anonymizer separates **configuration** (what to detect and how to replace it) fr
 
 **Part 1: Build the config (library)**
 
-Use [`anonymizer.config`](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs) to define the rewrite or replacement strategy and detection options. This code is identical whether you run Anonymizer standalone or through the NeMo Platform service.
+Use [`anonymizer.config`](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs) to define the rewrite or replacement strategy and detection options. This code is identical whether you run Anonymizer standalone or through the NeMo Helix service.
 
 ```python
 from anonymizer.config.anonymizer_config import AnonymizerConfig
@@ -37,10 +37,10 @@ from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-WORKSPACE = os.environ.get("NMP_WORKSPACE", "default")
-MODEL_PROVIDER = os.environ.get("NMP_ANON_PROVIDER", "nvidia-build")
+WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
+MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
     replace=Redact(format_template="[REDACTED_{label}]"),
@@ -52,8 +52,8 @@ model_configs = [
     ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3-nano-30b-a3b"),
 ]
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 anonymizer = sdk.anonymizer
@@ -74,17 +74,17 @@ preview = anonymizer.preview(
 
 ## Service-Specific Considerations
 
-When using Anonymizer as a NeMo Platform service:
+When using Anonymizer as a NeMo Helix service:
 
 | Feature        | Difference                                              | Details                                                                                |
 |----------------|---------------------------------------------------------|----------------------------------------------------------------------------------------|
 | **Inference**  | Routes through the Inference Gateway                    | Configure providers once and reference them by name from `model_configs`.              |
 | **Input data** | Filesets and HTTP(S) URLs                               | Use `sdk.files.filesets.create` / `sdk.files.upload`, then reference with `#<path>`. |
-| **Artifacts**  | Platform-managed                                        | `run` stores artifacts in NeMo Platform job storage. |
+| **Artifacts**  | Platform-managed                                        | `run` stores artifacts in NeMo Helix job storage. |
 
 ## Prerequisites
 
-Complete [Setup](/documentation/get-started) to install NeMo Platform, run `nemo services run`, and configure an inference provider. The Anonymizer plugin is currently supported from the NeMo Platform monorepo workspace: run `make bootstrap` at the repo root, or `make bootstrap-python` / `uv sync` if you only need Python dependencies, so uv can resolve `nemo-anonymizer-plugin` and the workspace prerequisites `nmp-common`, `nemo-platform-plugin`, and `data-designer-nemo`.
+Complete [Setup](/documentation/get-started) to install NeMo Helix, run `nemo services run`, and configure an inference provider. The Anonymizer plugin is currently supported from the NeMo Helix monorepo workspace: run `make bootstrap` at the repo root, or `make bootstrap-python` / `uv sync` if you only need Python dependencies, so uv can resolve `nemo-anonymizer-plugin` and the workspace prerequisites `nhx-common`, `nemo-helix-plugin`, and `data-designer-nemo`.
 
 The root workspace includes the Anonymizer plugin, so `nemo services run` discovers it automatically and mounts `/apis/anonymizer/...` on the gateway. Standalone installation from a fresh environment outside the repo is not available. Verify the CLI is registered:
 
@@ -94,7 +94,7 @@ nemo anonymizer --help
 
 You should see `validate`, `preview`, and `run` commands.
 
-These tutorials route inference through an [Inference Gateway](/documentation/models-and-inference) provider, so a NeMo Platform cluster must be running before you preview or run a job. The examples reference the default NVIDIA Build provider created during setup.
+These tutorials route inference through an [Inference Gateway](/documentation/models-and-inference) provider, so a NeMo Helix cluster must be running before you preview or run a job. The examples reference the default NVIDIA Build provider created during setup.
 
 <Markdown src="/snippets/_snippets/nvidia-build-model-provider.mdx" />
 
@@ -107,15 +107,15 @@ import os
 import tempfile
 from pathlib import Path
 
-from nemo_platform import NeMoPlatform
-from nemo_platform._exceptions import ConflictError
+from nemo_helix import NeMoHelix
+from nemo_helix._exceptions import ConflictError
 
-WORKSPACE = os.environ.get("NMP_WORKSPACE", "default")
+WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
 FILESET = "anonymizer-inputs"
 INPUT_FILENAME = "anonymizer-input.csv"
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 

@@ -138,7 +138,7 @@ changed, before/after metrics, and verdict.
 
 ### Improve NeMo itself
 
-NeMo Platform ships an annotated `.agent-improver.yml` at the repo root. Run from
+NeMo Helix ships an annotated `.agent-improver.yml` at the repo root. Run from
 the repo root and override the checked-in relative paths with absolute host
 paths:
 
@@ -219,12 +219,12 @@ as the runner is concerned.
 
 ### Worktree from a previous run blocks a new one
 
-The loop reuses the path `<repo>/../nmp-worktrees/self-improve/iter-N`
+The loop reuses the path `<repo>/../nhx-worktrees/self-improve/iter-N`
 and a branch name `self-improve/iter-N`. After a failed run, clean up
 manually:
 
 ```bash
-git worktree remove --force <repo>/../nmp-worktrees/self-improve/iter-1
+git worktree remove --force <repo>/../nhx-worktrees/self-improve/iter-1
 git branch -D self-improve/iter-1
 ```
 
@@ -253,7 +253,7 @@ implementation, gated on plumbing ``workspace`` / ``agent_name`` /
 - **`<batch_dir>/`** — per-batch artifacts (results, traces, reports)
 - **`baselines.json`** at the repo root — historical eval performance
 - **`loop_state.json`** at the repo root — last loop's iteration history
-- **`<repo>/../nmp-worktrees/self-improve/iter-N/`** — isolated worktree
+- **`<repo>/../nhx-worktrees/self-improve/iter-N/`** — isolated worktree
   used during a loop iteration
 - **`plugins/nemo-agents/examples/agent-improver.example.yml`** —
   annotated template for any agent's repo

@@ -149,15 +149,15 @@ def _create_secret(sdk: Any, workspace: str, secret_name: str, secret_value: str
     For long-lived platform instances a stale secret (e.g. rotated key)
     would require manual deletion or an update-on-conflict strategy.
     """
-    from nemo_platform_plugin.client.adapter import client_from_platform
-    from nemo_platform_plugin.secrets.client import SecretsClient
-    from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+    from nemo_helix_plugin.client.adapter import client_from_platform
+    from nemo_helix_plugin.secrets.client import SecretsClient
+    from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
     from pydantic import SecretStr
 
     secrets = client_from_platform(sdk, SecretsClient)
     try:
         secrets.create_secret(
-            body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(secret_value)),
+            body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(secret_value)),
             workspace=workspace,
         )
         logger.info("Created secret '%s'", secret_name)
@@ -215,10 +215,10 @@ def _wait_for_provider_discovery(sdk: Any, workspace: str, spec: ProviderSpec) -
 def _create_virtual_model(base_url: str, workspace: str, spec: VirtualModelSpec) -> None:
     """Create a VirtualModel via the entities REST API, ignoring conflicts.
 
-    Uses urllib (stdlib) rather than the NeMoPlatform SDK since the SDK's
+    Uses urllib (stdlib) rather than the NeMoHelix SDK since the SDK's
     virtual-models endpoint may not be exposed on all platform versions.
     Auth is omitted intentionally — local benchmark platforms run with auth
-    disabled (NMP_SECRETS_ALLOW_KEY_CREATION=1, no auth service in the
+    disabled (NHX_SECRETS_ALLOW_KEY_CREATION=1, no auth service in the
     services list).
     """
     url = f"{base_url.rstrip('/')}/apis/entities/v2/workspaces/{workspace}/entities/virtual_model"
@@ -268,11 +268,11 @@ def seed_all(
 
     Returns a :class:`SeedResult` with per-provider and per-vm status.
     """
-    from nemo_platform import NeMoPlatform
+    from nemo_helix import NeMoHelix
 
     provider_specs = load_manifest(manifest_path)
     vm_specs = _load_virtual_model_specs(manifest_path)
-    sdk = NeMoPlatform(base_url=base_url, workspace=workspace)
+    sdk = NeMoHelix(base_url=base_url, workspace=workspace)
     result = SeedResult()
 
     # Track which providers succeeded so VMs can gate on their dependency.
@@ -331,8 +331,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Seed inference providers from a YAML manifest")
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST, help="Path to providers.yaml")
-    parser.add_argument("--base-url", default="http://localhost:8080", help="NeMo Platform base URL")
-    parser.add_argument("--workspace", default="default", help="NeMo Platform workspace")
+    parser.add_argument("--base-url", default="http://localhost:8080", help="NeMo Helix base URL")
+    parser.add_argument("--workspace", default="default", help="NeMo Helix workspace")
     args = parser.parse_args()
 
     result = seed_all(args.manifest, base_url=args.base_url, workspace=args.workspace)

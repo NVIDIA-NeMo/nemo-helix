@@ -11,7 +11,7 @@ backend/benchmark/metric stack into every consumer that only wanted ``agent_eval
 * ``nemo_evaluator_sdk/values/__init__.py`` (AALGO-311) — pyarrow, numpy, jinja2 and jsonschema,
   together with the deferred pyarrow import in ``values/results.py``.
 
-Both are covered here in their source form and in the ``nemo_platform.beta.evaluator`` mirror the
+Both are covered here in their source form and in the ``nemo_helix.beta.evaluator`` mirror the
 vendoring tool generates.
 
 Every *assertion* runs out-of-process. Resolving a whole public surface imports openai, sacrebleu,
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-_VENDORED_MIRROR = "nemo_platform.beta.evaluator"
+_VENDORED_MIRROR = "nemo_helix.beta.evaluator"
 
 # Imported out-of-process on purpose: by the time this module runs under pytest, sibling suites
 # have already pulled the execution stack into sys.modules, so an in-process check proves nothing.
@@ -179,7 +179,7 @@ def test_every_public_name_resolves(module_name: str, submodule_name: str) -> No
     """
     # Probe the top-level package only. `find_spec` on a dotted name RAISES ModuleNotFoundError
     # when a parent is missing rather than returning None, so probing the full path would error
-    # in exactly the case this guard exists for (no nemo-platform installed). It also imports
+    # in exactly the case this guard exists for (no nemo-helix installed). It also imports
     # every parent in-process, which would defeat this module's isolation.
     root_package = module_name.partition(".")[0]
     if importlib.util.find_spec(root_package) is None:

@@ -30,10 +30,10 @@ class AnonymizerRequest(BaseModel):
       config:           AnonymizerConfig — replace/rewrite mode + detection params.
       data:             AnonymizerInputSpec — HTTP(S) URL or fileset source + text/id columns.
       model_configs:    DD ``ModelConfig`` list. ``provider`` on each entry must
-                        reference a NeMo Platform inference provider name (optionally
+                        reference a NeMo Helix inference provider name (optionally
                         ``workspace/provider``). Optional on the request model for
                         compatibility, but required by plugin preview/run execution
-                        so requests route through NeMo Platform Inference Gateway.
+                        so requests route through NeMo Helix Inference Gateway.
       selected_models:  Optional role->alias overrides. Omitted roles fall back
                         to the upstream library YAML defaults.
     """
@@ -71,7 +71,7 @@ class AnonymizerStepConfig(BaseModel):
     # YAML body to hand to ``Anonymizer(model_configs=...)`` after the service
     # resolved providers and roles.
     model_configs_yaml: str
-    # Provider definitions resolved against NeMo Platform. Each entry already points at
+    # Provider definitions resolved against NeMo Helix. Each entry already points at
     # the Inference Gateway URL with the right auth headers. The task will pass
     # these to ``Anonymizer(model_providers=...)``.
     dd_model_providers: list[dict[str, Any]]

@@ -11,9 +11,9 @@ import os
 import sys
 from pathlib import Path
 
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.tasks.dispatcher import exit_code_for, read_step_config
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.tasks.dispatcher import exit_code_for, read_step_config
+from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def _ensure_in_cluster_kubeconfig() -> None:
                 "context": {
                     "cluster": "incluster",
                     "user": "incluster",
-                    "namespace": os.getenv("POD_NAMESPACE", "nemo-platform-scaled-evals"),
+                    "namespace": os.getenv("POD_NAMESPACE", "nemo-helix-scaled-evals"),
                 },
             }
         ],

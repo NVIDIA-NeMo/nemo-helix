@@ -17,7 +17,7 @@
     "wheel_sha256": "f6d89d7e331221fac61679b0ede90de5d04225e972ca15bbcad905847045491a"
   },
   "adapter": {
-    "version": "nemo-platform-plugin-overlay-v1",
+    "version": "nemo-helix-plugin-overlay-v1",
     "files": [
       "harbor-patches/patch_langgraph_writable_venv.py",
       "harbor-patches/patch_pi_extra_env.py",

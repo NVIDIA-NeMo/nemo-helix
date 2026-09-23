@@ -9,33 +9,33 @@ import json
 from typing import Annotated, Any, Literal
 
 import typer
-from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
-from nemo_platform_ext.cli.core.code_generator import handle_code_generation
-from nemo_platform_ext.cli.core.context import CLIContext
-from nemo_platform_ext.cli.core.errors import handle_errors
-from nemo_platform_ext.cli.core.formatters import (
+from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
+from nemo_helix_ext.cli.core.code_generator import handle_code_generation
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.cli.core.errors import handle_errors
+from nemo_helix_ext.cli.core.formatters import (
     Column,
     check_output_columns_with_format,
     format_output,
     validate_stream_output_format,
 )
-from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import (
+from nemo_helix_ext.cli.core.help_formatter import collect_warnings, create_typer_app
+from nemo_helix_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_helix_ext.cli.core.stdin_utils import (
     build_request_body,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
 )
-from nemo_platform_ext.cli.core.types import (
+from nemo_helix_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
     NoTruncateOption,
     OutputColumnsOption,
     StreamOutputOption,
 )
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import (
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import (
     CreateGuardrailConfigRequest,
     ListGuardrailConfigsQueryParams,
     UpdateGuardrailConfigRequest,

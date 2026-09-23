@@ -8,7 +8,7 @@ reference example. The deployment uses the umbrella Helm chart at
 `contrib/auth/zitadel/helm`.
 
 The chart is self-seeding for local demos: a post-install job configures
-ZITADEL, patches NeMo Platform with generated client IDs, and stores generated
+ZITADEL, patches NeMo Helix with generated client IDs, and stores generated
 client secrets in the `nemo-zitadel-seed-state` Secret.
 
 For architecture and wiring details, see:

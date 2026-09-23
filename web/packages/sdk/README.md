@@ -3,9 +3,9 @@
 
 # @nemo/sdk
 
-A collection of generated types and hooks for NeMo Platform.
+A collection of generated types and hooks for NeMo Helix.
 
-This package uses [Orval](https://orval.dev/) to generate TypeScript types and React Query hooks from OpenAPI specifications or interacting with various NeMo Platform.
+This package uses [Orval](https://orval.dev/) to generate TypeScript types and React Query hooks from OpenAPI specifications or interacting with various NeMo Helix.
 
 ## Features
 

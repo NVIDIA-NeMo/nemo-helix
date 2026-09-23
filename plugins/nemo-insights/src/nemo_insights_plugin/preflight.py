@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+from nemo_helix import AsyncNeMoHelix, NeMoHelixError
+from nemo_helix_plugin.nooa_model_client import configured_model_refs
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.contracts.checks import CheckResult, make_check_result
 from nemo_insights_plugin.platform_client import make_client
 from nemo_insights_plugin.profile import AnalysisProfile
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatformError
-from nemo_platform_plugin.nooa_model_client import configured_model_refs
 
-_EXPECTED_PLATFORM_ERRORS = (NeMoPlatformError, httpx.HTTPError, OSError, RuntimeError, ValueError)
+_EXPECTED_PLATFORM_ERRORS = (NeMoHelixError, httpx.HTTPError, OSError, RuntimeError, ValueError)
 
 
 def _default_http_ok(base_url: str) -> bool:
@@ -33,7 +33,7 @@ def _default_http_ok(base_url: str) -> bool:
 
 
 async def _default_workspace_ok(base_url: str, workspace: str, agent: str) -> bool:
-    client: AsyncNeMoPlatform | None = None
+    client: AsyncNeMoHelix | None = None
     try:
         client = make_client(base_url)
         backend = make_analyst_backend(client=client, insights_output=None)
@@ -203,7 +203,7 @@ async def check_environment(
             "advisory",
             f"{base_url} reachable",
             f"{base_url} unreachable",
-            hint="check --base-url/NMP_BASE_URL and platform health",
+            hint="check --base-url/NHX_BASE_URL and platform health",
         )
     )
     if agent is not None and workspace is not None:

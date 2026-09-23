@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from nemo_platform_plugin.customization_contributor import CustomizationContributor
+from nemo_helix_plugin.customization_contributor import CustomizationContributor
 from nemo_unsloth_plugin.contributor import UnslothContributor
 from typer.testing import CliRunner
 
@@ -52,7 +52,7 @@ class TestAuthz:
         ``AuthzScope("customization").child(name, "jobs")``), not a separate
         ``get_authz_contribution`` declaration."""
         from fastapi.routing import APIRoute
-        from nemo_platform_plugin.authz import get_path_rules
+        from nemo_helix_plugin.authz import get_path_rules
 
         try:
             specs = contributor.get_routers()
@@ -177,7 +177,7 @@ class TestCLIHelp:
 def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tracking message names this backend, so all three job id prefixes read correctly."""
     import typer
-    from nmp.customization_common.cli import overrides
+    from nhx.customization_common.cli import overrides
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(

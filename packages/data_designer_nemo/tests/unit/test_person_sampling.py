@@ -9,8 +9,8 @@ from data_designer_nemo.errors import NDDInternalError
 from data_designer_nemo.person_sampling import (
     ensure_nemotron_personas_filesets,
 )
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 
 
 def _make_person_sampler_column(name: str, locale: str) -> dd.SamplerColumnConfig:

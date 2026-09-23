@@ -44,9 +44,9 @@ Use `client.evaluator.submit` for execution through the installed nemo-evaluator
 
 ```python
 from nemo_evaluator_sdk import ExactMatchMetric, RunConfig
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 job = client.evaluator.submit(
     metric=ExactMatchMetric(
         reference="{{item.expected}}",
@@ -120,7 +120,7 @@ job.wait_until_done()
 result = job.get_result()
 ```
 
-`nvidia-api-key` names a NeMo Platform workspace secret; the example does not
+`nvidia-api-key` names a NeMo Helix workspace secret; the example does not
 embed the credential value.
 
 **Platform CLI**

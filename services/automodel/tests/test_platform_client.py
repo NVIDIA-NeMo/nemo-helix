@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from nmp.customization_common.schemas.file_io import FileSetRef
+from nhx.customization_common.schemas.file_io import FileSetRef
 
 
 def test_fileset_ref_parse() -> None:

@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/core/jobs/jobs-launcher/nmpclient"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 	"github.com/spf13/cobra"
 )
 
@@ -110,25 +110,25 @@ func parseSecretReferences(secretsEnv string) ([]secretReference, error) {
 	return result, nil
 }
 
-// fetchSecrets retrieves secrets using the NeMo Platform API client and returns them as environment variables
-func fetchSecrets(apiBaseURL string, principal *nmpclient.Principal, secretRefs []secretReference) ([]string, error) {
-	return fetchSecretsWithClient(nmpclient.NewSecretClient(apiBaseURL, principal), secretRefs)
+// fetchSecrets retrieves secrets using the NeMo Helix API client and returns them as environment variables
+func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
 }
 
-func fetchSecretsWithEndpoint(endpoint nmpclient.Endpoint, principal *nmpclient.Principal, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
 	return fetchSecretsWithClient(
-		nmpclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
+		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
 		secretRefs,
 	)
 }
 
-func secretEndpointHTTPClient(endpoint nmpclient.Endpoint) *http.Client {
+func secretEndpointHTTPClient(endpoint nhxclient.Endpoint) *http.Client {
 	httpClient := *endpoint.HTTPClient()
 	httpClient.Timeout = secretFetchTimeout
 	return &httpClient
 }
 
-func fetchSecretsWithClient(client nmpclient.SecretClient, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
 	if len(secretRefs) == 0 {
 		return nil, nil
 	}
@@ -156,7 +156,7 @@ func workloadEnvFromParent() []string {
 	filtered := make([]string, 0, len(env))
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "NMP_JOB_LAUNCHER_") {
+		if strings.HasPrefix(key, "NHX_JOB_LAUNCHER_") {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -206,14 +206,14 @@ func runExec(args []string, stdinReader io.Reader) (int, error) {
 		}
 
 		if len(secretRefs) > 0 {
-			secretEndpoint, err := nmpclient.ResolveServiceEndpointFromEnv("secrets")
+			secretEndpoint, err := nhxclient.ResolveServiceEndpointFromEnv("secrets")
 			if err != nil {
-				logger.Printf("Error: NMP_SECRETS_URL or NMP_BASE_URL is required when NEMO_JOB_SECRETS is set: %v\n", err)
+				logger.Printf("Error: NHX_SECRETS_URL or NHX_BASE_URL is required when NEMO_JOB_SECRETS is set: %v\n", err)
 				return 1, fmt.Errorf("secrets endpoint is not configured: %w", err)
 			}
 
-			// Build auth context from NMP_PRINCIPAL JSON env var set by the jobs controller
-			principal := nmpclient.PrincipalFromEnv()
+			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
+			principal := nhxclient.PrincipalFromEnv()
 
 			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
 			if err != nil {

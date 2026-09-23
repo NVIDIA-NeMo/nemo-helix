@@ -3,14 +3,14 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- if and (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled }}
+{{- if and (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled }}
 {{- $imagePullSecrets := include "nemo-common.imagepullsecrets" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "nmp-envoy.servicename" . }}
+  name: {{ include "nhx-envoy.servicename" . }}
   labels:
-    {{- include "nmp-envoy.labels" . | nindent 4 }}
+    {{- include "nhx-envoy.labels" . | nindent 4 }}
   annotations:
     {{- with .Values.envoyProxy.annotations }}
     {{- toYaml . | nindent 4 }}
@@ -21,8 +21,8 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: nmp-envoy
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nhx-envoy
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -31,12 +31,12 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "nmp-envoy.labels" . | nindent 8 }}
+        {{- include "nhx-envoy.labels" . | nindent 8 }}
         {{- with .Values.envoyProxy.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      serviceAccountName: {{ include "nmp-envoy.serviceAccountName" . }}
+      serviceAccountName: {{ include "nhx-envoy.serviceAccountName" . }}
       securityContext:
         {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.envoyProxy.podSecurityContext) | nindent 8 }}
 {{- if $imagePullSecrets }}
@@ -47,7 +47,7 @@ spec:
         - name: envoy
           securityContext:
             {{- include "nemo-common.securityContext" (dict "global" .Values.securityContext "local" .Values.envoyProxy.securityContext) | nindent 12 }}
-          image: {{ include "nmp-envoy.image" . | quote }}
+          image: {{ include "nhx-envoy.image" . | quote }}
           imagePullPolicy: {{ .Values.envoyProxy.image.pullPolicy }}
           args:
             - -c
@@ -58,7 +58,7 @@ spec:
             - {{ . | quote }}
             {{- end }}
           env:
-            {{ include "nemo-platform.envoyProxy.env" . | nindent 12 | trim }}
+            {{ include "nemo-helix.envoyProxy.env" . | nindent 12 | trim }}
           ports:
             - name: proxy
               containerPort: {{ .Values.envoyProxy.service.port }}
@@ -82,7 +82,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "nmp-envoy.servicename" . }}
+            name: {{ include "nhx-envoy.servicename" . }}
         {{- with .Values.envoyProxy.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

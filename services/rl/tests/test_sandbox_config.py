@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from nmp.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     GymHostEgressRule,
     SandboxConfig,
     SandboxNetworkPolicy,
@@ -28,10 +28,10 @@ def test_assemble_master_egress_allow_defaults() -> None:
 
 
 def test_assemble_master_egress_allow_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_VLLM_SERVICE_HOST", "vllm.svc")
-    monkeypatch.setenv("NMP_VLLM_SERVICE_PORT", "9000")
-    monkeypatch.setenv("NMP_BROKER_SERVICE_HOST", "broker.svc")
-    monkeypatch.setenv("NMP_BROKER_SERVICE_PORT", "51235")
+    monkeypatch.setenv("NHX_VLLM_SERVICE_HOST", "vllm.svc")
+    monkeypatch.setenv("NHX_VLLM_SERVICE_PORT", "9000")
+    monkeypatch.setenv("NHX_BROKER_SERVICE_HOST", "broker.svc")
+    monkeypatch.setenv("NHX_BROKER_SERVICE_PORT", "51235")
     rules = assemble_master_egress_allow()
     assert [(r.host, r.port) for r in rules] == [
         ("vllm.svc", 9000),
@@ -40,7 +40,7 @@ def test_assemble_master_egress_allow_from_env(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_assemble_master_egress_allow_explicit_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_VLLM_SERVICE_HOST", "env-host")
+    monkeypatch.setenv("NHX_VLLM_SERVICE_HOST", "env-host")
     rules = assemble_master_egress_allow(vllm_host="explicit", vllm_port=1, broker_host="b", broker_port=2)
     assert [(r.host, r.port) for r in rules] == [("explicit", 1), ("b", 2)]
 
@@ -49,8 +49,8 @@ def _sandbox_config() -> SandboxConfig:
     return SandboxConfig(
         image="nvcr.io/example/rl:latest",
         network_policy=SandboxNetworkPolicy(egress_allow=[GymHostEgressRule(host="placeholder", port=1)]),
-        environment_pvc_claim="nmp-job-storage",
-        workspace_pvc_claim="nmp-job-storage",
+        environment_pvc_claim="nhx-job-storage",
+        workspace_pvc_claim="nhx-job-storage",
     )
 
 
@@ -65,7 +65,7 @@ def test_sandbox_config_requires_pvc_claims() -> None:
 
 def test_build_sandbox_mounts_maps_paths_to_pvc_subpaths() -> None:
     mounts = build_sandbox_mounts(
-        pvc_claim="nmp-job-storage",
+        pvc_claim="nhx-job-storage",
         workspace="default",
         job_id="job-9",
         storage_root=Path("/var/run/scratch/job"),
@@ -75,7 +75,7 @@ def test_build_sandbox_mounts_maps_paths_to_pvc_subpaths() -> None:
     assert mounts.environment_sub_path == "jobs/default/job-9/environment"
     assert mounts.dataset_sub_path == "jobs/default/job-9/dataset"
     assert mounts.workspace_sub_path == "jobs/default/job-9/gym-work"
-    assert mounts.environment_pvc_claim == "nmp-job-storage"
+    assert mounts.environment_pvc_claim == "nhx-job-storage"
 
 
 def test_apply_master_egress_to_sandbox_config() -> None:
@@ -93,7 +93,7 @@ def test_egress_is_operator_scoped_not_per_job() -> None:
     RlConfig, so they are per-deployment. Asserting on the submission schema is what actually
     pins the invariant: the compiler-side models legitimately carry both fields.
     """
-    from nmp.rl.schemas.job import GRPOTraining
+    from nhx.rl.schemas.job import GRPOTraining
 
     for field in ("allow_internet", "public_dns_allow", "egress_allow", "network_policy"):
         assert field not in GRPOTraining.model_fields
@@ -107,7 +107,7 @@ def test_egress_is_operator_scoped_not_per_job() -> None:
 
 
 def test_sandbox_config_carries_both_operator_egress_levers() -> None:
-    from nmp.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+    from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
         SandboxConfig,
         SandboxNetworkPolicy,
     )
@@ -123,7 +123,7 @@ def test_sandbox_config_carries_both_operator_egress_levers() -> None:
 
 def test_master_egress_refresh_preserves_public_dns_allow() -> None:
     """Refreshing vLLM/broker endpoints must not drop operator DNS configuration."""
-    from nmp.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+    from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
         SandboxConfig,
         SandboxNetworkPolicy,
         apply_master_egress_to_sandbox_config,

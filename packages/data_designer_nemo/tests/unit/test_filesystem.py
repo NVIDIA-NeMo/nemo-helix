@@ -4,8 +4,8 @@
 from unittest.mock import Mock, patch
 
 from data_designer_nemo.filesystem import make_filesystem
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
 
 
 def test_make_filesystem_uses_sync_client_for_sync_sdk() -> None:

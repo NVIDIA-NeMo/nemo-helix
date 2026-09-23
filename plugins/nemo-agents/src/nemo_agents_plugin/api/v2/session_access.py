@@ -9,7 +9,7 @@ import logging
 
 from fastapi import HTTPException
 from nemo_agents_plugin.entities import AgentSession
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 logger = logging.getLogger(__name__)
 

@@ -4,16 +4,16 @@
 """``MiddlewareFactory`` registry — typed config -> request/response pipelines.
 
 A ``MiddlewareFactory`` bridges declarative config (an entity-store
-payload, a NeMo Platform VirtualModel descriptor, a CLI flag bundle) to a pair of
+payload, a NeMo Helix VirtualModel descriptor, a CLI flag bundle) to a pair of
 :class:`RequestPipeline` / :class:`ResponsePipeline`. Hosts that own
-their own LLM backend — NeMo Platform IGW today, possibly Studio / Evaluator
+their own LLM backend — NeMo Helix IGW today, possibly Studio / Evaluator
 later — look up a factory by name, validate their raw config through it,
 and slot the resulting pipelines around their backend.
 
 Factories are deliberately host-agnostic: they live in
-``switchyard/lib/factories/``, they don't know about IGW or NeMo Platform, and
+``switchyard/lib/factories/``, they don't know about IGW or NeMo Helix, and
 the same registry is usable from the Switchyard CLI / standalone
-server. NeMo Platform-specific concerns (IGW ``ModelProvider`` resolution,
+server. NeMo Helix-specific concerns (IGW ``ModelProvider`` resolution,
 request-id keying, etc.) belong to the bridge layer, not here.
 
 Discovery uses the ``switchyard.middlewares`` entry-point group.
@@ -48,7 +48,7 @@ class MiddlewareFactory(Protocol[ConfigT]):
     The protocol is split into four part-builders so consumers only pay
     for what they use:
 
-    * NeMo Platform IGW supplies its own backend — it calls
+    * NeMo Helix IGW supplies its own backend — it calls
       :meth:`build_request_pipeline` / :meth:`build_response_pipeline`
       and never instantiates an LLM client.
     * Standalone Switchyard (CLI, recipes) calls

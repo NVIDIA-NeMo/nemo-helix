@@ -4,8 +4,8 @@
 import asyncio
 
 import pytest
-from nmp.core.entities.app.repository.account_identity import AccountIdentityStore
-from nmp.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
+from nhx.core.entities.app.repository.account_identity import AccountIdentityStore
+from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
 from sqlalchemy import func, select
 
 

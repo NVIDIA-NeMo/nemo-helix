@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from nmp.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.service import IntakeService
-from nmp.testing import create_test_client
+from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.service import IntakeService
+from nhx.testing import create_test_client
 
 
 @pytest.fixture

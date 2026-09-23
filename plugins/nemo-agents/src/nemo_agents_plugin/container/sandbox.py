@@ -4,7 +4,7 @@
 """Render sandbox-runtime image profiles into Dockerfile fragments.
 
 This is the packager's *mechanism*: it discovers a provider-supplied
-:class:`~nemo_platform_plugin.sandbox.SandboxImageProfile` by name and turns its
+:class:`~nemo_helix_plugin.sandbox.SandboxImageProfile` by name and turns its
 declarative fields (apt packages, users) into shell fragments the Dockerfile
 template interpolates. The provider (e.g. ``nemo-deployments[openshell]``) owns
 *what* an image needs; this module owns *how* it is baked in, so
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import re
 
-from nemo_platform_plugin.discovery import discover_sandbox_profiles
-from nemo_platform_plugin.sandbox import SandboxImageProfile
+from nemo_helix_plugin.discovery import discover_sandbox_profiles
+from nemo_helix_plugin.sandbox import SandboxImageProfile
 
 # Profile values originate from trusted provider code, not end users, but these
 # fragments are interpolated into a Dockerfile so validate against tight

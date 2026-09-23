@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { customizationJob1 } from '@studio/mocks/customizer/customization-jobs';
@@ -27,7 +27,7 @@ describe('DetailActions', () => {
     render(
       <TestProviders>
         <DetailActions
-          status={PlatformJobStatus.created}
+          status={HelixJobStatus.created}
           backend={CustomizationBackend.automodel}
           name={customizationJob1.name}
         />
@@ -39,7 +39,7 @@ describe('DetailActions', () => {
     render(
       <TestProviders>
         <DetailActions
-          status={PlatformJobStatus.completed}
+          status={HelixJobStatus.completed}
           backend={CustomizationBackend.automodel}
           name={customizationJob1.name}
         />
@@ -63,7 +63,7 @@ describe('DetailActions', () => {
     render(
       <TestProviders>
         <DetailActions
-          status={PlatformJobStatus.created}
+          status={HelixJobStatus.created}
           backend={CustomizationBackend.automodel}
           name={customizationJob1.name}
         />
@@ -77,9 +77,9 @@ describe('DetailActions', () => {
     expect(cancellingItem).toBeDisabled();
   });
   it.each([
-    PlatformJobStatus.cancelled,
-    PlatformJobStatus.error, // Platform uses 'error' instead of 'failed'
-    PlatformJobStatus.paused, // Platform doesn't have 'unknown', using 'paused' instead
+    HelixJobStatus.cancelled,
+    HelixJobStatus.error, // Platform uses 'error' instead of 'failed'
+    HelixJobStatus.paused, // Platform doesn't have 'unknown', using 'paused' instead
   ])('should render nothing when status is %s', (status) => {
     render(
       <TestProviders>

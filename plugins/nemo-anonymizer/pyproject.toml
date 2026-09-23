@@ -8,8 +8,8 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
 dependencies = [
-    "nemo-platform-plugin",
-    "nemo-platform",
+    "nemo-helix-plugin",
+    "nemo-helix",
     "nemo-anonymizer==0.4.0",
     "data-designer==0.9.3",
     "data-designer-nemo",
@@ -55,8 +55,8 @@ packages = ["src/nemo_anonymizer_plugin"]
 
 
 [tool.uv.sources]
-nemo-platform = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nemo-helix = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
 
 [tool.nemo.openapi]

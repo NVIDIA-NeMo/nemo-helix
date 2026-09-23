@@ -31,6 +31,11 @@ def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
         return False
     found = False
     for line_number, line in enumerate(text.splitlines(), start=1):
+        if path.suffix == ".patch" and line.startswith("-") and not line.startswith("---"):
+            # Patch files may legitimately mention legacy identifiers on removed
+            # lines to update external source trees during the rename. Added and
+            # context lines are still checked.
+            continue
         if predicate(line):
             print(f"{path}:{line_number}:{line}")
             found = True

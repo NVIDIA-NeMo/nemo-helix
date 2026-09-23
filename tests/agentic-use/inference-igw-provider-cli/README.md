@@ -12,7 +12,7 @@ This eval tests the agent's ability to register an external inference provider (
 
 ## Prerequisites
 
-- `nmp-agentic-base:latest` Docker image built
+- `nhx-agentic-base:latest` Docker image built
 - `NVIDIA_API_KEY` set for the AUT / NAT runtime
 
 Note: inference-provider credentials should be passed through environment/secret wiring and not checked into task files.
@@ -20,7 +20,7 @@ Note: inference-provider credentials should be passed through environment/secret
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest . && \
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest . && \
 export NVIDIA_API_KEY='<your-key>' && \
 python tests/agentic-use/nat_runner.py inference-igw-provider-cli \
     --agent-backend aut \
@@ -36,7 +36,7 @@ inference-igw-provider-cli/
   instruction.md     - Task description for the agent
   task.toml          - Harbor configuration (timeouts, metadata)
   environment/
-    Dockerfile       - Extends nmp-agentic-base:latest (CLI-only, no mock)
+    Dockerfile       - Extends nhx-agentic-base:latest (CLI-only, no mock)
   tests/
     test.sh          - Test runner script
     test_outputs.py  - Verifier: checks provider registration + real inference

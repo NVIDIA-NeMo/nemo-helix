@@ -68,7 +68,7 @@ def init_git_source(source_root: Path) -> None:
 def stamp(
     source_root: Path,
     *,
-    sdk_id: str = "nemo-platform",
+    sdk_id: str = "nemo-helix",
     cadence: str = "release",
     release_label: str = "1.0.0",
     nightly_timestamp: str = "",
@@ -102,7 +102,7 @@ def test_nightly_uses_latest_reachable_release_core_tag(tmp_path: Path):
     assert version == "2.1.0.dev20260512010101"
 
 
-@pytest.mark.parametrize("sdk_id", ["nemo-platform", "nemo-platform-plugin"])
+@pytest.mark.parametrize("sdk_id", ["nemo-helix", "nemo-helix-plugin"])
 def test_planned_nightly_version_overrides_source_tags(tmp_path: Path, sdk_id: str):
     source_root = tmp_path / "source"
     init_git_source(source_root)
@@ -141,7 +141,7 @@ def test_cli_prints_planned_nightly_version(tmp_path: Path, capsys: pytest.Captu
             "--source-root",
             str(tmp_path),
             "--sdk-id",
-            "nemo-platform-plugin",
+            "nemo-helix-plugin",
             "--cadence",
             "nightly",
             "--nightly-timestamp",
@@ -201,14 +201,14 @@ def test_stable_resolves_release_label(tmp_path: Path):
     assert version == "1.0.0"
 
 
-@pytest.mark.parametrize("sdk_id", ["../nemo-platform", ".", "..", "bad/id", "bad id"])
+@pytest.mark.parametrize("sdk_id", ["../nemo-helix", ".", "..", "bad/id", "bad id"])
 def test_unsafe_sdk_id_fails(tmp_path: Path, sdk_id: str):
     with pytest.raises(StampError, match="safe single path segment"):
         stamp(tmp_path, sdk_id=sdk_id)
 
 
-def test_nemo_platform_plugin_uses_same_resolution_path(tmp_path: Path):
-    version = stamp(tmp_path, sdk_id="nemo-platform-plugin", cadence="release", release_label="1.0.0")
+def test_nemo_helix_plugin_uses_same_resolution_path(tmp_path: Path):
+    version = stamp(tmp_path, sdk_id="nemo-helix-plugin", cadence="release", release_label="1.0.0")
 
     assert version == "1.0.0"
 
@@ -255,7 +255,7 @@ def test_cli_prints_resolved_version(tmp_path: Path, capsys: pytest.CaptureFixtu
             "--source-root",
             str(tmp_path),
             "--sdk-id",
-            "nemo-platform",
+            "nemo-helix",
             "--cadence",
             "release",
             "--release-label",
@@ -267,4 +267,4 @@ def test_cli_prints_resolved_version(tmp_path: Path, capsys: pytest.CaptureFixtu
     captured = capsys.readouterr()
     assert status == 0
     assert captured.out == "1.0.0\n"
-    assert captured.err == "Resolved sdk:nemo-platform version 1.0.0.\n"
+    assert captured.err == "Resolved sdk:nemo-helix version 1.0.0.\n"

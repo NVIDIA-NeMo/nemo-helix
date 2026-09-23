@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="trbl-ndd-dc"></a>
 
-Learn how to troubleshoot common issues with NeMo Data Designer in a local NeMo Platform setup.
+Learn how to troubleshoot common issues with NeMo Data Designer in a local NeMo Helix setup.
 
 ## Prerequisites
 
@@ -33,11 +33,11 @@ nemo setup
 
 ## Check Service Logs
 
-Local setup writes service output to `~/.local/state/nmp/instances/<scope>/services.log` in the directory where services were started.
+Local setup writes service output to `~/.local/state/nhx/instances/<scope>/services.log` in the directory where services were started.
 
 ```bash
-tail -n 200 ~/.local/state/nmp/instances/<scope>/services.log
-tail -f ~/.local/state/nmp/instances/<scope>/services.log
+tail -n 200 ~/.local/state/nhx/instances/<scope>/services.log
+tail -f ~/.local/state/nhx/instances/<scope>/services.log
 ```
 
 Look for startup errors, provider authentication failures, port conflicts, or Data Designer request failures.
@@ -53,7 +53,7 @@ Look for startup errors, provider authentication failures, port conflicts, or Da
 ## Next steps
 
 - Tutorial: [Data Designer Tutorials](/documentation/design-synthetic-data/tutorials) covers common generation workflows.
-- How-to: [Set Up NeMo Platform](/documentation/get-started) covers local setup and service startup.
+- How-to: [Set Up NeMo Helix](/documentation/get-started) covers local setup and service startup.
 - Explanation: [Data Designer Overview](/documentation/design-synthetic-data) explains configuration, execution, and service behavior.
 - Reference: [API Reference](/documentation/reference/api-reference) lists Data Designer endpoints.
 - Troubleshooting: [Troubleshooting Overview](/documentation/reference/troubleshooting) links to other service troubleshooting pages.

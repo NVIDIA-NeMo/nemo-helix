@@ -38,7 +38,7 @@ def test_generate_configs_import_path() -> None:
     ],
 )
 def test_contract_input_parses_as_training_step_config(config_name: str) -> None:
-    from nmp.automodel.tasks.training.schemas import TrainingStepConfig
+    from nhx.automodel.tasks.training.schemas import TrainingStepConfig
 
     input_path = CONTRACT_DIR / "input_configs" / "llama-3.2-1b" / f"{config_name}.json"
     if config_name.startswith("nemotron"):

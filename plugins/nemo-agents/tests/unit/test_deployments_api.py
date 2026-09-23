@@ -28,14 +28,14 @@ from nemo_agents_plugin.entities import (
     ComputeResources,
     DeploymentStatus,
 )
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
-from nemo_platform_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
+from nemo_helix_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
 
 NOW = datetime.now(timezone.utc)
 
@@ -340,9 +340,9 @@ class TestCreateDeployment:
                 "image": "registry.example/agent:1.0",
             },
             headers={
-                "X-NMP-Principal-Id": "user:alice",
-                "X-NMP-Principal-Email": "alice@example.com",
-                "X-NMP-Principal-Groups": "research,platform",
+                "X-NHX-Principal-Id": "user:alice",
+                "X-NHX-Principal-Email": "alice@example.com",
+                "X-NHX-Principal-Groups": "research,platform",
             },
         )
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data Designer token-usage aggregation for NeMo Platform jobs."""
+"""Data Designer token-usage aggregation for NeMo Helix jobs."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from data_designer.engine.models.usage_events import TokenUsageEvent, subscribe_token_usage
 from data_designer.engine.observability import RuntimeCorrelation, runtime_correlation_provider
-from nemo_platform_plugin.job_usage import JobUsageReporter
+from nemo_helix_plugin.job_usage import JobUsageReporter
 
 
 class _TokenUsageAccumulator:
@@ -54,7 +54,7 @@ def capture_data_designer_token_usage(reporter: JobUsageReporter) -> Iterator[No
     reset and unsubscribe happen before reporting so teardown order matches the
     original implementation.
     """
-    run_id = f"nemo-platform-{uuid4().hex}"
+    run_id = f"nemo-helix-{uuid4().hex}"
     accumulator = _TokenUsageAccumulator(run_id)
     unsubscribe = subscribe_token_usage(accumulator.record)
     correlation_token = runtime_correlation_provider.set(

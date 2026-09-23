@@ -3,12 +3,12 @@
 
 """NeMo-RL remote-submit DPO training job (NemoJob).
 
-Submit-only — executes as a 4-step ``PlatformJobSpec`` (download → DPO train →
+Submit-only — executes as a 4-step ``HelixJobSpec`` (download → DPO train →
 upload → model-entity) on the platform's Kubernetes GPU cluster, where the
 training step provisions a Ray cluster.
 
 Shared scaffold (``to_spec``) lives in
-:class:`nmp.customization_common.contributor.jobs.BaseSubmitJob`. ``compile``
+:class:`nhx.customization_common.contributor.jobs.BaseSubmitJob`. ``compile``
 stays here: it gates on the Kubernetes runtime (no local Docker fallback) and
 resolves the execution profile.
 """
@@ -17,18 +17,18 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_rl_plugin.schema import RlJobInput
 from nemo_rl_plugin.transform import transform_input_to_output
-from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_distributed_runtime
-from nmp.customization_common.service.platform_client import (
-    AsyncCustomizationPlatformClients,
+from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_distributed_runtime
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
 )
-from nmp.rl.compile import platform_job_config_compiler
-from nmp.rl.schemas import RlJobOutput
+from nhx.rl.compile import platform_job_config_compiler
+from nhx.rl.schemas import RlJobOutput
 from pydantic import BaseModel
 
 
@@ -51,7 +51,7 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
         cls,
         job_input: RlJobInput,
         workspace: str,
-        platform: AsyncCustomizationPlatformClients,
+        platform: AsyncCustomizationHelixClients,
     ) -> RlJobOutput:
         return await transform_input_to_output(job_input, workspace, platform)
 
@@ -62,10 +62,10 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile a validated :class:`RlJobOutput` into a 4-step Ray DPO job.
 
         Gates on ``platform.runtime: kubernetes`` — NeMo-RL provisions a Ray
@@ -81,7 +81,7 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
         try:
             canonical.validate_for_training()
         except ValueError as e:
-            raise PlatformJobCompilationError(str(e)) from e
+            raise HelixJobCompilationError(str(e)) from e
 
         # Leave ``None`` when unset so the compiler can default per topology.
         execution_profile = canonical.training.execution_profile or profile

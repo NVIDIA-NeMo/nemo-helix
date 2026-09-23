@@ -95,7 +95,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
   // External mode auto-fill: when the URL resolves to a recognised remote
   // repo, derive a name slug (HF + NGC) and a description (HF public only).
   // Only fills fields the user has not edited. Backend preview endpoint
-  // (nmp-1tk) will eventually replace the client-side fetch.
+  // (nhx-1tk) will eventually replace the client-side fetch.
   const isExternalMode = storageMode === StorageMode.External;
   const { data: remoteMetadata, isFetching: isRemoteFetching } = useRemoteRepoMetadata(
     url,

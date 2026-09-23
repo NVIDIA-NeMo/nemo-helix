@@ -9,9 +9,9 @@ from typing import Any, ClassVar
 import pytest
 import typer
 from nemo_customizer.cli import CustomizationCLI, CustomizationCLIError
-from nemo_platform_plugin.customization_contributor import CustomizationCLISummary
-from nemo_platform_plugin.service import RouterSpec
-from nmp.customization_common.cli.uploads import UploadReport
+from nemo_helix_plugin.customization_contributor import CustomizationCLISummary
+from nemo_helix_plugin.service import RouterSpec
+from nhx.customization_common.cli.uploads import UploadReport
 from typer.testing import CliRunner
 
 
@@ -185,9 +185,9 @@ def test_upload_resolves_workspace_like_submit(
 ) -> None:
     """Uploads land in the same workspace ``submit`` would use, not a literal 'default'."""
     if env is None:
-        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     else:
-        monkeypatch.setenv("NMP_WORKSPACE", env)
+        monkeypatch.setenv("NHX_WORKSPACE", env)
     assert _upload_workspace(args, state, monkeypatch, tmp_path) == expected
 
 
@@ -210,7 +210,7 @@ def _invoke_root(args: list[str], monkeypatch: pytest.MonkeyPatch) -> Any:
         ["--exist-ok"],
         ["--workspace", "team-a"],
         ["-w", "team-a"],
-        ["--base-url", "https://nmp.test"],
+        ["--base-url", "https://nhx.test"],
         ["--cluster", "prod"],
         ["--hf-token-secret", "hf-token"],
     ],
@@ -234,8 +234,8 @@ def test_error_names_every_misplaced_flag(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_subcommand_without_group_flags_still_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """NMP_WORKSPACE is resolved by the subcommand; it is not a misplaced flag."""
-    monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+    """NHX_WORKSPACE is resolved by the subcommand; it is not a misplaced flag."""
+    monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
 
     result = _invoke_root(["fake", "info"], monkeypatch)
 

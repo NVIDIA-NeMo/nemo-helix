@@ -12,7 +12,7 @@ import httpx
 
 
 @runtime_checkable
-class PlatformClient(Protocol):
+class HelixClient(Protocol):
     """Minimal structural surface the Anonymizer SDK needs from a platform client.
 
     Satisfied by ``NemoClient`` / ``AsyncNemoClient`` (and the legacy generated
@@ -31,15 +31,15 @@ class PlatformClient(Protocol):
 _API_PREFIX = "/apis/anonymizer/v2/workspaces"
 
 
-def base_url(platform: PlatformClient) -> str:
+def base_url(platform: HelixClient) -> str:
     return str(platform.base_url).rstrip("/")
 
 
-def headers(platform: PlatformClient) -> dict[str, str]:
+def headers(platform: HelixClient) -> dict[str, str]:
     return {k: v for k, v in platform.default_headers.items() if isinstance(v, str)}
 
 
-def resolve_workspace(platform: PlatformClient, workspace: str | None) -> str:
+def resolve_workspace(platform: HelixClient, workspace: str | None) -> str:
     resolved = workspace or platform.workspace
     if not resolved:
         raise ValueError(
@@ -55,7 +55,7 @@ def path_segment(value: str) -> str:
     return quote(value, safe="")
 
 
-def url(platform: PlatformClient, workspace: str | None, path: str) -> str:
+def url(platform: HelixClient, workspace: str | None, path: str) -> str:
     if not path.startswith("/"):
         raise ValueError("SDK URL path must start with '/'.")
     workspace_segment = path_segment(resolve_workspace(platform, workspace))

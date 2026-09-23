@@ -15,7 +15,7 @@
 # GCP prerequisites are NOT created here. See README.md.
 set -euo pipefail
 
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 cd "$(dirname "$0")"
 
 if [ ! -f local.env ]; then

@@ -5,7 +5,7 @@
 """
 Generate Automodel YAML configs from TrainingStepConfig JSON fixtures.
 
-Uses compile_automodel_config() from nmp-automodel. Input configs are grouped
+Uses compile_automodel_config() from nhx-automodel. Input configs are grouped
 by model in subdirectories of input_configs/ so each model is downloaded only once.
 
 Directory layout:
@@ -54,10 +54,10 @@ if AUTOMODEL_SRC.is_dir():
 else:
     sys.path.insert(0, "/app/services/automodel/src")
 
-from nmp.automodel.app.constants import V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES  # noqa: E402
-from nmp.automodel.tasks.training.backends.config import compile_automodel_config  # noqa: E402
-from nmp.automodel.tasks.training.schemas import TrainingStepConfig  # noqa: E402
-from nmp.customization_common.service.context import NMPJobContext  # noqa: E402
+from nhx.automodel.app.constants import V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES  # noqa: E402
+from nhx.automodel.tasks.training.backends.config import compile_automodel_config  # noqa: E402
+from nhx.automodel.tasks.training.schemas import TrainingStepConfig  # noqa: E402
+from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
 
 INPUT_DIR = SCRIPT_DIR / "input_configs"
 OUTPUT_DIR = SCRIPT_DIR / "output_configs"
@@ -213,7 +213,7 @@ def _compile_one(input_path: Path, model_local_dir: Path) -> dict[str, Any]:
     _apply_lora_defaults(config)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        job_ctx = NMPJobContext(
+        job_ctx = NHXJobContext(
             workspace="default",
             job_id="config-generation",
             attempt_id="attempt-0",

@@ -30,7 +30,7 @@ def test_download_failures_are_not_swallowed(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(module, "python_version", lambda python: "3.12.11")
     monkeypatch.setattr(module, "download", fail_download)
-    monkeypatch.setenv("NMP_COLLECT_SOURCES", "1")
+    monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
     monkeypatch.setattr(
         sys,
         "argv",

@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# legal_agent_bench_fabric — evaluate an agent on LAB, the NeMo Platform way
+# legal_agent_bench_fabric — evaluate an agent on LAB, the NeMo Helix way
 
 Run Harvey Labs' [Legal Agent Benchmark (LAB)](https://github.com/harveyai/harvey-labs) as **native
 `AgentEvalTask`s** through **NeMo Fabric**, scored by **LAB's own rubric scorer** wrapped in a metric.
@@ -60,12 +60,12 @@ has no skill support — see the limitations log).
 
 ## Setup (one-time)
 
-Run from the **`nemo-platform` repo root** with the project venv's Python directly — **not `uv run`**,
+Run from the **`nemo-helix` repo root** with the project venv's Python directly — **not `uv run`**,
 which re-syncs `.venv` to the lockfile and drops the out-of-lock `nemo_fabric` + adapters. `$FABRIC_REPO`
 / `$RELAY_REPO` are your NeMo-Fabric / NeMo-Relay checkouts (macOS builds them from source).
 
 ```bash
-cd nemo-platform
+cd nemo-helix
 make bootstrap-python     # base SDK env → .venv
 
 # 1. NeMo Fabric. The `runtime` extra provides the importable `nemo_fabric` module (a separate

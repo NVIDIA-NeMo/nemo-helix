@@ -56,7 +56,7 @@ CATEGORY_REMEDIATION: dict[str, str] = {
     CATEGORY_HITL_TIMEOUT: "Resubmit the run and respond to the interview/review prompt before it times out.",
     CATEGORY_ATTACKER_FAILED: "The attacker did not finish (often a timeout on a heavy agent); the 0-hit result "
     "is not valid. Re-run, raising the attacker timeout (garak.timeout_s) or lowering attack_intensity.",
-    CATEGORY_NETWORK: "Check connectivity to the NeMo Platform control plane, then retry.",
+    CATEGORY_NETWORK: "Check connectivity to the NeMo Helix control plane, then retry.",
     CATEGORY_MODEL_UNAVAILABLE: "Check the model name, endpoint URL, and API key for the flagged group; "
     "the error lists the models those credentials can reach.",
     CATEGORY_VALIDATION_FAILED: "The war-game completed but the round did not pass validation — some "

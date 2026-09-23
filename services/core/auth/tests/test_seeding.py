@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nmp.common.entities import SYSTEM_WORKSPACE, EntityConflictError, EntityNotFoundError
-from nmp.core.auth.app.seeding import (
+from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, EntityNotFoundError
+from nhx.core.auth.app.seeding import (
     DEFAULT_WORKSPACE_ROLE,
     PLATFORM_ADMIN_ROLE,
     SYSTEM_WORKSPACE_ROLE,
@@ -21,7 +21,7 @@ from nmp.core.auth.app.seeding import (
     seed_system_workspace_viewer,
     seed_workspace_creator,
 )
-from nmp.core.auth.entities import RoleBindingEntity
+from nhx.core.auth.entities import RoleBindingEntity
 
 
 class TestGenerateBindingName:
@@ -29,8 +29,8 @@ class TestGenerateBindingName:
 
     def test_basic_email(self):
         """Test binding name generation with a basic email."""
-        name = _generate_binding_name("user@example.com", "system", "PlatformAdmin")
-        assert name == "user-example-com-system-platformadmin"
+        name = _generate_binding_name("user@example.com", "system", "HelixAdmin")
+        assert name == "user-example-com-system-helixadmin"
 
     def test_complex_email(self):
         """Test binding name generation with a complex email."""
@@ -48,7 +48,7 @@ class TestGenerateBindingName:
         assert name == "wildcard-system-viewer"
 
 
-class TestSeedPlatformAdmin:
+class TestSeedHelixAdmin:
     """Tests for platform admin seeding."""
 
     @pytest.fixture
@@ -76,7 +76,7 @@ class TestSeedPlatformAdmin:
     @pytest.mark.asyncio
     async def test_seed_creates_role_binding(self, mock_entity_client, mock_config_with_admin):
         """Test that seeding creates the role binding entity when it doesn't exist."""
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
             result = await seed_platform_admin(mock_entity_client)
 
         assert result is True
@@ -102,7 +102,7 @@ class TestSeedPlatformAdmin:
         mock_entity_client.get = AsyncMock(return_value=existing_binding)
         mock_entity_client.create = AsyncMock()
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
             result = await seed_platform_admin(mock_entity_client)
 
         assert result is True
@@ -115,7 +115,7 @@ class TestSeedPlatformAdmin:
         # get returns NotFound, but create raises Conflict (another instance created it)
         mock_entity_client.create.side_effect = EntityConflictError("Already exists")
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
             result = await seed_platform_admin(mock_entity_client)
 
         assert result is True  # Should return True - binding exists
@@ -130,7 +130,7 @@ class TestSeedPlatformAdmin:
         mock_entity_client.get = AsyncMock(return_value=existing_binding)
         mock_entity_client.create = AsyncMock()
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
             result = await seed_platform_admin(mock_entity_client)
 
         assert result is False  # Revoked binding shouldn't count as success
@@ -138,7 +138,7 @@ class TestSeedPlatformAdmin:
     @pytest.mark.asyncio
     async def test_seed_skips_when_no_admin_email(self, mock_entity_client, mock_config_no_admin):
         """Test that seeding is skipped when no admin_email is configured."""
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
             result = await seed_platform_admin(mock_entity_client)
 
         assert result is False
@@ -167,7 +167,7 @@ class TestSeedDefaultWorkspaceEditor:
     @pytest.mark.asyncio
     async def test_seed_creates_wildcard_editor_binding(self, mock_entity_client, mock_config):
         """Test that seeding creates the wildcard Editor binding."""
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config):
             result = await seed_default_workspace_editor(mock_entity_client)
 
         assert result is True
@@ -190,7 +190,7 @@ class TestSeedDefaultWorkspaceEditor:
         mock_entity_client.get = AsyncMock(return_value=existing_binding)
         mock_entity_client.create = AsyncMock()
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config):
             result = await seed_default_workspace_editor(mock_entity_client)
 
         assert result is True
@@ -202,7 +202,7 @@ class TestSeedDefaultWorkspaceEditor:
         mock_config = MagicMock()
         mock_config.default_workspace = "my-custom-workspace"
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config):
             result = await seed_default_workspace_editor(mock_entity_client)
 
         assert result is True
@@ -218,7 +218,7 @@ class TestSeedDefaultWorkspaceEditor:
         mock_entity_client.get = AsyncMock(return_value=existing_binding)
         mock_entity_client.create = AsyncMock()
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config):
             result = await seed_default_workspace_editor(mock_entity_client)
 
         assert result is True
@@ -362,7 +362,7 @@ class TestRunSeeding:
     @pytest.mark.asyncio
     async def test_run_seeding_returns_true_on_success(self, mock_entity_client, mock_config_with_admin):
         """Test that run_seeding returns True when all seeding succeeds."""
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
             result = await run_seeding(mock_entity_client)
 
         assert result is True
@@ -372,7 +372,7 @@ class TestRunSeeding:
     @pytest.mark.asyncio
     async def test_run_seeding_seeds_wildcard_bindings_without_admin(self, mock_entity_client, mock_config_no_admin):
         """Test that run_seeding seeds wildcard bindings even without admin_email."""
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
             result = await run_seeding(mock_entity_client)
 
         assert result is True
@@ -386,7 +386,7 @@ class TestRunSeeding:
         mock_entity_client.get = AsyncMock(side_effect=EntityNotFoundError("Not found"))
         mock_entity_client.create = AsyncMock(side_effect=Exception("Database error"))
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_with_admin):
             result = await run_seeding(mock_entity_client)
 
         assert result is False
@@ -398,7 +398,7 @@ class TestRunSeeding:
         mock_entity_client.get = AsyncMock(side_effect=EntityNotFoundError("Not found"))
         mock_entity_client.create = AsyncMock(side_effect=Exception("Database error"))
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
             result = await run_seeding(mock_entity_client)
 
         assert result is False
@@ -416,7 +416,7 @@ class TestRunSeeding:
         mock_entity_client.get = AsyncMock(side_effect=[wildcard_editor, wildcard_viewer, wildcard_creator])
         mock_entity_client.create = AsyncMock()
 
-        with patch("nmp.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
+        with patch("nhx.core.auth.app.seeding.get_service_config", return_value=mock_config_no_admin):
             result = await run_seeding(mock_entity_client)
 
         assert result is True

@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import typer
 from nemo_agents_plugin.cli import AgentsCLI
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.discovery import AGENT_CLI_GROUP
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.discovery import AGENT_CLI_GROUP
 from typer.testing import CliRunner
 
 

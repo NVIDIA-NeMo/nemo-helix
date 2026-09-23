@@ -13,13 +13,13 @@ from data_designer_nemo.model_provider import (
 from data_designer_nemo.person_sampling import ensure_nemotron_personas_filesets
 from data_designer_nemo.seed import validate_seed
 from data_designer_nemo.tool_configs import validate_no_tool_configs
-from nemo_platform_plugin.client.adapter import AsyncPlatformClient
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 
 
 class DataDesignerValidationContext:
     """Async-only context for remote config validation and provider resolution."""
 
-    def __init__(self, async_sdk: AsyncPlatformClient, workspace: str) -> None:
+    def __init__(self, async_sdk: AsyncHelixClient, workspace: str) -> None:
         self._async_sdk = async_sdk
         self._workspace = workspace
         self._validated_filesystem_roots: set[str] = set()
@@ -67,5 +67,5 @@ class DataDesignerValidationContext:
         return [make_noop_provider()]
 
 
-def create_validation_context(async_sdk: AsyncPlatformClient, workspace: str) -> DataDesignerValidationContext:
+def create_validation_context(async_sdk: AsyncHelixClient, workspace: str) -> DataDesignerValidationContext:
     return DataDesignerValidationContext(async_sdk, workspace)

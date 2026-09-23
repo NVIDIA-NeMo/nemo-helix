@@ -9,8 +9,8 @@ from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
-from nmp.automodel.entities.values import FinetuningType
-from nmp.automodel.tasks.training.backends.checkpoints import (
+from nhx.automodel.entities.values import FinetuningType
+from nhx.automodel.tasks.training.backends.checkpoints import (
     ModelType,
     _build_export_module,
     _probe_bidirectional_mask,
@@ -20,7 +20,7 @@ from nmp.automodel.tasks.training.backends.checkpoints import (
     process_selected_checkpoints,
     sanitize_encoder_hf,
 )
-from nmp.automodel.tasks.training.schemas import (
+from nhx.automodel.tasks.training.schemas import (
     CheckpointFormat,
     CheckpointInfo,
     CheckpointSelection,
@@ -29,7 +29,7 @@ from nmp.automodel.tasks.training.schemas import (
 )
 from pytest_mock import MockerFixture
 
-CHECKPOINTS = "nmp.automodel.tasks.training.backends.checkpoints"
+CHECKPOINTS = "nhx.automodel.tasks.training.backends.checkpoints"
 
 
 @pytest.fixture

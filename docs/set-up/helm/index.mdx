@@ -2,27 +2,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Install NeMo Platform with Helm"
+title: "Install NeMo Helix with Helm"
 description: ""
 ---
-<a id="nemo-platform-setup"></a>
+<a id="nemo-helix-setup"></a>
 
-NeMo Platform is bundled in an all-in-one Helm chart for self-managed Kubernetes deployments. Use these guides to deploy the platform on local clusters such as minikube and kind, managed clusters such as EKS, AKS, GKE, and OKE, or on-prem Kubernetes.
+NeMo Helix is bundled in an all-in-one Helm chart for self-managed Kubernetes deployments. Use these guides to deploy the platform on local clusters such as minikube and kind, managed clusters such as EKS, AKS, GKE, and OKE, or on-prem Kubernetes.
 
-Start with [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites), then follow [Install](/documentation/kubernetes-deployment/setup/helm/install). The install guide pins the chart with `NMP_HELM_CHART_VERSION` and uses the `nvidia/nemo-platform` NGC org for chart and image access.
+Start with [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites), then follow [Install](/documentation/kubernetes-deployment/setup/helm/install). The install guide pins the chart with `NHX_HELM_CHART_VERSION` and uses the `nvidia/nemo-helix` NGC org for chart and image access.
 
 <Cards>
 
 <Card title="Prerequisites" href="/documentation/kubernetes-deployment/setup/helm/prerequisites">
 
-Review the prerequisites for installing the NeMo Platform Helm Chart.
+Review the prerequisites for installing the NeMo Helix Helm Chart.
 
 <small><span class="md-tag">cluster-admin</span></small>
 
 </Card>
 <Card title="Install" href="/documentation/kubernetes-deployment/setup/helm/install">
 
-Install the NeMo Platform using the Helm chart.
+Install the NeMo Helix using the Helm chart.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
@@ -36,21 +36,21 @@ Verify Helm NetworkPolicies on a local Kind cluster with Calico and Chainsaw.
 </Card>
 <Card title="Database Setup" href="/documentation/kubernetes-deployment/setup/helm/database-setup">
 
-Set up an external database for the NeMo Platform.
+Set up an external database for the NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
 </Card>
 <Card title="Ingress" href="/documentation/kubernetes-deployment/setup/helm/ingress">
 
-Set up Ingress for the NeMo Platform.
+Set up Ingress for the NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
 </Card>
 <Card title="Persistent Volumes" href="/documentation/kubernetes-deployment/setup/helm/persistent-volumes">
 
-Set up persistent volumes for the NeMo Platform.
+Set up persistent volumes for the NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
@@ -99,7 +99,7 @@ Install with OpenShift-compatible configuration.
 </Card>
 <Card title="Backup and Restore" href="/documentation/kubernetes-deployment/setup/helm/backup-and-restore">
 
-Set up backup and restore configurations for the NeMo Platform.
+Set up backup and restore configurations for the NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 

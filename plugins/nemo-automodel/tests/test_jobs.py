@@ -5,7 +5,7 @@
 
 ``validate_for_training`` rejects inconsistent parallelism/batch topologies.
 Those are user input errors, so they have to leave ``compile`` as
-``PlatformJobCompilationError`` — the api_factory only maps that type to a
+``HelixJobCompilationError`` — the api_factory only maps that type to a
 422, and anything else escapes as a 500.
 """
 
@@ -19,8 +19,8 @@ import httpx
 import pytest
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 from nemo_automodel_plugin.schema import AutomodelJobOutput
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def _make_canonical(**parallelism: Any) -> AutomodelJobOutput:
@@ -40,7 +40,7 @@ def _make_canonical(**parallelism: Any) -> AutomodelJobOutput:
 
 def _compile(canonical: AutomodelJobOutput) -> Any:
     async def run_compile() -> Any:
-        async_sdk = AsyncNeMoPlatform(
+        async_sdk = AsyncNeMoHelix(
             base_url="http://test",
             workspace="default",
             http_client=httpx.AsyncClient(
@@ -66,12 +66,12 @@ class TestCompileValidationErrors:
         # global_batch_size=4 with data_parallel_size=16 (2 nodes x 8 GPUs, TP=1).
         canonical = _make_canonical(tensor_parallel_size=1)
         with patch("nemo_automodel_plugin.jobs.jobs.require_container_runtime"):
-            with pytest.raises(PlatformJobCompilationError, match="global_batch_size"):
+            with pytest.raises(HelixJobCompilationError, match="global_batch_size"):
                 _compile(canonical)
 
     def test_indivisible_model_parallel_raises_compilation_error(self) -> None:
         # 16 total GPUs is not divisible by tensor_parallel_size=5.
         canonical = _make_canonical(tensor_parallel_size=5)
         with patch("nemo_automodel_plugin.jobs.jobs.require_container_runtime"):
-            with pytest.raises(PlatformJobCompilationError, match="Total GPUs"):
+            with pytest.raises(HelixJobCompilationError, match="Total GPUs"):
                 _compile(canonical)

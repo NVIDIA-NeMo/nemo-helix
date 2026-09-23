@@ -29,9 +29,9 @@ from nemo_evaluator.revisions import (
     publish_revision,
     revision_name,
 )
-from nemo_platform_plugin.entities import EntityBase
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.filter_ops import FilterOperator, LogicalOperation
+from nemo_helix_plugin.entities import EntityBase
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.filter_ops import FilterOperator, LogicalOperation
 
 _E = TypeVar("_E", bound=EntityBase)
 

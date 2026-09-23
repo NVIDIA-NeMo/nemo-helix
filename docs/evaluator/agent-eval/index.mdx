@@ -18,7 +18,7 @@ got there*. Each task carries its own metrics, so a single suite can grade heter
 
 **Local interfaces and durable platform interfaces are available.**
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
-that do not require running nemo-platform.
+that do not require running nemo-helix.
 - Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
 tasks or stored tasksets. For a `GymAgentTaskRunner` that you have already validated locally,
 `client.evaluator.submit(tasks=TasksetRef(...), target=runner)` provides a high-level submission

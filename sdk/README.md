@@ -1,13 +1,13 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform SDK
+# NeMo Helix SDK
 
 > **Using SDK generation for the first time? Start with [setup instructions](./setup-instructions.md)**.
 
 ## Introduction
 
-We are using [Stainless](https://www.stainless.com/) to generate a Python SDK for NeMo Platform from our OpenAPI specification. Stainless provides high-quality, idiomatic Python clients with comprehensive features, including synchronous and asynchronous interfaces, type safety, error handling, and more.
+We are using [Stainless](https://www.stainless.com/) to generate a Python SDK for NeMo Helix from our OpenAPI specification. Stainless provides high-quality, idiomatic Python clients with comprehensive features, including synchronous and asynchronous interfaces, type safety, error handling, and more.
 
 The generated SDK includes:
 
@@ -24,10 +24,10 @@ The generated SDK includes:
 
 The Stainless Webapp is available at: https://app.stainless.com/nvidia.
 
-The project used for generating the Python SDK is `nemo-platform-v1-python`: https://app.stainless.com/nvidia/nemo-platform-v1/overview.
+The project used for generating the Python SDK is `nemo-helix-v1-python`: https://app.stainless.com/nvidia/nemo-helix-v1/overview.
 
 The associated GitHub repository is:
-- Generated client code: https://github.com/stainless-sdks/nemo-platform-v1-python
+- Generated client code: https://github.com/stainless-sdks/nemo-helix-v1-python
 
 ## Folder Structure
 
@@ -35,7 +35,7 @@ The SDK inside the Platform repo is structured as follows:
 
 - The `sdk` folder contains all the files related to the SDK.
   - The `sdk/stainless.yaml` file contains the configuration for Stainless.
-  - The `sdk/python/nemo-platform` folder contains the generated Python SDK.
+  - The `sdk/python/nemo-helix` folder contains the generated Python SDK.
 
 ## Updating the SDK
 
@@ -46,7 +46,7 @@ At a high-level, the SDK update process:
   - The OpenAPI spec at `openapi/openapi.yaml`
   - The Stainless config at `sdk/stainless.yaml`
 - Runs the Stainless code generation process (in Stainless' cloud).
-- Fetches the updated code from the GitHub repository and updates the local copy of the SDK in the Platform repo (`sdk/python/nemo-platform`).
+- Fetches the updated code from the GitHub repository and updates the local copy of the SDK in the Platform repo (`sdk/python/nemo-helix`).
 
 This whole process can be executed by running:
 
@@ -75,7 +75,7 @@ To pull the changes from the GitHub repository, run the following command:
 ### Using the Stainless Webapp
 
 The code generation can also be triggered from Stainless Webapp directly. This is useful for debugging purposes.
-1. Go to the [Stainless Webapp](https://app.stainless.com/nvidia/nemo-platform-v1/studio?language=python).
+1. Go to the [Stainless Webapp](https://app.stainless.com/nvidia/nemo-helix-v1/studio?language=python).
 2. (Recommended) Pick your branch from dropdown in the top right corner.
 3. Update the "Stainless Config" and/or "OpenAPI Spec".
 4. Click the "Save" button (Cmd+S works as well) to trigger the code generation.
@@ -90,7 +90,7 @@ Behind the scenes, the key command that triggers the updates is the [Stainless C
 
 ```bash
 stl builds create \
-    --project nemo-platform \
+    --project nemo-helix \
     --branch <current-branch> \
     --config sdk/stainless.yaml \
     --openapi-spec openapi/openapi.yaml \
@@ -131,4 +131,4 @@ Common reasons for failure:
    - Verify `STAINLESS_API_KEY` is set correctly
    - Check your network connection
 
-SDK maintenance commands are provided by `nemo-platform-sdk-tools`. See `uv run nemo-platform-sdk-tools --help` for details.
+SDK maintenance commands are provided by `nemo-helix-sdk-tools`. See `uv run nemo-helix-sdk-tools --help` for details.

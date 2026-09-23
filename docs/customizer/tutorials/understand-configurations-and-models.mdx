@@ -29,7 +29,7 @@ This tutorial focuses on understanding and discovery—no actual training jobs a
 
 ### What is a Model Entity?
 
-A **Model Entity** represents a model registered in the NeMo Platform. It contains:
+A **Model Entity** represents a model registered in the NeMo Helix. It contains:
 
 1. **FileSet Reference**: Points to the model checkpoint files (weights, config, tokenizer)
 2. **Model Spec**: Auto-populated metadata about the model architecture (layers, parameters, etc.)
@@ -79,11 +79,11 @@ Upload your model checkpoint files (from Hugging Face, NGC, or local storage) to
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix import NeMoHelix
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -380,7 +380,7 @@ flowchart TD
 You can import a Hugging Face checkpoint into a FileSet and register it as a Model Entity:
 
 ```python
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 # Create FileSet from Hugging Face
 fileset = client.files.filesets.create(

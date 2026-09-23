@@ -13,20 +13,20 @@ Uses the create_test_client pattern for fast in-memory testing.
 from typing import Generator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import (
     CreateWorkspaceRequest,
     ListWorkspacesQueryParams,
     UpdateWorkspaceRequest,
 )
-from nmp.core.entities.service import EntitiesService
-from nmp.testing import create_test_client, short_unique_name
+from nhx.core.entities.service import EntitiesService
+from nhx.testing import create_test_client, short_unique_name
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
+def sdk() -> Generator[NeMoHelix, None, None]:
     """SDK client with EntitiesService (auth disabled)."""
     with create_test_client(
         EntitiesService,
@@ -40,7 +40,7 @@ def sdk() -> Generator[NeMoPlatform, None, None]:
 class TestWorkspaceCRUD:
     """Test workspace CRUD operations without authorization."""
 
-    def test_default_workspaces_created_on_startup(self, sdk: NeMoPlatform):
+    def test_default_workspaces_created_on_startup(self, sdk: NeMoHelix):
         """Test that 'default' and 'system' workspaces are created automatically on startup."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         # These workspaces are created by EntitiesService.startup()
@@ -52,7 +52,7 @@ class TestWorkspaceCRUD:
         assert system_ws.name == "system"
         assert system_ws.description == "Platform-provided resources (read-only for users)"
 
-    def test_create_workspace(self, sdk: NeMoPlatform):
+    def test_create_workspace(self, sdk: NeMoHelix):
         """Test creating a new workspace."""
         workspace_name = short_unique_name("test-ws")
 
@@ -73,7 +73,7 @@ class TestWorkspaceCRUD:
         assert workspace.created_by == ""
         assert workspace.updated_by == ""
 
-    def test_create_duplicate_workspace_fails(self, sdk: NeMoPlatform):
+    def test_create_duplicate_workspace_fails(self, sdk: NeMoHelix):
         """Test that creating a duplicate workspace returns 409."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("dup-ws")
@@ -82,14 +82,14 @@ class TestWorkspaceCRUD:
         workspaces.create_workspace(body=CreateWorkspaceRequest(name=workspace_name)).data()
 
         # Try to create duplicate
-        from nemo_platform_plugin.client.errors import ConflictError
+        from nemo_helix_plugin.client.errors import ConflictError
 
         with pytest.raises(ConflictError) as exc_info:
             workspaces.create_workspace(body=CreateWorkspaceRequest(name=workspace_name)).data()
 
         assert "already exists" in str(exc_info.value)
 
-    def test_retrieve_workspace(self, sdk: NeMoPlatform):
+    def test_retrieve_workspace(self, sdk: NeMoHelix):
         """Test retrieving a workspace by name."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("get-ws")
@@ -103,14 +103,14 @@ class TestWorkspaceCRUD:
         assert retrieved.name == workspace_name
         assert retrieved.description == "Retrieve test"
 
-    def test_retrieve_nonexistent_workspace_fails(self, sdk: NeMoPlatform):
+    def test_retrieve_nonexistent_workspace_fails(self, sdk: NeMoHelix):
         """Test that retrieving a non-existent workspace returns 404."""
-        from nemo_platform_plugin.client.errors import NotFoundError
+        from nemo_helix_plugin.client.errors import NotFoundError
 
         with pytest.raises(NotFoundError):
             client_from_platform(sdk, WorkspacesClient).get_workspace(name="nonexistent-workspace").data()
 
-    def test_list_workspaces(self, sdk: NeMoPlatform):
+    def test_list_workspaces(self, sdk: NeMoHelix):
         """Test listing workspaces."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("list-ws")
@@ -121,7 +121,7 @@ class TestWorkspaceCRUD:
         workspace_ids = [ws.id for ws in result.items()]
         assert created.id in workspace_ids
 
-    def test_list_workspaces_with_pagination(self, sdk: NeMoPlatform):
+    def test_list_workspaces_with_pagination(self, sdk: NeMoHelix):
         """Test pagination when listing workspaces."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         # Create a few workspaces
@@ -137,7 +137,7 @@ class TestWorkspaceCRUD:
         assert page.metadata["page"] == 1
         assert page.metadata["page_size"] == 2
 
-    def test_update_workspace(self, sdk: NeMoPlatform):
+    def test_update_workspace(self, sdk: NeMoHelix):
         """Test updating a workspace description."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("upd-ws")
@@ -155,16 +155,16 @@ class TestWorkspaceCRUD:
         assert updated.created_by == ""
         assert updated.updated_by == ""
 
-    def test_update_nonexistent_workspace_fails(self, sdk: NeMoPlatform):
+    def test_update_nonexistent_workspace_fails(self, sdk: NeMoHelix):
         """Test that updating a non-existent workspace returns 404."""
-        from nemo_platform_plugin.client.errors import NotFoundError
+        from nemo_helix_plugin.client.errors import NotFoundError
 
         with pytest.raises(NotFoundError):
             client_from_platform(sdk, WorkspacesClient).update_workspace(
                 name="nonexistent-workspace", body=UpdateWorkspaceRequest(description="Should fail")
             ).data()
 
-    def test_delete_workspace(self, sdk: NeMoPlatform):
+    def test_delete_workspace(self, sdk: NeMoHelix):
         """Test deleting a workspace."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("del-ws")
@@ -174,19 +174,19 @@ class TestWorkspaceCRUD:
         workspaces.delete_workspace(name=workspace_name).data()
 
         # Verify it's deleted
-        from nemo_platform_plugin.client.errors import NotFoundError
+        from nemo_helix_plugin.client.errors import NotFoundError
 
         with pytest.raises(NotFoundError):
             workspaces.get_workspace(name=workspace_name).data()
 
-    def test_delete_nonexistent_workspace_fails(self, sdk: NeMoPlatform):
+    def test_delete_nonexistent_workspace_fails(self, sdk: NeMoHelix):
         """Test that deleting a non-existent workspace returns 404."""
-        from nemo_platform_plugin.client.errors import NotFoundError
+        from nemo_helix_plugin.client.errors import NotFoundError
 
         with pytest.raises(NotFoundError):
             client_from_platform(sdk, WorkspacesClient).delete_workspace(name="nonexistent-workspace").data()
 
-    def test_workspace_crud_lifecycle(self, sdk: NeMoPlatform):
+    def test_workspace_crud_lifecycle(self, sdk: NeMoHelix):
         """Test full CRUD lifecycle for workspaces."""
         workspaces = client_from_platform(sdk, WorkspacesClient)
         workspace_name = short_unique_name("crud-ws")
@@ -212,7 +212,7 @@ class TestWorkspaceCRUD:
         workspaces.delete_workspace(name=workspace_name).data()
 
         # Verify deleted
-        from nemo_platform_plugin.client.errors import NotFoundError
+        from nemo_helix_plugin.client.errors import NotFoundError
 
         with pytest.raises(NotFoundError):
             workspaces.get_workspace(name=workspace_name).data()
@@ -222,7 +222,7 @@ class TestWorkspaceCRUD:
 class TestWorkspaceValidation:
     """Test workspace input validation."""
 
-    def test_create_workspace_invalid_name(self, sdk: NeMoPlatform):
+    def test_create_workspace_invalid_name(self, sdk: NeMoHelix):
         """Test that creating a workspace with invalid name returns 422."""
         # Names with spaces are invalid
         response = sdk._client.post(
@@ -231,7 +231,7 @@ class TestWorkspaceValidation:
         )
         assert response.status_code == 422
 
-    def test_create_workspace_empty_name(self, sdk: NeMoPlatform):
+    def test_create_workspace_empty_name(self, sdk: NeMoHelix):
         """Test that creating a workspace with empty name returns 422."""
         response = sdk._client.post(
             "/apis/entities/v2/workspaces",

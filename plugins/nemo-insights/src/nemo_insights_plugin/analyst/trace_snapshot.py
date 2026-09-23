@@ -5,8 +5,8 @@
 
 from datetime import datetime, timezone
 
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import TraceFilterParam
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import TraceFilterParam
 from trace_ingest.loaders.intake import (
     _EvaluatorResult,
     _IntakeSpan,

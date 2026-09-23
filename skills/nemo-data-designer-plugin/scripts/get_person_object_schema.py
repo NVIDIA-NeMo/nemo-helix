@@ -3,7 +3,7 @@
 
 """Inspect a locale's Nemotron Personas fileset and print its available fields.
 
-Person sampling on NeMo Platform reads locale data from a fileset in the
+Person sampling on NeMo Helix reads locale data from a fileset in the
 ``system`` workspace, so this script reads the same fileset the engine will.
 
 Fields are split into two groups based on the with_synthetic_personas setting:
@@ -28,10 +28,10 @@ from data_designer_nemo.nemotron_personas import (
     get_locale_fileset_file_ref,
     get_resource_name_for_locale,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.files.client import FilesClient
 
 
 def _fail(message: str) -> NoReturn:
@@ -39,7 +39,7 @@ def _fail(message: str) -> NoReturn:
     sys.exit(1)
 
 
-def _require_fileset(sdk: NeMoPlatform, locale: str) -> None:
+def _require_fileset(sdk: NeMoHelix, locale: str) -> None:
     """Exit with an actionable message when the locale's fileset isn't usable."""
     fileset_name = get_resource_name_for_locale(locale)
     files = client_from_platform(sdk, FilesClient)
@@ -50,7 +50,7 @@ def _require_fileset(sdk: NeMoPlatform, locale: str) -> None:
         _fail(
             f"the Nemotron Personas fileset for locale {locale!r} does not exist yet.\n"
             f"  Expected fileset {WORKSPACE}/{fileset_name}.\n"
-            "  Create it first (requires an NGC API key secret registered in NeMo Platform):\n"
+            "  Create it first (requires an NGC API key secret registered in NeMo Helix):\n"
             f"    nemo data-designer personas make-fileset --locale {locale} \\\n"
             "      --api-key-secret <workspace>/<secret-name>"
         )
@@ -62,7 +62,7 @@ def _require_fileset(sdk: NeMoPlatform, locale: str) -> None:
             "--api-key-secret <workspace>/<secret-name>"
         )
     except Exception as exc:
-        _fail(f"could not reach the NeMo Platform Files service to look up {WORKSPACE}/{fileset_name}: {exc}")
+        _fail(f"could not reach the NeMo Helix Files service to look up {WORKSPACE}/{fileset_name}: {exc}")
 
 
 def main(locale: str) -> None:
@@ -70,10 +70,10 @@ def main(locale: str) -> None:
         _fail(f"unsupported locale {locale!r}; choose from {', '.join(sorted(SUPPORTED_LOCALES))}")
 
     try:
-        sdk = NeMoPlatform()
+        sdk = NeMoHelix()
     except Exception as exc:
         _fail(
-            f"could not connect to NeMo Platform: {exc}\n"
+            f"could not connect to NeMo Helix: {exc}\n"
             "  Check that the CLI is configured and pointed at a reachable platform "
             "(`nemo config current-context`)."
         )

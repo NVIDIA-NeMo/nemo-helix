@@ -138,7 +138,7 @@ fi
 # Build docker image (once)
 if [[ "$SKIP_BUILD" == false ]]; then
     echo "Building Docker image..."
-    docker build -f "$PROJECT_ROOT/Dockerfile.agentic-base" -t nmp-agentic-base:latest "$PROJECT_ROOT"
+    docker build -f "$PROJECT_ROOT/Dockerfile.agentic-base" -t nhx-agentic-base:latest "$PROJECT_ROOT"
     echo "Docker image built successfully."
     echo ""
 fi

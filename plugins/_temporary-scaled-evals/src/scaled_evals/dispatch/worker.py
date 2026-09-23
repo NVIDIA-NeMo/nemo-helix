@@ -21,7 +21,7 @@ Postgres; ``run`` performs one evaluation end-to-end: load the evaluation, build
 backend, advance ``evaluations.status`` to ``running``, poll the backend to a
 terminal state, sync per-run artifacts to the object store, write the result
 envelope back to Postgres (``result`` JSONB plus derived summary columns),
-optionally upload post-run ATIF trajectories to NMP Intake when
+optionally upload post-run ATIF trajectories to NHX Intake when
 ``intake_profile_id`` is set, and set a terminal ``status`` of ``succeeded`` or
 ``failed``.
 
@@ -2887,7 +2887,7 @@ class Dispatcher:
         """Upload Harbor ATIF trajectories when ``intake_profile_id`` is set.
 
         Reads ``trajectory.json`` files from the finished Harbor job dir and POSTs
-        them to NMP Intake. Returns a human-readable note for ``status_detail``,
+        them to NHX Intake. Returns a human-readable note for ``status_detail``,
         or ``None`` on success/no-op. Failures are warnings unless
         ``INTAKE_FAIL_ON_ERROR`` is set.
         """

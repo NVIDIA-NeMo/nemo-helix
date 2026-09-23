@@ -32,7 +32,7 @@ def test_dataset_uri_no_workspace() -> None:
 
 
 def test_create_duckdb_connection_requires_injected_sdk() -> None:
-    with pytest.raises(RuntimeError, match="requires an injected NeMo Platform SDK"):
+    with pytest.raises(RuntimeError, match="requires an injected NeMo Helix SDK"):
         FilesetFileSeedReader().create_duckdb_connection()
 
 

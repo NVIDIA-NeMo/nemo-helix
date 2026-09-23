@@ -4,13 +4,13 @@
 # NAT workflow configuration for this agentic-use eval task.
 # Run with:  nat run --config_file workflow.yml --input "$(cat instruction.md)"
 #
-# The nemo_tools function group exposes all NeMo Platform operations (workspaces, files,
+# The nemo_tools function group exposes all NeMo Helix operations (workspaces, files,
 # secrets, entities, evaluator, inference, etc.) via the nemo-mcp MCP server.
-# This replaces the previous nemo / nmp CLI approach used with Claude Code.
+# This replaces the previous nemo / nhx CLI approach used with Claude Code.
 #
 # Required environment variables:
 #   NVIDIA_API_KEY  - API key for the NIM LLM (https://build.nvidia.com)
-#   NMP_BASE_URL    - URL of the running NeMo Platform API (default: http://localhost:8080)
+#   NHX_BASE_URL    - URL of the running NeMo Helix API (default: http://localhost:8080)
 
 functions:
   nemo_tools:

@@ -28,9 +28,9 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/testing/protocmp"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/config"
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/guardrails"
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/streams"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/config"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/guardrails"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/streams"
 )
 
 // Global guardrails models map for establishing source of truth across tests.

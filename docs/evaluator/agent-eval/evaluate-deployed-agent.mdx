@@ -131,8 +131,8 @@ To set up Hermes locally:
   1. Start the API server with `hermes gateway`.
   1. Export the same key as `HERMES_TOKEN` for the evaluator client.
 
-The [complete Hermes example](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/packages/nemo_evaluator_sdk/examples/hermes/example.py)
-defines `HermesStreamTranslator`, which implements the [AgentStreamTranslator](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_stream_translation.py)
+The [complete Hermes example](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/packages/nemo_evaluator_sdk/examples/hermes/example.py)
+defines `HermesStreamTranslator`, which implements the [AgentStreamTranslator](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_stream_translation.py)
 protocol, and scores whether the deployed agent returns the requested phrase `streaming works`:
 
 ```python

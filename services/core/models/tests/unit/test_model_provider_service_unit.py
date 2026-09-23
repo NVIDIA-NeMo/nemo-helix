@@ -8,14 +8,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nmp.core.models.api.service.model_provider_service import (
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.core.models.api.service.model_provider_service import (
     ModelProviderService,
     ModelProviderValidationError,
 )
-from nmp.core.models.entities import Model
-from nmp.core.models.entities import ModelProvider as ModelProviderEntity
-from nmp.core.models.schemas import (
+from nhx.core.models.entities import Model
+from nhx.core.models.entities import ModelProvider as ModelProviderEntity
+from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
     GetModelProviderRequest,

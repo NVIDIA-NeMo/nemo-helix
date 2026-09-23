@@ -16,11 +16,11 @@ from typing import Any, Iterator
 from urllib.parse import urlsplit
 
 import yaml
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.entities import parse_qualified_name
-from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.entities import parse_qualified_name
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 
 logger = logging.getLogger(__name__)
 
@@ -177,10 +177,10 @@ def rebase_optimize_outputs(config: dict[str, Any], output_base: Path) -> dict[s
 
 def get_base_url() -> str:
     """Return the base URL for the platform from the environment."""
-    from nemo_platform_plugin.config import get_platform_config
+    from nemo_helix_plugin.config import get_platform_config
 
     # `or` chain so get_platform_config() stays lazy.
-    return (os.environ.get("NEMO_BASE_URL") or os.environ.get("NMP_BASE_URL") or get_platform_config().base_url).rstrip(
+    return (os.environ.get("NEMO_BASE_URL") or os.environ.get("NHX_BASE_URL") or get_platform_config().base_url).rstrip(
         "/"
     )
 
@@ -190,15 +190,15 @@ def get_internal_base_url() -> str | None:
 
     This is the API Service DNS used to reach the platform from a deployed agent
     when :func:`get_base_url` is not routable from inside the container. Read from
-    ``NEMO_INTERNAL_BASE_URL``, then ``NMP_INTERNAL_BASE_URL``.
+    ``NEMO_INTERNAL_BASE_URL``, then ``NHX_INTERNAL_BASE_URL``.
     """
-    internal = os.environ.get("NEMO_INTERNAL_BASE_URL") or os.environ.get("NMP_INTERNAL_BASE_URL")
+    internal = os.environ.get("NEMO_INTERNAL_BASE_URL") or os.environ.get("NHX_INTERNAL_BASE_URL")
     return internal.rstrip("/") if internal else None
 
 
 def get_default_model() -> str | None:
     """Return the default model for the platform from the SDK context."""
-    from nemo_platform_ext.config import get_context
+    from nemo_helix_ext.config import get_context
 
     return get_context().default_model
 
@@ -219,8 +219,8 @@ def inject_gateway_url(
     1. *base_url* argument (when supplied explicitly, e.g. from a CLI flag).
     2. ``NEMO_BASE_URL`` environment variable (only consulted when *base_url*
        is ``None``).
-    3. Platform configuration (``PlatformConfig.base_url``), which defaults to
-       ``http://localhost:8080`` and can be overridden via ``NMP_BASE_URL``
+    3. Platform configuration (``HelixConfig.base_url``), which defaults to
+       ``http://localhost:8080`` and can be overridden via ``NHX_BASE_URL``
        (only consulted when *base_url* is ``None`` and ``NEMO_BASE_URL`` is
        unset).
 
@@ -364,7 +364,7 @@ def validate_llm_models(
     config: dict[str, Any],
     *,
     workspace: str,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
 ) -> None:
     """Pre-flight check that every IGW-routed LLM in *config* exists as a VirtualModel.
 
@@ -470,7 +470,7 @@ def preflight_validate_llm_models(
     config_path: Path,
     *,
     workspace: str,
-    sdk: NeMoPlatform | None,
+    sdk: NeMoHelix | None,
     agent_config: dict[str, Any] | None = None,
 ) -> None:
     """Load *config_path*, expand env vars, optionally merge an agent config, and validate.

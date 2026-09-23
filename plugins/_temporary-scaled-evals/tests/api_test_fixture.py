@@ -9,7 +9,7 @@ pytest.importorskip("scaled_evals")
 
 from fastapi.testclient import TestClient
 from nemo_scaled_evals_plugin.service import ScaledEvalsService
-from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 
 app = NemoServiceAdapter(ScaledEvalsService()).create_app()
 v1 = app

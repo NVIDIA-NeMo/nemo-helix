@@ -61,7 +61,7 @@ what it started when the kernel shuts down.
 For the script, start the platform yourself:
 
 ```bash
-NMP_BASE_URL=http://localhost:8080 uv run nemo services run --services auth,entities,intake
+NHX_BASE_URL=http://localhost:8080 uv run nemo services run --services auth,entities,intake
 ```
 
 Wait for readiness. First startup provisions ClickHouse, so give it around 30 seconds:
@@ -71,7 +71,7 @@ curl -sf http://localhost:8080/health/ready
 ```
 
 Intake is ClickHouse-backed and provisions a managed ClickHouse container itself as long as nothing
-has pointed it at an operator-owned one — that is, `NMP_INTAKE_CLICKHOUSE_URL` is unset *and* the
+has pointed it at an operator-owned one — that is, `NHX_INTAKE_CLICKHOUSE_URL` is unset *and* the
 resolved URL is still the default `http://localhost:8123`. On a stock checkout both hold, so there
 is nothing to start separately.
 
@@ -202,7 +202,7 @@ Trial git-leak-recovery__8D328Gd:
 ```
 
 These mirror two destinations Studio publishes in
-[`nmp.studio.studio_links`](../../../../services/studio/src/nmp/studio/studio_links.py) —
+[`nhx.studio.studio_links`](../../../../services/studio/src/nhx/studio/studio_links.py) —
 `experiment_detail` for the Evaluation and `intake_session` for one trial's trajectory — so they
 track Studio's own routing rather than being hand-built paths.
 
@@ -210,7 +210,7 @@ track Studio's own routing rather than being hand-built paths.
 it starts; for the script, add it yourself:
 
 ```bash
-NMP_BASE_URL=http://localhost:8080 uv run nemo services run --services auth,entities,intake,studio
+NHX_BASE_URL=http://localhost:8080 uv run nemo services run --services auth,entities,intake,studio
 ```
 
 Studio also serves a built Vite bundle. Without one it starts fine and shows a "not built" notice
@@ -258,7 +258,7 @@ unready platform: Intake starts and reports itself ready either way, and serves 
 ClickHouse-backed endpoints with 503 until ClickHouse turns up. The script's preflight query
 catches it before the evaluation runs; in the notebook it surfaces at the publish cell, where you
 can fix ClickHouse and re-run that cell alone, since the evaluation result is still in memory. If
-`NMP_INTAKE_CLICKHOUSE_URL` is set, Intake uses that instance rather than provisioning one, so
+`NHX_INTAKE_CLICKHOUSE_URL` is set, Intake uses that instance rather than provisioning one, so
 check that it is actually up.
 
 **Ingest rejects the Evaluation.** The Evaluation must exist before publish. If you renamed it via

@@ -17,10 +17,10 @@ Full verification of auth propagation to secret access is done in unit tests
 from typing import Generator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.models.client import ModelsClient
-from nmp.core.models.service import ModelsService
-from nmp.testing import as_user, create_test_client, short_unique_name, unique_email
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.models.client import ModelsClient
+from nhx.core.models.service import ModelsService
+from nhx.testing import as_user, create_test_client, short_unique_name, unique_email
 
 from .conftest import (
     create_deployment,
@@ -36,7 +36,7 @@ from .conftest import (
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
+def sdk() -> Generator[NeMoHelix, None, None]:
     """SDK client with ModelsService (auth enabled)."""
     with create_test_client(
         ModelsService,
@@ -45,13 +45,13 @@ def sdk() -> Generator[NeMoPlatform, None, None]:
         yield sdk
 
 
-def _as_service_principal(sdk: NeMoPlatform, service_name: str = "models-controller") -> ModelsClient:
+def _as_service_principal(sdk: NeMoHelix, service_name: str = "models-controller") -> ModelsClient:
     """Create an SDK client authenticated as a service principal."""
     return models_client_from_sdk(as_user(sdk, f"service:{service_name}"))
 
 
 def _create_deployment(
-    user_sdk: NeMoPlatform,
+    user_sdk: NeMoHelix,
     workspace: str = "default",
     prefix: str = "test",
 ):
@@ -77,7 +77,7 @@ def _create_deployment(
 
 
 class TestDeploymentAuthPropagation:
-    def test_auth_context_sanitized_for_regular_user(self, sdk: NeMoPlatform):
+    def test_auth_context_sanitized_for_regular_user(self, sdk: NeMoHelix):
         """Regular users should not see auth_context on create, retrieve, or list."""
         creator_sdk = as_user(sdk, unique_email("creator"), groups=["team-alpha"])
         deployment = _create_deployment(creator_sdk, prefix="sanitize")
@@ -99,7 +99,7 @@ class TestDeploymentAuthPropagation:
         assert len(matching) == 1
         assert matching[0].auth_context is None, "list: regular user should not see auth_context"
 
-    def test_auth_context_visible_to_service_principal(self, sdk: NeMoPlatform):
+    def test_auth_context_visible_to_service_principal(self, sdk: NeMoHelix):
         """Service principals should see auth_context on retrieve and list."""
         creator_email = unique_email("creator")
         creator_groups = ["team-alpha", "ml-engineers"]
@@ -126,7 +126,7 @@ class TestDeploymentAuthPropagation:
         assert matching[0].auth_context.principal_id == creator_email
         assert matching[0].auth_context.principal_groups == creator_groups
 
-    def test_auth_context_persisted_across_users(self, sdk: NeMoPlatform):
+    def test_auth_context_persisted_across_users(self, sdk: NeMoHelix):
         """Auth context persists the original creator's identity, invisible to other users."""
         creator_email = unique_email("creator")
         creator_groups = ["admins"]
@@ -155,7 +155,7 @@ class TestDeploymentAuthPropagation:
 
 
 class TestProviderAuthPropagation:
-    def test_auth_context_captured_at_creation(self, sdk: NeMoPlatform):
+    def test_auth_context_captured_at_creation(self, sdk: NeMoHelix):
         """Auth context is captured when provider is created, visible to service principals."""
         creator_email = unique_email("creator")
         creator_groups = ["team-beta"]
@@ -185,7 +185,7 @@ class TestProviderAuthPropagation:
         assert retrieved.auth_context.principal_email == creator_email
         assert retrieved.auth_context.principal_groups == creator_groups
 
-    def test_auth_context_stripped_for_regular_user_on_list(self, sdk: NeMoPlatform):
+    def test_auth_context_stripped_for_regular_user_on_list(self, sdk: NeMoHelix):
         """Auth context should be stripped from list responses for regular users."""
         provider_name = short_unique_name("list-prov")
 
@@ -204,7 +204,7 @@ class TestProviderAuthPropagation:
         assert len(matching) == 1
         assert matching[0].auth_context is None, "Regular user should not see auth_context in list"
 
-    def test_auth_context_on_upsert(self, sdk: NeMoPlatform):
+    def test_auth_context_on_upsert(self, sdk: NeMoHelix):
         """Auth context is captured on upsert (create and update paths), visible to service principals."""
         creator_email = unique_email("creator")
         creator_groups = ["ml-ops"]

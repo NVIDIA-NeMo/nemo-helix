@@ -10,7 +10,7 @@ durable platform job.
 | Execution | `api_key_secret` resolves to |
 | --- | --- |
 | Standalone SDK | Environment-variable name in the calling process, such as `NVIDIA_API_KEY` |
-| Plugin `submit` | NeMo Platform secret name in the target workspace, such as `nvidia-api-key` |
+| Plugin `submit` | NeMo Helix secret name in the target workspace, such as `nvidia-api-key` |
 
 A remote job cannot read the submitting shell's environment variables. Before
 submitting, verify the `api_key_secret` is in the list of secrets:
@@ -19,7 +19,7 @@ submitting, verify the `api_key_secret` is in the list of secrets:
 nemo secrets list
 ```
 
-Create it through the supported secrets CLI for the installed NeMo Platform
+Create it through the supported secrets CLI for the installed NeMo Helix
 version. Do not put the key directly in a spec, command line, log, or committed
 file.
 

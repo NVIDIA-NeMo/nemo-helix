@@ -7,7 +7,7 @@
 set -e
 
 echo "=========================================="
-echo "Fixing NeMo Platform Test Issues"
+echo "Fixing NeMo Helix Test Issues"
 echo "=========================================="
 echo ""
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Smoke-test the built `nmp-cpu-tasks` image.
+"""Smoke-test the built `nhx-cpu-tasks` image.
 
 Every job that declares `container = "cpu-tasks"` launches its task module in
 this image, and the failure mode when a plugin is missing from the `cpu-tasks`

@@ -13,8 +13,8 @@ plugin's scheduled runs rather than driving the analyst itself.
 from typing import ClassVar
 
 import typer
+from nemo_helix_plugin.cli import NemoCLI
 from nemo_insights_plugin.cli import analyze, doctor
-from nemo_platform_plugin.cli import NemoCLI
 
 
 class AnalystCLI(NemoCLI):

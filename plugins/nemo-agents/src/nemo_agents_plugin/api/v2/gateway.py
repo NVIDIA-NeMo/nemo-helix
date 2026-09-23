@@ -59,9 +59,9 @@ from nemo_agents_plugin.entities import (
 from nemo_agents_plugin.fabric.session_manager import DEFAULT_IDLE_SESSION_TIMEOUT_SECONDS
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.dependencies import get_effective_principal_id
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -97,8 +97,8 @@ _HOP_BY_HOP_HEADERS = {
 
 # Platform-internal headers should not leak to the agent process
 _PLATFORM_INTERNAL_HEADERS = {
-    "x-nmp-principal-id",
-    "x-nmp-principal-on-behalf-of",
+    "x-nhx-principal-id",
+    "x-nhx-principal-on-behalf-of",
 }
 
 # Headers we strip before forwarding to the agent process (hop-by-hop + platform-internal + session ID)

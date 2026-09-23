@@ -42,11 +42,11 @@ from nemo_evaluator_sdk.values import (
     RunConfigOnline,
     RunConfigOnlineModel,
 )
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.evaluator.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
-from nemo_platform_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evaluator.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 
 _DEFAULT_POLL_INTERVAL_SECONDS = 10.0
 _DEFAULT_JOB_TIMEOUT_SECONDS = 3600.0

@@ -20,7 +20,7 @@ Two routes:
   doesn't model SSE, so clients use a fetch-based EventSource that can attach
   the ``Authorization`` header (native ``EventSource`` cannot).
 
-Lines are shaped to match :class:`PlatformJobLog` so Studio can reuse the
+Lines are shaped to match :class:`HelixJobLog` so Studio can reuse the
 existing ``LogViewer`` component without a new schema.
 """
 
@@ -42,8 +42,8 @@ from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.entities import AgentDeployment
 from nemo_agents_plugin.runner.registry import get_runner_backend
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ _TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)
 
 
 class LogLine(BaseModel):
-    """One line shaped to match ``PlatformJobLog`` so Studio's LogViewer renders it as-is."""
+    """One line shaped to match ``HelixJobLog`` so Studio's LogViewer renders it as-is."""
 
     timestamp: str = Field(description="ISO-8601 timestamp parsed from the line; empty when absent.")
     job: str = Field(default="", description="Empty — kept for shape compatibility with jobs logs.")

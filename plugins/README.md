@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Plugins
+# NeMo Helix Plugins
 
-This directory contains first-party NeMo Platform plugins. Each subdirectory is a standalone Python package that registers one or more surfaces with the platform via entry points.
+This directory contains first-party NeMo Helix plugins. Each subdirectory is a standalone Python package that registers one or more surfaces with the platform via entry points.
 
 ## Installing a plugin
 
@@ -95,7 +95,7 @@ Inference middleware plugins do not necessarily add CLI commands or HTTP routes.
 
 ## Writing a new plugin
 
-See `packages/nemo_platform_plugin/` for the public contract. A basic plugin only needs `nemo-platform-plugin` as a dependency — no access to `nmp-common` or platform internals is required.
+See `packages/nemo_helix_plugin/` for the public contract. A basic plugin only needs `nemo-helix-plugin` as a dependency — no access to `nhx-common` or platform internals is required.
 
 Entry points point to **classes**, not instances. The platform instantiates each class at startup, which keeps the plugin author out of the construction lifecycle and makes future dependency injection straightforward.
 
@@ -103,33 +103,33 @@ Minimum `pyproject.toml`:
 
 ```toml
 [project]
-name = "nmp-my-plugin"
+name = "nhx-my-plugin"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["nemo-platform-plugin"]
+dependencies = ["nemo-helix-plugin"]
 
 [project.entry-points."nemo.services"]
-my-plugin = "nmp.my_plugin.service:MyService"
+my-plugin = "nhx.my_plugin.service:MyService"
 
 [project.entry-points."nemo.cli"]
-my-plugin = "nmp.my_plugin.cli:MyCLI"
+my-plugin = "nhx.my_plugin.cli:MyCLI"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 ```
 
-Normal plugin packages only need `hatchling` in `build-system.requires`. `nmp-build-tools` is reserved for first-party packages that declare `[tool.bundle-package]` and need to bundle workspace sources into a published wheel.
+Normal plugin packages only need `hatchling` in `build-system.requires`. `nhx-build-tools` is reserved for first-party packages that declare `[tool.bundle-package]` and need to bundle workspace sources into a published wheel.
 
 Minimum service implementation:
 
 ```python
-# src/nmp/my_plugin/service.py
+# src/nhx/my_plugin/service.py
 from fastapi import APIRouter
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 class MyService(NemoService):
     name = "my-plugin"
@@ -148,9 +148,9 @@ class MyService(NemoService):
 Minimum CLI implementation:
 
 ```python
-# src/nmp/my_plugin/cli.py
+# src/nhx/my_plugin/cli.py
 import typer
-from nemo_platform_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI
 
 class MyCLI(NemoCLI):
     def get_cli(self) -> typer.Typer:

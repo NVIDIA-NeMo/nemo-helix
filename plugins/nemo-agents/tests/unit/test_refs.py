@@ -5,13 +5,13 @@
 
 Covers the agent-specific ref types (:class:`AgentRef` and the
 :data:`AgentTarget` union it forms with
-:class:`~nemo_platform_plugin.refs.EndpointURL`) and the shape-based
+:class:`~nemo_helix_plugin.refs.EndpointURL`) and the shape-based
 :func:`classify_agent_target` dispatch the ``EvaluateAgentJob`` uses to
-decide between a NeMo Platform agent reference and a literal endpoint URL.
+decide between a NeMo Helix agent reference and a literal endpoint URL.
 
 The generic ref machinery (``StrRef``, ``LocalDir``, ``FilesetRef``,
 ``classify_output_target``) is tested in
-``packages/nemo_platform_plugin/tests/test_refs.py`` so this suite stays focused
+``packages/nemo_helix_plugin/tests/test_refs.py`` so this suite stays focused
 on what the agents plugin layers on top.
 """
 

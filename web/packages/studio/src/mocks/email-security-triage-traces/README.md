@@ -43,11 +43,11 @@ no separate `/evaluator-results` call needed.
 ## Import
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 export WORKSPACE=default
 
 for f in trace-*.json; do
-  curl -sS -X POST "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/atif" \
+  curl -sS -X POST "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/atif" \
     -H 'Content-Type: application/json' --data-binary "@$f" \
     -o /dev/null -w "$f -> %{http_code}\n"
 done
@@ -56,7 +56,7 @@ done
 `201` with an empty body is success. Verify by reading them back:
 
 ```bash
-curl -sS -g "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[agent_name]=email-security-triage&page=1&page_size=100"
+curl -sS -g "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[agent_name]=email-security-triage&page=1&page_size=100"
 ```
 
 ## Other ingest formats

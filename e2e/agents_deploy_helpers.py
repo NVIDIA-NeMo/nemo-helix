@@ -27,8 +27,8 @@ from typing import Any, Literal
 import httpx
 import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_platform import NeMoPlatform
-from nmp.testing import MockProviderResponse, add_mock_provider
+from nemo_helix import NeMoHelix
+from nhx.testing import MockProviderResponse, add_mock_provider
 
 from e2e.utils import collect_sse_chunks
 
@@ -43,7 +43,7 @@ def unique_name(prefix: str) -> str:
 
 
 def wait_for_agent_spans(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     agent_name: str,
@@ -143,7 +143,7 @@ def _page_data(page: Any) -> list[dict[str, Any]]:
     return data
 
 
-def delete_agent_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> None:
+def delete_agent_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
     try:
         sdk.agents.delete(name, workspace=workspace)
     except httpx.HTTPStatusError as exc:
@@ -151,7 +151,7 @@ def delete_agent_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> N
             raise
 
 
-def delete_deployment_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str) -> None:
+def delete_deployment_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
     try:
         sdk.agents.deployments.delete(name, workspace=workspace)
     except httpx.HTTPStatusError as exc:
@@ -159,7 +159,7 @@ def delete_deployment_if_exists(sdk: NeMoPlatform, *, workspace: str, name: str)
             raise
 
 
-def get_deployment_log_text(sdk: NeMoPlatform, *, workspace: str, name: str) -> str:
+def get_deployment_log_text(sdk: NeMoHelix, *, workspace: str, name: str) -> str:
     try:
         response = sdk._client.get(
             f"/apis/agents/v2/workspaces/{workspace}/deployments/{name}/logs",
@@ -175,7 +175,7 @@ def get_deployment_log_text(sdk: NeMoPlatform, *, workspace: str, name: str) -> 
 
 
 def wait_for_deployment_deleted(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -196,7 +196,7 @@ def wait_for_deployment_deleted(
 
 
 def wait_for_deployment_running(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -218,7 +218,7 @@ def wait_for_deployment_running(
 
 
 def _assert_non_streaming_invocation(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     agent_name: str,
@@ -233,7 +233,7 @@ def _assert_non_streaming_invocation(
 
 
 def _assert_streaming_invocation(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     deployment_name: str,
@@ -260,7 +260,7 @@ def _assert_streaming_invocation(
 
 
 def _assert_persisted_session_invocation(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     deployment_name: str,
@@ -291,7 +291,7 @@ def _assert_persisted_session_invocation(
 
 
 def run_agent_deploy_and_invoke(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     deployment_mode: str,
@@ -422,7 +422,7 @@ def run_agent_deploy_and_invoke(
 
 
 def run_container_agent_deploy_and_invoke(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     deployment_mode: str,

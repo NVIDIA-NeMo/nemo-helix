@@ -15,10 +15,10 @@ HELM_TEMPLATE_TIMEOUT_SECONDS = 60
 
 def _helm_template(*args: str) -> list[dict]:
     if shutil.which("helm") is None:
-        pytest.skip("helm is required to render the NeMo Platform chart")
+        pytest.skip("helm is required to render the NeMo Helix chart")
 
     completed = subprocess.run(
-        ["helm", "template", "nemo-platform", str(HELM_DIR), *args],
+        ["helm", "template", "nemo-helix", str(HELM_DIR), *args],
         check=True,
         capture_output=True,
         text=True,
@@ -29,10 +29,10 @@ def _helm_template(*args: str) -> list[dict]:
 
 def _helm_template_failure(*args: str) -> str:
     if shutil.which("helm") is None:
-        pytest.skip("helm is required to render the NeMo Platform chart")
+        pytest.skip("helm is required to render the NeMo Helix chart")
 
     completed = subprocess.run(
-        ["helm", "template", "nemo-platform", str(HELM_DIR), *args],
+        ["helm", "template", "nemo-helix", str(HELM_DIR), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -46,7 +46,7 @@ def _clickhouse_resources(documents: list[dict]) -> list[dict]:
     return [
         document
         for document in documents
-        if document.get("metadata", {}).get("name") == "nemo-platform-clickhouse"
+        if document.get("metadata", {}).get("name") == "nemo-helix-clickhouse"
         or document.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/component") == "clickhouse"
     ]
 
@@ -55,7 +55,7 @@ def _api_container(documents: list[dict]) -> dict:
     deployment = next(
         document
         for document in documents
-        if document["kind"] == "Deployment" and document["metadata"]["name"] == "nemo-platform-api"
+        if document["kind"] == "Deployment" and document["metadata"]["name"] == "nemo-helix-api"
     )
     return deployment["spec"]["template"]["spec"]["containers"][0]
 
@@ -64,7 +64,7 @@ def _controller_container(documents: list[dict]) -> dict:
     deployment = next(
         document
         for document in documents
-        if document["kind"] == "Deployment" and document["metadata"]["name"] == "nemo-platform-core-controller"
+        if document["kind"] == "Deployment" and document["metadata"]["name"] == "nemo-helix-core-controller"
     )
     return deployment["spec"]["template"]["spec"]["containers"][0]
 
@@ -73,7 +73,7 @@ def _envoy_config(documents: list[dict]) -> dict:
     config_map = next(
         document
         for document in documents
-        if document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nemo-platform-envoy"
+        if document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nemo-helix-envoy"
     )
     return yaml.safe_load(config_map["data"]["envoy.yaml"])
 
@@ -90,7 +90,7 @@ def test_default_intake_selection_renders_embedded_clickhouse_dependency() -> No
     assert "--service-group=all" in _api_container(documents)["args"]
 
     env = _env_by_name(_api_container(documents))
-    assert env["NMP_INTAKE_CLICKHOUSE_URL"]["value"] == "http://nemo-platform-clickhouse:8123"
+    assert env["NHX_INTAKE_CLICKHOUSE_URL"]["value"] == "http://nemo-helix-clickhouse:8123"
 
 
 def test_core_service_group_can_skip_embedded_clickhouse_dependency() -> None:
@@ -247,8 +247,8 @@ def test_external_clickhouse_disables_embedded_dependency() -> None:
     assert _clickhouse_resources(documents) == []
 
     env = _env_by_name(_api_container(documents))
-    assert env["NMP_INTAKE_CLICKHOUSE_URL"]["value"] == "http://clickhouse.example.internal:8123"
-    password_ref = env["NMP_INTAKE_CLICKHOUSE_PASSWORD"]["valueFrom"]["secretKeyRef"]
+    assert env["NHX_INTAKE_CLICKHOUSE_URL"]["value"] == "http://clickhouse.example.internal:8123"
+    password_ref = env["NHX_INTAKE_CLICKHOUSE_PASSWORD"]["valueFrom"]["secretKeyRef"]
     assert password_ref == {"name": "clickhouse-credentials", "key": "password"}
 
 

@@ -4,8 +4,8 @@
 """Tests for cross-workspace entity repository queries."""
 
 import pytest
-from nmp.common.entities import ALL_WORKSPACES
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.common.entities import ALL_WORKSPACES
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
 
 
 @pytest.mark.asyncio

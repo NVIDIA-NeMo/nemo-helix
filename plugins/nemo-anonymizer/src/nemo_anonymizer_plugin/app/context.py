@@ -15,20 +15,20 @@ from nemo_anonymizer_plugin.app.input import (
     prepare_anonymizer_input_async,
     validate_anonymizer_input_source,
 )
-from nemo_platform_plugin.client.adapter import AsyncPlatformClient
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 
 
 def require_model_configs_for_execution(model_configs: list[dd.ModelConfig] | None) -> list[dd.ModelConfig]:
     if not model_configs:
         raise AnonymizerInvalidConfigError(
-            "model_configs are required for anonymizer execution so requests route through NeMo Platform "
+            "model_configs are required for anonymizer execution so requests route through NeMo Helix "
             "Inference Gateway instead of Anonymizer library defaults."
         )
     return model_configs
 
 
 class AnonymizerContext:
-    def __init__(self, sdk: AsyncPlatformClient, workspace: str):
+    def __init__(self, sdk: AsyncHelixClient, workspace: str):
         self._sdk = sdk
         self._workspace = workspace
 
@@ -58,7 +58,7 @@ class AnonymizerContext:
 
 
 def create_anonymizer_context(
-    sdk: AsyncPlatformClient,
+    sdk: AsyncHelixClient,
     workspace: str,
 ) -> AnonymizerContext:
     return AnonymizerContext(sdk, workspace)

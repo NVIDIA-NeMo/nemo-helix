@@ -4,7 +4,7 @@
 """Default entrypoint for the sandboxed Gym host.
 
 Paths are parameterized via constructor args / environment variables so the same
-package works in NeMo-RL training images and platform ``nmp-gym-runtime`` images.
+package works in NeMo-RL training images and platform ``nhx-gym-runtime`` images.
 
 Every path here describes the layout of the *host* image. A caller that is not itself running in
 that image must pass ``git_root`` explicitly: the packaged-file shortcuts below resolve against this

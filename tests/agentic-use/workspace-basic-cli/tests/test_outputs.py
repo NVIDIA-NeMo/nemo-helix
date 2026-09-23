@@ -10,16 +10,16 @@ from the working directory.
 
 import os
 
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 
 
 def test_workspace_created() -> None:
     """Test that the harbor-test-workspace was successfully created."""
-    # Get NeMo Platform API base URL from environment
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+    # Get NeMo Helix API base URL from environment
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 
     # Create SDK client and list workspaces
-    client = WorkspacesClient(base_url=nmp_base_url)
+    client = WorkspacesClient(base_url=nhx_base_url)
     response = client.list_workspaces()
 
     # Extract workspace names from the SDK response

@@ -63,7 +63,7 @@ def test_submit_help_explains_the_job_json(contributor: RlContributor) -> None:
 def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tracking message names this backend, so all three job id prefixes read correctly."""
     import typer
-    from nmp.customization_common.cli import overrides
+    from nhx.customization_common.cli import overrides
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(

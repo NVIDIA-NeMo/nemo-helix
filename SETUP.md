@@ -3,17 +3,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: nemo-setup
-description: Set up a local NeMo Platform (`make bootstrap` + `nemo setup`) — services, providers, plugins, default/fast models, and an optional demo agent. Use when the user asks to install, bootstrap, set up, run, or start a local NeMo Platform.
+description: Set up a local NeMo Helix (`make bootstrap` + `nemo setup`) — services, providers, plugins, default/fast models, and an optional demo agent. Use when the user asks to install, bootstrap, set up, run, or start a local NeMo Helix.
 version: "0.1"
 ---
 
-# NeMo Platform Setup
+# NeMo Helix Setup
 
-Get a local NeMo platform running on `localhost:8080`. Work through the prereq questions below before bootstrapping — they shape which services start and what state survives the run. When setup is finished, [What's next?](#whats-next) maps the user's stated goal to the right follow-up skill.
+Get a local NeMo Helix running on `localhost:8080`. Work through the prereq questions below before bootstrapping — they shape which services start and what state survives the run. When setup is finished, [What's next?](#whats-next) maps the user's stated goal to the right follow-up skill.
 
 > This document is the canonical setup guide. It lives at the repository root as `SETUP.md`. Unlike the other skills, it is **not** installed by `nemo skills install` — it has to be available before the platform is bootstrapped, when the CLI may not yet exist.
 
-## Question 1 — Is a NeMo platform already running locally?
+## Question 1 — Is a NeMo Helix already running locally?
 
 Before starting `nemo services run`, check for an existing instance:
 
@@ -46,32 +46,32 @@ Confirm where the user wants local platform state (entity-store DB, encryption k
 
 Most users accept the default. Override paths follow XDG conventions:
 
-1. **`$NMP_DATA_DIR`** (most explicit) — used as-is, no `/nemo` suffix appended.
+1. **`$NHX_DATA_DIR`** (most explicit) — used as-is, no `/nemo` suffix appended.
 2. **`$XDG_DATA_HOME/nemo`** — if `XDG_DATA_HOME` is set in the shell.
 3. **`~/.local/share/nemo`** — the default.
 
 If the user picks a custom path, export it before starting services so the spawned platform inherits it:
 
 ```bash
-export NMP_DATA_DIR=/custom/path/to/state
+export NHX_DATA_DIR=/custom/path/to/state
 ```
 
-`nemo setup` persists the choice to `~/.config/nmp/config.yaml` under `local_services.data_dir` and re-uses it on subsequent runs. If you're running services manually (not via `nemo setup`), set `NMP_DATA_DIR` yourself each session.
+`nemo setup` persists the choice to `~/.config/nhx/config.yaml` under `local_services.data_dir` and re-uses it on subsequent runs. If you're running services manually (not via `nemo setup`), set `NHX_DATA_DIR` yourself each session.
 
 ## Question 3 — Wipe local platform data?
 
 Ask whether the user wants to wipe local platform data before startup. This is a destructive operation that requires explicit confirmation. Warn clearly that it deletes the entity-store database, encryption key, files, job history, secrets, and Intake ClickHouse traces stored under the selected platform data directory. An explicitly configured ClickHouse data directory outside it is preserved. Providers and secrets must be re-seeded afterward. If the database and encryption key get out of sync, later runs can fail with decryption errors such as `cryptography.exceptions.InvalidTag`. **Stop every `nemo services run` process before wiping** (see the macOS gotcha under Question 1), and remove the managed ClickHouse container before deleting its bind-mounted data. If the user confirms, run this before `nemo services run`:
 
 ```bash
-DATA_DIR="${NMP_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/nemo}"
+DATA_DIR="${NHX_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/nemo}"
 case "$DATA_DIR" in
   ""|"/"|"$HOME"|"$HOME/"|"."|"./"|"$PWD"|"$PWD/")
     echo "REFUSING_UNSAFE_DATA_DIR: '$DATA_DIR' — abort"; exit 1 ;;
 esac
 lsof -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1 && { echo "PLATFORM_STILL_RUNNING — abort before wipe"; exit 1; }
-CLICKHOUSE_DATA_DIR="${NMP_INTAKE_CLICKHOUSE_DATA_DIR:-$DATA_DIR/intake-clickhouse}"
-if [ -f "$CLICKHOUSE_DATA_DIR/.nmp-clickhouse-identity" ]; then
-  NMP_DATA_DIR="$DATA_DIR" uv run python -m nmp.intake.local_clickhouse --remove || {
+CLICKHOUSE_DATA_DIR="${NHX_INTAKE_CLICKHOUSE_DATA_DIR:-$DATA_DIR/intake-clickhouse}"
+if [ -f "$CLICKHOUSE_DATA_DIR/.nhx-clickhouse-identity" ]; then
+  NHX_DATA_DIR="$DATA_DIR" uv run python -m nhx.intake.local_clickhouse --remove || {
     echo "CLICKHOUSE_CONTAINER_CLEANUP_FAILED — start Docker and retry; data was not deleted"
     exit 1
   }
@@ -79,7 +79,7 @@ fi
 rm -rf "$DATA_DIR"
 ```
 
-Replace the path with whatever was chosen in Q2 (`$NMP_DATA_DIR`,
+Replace the path with whatever was chosen in Q2 (`$NHX_DATA_DIR`,
 `$XDG_DATA_HOME/nemo`, or the default `~/.local/share/nemo`). The cleanup command
 validates and removes only the managed container, restoring host ownership when
 its data lives under the platform data directory. If cleanup fails because Docker
@@ -89,7 +89,7 @@ is unavailable, start Docker and retry—do not proceed to `rm -rf`.
 
 ## Bootstrap and start
 
-This section is the **source checkout** path: use it to work on NeMo Platform itself, on a local plugin, or on Studio assets. To only *use* the platform, install the published wheel instead — `uv tool install "nemo-platform[all]"` needs no checkout and no toolchain, then continue at `nemo setup`.
+This section is the **source checkout** path: use it to work on NeMo Helix itself, on a local plugin, or on Studio assets. To only *use* the platform, install the published wheel instead — `uv tool install "nemo-helix[all]"` needs no checkout and no toolchain, then continue at `nemo setup`.
 
 The steps below cover prerequisites install, service startup, provider registration, default/fast model selection, and demo agent deployment in one shot. Prefer them over the manual sections further down whenever the task fits:
 
@@ -184,19 +184,19 @@ LOG_LEVEL=DEBUG uv run nemo services run \
 
 ### Local ClickHouse for Intake
 
-When the `intake` service is selected and `NMP_INTAKE_CLICKHOUSE_URL` is unset, Intake automatically
+When the `intake` service is selected and `NHX_INTAKE_CLICKHOUSE_URL` is unset, Intake automatically
 provisions a ClickHouse container owned by the resolved NeMo data directory, with a Docker-assigned
 loopback port. A platform process reuses the container for that data directory; graceful shutdown
 stops it without removing it, while hard process termination can leave it running. Only the explicitly
 confirmed reset in Question 3 or teardown options 2/3 delete its
 default data under the NeMo data directory, after removing the managed container. A separately
-configured `NMP_INTAKE_CLICKHOUSE_DATA_DIR` is preserved. Run only one active local platform instance
+configured `NHX_INTAKE_CLICKHOUSE_DATA_DIR` is preserved. Run only one active local platform instance
 per data directory; stopping it also stops that directory's managed ClickHouse container.
 
 Docker must already be running. If startup logs report `Docker daemon is unavailable`, start Docker
 Desktop on macOS/Windows or the Docker service on Linux, then rerun `nemo setup` or restart
 `nemo services run`. To use an external ClickHouse and bypass local Docker provisioning, export
-`NMP_INTAKE_CLICKHOUSE_URL` before starting the platform.
+`NHX_INTAKE_CLICKHOUSE_URL` before starting the platform.
 
 ### Demo agent
 
@@ -210,7 +210,7 @@ nemo agents invoke --agent calculator-agent --input "What is 12 * 8?"
 ### Local platform environment summary
 
 - **Port**: `8080` (CLI default — do NOT pass a custom `--base-url`).
-- **`export NMP_BASE_URL=http://localhost:8080` — required when targeting a local platform.** If your `~/.config/nmp/config.yaml` already points at a remote cluster, the CLI uses that base URL and ignores the local platform entirely. Setting this env var overrides the config file for the current shell session.
+- **`export NHX_BASE_URL=http://localhost:8080` — required when targeting a local platform.** If your `~/.config/nhx/config.yaml` already points at a remote cluster, the CLI uses that base URL and ignores the local platform entirely. Setting this env var overrides the config file for the current shell session.
 - **Reset state:** follow Question 3 above; it requires explicit confirmation and removes the managed
   ClickHouse container before deleting platform data.
 

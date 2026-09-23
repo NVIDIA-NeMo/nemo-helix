@@ -38,8 +38,12 @@ WORD_OVERRIDES = {
     "cpu": "CPU",
     "gpu": "GPU",
     "nemo": "NeMo",
-    "nmp": "NeMo Platform",
+    "nhx": "NeMo Helix",
     "sdk": "SDK",
+}
+COMPONENT_DISPLAY_NAMES = {
+    "nhx-auditor-tasks": "Auditor Tasks",
+    "nhx-safe-synthesizer-tasks": "Safe Synthesizer Tasks",
 }
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -58,6 +62,8 @@ class Asset:
 
 def default_display_name(name: str) -> str:
     """Convert an NGC asset name into a human-readable display name."""
+    if name in COMPONENT_DISPLAY_NAMES:
+        return COMPONENT_DISPLAY_NAMES[name]
     return " ".join(WORD_OVERRIDES.get(word.lower(), word.capitalize()) for word in name.split("-"))
 
 
@@ -83,9 +89,7 @@ def load_asset(path: Path, asset_type: Literal["container", "chart"]) -> Asset:
     name = path.stem
     display_name = str(metadata.get("display_name") or default_display_name(name))
     default_description = (
-        f"Deploy {display_name} to Kubernetes"
-        if asset_type == "chart"
-        else f"{display_name} is part of the NeMo Platform"
+        f"Deploy {display_name} to Kubernetes" if asset_type == "chart" else f"{display_name} is part of the NeMo Helix"
     )
     description = str(metadata.get("description") or default_description)
     labels = metadata.get("labels", DEFAULT_LABELS)

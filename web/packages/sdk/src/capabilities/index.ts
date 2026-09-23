@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * NeMo Platform API capabilities for LLM tool use.
+ * NeMo Helix API capabilities for LLM tool use.
  *
  * The generated registry (`generated/capabilities/registry.ts`) describes every
  * API operation. The gateway exposes a handful of capabilities — search,

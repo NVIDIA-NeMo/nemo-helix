@@ -31,7 +31,7 @@ from data_designer.config.errors import InvalidConfigError
 from data_designer.interface.data_designer import DataDesigner
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from nemo_data_designer_plugin.sdk._engine_pass import run_engine_pass
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from pydantic import BaseModel, Field, computed_field
 
 # The engine's compile step is the source of truth on column→alias→provider
@@ -68,8 +68,8 @@ def _validate(data_designer: DataDesigner, config_builder: dd.DataDesignerConfig
 async def validate_config(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoPlatform | None = None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    sdk: NeMoHelix | None = None,
+    async_sdk: AsyncNeMoHelix | None = None,
     workspace: str,
     config_source: str | None = None,
 ) -> ValidationReport:
@@ -86,9 +86,9 @@ async def validate_config(
 
     Args:
         config_builder: The Data Designer config to validate.
-        sdk: Sync NeMoPlatform SDK. Used for engine-level compile validation
+        sdk: Sync NeMoHelix SDK. Used for engine-level compile validation
             and as a fallback to derive ``async_sdk`` when one is not supplied.
-        async_sdk: Async NeMoPlatform SDK. If omitted but ``sdk`` is supplied,
+        async_sdk: Async NeMoHelix SDK. If omitted but ``sdk`` is supplied,
             an async wrapper is built via ``sync_to_async_sdk``.
         workspace: Workspace used to resolve provider references and seed
             sources for the remote context. Pass ``"default"`` if you have
@@ -124,8 +124,8 @@ async def validate_config(
 def validate_config_sync(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoPlatform | None = None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    sdk: NeMoHelix | None = None,
+    async_sdk: AsyncNeMoHelix | None = None,
     workspace: str,
     config_source: str | None = None,
 ) -> ValidationReport:

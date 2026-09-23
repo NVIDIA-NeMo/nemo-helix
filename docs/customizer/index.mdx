@@ -27,23 +27,23 @@ At a high level, the fine-tuning workflow consists of the following steps:
 
 ## Container Images
 
-Fine-tuning jobs run in container images published to NVIDIA NGC. Use the image tag that matches your NeMo Platform release:
+Fine-tuning jobs run in container images published to NVIDIA NGC. Use the image tag that matches your NeMo Helix release:
 
 | Image | Purpose |
 |-------|---------|
-| `nvcr.io/nvidia/nemo-platform/nmp-customizer-tasks:<image-tag>` | Shared CPU task steps (file I/O, model entity, model spec) for all customization backends |
-| `nvcr.io/nvidia/nemo-platform/nmp-automodel-training:<image-tag>` | Automodel GPU training step |
-| `nvcr.io/nvidia/nemo-platform/nmp-unsloth-training:<image-tag>` | Unsloth GPU training step |
+| `nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<image-tag>` | Shared CPU task steps (file I/O, model entity, model spec) for all customization backends |
+| `nvcr.io/nvidia/nemo-helix/nhx-automodel-training:<image-tag>` | Automodel GPU training step |
+| `nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<image-tag>` | Unsloth GPU training step |
 
 These public images can be pulled directly from `nvcr.io`:
 
 ```bash
-docker pull nvcr.io/nvidia/nemo-platform/nmp-customizer-tasks:<image-tag>
-docker pull nvcr.io/nvidia/nemo-platform/nmp-automodel-training:<image-tag>
-docker pull nvcr.io/nvidia/nemo-platform/nmp-unsloth-training:<image-tag>
+docker pull nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<image-tag>
+docker pull nvcr.io/nvidia/nemo-helix/nhx-automodel-training:<image-tag>
+docker pull nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<image-tag>
 ```
 
-Most users do not need to pull these images manually. NeMo Platform resolves them from the configured platform image registry and tag. Pull or mirror them when you are operating a self-managed deployment, preloading an air-gapped environment, or validating registry access. If your environment requires authenticated registry pulls, authenticate to `nvcr.io` with an NGC API key before pulling or mirroring the images.
+Most users do not need to pull these images manually. NeMo Helix resolves them from the configured platform image registry and tag. Pull or mirror them when you are operating a self-managed deployment, preloading an air-gapped environment, or validating registry access. If your environment requires authenticated registry pulls, authenticate to `nvcr.io` with an NGC API key before pulling or mirroring the images.
 
 ---
 

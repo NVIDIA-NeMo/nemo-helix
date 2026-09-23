@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from nemo_evaluator.filesets import FilesetRef, download_dataset
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from pytest_mock import MockerFixture
 
 

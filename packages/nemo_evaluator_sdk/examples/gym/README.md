@@ -9,7 +9,7 @@ Mapping: one Gym dataset → one run; each distinct row → one `AgentEvalTask` 
 
 ## Prerequisites
 
-**1. NeMo Gym installed in its own environment, with that environment's `bin` on `PATH`**, plus the target environment's own dependencies. Gym imports Ray at module load and nemo-platform excludes Ray by constraint, so the two generally cannot share a virtualenv; the runner resolves `gym` from `PATH` only. Environments ship in the `nemo-gym` wheel — `resources_servers` and friends install beside `nemo_gym`, configs and `data/example.jsonl` included — so no checkout is needed:
+**1. NeMo Gym installed in its own environment, with that environment's `bin` on `PATH`**, plus the target environment's own dependencies. Gym imports Ray at module load and nemo-helix excludes Ray by constraint, so the two generally cannot share a virtualenv; the runner resolves `gym` from `PATH` only. Environments ship in the `nemo-gym` wheel — `resources_servers` and friends install beside `nemo_gym`, configs and `data/example.jsonl` included — so no checkout is needed:
 
 ```bash
 uv venv ~/gym-env --python 3.12
@@ -114,7 +114,7 @@ logging.getLogger("nemo_evaluator_sdk.agent_eval.runtimes.gym").setLevel(logging
 - This example covers the local subprocess path. Platform deployments can run the same target
   colocated or provision a separate sandboxed Gym host; custom environment FileSets require the
   sandboxed path. See the
-  [Evaluator Gym documentation](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/gym-runner).
+  [Evaluator Gym documentation](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/gym-runner).
 
 ## Next steps
 
