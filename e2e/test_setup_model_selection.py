@@ -19,12 +19,19 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_helix import APIStatusError, NeMoHelix
+from nemo_helix import NeMoHelix
 from nemo_helix_ext.cli.commands import setup as setup_commands
 from nemo_helix_ext.cli.commands.setup import ModelPair, SetupClients
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    CreateModelProviderRequest,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+)
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nhx.common.config import Configuration
 from nhx.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_SERVED_MODELS_HEADER
@@ -55,7 +62,7 @@ def _chat_response(content: str) -> dict[str, Any]:
     }
 
 
-def _advertise_models_without_routes(sdk: NeMoHelix, workspace: str, name: str, entities: list[str]) -> str:
+def _advertise_models_without_routes(client: NemoClient, workspace: str, name: str, entities: list[str]) -> str:
     """Create a mock provider that serves *entities* before their routes exist.
 
     This is ``add_mock_provider`` without the passthrough VirtualModels it
@@ -64,26 +71,32 @@ def _advertise_models_without_routes(sdk: NeMoHelix, workspace: str, name: str, 
     provider's discovery response, so the reconciler preserves them.
     """
     provider_name = f"{Configuration.get_service_config(InferenceGatewayConfig).mock_provider_prefix}{name}"
-    sdk.inference.providers.create(
+    models = ModelsClient.from_client(client)
+    models.create_provider(
         workspace=workspace,
-        name=provider_name,
-        host_url="http://mock.local",
-        default_extra_headers={
-            MOCK_RESPONSE_HEADER: json.dumps(_chat_response("OK")),
-            MOCK_SERVED_MODELS_HEADER: json.dumps(entities),
-        },
+        body=CreateModelProviderRequest(
+            name=provider_name,
+            host_url="http://mock.local",
+            default_extra_headers={
+                MOCK_RESPONSE_HEADER: json.dumps(_chat_response("OK")),
+                MOCK_SERVED_MODELS_HEADER: json.dumps(entities),
+            },
+        ),
     )
-    sdk.inference.providers.update_status(
+    models.update_provider_status(
         name=provider_name,
         workspace=workspace,
-        served_models=[
-            {"model_entity_id": f"{workspace}/{entity}", "served_model_name": entity} for entity in entities
-        ],
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(model_entity_id=f"{workspace}/{entity}", served_model_name=entity)
+                for entity in entities
+            ]
+        ),
     )
     return provider_name
 
 
-def _run_auto_setup(sdk: NeMoHelix, workspace: str, provider_name: str) -> ModelPair | None:
+def _run_auto_setup(client: NemoClient, workspace: str, provider_name: str) -> ModelPair | None:
     """Run ``_run_auto_mode`` for *provider_name* and return the persisted pair."""
     with (
         patch.dict("os.environ", {"NEMO_DEFAULT_MODEL": "", "NEMO_FAST_MODEL": ""}),
@@ -94,15 +107,15 @@ def _run_auto_setup(sdk: NeMoHelix, workspace: str, provider_name: str) -> Model
         patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
     ):
         clients = SetupClients(
-            models=client_from_platform(sdk, ModelsClient),
-            secrets=client_from_platform(sdk, SecretsClient),
-            gateway=client_from_platform(sdk, InferenceGatewayClient),
+            models=ModelsClient.from_client(client),
+            secrets=SecretsClient.from_client(client),
+            gateway=InferenceGatewayClient.from_client(client),
         )
         setup_commands._run_auto_mode(
             MagicMock(),
             clients,
             workspace,
-            str(sdk.base_url),
+            client.base_url,
             install_skills=False,
             deploy_agent=False,
         )
@@ -112,7 +125,7 @@ def _run_auto_setup(sdk: NeMoHelix, workspace: str, provider_name: str) -> Model
     return save_pair.call_args.args[1]
 
 
-def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoHelix, workspace: str):
+def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoHelix, client: NemoClient, workspace: str):
     """The largest model that answers becomes the default, the smallest the fast model."""
     suffix = _unique_suffix()
     ultra = f"nvidia-nemotron-ultra-500b-{suffix}"
@@ -137,12 +150,12 @@ def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoHelix, wor
         served_models={name: name for name in (ultra, large, nano)},
     )
 
-    saved = _run_auto_setup(sdk, workspace, provider.name)
+    saved = _run_auto_setup(client, workspace, provider.name)
 
     assert saved == ModelPair(default=f"{workspace}/{large}", fast=f"{workspace}/{nano}")
 
 
-def test_auto_setup_waits_for_a_late_published_model_route(sdk: NeMoHelix, workspace: str):
+def test_auto_setup_waits_for_a_late_published_model_route(client: NemoClient, workspace: str):
     """Cold start: discovery reports a model before its route is published.
 
     The gateway 404s the model until the controller creates its passthrough
@@ -150,26 +163,27 @@ def test_auto_setup_waits_for_a_late_published_model_route(sdk: NeMoHelix, works
     """
     suffix = _unique_suffix()
     entity = f"nvidia-nemotron-nano-9b-{suffix}"
-    provider_name = _advertise_models_without_routes(sdk, workspace, f"late-route-{suffix}", [entity])
+    provider_name = _advertise_models_without_routes(client, workspace, f"late-route-{suffix}", [entity])
 
-    with pytest.raises(APIStatusError) as initial_probe:
-        sdk.inference.gateway.openai.post(
-            "v1/chat/completions",
+    with pytest.raises(NotFoundError):
+        InferenceGatewayClient.from_client(client).openai_post(
             workspace=workspace,
-            body={
-                "model": f"{workspace}/{entity}",
-                "messages": [{"role": "user", "content": "Respond with 'OK'"}],
-                "max_tokens": 16,
-            },
+            trailing_uri="v1/chat/completions",
+            body=JsonBody(
+                {
+                    "model": f"{workspace}/{entity}",
+                    "messages": [{"role": "user", "content": "Respond with 'OK'"}],
+                    "max_tokens": 16,
+                }
+            ),
         )
-    assert initial_probe.value.status_code == 404
 
-    saved = _run_auto_setup(sdk, workspace, provider_name)
+    saved = _run_auto_setup(client, workspace, provider_name)
 
     assert saved == ModelPair(default=f"{workspace}/{entity}", fast=f"{workspace}/{entity}")
 
 
-def test_auto_setup_saves_nothing_when_no_model_answers(sdk: NeMoHelix, workspace: str):
+def test_auto_setup_saves_nothing_when_no_model_answers(sdk: NeMoHelix, client: NemoClient, workspace: str):
     """A provider whose models all fail leaves the default unset rather than broken."""
     suffix = _unique_suffix()
     entity = f"nvidia-nemotron-nano-9b-{suffix}"
@@ -183,4 +197,4 @@ def test_auto_setup_saves_nothing_when_no_model_answers(sdk: NeMoHelix, workspac
         served_models={entity: entity},
     )
 
-    assert _run_auto_setup(sdk, workspace, provider.name) is None
+    assert _run_auto_setup(client, workspace, provider.name) is None

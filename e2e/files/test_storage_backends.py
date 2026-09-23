@@ -18,8 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import BadRequestError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, NGCStorageConfig
@@ -82,10 +81,10 @@ def hf_token() -> str:
 
 
 @pytest.fixture
-def hf_secret(sdk: NeMoHelix, workspace: str, hf_token: str) -> Iterator[str]:
+def hf_secret(client: NemoClient, workspace: str, hf_token: str) -> Iterator[str]:
     """Create a secret containing the HF token, cleaned up after test."""
     secret_name = f"e2e-hf-tok-{uuid.uuid4().hex[:8]}"
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     secrets.create_secret(workspace=workspace, body=HelixSecretCreateRequest(name=secret_name, value=hf_token))
     yield secret_name
     try:
@@ -128,18 +127,18 @@ def hf_fileset(files_client: FilesClient, workspace: str, hf_secret: str) -> Ite
 class TestNGCFileset:
     """Tests for NGC-backed filesets."""
 
-    def test_list_files(self, sdk: NeMoHelix, workspace: str, ngc_fileset: str):
+    def test_list_files(self, client: NemoClient, workspace: str, ngc_fileset: str):
         """Listing an NGC-backed fileset returns files with paths and sizes."""
-        files = client_from_platform(sdk, FilesClient).list_files(name=ngc_fileset, workspace=workspace).data().data
+        files = FilesClient.from_client(client).list_files(name=ngc_fileset, workspace=workspace).data().data
         assert len(files) > 0, "NGC fileset should contain at least one file"
 
         for f in files:
             assert f.path, "Each file should have a path"
             assert f.size > 0, "Each file should have a non-zero size"
 
-    def test_download_file(self, sdk: NeMoHelix, workspace: str, ngc_fileset: str):
+    def test_download_file(self, client: NemoClient, workspace: str, ngc_fileset: str):
         """Downloading the smallest file from an NGC fileset succeeds and size matches."""
-        files = client_from_platform(sdk, FilesClient).list_files(name=ngc_fileset, workspace=workspace).data().data
+        files = FilesClient.from_client(client).list_files(name=ngc_fileset, workspace=workspace).data().data
         assert len(files) > 0
 
         target = min(files, key=lambda f: f.size)
@@ -147,7 +146,7 @@ class TestNGCFileset:
         with tempfile.TemporaryDirectory() as tmpdir:
             local_path = Path(tmpdir) / target.path.replace("/", "_")
             content = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(
                     name=ngc_fileset,
                     workspace=workspace,
@@ -159,10 +158,10 @@ class TestNGCFileset:
             assert local_path.exists()
             assert local_path.stat().st_size == target.size
 
-    def test_cache_status(self, sdk: NeMoHelix, workspace: str, ngc_fileset: str):
+    def test_cache_status(self, client: NemoClient, workspace: str, ngc_fileset: str):
         """NGC-backed files report a cacheable status."""
         files = (
-            client_from_platform(sdk, FilesClient)
+            FilesClient.from_client(client)
             .list_files(
                 name=ngc_fileset,
                 workspace=workspace,
@@ -204,7 +203,7 @@ class TestNGCFileset:
     )
     def test_create_error(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         files_client: FilesClient,
         workspace: str,
         ngc_api_key: str,
@@ -215,7 +214,7 @@ class TestNGCFileset:
         """Bad NGC configurations are rejected with 400."""
         value = secret_value if secret_value is not None else ngc_api_key
         secret_name = f"e2e-ngc-err-{uuid.uuid4().hex[:8]}"
-        secrets = client_from_platform(sdk, SecretsClient)
+        secrets = SecretsClient.from_client(client)
         secrets.create_secret(workspace=workspace, body=HelixSecretCreateRequest(name=secret_name, value=value))
         try:
             storage = NGCStorageConfig(
@@ -263,18 +262,18 @@ class TestNGCFileset:
 class TestHuggingFaceFileset:
     """Tests for Hugging Face-backed filesets."""
 
-    def test_list_files(self, sdk: NeMoHelix, workspace: str, hf_fileset: str):
+    def test_list_files(self, client: NemoClient, workspace: str, hf_fileset: str):
         """Listing an HF-backed fileset returns files with paths and sizes."""
-        files = client_from_platform(sdk, FilesClient).list_files(name=hf_fileset, workspace=workspace).data().data
+        files = FilesClient.from_client(client).list_files(name=hf_fileset, workspace=workspace).data().data
         assert len(files) > 0, "HF fileset should contain at least one file"
 
         for f in files:
             assert f.path, "Each file should have a path"
             assert f.size > 0, "Each file should have a non-zero size"
 
-    def test_download_file(self, sdk: NeMoHelix, workspace: str, hf_fileset: str):
+    def test_download_file(self, client: NemoClient, workspace: str, hf_fileset: str):
         """Downloading the smallest file from an HF fileset succeeds and size matches."""
-        files = client_from_platform(sdk, FilesClient).list_files(name=hf_fileset, workspace=workspace).data().data
+        files = FilesClient.from_client(client).list_files(name=hf_fileset, workspace=workspace).data().data
         assert len(files) > 0
 
         target = min(files, key=lambda f: f.size)
@@ -282,7 +281,7 @@ class TestHuggingFaceFileset:
         with tempfile.TemporaryDirectory() as tmpdir:
             local_path = Path(tmpdir) / target.path.replace("/", "_")
             content = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(
                     name=hf_fileset,
                     workspace=workspace,
@@ -294,10 +293,10 @@ class TestHuggingFaceFileset:
             assert local_path.exists()
             assert local_path.stat().st_size == target.size
 
-    def test_cache_status(self, sdk: NeMoHelix, workspace: str, hf_fileset: str):
+    def test_cache_status(self, client: NemoClient, workspace: str, hf_fileset: str):
         """HF-backed files report a cacheable status."""
         files = (
-            client_from_platform(sdk, FilesClient)
+            FilesClient.from_client(client)
             .list_files(
                 name=hf_fileset,
                 workspace=workspace,

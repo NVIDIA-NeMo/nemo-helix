@@ -11,16 +11,16 @@ reconcile controller that turns those entities into real backend resources
 
 The chain they prove::
 
-    sdk._client POST /apis/deployments/v2/.../deployment-configs   (template)
-    sdk._client POST /apis/deployments/v2/.../volumes              (optional PVC/volume)
-    sdk._client POST /apis/deployments/v2/.../deployments          (desired state)
+    client._client POST /apis/deployments/v2/.../deployment-configs   (template)
+    client._client POST /apis/deployments/v2/.../volumes              (optional PVC/volume)
+    client._client POST /apis/deployments/v2/.../deployments          (desired state)
       -> deployments reconcile controller
       -> executor backend (docker | k8s) creates the real workload
       -> Deployment.status converges (READY for services, SUCCEEDED for jobs)
 
 Unlike ``e2e/agents_deploy_helpers.py`` (which goes through the higher-level
-``sdk.agents`` surface), the deployments plugin is not exposed on the typed SDK,
-so this module talks to the REST API directly via ``sdk._client``. The
+``agents`` plugin surface), the deployments plugin has no typed client,
+so this module talks to the REST API directly via ``client._client``. The
 per-backend modules own only what genuinely differs: pytest markers, the backend
 key passed to volume/deployment ``backend_config``, and any best-effort reaping
 of leaked backend resources.
@@ -36,7 +36,7 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 # Small, widely-cached public images used by the deployment workloads. ``alpine``
 # runs a one-shot job (restart_policy=Never -> SUCCEEDED); ``nginx`` runs a
@@ -69,7 +69,7 @@ def _base(workspace: str) -> str:
 
 
 def create_deployment_config(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -90,13 +90,13 @@ def create_deployment_config(
         body["config_files"] = config_files
     if backend_config is not None:
         body["backend_config"] = backend_config
-    response = sdk._client.post(f"{_base(workspace)}/deployment-configs", json=body)
+    response = client._client.post(f"{_base(workspace)}/deployment-configs", json=body)
     response.raise_for_status()
     return response.json()
 
 
 def create_volume(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -109,13 +109,13 @@ def create_volume(
         body["access_modes"] = access_modes
     if backend_config is not None:
         body["backend_config"] = backend_config
-    response = sdk._client.post(f"{_base(workspace)}/volumes", json=body)
+    response = client._client.post(f"{_base(workspace)}/volumes", json=body)
     response.raise_for_status()
     return response.json()
 
 
 def create_deployment(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -133,52 +133,52 @@ def create_deployment(
         body["executor"] = executor
     if prerequisites is not None:
         body["prerequisites"] = prerequisites
-    response = sdk._client.post(f"{_base(workspace)}/deployments", json=body)
+    response = client._client.post(f"{_base(workspace)}/deployments", json=body)
     response.raise_for_status()
     return response.json()
 
 
-def get_deployment(sdk: NeMoHelix, *, workspace: str, name: str) -> dict[str, Any]:
-    response = sdk._client.get(f"{_base(workspace)}/deployments/{name}")
+def get_deployment(client: NemoClient, *, workspace: str, name: str) -> dict[str, Any]:
+    response = client._client.get(f"{_base(workspace)}/deployments/{name}")
     response.raise_for_status()
     return response.json()
 
 
-def get_volume(sdk: NeMoHelix, *, workspace: str, name: str) -> dict[str, Any]:
-    response = sdk._client.get(f"{_base(workspace)}/volumes/{name}")
+def get_volume(client: NemoClient, *, workspace: str, name: str) -> dict[str, Any]:
+    response = client._client.get(f"{_base(workspace)}/volumes/{name}")
     response.raise_for_status()
     return response.json()
 
 
-def list_deployments(sdk: NeMoHelix, *, workspace: str) -> list[dict[str, Any]]:
-    response = sdk._client.get(f"{_base(workspace)}/deployments", params={"page_size": 100})
+def list_deployments(client: NemoClient, *, workspace: str) -> list[dict[str, Any]]:
+    response = client._client.get(f"{_base(workspace)}/deployments", params={"page_size": 100})
     response.raise_for_status()
     data = response.json().get("data", [])
     assert isinstance(data, list)
     return data
 
 
-def delete_deployment_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
+def delete_deployment_if_exists(client: NemoClient, *, workspace: str, name: str) -> None:
     try:
-        response = sdk._client.delete(f"{_base(workspace)}/deployments/{name}")
+        response = client._client.delete(f"{_base(workspace)}/deployments/{name}")
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 404:
             raise
 
 
-def delete_volume_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
+def delete_volume_if_exists(client: NemoClient, *, workspace: str, name: str) -> None:
     try:
-        response = sdk._client.delete(f"{_base(workspace)}/volumes/{name}")
+        response = client._client.delete(f"{_base(workspace)}/volumes/{name}")
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 404:
             raise
 
 
-def delete_deployment_config_if_exists(sdk: NeMoHelix, *, workspace: str, name: str) -> None:
+def delete_deployment_config_if_exists(client: NemoClient, *, workspace: str, name: str) -> None:
     try:
-        response = sdk._client.delete(f"{_base(workspace)}/deployment-configs/{name}")
+        response = client._client.delete(f"{_base(workspace)}/deployment-configs/{name}")
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 404:
@@ -189,7 +189,7 @@ def delete_deployment_config_if_exists(sdk: NeMoHelix, *, workspace: str, name: 
 
 
 def wait_for_deployment_status(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -205,7 +205,7 @@ def wait_for_deployment_status(
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
-        deployment = get_deployment(sdk, workspace=workspace, name=name)
+        deployment = get_deployment(client, workspace=workspace, name=name)
         last = deployment
         status = deployment["status"]
         if status in target_statuses:
@@ -222,7 +222,7 @@ def wait_for_deployment_status(
 
 
 def wait_for_volume_status(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -232,7 +232,7 @@ def wait_for_volume_status(
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
-        volume = get_volume(sdk, workspace=workspace, name=name)
+        volume = get_volume(client, workspace=workspace, name=name)
         last = volume
         if volume["status"] in target_statuses:
             return volume
@@ -243,7 +243,7 @@ def wait_for_volume_status(
 
 
 def wait_for_deployment_deleted(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -253,7 +253,7 @@ def wait_for_deployment_deleted(
     last_status: str | None = None
     while time.monotonic() < deadline:
         try:
-            deployment = get_deployment(sdk, workspace=workspace, name=name)
+            deployment = get_deployment(client, workspace=workspace, name=name)
             last_status = deployment.get("status")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
@@ -264,7 +264,7 @@ def wait_for_deployment_deleted(
 
 
 def wait_for_volume_deleted(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -274,7 +274,7 @@ def wait_for_volume_deleted(
     last_status: str | None = None
     while time.monotonic() < deadline:
         try:
-            volume = get_volume(sdk, workspace=workspace, name=name)
+            volume = get_volume(client, workspace=workspace, name=name)
             last_status = volume.get("status")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
@@ -288,7 +288,7 @@ def wait_for_volume_deleted(
 
 
 def run_service_deployment_lifecycle(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     backend_key: str,
@@ -315,7 +315,7 @@ def run_service_deployment_lifecycle(
     # cleanup runs even if config creation fails partway.
     try:
         create_deployment_config(
-            sdk,
+            client,
             workspace=workspace,
             name=config_name,
             restart_policy="Always",
@@ -330,7 +330,7 @@ def run_service_deployment_lifecycle(
         )
 
         created = create_deployment(
-            sdk,
+            client,
             workspace=workspace,
             name=deployment_name,
             deployment_config=config_name,
@@ -340,7 +340,7 @@ def run_service_deployment_lifecycle(
         assert created["status"] == "PENDING"
 
         deployment = wait_for_deployment_status(
-            sdk,
+            client,
             workspace=workspace,
             name=deployment_name,
             target_statuses=("READY",),
@@ -351,18 +351,18 @@ def run_service_deployment_lifecycle(
         assert endpoints and endpoints[0]["url"], deployment
 
         # It must also show up in the workspace listing while active.
-        listed = {d["name"] for d in list_deployments(sdk, workspace=workspace)}
+        listed = {d["name"] for d in list_deployments(client, workspace=workspace)}
         assert deployment_name in listed
     finally:
-        _safe(delete_deployment_if_exists, sdk, workspace=workspace, name=deployment_name)
-        _safe(wait_for_deployment_deleted, sdk, workspace=workspace, name=deployment_name)
+        _safe(delete_deployment_if_exists, client, workspace=workspace, name=deployment_name)
+        _safe(wait_for_deployment_deleted, client, workspace=workspace, name=deployment_name)
         if reap_backend_resources is not None:
             _safe(reap_backend_resources, deployment_name)
-        _safe(delete_deployment_config_if_exists, sdk, workspace=workspace, name=config_name)
+        _safe(delete_deployment_config_if_exists, client, workspace=workspace, name=config_name)
 
 
 def run_job_deployment_lifecycle(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     backend_key: str,
@@ -381,7 +381,7 @@ def run_job_deployment_lifecycle(
     # cleanup runs even if config creation fails partway.
     try:
         create_deployment_config(
-            sdk,
+            client,
             workspace=workspace,
             name=config_name,
             restart_policy="Never",
@@ -396,13 +396,13 @@ def run_job_deployment_lifecycle(
         )
 
         create_deployment(
-            sdk,
+            client,
             workspace=workspace,
             name=deployment_name,
             deployment_config=config_name,
         )
         deployment = wait_for_deployment_status(
-            sdk,
+            client,
             workspace=workspace,
             name=deployment_name,
             target_statuses=("SUCCEEDED",),
@@ -410,15 +410,15 @@ def run_job_deployment_lifecycle(
         )
         assert deployment.get("exit_code") == 0, deployment
     finally:
-        _safe(delete_deployment_if_exists, sdk, workspace=workspace, name=deployment_name)
-        _safe(wait_for_deployment_deleted, sdk, workspace=workspace, name=deployment_name)
+        _safe(delete_deployment_if_exists, client, workspace=workspace, name=deployment_name)
+        _safe(wait_for_deployment_deleted, client, workspace=workspace, name=deployment_name)
         if reap_backend_resources is not None:
             _safe(reap_backend_resources, deployment_name)
-        _safe(delete_deployment_config_if_exists, sdk, workspace=workspace, name=config_name)
+        _safe(delete_deployment_config_if_exists, client, workspace=workspace, name=config_name)
 
 
 def run_volume_deployment_round_trip(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     backend_key: str,
@@ -458,7 +458,7 @@ def run_volume_deployment_round_trip(
     # partway (otherwise a created volume/config would leak).
     try:
         create_volume(
-            sdk,
+            client,
             workspace=workspace,
             name=volume_name,
             size="1Gi",
@@ -470,7 +470,7 @@ def run_volume_deployment_round_trip(
         # and this helper only runs on eagerly-binding backends (docker), so
         # require BOUND up front rather than tolerating a lingering PENDING.
         wait_for_volume_status(
-            sdk,
+            client,
             workspace=workspace,
             name=volume_name,
             target_statuses=("BOUND",),
@@ -478,7 +478,7 @@ def run_volume_deployment_round_trip(
         )
 
         create_deployment_config(
-            sdk,
+            client,
             workspace=workspace,
             name=config_name,
             restart_policy="Never",
@@ -501,13 +501,13 @@ def run_volume_deployment_round_trip(
         )
 
         create_deployment(
-            sdk,
+            client,
             workspace=workspace,
             name=deployment_name,
             deployment_config=config_name,
         )
         deployment = wait_for_deployment_status(
-            sdk,
+            client,
             workspace=workspace,
             name=deployment_name,
             target_statuses=("SUCCEEDED",),
@@ -515,15 +515,15 @@ def run_volume_deployment_round_trip(
         )
         assert deployment.get("exit_code") == 0, deployment
     finally:
-        _safe(delete_deployment_if_exists, sdk, workspace=workspace, name=deployment_name)
-        _safe(wait_for_deployment_deleted, sdk, workspace=workspace, name=deployment_name)
+        _safe(delete_deployment_if_exists, client, workspace=workspace, name=deployment_name)
+        _safe(wait_for_deployment_deleted, client, workspace=workspace, name=deployment_name)
         if reap_backend_resources is not None:
             _safe(reap_backend_resources, deployment_name)
         # The volume delete is blocked while a config still mounts it, so the
         # config must be dropped before the volume.
-        _safe(delete_deployment_config_if_exists, sdk, workspace=workspace, name=config_name)
-        _safe(delete_volume_if_exists, sdk, workspace=workspace, name=volume_name)
-        _safe(wait_for_volume_deleted, sdk, workspace=workspace, name=volume_name)
+        _safe(delete_deployment_config_if_exists, client, workspace=workspace, name=config_name)
+        _safe(delete_volume_if_exists, client, workspace=workspace, name=volume_name)
+        _safe(wait_for_volume_deleted, client, workspace=workspace, name=volume_name)
 
 
 def _safe(fn: Any, *args: Any, **kwargs: Any) -> None:
