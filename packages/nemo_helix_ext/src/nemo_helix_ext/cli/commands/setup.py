@@ -32,12 +32,13 @@ from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.entities import DEFAULT_WORKSPACE, parse_qualified_name
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.refs import model_entity_route_openai_url
 from nemo_helix_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
@@ -2023,7 +2024,17 @@ def _deploy_demo_agent_impl(
         config_dict = expand_env_vars(config_dict, vars_dict={"NEMO_DEFAULT_MODEL": default_model})
         config_format = config_dict.get("config_format", "nat-workflow-v1")
         if config_format == "nemo-agents-spec-v1":
-            config_dict["models"]["default"]["model"] = default_model
+            # Fabric sends ``model`` to the OpenAI-compatible endpoint, where a
+            # workspace-qualified entity ID is invalid. Bind the exact entity
+            # route so an agent in ``sample`` can still use a model in ``default``.
+            model_workspace, model_name = parse_qualified_name(default_model)
+            model_config = config_dict["models"]["default"]
+            model_config["model"] = model_name
+            model_config["base_url"] = model_entity_route_openai_url(
+                base_url=base_url,
+                workspace=model_workspace,
+                name=model_name,
+            )
         payload = {
             "name": agent_name,
             "description": description,
@@ -2055,17 +2066,17 @@ def _deploy_demo_agent_impl(
 
     resp.raise_for_status()
     deployment_name = resp.json().get("name", "")
-    console.print(f"  {CHECK} Deployed agent '{agent_name}'")
 
     # Poll the specific deployment we just created by name, not the full
     # list.  Previous runs may leave stale "failed" deployments that would
     # confuse a list-and-scan approach.
     start = time.monotonic()
     deadline = start + _AGENT_DEPLOY_TIMEOUT_SECONDS
-    with console.status("[bold cyan]Waiting for agent deployment...") as spinner:
+    terminal_status: str | None = None
+    with console.status(f"[bold cyan]Deploying agent '{agent_name}'...") as spinner:
         while time.monotonic() < deadline:
             elapsed = int(time.monotonic() - start)
-            spinner.update(f"[bold cyan]Waiting for agent deployment... ({elapsed}s)")
+            spinner.update(f"[bold cyan]Deploying agent '{agent_name}'... ({elapsed}s)")
             try:
                 dep_resp = httpx.get(
                     f"{api_base}/apis/agents/v2/workspaces/{workspace}/deployments/{deployment_name}",
@@ -2075,14 +2086,19 @@ def _deploy_demo_agent_impl(
                 )
                 if dep_resp.status_code == 200:
                     dep_status = dep_resp.json().get("status", "")
-                    if dep_status == "running":
-                        return True
-                    if dep_status == "failed":
-                        console.print(f"  {CROSS} Agent deployment failed")
-                        return False
+                    if dep_status in {"running", "failed"}:
+                        terminal_status = dep_status
+                        break
             except Exception:
                 logger.debug("Agent deployment status poll failed", exc_info=True)
             _pause(_AGENT_DEPLOY_POLL_INTERVAL)
+
+    if terminal_status == "running":
+        console.print(f"  {CHECK} Deployed agent '{agent_name}'")
+        return True
+    if terminal_status == "failed":
+        console.print(f"  {CROSS} Agent deployment failed")
+        return False
 
     console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
     return False
@@ -3203,12 +3219,22 @@ def _print_setup_complete(
     if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
         raise typer.Exit(1)
 
-    console.print(f"\n{CHECK} [green bold]Setup complete![/green bold]")
-    console.print(f"  Provider: {provider_name}")
+    lines = [f"[bold]Provider:[/bold] {provider_name}"]
     if default_model:
-        console.print(f"  Default model: {_display_model_name(default_model)}")
+        lines.append(f"[bold]Default model:[/bold] {_display_model_name(default_model)}")
     if fast_model:
-        console.print(f"  Fast model: {_display_model_name(fast_model)}")
+        lines.append(f"[bold]Fast model:[/bold] {_display_model_name(fast_model)}")
+
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Setup complete[/bold]",
+            title_align="left",
+            border_style="green",
+            box=box.ROUNDED,
+            padding=(1, 1),
+        )
+    )
 
 
 def _ensure_workspace_exists(

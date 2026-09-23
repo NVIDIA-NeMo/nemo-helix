@@ -4125,6 +4125,27 @@ class TestDeployDemoAgentSpinner:
         assert result is True
         mock_console.status.assert_called()
 
+    def test_reports_deployed_only_after_running_status(self, tmp_path, spinner_console):
+        config = tmp_path / "calculator-agent.yml"
+        config.write_text("llms: {}\n")
+
+        responses = self._mock_deploy_responses(status_sequence=["failed"])
+        mock_console, _ = spinner_console
+
+        with (
+            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
+            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]),
+            patch(f"{self._MOD}._agent_exists", return_value=False),
+            patch(f"{self._MOD}._pause"),
+            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
+        ):
+            result = _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+
+        printed = [str(call.args[0]) for call in mock_console.print.call_args_list]
+        assert result is False
+        assert not any("Deployed agent" in message for message in printed)
+        assert any("Agent deployment failed" in message for message in printed)
+
     def test_spinner_updates_with_elapsed_time(self, tmp_path, spinner_console):
         """status.update() should include elapsed seconds during deploy polling."""
         config = tmp_path / "calculator-agent.yml"
@@ -4241,7 +4262,7 @@ class TestDeployDemoAgentSpinner:
                 "http://localhost:8080",
                 "sample",
                 config,
-                default_model="sample/selected-model",
+                default_model="default/selected-model",
                 agent_name="email-security-triage",
                 description="Setup sample",
             )
@@ -4265,7 +4286,11 @@ class TestDeployDemoAgentSpinner:
                 "models": {
                     "default": {
                         "provider": "nvidia",
-                        "model": "sample/selected-model",
+                        "model": "selected-model",
+                        "base_url": (
+                            "http://localhost:8080/apis/inference-gateway/v2/workspaces/"
+                            "default/model/selected-model/-/v1"
+                        ),
                     }
                 },
             },
@@ -5059,11 +5084,12 @@ class TestPrintSetupComplete:
                 fast_model="default/fast-model",
             )
 
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "Setup complete" in printed
-        assert "nvidia-build" in printed
-        assert "some-model" in printed
-        assert "fast-model" in printed
+        panel = mock_console.print.call_args.args[0]
+        assert panel.title == "[bold]Setup complete[/bold]"
+        assert panel.border_style == "green"
+        assert "Provider:[/bold] nvidia-build" in panel.renderable
+        assert "Default model:[/bold] some-model" in panel.renderable
+        assert "Fast model:[/bold] fast-model" in panel.renderable
 
     def test_unhealthy_platform_exits(self):
         with (
