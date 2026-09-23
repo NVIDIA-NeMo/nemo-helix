@@ -978,9 +978,7 @@ async def virtual_model_proxy(
 ) -> Response:
     """Execute the full VirtualModel middleware pipeline and return a streaming response.
 
-    *permission* is the calling route's exec permission. The model entity the request
-    finally resolves to, and a LoRA adapter's own workspace, are checked against it when
-    they lie outside *workspace* (see :func:`may_use_from_workspace`).
+    *permission* is the calling route's exec permission, checked for entities outside *workspace*.
 
     Shared implementation for both ``openai_proxy`` and ``model_entity_proxy``.
     The caller is responsible for:
@@ -1000,17 +998,18 @@ async def virtual_model_proxy(
     instead of silently bypassing the middleware chain. Recovery is automatic
     once the next IGW polling cycle re-resolves the VM cleanly.
     """
-    if (workspace, vm_name) in registry.broken_vms:
+    vm_key = (virtual_model.workspace or workspace, vm_name)
+    if vm_key in registry.broken_vms:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 f"Middleware configuration unavailable for VirtualModel "
-                f"'{workspace}/{vm_name}'. A referenced config may have been "
+                f"'{vm_key[0]}/{vm_name}'. A referenced config may have been "
                 "deleted, or a plugin failed to validate it."
             ),
         )
 
-    request_middleware_calls = registry.request_middleware_calls.get((workspace, vm_name), [])
+    request_middleware_calls = registry.request_middleware_calls.get(vm_key, [])
     logger.debug(
         "virtual_model_proxy entry: workspace=%s vm_name=%s body_model_in=%r "
         "vm_default_model_entity=%r request_middleware_count=%d",
@@ -1108,12 +1107,10 @@ async def virtual_model_proxy(
             ) from exc
 
         resolved_model_entity = model_cache.get_from_model_entity(modified_model_ref.workspace, modified_model_ref.name)
-        # A model entity shared in from the global workspace, or a LoRA adapter living in
-        # another workspace, is usable only by a caller entitled there; to anyone else it
-        # does not exist.
+        # Checked against the route workspace: body["model"] is caller- or middleware-controlled.
         adapter_parts = parse_adapters_suffix(modified_model_ref.name)
         if resolved_model_entity is not None and (
-            not await may_use_from_workspace(modified_model_ref.workspace, resolved_model_entity.workspace, permission)
+            not await may_use_from_workspace(workspace, resolved_model_entity.workspace, permission)
             or (adapter_parts is not None and not await may_use_from_workspace(workspace, adapter_parts[1], permission))
         ):
             resolved_model_entity = None
@@ -1272,7 +1269,7 @@ async def virtual_model_proxy(
         )
 
     # Response middleware chain.
-    response_middleware_calls = registry.response_middleware_calls.get((workspace, vm_name), [])
+    response_middleware_calls = registry.response_middleware_calls.get(vm_key, [])
     if response_middleware_calls:
         inference_response = build_inference_response(
             inference_response.result,
@@ -1300,7 +1297,7 @@ async def virtual_model_proxy(
     )
 
     # Post-response middleware (fire-and-forget, non-streaming only).
-    post_response_middleware_calls = registry.post_response_middleware_calls.get((workspace, vm_name), [])
+    post_response_middleware_calls = registry.post_response_middleware_calls.get(vm_key, [])
     if post_response_middleware_calls and not is_streaming:
         post_response = inference_response
         if not response_middleware_calls:

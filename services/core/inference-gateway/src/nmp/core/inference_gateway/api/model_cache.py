@@ -282,7 +282,7 @@ async def refresh_model_cache(
 
     # Update or add providers from the fetched list
     for model_provider in model_providers:
-        model_info = model_cache.get_from_provider(model_provider.workspace, model_provider.name)
+        model_info = model_cache.workspace_name_provider_map.get((model_provider.workspace, model_provider.name))
         if model_info is None:
             model_info = ModelProviderInfo(model_provider=model_provider)
         else:
