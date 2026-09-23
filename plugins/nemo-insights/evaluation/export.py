@@ -15,7 +15,7 @@ API silently injects a 30-day default lookback when none is given, so an
 import asyncio
 import json
 import shutil
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +24,8 @@ from urllib.parse import urlparse
 
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_ext.config.config import Config
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 PAGE_SIZE = 1000
@@ -39,6 +41,17 @@ def make_client(base_url: str) -> AsyncNeMoHelix:
     if host in _LOOPBACK_HOSTS or not config_path.exists():
         return AsyncNeMoHelix(base_url=base_url, timeout=60.0)
     return AsyncNeMoHelix(base_url=base_url, config_path=config_path, timeout=60.0)
+
+
+def _intake_client(client: AsyncNeMoHelix) -> AsyncIntakeClient:
+    """Typed Intake client sharing the platform client's transport and auth."""
+    return client_from_platform(client, AsyncIntakeClient)
+
+
+async def _items(paginator) -> AsyncIterator:
+    """Iterate every item of an awaitable typed paginated response."""
+    async for item in (await paginator).items():
+        yield item
 
 
 def _dump(item) -> dict:
@@ -140,6 +153,7 @@ def export_workspaces(
 
 async def _resolve_experiment_scope(
     client: AsyncNeMoHelix,
+    intake: AsyncIntakeClient,
     *,
     workspace: str,
     experiment_name: str,
@@ -166,14 +180,16 @@ async def _resolve_experiment_scope(
 
     traces: dict[str, tuple[str, int]] = {}
     for evaluation_name in evaluation_names:
-        paginator = client.intake.traces.list(
+        paginator = intake.list_traces(
             workspace=workspace,
-            page_size=PAGE_SIZE,
-            mode="preview",
-            sort="started_at",
-            filter=cast(Any, {"evaluation_id": evaluation_name, "started_at": {"gte": lower}}),
+            query_params={
+                "page_size": PAGE_SIZE,
+                "mode": "preview",
+                "sort": "started_at",
+                "filter": {"evaluation_id": evaluation_name, "started_at": {"gte": lower}},
+            },
         )
-        async for trace in paginator:
+        async for trace in _items(paginator):
             if trace.span_count is None:
                 raise RuntimeError(f"{workspace}/{trace.id}: preview response omitted span_count")
             value = (trace.session_id, trace.span_count)
@@ -195,7 +211,7 @@ async def _resolve_experiment_scope(
 
 
 async def _export_scoped_workspace(
-    client: AsyncNeMoHelix,
+    intake: AsyncIntakeClient,
     *,
     workspace: str,
     ws_dir: Path,
@@ -212,12 +228,16 @@ async def _export_scoped_workspace(
         path = parts / f"{index:06d}.jsonl"
         async with semaphore:
             count = await _drain_to_jsonl(
-                client.intake.spans.list(
-                    workspace=workspace,
-                    page_size=PAGE_SIZE,
-                    mode="detailed",
-                    sort="started_at",
-                    filter=cast(Any, {"trace_id": trace_id, "started_at": {"gte": epoch}}),
+                _items(
+                    intake.list_spans(
+                        workspace=workspace,
+                        query_params={
+                            "page_size": PAGE_SIZE,
+                            "mode": "detailed",
+                            "sort": "started_at",
+                            "filter": {"trace_id": trace_id, "started_at": {"gte": epoch}},
+                        },
+                    )
                 ),
                 path,
                 on_doc=bounds.note,
@@ -241,23 +261,27 @@ async def _export_scoped_workspace(
             f"but export returned {n_spans}; the source changed during capture"
         )
 
-    async def drain_sessions(collection, path: Path) -> int:
+    async def drain_sessions(list_method, path: Path) -> int:
         count = 0
         with path.open("w", encoding="utf-8") as stream:
             for session_id in scope.session_ids:
                 count += await _drain_to_stream(
-                    collection.list(
-                        workspace=workspace,
-                        page_size=PAGE_SIZE,
-                        sort="created_at",
-                        filter=cast(Any, {"session_id": session_id, "created_at": {"gte": epoch}}),
+                    _items(
+                        list_method(
+                            workspace=workspace,
+                            query_params={
+                                "page_size": PAGE_SIZE,
+                                "sort": "created_at",
+                                "filter": {"session_id": session_id, "created_at": {"gte": epoch}},
+                            },
+                        )
                     ),
                     stream,
                 )
         return count
 
-    n_annotations = await drain_sessions(client.intake.annotations, ws_dir / "annotations.jsonl")
-    n_results = await drain_sessions(client.intake.evaluator_results, ws_dir / "evaluator_results.jsonl")
+    n_annotations = await drain_sessions(intake.list_annotations, ws_dir / "annotations.jsonl")
+    n_results = await drain_sessions(intake.list_evaluator_results, ws_dir / "evaluator_results.jsonl")
     return {"spans": n_spans, "annotations": n_annotations, "evaluator_results": n_results}
 
 
@@ -280,6 +304,7 @@ async def _export_workspaces(
     counts: dict[str, dict[str, int]] = {}
     selections: dict[str, dict] = {}
     client = client if client is not None else make_client(base_url)
+    intake = _intake_client(client)
     try:
         for workspace in workspaces:
             ws_dir = out_dir / "export" / workspace
@@ -287,6 +312,7 @@ async def _export_workspaces(
             scope = (
                 await _resolve_experiment_scope(
                     client,
+                    intake,
                     workspace=workspace,
                     experiment_name=experiment,
                     lower=lower,
@@ -305,7 +331,7 @@ async def _export_workspaces(
             )
             if scope is not None:
                 counts[workspace] = await _export_scoped_workspace(
-                    client,
+                    intake,
                     workspace=workspace,
                     ws_dir=ws_dir,
                     scope=scope,
@@ -319,28 +345,34 @@ async def _export_workspaces(
                     f"{workspace_counts['evaluator_results']} evaluator results"
                 )
                 continue
-            spans = client.intake.spans.list(
+            spans = intake.list_spans(
                 workspace=workspace,
-                page_size=PAGE_SIZE,
-                mode="detailed",
-                sort="started_at",
-                filter=cast(Any, {"started_at": {"gte": lower}}),
+                query_params={
+                    "page_size": PAGE_SIZE,
+                    "mode": "detailed",
+                    "sort": "started_at",
+                    "filter": {"started_at": {"gte": lower}},
+                },
             )
-            n_spans = await _drain_to_jsonl(spans, ws_dir / "spans.jsonl", on_doc=bounds.note)
-            annotations = client.intake.annotations.list(
+            n_spans = await _drain_to_jsonl(_items(spans), ws_dir / "spans.jsonl", on_doc=bounds.note)
+            annotations = intake.list_annotations(
                 workspace=workspace,
-                page_size=PAGE_SIZE,
-                sort="created_at",
-                filter=cast(Any, {"created_at": {"gte": lower}}),
+                query_params={
+                    "page_size": PAGE_SIZE,
+                    "sort": "created_at",
+                    "filter": {"created_at": {"gte": lower}},
+                },
             )
-            n_annotations = await _drain_to_jsonl(annotations, ws_dir / "annotations.jsonl")
-            results = client.intake.evaluator_results.list(
+            n_annotations = await _drain_to_jsonl(_items(annotations), ws_dir / "annotations.jsonl")
+            results = intake.list_evaluator_results(
                 workspace=workspace,
-                page_size=PAGE_SIZE,
-                sort="created_at",
-                filter=cast(Any, {"created_at": {"gte": lower}}),
+                query_params={
+                    "page_size": PAGE_SIZE,
+                    "sort": "created_at",
+                    "filter": {"created_at": {"gte": lower}},
+                },
             )
-            n_results = await _drain_to_jsonl(results, ws_dir / "evaluator_results.jsonl")
+            n_results = await _drain_to_jsonl(_items(results), ws_dir / "evaluator_results.jsonl")
             counts[workspace] = {
                 "spans": n_spans,
                 "annotations": n_annotations,
