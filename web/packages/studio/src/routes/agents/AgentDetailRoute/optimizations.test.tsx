@@ -179,8 +179,11 @@ describe('AgentDetailRoute optimizations tab', () => {
 
     await deleteFromRow(user, 'brevity-sweep-3');
 
-    await waitFor(() => expect(deleted.filesets).toEqual([BUNDLE]));
-    expect(deleted.studies).toEqual(['brevity-sweep-3']);
+    // The bundle goes first, so waiting on it alone would settle before the study delete lands.
+    await waitFor(() => {
+      expect(deleted.filesets).toEqual([BUNDLE]);
+      expect(deleted.studies).toEqual(['brevity-sweep-3']);
+    });
   });
 
   it('leaves a fileset the study does not run from alone, however the study marks it', async () => {
