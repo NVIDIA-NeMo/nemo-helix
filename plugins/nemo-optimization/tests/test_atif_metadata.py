@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from nemo_optimization.backends.optuna.atif_metadata import (
+from nemo_optimization.atif_metadata import (
     ATIF_EXPERIMENT_ID,
     ATIF_REP,
     ATIF_ROW_ID,
