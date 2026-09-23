@@ -16,6 +16,9 @@ import re
 from pathlib import Path
 
 import nemo_evals.intake as intake
+import pytest
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
 
 INTAKE_ROOT = Path(next(iter(intake.__path__))).resolve()
 
@@ -35,3 +38,10 @@ def test_intake_mapping_has_no_service_imports() -> None:
             offenders.append(f"{path.relative_to(INTAKE_ROOT)}:{line_no}: {match.group(0).strip()}")
 
     assert not offenders, "nemo_evals.intake must not import the Intake service / transport:\n" + "\n".join(offenders)
+
+
+@pytest.mark.asyncio
+async def test_typed_intake_client_imports_without_generated_sdk() -> None:
+    async with AsyncNemoClient(base_url="http://platform.test") as async_client:
+        intake_client = AsyncIntakeClient.from_client(async_client)
+        assert intake_client.traces is not None
