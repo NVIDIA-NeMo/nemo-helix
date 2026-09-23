@@ -199,6 +199,16 @@ class PushStepConfig(BaseModel):
 
     signing: SigningConfig
     images: list[PushImage] = Field(min_length=1)
+    credential_registry: str | None = Field(
+        default=None,
+        description=(
+            "The one registry host a bare `user:password` credential is presented to: the "
+            "deployment's `default_registry`. Never derived from the images' destinations, "
+            "because a spec may name its own registry, and binding the credential to whatever "
+            "host a caller names would hand it to that host. A dockerconfigjson credential "
+            "ignores this -- it already says which hosts it is for."
+        ),
+    )
     insecure: bool = Field(
         default=False,
         description=(

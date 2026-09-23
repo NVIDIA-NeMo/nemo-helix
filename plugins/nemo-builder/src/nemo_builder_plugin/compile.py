@@ -299,6 +299,8 @@ def _push_step(
         config=PushStepConfig(
             signing=SigningConfig(key=resolved.signing_key, storage=config.signature_storage),
             images=images,
+            # The operator's registry, not any destination a spec named. See the field.
+            credential_registry=config.default_registry,
             insecure=config.registry_insecure,
         ).model_dump(),
     )

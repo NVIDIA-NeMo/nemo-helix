@@ -25,6 +25,7 @@ build.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -47,7 +48,11 @@ _CHUNK = 1024 * 1024
 CREDENTIAL_ENVVAR = "NMP_REGISTRY_AUTH"
 
 
-def _materialize_credential() -> str | None:
+class CredentialError(Exception):
+    """The injected credential cannot be turned into something crane and cosign will use."""
+
+
+def _materialize_credential(registry: str | None) -> str | None:
     """Write the injected credential where crane and cosign will look for it.
 
     Both read a Docker config, so the value has to land on a filesystem somewhere -- there is no
@@ -57,6 +62,12 @@ def _materialize_credential() -> str | None:
 
     Accepts either a full dockerconfigjson or a bare `user:password`, because a deployment's
     Secrets entry is more likely to hold whichever its operator already had.
+
+    **A bare credential names no host, so it is bound to ``registry``** -- the deployment's
+    default registry, handed over by the compiler. An earlier version read the host from an
+    environment variable nothing set, wrote the credential under the key ``""``, and crane,
+    matching no host, pushed anonymously. With no registry to bind to, this refuses rather than
+    guessing: the alternative guesses are the images' destinations, which a caller chooses.
     """
     raw = os.environ.get(CREDENTIAL_ENVVAR)
     if not raw:
@@ -67,10 +78,14 @@ def _materialize_credential() -> str | None:
     if raw.startswith("{"):
         config = raw
     else:
-        import base64
-
-        username, _, password = raw.partition(":")
-        registry = os.environ.get("NMP_REGISTRY_HOST", "")
+        username, separator, password = raw.partition(":")
+        if not separator:
+            raise CredentialError(f"{CREDENTIAL_ENVVAR} is neither a docker config nor `user:password`")
+        if not registry:
+            raise CredentialError(
+                f"{CREDENTIAL_ENVVAR} is a bare `user:password`, which names no registry, and this "
+                "deployment has no default_registry to bind it to. Store a dockerconfigjson instead."
+            )
         auth = base64.b64encode(f"{username}:{password}".encode()).decode()
         config = json.dumps({"auths": {registry: {"auth": auth}}})
 
@@ -212,7 +227,13 @@ def _push_one(image: PushImage, signing: SigningConfig, insecure: bool = False) 
 
 def main() -> int:
     config = PushStepConfig.model_validate(read_step_config())
-    _materialize_credential()
+    try:
+        _materialize_credential(config.credential_registry)
+    except CredentialError as exc:
+        # Nothing is pushed. Publishing anonymously when a credential was configured would hide
+        # the misconfiguration behind a registry's 401, or worse, succeed somewhere it shouldn't.
+        logger.error("%s", exc)
+        return 1
 
     published = 0
     failures = 0

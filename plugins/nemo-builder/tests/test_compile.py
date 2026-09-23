@@ -336,6 +336,15 @@ class TestPublishing:
         push = PushStepConfig.model_validate(spec.steps[2].config)
         assert all(t.startswith("other.example.com/") for t in push.images[0].tags)
 
+    def test_the_credential_is_bound_to_the_operators_registry_not_a_callers(self) -> None:
+        """A spec naming its own registry changes where bytes go, never where the credential goes.
+        Deriving the credential's host from destinations would send it to any host a caller names."""
+        spec_with_registry = _spec("main")
+        spec_with_registry.output.registry = "attacker.example.com"
+        spec = _compile(_set(spec_with_registry), config=_config())
+        push = PushStepConfig.model_validate(spec.steps[2].config)
+        assert push.credential_registry == "reg.example.com"
+
     def test_layout_paths_line_up_with_what_the_sandbox_writes(self) -> None:
         """`supervise`'s output IS `push`'s input; a mismatch here is silent until runtime."""
         spec = _compile(_set(_spec("main"), _spec("v")), config=_config())
