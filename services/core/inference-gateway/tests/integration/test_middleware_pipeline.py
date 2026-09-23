@@ -33,14 +33,23 @@ from typing import Any
 import pytest
 from nemo_deployments_plugin.backends.labels import container_name as plugin_container_name
 from nemo_deployments_plugin.backends.labels import docker_volume_name
-from nemo_helix import NeMoHelix, NotFoundError
 from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceRequest,
     InferenceResponse,
     NemoInferenceMiddleware,
+)
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
 )
 from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
@@ -54,14 +63,20 @@ from nhx.core.inference_gateway.api.model_cache import ModelProviderInfo
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from nhx.core.models.controllers.backends.deployments_plugin.naming import entity_names
 from nhx.core.models.controllers.models_controller import ModelsController
+from nhx.testing import ClientContext
 from tenacity import retry, stop_after_delay, wait_fixed
 
 DEFAULT_WORKSPACE = "default"
 
 
+def _gateway(ctx: ClientContext) -> InferenceGatewayClient:
+    """Typed gateway client for the in-process app."""
+    return InferenceGatewayClient(base_url="http://testserver", http_client=ctx.test_client)
+
+
 def _wait_for_deployment_deleted(
     controller: ModelsController,
-    sdk: NeMoHelix,
+    models: ModelsClient,
     deployment_name: str,
     max_wait: float = 30,
     poll_interval: float = 0.1,
@@ -79,10 +94,7 @@ def _wait_for_deployment_deleted(
     def _poll() -> None:
         controller.step()
         try:
-            deployment = sdk.inference.deployments.retrieve(
-                deployment_name,
-                workspace=DEFAULT_WORKSPACE,
-            )
+            deployment = models.get_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
         except NotFoundError:
             return
         assert deployment.status == "DELETED", f"Deployment not DELETED: {deployment.status}"
@@ -376,13 +388,19 @@ def test_middleware_immediate_response_and_response_mutation(test_clients):
     )
 
     try:
-        response = test_clients.sdk.inference.gateway.openai.post(
-            "v1/chat/completions",
-            workspace=DEFAULT_WORKSPACE,
-            body={
-                "model": vm_name,
-                "messages": [{"role": "user", "content": "hello"}],
-            },
+        response = (
+            _gateway(test_clients)
+            .openai_post(
+                trailing_uri="v1/chat/completions",
+                workspace=DEFAULT_WORKSPACE,
+                body=JsonBody(
+                    {
+                        "model": vm_name,
+                        "messages": [{"role": "user", "content": "hello"}],
+                    }
+                ),
+            )
+            .data()
         )
         # Request middleware ran: response has the ImmediateResponse canned id
         assert response.get("id") == ImmediateResponseMiddleware.REQUEST_MARKER, (
@@ -421,7 +439,9 @@ def test_middleware_request_and_response_mutation_through_backend(
        the response dict.
     6. Assertions verify both mutations: a valid NIM response AND the sentinel.
     """
-    controller, model_cache, sdk, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    controller, model_cache, client, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    models = ModelsClient.from_client(client)
+    gateway = InferenceGatewayClient.from_client(client)
     test_uuid = uuid.uuid4().hex[:8]
 
     config_name = f"test-mw-{test_uuid}"
@@ -440,40 +460,41 @@ def test_middleware_request_and_response_mutation_through_backend(
 
     # ---- Phase 1: Deploy mock NIM ----------------------------------------
     image_name, image_tag = mock_nim_image.rsplit(":", 1)
-    sdk.inference.deployment_configs.create(
+    models.create_deployment_config(
         workspace=DEFAULT_WORKSPACE,
-        name=config_name,
-        engine="nim",
-        model_spec={},
-        executor_config={"gpu": 0, "image_name": image_name, "image_tag": image_tag},
+        body=CreateModelDeploymentConfigRequest(
+            name=config_name,
+            engine="nim",
+            model_spec={},
+            executor_config={"gpu": 0, "image_name": image_name, "image_tag": image_tag},
+        ),
     )
-    sdk.inference.deployments.create(
-        workspace=DEFAULT_WORKSPACE,
-        name=deployment_name,
-        config=config_name,
+    models.create_deployment(
+        workspace=DEFAULT_WORKSPACE, body=CreateModelDeploymentRequest(name=deployment_name, config=config_name)
     )
 
     @retry(stop=stop_after_delay(30), wait=wait_fixed(0.1), reraise=True)
     def _wait_ready():
         controller.step()
-        dep = sdk.inference.deployments.retrieve(deployment_name, workspace=DEFAULT_WORKSPACE)
+        dep = models.get_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
         assert dep.status == "READY", f"Not READY: {dep.status}"
 
     _wait_ready()
 
     # ---- Phase 2: Wire up served_models and populate the model cache ------
-    sdk.inference.providers.update_status(
-        deployment_name,
+    models.update_provider_status(
+        name=deployment_name,
         workspace=DEFAULT_WORKSPACE,
-        served_models=[
-            {
-                "model_entity_id": f"{DEFAULT_WORKSPACE}/{model_entity_name}",
-                "served_model_name": served_model_name,
-            }
-        ],
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(
+                    model_entity_id=f"{DEFAULT_WORKSPACE}/{model_entity_name}", served_model_name=served_model_name
+                )
+            ]
+        ),
     )
 
-    provider = sdk.inference.providers.retrieve(deployment_name, workspace=DEFAULT_WORKSPACE)
+    provider = models.get_provider(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
     model_cache.workspace_name_provider_map[(DEFAULT_WORKSPACE, deployment_name)] = ModelProviderInfo(
         model_provider=provider
     )
@@ -501,14 +522,16 @@ def test_middleware_request_and_response_mutation_through_backend(
         # ---- Phase 4: Make inference request via VirtualModel alias --------
         # Without the request middleware this would 422 because vm_name has
         # no default_model_entity and is not itself a model entity.
-        response = sdk.inference.gateway.openai.post(
-            "v1/chat/completions",
+        response = gateway.openai_post(
+            trailing_uri="v1/chat/completions",
             workspace=DEFAULT_WORKSPACE,
-            body={
-                "model": vm_name,
-                "messages": [{"role": "user", "content": "hello from middleware test"}],
-            },
-        )
+            body=JsonBody(
+                {
+                    "model": vm_name,
+                    "messages": [{"role": "user", "content": "hello from middleware test"}],
+                }
+            ),
+        ).data()
 
         # Request mutation: routing succeeded → mock-NIM returned a valid chat response
         assert "choices" in response or "message" in response, (
@@ -524,9 +547,9 @@ def test_middleware_request_and_response_mutation_through_backend(
         _cleanup(registry, vm_cache, DEFAULT_WORKSPACE, vm_name, [router_key, marker_key])
 
         # ---- Phase 5: Cleanup --------------------------------------------
-        sdk.inference.deployments.delete(deployment_name, workspace=DEFAULT_WORKSPACE)
-        _wait_for_deployment_deleted(controller, sdk, deployment_name)
-        sdk.inference.deployment_configs.delete(config_name, workspace=DEFAULT_WORKSPACE)
+        models.delete_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE)
+        _wait_for_deployment_deleted(controller, models, deployment_name)
+        models.delete_deployment_config(name=config_name, workspace=DEFAULT_WORKSPACE)
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +568,9 @@ def test_model_endpoint_request_and_response_mutation_through_backend(
 
     Ensures the model entity proxy path executes the full middleware pipeline.
     """
-    controller, model_cache, sdk, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    controller, model_cache, client, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    models = ModelsClient.from_client(client)
+    gateway = InferenceGatewayClient.from_client(client)
     test_uuid = uuid.uuid4().hex[:8]
 
     config_name = f"test-mep-{test_uuid}"
@@ -564,35 +589,40 @@ def test_model_endpoint_request_and_response_mutation_through_backend(
 
     # ---- Phase 1: Deploy mock NIM ----------------------------------------
     image_name, image_tag = mock_nim_image.rsplit(":", 1)
-    sdk.inference.deployment_configs.create(
+    models.create_deployment_config(
         workspace=DEFAULT_WORKSPACE,
-        name=config_name,
-        engine="nim",
-        model_spec={},
-        executor_config={"gpu": 0, "image_name": image_name, "image_tag": image_tag},
+        body=CreateModelDeploymentConfigRequest(
+            name=config_name,
+            engine="nim",
+            model_spec={},
+            executor_config={"gpu": 0, "image_name": image_name, "image_tag": image_tag},
+        ),
     )
-    sdk.inference.deployments.create(workspace=DEFAULT_WORKSPACE, name=deployment_name, config=config_name)
+    models.create_deployment(
+        workspace=DEFAULT_WORKSPACE, body=CreateModelDeploymentRequest(name=deployment_name, config=config_name)
+    )
 
     @retry(stop=stop_after_delay(30), wait=wait_fixed(0.1), reraise=True)
     def _wait_ready():
         controller.step()
-        dep = sdk.inference.deployments.retrieve(deployment_name, workspace=DEFAULT_WORKSPACE)
+        dep = models.get_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
         assert dep.status == "READY", f"Not READY: {dep.status}"
 
     _wait_ready()
 
     # ---- Phase 2: Wire up served_models and populate the model cache ------
-    sdk.inference.providers.update_status(
-        deployment_name,
+    models.update_provider_status(
+        name=deployment_name,
         workspace=DEFAULT_WORKSPACE,
-        served_models=[
-            {
-                "model_entity_id": f"{DEFAULT_WORKSPACE}/{model_entity_name}",
-                "served_model_name": served_model_name,
-            }
-        ],
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(
+                    model_entity_id=f"{DEFAULT_WORKSPACE}/{model_entity_name}", served_model_name=served_model_name
+                )
+            ]
+        ),
     )
-    provider = sdk.inference.providers.retrieve(deployment_name, workspace=DEFAULT_WORKSPACE)
+    provider = models.get_provider(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
     model_cache.workspace_name_provider_map[(DEFAULT_WORKSPACE, deployment_name)] = ModelProviderInfo(
         model_provider=provider
     )
@@ -616,15 +646,17 @@ def test_model_endpoint_request_and_response_mutation_through_backend(
 
     try:
         # ---- Phase 4: Make inference request via model endpoint -----------
-        response = sdk.inference.gateway.model.post(
-            "v1/chat/completions",
+        response = gateway.model_post(
+            trailing_uri="v1/chat/completions",
             name=vm_name,
             workspace=DEFAULT_WORKSPACE,
-            body={
-                "model": vm_name,
-                "messages": [{"role": "user", "content": "hello from model endpoint test"}],
-            },
-        )
+            body=JsonBody(
+                {
+                    "model": vm_name,
+                    "messages": [{"role": "user", "content": "hello from model endpoint test"}],
+                }
+            ),
+        ).data()
 
         assert "choices" in response or "message" in response, (
             f"Expected valid chat response from mock-NIM, got: {response}"
@@ -635,9 +667,9 @@ def test_model_endpoint_request_and_response_mutation_through_backend(
 
     finally:
         _cleanup(registry, vm_cache, DEFAULT_WORKSPACE, vm_name, [router_key, marker_key])
-        sdk.inference.deployments.delete(deployment_name, workspace=DEFAULT_WORKSPACE)
-        _wait_for_deployment_deleted(controller, sdk, deployment_name)
-        sdk.inference.deployment_configs.delete(config_name, workspace=DEFAULT_WORKSPACE)
+        models.delete_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE)
+        _wait_for_deployment_deleted(controller, models, deployment_name)
+        models.delete_deployment_config(name=config_name, workspace=DEFAULT_WORKSPACE)
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +698,9 @@ def test_model_endpoint_non_model_body_mutation_regression(
     the mutation regardless of the bug).  See the docstring on
     ``RequestBodyEchoMiddleware`` for details.
     """
-    controller, model_cache, sdk, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    controller, model_cache, client, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    models = ModelsClient.from_client(client)
+    gateway = InferenceGatewayClient.from_client(client)
     test_uuid = uuid.uuid4().hex[:8]
 
     config_name = f"test-mep-reg-{test_uuid}"
@@ -685,35 +719,40 @@ def test_model_endpoint_non_model_body_mutation_regression(
 
     # ---- Phase 1: Deploy mock NIM ----------------------------------------
     image_name, image_tag = mock_nim_image.rsplit(":", 1)
-    sdk.inference.deployment_configs.create(
+    models.create_deployment_config(
         workspace=DEFAULT_WORKSPACE,
-        name=config_name,
-        engine="nim",
-        model_spec={},
-        executor_config={"gpu": 0, "image_name": image_name, "image_tag": image_tag},
+        body=CreateModelDeploymentConfigRequest(
+            name=config_name,
+            engine="nim",
+            model_spec={},
+            executor_config={"gpu": 0, "image_name": image_name, "image_tag": image_tag},
+        ),
     )
-    sdk.inference.deployments.create(workspace=DEFAULT_WORKSPACE, name=deployment_name, config=config_name)
+    models.create_deployment(
+        workspace=DEFAULT_WORKSPACE, body=CreateModelDeploymentRequest(name=deployment_name, config=config_name)
+    )
 
     @retry(stop=stop_after_delay(30), wait=wait_fixed(0.1), reraise=True)
     def _wait_ready():
         controller.step()
-        dep = sdk.inference.deployments.retrieve(deployment_name, workspace=DEFAULT_WORKSPACE)
+        dep = models.get_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
         assert dep.status == "READY", f"Not READY: {dep.status}"
 
     _wait_ready()
 
     # ---- Phase 2: Wire up served_models and populate the model cache ------
-    sdk.inference.providers.update_status(
-        deployment_name,
+    models.update_provider_status(
+        name=deployment_name,
         workspace=DEFAULT_WORKSPACE,
-        served_models=[
-            {
-                "model_entity_id": f"{DEFAULT_WORKSPACE}/{model_entity_name}",
-                "served_model_name": served_model_name,
-            }
-        ],
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(
+                    model_entity_id=f"{DEFAULT_WORKSPACE}/{model_entity_name}", served_model_name=served_model_name
+                )
+            ]
+        ),
     )
-    provider = sdk.inference.providers.retrieve(deployment_name, workspace=DEFAULT_WORKSPACE)
+    provider = models.get_provider(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
     model_cache.workspace_name_provider_map[(DEFAULT_WORKSPACE, deployment_name)] = ModelProviderInfo(
         model_provider=provider
     )
@@ -759,15 +798,17 @@ def test_model_endpoint_non_model_body_mutation_regression(
     )
 
     try:
-        response = sdk.inference.gateway.model.post(
-            "v1/chat/completions",
+        response = gateway.model_post(
+            trailing_uri="v1/chat/completions",
             name=vm_name,
             workspace=DEFAULT_WORKSPACE,
-            body={
-                "model": vm_name,
-                "messages": [{"role": "user", "content": "regression test"}],
-            },
-        )
+            body=JsonBody(
+                {
+                    "model": vm_name,
+                    "messages": [{"role": "user", "content": "regression test"}],
+                }
+            ),
+        ).data()
 
         assert "choices" in response or "message" in response, f"Expected valid chat response, got: {response}"
         # ResponseMarkerMiddleware echoes SOURCE_KEY from request_body.
@@ -778,6 +819,6 @@ def test_model_endpoint_non_model_body_mutation_regression(
 
     finally:
         _cleanup(registry, vm_cache, DEFAULT_WORKSPACE, vm_name, [router_key, echo_key])
-        sdk.inference.deployments.delete(deployment_name, workspace=DEFAULT_WORKSPACE)
-        _wait_for_deployment_deleted(controller, sdk, deployment_name)
-        sdk.inference.deployment_configs.delete(config_name, workspace=DEFAULT_WORKSPACE)
+        models.delete_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE)
+        _wait_for_deployment_deleted(controller, models, deployment_name)
+        models.delete_deployment_config(name=config_name, workspace=DEFAULT_WORKSPACE)
