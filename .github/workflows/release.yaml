@@ -1124,6 +1124,7 @@ jobs:
         env:
           SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+          NIGHTLY_INSTANCE_URL: ${{ secrets.NIGHTLY_INSTANCE_URL }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
