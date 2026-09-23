@@ -68,7 +68,6 @@ class FilesResource:
         # Retain the platform client so the generated fileset/otlp sub-resources
         # (which speak to the platform client, not the FilesClient) can be exposed.
         self._platform_client = client
-        self._generated_files = GeneratedFilesResource(client)
         if files_client is not None:
             self._client = files_client
         else:
@@ -81,7 +80,15 @@ class FilesResource:
         """Access the underlying FilesClient for direct API calls."""
         return self._client
 
+    @cached_property
+    def _generated_files(self) -> GeneratedFilesResource:
+        # Built on first use so a typed platform client can back the high-level
+        # operations without also having to satisfy the generated resource.
+        return GeneratedFilesResource(self._platform_client)
+
     def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
         return getattr(self._generated_files, name)
 
     @cached_property
@@ -538,7 +545,6 @@ class AsyncFilesResource:
         # Retain the platform client so the generated fileset/otlp sub-resources
         # (which speak to the platform client, not the FilesClient) can be exposed.
         self._platform_client = client
-        self._generated_files = GeneratedAsyncFilesResource(client)
         if files_client is not None:
             self._client = files_client
         else:
@@ -551,7 +557,13 @@ class AsyncFilesResource:
         """Access the underlying AsyncFilesClient for direct API calls."""
         return self._client
 
+    @cached_property
+    def _generated_files(self) -> GeneratedAsyncFilesResource:
+        return GeneratedAsyncFilesResource(self._platform_client)
+
     def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
         return getattr(self._generated_files, name)
 
     @cached_property
