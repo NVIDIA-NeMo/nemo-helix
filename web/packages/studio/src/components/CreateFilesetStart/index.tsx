@@ -10,25 +10,22 @@ import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { useMemo, useState, type FC } from 'react';
 
 export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onContinue }) => {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   // "Describe with AI" is the only option that asks for anything else before the canvas.
   const [draftingWithAi, setDraftingWithAi] = useState(false);
 
   const templateGroups = useMemo(buildTemplateGroups, []);
 
-  const isTemplate = FILESET_TEMPLATES.some((template) => template.id === selectedId);
-
-  const handleContinue = () => {
-    if (selectedId === 'scratch') {
+  const handleSelect = (id: string) => {
+    if (id === 'scratch') {
       onContinue({ optionId: 'scratch' });
       return;
     }
-    if (selectedId === 'ai') {
+    if (id === 'ai') {
       setDraftingWithAi(true);
       return;
     }
-    if (isTemplate && selectedId) {
-      onContinue({ optionId: 'template', templateId: selectedId });
+    if (FILESET_TEMPLATES.some((template) => template.id === id)) {
+      onContinue({ optionId: 'template', templateId: id });
     }
   };
 
@@ -49,10 +46,7 @@ export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onC
       options={START_OPTIONS}
       templateGroups={templateGroups}
       templatesTag={TEMPLATES_TAG}
-      value={selectedId}
-      onChange={setSelectedId}
-      canContinue={selectedId !== null}
-      onContinue={handleContinue}
+      onSelect={handleSelect}
     />
   );
 };

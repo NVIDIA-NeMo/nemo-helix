@@ -19,7 +19,8 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   workspace,
   onContinue,
 }) => {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Only to mark the tile that is provisioning; nothing stays selected after a pick.
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
@@ -40,23 +41,24 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
     []
   );
 
-  const selectedTemplate =
-    CUSTOMIZATION_TEMPLATES.find((template) => template.id === selectedId) ?? null;
-
-  const handleContinue = async () => {
-    if (selectedId === 'scratch') {
+  const handleSelect = async (id: string) => {
+    if (id === 'scratch') {
       onContinue({ optionId: 'scratch' });
       return;
     }
-    if (!selectedTemplate) return;
+    const template = CUSTOMIZATION_TEMPLATES.find((candidate) => candidate.id === id);
+    if (!template) return;
 
     // Registering the model and loading the dataset has to finish before the form can
     // reference them, so it happens here rather than on the next screen.
-    const initialValues = await runTemplateSetup(selectedTemplate);
-    // Provisioning spans a render, and the group is locked throughout, but only hand over
-    // values that still match what is selected.
-    if (initialValues && selectedId === selectedTemplate.id) {
-      onContinue({ optionId: 'template', initialValues });
+    setBusyId(id);
+    try {
+      const initialValues = await runTemplateSetup(template);
+      if (initialValues) {
+        onContinue({ optionId: 'template', initialValues });
+      }
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -67,16 +69,12 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       options={START_OPTIONS}
       templateGroups={templateGroups}
       templatesTag={TEMPLATES_TAG}
-      value={selectedId}
+      onSelect={(id) => void handleSelect(id)}
       // Provisioning registers models and uploads a dataset, which takes long enough that
-      // the tiles would stay clickable behind the disabled Continue button. Moving the
-      // selection then would leave a finished setup pointing at something else.
-      onChange={setSelectedId}
+      // the other tiles would stay clickable and start a second setup over the first.
       disabled={isSettingUp}
-      canContinue={selectedId !== null && !isSettingUp}
-      continueLabel={isSettingUp ? statusLabel : 'Continue'}
-      continueLoading={isSettingUp}
-      onContinue={() => void handleContinue()}
+      busyId={busyId}
+      busyLabel={isSettingUp ? statusLabel : undefined}
       slotBanner={
         templateError ? (
           <Banner kind="inline" status="error">
