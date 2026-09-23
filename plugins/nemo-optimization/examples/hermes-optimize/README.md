@@ -104,12 +104,7 @@ curl -s "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/
   -d '{"model": "nvidia-nemotron-3-5-lightning-30b-a3b", "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
-The same model is the judge. `optimize-chatonly-via-agent.yaml` turns its
-thinking off with
-`inference.extra_body.chat_template_kwargs.enable_thinking: false`;
-otherwise the judge can spend its token budget thinking, never emit the JSON
-score, and fail every trial with `Error in evaluator from parsing judge LLM
-response`.
+The same model is the judge.
 
 The gateway lists every model in the provider catalog, but a key can only call
 some of them; others return an upstream 404 or 410. If yours cannot call this

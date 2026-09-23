@@ -31,10 +31,6 @@ eval:
     accuracy:
       _type: tunable_rag_evaluator
       llm_name: judge
-      inference:
-        extra_body:
-          chat_template_kwargs:
-            enable_thinking: false
       default_scoring: true
       default_score_weights:
         coverage: 0.5
