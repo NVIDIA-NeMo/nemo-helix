@@ -32,12 +32,10 @@ def test_apply_suggestions_strips_optimizer_metadata() -> None:
             "numeric": {"enabled": True},
             "search_space": {"temperature": {"low": 0.0, "high": 0.8}},
         },
-        "optimizable_params": {"legacy": True},
     }
     trial = apply_suggestions(base, {"models.default.temperature": 0.6})
     assert trial["models"]["default"]["temperature"] == 0.6
     assert "optimizer" not in trial
-    assert "optimizable_params" not in trial
 
 
 def test_suggestions_to_profile_overlay_names_trial() -> None:

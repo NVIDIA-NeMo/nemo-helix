@@ -9,8 +9,6 @@ import copy
 from collections.abc import Mapping
 from typing import Any
 
-_OPTIMIZER_ONLY_TOP_LEVEL_KEYS = frozenset({"optimizer", "optimizable_params"})
-
 
 def set_by_dotted_path(config: dict[str, Any], dotted_path: str, value: Any) -> None:
     """Set ``value`` on ``config`` at a dotted path, creating intermediate dicts."""
@@ -67,12 +65,7 @@ def nest_dotted_paths(flat: Mapping[str, Any]) -> dict[str, Any]:
 
 def strip_optimizer_only_fields(config: dict[str, Any]) -> None:
     """Remove optimizer metadata from a trial config artifact in place."""
-    for key in _OPTIMIZER_ONLY_TOP_LEVEL_KEYS:
-        config.pop(key, None)
-    optimizer = config.get("optimizer")
-    if isinstance(optimizer, dict):
-        optimizer.pop("search_space", None)
-        optimizer.pop("optimizable_params", None)
+    config.pop("optimizer", None)
 
 
 def apply_suggestions(

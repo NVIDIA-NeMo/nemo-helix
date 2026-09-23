@@ -15,6 +15,7 @@ from nemo_optimization.config_overlay import get_by_dotted_path
 
 SUPPORTED_PARAM_TYPES = frozenset({"fabric"})
 DEFAULT_PARAM_TYPE = "fabric"
+LEGACY_SEARCH_SPACE_ERROR = "optimizer.optimizable_params is no longer supported; rename it to optimizer.search_space."
 
 
 class SearchSpaceError(ValueError):
@@ -135,10 +136,10 @@ SearchSpaceSpec = NumericSearchSpaceSpec | PromptSearchSpaceSpec
 
 
 def parse_all_search_space(optimizer: Mapping[str, Any]) -> dict[str, SearchSpaceSpec]:
-    """Parse ``optimizer.search_space`` (with legacy ``optimizable_params`` shim)."""
+    """Parse ``optimizer.search_space``."""
+    if "optimizable_params" in optimizer:
+        raise SearchSpaceError(LEGACY_SEARCH_SPACE_ERROR)
     raw = optimizer.get("search_space")
-    if raw is None:
-        raw = optimizer.get("optimizable_params")
     if not isinstance(raw, Mapping):
         raise SearchSpaceError("optimizer.search_space must be a mapping of param names to typed specs.")
 

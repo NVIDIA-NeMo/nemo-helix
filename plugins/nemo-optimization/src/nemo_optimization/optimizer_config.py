@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, StrictBool, ValidationError, model_validator
 
 from nemo_optimization.search_space import (
+    LEGACY_SEARCH_SPACE_ERROR,
     NumericSearchSpaceSpec,
     PromptSearchSpaceSpec,
     SearchSpaceError,
@@ -174,6 +175,8 @@ def parse_optimizer_config(payload: dict[str, Any]) -> OptimizerConfig:
 
 
 def _parse_optimizer_mapping(raw: dict[str, Any]) -> _OptimizerInput:
+    if "optimizable_params" in raw:
+        raise OptimizerConfigError(LEGACY_SEARCH_SPACE_ERROR)
     try:
         return _OptimizerInput.model_validate(raw)
     except ValidationError as exc:

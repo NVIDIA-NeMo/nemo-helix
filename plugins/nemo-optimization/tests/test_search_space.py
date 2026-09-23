@@ -9,6 +9,7 @@ from nemo_optimization.backends.optuna.search_space import (
     grid_trial_count,
     parse_search_space,
 )
+from nemo_optimization.optimizer_config import OptimizerConfigError, parse_optimizer_config
 from nemo_optimization.search_space import (
     PromptSearchSpaceSpec,
     SearchSpaceError,
@@ -123,6 +124,18 @@ def test_parse_search_space_filters_prompt_entries_for_optuna() -> None:
     assert set(parse_all_search_space(optimizer)) == {"temperature", "system_prompt"}
     assert set(parse_search_space(optimizer)) == {"temperature"}
     assert set(parse_prompt_search_space(optimizer)) == {"system_prompt"}
+
+
+def test_parse_search_space_rejects_legacy_optimizable_params() -> None:
+    with pytest.raises(SearchSpaceError, match="rename it to optimizer.search_space"):
+        parse_all_search_space(
+            {"optimizable_params": {"temperature": {"path": "models.default.temperature", "values": [0.0, 0.2]}}}
+        )
+
+
+def test_parse_optimizer_config_rejects_legacy_optimizable_params() -> None:
+    with pytest.raises(OptimizerConfigError, match="rename it to optimizer.search_space"):
+        parse_optimizer_config({"optimizer": {"optimizable_params": {}}})
 
 
 def test_parse_search_space_rejects_when_no_numeric_dimensions() -> None:

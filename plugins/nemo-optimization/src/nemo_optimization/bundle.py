@@ -27,7 +27,12 @@ from nemo_helix_plugin.refs import FILESET_REF_PATTERN
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config, looks_like_nat_config
 from nemo_optimization.schemas.optimize import is_fileset_relative
-from nemo_optimization.search_space import SearchSpaceError, parse_numeric_search_space, parse_prompt_search_space
+from nemo_optimization.search_space import (
+    LEGACY_SEARCH_SPACE_ERROR,
+    SearchSpaceError,
+    parse_numeric_search_space,
+    parse_prompt_search_space,
+)
 
 
 class BundlePreflightError(ValueError):
@@ -124,6 +129,9 @@ def _optimizer_problems(config: Mapping[str, Any], *, agent: str | None) -> Iter
     optimizer = config.get("optimizer")
     if not isinstance(optimizer, Mapping):
         yield "optimizer section is missing or is not a mapping"
+        return
+    if "optimizable_params" in optimizer:
+        yield LEGACY_SEARCH_SPACE_ERROR
         return
     enabled = [
         name

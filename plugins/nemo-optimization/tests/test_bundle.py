@@ -138,6 +138,18 @@ def test_rejects_numeric_optimization_with_an_empty_search_space(tmp_path: Path)
         preflight_bundle(tmp_path, "optimize.yml")
 
 
+def test_rejects_legacy_optimizable_params_with_migration_guidance(tmp_path: Path) -> None:
+    config = full_config()
+    config["optimizer"] = {
+        "numeric": {"enabled": True},
+        "optimizable_params": {"temperature": {"path": "models.default.temperature", "values": [0.0, 0.2]}},
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="rename it to optimizer.search_space"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
 def test_rejects_prompt_optimization_without_model_reference(tmp_path: Path) -> None:
     config = full_config()
     config["instructions"] = {"system": {"content": "Base prompt."}}
