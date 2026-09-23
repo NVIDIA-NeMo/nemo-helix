@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 import urllib.error
+from email.message import Message
 from http.server import HTTPServer, ThreadingHTTPServer
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
@@ -1515,27 +1516,26 @@ def _policy_config(key: str = "${oc.env:GYM_POLICY_API_KEY}") -> dict[str, Any]:
 
 def _raising_urlopen(status: int):
     def _urlopen(request, timeout=None):
-        raise urllib.error.HTTPError(request.full_url, status, "", {}, io.BytesIO(b""))
+        raise urllib.error.HTTPError(request.full_url, status, "", Message(), io.BytesIO(b""))
 
     return _urlopen
 
 
-@pytest.mark.parametrize("status", [401, 403])
-def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch, status: int) -> None:
+def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch) -> None:
     """An auth refusal fails the host before Gym's servers are built.
 
     Without this the refusal reaches the caller as a 500 from a loopback address: the component
     server discards the upstream status, and the sandbox carrying the only log of it is destroyed.
     """
     monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-expired")
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(status))
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(401))
 
     with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
         runtime._preflight_policy_credential(_policy_config())
 
     message = str(excinfo.value)
     assert "integrate.api.nvidia.com" in message, "name the endpoint that refused the credential"
-    assert str(status) in message
+    assert "401" in message
     assert "nemotron-3.5-lightning-30b-a3b" in message, "name the model, which may itself be wrong"
     assert "GYM_POLICY_API_KEY" in message, "name the variable an operator has to rotate"
 
@@ -1593,7 +1593,7 @@ def test_preflight_reads_the_key_from_the_environment(monkeypatch) -> None:
     def _urlopen(request, timeout=None):
         sent["auth"] = request.headers.get("Authorization")
         sent["url"] = request.full_url
-        raise urllib.error.HTTPError(request.full_url, 500, "", {}, io.BytesIO(b""))
+        raise urllib.error.HTTPError(request.full_url, 500, "", Message(), io.BytesIO(b""))
 
     monkeypatch.setattr(runtime.urllib.request, "urlopen", _urlopen)
     runtime._preflight_policy_credential(_policy_config())
@@ -1719,7 +1719,7 @@ def test_captured_output_masks_secret_env_values(monkeypatch):
     monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
     monkeypatch.setenv("HOME", "/root")
     buffer: collections.deque[str] = collections.deque(maxlen=10)
-    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._secret_env_values())
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
 
     tail.write("resolved policy_api_key=nvapi-secretvalue123 for HOME=/root\n")
 
@@ -1740,7 +1740,7 @@ def test_captured_output_reaches_the_underlying_stream_unchanged(monkeypatch):
     """Masking applies to what is captured, not to what the host logs for an operator."""
     stream = io.StringIO()
     monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
-    tail = runtime._OutputTail(stream, collections.deque(maxlen=10), runtime._secret_env_values())
+    tail = runtime._OutputTail(stream, collections.deque(maxlen=10), runtime._captured_output_secrets())
 
     tail.write("key=nvapi-secretvalue123\n")
 
@@ -1761,3 +1761,45 @@ def test_a_list_valued_policy_base_url_is_still_preflighted(monkeypatch):
             "policy_model_name": ["meta/llama-3.1-8b-instruct"],
         }
     ) == ("http://vllm-0.svc.cluster.local:8000/v1", "nvapi-key", "meta/llama-3.1-8b-instruct")
+
+
+def test_captured_output_masks_a_policy_key_the_config_holds_literally(monkeypatch):
+    """A config may inline the key instead of referencing ``${oc.env:VAR}``.
+
+    No env var then holds that value, so a name-based sweep of the environment misses it entirely
+    and the key reaches the caller in the failure the tail was added to produce.
+    """
+    monkeypatch.setenv(
+        runtime.GYM_GLOBAL_CONFIG_ENV_KEY,
+        json.dumps({"policy_api_key": "nvapi-literalkey123", "policy_base_url": "https://x/v1"}),
+    )
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("POST https://x/v1 key=nvapi-literalkey123\n")
+
+    assert list(buffer) == ["POST https://x/v1 key=***"]
+
+
+def test_captured_output_secrets_survive_an_unset_global_config(monkeypatch):
+    """The tail is installed before bootstrap, so the config may be absent or unparseable."""
+    monkeypatch.delenv(runtime.GYM_GLOBAL_CONFIG_ENV_KEY, raising=False)
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-fromenv123")
+
+    assert "nvapi-fromenv123" in runtime._captured_output_secrets()
+
+
+def test_preflight_does_not_blame_the_credential_for_a_403(monkeypatch):
+    """A 403 is also how an egress proxy or an endpoint policy refuses.
+
+    The run still fails, because the rollouts post to the same URL with the same headers, but
+    naming the credential sends an operator to rotate a key that was never the problem.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-fine")
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(403))
+
+    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
+        runtime._preflight_policy_credential(_policy_config())
+
+    assert "refused the request" in str(excinfo.value)
+    assert "rejected the configured credential" not in str(excinfo.value)

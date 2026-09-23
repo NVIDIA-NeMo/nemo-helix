@@ -112,13 +112,11 @@ def _env_float(name: str, default: float) -> float:
 
 #: Env vars whose values are masked before a line is captured. The tail is returned to the caller
 #: and stored in job logs, so anything a component prints about its own environment must not be.
-_SECRET_ENV_NAME_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+_SECRET_ENV_NAME_RE = re.compile(r"KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH|PRIVATE", re.IGNORECASE)
 #: Short enough that one runaway line cannot fill the failure response on its own.
 _MAX_CAPTURED_LINE_CHARS = 500
-
-
-def _secret_env_values() -> tuple[str, ...]:
-    return tuple(value for name, value in os.environ.items() if len(value) >= 8 and _SECRET_ENV_NAME_RE.search(name))
+#: Below this, a value is too short to be a credential and masking it only obscures the output.
+_MIN_MASKED_SECRET_CHARS = 8
 
 
 class _OutputTail:
@@ -155,8 +153,22 @@ _PREFLIGHT_TIMEOUT_S = 20.0
 _OUTPUT_TAIL: collections.deque[str] = collections.deque(maxlen=_OUTPUT_TAIL_LINES)
 
 
+def _captured_output_secrets() -> tuple[str, ...]:
+    """Values masked out of captured output.
+
+    The policy key is read from the config as well as the environment: it is only an ``${oc.env:}``
+    reference on a platform job, and a config that inlines it literally is masked by no env name.
+    """
+    values = {value for name, value in os.environ.items() if _SECRET_ENV_NAME_RE.search(name)}
+    try:
+        values.add(_resolved_policy_route(_load_global_config_dict())[1])
+    except Exception:
+        pass
+    return tuple(value for value in values if len(value) >= _MIN_MASKED_SECRET_CHARS)
+
+
 def _install_output_tail() -> None:
-    secrets = _secret_env_values()
+    secrets = _captured_output_secrets()
     sys.stdout = _OutputTail(sys.stdout, _OUTPUT_TAIL, secrets)
     sys.stderr = _OutputTail(sys.stderr, _OUTPUT_TAIL, secrets)
 
@@ -239,10 +251,14 @@ def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
         if error.code not in (401, 403):
             print(f"gym-host: policy preflight inconclusive (HTTP {error.code}); continuing", flush=True)
             return
+        # 403 is also returned by an egress proxy or an endpoint policy, so it does not prove the
+        # credential is at fault. It still fails the run: the rollouts post to this same URL with
+        # these same headers, so whatever refused the probe refuses all of them.
+        cause = "rejected the configured credential" if error.code == 401 else "refused the request"
         source = _policy_key_source(global_config)
         raise PolicyCredentialRejected(
-            f"the policy endpoint {base_url} rejected the configured credential (HTTP {error.code}) "
-            f"for model {model_name}{source}. Every rollout would fail the same way."
+            f"the policy endpoint {base_url} {cause} (HTTP {error.code}) for model "
+            f"{model_name}{source}. Every rollout would fail the same way."
         ) from error
     except Exception as error:
         print(f"gym-host: policy preflight inconclusive ({type(error).__name__}: {error}); continuing", flush=True)
