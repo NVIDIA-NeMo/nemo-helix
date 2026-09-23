@@ -12,6 +12,7 @@ These tests verify that the AuthorizationMiddleware correctly:
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 # Test principals for authenticated requests
@@ -20,6 +21,10 @@ SERVICE_PRINCIPAL = "service:integration-test"
 
 # Platform mounts entities at /apis/entities; list workspaces is GET /apis/entities/v2/workspaces
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
+
+# test_client is module-scoped (expensive to boot): keep these tests on one xdist worker so
+# they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("auth_authorization_middleware")
 
 
 class TestAuthorizationMiddleware:

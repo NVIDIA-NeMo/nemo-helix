@@ -37,6 +37,10 @@ from nhx.testing import (
 )
 from pydantic import SecretStr
 
+# sdk is module-scoped (expensive to boot, auth_enabled=True): keep this file's tests on
+# one xdist worker so they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("jobs_secrets_access")
+
 
 @pytest.fixture(scope="module")
 def sdk() -> Generator[NeMoHelix, None, None]:

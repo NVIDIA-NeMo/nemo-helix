@@ -73,6 +73,11 @@ from .conftest import (
     upsert_provider,
 )
 
+# sdk is module-scoped (expensive to boot, auth_enabled=True): keep all classes in this
+# file on one xdist worker so they share it instead of each worker re-provisioning it
+# from scratch.
+pytestmark = pytest.mark.xdist_group("models_with_auth")
+
 
 async def _build_authorization_data_without_secrets(entities_client=None):
     """Wraps the real build_authorization_data to inject an EditorNoSecrets role.

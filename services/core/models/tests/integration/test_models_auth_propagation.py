@@ -34,6 +34,11 @@ from .conftest import (
     upsert_provider,
 )
 
+# sdk is module-scoped (expensive to boot, auth_enabled=True): keep both classes in this
+# file on one xdist worker so they share it instead of each worker re-provisioning it
+# from scratch.
+pytestmark = pytest.mark.xdist_group("models_auth_propagation")
+
 
 @pytest.fixture(scope="module")
 def sdk() -> Generator[NeMoHelix, None, None]:
