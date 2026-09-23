@@ -245,6 +245,7 @@ async def get_accessible_workspaces(
             "role": b.data.get("role"),
         }
         for b in principal_bindings_entities
+        if b.data.get("revoked_at") is None
     ]
 
     # Compute accessible workspaces (principal_id is the acting user when OBO is set)
