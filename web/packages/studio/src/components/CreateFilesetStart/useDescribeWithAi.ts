@@ -6,7 +6,7 @@ import { type ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels'
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { getErrorMessage } from '@nemo/common/src/utils/error';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
-import { buildFixMessages } from '@studio/components/DataDesignerStart/fixRequest';
+import { buildFixMessages } from '@studio/components/CreateFilesetStart/fixRequest';
 import { DATA_DESIGNER_JOB_GENERATOR_SYSTEM_PROMPT } from '@studio/components/NewDataDesignerJobForm/constants';
 import { generateDataDesignerJobRequestTool } from '@studio/components/NewDataDesignerJobForm/tools';
 import {

@@ -10,7 +10,7 @@ import { getDataDesignerJobListRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 
 /**
- * Legacy job-creation form, superseded by {@link DataDesignerStart} and the DAG canvas
+ * Legacy job-creation form, superseded by {@link CreateFilesetStart} and the DAG canvas
  * builder. Kept for now but not linked from any UI — reachable only by typing the URL.
  */
 export const LegacyNewDataDesignerJobRoute: FC = () => {

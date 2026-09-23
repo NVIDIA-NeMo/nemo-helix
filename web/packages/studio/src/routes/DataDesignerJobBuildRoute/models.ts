@@ -21,7 +21,7 @@ import type {
   ModelEntityFilter,
   ModelProvider,
 } from '@nemo/sdk/generated/platform/schema';
-import type { TemplateModelSpec } from '@studio/components/DataDesignerStart/types';
+import type { TemplateModelSpec } from '@studio/components/CreateFilesetStart/types';
 import {
   DEFAULT_MAX_PARALLEL_REQUESTS,
   DEFAULT_TEXT_INFERENCE_PARAMS,

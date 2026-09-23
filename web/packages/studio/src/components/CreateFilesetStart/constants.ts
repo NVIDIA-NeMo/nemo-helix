@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StartOption, StartOptionTag } from '@studio/components/DataDesignerStart/types';
+import type { StartOption, StartOptionTag } from '@studio/components/CreateFilesetStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
 import { Plus, Sparkles } from 'lucide-react';
 

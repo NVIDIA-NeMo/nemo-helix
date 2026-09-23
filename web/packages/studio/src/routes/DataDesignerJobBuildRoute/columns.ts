@@ -19,8 +19,8 @@ import type {
   ColumnTypeOption,
   DataDesignerColumnType,
 } from '@studio/components/AddColumnPalette/types';
+import type { TemplateColumnSpec } from '@studio/components/CreateFilesetStart/types';
 import type { DagEdge, DagNode } from '@studio/components/DagCanvas/types';
-import type { TemplateColumnSpec } from '@studio/components/DataDesignerStart/types';
 import {
   type BuilderModel,
   buildModelConfigs,

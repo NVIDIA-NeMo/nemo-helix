@@ -41,7 +41,7 @@ export interface TemplateModelSpec {
  * and any models they reference.
  */
 export interface FilesetTemplate {
-  /** Stable id passed to {@link DataDesignerStartProps.onContinue} when chosen. */
+  /** Stable id passed to {@link CreateFilesetStartProps.onContinue} when chosen. */
   id: string;
   title: string;
   description: string;
@@ -95,7 +95,7 @@ export type StartSelection =
   | { optionId: 'template'; templateId: string }
   | { optionId: 'ai'; jobRequest: DataDesignerJobRequest };
 
-export interface DataDesignerStartProps {
+export interface CreateFilesetStartProps {
   /** Workspace whose models the "Describe with AI" option draws from. */
   workspace: string;
   /** Fired when the user confirms a selected start option via the Continue footer. */

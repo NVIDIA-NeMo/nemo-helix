@@ -3,7 +3,7 @@
 
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import { Block, Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
-import { DescribeWithAiPanel } from '@studio/components/DataDesignerStart/DescribeWithAiPanel';
+import { DescribeWithAiPanel } from '@studio/components/CreateFilesetStart/DescribeWithAiPanel';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useState, type FC } from 'react';
 

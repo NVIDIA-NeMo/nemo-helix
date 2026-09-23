@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { GeneratedConfigPanel } from '@studio/components/DataDesignerStart/GeneratedConfigPanel';
-import type { GeneratedConfigResultProps } from '@studio/components/DataDesignerStart/types';
+import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';
+import type { GeneratedConfigResultProps } from '@studio/components/CreateFilesetStart/types';
 import { FileJson, Sparkles, Wand2 } from 'lucide-react';
 import { type FC, useState } from 'react';
 
