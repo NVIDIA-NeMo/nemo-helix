@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.config import HelixConfig
 from nemo_helix_plugin.entities import EntityClient
 
@@ -71,6 +71,18 @@ def get_nemo_client() -> AsyncNemoClient:
     """
     raise RuntimeError(
         "get_nemo_client() was called without being overridden. "
+        "Ensure your Service subclass calls super().create_app()."
+    )
+
+
+def get_sync_nemo_client() -> NemoClient:
+    """FastAPI dependency for getting the sync NemoClient.
+
+    This is a placeholder. The actual client is injected via
+    app.dependency_overrides in Service.create_app().
+    """
+    raise RuntimeError(
+        "get_sync_nemo_client() was called without being overridden. "
         "Ensure your Service subclass calls super().create_app()."
     )
 

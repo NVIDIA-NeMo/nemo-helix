@@ -4,12 +4,17 @@
 """Tests for plugin-owned FastAPI dependency placeholders."""
 
 import pytest
-from nemo_helix_plugin.dependencies import get_effective_principal_id, get_nemo_client
+from nemo_helix_plugin.dependencies import get_effective_principal_id, get_nemo_client, get_sync_nemo_client
 
 
 def test_get_nemo_client_requires_platform_override() -> None:
     with pytest.raises(RuntimeError, match=r"get_nemo_client\(\) was called without being overridden"):
         get_nemo_client()
+
+
+def test_get_sync_nemo_client_requires_platform_override() -> None:
+    with pytest.raises(RuntimeError, match=r"get_sync_nemo_client\(\) was called without being overridden"):
+        get_sync_nemo_client()
 
 
 def test_get_effective_principal_id_requires_platform_override() -> None:
