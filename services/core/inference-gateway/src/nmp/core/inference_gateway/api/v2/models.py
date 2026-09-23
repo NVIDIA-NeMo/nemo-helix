@@ -116,7 +116,9 @@ async def model_entity_proxy(
     validate_model_entity_name(name, field_name="name")
     logger.info(f"Model entity proxy request: {workspace}/{name}/-/{trailing_uri}")
 
-    virtual_model = await resolve_vm_for_request(virtual_model_cache, workspace, name, MODEL_EXEC_PERMISSION)
+    virtual_model = await resolve_vm_for_request(
+        virtual_model_cache, model_cache, workspace, name, MODEL_EXEC_PERMISSION
+    )
 
     if virtual_model is None or virtual_model.name is None:
         raise_virtual_model_not_found(workspace, name)

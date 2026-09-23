@@ -1095,7 +1095,7 @@ def test_resolve_vm_for_model_plain_name_exact_match():
     vm = _custom_vm("ws", "my-model", default_model_entity="ws/my-model")
     vm_cache.rebuild([vm])
 
-    assert resolve_vm_for_model(vm_cache, "ws", "my-model") is vm
+    assert resolve_vm_for_model(vm_cache, ModelCache(), "ws", "my-model") is vm
 
 
 def test_resolve_vm_for_model_composite_keys_by_base_segment():
@@ -1107,9 +1107,9 @@ def test_resolve_vm_for_model_composite_keys_by_base_segment():
     base_vm = _custom_vm("ws", "base", default_model_entity="ws/base")
     vm_cache.rebuild([base_vm])
 
-    assert resolve_vm_for_model(vm_cache, "ws", "base&adapters/aws/aname") is base_vm
+    assert resolve_vm_for_model(vm_cache, ModelCache(), "ws", "base&adapters/aws/aname") is base_vm
     # A composite whose base has no VM does not resolve.
-    assert resolve_vm_for_model(vm_cache, "ws", "other&adapters/aws/aname") is None
+    assert resolve_vm_for_model(vm_cache, ModelCache(), "ws", "other&adapters/aws/aname") is None
 
 
 def test_resolve_vm_for_model_composite_does_not_match_composite_named_vm():
@@ -1121,14 +1121,14 @@ def test_resolve_vm_for_model_composite_does_not_match_composite_named_vm():
     vm_cache = VirtualModelCache()
     vm_cache.rebuild([_custom_vm("ws", "base&adapters/aws/aname")])
 
-    assert resolve_vm_for_model(vm_cache, "ws", "base&adapters/aws/aname") is None
+    assert resolve_vm_for_model(vm_cache, ModelCache(), "ws", "base&adapters/aws/aname") is None
 
 
 def test_resolve_vm_for_model_misses_when_uncached():
     """Returns ``None`` when neither the base nor the plain name is cached."""
     vm_cache = VirtualModelCache()
-    assert resolve_vm_for_model(vm_cache, "ws", "nope") is None
-    assert resolve_vm_for_model(vm_cache, "ws", "nope&adapters/aws/aname") is None
+    assert resolve_vm_for_model(vm_cache, ModelCache(), "ws", "nope") is None
+    assert resolve_vm_for_model(vm_cache, ModelCache(), "ws", "nope&adapters/aws/aname") is None
 
 
 # ---------------------------------------------------------------------------

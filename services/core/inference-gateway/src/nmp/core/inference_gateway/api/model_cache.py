@@ -95,7 +95,11 @@ class ModelCache:
     """Time-to-live in seconds for cached secrets (0 = always refresh)"""
 
     def get_from_provider(self, workspace: str, provider_name: str) -> ModelProviderInfo | None:
-        """Look up a provider, falling back to the global workspace (local wins)."""
+        model_info = self.workspace_name_provider_map.get((workspace, provider_name))
+        return model_info
+
+    def resolve_provider(self, workspace: str, provider_name: str) -> ModelProviderInfo | None:
+        """Look up a provider by name from *workspace*, falling back to the global workspace (local wins)."""
         for candidate in workspace_lookup_order(workspace):
             model_info = self.workspace_name_provider_map.get((candidate, provider_name))
             if model_info is not None:
@@ -103,12 +107,7 @@ class ModelCache:
         return None
 
     def get_from_model_entity(self, workspace: str, model_entity_name: str) -> ModelEntityInfo | None:
-        """Look up a model entity, falling back to the global workspace (local wins)."""
-        for candidate in workspace_lookup_order(workspace):
-            model_entity_info = self.model_entity_info_map.get((candidate, model_entity_name))
-            if model_entity_info is not None:
-                return model_entity_info
-        return None
+        return self.model_entity_info_map.get((workspace, model_entity_name))
 
     def update_model_info(self, model_info: ModelProviderInfo):
         self.workspace_name_provider_map[(model_info.model_provider.workspace, model_info.model_provider.name)] = (
@@ -282,7 +281,7 @@ async def refresh_model_cache(
 
     # Update or add providers from the fetched list
     for model_provider in model_providers:
-        model_info = model_cache.workspace_name_provider_map.get((model_provider.workspace, model_provider.name))
+        model_info = model_cache.get_from_provider(model_provider.workspace, model_provider.name)
         if model_info is None:
             model_info = ModelProviderInfo(model_provider=model_provider)
         else:

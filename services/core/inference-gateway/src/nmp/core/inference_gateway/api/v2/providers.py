@@ -55,7 +55,7 @@ async def provider_ready(
     await enforce_delegated_workspace_access(workspace, PROVIDER_READ_PERMISSION)
     logger.info(f"Provider ready check: {workspace}/{name}")
 
-    model_info = model_cache.get_from_provider(workspace, name)
+    model_info = model_cache.resolve_provider(workspace, name)
     if model_info is not None and not await may_use_from_workspace(
         workspace, model_info.model_provider.workspace, PROVIDER_READ_PERMISSION
     ):
@@ -135,7 +135,7 @@ async def provider_proxy(
     if is_mock_request(request):
         return await handle_mock_request(request=request, trailing_uri=trailing_uri)
 
-    model_info = model_cache.get_from_provider(workspace, name)
+    model_info = model_cache.resolve_provider(workspace, name)
     if model_info is not None and not await may_use_from_workspace(
         workspace, model_info.model_provider.workspace, PROVIDER_EXEC_PERMISSION
     ):

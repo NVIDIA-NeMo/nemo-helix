@@ -60,39 +60,52 @@ class TestVirtualModelCache:
     def test_global_vm_resolves_from_another_workspace(self) -> None:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "shared-llm")])
-        assert cache.get("team-a", "shared-llm") is not None
+        assert cache.resolve("team-a", "shared-llm") is not None
+
+    def test_get_does_not_fall_back_to_the_global_workspace(self) -> None:
+        cache = VirtualModelCache()
+        cache.rebuild([_make_vm("default", "shared-llm")])
+        assert cache.get("team-a", "shared-llm") is None
 
     def test_local_vm_shadows_global(self) -> None:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "llm"), _make_vm("team-a", "llm")])
-        resolved = cache.get("team-a", "llm")
+        resolved = cache.resolve("team-a", "llm")
         assert resolved is not None
         assert resolved.workspace == "team-a"
 
     def test_workspace_scoped_vm_does_not_leak_to_other_workspaces(self) -> None:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("team-a", "private-llm")])
-        assert cache.get("team-b", "private-llm") is None
+        assert cache.resolve("team-b", "private-llm") is None
 
     def test_unknown_name_still_misses(self) -> None:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "shared-llm")])
-        assert cache.get("team-a", "nope") is None
+        assert cache.resolve("team-a", "nope") is None
 
 
 class TestResolveVMForModel:
     def test_global_vm_resolves_for_plain_name(self) -> None:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "shared-llm")])
-        assert resolve_vm_for_model(cache, "team-a", "shared-llm") is not None
+        assert resolve_vm_for_model(cache, ModelCache(), "team-a", "shared-llm") is not None
 
     def test_lora_composite_resolves_through_global_base(self) -> None:
         """An adapter fine-tuned in a workspace routes via the shared base model's VM."""
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "base-llm")])
-        resolved = resolve_vm_for_model(cache, "team-a", "base-llm&adapters/team-a/my-adapter")
+        resolved = resolve_vm_for_model(cache, ModelCache(), "team-a", "base-llm&adapters/team-a/my-adapter")
         assert resolved is not None
         assert resolved.workspace == "default"
+
+    def test_served_local_model_without_a_vm_does_not_fall_back_to_the_global_vm(self) -> None:
+        cache = VirtualModelCache()
+        cache.rebuild([_make_vm("default", "base-llm")])
+        model_cache = ModelCache()
+        model_cache.model_entity_info_map[("team-a", "base-llm")] = ModelEntityInfo(workspace="team-a", name="base-llm")
+        assert resolve_vm_for_model(cache, model_cache, "team-a", "base-llm") is None
+        assert resolve_vm_for_model(cache, model_cache, "team-a", "base-llm&adapters/team-a/my-adapter") is None
 
 
 class TestModelCache:
@@ -110,38 +123,30 @@ class TestModelCache:
     def test_global_provider_resolves_from_another_workspace(self) -> None:
         cache = ModelCache()
         cache.update_model_info(self._provider_info("default", "shared-provider"))
-        assert cache.get_from_provider("team-a", "shared-provider") is not None
+        assert cache.resolve_provider("team-a", "shared-provider") is not None
+
+    def test_get_from_provider_does_not_fall_back_to_the_global_workspace(self) -> None:
+        cache = ModelCache()
+        cache.update_model_info(self._provider_info("default", "shared-provider"))
+        assert cache.get_from_provider("team-a", "shared-provider") is None
 
     def test_local_provider_shadows_global(self) -> None:
         cache = ModelCache()
         cache.update_model_info(self._provider_info("default", "prov"))
         cache.update_model_info(self._provider_info("team-a", "prov"))
-        resolved = cache.get_from_provider("team-a", "prov")
+        resolved = cache.resolve_provider("team-a", "prov")
         assert resolved is not None
         assert resolved.model_provider.workspace == "team-a"
 
     def test_private_provider_does_not_leak(self) -> None:
         cache = ModelCache()
         cache.update_model_info(self._provider_info("team-a", "prov"))
-        assert cache.get_from_provider("team-b", "prov") is None
+        assert cache.resolve_provider("team-b", "prov") is None
 
-    def test_global_model_entity_resolves_from_another_workspace(self) -> None:
+    def test_qualified_model_entity_is_not_redirected_to_the_global_workspace(self) -> None:
         cache = ModelCache()
         cache.model_entity_info_map[("default", "shared-llm")] = ModelEntityInfo(workspace="default", name="shared-llm")
-        assert cache.get_from_model_entity("team-a", "shared-llm") is not None
-
-    def test_local_model_entity_shadows_global(self) -> None:
-        cache = ModelCache()
-        cache.model_entity_info_map[("default", "llm")] = ModelEntityInfo(workspace="default", name="llm")
-        cache.model_entity_info_map[("team-a", "llm")] = ModelEntityInfo(workspace="team-a", name="llm")
-        resolved = cache.get_from_model_entity("team-a", "llm")
-        assert resolved is not None
-        assert resolved.workspace == "team-a"
-
-    def test_private_model_entity_does_not_leak(self) -> None:
-        cache = ModelCache()
-        cache.model_entity_info_map[("team-a", "llm")] = ModelEntityInfo(workspace="team-a", name="llm")
-        assert cache.get_from_model_entity("team-b", "llm") is None
+        assert cache.get_from_model_entity("team-a", "shared-llm") is None
 
 
 class TestResolveVMForRequest:
@@ -161,7 +166,7 @@ class TestResolveVMForRequest:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "shared-llm")])
 
-        assert await resolve_vm_for_request(cache, "team-a", "shared-llm", OPENAI_EXEC_PERMISSION) is None
+        assert await resolve_vm_for_request(cache, ModelCache(), "team-a", "shared-llm", OPENAI_EXEC_PERMISSION) is None
         _user.has_permissions.assert_awaited_once_with("default", [OPENAI_EXEC_PERMISSION])
 
     async def test_shared_vm_resolves_for_an_entitled_caller(self, _user) -> None:
@@ -169,7 +174,7 @@ class TestResolveVMForRequest:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("default", "shared-llm")])
 
-        resolved = await resolve_vm_for_request(cache, "team-a", "shared-llm", OPENAI_EXEC_PERMISSION)
+        resolved = await resolve_vm_for_request(cache, ModelCache(), "team-a", "shared-llm", OPENAI_EXEC_PERMISSION)
 
         assert resolved is not None
         assert resolved.workspace == "default"
@@ -178,7 +183,7 @@ class TestResolveVMForRequest:
         cache = VirtualModelCache()
         cache.rebuild([_make_vm("team-a", "llm")])
 
-        assert await resolve_vm_for_request(cache, "team-a", "llm", OPENAI_EXEC_PERMISSION) is not None
+        assert await resolve_vm_for_request(cache, ModelCache(), "team-a", "llm", OPENAI_EXEC_PERMISSION) is not None
         _user.has_permissions.assert_not_awaited()
 
 

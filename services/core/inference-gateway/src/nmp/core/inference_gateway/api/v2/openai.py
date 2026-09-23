@@ -91,6 +91,7 @@ def parse_igw_openai_model(igw_openai_model: str) -> tuple[str, str]:
 
 def resolve_vm_for_model(
     virtual_model_cache: VirtualModelCache,
+    model_cache: ModelCache,
     workspace: str,
     model_name: str,
 ) -> "SDKVirtualModel | None":
@@ -109,11 +110,12 @@ def resolve_vm_for_model(
     - **Plain name**: looked up as-is.
 
     The composite-awareness lives here, *outside* the cache layer:
-    :meth:`VirtualModelCache.get` owns only the workspace dimension (request workspace
+    :meth:`VirtualModelCache.resolve` owns only the workspace dimension (request workspace
     first, then the global workspace), not the composite-name grammar.
 
     Args:
         virtual_model_cache: The in-memory VirtualModel cache.
+        model_cache: The in-memory model cache, consulted so a served local model shadows the global one.
         workspace: The request workspace (always taken from the URL path).
         model_name: The model entity name, possibly a LoRA composite.
 
@@ -125,17 +127,21 @@ def resolve_vm_for_model(
     # reconciler + validation). A plain name has no suffix and is looked up as-is.
     adapter_parts = parse_adapters_suffix(model_name)
     base_model_name = adapter_parts[0] if adapter_parts is not None else model_name
-    return virtual_model_cache.get(workspace, base_model_name)
+    # Local wins even while a served local model's passthrough VM is still being created.
+    if model_cache.get_from_model_entity(workspace, base_model_name) is not None:
+        return virtual_model_cache.get(workspace, base_model_name)
+    return virtual_model_cache.resolve(workspace, base_model_name)
 
 
 async def resolve_vm_for_request(
     virtual_model_cache: VirtualModelCache,
+    model_cache: ModelCache,
     workspace: str,
     model_name: str,
     permission: str,
 ) -> "SDKVirtualModel | None":
     """:func:`resolve_vm_for_model`, hiding a shared VirtualModel the caller may not use."""
-    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    virtual_model = resolve_vm_for_model(virtual_model_cache, model_cache, workspace, model_name)
     if virtual_model is not None and not await may_use_from_workspace(workspace, virtual_model.workspace, permission):
         return None
     return virtual_model
@@ -200,6 +206,7 @@ async def openai_get_model(
     workspace: str,
     name: str,
     virtual_model_cache: Annotated[VirtualModelCache, Depends(global_virtual_model_cache)],
+    model_cache: Annotated[ModelCache, Depends(global_model_cache)],
 ) -> OpenAIModelResp:
     """
     Retrieve information about a specific OpenAI-compatible model.
@@ -213,7 +220,10 @@ async def openai_get_model(
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
-    if await resolve_vm_for_request(virtual_model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION) is None:
+    if (
+        await resolve_vm_for_request(virtual_model_cache, model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION)
+        is None
+    ):
         raise_virtual_model_not_found(workspace, model_name)
 
     return OpenAIModelResp(
@@ -309,7 +319,9 @@ async def openai_proxy(
 
     validate_model_entity_name(model_name, field_name="model")
 
-    virtual_model = await resolve_vm_for_request(virtual_model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION)
+    virtual_model = await resolve_vm_for_request(
+        virtual_model_cache, model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION
+    )
     logger.debug(
         "openai_proxy: workspace=%s model_name=%s body_model=%s vm_hit=%s",
         workspace,
