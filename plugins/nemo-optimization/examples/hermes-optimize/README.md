@@ -193,6 +193,12 @@ nemo agents optimize \
 **Success:** same as Example 1 (`status: completed`, `n_trials: 2`), with log
 line `Resolved agent 'hermes-optimize-chatonly' to platform agent ...`.
 
+The overlay turns the judge's thinking off with
+`inference.extra_body.chat_template_kwargs.enable_thinking: false`. A thinking
+judge can spend its token budget before writing the JSON score, and every trial
+then scores 0 with `Error in evaluator from parsing judge LLM response`. Options
+outside the OpenAI client's signature must go under `extra_body`.
+
 To replace the stored config after editing `agent.yaml`:
 
 ```bash
