@@ -120,7 +120,7 @@ async def may_use_from_workspace(request_workspace: str, entity_workspace: str, 
     if auth_client is None or not auth_client.auth_enabled:
         return True
     principal = auth_client.principal
-    if principal.is_privileged:
+    if principal.is_privileged():
         if not principal.is_delegated:
             return True
         return await _on_behalf_of_has_permission(auth_client, entity_workspace, permission)
