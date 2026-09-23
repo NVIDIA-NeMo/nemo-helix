@@ -24,12 +24,11 @@ from nemo_evaluator_sdk.values.models import Model, ModelRef, RankingInference
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, AggregateRangeScore
 from nemo_evaluator_sdk.values.retrieval import Retrieval
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -59,8 +58,8 @@ def _spec() -> RetrieveEvalSpec:
     )
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://platform.test", workspace="default")
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 def _result(*, ndcg: float = 0.75, recall: float = 1.0) -> BenchmarkEvaluationResult:
