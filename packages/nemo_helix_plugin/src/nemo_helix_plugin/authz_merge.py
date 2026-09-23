@@ -42,15 +42,11 @@ def _permission_id_to_nested(permission_id: str, description: str) -> dict[str, 
     return node
 
 
-def _merge_flat_permissions(
-    registry: dict[str, Any],
-    flat_permissions: dict[str, str],
-) -> dict[str, Any]:
-    merged = copy.deepcopy(registry)
+def _merge_flat_permissions_into(registry: dict[str, Any], flat_permissions: dict[str, str]) -> None:
+    """Merge flat ``permission_id -> description`` pairs into ``registry`` in place."""
     for perm_id, description in flat_permissions.items():
         nested = _permission_id_to_nested(perm_id, description)
-        _merge_permission_node_into(merged, nested)
-    return merged
+        _merge_permission_node_into(registry, nested)
 
 
 def _default_roles_for_permission(permission_id: str) -> list[str]:
@@ -90,7 +86,7 @@ def merge_authz_contributions(
     for contribution in contributions:
         flat_permissions = contribution.get("permissions") or {}
         if isinstance(flat_permissions, dict):
-            registry = _merge_flat_permissions(registry, flat_permissions)
+            _merge_flat_permissions_into(registry, flat_permissions)
 
         contrib_endpoints = contribution.get("endpoints") or {}
         if isinstance(contrib_endpoints, dict):
@@ -112,8 +108,6 @@ def merge_authz_contributions(
         for perm_id in flat_permissions:
             for role_name in _default_roles_for_permission(perm_id):
                 auto_role_grants.setdefault(role_name, set()).add(perm_id)
-
-    authz["permissions"] = registry
 
     for role_name, perm_ids in auto_role_grants.items():
         role_cfg = roles.setdefault(role_name, {"permissions": []})
