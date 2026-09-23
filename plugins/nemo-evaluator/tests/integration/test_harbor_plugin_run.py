@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import shutil
 import subprocess
 import tarfile
@@ -44,9 +43,6 @@ from nemo_helix_plugin.sdk import AsyncNeMoHelix
 pytestmark = [pytest.mark.integration]
 
 
-@pytest.mark.skipif(
-    not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"), reason="requires opt-in platform/subprocess/Docker integration"
-)
 @pytest.mark.parametrize("direct", [False, True], ids=["taskset", "direct-list"])
 @pytest.mark.parametrize(
     "subprocess_platform",
