@@ -92,6 +92,15 @@ def _run_phases(payload: dict[str, Any], *, ctx: JobContext, sdk: SyncHelixClien
             ctx=ctx,
             sdk=sdk,
         )
+        if result.phase is not item.phase:
+            raise OptimizeRouterError(
+                f"Optimization backend {item.backend_name!r} returned phase {result.phase.value!r} "
+                f"for a {item.phase.value!r} request."
+            )
+        if result.backend != item.backend_name:
+            raise OptimizeRouterError(
+                f"Optimization backend {item.backend_name!r} returned mismatched backend name {result.backend!r}."
+            )
         results.append(result)
         offset += result.trial_count
         current_payload = copy.deepcopy(result.optimized_payload)
@@ -159,7 +168,7 @@ def _preflight(
     payload: dict[str, Any],
     experiment_id: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: SyncHelixClient | None,
 ) -> list[OptimizationPhaseResult] | None:
     for index, item in enumerate(plan):
         try:
