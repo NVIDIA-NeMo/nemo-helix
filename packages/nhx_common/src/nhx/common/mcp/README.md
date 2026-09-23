@@ -133,16 +133,26 @@ When service teams build their own MCP servers:
 ```python
 # services/guardrails/src/nhx/guardrails/mcp/server.py
 from fastmcp import FastMCP
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 from nhx.common.mcp import format_error_response
 from nhx.common.sdk_factory import get_platform_sdk
 
 guardrails = FastMCP("NeMo Guardrails")
-client = get_platform_sdk()
+client = client_from_platform(get_platform_sdk(), GuardrailClient)
 
 @guardrails.tool()
-async def create_guardrail_config(rules: dict):
+async def create_guardrail_config(config: dict[str, object]):
+    """Create a guardrail config from a CreateGuardrailConfigRequest payload.
+
+    The payload must include required fields such as name, along with the
+    guardrail rules and any other supported config options.
+    """
     try:
-        result = client.guardrails.configs.create(rules)
+        result = client.create_guardrail_config(
+            body=CreateGuardrailConfigRequest.model_validate(config),
+        ).data()
         return {"success": True, "config_id": result.id}
     except Exception as e:
         return format_error_response(e)

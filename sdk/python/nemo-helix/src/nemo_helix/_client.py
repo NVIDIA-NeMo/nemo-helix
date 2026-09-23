@@ -62,7 +62,6 @@ if TYPE_CHECKING:
         models,
         adapters,
         projects,
-        guardrail,
         inference,
         workspaces,
         evaluations,
@@ -72,7 +71,6 @@ if TYPE_CHECKING:
     from .resources.intake.intake import IntakeResource, AsyncIntakeResource
     from .resources.adapters.adapters import AdaptersResource, AsyncAdaptersResource
     from .resources.projects.projects import ProjectsResource, AsyncProjectsResource
-    from .resources.guardrail.guardrail import GuardrailResource, AsyncGuardrailResource
     from .resources.inference.inference import InferenceResource, AsyncInferenceResource
     from .resources.workspaces.workspaces import WorkspacesResource, AsyncWorkspacesResource
     from .resources.evaluations.evaluations import EvaluationsResource, AsyncEvaluationsResource
@@ -277,12 +275,6 @@ class NeMoHelix(SyncAPIClient):
         from .filesets.resources import FilesResource
 
         return FilesResource(self)
-
-    @cached_property
-    def guardrail(self) -> GuardrailResource:
-        from .resources.guardrail import GuardrailResource
-
-        return GuardrailResource(self)
 
     @cached_property
     def inference(self) -> InferenceResource:
@@ -661,12 +653,6 @@ class AsyncNeMoHelix(AsyncAPIClient):
         return AsyncFilesResource(self)
 
     @cached_property
-    def guardrail(self) -> AsyncGuardrailResource:
-        from .resources.guardrail import AsyncGuardrailResource
-
-        return AsyncGuardrailResource(self)
-
-    @cached_property
     def inference(self) -> AsyncInferenceResource:
         from .resources.inference import AsyncInferenceResource
 
@@ -881,12 +867,6 @@ class NeMoHelixWithRawResponse:
         return FilesResourceWithRawResponse(self._client.files)
 
     @cached_property
-    def guardrail(self) -> guardrail.GuardrailResourceWithRawResponse:
-        from .resources.guardrail import GuardrailResourceWithRawResponse
-
-        return GuardrailResourceWithRawResponse(self._client.guardrail)
-
-    @cached_property
     def inference(self) -> inference.InferenceResourceWithRawResponse:
         from .resources.inference import InferenceResourceWithRawResponse
 
@@ -946,12 +926,6 @@ class AsyncNeMoHelixWithRawResponse:
         from .resources.files import AsyncFilesResourceWithRawResponse
 
         return AsyncFilesResourceWithRawResponse(self._client.files)
-
-    @cached_property
-    def guardrail(self) -> guardrail.AsyncGuardrailResourceWithRawResponse:
-        from .resources.guardrail import AsyncGuardrailResourceWithRawResponse
-
-        return AsyncGuardrailResourceWithRawResponse(self._client.guardrail)
 
     @cached_property
     def inference(self) -> inference.AsyncInferenceResourceWithRawResponse:
@@ -1015,12 +989,6 @@ class NeMoHelixWithStreamedResponse:
         return FilesResourceWithStreamingResponse(self._client.files)
 
     @cached_property
-    def guardrail(self) -> guardrail.GuardrailResourceWithStreamingResponse:
-        from .resources.guardrail import GuardrailResourceWithStreamingResponse
-
-        return GuardrailResourceWithStreamingResponse(self._client.guardrail)
-
-    @cached_property
     def inference(self) -> inference.InferenceResourceWithStreamingResponse:
         from .resources.inference import InferenceResourceWithStreamingResponse
 
@@ -1080,12 +1048,6 @@ class AsyncNeMoHelixWithStreamedResponse:
         from .resources.files import AsyncFilesResourceWithStreamingResponse
 
         return AsyncFilesResourceWithStreamingResponse(self._client.files)
-
-    @cached_property
-    def guardrail(self) -> guardrail.AsyncGuardrailResourceWithStreamingResponse:
-        from .resources.guardrail import AsyncGuardrailResourceWithStreamingResponse
-
-        return AsyncGuardrailResourceWithStreamingResponse(self._client.guardrail)
 
     @cached_property
     def inference(self) -> inference.AsyncInferenceResourceWithStreamingResponse:

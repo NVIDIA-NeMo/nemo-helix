@@ -10,6 +10,9 @@ from typing import Any, Literal
 
 from nemo_helix import APIStatusError, NeMoHelix
 from nemo_helix.types.inference import MiddlewareCallParam
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 from nhx.testing import MockProviderResponse, add_mock_provider
 
 from e2e.utils import collect_sse_chunks
@@ -177,6 +180,10 @@ def content_safety_config(
     }
 
 
+def guardrail_client_from_sdk(sdk: NeMoHelix) -> GuardrailClient:
+    return client_from_platform(sdk, GuardrailClient)
+
+
 def setup_mock_provider(sdk: NeMoHelix, test_case: GuardrailsChatTestCase) -> None:
     add_mock_provider(
         sdk,
@@ -211,11 +218,13 @@ def create_guarded_virtual_model(
     config_data: dict[str, Any],
 ) -> None:
     if test_case.config_mode == "referenced":
-        sdk.guardrail.configs.create(
+        guardrail_client_from_sdk(sdk).create_guardrail_config(
             workspace=test_case.workspace,
-            name=test_case.config_name,
-            description="E2E content-safety Guardrails config",
-            data=config_data,
+            body=CreateGuardrailConfigRequest(
+                name=test_case.config_name,
+                description="E2E content-safety Guardrails config",
+                data=config_data,
+            ),
         )
 
     middleware_call = _middleware_call(
