@@ -3,7 +3,7 @@
 
 import asyncio
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
@@ -536,7 +536,10 @@ class TestWorkspaceCleanupModelsAndAdapters:
         with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), models_client):
             await controller._async_step()
 
-        assert models_client.delete_model.await_count == 2
+        assert models_client.delete_model.await_args_list == [
+            call(name="shared-base", workspace="test-workspace"),
+            call(name="other", workspace="test-workspace"),
+        ]
         repo.delete_workspace.assert_not_called()
         repo.mark_workspace_for_deletion.assert_any_call(
             name="test-workspace",
