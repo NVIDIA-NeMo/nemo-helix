@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from nemo_helix_plugin.authz import AuthzScope
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import job_collection_path_for
 from nemo_helix_plugin.jobs.api_factory import (
     HelixJobResultRoute,
@@ -234,12 +235,12 @@ def _adapt_to_spec(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
     """Bridge ``NemoJob.to_spec`` to the factory's ``input_to_output`` shape.
 
     The factory calls ``input_to_output(original, workspace, entity_client,
-    job_name, sdk)`` with an :class:`AsyncNeMoHelix` in the ``sdk``
+    job_name, async_client)`` with the request-scoped
+    :class:`~nemo_helix_plugin.client.client.AsyncNemoClient` in the last
     slot. :meth:`NemoJob.to_spec` takes the same data but organises it as
     ``(input_spec, *, workspace, entity_client, async_sdk)`` (no
-    ``job_name``); ``async_sdk`` matches the codebase-wide convention
-    that this name carries an async client. The shim adapts and awaits
-    the ``async classmethod``.
+    ``job_name``); ``async_sdk`` is the job-facing name for that async
+    platform handle. The shim adapts and awaits the ``async classmethod``.
     """
 
     async def to_spec_adapter(
@@ -247,14 +248,14 @@ def _adapt_to_spec(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
         workspace: str,
         entity_client: Any,
         job_name: str | None,
-        sdk: Any,
+        async_client: AsyncNemoClient,
     ) -> Any:
         del job_name  # NemoJob.to_spec doesn't use it (names belong to the Jobs service)
         return await job_cls.to_spec(
             original_spec,
             workspace=workspace,
             entity_client=entity_client,
-            async_sdk=sdk,
+            async_sdk=async_client,
             is_local=False,
         )
 
@@ -268,7 +269,7 @@ def _adapt_compile(
     """Bridge ``NemoJob.compile`` to the factory's ``platform_job_config_compiler`` shape.
 
     The factory calls ``compiler(workspace, original_spec, transformed_spec,
-    entity_client, job_name, sdk)`` and forwards submitter-provided
+    entity_client, job_name, async_client)`` and forwards submitter-provided
     ``profile`` / ``options`` to compilers that accept those kwargs.
     :meth:`NemoJob.compile` is an ``async classmethod`` that uses kwargs and
     accepts those submit controls. After ``compile`` returns, the adapter
@@ -286,7 +287,7 @@ def _adapt_compile(
         transformed_spec: Any,
         entity_client: Any,
         job_name: str | None,
-        sdk: Any,
+        async_client: AsyncNemoClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> Any:
@@ -301,7 +302,7 @@ def _adapt_compile(
                 spec=transformed_spec,
                 entity_client=entity_client,
                 job_name=job_name,
-                async_sdk=sdk,
+                async_sdk=async_client,
                 **submit_control_kwargs,
             )
         except NotImplementedError as exc:

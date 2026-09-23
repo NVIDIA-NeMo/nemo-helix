@@ -71,7 +71,7 @@ from abc import abstractmethod
 from typing import Any, ClassVar
 
 from nemo_helix_plugin._base import _NamedPlugin
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext
 from pydantic import BaseModel
 
@@ -236,7 +236,7 @@ class NemoJob(_NamedPlugin):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:
         """Transform *input_spec* into a canonical :attr:`spec_schema` instance.
@@ -259,13 +259,12 @@ class NemoJob(_NamedPlugin):
             input_spec: Validated :attr:`input_spec_schema` instance.
             workspace: Workspace scope (used for entity-client scoping).
             entity_client: Entity client for resolving names to IDs.
-            async_sdk: Async platform handle (``AsyncNeMoHelix`` on the
-                plugin service, ``AsyncNemoClient`` from the local CLI);
-                adapt it with ``client_from_platform``. ``to_spec`` runs in
-                the API process and is itself ``async``, so the framework
-                only offers the async client here — the parameter name
-                follows the codebase convention (``sdk`` is sync,
-                ``async_sdk`` is async).
+            async_sdk: The request-scoped :class:`AsyncNemoClient` (from the
+                plugin service's ``get_nemo_client`` dependency, or the local
+                CLI context); derive typed service clients from it with
+                ``<Client>.from_client``. ``to_spec`` runs in the API process
+                and is itself ``async``, so the framework only offers the
+                async client here.
             is_local: Whether this transformation is running for local
                 scheduler execution. The plugin-service route adapter passes
                 ``False``.
@@ -283,7 +282,7 @@ class NemoJob(_NamedPlugin):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> object:
@@ -301,9 +300,9 @@ class NemoJob(_NamedPlugin):
             spec: Canonical :attr:`spec_schema` instance.
             entity_client: For resolving references (datasets, models, ...).
             job_name: Optional job name supplied by the submitter.
-            async_sdk: Async platform handle. Same contract as
-                :meth:`to_spec`: this runs in the API process so only
-                the async client is offered.
+            async_sdk: The request-scoped :class:`AsyncNemoClient`. Same
+                contract as :meth:`to_spec`: this runs in the API process so
+                only the async client is offered.
             profile: Submitter-selected profile. The factory applies
                 ``stamp_profile(spec, profile)`` after this method
                 returns; per-step overrides set here take precedence.
