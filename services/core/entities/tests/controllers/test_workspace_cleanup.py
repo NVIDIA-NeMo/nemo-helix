@@ -5,7 +5,9 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from nemo_platform_plugin.client.errors import ConflictError
 from nmp.core.entities.controllers.workspace_cleanup import WorkspaceCleanup, WorkspaceJobCleanupError
 from nmp.core.entities.entities import Workspace, WorkspaceDeletionStage
 
@@ -515,6 +517,31 @@ class TestWorkspaceCleanupModelsAndAdapters:
 
         assert models_client.delete_adapter.await_count == 2
         assert models_client.delete_model.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_refused_model_delete_blocks_workspace_delete(self):
+        workspace = _make_workspace()
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([workspace], None)
+        repo.mark_workspace_for_deletion.return_value = True
+        shared = MagicMock()
+        shared.name = "shared-base"
+        other = MagicMock()
+        other.name = "other"
+        models_client = _make_models_client(models=[shared, other])
+        refusal = ConflictError(httpx.Response(409, json={"detail": "has child entities in other workspaces"}))
+        models_client.delete_model = AsyncMock(side_effect=[refusal, None])
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), models_client):
+            await controller._async_step()
+
+        assert models_client.delete_model.await_count == 2
+        repo.delete_workspace.assert_not_called()
+        repo.mark_workspace_for_deletion.assert_any_call(
+            name="test-workspace",
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
 
     @pytest.mark.asyncio
     async def test_raises_on_list_failure(self):
