@@ -142,19 +142,20 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 - Run Python tools like Pytest with `uv run pytest` or `uv run ruff`
 - Launch a Python repl with `uv run python`
 
-### SDK Generation
+### SDK
 
-The Python SDK is automatically generated from the OpenAPI specification using Stainless. The SDK is maintained in a separate Git repository and integrated into this project.
+The Python SDK (`sdk/python/nemo-helix`) is checked in to this repository and hand-maintained. The `nemo` CLI is hand-written in `nemo_helix_ext` and bundled into the SDK package at build time.
 
-**Update the SDK:**
-- `make update-sdk` - Full SDK update (regenerate OpenAPI spec + sync with Stainless)
+The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platform's HTTP API routes. It is regenerated locally from the FastAPI service code (no cloud credentials required).
 
-**Individual steps:**
-- `make refresh-openapi` - Regenerate OpenAPI spec from API definitions
-- `make stainless` - Sync with Stainless (requires `STAINLESS_API_KEY` env var)
+**Update the OpenAPI spec:**
+- `make refresh-openapi` - Regenerate `openapi/openapi.yaml` from API definitions
 
-**When to regenerate the SDK:**
-Regenerate the SDK whenever you modify:
+**Update web SDK / CLI:**
+- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), then vendor `nemo_helix_ext` into the SDK and regenerate the CLI reference docs.
+
+**When to run `make refresh-openapi`:**
+Run it whenever you modify:
 - API endpoints (routes, methods, parameters, responses)
 - Data models or schemas
 - Files in these paths:
@@ -162,13 +163,11 @@ Regenerate the SDK whenever you modify:
   - `packages/nhx_common/src/nhx_common/api/`
   - Service API files: `services/*/src/*/api/`
 
-**How it works:**
-1. `refresh-openapi` generates `openapi/openapi.yaml` from your API code
-2. `stainless` pushes the spec to Stainless API, which generates SDK code
-3. Generated SDK is pulled from stainless remote and vendored packages are integrated
-4. Post-generation updates apply licenses, README, and other metadata
-
 **Note:** OpenAPI generation also runs as a pre-commit hook (manual stage) when API files change.
+
+#### Changing SDK types
+
+The SDK package is not regenerated. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
 
 #### Testing Python Code
 
