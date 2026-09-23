@@ -14,10 +14,13 @@ src/nemo_builder_plugin/
   identity.py            reference parsing, the digest model, the system tag
   schema.py              BuildSet / BuildSpec / BuildOutput / FileSetSource
   entities.py            ContainerImage -- the only entity in the design
-  steps.py               the three step config contracts
+  steps.py               the step config contracts, and WorkLayout: where everything lives on
+                         the work volume, the one definition every step derives paths from
   config.py              operator settings, including the kill switch
-  compile.py             BuildSet -> three-step PlatformJobSpec, as a pure function
-  submit.py              rows first, then the job
+  plan.py                a request resolved against this deployment, once; every check that
+                         can reject a submit
+  compile.py             BuildPlan -> three-step PlatformJobSpec, as a pure projection
+  submit.py              resolve, then rows, then the job -- rows and job read the same plan
   service.py             POST /builds, and reads for the rows it creates
   registry.py            an OCI Distribution client (not a GAR one)
   controller.py          the reconciler -- the only writer of observed state
@@ -59,7 +62,7 @@ Verified independently of the control plane, from inside the cluster:
 | `supervise` has **no** work-volume mount | ✅ observed — absence is the control, and it holds |
 | namespace still refuses the BuildKit posture | ✅ re-run after the green build |
 | sandbox reaches the internet and nothing private | ✅ 7/7, against cluster-derived addresses |
-| 139 unit tests, `ruff` and `ty` clean | ✅ |
+| 161 unit tests, `ruff` and `ty` clean | ✅ |
 
 A second run, built to hit the conditions the first one never did -- one set (`fixcheck`), two
 different Dockerfiles published to the **same repository**, and a third Dockerfile that **fails**
@@ -77,6 +80,16 @@ different Dockerfiles published to the **same repository**, and a third Dockerfi
 The first row passed once before, **for the wrong reason**: `supervise` was recording every
 build as a success, so it never had a failure to stop on. The rows above are from `fixcheck`
 revision 2, after that was fixed -- see *Found afterwards*, below.
+
+A third run, for build contexts in **subdirectories** (`context_path`), which no earlier run used.
+Each image copies a marker file from its own context into `/which`, read back from the registry:
+
+| | |
+|---|---|
+| two specs, each building from its own subdirectory | ✅ each image holds its own subdirectory's marker |
+| a whole-fileset spec and a subdirectory of the same fileset | ✅ one download serves both, and each image is right |
+| the pre-refactor code, same request | ❌ both builds failed: kaniko found no Dockerfile -- see *Found afterwards* |
+| `fixcheck` rerun on the refactored code | ✅ unchanged: 2 `ready`, 1 `failed`, contents correct |
 
 ### The two environments, and why both exist
 
@@ -174,11 +187,13 @@ handling.
   and what credential pushes it. **This needs a decision, not a fix**: if the push credential is
   the tenant's (RFC 001's "tenant-provisioned, creds in Secrets" suggests so), rename and document
   it; if it is the operator's, the config must name a secret in the platform's own workspace.
-- `context_path`, `fileset` and `BuildSet.name` are not validated for their destinations the way
-  `dockerfile` is. Not a cross-tenant escape -- the kubelet rejects `..` in a subPath -- but it
-  turns a caller mistake into an opaque late failure instead of a 400.
+- `context_path`, `fileset` and `BuildSet.name` are not validated at submit the way `dockerfile`
+  is. `WorkLayout` now refuses an absolute or `..` component wherever a path is built -- before,
+  `fetch` joined them with `pathlib`, where an absolute component *replaces* the path rather than
+  nesting under it -- so a bad one fails the job rather than reaching outside it. It is still a
+  late failure where a 400 belongs.
 - The reconciler reads one page (200) of `pending` rows per cycle.
-- Every sandbox group in a set shares one `/out`, so one spec's `RUN` can overwrite another's
+- Every sandbox group in a set shares one output directory, so one spec's `RUN` can overwrite another's
   layout. Same submitter on both sides, so not escalation, but it is weaker than the
   one-sandbox-per-source isolation implies.
 - Two edge cases, neither demonstrated: an index resolves to its first manifest unchecked, and
@@ -216,6 +231,16 @@ A registry that challenges with `Basic` -- `registry:3` with htpasswd, for one -
 treated as a token URL, and the resulting `ValueError` is not a `RegistryError`, so it escapes
 the reconcile loop's handling. `push` can now publish to such a registry; the reconciler cannot
 read back what it published.
+
+**Found by refactoring:** a build with a `context_path` could never find its Dockerfile. Files
+reports entry paths relative to the fileset root even when a listing is narrowed to a
+subdirectory, and `fetch` wrote them under the subdirectory's own directory -- so `tests/Dockerfile`
+landed at `context/<fileset>/tests/tests/Dockerfile`, and the sandbox, mounting
+`context/<fileset>/tests`, found no Dockerfile. Nothing had exercised a `context_path` end to end.
+It surfaced while moving every path into `WorkLayout`, where `fetch` now copies a fileset with its
+paths intact and a subtree sits inside it by definition. *Reproduced on the cluster against the
+pre-refactor code -- kaniko: "please provide a valid path to a Dockerfile within the build
+context" -- and verified fixed by the third run above.*
 
 ## Deliberately out of scope
 
