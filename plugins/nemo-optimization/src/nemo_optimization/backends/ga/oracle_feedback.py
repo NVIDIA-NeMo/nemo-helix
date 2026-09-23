@@ -7,18 +7,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from nemo_optimization.backends.ga.config import GaPromptOptimizerConfig, MetricDirection, MetricSpec
+from nemo_optimization.backends.ga.config import GaPromptOptimizerConfig, MetricDirection
 from nemo_optimization.backends.ga.individual import GaIndividual
-from nemo_optimization.candidate import CandidateEvaluationResult, RowReasoning
+from nemo_optimization.candidate import CandidateEvaluationResult
 
 
 @dataclass(frozen=True)
 class OracleFeedbackState:
-    """Generation-level signals for adaptive oracle feedback."""
+    """Latched adaptive oracle-feedback state."""
 
-    stagnation_generations: int
-    fitness_variance: float
-    duplicate_ratio: float
+    adaptive_enabled: bool = False
 
 
 def should_use_oracle_feedback(
@@ -37,11 +35,35 @@ def should_use_oracle_feedback(
     if mode == "failing_only":
         return parent.fitness is not None and parent.fitness < config.oracle_feedback_fitness_threshold
     if mode == "adaptive":
-        return (
-            state.stagnation_generations >= config.oracle_feedback_stagnation_generations
-            or state.fitness_variance <= config.oracle_feedback_fitness_variance_threshold
-            or state.duplicate_ratio >= config.oracle_feedback_diversity_threshold
-        )
+        return state.adaptive_enabled
+    return False
+
+
+def adaptive_feedback_triggered(
+    *,
+    best_fitness_history: list[float],
+    population: list[GaIndividual],
+    config: GaPromptOptimizerConfig,
+) -> bool:
+    """Apply NAT's stagnation, variance, and diversity triggers."""
+
+    window = config.oracle_feedback_stagnation_generations
+    if len(best_fitness_history) >= window:
+        recent = best_fitness_history[-window:]
+        if max(recent) - min(recent) < 0.001:
+            return True
+
+    fitness_values = [individual.fitness or 0.0 for individual in population]
+    if len(fitness_values) > 1:
+        mean = sum(fitness_values) / len(fitness_values)
+        sample_variance = sum((value - mean) ** 2 for value in fitness_values) / (len(fitness_values) - 1)
+        if sample_variance < config.oracle_feedback_fitness_variance_threshold:
+            return True
+
+    if population:
+        unique_ratio = len({individual.prompt_signature for individual in population}) / len(population)
+        if unique_ratio < 1.0 - config.oracle_feedback_diversity_threshold:
+            return True
     return False
 
 
@@ -59,63 +81,49 @@ def build_oracle_feedback(
         aggregate_metrics=dict(individual.aggregate_metrics),
         scores=individual.raw_scores,
     )
-    sections: list[str] = []
-    weighted_metrics = sorted(config.metrics, key=lambda metric: (metric.weight, metric.name), reverse=True)
-    total_weight = sum(metric.weight for metric in weighted_metrics)
-    remaining_chars = config.oracle_feedback_max_chars
-    for metric in weighted_metrics:
-        section = _metric_feedback_section(evaluation, individual=individual, metric=metric, config=config)
-        if not section:
-            continue
-        separator_chars = 2 if sections else 0
-        available_chars = remaining_chars - separator_chars
-        if available_chars <= 0:
-            break
-        budget = int(config.oracle_feedback_max_chars * (metric.weight / total_weight))
-        budget = max(1, min(budget, available_chars))
-        sections.append(section[:budget])
-        remaining_chars -= separator_chars + len(sections[-1])
+    weighted_rows: list[tuple[float, str, str]] = []
+    for metric in config.metrics:
+        for row in evaluation.reasoning_for_metric(metric.name):
+            weight = max(metric.weight, 0.01)
+            if metric.direction is MetricDirection.MINIMIZE:
+                priority = -row.objective_value * weight
+            else:
+                priority = row.objective_value / weight
+            weighted_rows.append((priority, row.reasoning.strip(), metric.name))
 
-    feedback = "\n\n".join(sections).strip()
-    if not feedback:
-        return None
-    return feedback
-
-
-def _metric_feedback_section(
-    evaluation: CandidateEvaluationResult,
-    *,
-    individual: GaIndividual,
-    metric: MetricSpec,
-    config: GaPromptOptimizerConfig,
-) -> str | None:
-    if metric.name not in individual.aggregate_metrics:
-        return None
-    reasoning_rows = list(evaluation.reasoning_for_metric(metric.name))
-    if not reasoning_rows:
-        return None
-    rows = _worst_rows(reasoning_rows, direction=metric.direction, limit=config.oracle_feedback_worst_n)
-    lines = [
-        f"Metric {metric.name} ({metric.direction.value}, weight={metric.weight:.6g}); "
-        f"aggregate={individual.aggregate_metrics[metric.name]:.6g}:"
+    weighted_rows.sort(key=lambda item: item[0])
+    reasoning = [
+        f"[{metric_name}] {text}" for _, text, metric_name in weighted_rows[: config.oracle_feedback_worst_n] if text
     ]
-    for row in rows:
-        lines.append(f"- row={row.task_id} score={row.objective_value:.6g} reasoning={row.reasoning.strip()}")
-    return "\n".join(lines)
+    return _truncate_feedback(reasoning, max_chars=config.oracle_feedback_max_chars)
 
 
-def _worst_rows(
-    rows: list[RowReasoning],
-    *,
-    direction: MetricDirection,
-    limit: int,
-) -> list[RowReasoning]:
-    reverse = direction is MetricDirection.MINIMIZE
-    return sorted(rows, key=lambda row: row.objective_value, reverse=reverse)[:limit]
+def _truncate_feedback(reasoning: list[str], *, max_chars: int) -> str | None:
+    parts: list[str] = []
+    current_length = 0
+    truncated = False
+    for index, text in enumerate(reasoning, 1):
+        entry = f"{index}. {text}\n"
+        if current_length + len(entry) > max_chars:
+            remaining = max_chars - current_length
+            if remaining > 20:
+                parts.append(entry[: remaining - 3] + "...")
+            else:
+                truncated = True
+            break
+        parts.append(entry)
+        current_length += len(entry)
+    if not parts:
+        return None
+    result = "".join(parts)
+    if truncated and not result.endswith("..."):
+        result = result.rstrip("\n") + "...\n"
+    return result
 
 
 __all__ = [
     "OracleFeedbackState",
+    "adaptive_feedback_triggered",
     "build_oracle_feedback",
     "should_use_oracle_feedback",
 ]

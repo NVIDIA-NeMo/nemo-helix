@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,24 +50,14 @@ class GaIndividual:
         return tuple(sorted(self.prompts.items()))
 
     def clone_as_elite(self, *, generation: int, individual_index: int) -> GaIndividual:
-        """Copy an already evaluated elite into a later generation without reevaluation."""
+        """Carry an elite's prompts into a later generation for fresh evaluation."""
 
         return GaIndividual(
-            prompts=copy.deepcopy(self.prompts),
+            prompts=dict(self.prompts),
             generation=generation,
             individual_index=individual_index,
             parent_ids=(self.individual_id,),
             carried_from=self.individual_id,
-            phase_trial_number=self.phase_trial_number,
-            global_trial_number=self.global_trial_number,
-            aggregate_metrics=dict(self.aggregate_metrics),
-            normalized_metrics=dict(self.normalized_metrics),
-            raw_scores=self.raw_scores,
-            fitness=self.fitness,
-            status=self.status,
-            failure_reason=self.failure_reason,
-            transform_failures=list(self.transform_failures),
-            transform_successes=list(self.transform_successes),
         )
 
     def to_history_row(self) -> dict[str, Any]:

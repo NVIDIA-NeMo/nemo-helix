@@ -157,8 +157,14 @@ def _extract_chat_content(payload: Mapping[str, object]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
         return ""
-    message = choices[0].get("message")
-    content = message.get("content") if isinstance(message, Mapping) else choices[0].get("text")
+    choice = choices[0]
+    finish_reason = choice.get("finish_reason")
+    if finish_reason != "stop":
+        raise PromptTransformError(
+            f"Prompt optimizer model did not complete normally: finish_reason={finish_reason!r}; expected 'stop'."
+        )
+    message = choice.get("message")
+    content = message.get("content") if isinstance(message, Mapping) else choice.get("text")
     if not isinstance(content, str):
         return ""
     stripped = content.strip()
