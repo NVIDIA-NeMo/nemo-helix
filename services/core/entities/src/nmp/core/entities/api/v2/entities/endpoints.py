@@ -37,6 +37,7 @@ from nmp.core.entities.api.v2.utils import (
     add_workspace_filtering,
     bindings_cache_delete,
     can_read_global_workspace,
+    describe_workspaces,
     get_accessible_workspaces,
     raise_if_workspace_inaccessible,
     require_workspace_access,
@@ -635,11 +636,12 @@ async def delete_entity_by_name(
             refuse_children_outside=workspace,
         )
     except ForeignChildEntitiesError as e:
+        foreign = describe_workspaces(e.workspaces, await get_accessible_workspaces(repository))
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"Entity '{name}' has child entities in other workspaces "
-                f"({', '.join(e.workspaces)}). Deleting it would also delete them. "
+                f"({foreign}). Deleting it would also delete them. "
                 f"Remove those entities first."
             ),
         ) from e

@@ -360,3 +360,12 @@ def can_read_global_workspace(
     if not is_globally_shareable(entity_type):
         return False
     return accessible_workspaces is None or GLOBAL_WORKSPACE in accessible_workspaces
+
+
+def describe_workspaces(workspaces: list[str], accessible_workspaces: Optional[Set[str]]) -> str:
+    """Name the workspaces the caller can access and only count the rest."""
+    named = [w for w in workspaces if accessible_workspaces is None or w in accessible_workspaces]
+    hidden = len(workspaces) - len(named)
+    if hidden:
+        named.append(f"{hidden} you cannot access")
+    return ", ".join(named)

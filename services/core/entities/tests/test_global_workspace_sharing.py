@@ -4,7 +4,7 @@
 """Unit tests for global-workspace read sharing (ASTD-526)."""
 
 import pytest
-from nmp.core.entities.api.v2.utils import can_read_global_workspace
+from nmp.core.entities.api.v2.utils import can_read_global_workspace, describe_workspaces
 from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE, is_globally_shareable
 
 
@@ -48,3 +48,11 @@ def test_full_access_can_read_the_global_workspace() -> None:
 
 def test_full_access_still_respects_the_type_registry() -> None:
     assert not can_read_global_workspace(None, "agent_session")
+
+
+def test_describe_workspaces_counts_inaccessible_ones_without_naming_them() -> None:
+    assert describe_workspaces(["team-a", "secret-b", "secret-c"], {"team-a"}) == "team-a, 2 you cannot access"
+
+
+def test_describe_workspaces_names_all_with_full_access() -> None:
+    assert describe_workspaces(["team-a", "team-b"], None) == "team-a, team-b"
