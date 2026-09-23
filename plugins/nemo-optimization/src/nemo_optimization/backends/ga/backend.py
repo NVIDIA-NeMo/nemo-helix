@@ -235,7 +235,7 @@ def _build_prompt_transformer(
     payload: dict[str, Any],
     *,
     model_name: str,
-    sdk: NeMoPlatform | None,
+    sdk: SyncHelixClient | None,
     workspace: str,
 ) -> PromptTransformer:
     return ModelPromptTransformer(sdk=sdk, workspace=workspace, payload=payload, model_name=model_name)
