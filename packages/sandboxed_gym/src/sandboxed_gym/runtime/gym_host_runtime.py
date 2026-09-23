@@ -127,6 +127,9 @@ class _OutputTail:
         self._buffer = buffer
         self._secrets = secrets
         self._partial = ""
+        # Past the captured width, plus the longest secret: a secret starting inside that width is
+        # held whole, so masking still matches it. Anything beyond would be truncated away anyway.
+        self._retain = _MAX_CAPTURED_LINE_CHARS + max((len(secret) for secret in secrets), default=0)
 
     def write(self, text: str) -> int:
         # Captured only once a line terminator arrives. Masking each write on its own would store a
@@ -136,6 +139,8 @@ class _OutputTail:
         for line in pending[: len(pending) - len(self._partial)].splitlines():
             if line.strip():
                 self._buffer.append(self._scrub(line))
+        # A writer under no obligation to emit a newline would otherwise grow this without bound.
+        self._partial = self._partial[: self._retain]
         return self._stream.write(text)
 
     def _scrub(self, line: str) -> str:

@@ -1850,3 +1850,32 @@ def test_the_preflight_refuses_to_follow_a_redirect() -> None:
     )
 
     assert refused is None
+
+
+def test_an_endless_unterminated_write_does_not_grow_without_bound():
+    """Nothing obliges a writer to emit a newline, and this buffer lives in the host process."""
+    tail = runtime._OutputTail(io.StringIO(), collections.deque(maxlen=10))
+
+    for _ in range(100):
+        tail.write("x" * 1000)
+
+    assert len(tail._partial) <= runtime._MAX_CAPTURED_LINE_CHARS
+
+
+def test_a_secret_straddling_the_retention_bound_is_still_masked(monkeypatch):
+    """Bounding what is held must not cut a secret in half and publish the visible end.
+
+    The secret has to cross the bound while the line is still unterminated, which is the only
+    moment the bound applies. Retaining the captured width plus the longest secret keeps one that
+    starts inside that width whole, so the scrub at end-of-line still matches it.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-straddlingsecret")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("y" * (runtime._MAX_CAPTURED_LINE_CHARS - 3))
+    tail.write("nvapi-straddlingsecret")
+    tail.write(" trailing\n")
+
+    assert "nvapi-straddlingsecret" not in buffer[0]
+    assert "***" in buffer[0], "the secret crossed the bound and must survive whole to be masked"
