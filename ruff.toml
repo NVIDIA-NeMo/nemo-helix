@@ -43,9 +43,6 @@ exclude = [
     "packages/garak_api/garakapi/exception.py",
     "packages/garak_api/garakapi/_selection.py",
     "packages/garak_api/garakapi/_spec.py",
-    # vendored snapshot of switchyard.lib — owned upstream, keep in lockstep with the
-    # vendor pin rather than reformatting locally (see plugins/nemo-switchyard/vendor/switchyard/README.md)
-    "plugins/nemo-switchyard/vendor/",
 ]
 
 line-length = 120

@@ -5085,6 +5085,7 @@ all = [
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-safe-synthesizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemoguardrails", extra = ["tracing"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "ngcsdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-auth", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5126,7 +5127,6 @@ all = [
     { name = "sqlalchemy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sqlmodel", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "streaming-form-data", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "switchyard-vendored", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tenacity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "trace-ingest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5621,8 +5621,9 @@ nemo-safe-synthesizer-plugin = [
     { name = "uvicorn", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 nemo-switchyard = [
+    { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "switchyard-vendored", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 nemo-unsloth-plugin = [
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5713,6 +5714,7 @@ plugins = [
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-safe-synthesizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemoguardrails", extra = ["tracing"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-automodel", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-customization-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5737,7 +5739,6 @@ plugins = [
     { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "switchyard-vendored", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "trace-ingest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tzdata", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5815,6 +5816,7 @@ services = [
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-safe-synthesizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemoguardrails", extra = ["tracing"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "ngcsdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-auth", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5856,7 +5858,6 @@ services = [
     { name = "sqlalchemy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sqlmodel", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "streaming-form-data", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "switchyard-vendored", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tenacity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "trace-ingest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5871,12 +5872,6 @@ studio-service = [
     { name = "fastapi", extra = ["standard"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "uvicorn", extra = ["standard"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-switchyard-vendored = [
-    { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 unsloth-service = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5928,7 +5923,6 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'plugins'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'services'", specifier = ">=0.88.0" },
-    { name = "anthropic", marker = "extra == 'switchyard-vendored'", specifier = ">=0.99.0,<1.0" },
     { name = "anyio", marker = "extra == 'all'", specifier = ">=4.0.0" },
     { name = "anyio", marker = "extra == 'core-service'", specifier = ">=4.0.0" },
     { name = "anyio", marker = "extra == 'data-designer-nemo'", specifier = ">=4.0" },
@@ -6101,7 +6095,6 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.2" },
-    { name = "httpx", marker = "extra == 'switchyard-vendored'", specifier = ">=0.28.1,<1.0" },
     { name = "httpx", marker = "extra == 'unsloth-service'", specifier = ">=0.27.0" },
     { name = "httpx-aiohttp", marker = "extra == 'aiohttp'", specifier = ">=0.1.9" },
     { name = "huggingface-hub", marker = "extra == 'nhx-common'", specifier = ">=1.0.1,<2.0.0" },
@@ -6115,14 +6108,18 @@ requires-dist = [
     { name = "insight-agent", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "insight-agent", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
+    { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'harbor'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=3.1.6" },
+    { name = "jinja2", marker = "extra == 'nemo-switchyard'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'plugins'", specifier = ">=3.1" },
+    { name = "jinja2", marker = "extra == 'plugins'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'services'", specifier = ">=3.1" },
+    { name = "jinja2", marker = "extra == 'services'", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", marker = "extra == 'harbor'", specifier = ">=1.7.0" },
     { name = "jsonpath-ng", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.7.0" },
     { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.23.0" },
@@ -6319,6 +6316,10 @@ requires-dist = [
     { name = "nemo-safe-synthesizer", marker = "extra == 'services'", specifier = "==0.1.7" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'harbor'", editable = "packages/sandboxed_gym" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "packages/sandboxed_gym" },
+    { name = "nemo-switchyard", marker = "extra == 'all'", specifier = "==0.3.0" },
+    { name = "nemo-switchyard", marker = "extra == 'nemo-switchyard'", specifier = "==0.3.0" },
+    { name = "nemo-switchyard", marker = "extra == 'plugins'", specifier = "==0.3.0" },
+    { name = "nemo-switchyard", marker = "extra == 'services'", specifier = "==0.3.0" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.23.0" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'guardrails-service'", specifier = "==0.23.0" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'nemo-guardrails-plugin'", specifier = "==0.23.0" },
@@ -6442,7 +6443,6 @@ requires-dist = [
     { name = "openai", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.109.1" },
     { name = "openai", marker = "extra == 'nemo-helix-sdk'" },
     { name = "openai", marker = "extra == 'services'", specifier = ">=1.61.0" },
-    { name = "openai", marker = "extra == 'switchyard-vendored'", specifier = ">=2.34.0,<3.0" },
     { name = "opentelemetry-distro", marker = "extra == 'all'", specifier = ">=0.64b0" },
     { name = "opentelemetry-distro", marker = "extra == 'guardrails-service'", specifier = ">=0.64b0" },
     { name = "opentelemetry-distro", marker = "extra == 'services'", specifier = ">=0.64b0" },
@@ -6556,7 +6556,6 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.10.3" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.12.0" },
-    { name = "pydantic", marker = "extra == 'switchyard-vendored'", specifier = ">=2.13.3,<3.0" },
     { name = "pydantic", marker = "extra == 'unsloth-service'", specifier = ">=2.10.6" },
     { name = "pydantic", extras = ["email"], marker = "extra == 'all'", specifier = ">=2.9.2" },
     { name = "pydantic", extras = ["email"], marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=2.9.2" },
@@ -6681,10 +6680,6 @@ requires-dist = [
     { name = "streaming-form-data", marker = "extra == 'files-service'", specifier = ">=1.19.1" },
     { name = "streaming-form-data", marker = "extra == 'services'", specifier = ">=1.19.1" },
     { name = "structlog", marker = "extra == 'nhx-common'", specifier = ">=24.1.0" },
-    { name = "switchyard-vendored", marker = "extra == 'all'" },
-    { name = "switchyard-vendored", marker = "extra == 'nemo-switchyard'" },
-    { name = "switchyard-vendored", marker = "extra == 'plugins'" },
-    { name = "switchyard-vendored", marker = "extra == 'services'" },
     { name = "tenacity", marker = "extra == 'all'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'automodel-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'core-service'", specifier = ">=8.5.0" },
@@ -6765,7 +6760,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
 ]
-provides-extras = ["aiohttp", "all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agents-example-calculator", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-guardrails-plugin", "nemo-helix-plugin", "nemo-helix-sdk", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "switchyard-vendored", "unsloth-service"]
+provides-extras = ["aiohttp", "all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agents-example-calculator", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-guardrails-plugin", "nemo-helix-plugin", "nemo-helix-sdk", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"
@@ -7484,18 +7479,31 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "nemo-switchyard"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/2b/60bba54499585dad82fb37643577ffde2cc6de0ea283ddaefe4c2f73ab9a/nemo_switchyard-0.3.0.tar.gz", hash = "sha256:8eb5cf8ff9cb51d50aa9b1927559d4add807eef5041de9c27ab51ccf111d7b4c", size = 579981, upload-time = "2026-09-22T18:06:55.156Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/de/e6a812c444b897f091649bf83ca60f483abab7fec92b30ce289f1a968101/nemo_switchyard-0.3.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:cdc64503e427095c73e7840f0de093f0ee35fc3e306825e522050cd6e6825039", size = 8251239, upload-time = "2026-09-22T18:06:44.842Z" },
+    { url = "https://files.pythonhosted.org/packages/af/26/2424b9987c82917146d0533627eb7cd59819487dd86abc35dc8671039514/nemo_switchyard-0.3.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:bb40a39da460cc28d0c2143044233fef69b2c113813c511255f813ef0ac5bf1b", size = 8964907, upload-time = "2026-09-22T18:06:47.152Z" },
+    { url = "https://files.pythonhosted.org/packages/37/5e/013e2ca5b866d6235b4be482a3ef78e49ad571e6a6c1972f8c89686f32ee/nemo_switchyard-0.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f0c3728517a7015d87bbdf6a21303a344c9d886ae98d910dee6a01c67f8657d3", size = 9058284, upload-time = "2026-09-22T18:06:49.477Z" },
+]
+
+[[package]]
 name = "nemo-switchyard-plugin"
 version = "0.1.0"
 source = { editable = "plugins/nemo-switchyard" }
 dependencies = [
+    { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "switchyard-vendored", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "jinja2", specifier = ">=3.1.6" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "switchyard-vendored", editable = "plugins/nemo-switchyard/vendor/switchyard" },
+    { name = "nemo-switchyard", specifier = "==0.3.0" },
 ]
 
 [[package]]
@@ -12301,25 +12309,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/84/5d/61c2446ed26a57fa5543f9c270a731320911569202340d15341f72cdba7c/supabase_functions-2.31.0.tar.gz", hash = "sha256:4ad027b3ae3bd28b31233339f4db1da6965affd3546f655b421baf40cee2690f", size = 4683, upload-time = "2026-06-04T13:37:28.878Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/90/79/1a8162ce7d705381a4f2668c0da68e097b103c1aa701418a31da52905c7b/supabase_functions-2.31.0-py3-none-any.whl", hash = "sha256:3fdc4c4766152bfda63bdd0e286fc8a06f50e1280711fae4a1dfc9b7e9ebabc6", size = 8794, upload-time = "2026-06-04T13:37:28.022Z" },
-]
-
-[[package]]
-name = "switchyard-vendored"
-version = "0.1.0+vendored.9407922"
-source = { editable = "plugins/nemo-switchyard/vendor/switchyard" }
-dependencies = [
-    { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.99.0,<1.0" },
-    { name = "httpx", specifier = ">=0.28.1,<1.0" },
-    { name = "openai", specifier = ">=2.34.0,<3.0" },
-    { name = "pydantic", specifier = ">=2.13.3,<3.0" },
 ]
 
 [[package]]

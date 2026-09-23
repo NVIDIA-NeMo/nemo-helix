@@ -34,11 +34,12 @@ def test_bundle_uses_plugin_dist_name_and_existing_extra() -> None:
 
     assert spec["module"] == "nemo_switchyard"
     assert spec["deps_group"] == "nemo-switchyard"
-    assert "switchyard-vendored" in platform["project"]["optional-dependencies"]["nemo-switchyard"]
+    assert "nemo-switchyard==0.3.0" in platform["project"]["optional-dependencies"]["nemo-switchyard"]
 
 
 def test_lock_uses_plugin_dist_name() -> None:
     names = [package["name"] for package in _toml(_UV_LOCK)["package"]]
 
     assert "nemo-switchyard-plugin" in names
-    assert "nemo-switchyard" not in names
+    assert "nemo-switchyard" in names
+    assert "switchyard-vendored" not in names

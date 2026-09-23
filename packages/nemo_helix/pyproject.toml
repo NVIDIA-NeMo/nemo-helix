@@ -501,8 +501,9 @@ nemo-safe-synthesizer-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-switchyard = [
+  "jinja2>=3.1.6",
   "nemo-helix-plugin",
-  "switchyard-vendored",
+  "nemo-switchyard==0.3.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -629,14 +630,6 @@ studio-service = [
   "fastapi[standard]>=0.115.4",
   "uvicorn[standard]>=0.12.0",
   "nhx-common",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
-switchyard-vendored = [
-  "openai>=2.34.0,<3.0",
-  "anthropic>=0.99.0,<1.0",
-  "httpx>=0.28.1,<1.0",
-  "pydantic>=2.13.3,<3.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -856,7 +849,6 @@ nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_eval
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }
 nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", deps_group = "services" }
 garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi", deps_group = "auditor-service" }
-switchyard-vendored = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchyard", module = "switchyard" }
 
 # Default first-party plugins
 nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents"] } }
