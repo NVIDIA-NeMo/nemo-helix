@@ -10,10 +10,11 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.compat import AsyncLegacyPaginatedResponse, LegacyPaginatedResponse
 from nemo_helix_plugin.client.endpoint import get
 from nemo_helix_plugin.client.errors import NemoResponseValidationError
 from nemo_helix_plugin.client.method import method
-from nemo_helix_plugin.client.response import AsyncNemoPaginatedResponse, NemoPaginatedResponse
+from nemo_helix_plugin.client.response import AsyncNemoPaginatedCall, AsyncNemoPaginatedResponse, NemoPaginatedResponse
 from nemo_helix_plugin.client.types import CursorPagination, OffsetPagination, Paginated, RetryPolicy
 from pydantic import BaseModel
 
@@ -71,6 +72,28 @@ class TestPaginatedSync:
         assert items[1].name == "b"
         # Only one request made (no additional page fetches)
         assert mock_http.request.call_count == 1
+
+    def test_response_iterates_items_directly_and_exposes_first_page_data(self) -> None:
+        mock_http = MagicMock(spec=httpx.Client)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+
+        response = NemoClient(base_url=BASE, workspace="default", http_client=mock_http).send(LIST_ITEMS())
+
+        assert [item.name for item in response] == ["a"]
+        assert [item.name for item in response.data] == ["a"]
+
+    def test_legacy_paginated_response_reuses_common_page_helpers(self) -> None:
+        mock_http = MagicMock(spec=httpx.Client)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+
+        response = NemoClient(base_url=BASE, workspace="default", http_client=mock_http).send(LIST_ITEMS())
+        legacy = LegacyPaginatedResponse(response)
+        page = next(legacy.iter_pages())
+
+        assert [item.name for item in legacy.data] == ["a"]
+        assert [item.name for item in legacy] == ["a"]
+        assert page.has_next_page() is False
+        assert page.next_page_info() is None
 
     def test_multi_page_iteration(self) -> None:
         """Iterating should automatically fetch all pages."""
@@ -239,6 +262,50 @@ class TestPaginatedAsync:
         assert len(items) == 2
         assert items[0].name == "a"
         assert items[1].name == "b"
+
+    @pytest.mark.asyncio
+    async def test_async_response_iterates_items_directly_and_exposes_first_page_data(self) -> None:
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+
+        response = await AsyncNemoClient(base_url=BASE, workspace="default", http_client=mock_http).send(LIST_ITEMS())
+
+        assert [item.name async for item in response] == ["a"]
+        assert [item.name for item in response.data] == ["a"]
+
+    @pytest.mark.asyncio
+    async def test_async_paginated_call_is_awaitable_iterable_and_cached(self) -> None:
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+        client = AsyncNemoClient(base_url=BASE, workspace="default", http_client=mock_http)
+        loader_calls = 0
+
+        async def loader() -> AsyncNemoPaginatedResponse[Item, OffsetPagination]:
+            nonlocal loader_calls
+            loader_calls += 1
+            return await client.send(LIST_ITEMS())
+
+        call = AsyncNemoPaginatedCall(loader)
+
+        response = await call
+        assert [item.name for item in response.data] == ["a"]
+        assert [item.name async for item in call] == ["a"]
+        assert loader_calls == 1
+        assert mock_http.request.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_async_legacy_paginated_response_reuses_common_page_helpers(self) -> None:
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+        response = AsyncNemoClient(base_url=BASE, workspace="default", http_client=mock_http).send(LIST_ITEMS())
+        legacy = AsyncLegacyPaginatedResponse(response)
+
+        page = await legacy
+
+        assert [item.name for item in page.data] == ["a"]
+        assert [item.name async for item in legacy] == ["a"]
+        assert page.has_next_page() is False
+        assert page.next_page_info() is None
 
     @pytest.mark.asyncio
     async def test_async_data_returns_page_result(self) -> None:

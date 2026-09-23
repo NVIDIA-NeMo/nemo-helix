@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 import nemo_evaluator.intake as intake
+from nemo_helix import AsyncNeMoHelix
 
 INTAKE_ROOT = Path(next(iter(intake.__path__))).resolve()
 
@@ -37,3 +38,9 @@ def test_intake_mapping_has_no_service_imports() -> None:
     assert not offenders, "nemo_evaluator.intake must not import the Intake service / transport:\n" + "\n".join(
         offenders
     )
+
+
+def test_platform_evaluations_resource_imports_without_generated_intake_types() -> None:
+    async_sdk = AsyncNeMoHelix(base_url="http://platform.test")
+
+    assert async_sdk.evaluations is not None

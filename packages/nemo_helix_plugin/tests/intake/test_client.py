@@ -38,6 +38,34 @@ def _evaluation_json() -> dict[str, object]:
     }
 
 
+def _trace_json(trace_id: str) -> dict[str, object]:
+    return {
+        "id": trace_id,
+        "root_span_id": "span-1",
+        "session_id": "session-1",
+        "workspace": "default",
+        "started_at": "2026-01-02T03:04:05Z",
+        "status": "OK",
+    }
+
+
+def _traces_page(request: httpx.Request, trace_id: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        request=request,
+        json={
+            "data": [_trace_json(trace_id)],
+            "pagination": {
+                "page": 1,
+                "page_size": 10,
+                "current_page_size": 1,
+                "total_pages": 1,
+                "total_results": 1,
+            },
+        },
+    )
+
+
 def test_sync_create_evaluator_result_uses_typed_transport() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
@@ -70,6 +98,36 @@ def test_sync_create_evaluator_result_uses_typed_transport() -> None:
     assert response.data().evaluator_result_id == "eval-result-1"
 
 
+def test_sync_evaluator_results_compat_omits_absent_optional_fields() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/evaluator-results"
+        assert json.loads(request.read()) == {
+            "span_id": "span-1",
+            "session_id": "session-1",
+            "name": "accuracy.score",
+            "data_type": "NUMERIC",
+            "value": 1.0,
+        }
+        return httpx.Response(201, request=request, json=_evaluator_result_json())
+
+    client = IntakeClient(
+        base_url=BASE,
+        workspace="default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    response = client.evaluator_results.create(
+        span_id="span-1",
+        session_id="session-1",
+        name="accuracy.score",
+        data_type="NUMERIC",
+        value=1.0,
+    )
+
+    assert response.evaluator_result_id == "eval-result-1"
+
+
 def test_sync_patch_evaluation_uses_typed_transport() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "PATCH"
@@ -89,6 +147,49 @@ def test_sync_patch_evaluation_uses_typed_transport() -> None:
     )
 
     assert response.data().name == "eval-1"
+
+
+def test_sync_chat_completions_compat_omits_absent_optional_fields() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/ingest/chat-completions"
+        assert json.loads(request.read()) == {
+            "request": {"model": "test-model"},
+            "response": {"id": "chatcmpl-1"},
+        }
+        return httpx.Response(201, request=request, json={"session_id": "session-1", "span_id": "span-1"})
+
+    client = IntakeClient(
+        base_url=BASE,
+        workspace="default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    response = client.ingest.chat_completions.create(
+        request={"model": "test-model"},
+        response={"id": "chatcmpl-1"},
+    )
+
+    assert response.session_id == "session-1"
+
+
+def test_sync_nested_traces_list_exposes_page_data_and_iteration() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/traces"
+        assert json.loads(request.url.params["filter"]) == {"session_id": "session-1"}
+        return _traces_page(request, "trace-1")
+
+    client = IntakeClient(
+        base_url=BASE,
+        workspace="default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    response = client.traces.list(filter={"session_id": "session-1"})
+
+    assert [trace.id for trace in response.data] == ["trace-1"]
+    assert [trace.id for trace in response] == ["trace-1"]
 
 
 @pytest.mark.asyncio
@@ -137,35 +238,30 @@ async def test_async_create_otlp_traces_uses_typed_transport() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_otlp_compat_normalizes_sync_iterables() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+        assert request.headers["Content-Type"] == "application/x-protobuf"
+        assert request.content == b"trace-protobuf"
+        return httpx.Response(200, request=request, json={"errors": []})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = AsyncIntakeClient(base_url=BASE, workspace="default", http_client=http_client)
+
+        response = await client.ingest.otlp.v1.traces.create(body=[b"trace", b"-protobuf"])
+
+    assert response.errors == []
+
+
+@pytest.mark.asyncio
 async def test_async_list_traces_returns_paginated_items_and_serializes_filter() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path == "/apis/intake/v2/workspaces/default/traces"
         assert request.url.params["mode"] == "detailed"
         assert json.loads(request.url.params["filter"]) == {"session_id": "session-1"}
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "data": [
-                    {
-                        "id": "trace-1",
-                        "root_span_id": "span-1",
-                        "session_id": "session-1",
-                        "workspace": "default",
-                        "started_at": "2026-01-02T03:04:05Z",
-                        "status": "OK",
-                    }
-                ],
-                "pagination": {
-                    "page": 1,
-                    "page_size": 10,
-                    "current_page_size": 1,
-                    "total_pages": 1,
-                    "total_results": 1,
-                },
-            },
-        )
+        return _traces_page(request, "trace-1")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         client = AsyncIntakeClient(base_url=BASE, workspace="default", http_client=http_client)
@@ -179,6 +275,30 @@ async def test_async_list_traces_returns_paginated_items_and_serializes_filter()
 
     assert len(traces) == 1
     assert traces[0].root_span_id == "span-1"
+
+
+@pytest.mark.asyncio
+async def test_async_nested_traces_list_supports_awaited_data_and_direct_iteration() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.method == "GET"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/traces"
+        assert json.loads(request.url.params["filter"]) == {"session_id": "session-1"}
+        return _traces_page(request, f"trace-{len(requests)}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = AsyncIntakeClient(base_url=BASE, workspace="default", http_client=http_client)
+
+        call = client.traces.list(filter={"session_id": "session-1"})
+        response = await call
+
+        assert [trace.id for trace in response.data] == ["trace-1"]
+        assert [trace.id async for trace in call] == ["trace-1"]
+        assert [trace.id async for trace in client.traces.list(filter={"session_id": "session-1"})] == ["trace-2"]
+
+    assert len(requests) == 2
 
 
 @pytest.mark.asyncio
