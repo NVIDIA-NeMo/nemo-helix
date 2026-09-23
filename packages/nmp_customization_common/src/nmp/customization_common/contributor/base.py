@@ -23,6 +23,7 @@ from nemo_platform_plugin.customization_contributor import (
 from nemo_platform_plugin.jobs.api_factory import JobRouteOption
 from nemo_platform_plugin.jobs.routes import add_job_routes
 from nemo_platform_plugin.service import RouterSpec
+from nmp.customization_common.service.platform_client import CUSTOMIZATION_JOB_SOURCE
 
 
 class BaseContributor:
@@ -74,7 +75,7 @@ class BaseContributor:
 
         jobs_router = add_job_routes(
             self.job_cls,
-            service_name="customization",
+            service_name=CUSTOMIZATION_JOB_SOURCE,
             generate_job_name=self.generate_job_name,
             route_options=[JobRouteOption.CORE],
             default_profile=config.default_training_execution_profile,

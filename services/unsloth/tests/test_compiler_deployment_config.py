@@ -126,6 +126,8 @@ def platform() -> MagicMock:
     clients = MagicMock()
     clients.models.get_deployment_config = AsyncMock(side_effect=_not_found())
     clients.models.get_model = AsyncMock(side_effect=_not_found())
+    # No adapter holds the output name yet, which is what every test here assumes.
+    clients.models.get_adapter = AsyncMock(side_effect=_not_found())
     return clients
 
 

@@ -11,7 +11,7 @@ schedule passes through.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
@@ -21,6 +21,7 @@ from nmp.unsloth.schemas import (
     LoRAParams,
     ModelLoadSpec,
     OutputResponse,
+    ScheduleSpec,
     TrainingSpec,
     UnslothJobOutput,
 )
@@ -31,7 +32,7 @@ def _canonical_spec() -> UnslothJobOutput:
         model=ModelLoadSpec(name="default/base"),
         dataset=DatasetSpec(path="default/training"),
         training=TrainingSpec(lora=LoRAParams()),
-        schedule={"max_steps": 1},
+        schedule=ScheduleSpec(max_steps=1),
         output=OutputResponse(
             name="r",
             type="adapter",
@@ -44,7 +45,7 @@ def _canonical_spec() -> UnslothJobOutput:
 @pytest.mark.asyncio
 async def test_compile_delegates_to_app_jobs_compiler() -> None:
     spec = _canonical_spec()
-    platform = AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock())
+    platform = AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock(), jobs=MagicMock())
 
     sentinel = object()
     target = "nmp.unsloth.compile._compile_canonical"

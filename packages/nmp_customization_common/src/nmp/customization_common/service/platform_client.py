@@ -8,16 +8,24 @@ handler / ``to_spec`` flow) to validate that the submitter's ``model`` and
 ``dataset`` references exist before the job moves on to compile / run.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_platform_plugin.client.errors import NemoClientError, NotFoundError, PermissionDeniedError
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.files.types import FilesetPurpose
+from nemo_platform_plugin.jobs.client import AsyncJobsClient
+from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.common.entities.utils import parse_entity_ref
 from nmp.customization_common.schemas.file_io import FileSetRef
+
+#: ``source`` of every customization job (automodel, unsloth and rl) in the Jobs service.
+CUSTOMIZATION_JOB_SOURCE = "customization"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +34,7 @@ class AsyncCustomizationPlatformClients:
 
     files: AsyncFilesClient
     models: AsyncModelsClient
+    jobs: AsyncJobsClient
 
 
 def async_customization_platform_clients_from_platform(
@@ -35,6 +44,7 @@ def async_customization_platform_clients_from_platform(
     return AsyncCustomizationPlatformClients(
         files=client_from_platform(platform, AsyncFilesClient),
         models=client_from_platform(platform, AsyncModelsClient),
+        jobs=client_from_platform(platform, AsyncJobsClient),
     )
 
 
@@ -168,3 +178,80 @@ async def fetch_model_entity(
             label=f"weights for model '{resolved_ref.workspace}/{resolved_ref.name}'",
         )
     return model
+
+
+async def validate_adapter_base_model(
+    adapter_name: str,
+    base_model_ref: str,
+    workspace: str,
+    platform: AsyncCustomizationPlatformClients,
+) -> None:
+    """Reject a LoRA output name that is already an adapter of a different base model.
+
+    Adapter names are unique per workspace, so retraining an existing adapter name under a
+    different base model conflicts on create and cannot be updated. Without this check the
+    job trains to completion first and only fails in the model-entity step. Callers decide
+    whether the job trains a LoRA adapter; this only compares base models.
+    """
+    try:
+        existing = (await platform.models.get_adapter(name=adapter_name, workspace=workspace)).data()
+    except NotFoundError:
+        return
+
+    base = parse_entity_ref(base_model_ref, workspace)
+    expected = f"{base.workspace}/{base.name}"
+    if existing.model is not None and existing.model != expected:
+        raise PlatformJobCompilationError(
+            f"Adapter '{workspace}/{adapter_name}' already exists on base model '{existing.model}', "
+            f"but this job trains against '{expected}'. Adapter names are unique per workspace, so "
+            "the existing adapter cannot be re-parented. Choose a different output.name, or train "
+            f"against '{existing.model}'."
+        )
+
+
+async def validate_output_name_not_in_flight(
+    output_name: str,
+    workspace: str,
+    platform: AsyncCustomizationPlatformClients,
+) -> None:
+    """Reject an output name that a pending or running customization job will also write.
+
+    Every job uploads into a fileset named after its output and then registers the
+    model or adapter under that name. Two jobs sharing a name therefore mix their
+    checkpoints in one fileset, and the later one either overwrites the earlier
+    entity or, for an adapter on a different base model, fails at registration
+    after training has finished. Checking entities that already exist
+    (``validate_adapter_base_model``) cannot see a job that has not registered yet.
+
+    The new job is not stored until it compiles, so it is never among the results.
+    Two submissions landing at the same instant can still both pass; this closes the
+    hours-long window a training run leaves open, not that one.
+    """
+    in_flight = {
+        "source": CUSTOMIZATION_JOB_SOURCE,
+        "status": {"$in": [status.value for status in PlatformJobStatus.non_terminals()]},
+        "spec.output.name": output_name,
+    }
+    try:
+        conflicting = [
+            job
+            async for job in platform.jobs.list(workspace=workspace, filter=in_flight, page_size=100)
+            if _output_name(job.spec) == output_name
+        ]
+    except NemoClientError as exc:
+        # Fail closed: the job would be created through the same Jobs service a moment later.
+        raise PlatformJobCompilationError(
+            f"Could not check for running jobs that write output '{workspace}/{output_name}': {exc}"
+        ) from exc
+
+    if conflicting:
+        job = conflicting[0]
+        raise PlatformJobCompilationError(
+            f"Job '{job.name}' ({job.status.value}) is already producing output '{workspace}/{output_name}'. "
+            "Wait for it to finish, or choose a different output.name."
+        )
+
+
+def _output_name(spec: Mapping[str, Any]) -> str | None:
+    output = spec.get("output")
+    return output.get("name") if isinstance(output, Mapping) else None

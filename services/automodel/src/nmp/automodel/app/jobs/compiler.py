@@ -60,7 +60,12 @@ from nmp.customization_common.schemas.model_entity import (
 from nmp.customization_common.schemas.model_entity import (
     PEFTConfig as ModelEntityPEFTConfig,
 )
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    fetch_model_entity,
+    validate_adapter_base_model,
+    validate_output_name_not_in_flight,
+)
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 
 logger = logging.getLogger(__name__)
@@ -428,6 +433,10 @@ async def platform_job_config_compiler(
             raise PlatformJobCompilationError(
                 f"Access denied to teacher model '{transformed_spec.training.teacher_model}'."
             ) from e
+
+    await validate_output_name_not_in_flight(transformed_spec.output.name, workspace, platform)
+    if transformed_spec.training.finetuning_type == FinetuningType.LORA:
+        await validate_adapter_base_model(transformed_spec.output.name, transformed_spec.model, workspace, platform)
 
     if transformed_spec.deployment_config is not None:
         await _validate_deployment_config(workspace, transformed_spec, platform)

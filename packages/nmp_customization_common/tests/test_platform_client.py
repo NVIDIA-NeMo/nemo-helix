@@ -1,18 +1,25 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.client.errors import NemoTransportError, NotFoundError
+from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nmp.customization_common.service.platform_client import (
+    CUSTOMIZATION_JOB_SOURCE,
     AsyncCustomizationPlatformClients,
     check_dataset_access,
     check_environment_access,
     check_gym_dataset_layout,
     fetch_model_entity,
+    validate_adapter_base_model,
+    validate_output_name_not_in_flight,
 )
 
 
@@ -32,7 +39,7 @@ def _clients(
     if fileset_error is not None:
         files.get_fileset.side_effect = fileset_error
 
-    return models, files, AsyncCustomizationPlatformClients(files=files, models=models)
+    return models, files, AsyncCustomizationPlatformClients(files=files, models=models, jobs=MagicMock())
 
 
 async def test_fetch_model_entity_verifies_weights_fileset() -> None:
@@ -120,3 +127,108 @@ async def test_environment_access_rejects_directory_path() -> None:
 
     with pytest.raises(ValueError, match="must not include a '#path/' directory"):
         await check_environment_access(platform, "default/environment#package", "default")
+
+
+def _adapter_clients(existing_base: str | None, *, missing: bool = False) -> AsyncCustomizationPlatformClients:
+    models = MagicMock()
+    if missing:
+        models.get_adapter = AsyncMock(side_effect=_not_found())
+    else:
+        models.get_adapter = AsyncMock(return_value=SimpleNamespace(data=lambda: SimpleNamespace(model=existing_base)))
+    return AsyncCustomizationPlatformClients(files=MagicMock(), models=models, jobs=MagicMock())
+
+
+@pytest.mark.parametrize(
+    ("base_model_ref", "existing_base", "missing"),
+    [
+        ("default/base", None, True),
+        ("default/base", "default/base", False),
+        ("base", "default/base", False),
+        ("default/base", None, False),
+    ],
+    ids=["no-adapter-yet", "retrain-same-base", "bare-name-same-base", "adapter-without-base"],
+)
+async def test_adapter_base_model_allows(base_model_ref: str, existing_base: str | None, missing: bool) -> None:
+    platform = _adapter_clients(existing_base, missing=missing)
+
+    await validate_adapter_base_model("my-lora", base_model_ref, "default", platform)
+
+    cast(AsyncMock, platform.models.get_adapter).assert_awaited_once_with(name="my-lora", workspace="default")
+
+
+async def test_adapter_base_model_rejects_a_different_base() -> None:
+    """The adapter name is taken in this workspace, so training would only fail at the end."""
+    platform = _adapter_clients("default/other-base")
+
+    with pytest.raises(
+        PlatformJobCompilationError,
+        match=r"Adapter 'default/my-lora' already exists on base model 'default/other-base', "
+        r"but this job trains against 'default/base'",
+    ):
+        await validate_adapter_base_model("my-lora", "default/base", "default", platform)
+
+
+class _Jobs:
+    """Jobs client stand-in: returns *jobs* from ``list`` and records how it was called."""
+
+    def __init__(self, jobs: list[SimpleNamespace] | None = None, error: Exception | None = None) -> None:
+        self._jobs = jobs or []
+        self._error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def list(self, **kwargs: Any) -> AsyncIterator[SimpleNamespace]:
+        self.calls.append(kwargs)
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[SimpleNamespace]:
+        if self._error is not None:
+            raise self._error
+        for job in self._jobs:
+            yield job
+
+
+def _in_flight_clients(jobs: _Jobs) -> AsyncCustomizationPlatformClients:
+    return AsyncCustomizationPlatformClients(files=MagicMock(), models=MagicMock(), jobs=cast(Any, jobs))
+
+
+def _job(name: str, output_name: str, status: PlatformJobStatus = PlatformJobStatus.ACTIVE) -> SimpleNamespace:
+    return SimpleNamespace(name=name, status=status, spec={"output": {"name": output_name, "type": "adapter"}})
+
+
+async def test_output_name_check_queries_in_flight_customization_jobs_for_that_name() -> None:
+    jobs = _Jobs()
+
+    await validate_output_name_not_in_flight("my-lora", "default", _in_flight_clients(jobs))
+
+    (call,) = jobs.calls
+    assert call["workspace"] == "default"
+    assert call["filter"] == {
+        "source": CUSTOMIZATION_JOB_SOURCE,
+        "status": {"$in": [status.value for status in PlatformJobStatus.non_terminals()]},
+        "spec.output.name": "my-lora",
+    }
+
+
+async def test_output_name_check_rejects_a_running_job_with_the_same_output() -> None:
+    """Job 2 would otherwise train for hours, then collide with job 1 at registration."""
+    jobs = _Jobs([_job("automodel-job-1", "my-lora", PlatformJobStatus.PENDING)])
+
+    with pytest.raises(
+        PlatformJobCompilationError,
+        match=r"Job 'automodel-job-1' \(pending\) is already producing output 'default/my-lora'",
+    ):
+        await validate_output_name_not_in_flight("my-lora", "default", _in_flight_clients(jobs))
+
+
+async def test_output_name_check_ignores_a_job_with_a_different_output() -> None:
+    """The spec filter runs server-side; a job it lets through with another name is not a conflict."""
+    jobs = _Jobs([_job("automodel-job-1", "other-lora")])
+
+    await validate_output_name_not_in_flight("my-lora", "default", _in_flight_clients(jobs))
+
+
+async def test_output_name_check_fails_closed_when_jobs_cannot_be_listed() -> None:
+    jobs = _Jobs(error=NemoTransportError(httpx.ConnectError("connection refused")))
+
+    with pytest.raises(PlatformJobCompilationError, match="Could not check for running jobs"):
+        await validate_output_name_not_in_flight("my-lora", "default", _in_flight_clients(jobs))

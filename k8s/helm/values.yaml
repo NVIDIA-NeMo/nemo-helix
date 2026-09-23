@@ -622,6 +622,9 @@ basePlatformConfig: |
 
   # -- rl is the configuration specific to NeMo-RL customization jobs (DPO / GRPO)
   rl:
+    # -- default_training_execution_profile is the single-node GPU profile used when the job
+    # omits training.execution_profile. Matches automodel and unsloth.
+    default_training_execution_profile: default
     # -- job_storage_pvc_claim is the claim sandboxed GRPO re-mounts into the Gym host so
     # the sandbox can read the downloaded environment and dataset. Must match the claim the
     # Jobs controller mounts for job storage.

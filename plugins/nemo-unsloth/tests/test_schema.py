@@ -14,6 +14,7 @@ import httpx
 import pytest
 from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_platform_plugin.jobs.client import AsyncJobsClient
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_unsloth_plugin.schema import (
     DatasetSpec,
@@ -105,6 +106,7 @@ async def _run_transform_async(
         platform = AsyncCustomizationPlatformClients(
             files=AsyncFilesClient.from_client(client),
             models=AsyncModelsClient.from_client(client),
+            jobs=AsyncJobsClient.from_client(client),
         )
         return await transform_input_to_output(spec, "default", platform)
 
