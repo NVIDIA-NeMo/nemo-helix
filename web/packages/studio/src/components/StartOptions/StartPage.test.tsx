@@ -41,6 +41,18 @@ const renderPage = (groups: StartTemplateGroup[], value: string | null = null) =
     </TestProviders>
   );
 
+describe('StartPage accessibility', () => {
+  it('names the group holding the options and templates', () => {
+    renderPage([group()]);
+
+    // KUI sets the role but takes its name from a wrapping FormField, which this page has
+    // no visible prompt for — without a name the group is announced as an unnamed one.
+    expect(
+      screen.getByRole('radiogroup', { name: 'How do you want to start?' })
+    ).toBeInTheDocument();
+  });
+});
+
 describe('StartPage badges', () => {
   it('shows an option tag on its tile', () => {
     renderPage([group()]);

@@ -23,6 +23,13 @@ const CONTENT_WIDTH = 'w-full max-w-[768px]';
 /** The design's tile is `radius/md`; Card's own `radius-density-xl` is visibly rounder. */
 const TILE_RADIUS = 'rounded-[var(--radius-md)]';
 
+/**
+ * Names the radio group. KUI gives the group its role but takes `aria-labelledby` only
+ * from a wrapping FormField, so without this it is announced unnamed — and the design has
+ * no visible prompt to point at, the page heading naming the page rather than the choice.
+ */
+const GROUP_LABEL = 'How do you want to start?';
+
 /** The design's tile sets its title at 14px semibold over a 12px description. */
 const TILE_LABEL_KIND = 'label/semibold/md' as const;
 const TILE_DESCRIPTION_KIND = 'label/regular/sm' as const;
@@ -69,6 +76,7 @@ export const StartPage: FC<StartPageProps> = ({
           <Flex justify="center" className="w-full">
             <RadioGroupRoot
               name="start-option"
+              aria-label={GROUP_LABEL}
               value={value ?? ''}
               onValueChange={onChange}
               disabled={disabled}
