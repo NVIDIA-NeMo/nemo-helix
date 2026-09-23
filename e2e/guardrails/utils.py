@@ -15,6 +15,7 @@ from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import (
     CreateVirtualModelRequest,
@@ -259,7 +260,9 @@ def create_guarded_virtual_model(
         body=CreateVirtualModelRequest(
             name=test_case.virtual_model_name,
             default_model_entity=test_case.backend_model_ref,
-            models=[VirtualModelInferenceConfig(model=test_case.backend_model_ref, backend_format="OPENAI_CHAT")],
+            models=[
+                VirtualModelInferenceConfig(model=test_case.backend_model_ref, backend_format=BackendFormat.OPENAI_CHAT)
+            ],
             request_middleware=[middleware_call],
             response_middleware=[middleware_call],
         ),

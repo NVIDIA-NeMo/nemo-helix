@@ -5,7 +5,7 @@
 
 import os
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import httpx
@@ -183,3 +183,26 @@ def services_pool_client(_services: str, _services_instance: RunningServices) ->
         yield client
     finally:
         client.close()
+
+
+def client_as_principal(client: NemoClient, headers: Mapping[str, str]) -> NemoClient:
+    """Return a fresh client for *client*'s platform that carries only *headers* as its identity.
+
+    The pooled client's transport sends the admin principal headers on every
+    request, so acting as another principal needs a new transport rather than a
+    ``with_headers`` clone, which would merge the two identities.
+    """
+    auth = _services_pool_auth()
+    return NemoClient(
+        base_url=client.base_url,
+        workspace=client.workspace,
+        auth=auth,
+        default_headers=dict(headers),
+        http_client=httpx.Client(
+            base_url=client.base_url,
+            headers=dict(headers),
+            auth=TokenProviderAuth(auth) if auth is not None else None,
+            timeout=DEFAULT_TIMEOUT,
+        ),
+        owns_http_client=True,
+    )
