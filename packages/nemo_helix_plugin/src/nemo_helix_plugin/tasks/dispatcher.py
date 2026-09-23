@@ -6,8 +6,8 @@
 Docker-backed task containers and host subprocess executors land here with the
 ``NEMO_JOB_*`` environment populated. Typed task entrypoints use
 :func:`run_task_with_client` or :func:`run_task_with_async_client` with an
-explicit context so the platform SDK used for result storage is not forwarded
-as a job client by accident.
+explicit context so the client used for result storage is not forwarded as a
+job client by accident.
 
 The default ``ctx.results`` is
 :class:`~nemo_helix_plugin.job_results.HelixJobResults` — results upload
@@ -21,7 +21,7 @@ Usage from a plugin's ``__main__.py``::
     import sys
     from types import FrameType
 
-    from nemo_helix_plugin.sdk_provider import get_task_sdk
+    from nemo_helix_plugin.client_provider import get_task_nemo_client
     from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, run_task_with_client
     from my_plugin.jobs.train import TrainJob
 
@@ -32,9 +32,8 @@ Usage from a plugin's ``__main__.py``::
 
     if __name__ == "__main__":
         signal.signal(signal.SIGTERM, _shutdown)
-        sdk = get_task_sdk("my-service")
-        client = client_from_platform(sdk, NemoClient)
-        sys.exit(run_task_with_client(TrainJob, client=client, ctx=build_ctx_from_env(sdk)))
+        client = get_task_nemo_client("my-service")
+        sys.exit(run_task_with_client(TrainJob, client=client, ctx=build_ctx_from_env(client)))
 """
 
 from __future__ import annotations
@@ -45,8 +44,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
@@ -180,8 +177,12 @@ def read_step_config() -> dict:
     return data
 
 
-def build_ctx_from_env(sdk: NeMoHelix) -> JobContext:
+def build_ctx_from_env(client: NemoClient) -> JobContext:
     """Build a :class:`JobContext` from the platform-injected ``NEMO_JOB_*`` env.
+
+    ``client`` is the task's sync :class:`NemoClient` (see
+    :func:`~nemo_helix_plugin.client_provider.get_task_nemo_client`); the
+    result sink and usage reporter share its transport and auth.
 
     Wires :attr:`JobContext.results` to :class:`HelixJobResults` so results
     upload through the Files service — works the same in docker-backed and
@@ -207,7 +208,6 @@ def build_ctx_from_env(sdk: NeMoHelix) -> JobContext:
     job_id = os.environ.get(NEMO_JOB_ID_ENVVAR, "").strip()
     if not job_id:
         raise RuntimeError(f"{NEMO_JOB_ID_ENVVAR} not set; running outside the platform?")
-    client = client_from_platform(sdk, NemoClient)
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(

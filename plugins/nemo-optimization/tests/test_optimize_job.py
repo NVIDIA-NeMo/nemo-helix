@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 import yaml
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job_context import JobContext
@@ -358,11 +357,11 @@ def bundle_sdk(
     *,
     downloaded: dict[str, Any] | None = None,
     uploaded: dict[str, Any] | None = None,
-) -> Iterator[NeMoHelix]:
+) -> Iterator[NemoClient]:
     """Patch fileset staging helpers so typed-manager calls materialize *bundle*."""
 
     bundle = bundle or {}
-    sdk = MagicMock(spec=NeMoHelix)
+    sdk = MagicMock(spec=NemoClient)
     files_client = MagicMock()
 
     def _manager(
@@ -415,7 +414,7 @@ def bundle_sdk(
         patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=files_client),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=_manager),
     ):
-        yield cast(NeMoHelix, sdk)
+        yield cast(NemoClient, sdk)
 
 
 def test_run_stages_the_config_from_the_fileset(ctx: JobContext) -> None:
@@ -523,7 +522,7 @@ def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -
 
 
 def test_run_rejects_a_staged_config_without_an_sdk(ctx: JobContext) -> None:
-    with pytest.raises(LocalRunError, match="requires a 'sdk: NeMoHelix'"):
+    with pytest.raises(LocalRunError, match="requires a sync platform client"):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -710,7 +709,7 @@ def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext)
 
     with (
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
-        pytest.raises(LocalRunError, match="requires a 'sdk: NeMoHelix'"),
+        pytest.raises(LocalRunError, match="requires a sync platform client"),
     ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},

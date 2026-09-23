@@ -24,7 +24,8 @@ from pathlib import Path
 from typing import Iterator
 
 from filesets import FilesetFileSystem
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_context import JobContext
@@ -68,7 +69,7 @@ def resolve_staged_config(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: SyncHelixClient | None,
+    sdk: NemoClient | None,
     kind: str,
 ) -> Iterator[Path]:
     """Yield a local path to a config file, staging it from a fileset if requested.
@@ -88,8 +89,8 @@ def resolve_staged_config(
 
     if sdk is None:
         raise LocalRunError(
-            f"Staging {kind} from a fileset requires a 'sdk: NeMoHelix', but no "
-            "platform SDK was available. Set NHX_BASE_URL before using fileset inputs."
+            f"Staging {kind} from a fileset requires a sync platform client ('sdk'), but none "
+            "was available. Set NHX_BASE_URL before using fileset inputs."
         )
 
     with tempfile.TemporaryDirectory(prefix=f".{kind}-{name}-", dir=str(ctx.storage.ephemeral)) as tmp:
@@ -119,7 +120,7 @@ def resolve_output(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: SyncHelixClient | None,
+    sdk: NemoClient | None,
     kind: str,
 ) -> Iterator[Path]:
     """Yield a local base directory for job outputs, uploading to a fileset on success.
@@ -152,8 +153,8 @@ def resolve_output(
 
     if sdk is None:
         raise LocalRunError(
-            f"Uploading {kind} results to a fileset requires a 'sdk: NeMoHelix', but no "
-            "platform SDK was available. Set NHX_BASE_URL or use a local output directory instead."
+            f"Uploading {kind} results to a fileset requires a sync platform client ('sdk'), but none "
+            "was available. Set NHX_BASE_URL or use a local output directory instead."
         )
 
     with tempfile.TemporaryDirectory(prefix=f".{kind}-output-{name}-", dir=str(ctx.storage.ephemeral)) as tmp:
@@ -170,7 +171,7 @@ def resolve_output(
                 upload_to_fileset(tmp_path, fileset=name, workspace=ws, sdk=sdk)
 
 
-def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: SyncHelixClient) -> None:
+def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: NemoClient) -> None:
     """Upload *local_dir*'s contents recursively to the named fileset (auto-created)."""
     files_client = client_from_platform(sdk, FilesClient)
     manager = _fileset_manager(files_client, workspace=workspace, fileset=fileset, ensure_fileset_exists=True)

@@ -20,7 +20,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
 import yaml
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
@@ -83,7 +84,7 @@ class OptimizeJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> OptimizeSpec:
         del entity_client, async_sdk
@@ -99,7 +100,7 @@ class OptimizeJob(NemoJob):
         spec: OptimizeSpec,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
@@ -136,7 +137,7 @@ class OptimizeJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: SyncHelixClient | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict:
         spec = OptimizeSpec.model_validate(config)
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
@@ -176,7 +177,7 @@ def _profiles_unavailable(profile: str) -> HelixJobDependencyUnavailableError:
     )
 
 
-async def _resolve_executor(*, profile: str, async_sdk: AsyncHelixClient) -> ExecutorSpec:
+async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> ExecutorSpec:
     """Pick the executor for *profile* from the backends the platform actually registered.
 
     Optimize prefers ``subprocess``: a study drives Fabric trials that may need the host's
@@ -223,7 +224,7 @@ def _staged_bundle(
     spec: OptimizeSpec,
     *,
     ctx: JobContext,
-    sdk: SyncHelixClient | None,
+    sdk: NemoClient | None,
 ) -> Iterator[tuple[Path, Path | None]]:
     """Yield ``(optimize config path, bundle root)`` for the run.
 
@@ -297,7 +298,7 @@ def _staged_dataset(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: SyncHelixClient | None,
+    sdk: NemoClient | None,
 ) -> Iterator[dict[str, Any]]:
     """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
 
@@ -359,7 +360,7 @@ def _publish_results(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: SyncHelixClient | None,
+    sdk: NemoClient | None,
 ) -> dict[str, str] | None:
     """Copy the study's artifacts to *output*, returning a pointer for the job result.
 
@@ -403,8 +404,8 @@ def _publish_results(
     ws, name = split_fileset_ref(FilesetRef(output), workspace)
     if sdk is None:
         raise LocalRunError(
-            f"Publishing optimize results to fileset '{ws}/{name}' requires a 'sdk: NeMoHelix', "
-            "but no platform SDK was available. Set NHX_BASE_URL or use a local output directory instead."
+            f"Publishing optimize results to fileset '{ws}/{name}' requires a sync platform client ('sdk'), "
+            "but none was available. Set NHX_BASE_URL or use a local output directory instead."
         )
     upload_to_fileset(artifacts, fileset=name, workspace=ws, sdk=sdk)
     logger.info("Published optimize results from %s to fileset %s/%s", artifacts, ws, name)
