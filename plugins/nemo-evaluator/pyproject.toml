@@ -8,6 +8,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "cloudpickle>=3.1.1",
+    "nemo-agents-plugin",
     "nemo-evaluator-sdk[harbor]",
     "nemo-helix-plugin",
     "pydantic>=2.12.0",
@@ -41,6 +42,7 @@ packages = ["src/nemo_evaluator"]
 
 
 [tool.uv.sources]
+nemo-agents-plugin = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nhx-testing = { workspace = true }

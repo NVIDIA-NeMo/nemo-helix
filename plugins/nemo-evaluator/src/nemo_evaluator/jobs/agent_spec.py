@@ -19,7 +19,7 @@ from typing import Any, Literal, Self, TypeAlias
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TasksetRef
+from nemo_evaluator.api.schemas import AgentRef, MetricInline, TaskInputs, TaskMetadataList, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_model_refs
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
@@ -30,6 +30,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 from nemo_evaluator_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_evaluator_sdk.values.agents import AgentBase
+from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 
@@ -76,16 +77,38 @@ class FabricRunnerTarget(BaseModel):
     config's ``harness.adapter_id`` and is never inferred from ``model``. ``model`` is applied as the
     config's default model when given.
 
-    A run is described by exactly one complete ``config``. Fabric 0.1.0rc2 removed profile overlays,
-    so the former ``profiles`` field is gone — fold any overlay you were passing into ``config``.
+    A run is described by exactly one complete ``config`` — given inline, or resolved at submit from a
+    registered platform ``agent`` (``nemo agents create``) with the same resolution a deployment gets:
+    environment merge, Inference Gateway binding, translation of the platform ``agent.yaml``. Either way
+    the canonical spec carries a plain ``config``; the job never looks an agent up. Fabric 0.1.0rc2
+    removed profile overlays, so the former ``profiles`` field is gone — fold any overlay into ``config``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["fabric"] = "fabric"
-    config: dict[str, Any] = Field(
+    config: dict[str, Any] | None = Field(
+        default=None,
         description="Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped mapping). Its "
-        "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex.",
+        "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex. Exactly one of "
+        "`config` or `agent`.",
+    )
+    agent: AgentRef | None = Field(
+        default=None,
+        description="A registered platform agent to run instead of an inline `config`: `workspace/name`, or "
+        "`name` in the submission workspace. Resolved at submit into `config`. The agent runs fresh for every "
+        "trial; an existing deployment is never called.",
+    )
+    environment: EnvironmentSpecInline | None = Field(
+        default=None,
+        description="Environment to evaluate a registered `agent` in, merged onto its config exactly as a "
+        "deployment would: MCP fulfilments (url/env/secrets) for servers the agent declares, process env, secret "
+        "refs, and Fabric environment settings. Requires `agent`.",
+    )
+    agent_files: FilesetRef | None = Field(
+        default=None,
+        description="Set by resolution, not by the submitter: the registered agent's Ethos FileSet, staged into "
+        "the job before the run so relative `skills.paths` resolve.",
     )
     model: str | None = Field(
         default=None,
@@ -98,6 +121,28 @@ class FabricRunnerTarget(BaseModel):
         description="Capture the agent trajectory as ATIF via NeMo Relay and attach it to trial evidence. "
         "Requires the NeMo Relay gateway in the run environment.",
     )
+    env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        description="Environment variables for the Fabric harness, sourced from the secrets service, as "
+        "{ENV_NAME: secret-ref}. The reference travels in the spec; the service resolves it into the job's "
+        "environment at compile time, where the harness reads it by name (e.g. a model `api_key_env` or an MCP "
+        "server's `env`). No credential is stored on the spec or the run bundle.",
+    )
+
+    @model_validator(mode="after")
+    def _config_or_registered_agent(self) -> Self:
+        if (self.config is None) == (self.agent is None):
+            raise ValueError(
+                "provide exactly one of `config` (inline Fabric agent config) or `agent` (a registered agent)"
+            )
+        if self.environment is not None and self.agent is None:
+            raise ValueError("`environment` applies to a registered `agent`; fold it into an inline `config` instead")
+        if self.agent is not None and self.model is not None:
+            raise ValueError(
+                "`model` cannot be combined with `agent`: a registered agent's model is part of what it is, so a "
+                "different model is a different registered agent"
+            )
+        return self
 
 
 class HarborRunnerTarget(BaseModel):
@@ -113,9 +158,26 @@ class HarborRunnerTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["harbor"] = "harbor"
+    agent: AgentRef | None = Field(
+        default=None,
+        description="A registered platform agent to run inside each task container: `workspace/name`, or `name` "
+        "in the submission workspace. Resolved at submit into `agent_import_path` (the SDK's installed Fabric "
+        "agent) and `agent_kwargs.fabric_config`, so the agent runs as registered — identity, skills, MCP "
+        "servers, and telemetry included. Mutually exclusive with `agent_import_path` and `agent_model_name`.",
+    )
+    environment: EnvironmentSpecInline | None = Field(
+        default=None,
+        description="Environment to evaluate a registered `agent` in, merged onto its config exactly as a "
+        "deployment would. Requires `agent`. MCP fulfilment URLs must be reachable from inside the task container.",
+    )
+    agent_files: FilesetRef | None = Field(
+        default=None,
+        description="Set by resolution, not by the submitter: the registered agent's Ethos FileSet, staged into "
+        "the job and uploaded into the task container as the Fabric config bundle.",
+    )
     agent_name: str | None = Field(
         default="oracle",
-        description="Built-in Harbor agent to run (e.g. 'oracle'). Ignored when `agent_import_path` is set.",
+        description="Built-in Harbor agent to run (e.g. 'oracle'). Ignored when `agent_import_path` or `agent` is set.",
     )
     agent_import_path: str | None = Field(
         default=None,
@@ -147,10 +209,40 @@ class HarborRunnerTarget(BaseModel):
     reward_key: str = Field(
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
     )
+    agent_setup_timeout_multiplier: float | None = Field(
+        default=None,
+        gt=0,
+        description="Harbor agent-setup timeout multiplier. An agent that installs itself into the task container "
+        "(a Fabric harness, a registered agent) needs several times Harbor's default, which is tuned for prebuilt "
+        "agents.",
+    )
+    agent_timeout_multiplier: float | None = Field(
+        default=None, gt=0, description="Harbor agent-phase timeout multiplier, applied to every trial."
+    )
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> Self:
+        # ``fabric_config`` is a typed agent document and is judged by value shape only; see
+        # ``provenance.VALUE_ONLY_SETTINGS_KEYS``. The SDK runtime applies the identical rule job-side.
         require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        return self
+
+    @model_validator(mode="after")
+    def _registered_agent_owns_the_harbor_agent(self) -> Self:
+        if self.agent is None:
+            if self.environment is not None:
+                raise ValueError("`environment` applies to a registered `agent`")
+            return self
+        if self.agent_import_path is not None:
+            raise ValueError(
+                "`agent_import_path` cannot be combined with `agent`: the registered agent selects the Harbor agent"
+            )
+        if self.agent_model_name is not None:
+            raise ValueError(
+                "`agent_model_name` cannot be combined with `agent`: a registered agent's model is part of what it is"
+            )
+        if "fabric_config" in self.agent_kwargs:
+            raise ValueError("`agent_kwargs.fabric_config` is derived from `agent`; pass one or the other")
         return self
 
 
@@ -294,9 +386,17 @@ class GymPlacement(BaseModel):
 #: to a runtime at run time. ``kind``-discriminated; widen with more members as runners land.
 AgentRunnerTarget: TypeAlias = FabricRunnerTarget | GymRunnerTarget | HarborRunnerTarget
 
+
 #: What generates trials: a Model or Agent endpoint, or an agent runner. ``kind``-discriminated, and
 #: the spec-level analog of the SDK's runtime ``AgentEvalTarget`` (Model | Agent | AgentTaskRunner).
 Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
+
+
+def registered_agent_name(target: Target | None) -> str | None:
+    """The bare name of the registered agent a Fabric or Harbor target names, if any."""
+    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and target.agent is not None:
+        return target.agent.root.rpartition("/")[2]
+    return None
 
 
 def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
@@ -304,7 +404,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
 
     Only targets that carry a real name yield one — nothing here invents an identity, because a
     made-up agent name is worse than an explicit one the submitter had to supply. A ``ModelTarget``
-    has a model but no agent; the runners other than Harbor name a harness, not an agent. Those
+    has a model but no agent; a Fabric or Harbor runner names a harness, not an agent, unless it runs a
+    registered agent. Those
     cases return ``None`` and the spec must carry ``publication.intake.agent_name``.
 
     Accepts both unions: agent-eval passes its ``Target`` spec wrappers, while the dataset-driven
@@ -317,13 +418,15 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
     if isinstance(target, AgentTarget):
         return target.agent.name, None
     if isinstance(target, HarborRunnerTarget):
+        if target.agent is not None:
+            return registered_agent_name(target), None
         return target.agent_import_path or target.agent_name, target.agent_model_name
     if isinstance(target, GymRunnerTarget):
         return target.agent, None
     if isinstance(target, ModelTarget):
         return None, target.model.name
     if isinstance(target, FabricRunnerTarget):
-        return None, target.model
+        return registered_agent_name(target), target.model
     # Bare SDK values, as carried by the dataset-driven eval spec.
     if isinstance(target, AgentBase):
         return target.name, None
@@ -474,6 +577,19 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     """Canonical agent-evaluation spec: tasks with all metric references resolved to inline."""
 
     tasks: list[AgentEvalTaskSpec] = Field(min_length=1, description="Tasks to evaluate; at least one is required.")
+
+    @model_validator(mode="after")
+    def _reject_unresolved_registered_agent(self) -> Self:
+        # A registered agent is resolved into the runner's own fields during spec resolution; the job must
+        # never have to look an agent up itself.
+        if isinstance(self.target, (FabricRunnerTarget, HarborRunnerTarget)) and self.target.agent is not None:
+            raise ValueError(
+                f"AgentEvalSpec target names registered agent {self.target.agent.root!r}; it must be resolved "
+                "before run"
+            )
+        if isinstance(self.target, FabricRunnerTarget) and self.target.config is None:
+            raise ValueError("AgentEvalSpec Fabric target has no `config`; resolution did not run")
+        return self
 
     @model_validator(mode="after")
     def _reject_unresolved_metric_model_refs(self) -> Self:

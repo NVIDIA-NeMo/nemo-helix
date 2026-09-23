@@ -17,6 +17,7 @@ is written via :func:`~nemo_evaluator.jobs.result_persistence.persist_agent_eval
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import os
 from dataclasses import dataclass
@@ -25,6 +26,14 @@ from typing import Any, ClassVar, Literal
 
 import nemo_evaluator.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from filesets import FilesetPathError, parse_fileset_ref
+from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
+from nemo_agents_plugin.entities import ethos_fileset_name
+from nemo_agents_plugin.environment_resolution import (
+    EnvironmentResolutionError,
+    merge_environment_spec_into_agent_config,
+)
+from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.config import get_config
 from nemo_evaluator.filesets import FilesetRef
@@ -42,7 +51,9 @@ from nemo_evaluator.jobs.agent_spec import (
     HarborRunnerTarget,
     ModelTarget,
     Target,
+    registered_agent_name,
 )
+from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evaluator.jobs.gym_environment_package import (
     ENVIRONMENT_MANIFEST_FILENAME,
     GymEnvironmentPackageError,
@@ -70,7 +81,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTas
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
 from nemo_evaluator_sdk.metrics.protocol import Metric
-from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
+from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -99,6 +112,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     VolcanoJobExecutionProfile,
 )
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
+from nemo_helix_plugin.refs import parse_entity_ref
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -126,6 +140,162 @@ def _profile_dependency_unavailable(profile: str) -> HelixJobDependencyUnavailab
     return HelixJobDependencyUnavailableError(
         f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily unavailable. "
         "Retry the submission."
+    )
+
+
+#: The only registered-agent config format with a runner. ``nat-workflow-v1`` (the legacy default)
+#: describes a NAT workflow, which nothing in agent-eval can run.
+_FABRIC_AGENT_CONFIG_FORMAT = "nemo-agents-spec-v1"
+
+#: The Harbor agent a registered agent runs through: the SDK's installed Fabric agent, which brings its
+#: own Python and so runs on any task image, handed the whole config through ``fabric_config``.
+REGISTERED_AGENT_HARBOR_IMPORT_PATH = (
+    "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent"
+)
+
+#: Fabric distribution extra that installs each harness adapter into the task container.
+_FABRIC_ADAPTER_EXTRAS: dict[str, str] = {
+    "nvidia.fabric.langchain.deepagents": "deepagents",
+    "nvidia.fabric.codex": "codex",
+    "nvidia.fabric.claude": "claude",
+    "nvidia.fabric.hermes": "hermes",
+}
+
+
+def _default_fabric_package(adapter_id: str) -> str:
+    """The ``nemo-fabric`` requirement that installs ``adapter_id``'s harness, pinned to this service's Fabric."""
+    extra = _FABRIC_ADAPTER_EXTRAS.get(adapter_id)
+    if extra is None:
+        raise ValueError(
+            f"no known Fabric package extra installs harness {adapter_id!r}; set `agent_kwargs.fabric_package` "
+            "to the requirement that does"
+        )
+    return f"nemo-fabric[{extra},relay]=={importlib.metadata.version('nemo-fabric')}"
+
+
+@dataclass(frozen=True)
+class _ResolvedRegisteredAgent:
+    """A registered agent turned into what a runner needs: its Fabric config, secret refs, and files."""
+
+    config: dict[str, Any]
+    env_secrets: dict[str, SecretRef]
+    files: FilesetRef | None
+
+
+async def _load_registered_agent(
+    agent_ref: str,
+    environment: EnvironmentSpecInline | None,
+    *,
+    workspace: str,
+    async_sdk: AsyncHelixClient | None,
+) -> _ResolvedRegisteredAgent:
+    """Look a registered agent up and resolve it exactly as ``nemo agents deploy`` would.
+
+    Inference Gateway binding and trace-name injection first, then the environment spec merged on top
+    (MCP fulfilments, env, secret refs), then translation of the platform ``agent.yaml`` into a Fabric
+    config. The agents plugin owns the format, the merge, and the translation; this is the one place
+    the evaluator plugin depends on it. The agent's Ethos FileSet, when it has one, is returned so the
+    job can stage the files its config refers to by relative path.
+    """
+    parsed = parse_entity_ref(agent_ref, workspace)
+    agent_workspace, agent_name = parsed.workspace, parsed.name
+
+    agents = client_from_platform(async_sdk, AsyncAgentsClient)
+    try:
+        agent = (await agents.get_agent(workspace=agent_workspace, name=agent_name)).data()
+    except NotFoundError as exc:
+        raise ValueError(f"registered agent {agent_workspace}/{agent_name} does not exist") from exc
+    except PermissionDeniedError as exc:
+        raise PermissionError(f"access denied to registered agent {agent_workspace}/{agent_name}") from exc
+
+    if agent.config_format != _FABRIC_AGENT_CONFIG_FORMAT:
+        raise ValueError(
+            f"registered agent {agent_workspace}/{agent_name} has config_format {agent.config_format!r}; only "
+            f"{_FABRIC_AGENT_CONFIG_FORMAT!r} agents can be evaluated as a runner"
+        )
+
+    try:
+        resolved = resolve_agent_config_for_deployment(
+            agent.config_format,
+            dict(agent.config),
+            workspace=agent_workspace,
+            agent_name=agent_name,
+        )
+        merged = merge_environment_spec_into_agent_config(resolved, environment)
+        fabric_config = translate_agent_config(AgentConfig.model_validate(merged.config))
+    except (EnvironmentResolutionError, AgentConfigFormatError, FabricTranslationError) as exc:
+        raise ValueError(
+            f"registered agent {agent_workspace}/{agent_name} cannot be run through Fabric: {exc}"
+        ) from exc
+
+    # Config-only agents have no Ethos FileSet; one that references skills must have it.
+    files = client_from_platform(async_sdk, AsyncFilesClient)
+    fileset_name = ethos_fileset_name(agent_name)
+    try:
+        await files.get_fileset(workspace=agent_workspace, name=fileset_name)
+        agent_files: FilesetRef | None = FilesetRef(root=f"{agent_workspace}/{fileset_name}")
+    except NotFoundError:
+        agent_files = None
+        if merged.config.get("skills", {}).get("paths"):
+            raise ValueError(
+                f"registered agent {agent_workspace}/{agent_name} references skills but has no Ethos FileSet "
+                f"{agent_workspace}/{fileset_name} to stage them from"
+            ) from None
+
+    return _ResolvedRegisteredAgent(
+        config=fabric_config.model_dump(mode="json", exclude_none=True),
+        env_secrets={env_name: SecretRef(root=ref) for env_name, ref in merged.secrets.items()},
+        files=agent_files,
+    )
+
+
+async def _resolve_registered_agent(
+    target: Target | None,
+    *,
+    workspace: str,
+    async_sdk: AsyncHelixClient | None,
+) -> Target | None:
+    """Fill a Fabric or Harbor runner target that names a registered ``agent`` with what that agent is.
+
+    The canonical spec never carries the ref: a Fabric target ends up with a plain ``config``, a Harbor
+    target with the installed Fabric agent selected and the config in its kwargs. Either way the job
+    runs the agent fresh per trial and never looks it up itself.
+    """
+    if not isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) or target.agent is None:
+        return target
+
+    agent = await _load_registered_agent(
+        target.agent.root, target.environment, workspace=workspace, async_sdk=async_sdk
+    )
+    env_secrets = {**target.env_secrets, **agent.env_secrets}
+    if isinstance(target, FabricRunnerTarget):
+        return target.model_copy(
+            update={
+                "config": agent.config,
+                "agent": None,
+                "environment": None,
+                "agent_files": agent.files,
+                "env_secrets": env_secrets,
+            }
+        )
+
+    adapter_id = agent.config["harness"]["adapter_id"]
+    fabric_package = target.agent_kwargs.get("fabric_package")
+    agent_kwargs: dict[str, Any] = {
+        **target.agent_kwargs,
+        "fabric_config": agent.config,
+        "fabric_package": fabric_package if isinstance(fabric_package, str) else _default_fabric_package(adapter_id),
+    }
+    return target.model_copy(
+        update={
+            "agent": None,
+            "environment": None,
+            "agent_files": agent.files,
+            "agent_name": None,
+            "agent_import_path": REGISTERED_AGENT_HARBOR_IMPORT_PATH,
+            "agent_kwargs": agent_kwargs,
+            "env_secrets": env_secrets,
+        }
     )
 
 
@@ -273,6 +443,33 @@ def _to_runtime_task(task: AgentEvalTaskSpec) -> AgentEvalTask:
     )
 
 
+def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
+    """Check the service resolved every ``env_secrets`` entry into this job's environment.
+
+    On the host the Fabric harness inherits the job process's environment and reads each credential by
+    name, so there is nothing to forward — only something to verify before a trial fails opaquely.
+    """
+    missing = sorted(name for name in target.env_secrets if name not in os.environ)
+    if missing:
+        raise ValueError(
+            f"`env_secrets` entries {missing} were not resolved into this job's environment, so the Fabric "
+            "harness cannot read them."
+        )
+
+
+def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: JobContext) -> Path | None:
+    """Where the preceding staging step put a registered agent's Ethos files, once it is verified present."""
+    if target.agent_files is None:
+        return None
+    staged = ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR
+    if not staged.is_dir():
+        raise ValueError(
+            f"registered agent files {target.agent_files.root!r} were not staged at {staged}; the stage-environment "
+            "step did not run or did not complete"
+        )
+    return staged
+
+
 def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
     """The ``env_secrets`` names to forward to the Harbor agent, after checking the service resolved them."""
     missing = sorted(name for name in target.env_secrets if name not in os.environ)
@@ -338,8 +535,26 @@ class _AgentEvalJobBase(NemoJob):
                     metadata=task.metadata,
                 )
             )
-        resolved_target = await _resolve_gym_environment(
+        # A registered agent carries the identity its published trajectories should be recorded under;
+        # the Fabric target it resolves to names only a harness, so pin the name before resolving.
+        publication = submit_spec.publication
+        agent_name = registered_agent_name(submit_spec.target)
+        if (
+            agent_name is not None
+            and publication is not None
+            and publication.intake is not None
+            and publication.intake.agent_name is None
+        ):
+            publication = publication.model_copy(
+                update={"intake": publication.intake.model_copy(update={"agent_name": agent_name})}
+            )
+        resolved_target = await _resolve_registered_agent(
             submit_spec.target,
+            workspace=workspace,
+            async_sdk=async_sdk,
+        )
+        resolved_target = await _resolve_gym_environment(
+            resolved_target,
             workspace=workspace,
             async_sdk=async_sdk,
         )
@@ -350,7 +565,7 @@ class _AgentEvalJobBase(NemoJob):
             max_concurrent_tasks=submit_spec.max_concurrent_tasks,
             fail_fast=submit_spec.fail_fast,
             labels=submit_spec.labels,
-            publication=submit_spec.publication,
+            publication=publication,
         )
 
     @classmethod
@@ -536,12 +751,17 @@ class _AgentEvalJobBase(NemoJob):
         if isinstance(target, AgentTarget):
             return target.agent, None, target.params or RunConfigOnline()
         if isinstance(target, FabricRunnerTarget):
+            _require_fabric_env_secrets_resolved(target)
+            assert target.config is not None  # canonical spec guarantees resolution ran
             fabric_runtime = FabricAgentRuntime(
                 config=target.config,
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
                 work_root=ctx.storage.persistent / "fabric",
+                # A registered agent's files were staged by the preceding step; relative skill paths in
+                # the config resolve against that tree.
+                base_dir=_staged_agent_files(target, ctx),
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
@@ -601,13 +821,18 @@ class _AgentEvalJobBase(NemoJob):
             )
             return gym_runtime, None, None
         if isinstance(target, HarborRunnerTarget):
+            agent_kwargs = dict(target.agent_kwargs)
+            staged = _staged_agent_files(target, ctx)
+            if staged is not None:
+                # Uploaded into every task container; the config's relative skill paths resolve against it.
+                agent_kwargs["fabric_config_bundle"] = str(staged)
             harbor_runtime = HarborAgentTaskRunner(
                 config=HarborRuntimeConfig(
                     jobs_dir=ctx.storage.persistent / "harbor",
                     agent_name=target.agent_name,
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
-                    agent_kwargs=target.agent_kwargs,
+                    agent_kwargs=agent_kwargs,
                     agent_env_from_host=_harbor_agent_env_from_host(target),
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
@@ -615,6 +840,8 @@ class _AgentEvalJobBase(NemoJob):
                     artifacts=target.artifacts,
                     trace_dir=target.trace_dir,
                     reward_key=target.reward_key,
+                    agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
+                    agent_timeout_multiplier=target.agent_timeout_multiplier,
                 )
             )
             return harbor_runtime, None, None

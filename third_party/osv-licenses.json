@@ -2432,7 +2432,7 @@
         {
           "package": {
             "name": "nooa",
-            "version": "0.0.9",
+            "version": "0.0.10",
             "ecosystem": "PyPI"
           },
           "licenses": [

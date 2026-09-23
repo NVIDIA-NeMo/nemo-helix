@@ -239,10 +239,63 @@ target = FabricRunnerTarget(config=config, model="<provider>/<model>", capture_t
 | `model` | no | a `provider/model` slug applied as the config's default model |
 | `timeout_s` | no | per-task timeout for the Fabric run |
 | `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` the service resolves into the job's environment for the harness to read |
 
 Submit it with `nemo evaluator agent-evaluate`, or as the `target` of an
 `AgentEvalInputSpec`. See
 [Targets and Runners](/documentation/evaluate-models/agent-eval/targets-and-runners).
+
+### Evaluate an agent registered on the platform
+
+If the agent is already registered with `nemo agents create`, name it in place of `config`:
+
+```json
+{"kind": "fabric", "agent": "calculator-agent"}
+```
+
+At submit time the service looks the agent up, applies the same resolution a deployment gets — its
+models are bound to the workspace's Inference Gateway, so no credential travels in the spec — and
+translates the platform `agent.yaml` into the `config` above. The persisted job spec therefore shows a
+plain `config`; the job never looks an agent up. It runs the agent fresh for every trial and never
+calls an existing deployment, so the evaluation is independent of what is (or is not) deployed.
+
+| Field | Required | Notes |
+|---|---|---|
+| `agent` | with no `config` | `name` in the submission workspace, or `workspace/name`; exactly one of `agent` or `config` |
+| `environment` | no | an environment spec (the same shape `nemo agents deploy` takes) merged onto the agent's config; requires `agent` |
+| `timeout_s` | no | per-task timeout for the Fabric run |
+| `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
+
+`model` cannot be combined with `agent`. If the agent's config refers to skills or prompts by relative
+path, its Ethos FileSet is staged into the job before the run so those paths resolve. The same `agent`
+(and `environment`) fields exist on the [Harbor target](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#run-a-registered-agent),
+which runs the registered agent inside each task container instead of on the host.
+
+There is no model override: the model is part of what the agent *is*, so a different model is a
+different registered agent. What an evaluation does get to shape is the **environment** the agent runs
+in. `environment` takes the same spec a deployment does, so you can point the agent's declared MCP
+servers at mocks, add process env, and bind secrets by reference:
+
+```json
+{
+  "kind": "fabric",
+  "agent": "calculator-agent",
+  "environment": {
+    "mcp": {"calculator": {"url": "http://mock-calculator:8000/mcp"}},
+    "env": {"EVAL_MODE": "mock"},
+    "secrets": {"CALC_TOKEN": "calc-token"}
+  }
+}
+```
+
+Only servers the agent already declares are fulfilled — an environment can redirect a tool, not hand
+the agent one it never had. Secret values never enter the spec: the refs travel as `env_secrets` on the
+resolved Fabric target and the service injects them into the job's environment.
+
+Only agents with `config_format: nemo-agents-spec-v1` resolve. A legacy `nat-workflow-v1` agent is
+rejected at submit — it describes a NeMo Agent Toolkit workflow, which has no runner here. When the
+job publishes to Intake, the trajectories are recorded under the agent's name unless
+`publication.intake.agent_name` says otherwise.
 
 ## Running in a sandbox
 

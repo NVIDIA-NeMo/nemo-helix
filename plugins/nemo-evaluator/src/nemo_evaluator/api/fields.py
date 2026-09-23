@@ -165,6 +165,20 @@ class MetricRef(RootModel[str]):
     )
 
 
+class AgentRef(RootModel[str]):
+    """Reference to an agent registered on the platform (format: ``workspace/name`` or ``name``).
+
+    Names an ``Agent`` entity (``nemo agents create``) so an evaluation can run it without repeating
+    its configuration. Same shape as :class:`MetricRef`: a bare name resolves in the job workspace.
+    Agents carry no revision fragment — the entity is looked up as it is at submit time.
+    """
+
+    root: str = Field(
+        pattern=ENTITY_REF_PATTERN,
+        description="Reference to a registered agent (format: workspace/agent-name, or agent-name in the job workspace).",
+    )
+
+
 #: A wire metric is either an inline bundle DTO or a reference to a stored metric. Lives here (next to
 #: ``MetricInline``) rather than in ``metric_refs`` so entity/DTO modules can use it without importing
 #: the ref-resolution logic (which depends on ``entities`` and would cycle); ``metric_refs`` re-exports.

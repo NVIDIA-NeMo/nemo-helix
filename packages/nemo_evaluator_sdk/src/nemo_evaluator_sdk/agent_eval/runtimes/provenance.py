@@ -42,7 +42,15 @@ _CREDENTIAL_VALUE = re.compile(
 _CREDENTIAL_VALUE_MIN_CHARS = 16
 
 
-def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[str, Any]:
+#: Free-form settings keys whose value is a *typed agent document* rather than loose knobs -- Harbor's
+#: ``agent_kwargs["fabric_config"]`` is a whole Fabric ``agent.yaml``. Such a document legitimately
+#: *names* credential variables (``models.*.api_key_env``) and carries gateway placeholders
+#: (``environment.env.NVIDIA_API_KEY: not-used``), so the key-marker heuristic would refuse or redact
+#: every registered agent. Under these keys only the value shape decides.
+VALUE_ONLY_SETTINGS_KEYS: frozenset[str] = frozenset({"fabric_config"})
+
+
+def redact_credentials(settings: Mapping[str, Any], _prefix: str = "", *, _value_only: bool = False) -> dict[str, Any]:
     """Redact credential-looking values from free-form settings before they are recorded as provenance.
 
     Runner configs carry escape hatches forwarded verbatim to the harness (Gym's ``hydra_params``,
@@ -61,12 +69,13 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[s
     redacted: dict[str, Any] = {}
     for key, value in settings.items():
         path = f"{_prefix}{key}"
+        value_only = _value_only or (not _prefix and key in VALUE_ONLY_SETTINGS_KEYS)
         if isinstance(value, Mapping):
-            redacted[key] = redact_credentials(value, f"{path}.")
-        elif any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
+            redacted[key] = redact_credentials(value, f"{path}.", _value_only=value_only)
+        elif not value_only and any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
             redacted[key] = _REDACTED
         elif isinstance(value, (list, tuple)):
-            redacted[key] = [_redact_list_item(item, path) for item in value]
+            redacted[key] = [_redact_list_item(item, path, value_only=value_only) for item in value]
         elif is_credential_value(value):
             redacted[key] = _REDACTED
         else:
@@ -74,12 +83,12 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[s
     return redacted
 
 
-def _redact_list_item(item: Any, path: str) -> Any:
+def _redact_list_item(item: Any, path: str, *, value_only: bool = False) -> Any:
     """Redact inside one element of a list-valued setting. See :func:`redact_credentials`."""
     if isinstance(item, Mapping):
-        return redact_credentials(item, f"{path}.")
+        return redact_credentials(item, f"{path}.", _value_only=value_only)
     if isinstance(item, (list, tuple)):
-        return [_redact_list_item(nested, path) for nested in item]
+        return [_redact_list_item(nested, path, value_only=value_only) for nested in item]
     return _REDACTED if is_credential_value(item) else item
 
 
@@ -104,19 +113,31 @@ def credential_shaped_settings(settings: Mapping[str, Any]) -> list[str]:
     A value carrying a recognised issued-token shape is reported whatever its key, since an ``env``
     mapping forwarded to a harness names its own variables.
     """
-    exposed = [path for key, value in settings.items() for path in _exposed_paths(key, value)]
+    exposed = [
+        path
+        for key, value in settings.items()
+        for path in _exposed_paths(key, value, value_only=key in VALUE_ONLY_SETTINGS_KEYS)
+    ]
     return list(dict.fromkeys(exposed))
 
 
-def _exposed_paths(path: str, value: Any) -> list[str]:
-    """Paths exposed by one setting. See :func:`credential_shaped_settings`."""
+def _exposed_paths(path: str, value: Any, *, value_only: bool = False) -> list[str]:
+    """Paths exposed by one setting. See :func:`credential_shaped_settings`.
+
+    Under a :data:`VALUE_ONLY_SETTINGS_KEYS` key the path says nothing -- ``api_key_env`` names a
+    variable -- so only an issued-token value shape counts.
+    """
     if isinstance(value, Mapping):
-        return [nested for key, item in value.items() for nested in _exposed_paths(f"{path}.{key}", item)]
+        return [
+            nested
+            for key, item in value.items()
+            for nested in _exposed_paths(f"{path}.{key}", item, value_only=value_only)
+        ]
     if isinstance(value, (list, tuple)):
-        return [nested for item in value for nested in _exposed_paths(path, item)]
+        return [nested for item in value for nested in _exposed_paths(path, item, value_only=value_only)]
     if not isinstance(value, str) or not value or _ENV_TEMPLATE.fullmatch(value):
         return []
-    if _SECRET_KEY_MARKER_RE.search(path.casefold()):
+    if not value_only and _SECRET_KEY_MARKER_RE.search(path.casefold()):
         return [path]
     return [path] if is_credential_value(value) else []
 

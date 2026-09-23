@@ -19,6 +19,9 @@ from nemo_evaluator.api.fields import (
     REF_FRAGMENT_SEPARATOR as REF_FRAGMENT_SEPARATOR,
 )
 from nemo_evaluator.api.fields import (
+    AgentRef as AgentRef,
+)
+from nemo_evaluator.api.fields import (
     CloudpickleMetricPayload as CloudpickleMetricPayload,
 )
 from nemo_evaluator.api.fields import (

@@ -153,6 +153,32 @@ reported score. See
 `AgentTarget` owns its agent request configuration. Runner targets are resolved
 to an `AgentTaskRunner` inside the job runtime.
 
+A Fabric or Harbor runner target may name a **registered agent** instead of
+describing one. The service resolves it at submit: it looks the agent up, binds
+its models to the workspace Inference Gateway exactly as a deployment would,
+merges the optional `environment` spec, and translates the platform `agent.yaml`
+into the runner's own fields — `config` on Fabric, the installed Fabric agent
+plus `agent_kwargs.fabric_config` on Harbor. The persisted job spec never
+carries the ref. The agent runs fresh for every trial; an existing deployment is
+never called.
+
+```python
+from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget, HarborRunnerTarget
+
+on_host = FabricRunnerTarget(agent="calculator-agent")  # or "workspace/name"
+in_task_containers = HarborRunnerTarget(agent="calculator-agent", n_attempts=2)
+```
+
+There is no model override — a different model is a different registered
+agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the
+same spec `nemo agents deploy` takes): MCP fulfilments redirect servers the agent
+declares (mocks), `env` adds process env, `secrets` binds `{ENV_NAME: ref}` and
+travels as `env_secrets` on the resolved target. Skills and prompts the config
+refers to by relative path are staged from the agent's Ethos FileSet before the
+run. Only `nemo-agents-spec-v1` agents resolve; a legacy `nat-workflow-v1`
+agent is rejected at submit. When publishing to Intake,
+`publication.intake.agent_name` defaults to the registered agent's name.
+
 For [Fabric](https://github.com/nvidia/nemo-fabric), pass one complete `agent.yaml` as a JSON-shaped `config`; the
 `harness.adapter_id` selects the harness:
 
