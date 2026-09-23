@@ -10,7 +10,7 @@ from typing import Any
 
 import psycopg
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.archive_validation import benchmark_archive_object_key, validate_archive_id
 
@@ -30,7 +30,7 @@ def cleanup_benchmark_archives(
     a crashed/revoked worker's last cleanup attempt.
     """
     prefix = f"benchmark-runs/{validate_archive_id(run_id)}/archives/"
-    keys = object_keys if object_keys is not None else [item["key"] for item in s3.list_objects(prefix)]
+    keys = object_keys if object_keys is not None else [item["key"] for item in artifacts.list_objects(prefix)]
     candidates = []
     for key in keys:
         if not key.startswith(prefix):
@@ -57,6 +57,6 @@ def cleanup_benchmark_archives(
             protected.add(benchmark_archive_object_key(run_id, row["generation"], row["claim_token"]))
         for key in candidates:
             if key not in protected:
-                s3.delete_object(key)
+                artifacts.delete_object(key)
                 deleted += 1
     return deleted

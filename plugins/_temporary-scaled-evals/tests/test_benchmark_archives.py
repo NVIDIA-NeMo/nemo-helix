@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import app, v1
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
@@ -132,8 +132,8 @@ def build(monkeypatch, tmp_path, sources, *, benchmark_artifacts=None, listing=N
         {"key": key, "size_bytes": len(body), "updated_at": NOW.isoformat()}
         for key, body in (benchmark_artifacts or {}).items()
     ]
-    monkeypatch.setattr(s3, "list_objects", listing or (lambda prefix: objects))
-    monkeypatch.setattr(s3, "stream_object", lambda key: iter([blobs[key]]))
+    monkeypatch.setattr(artifacts, "list_objects", listing or (lambda prefix: objects))
+    monkeypatch.setattr(artifacts, "stream_object", lambda key: iter([blobs[key]]))
     captured = {}
 
     def upload(path, key, *, content_type):
@@ -142,7 +142,7 @@ def build(monkeypatch, tmp_path, sources, *, benchmark_artifacts=None, listing=N
         destination.write_bytes(path.read_bytes())
         return destination.stat().st_size
 
-    monkeypatch.setattr(s3, "upload_file", upload)
+    monkeypatch.setattr(artifacts, "upload_file", upload)
     built = build_benchmark_archive(
         job(members=members), check_claim=lambda: None, evidence_checks=(check_campaign_evidence,)
     )
@@ -217,7 +217,7 @@ def test_export_enforces_aggregate_limits(monkeypatch, tmp_path):
 
 
 def test_export_rejects_changed_source_size(monkeypatch):
-    monkeypatch.setattr(s3, "stream_object", lambda key: iter([b"wrong"]))
+    monkeypatch.setattr(artifacts, "stream_object", lambda key: iter([b"wrong"]))
     with pytest.raises(BenchmarkArchiveError, match="size changed"):
         build_benchmark_archive(job(), check_claim=lambda: None)
 
@@ -292,7 +292,7 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
         yield b"archive"
 
     v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
-    monkeypatch.setattr(s3, "stream_object", stream_object)
+    monkeypatch.setattr(artifacts, "stream_object", stream_object)
     response = client.get("/v1/benchmark-runs/bmr_1/archive/download")
     assert response.content == b"archive"
     assert "bmr_1-results.tar.gz" in response.headers["content-disposition"]

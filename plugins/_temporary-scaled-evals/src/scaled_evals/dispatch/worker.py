@@ -57,7 +57,7 @@ import psycopg
 import yaml
 from psycopg.rows import dict_row
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.redaction import redact_secret_text
@@ -397,8 +397,8 @@ def _sync_live_log_warn(
         signature = (stat.st_size, stat.st_mtime_ns)
         if signature == previous_signature:
             return previous_signature
-        s3.put_text_object(
-            s3.evaluation_live_log_key(evaluation_id, execution_number),
+        artifacts.put_text_object(
+            artifacts.evaluation_live_log_key(evaluation_id, execution_number),
             redact_secret_text(path.read_text(errors="replace")),
         )
         return signature
@@ -768,7 +768,7 @@ class Dispatcher:
                     None if stats_path.is_file() else (capture_note or "routing stats artifact was not produced")
                 )
                 prefix = f"benchmark-runs/{benchmark_run_id}/artifacts/"
-                s3.sync_directory_to_prefix(root, prefix)
+                artifacts.sync_directory_to_prefix(root, prefix)
                 object_key = f"{prefix}switchyard/routing_stats_final.json" if stats_path.is_file() else None
                 sha256 = _file_hash(stats_path) if stats_path.is_file() else None
                 reference = {
@@ -849,23 +849,23 @@ class Dispatcher:
         evaluation_id: str,
         reference: dict[str, Any],
     ) -> None:
-        reference_key = s3.evaluation_artifact_key(
+        reference_key = artifacts.evaluation_artifact_key(
             evaluation_id,
             "switchyard/campaign_evidence.json",
         )
-        s3.put_json_object(reference_key, reference)
-        manifest_key = s3.evaluation_artifact_key(
+        artifacts.put_json_object(reference_key, reference)
+        manifest_key = artifacts.evaluation_artifact_key(
             evaluation_id,
             "switchyard/run_manifest.json",
         )
         try:
-            manifest = s3.read_json_object(manifest_key)
+            manifest = artifacts.read_json_object(manifest_key)
         except Exception:  # noqa: BLE001 — reference remains independently durable
             return
         outcomes = manifest.setdefault("outcomes", {})
         if isinstance(outcomes, dict):
             outcomes["campaign_routing_stats"] = reference
-            s3.put_json_object(manifest_key, manifest)
+            artifacts.put_json_object(manifest_key, manifest)
 
     def claim_next_switchyard_campaign_deletion(self) -> dict | None:
         with self.connect() as conn:
@@ -971,8 +971,8 @@ class Dispatcher:
                     resource_row,
                 )
                 try:
-                    skill_materials = s3.read_json_object(
-                        s3.evaluation_artifact_key(
+                    skill_materials = artifacts.read_json_object(
+                        artifacts.evaluation_artifact_key(
                             evaluation_id,
                             "scaled-evals-extra-skill-materials.json",
                         )
@@ -988,13 +988,13 @@ class Dispatcher:
                     evidence_root,
                     row,
                     status=str(row["status"]),
-                    artifact_prefix=s3.evaluation_artifact_prefix(evaluation_id),
+                    artifact_prefix=artifacts.evaluation_artifact_prefix(evaluation_id),
                     backend=str(row.get("runtime") or "") or None,
                     handle=_external_handle(row.get("backend_handle")),
                 )
-                s3.sync_evidence_files(
+                artifacts.sync_evidence_files(
                     evidence_root,
-                    s3.evaluation_artifact_prefix(evaluation_id),
+                    artifacts.evaluation_artifact_prefix(evaluation_id),
                 )
             with self.connect() as conn:
                 EvaluationRepository(conn).mark_evidence_ready(
@@ -1362,7 +1362,7 @@ class Dispatcher:
                 object_key = row.get("tarball_object_key")
                 if object_key:
                     try:
-                        pack_exists = s3.object_exists(str(object_key))
+                        pack_exists = artifacts.object_exists(str(object_key))
                     except Exception as exc:  # noqa: BLE001 — dispatch must terminalize cleanly
                         self._set_status(
                             conn,
@@ -2963,7 +2963,7 @@ class Dispatcher:
                 artifact_root,
                 row,
                 status=status,
-                artifact_prefix=s3.evaluation_artifact_prefix(row["id"]),
+                artifact_prefix=artifacts.evaluation_artifact_prefix(row["id"]),
                 backend=None if handle is None else handle.backend,
                 handle=None if handle is None else handle.external_id,
             )
@@ -3016,9 +3016,9 @@ class Dispatcher:
                     artifact_root=artifact_root,
                 )
             _copy_runtime_logs_to_artifact_root(source_id, runtime)
-            artifact_prefix = s3.evaluation_artifact_prefix(evaluation_id)
+            artifact_prefix = artifacts.evaluation_artifact_prefix(evaluation_id)
             if execution_number is None:
-                count = s3.sync_directory_to_prefix(artifact_root, artifact_prefix)
+                count = artifacts.sync_directory_to_prefix(artifact_root, artifact_prefix)
             else:
                 with self.connect() as conn, conn.transaction():
                     if not EvaluationRepository(conn).lock_current_execution(
@@ -3027,9 +3027,9 @@ class Dispatcher:
                     ):
                         raise DispatchClaimLost(evaluation_id)
                     sync = (
-                        s3.replace_directory_at_prefix
+                        artifacts.replace_directory_at_prefix
                         if replace and execution_number > 1
-                        else s3.sync_directory_to_prefix
+                        else artifacts.sync_directory_to_prefix
                     )
                     count = sync(artifact_root, artifact_prefix)
                     ExecutionTelemetryRepository(conn).record_artifact_sync(
@@ -3148,12 +3148,12 @@ class Dispatcher:
                     )
             if execution_number is None:
                 if artifact_root is not None:
-                    archive = s3.build_evaluation_archive_from_directory(
+                    archive = artifacts.build_evaluation_archive_from_directory(
                         evaluation_id,
                         artifact_root,
                     )
                 else:
-                    archive = s3.build_evaluation_archive(evaluation_id)
+                    archive = artifacts.build_evaluation_archive(evaluation_id)
                 with self.connect() as conn:
                     EvaluationRepository(conn).mark_archive_ready(
                         evaluation_id,
@@ -3168,12 +3168,12 @@ class Dispatcher:
                     ):
                         raise DispatchClaimLost(evaluation_id)
                     if artifact_root is not None:
-                        archive = s3.build_evaluation_archive_from_directory(
+                        archive = artifacts.build_evaluation_archive_from_directory(
                             evaluation_id,
                             artifact_root,
                         )
                     else:
-                        archive = s3.build_evaluation_archive(evaluation_id)
+                        archive = artifacts.build_evaluation_archive(evaluation_id)
                     EvaluationRepository(conn).mark_archive_ready(
                         evaluation_id,
                         object_key=archive["object_key"],
@@ -3195,7 +3195,7 @@ class Dispatcher:
             except Exception:  # noqa: BLE001 — keep original archive failure as the warning
                 LOG.exception("failed to record archive build failure for %s", evaluation_id)
             return f"archive build failed: {detail}"
-        return f"archive: uploaded {s3.ARCHIVE_FILE_NAME}"
+        return f"archive: uploaded {artifacts.ARCHIVE_FILE_NAME}"
 
     @staticmethod
     def _load(conn: psycopg.Connection, evaluation_id: str) -> dict | None:

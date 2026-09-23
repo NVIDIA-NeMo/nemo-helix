@@ -19,7 +19,7 @@ from typing import Any
 import psycopg
 import yaml
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.build.task_image_identity import (
     TaskImageReference,
     parse_task_image_ref,
@@ -206,7 +206,7 @@ def _queue_import_revision(
     with tempfile.TemporaryDirectory(prefix="se-harbor-pack-") as tmp:
         archive_path = Path(tmp) / "task-pack.tar.gz"
         archive_path.write_bytes(archive)
-        size_bytes = s3.upload_file(
+        size_bytes = artifacts.upload_file(
             archive_path,
             object_key,
             content_type="application/gzip",

@@ -6,7 +6,7 @@
 Drives ``scaled_evals.api._files_backend`` against a REAL, in-memory Files service
 (``create_test_client(FilesService, SecretsService)`` on a ``local`` tmp_path backend —
 no cluster, no external S3/GCS). Asserts the same transport-level behaviors the current
-boto3 path provides, so once ``scaled_evals.api.s3`` delegates to this backend the
+boto3 path provides, so once ``scaled_evals.api.artifacts`` delegates to this backend the
 characterization suite (test_artifact_storage_contract.py) proves end-to-end equivalence.
 
 The fileset key mapping under test (see ``_files_backend.split_key``):

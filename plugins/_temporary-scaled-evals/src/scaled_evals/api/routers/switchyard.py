@@ -12,7 +12,7 @@ from typing import Annotated, BinaryIO, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.build import cloud_build
 from scaled_evals.api.build.buildkit import BuildError
@@ -249,7 +249,7 @@ def _submit_cloud_build_switchyard(
     """Submit the Switchyard image to Cloud Build without waiting for completion."""
 
     object_key = f"switchyard-contexts/{body.source_ref}/{metadata.context_hash}.tar.gz"
-    s3.upload_context_archive(archive_path, object_key)
+    artifacts.upload_context_archive(archive_path, object_key)
     target_ref = _switchyard_cloud_build_image_ref(body.source_ref, metadata.context_hash)
     substitutions = {
         f"{_SWITCHYARD_SUBSTITUTION_PREFIX}PURPOSE": "publish",

@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.dispatch.registry import get_backend_capabilities
 from scaled_evals.dispatch.runtime_backend import RuntimeBackendCapabilities
@@ -139,8 +139,8 @@ def read_log_files(paths: list[Path]) -> list[str]:
 def remote_live_log_lines(row: Mapping[str, Any]) -> list[str]:
     """Read the runner snapshot when the API has a separate filesystem."""
     try:
-        text = s3.read_text_object_if_exists(
-            s3.evaluation_live_log_key(
+        text = artifacts.read_text_object_if_exists(
+            artifacts.evaluation_live_log_key(
                 str(row["id"]),
                 int(row.get("current_execution") or 1),
             )

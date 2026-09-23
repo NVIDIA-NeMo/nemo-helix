@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 try:
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -39,10 +39,10 @@ def test_json_artifact_upload_redacts_without_corrupting_json_or_source(
     def fake_put_bytes(object_key: str, body: bytes, *, content_type: str | None = None) -> None:
         uploaded[object_key] = body
 
-    monkeypatch.setattr(s3._files_backend, "upload_file", fake_upload_file)
-    monkeypatch.setattr(s3._files_backend, "put_bytes", fake_put_bytes)
+    monkeypatch.setattr(artifacts._files_backend, "upload_file", fake_upload_file)
+    monkeypatch.setattr(artifacts._files_backend, "put_bytes", fake_put_bytes)
 
-    assert s3.sync_directory_to_prefix(root, "evaluations/ev_json/artifacts/") == 3
+    assert artifacts.sync_directory_to_prefix(root, "evaluations/ev_json/artifacts/") == 3
 
     trajectory = uploaded["evaluations/ev_json/artifacts/trajectory.json"]
     assert "synthetic-value" not in trajectory.decode()
@@ -54,7 +54,7 @@ def test_json_artifact_upload_redacts_without_corrupting_json_or_source(
         {"password": "<redacted>"},
         {"step": 2},
     ]
-    manifest = json.loads(uploaded["evaluations/ev_json/artifacts/" + s3.ARTIFACT_MANIFEST_PATH])
+    manifest = json.loads(uploaded["evaluations/ev_json/artifacts/" + artifacts.ARTIFACT_MANIFEST_PATH])
     for item in manifest["files"]:
         body = uploaded["evaluations/ev_json/artifacts/" + item["path"]]
         assert item["sha256"] == "sha256:" + hashlib.sha256(body).hexdigest()
