@@ -547,7 +547,7 @@ class TestHelixAdminSecretsAccess:
         ).data()
 
         # Call the rotate encryption keys endpoint
-        response = _secrets(client).rotate_encryption_keys().data()
+        response = admin_secrets.rotate_encryption_keys().data()
 
         assert response.success is True
         assert response.rotated_secrets >= 1

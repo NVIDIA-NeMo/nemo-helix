@@ -335,8 +335,8 @@ def _wait_for_evaluator_job(job: EvaluatorJobResource) -> None:
                 pending_timeout_seconds=min(EVALUATOR_PENDING_TIMEOUT_SECONDS, remaining),
             )
             return
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code not in EVALUATOR_TRANSIENT_STATUS_CODES:
+        except NemoHTTPError as exc:
+            if exc.status_code not in EVALUATOR_TRANSIENT_STATUS_CODES:
                 raise
             remaining = EVALUATOR_JOB_TIMEOUT_SECONDS - (time.monotonic() - started_at)
             if remaining <= 0:
