@@ -25,10 +25,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from nemo_builder_plugin.compile import compile_build_set, image_name_for, job_name_for, resolve_destinations
+from nemo_builder_plugin.compile import compile_build_set
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance
-from nemo_builder_plugin.identity import compose_system_tag
+from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.schema import BuildSet
 from nemo_platform_plugin.entities import EntityConflictError
 from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
@@ -71,39 +71,26 @@ class SubmitResult:
     images: list[ContainerImage]
 
 
-def system_tags_for(build_set: BuildSet, workspace: str) -> list[str]:
-    """One system tag per spec, in order. Called exactly once per submit; see `submit_build_set`."""
-    return [
-        compose_system_tag(workspace, build_set.name, build_set.revision, index)
-        for index in range(len(build_set.build_specs))
-    ]
-
-
-def _rows_for(
-    build_set: BuildSet, config: BuilderConfig, workspace: str, system_tags: list[str]
-) -> list[ContainerImage]:
+def _rows_for(plan: BuildPlan) -> list[ContainerImage]:
     """The desired state, before anything is built."""
-    job_name = job_name_for(build_set)
-    destinations = resolve_destinations(build_set, config)
-
     return [
         ContainerImage(
-            name=image_name_for(job_name, index),
-            workspace=workspace,
-            registry=destinations[index][0],
-            repository=destinations[index][1],
-            platform=spec.platform,
+            name=image.name,
+            workspace=plan.workspace,
+            registry=image.registry,
+            repository=image.repository,
+            platform=image.spec.platform,
             provenance=Provenance(
                 backend="execution",
                 built_by=JobOrigin(
-                    build_set=build_set.name,
-                    revision=build_set.revision,
-                    job=f"{workspace}/{job_name}",
-                    system_tag=system_tags[index],
+                    build_set=plan.build_set.name,
+                    revision=plan.build_set.revision,
+                    job=f"{plan.workspace}/{plan.job_name}",
+                    system_tag=image.system_tag,
                 ),
             ),
         )
-        for index, spec in enumerate(build_set.build_specs)
+        for image in plan.images
     ]
 
 
@@ -115,19 +102,15 @@ async def submit_build_set(
     entity_client: _EntityWriter,
     create_job: CreateJob,
 ) -> SubmitResult:
-    """Compile, write the rows, create the job. In that order."""
-    job_name = job_name_for(build_set)
-    # Composed ONCE and handed to both the compiler and the rows. An earlier version composed it
-    # separately in each place -- harmless while the function was deterministic, but it is
-    # precisely the drift this parameter exists to rule out.
-    system_tags = system_tags_for(build_set, workspace)
-
-    # Compile FIRST. It is pure and it is the only step that can reject the request for a reason
-    # the caller can act on, so it should run before anything is written.
-    platform_spec = compile_build_set(build_set, config=config, system_tags=system_tags)
+    """Resolve, compile, write the rows, create the job. In that order."""
+    # Resolve and compile FIRST. Both are pure, and resolving is the only step that can reject
+    # the request for a reason the caller can act on, so it runs before anything is written.
+    # The rows and the job are both projections of this one plan.
+    plan = BuildPlan.resolve(build_set, config=config, workspace=workspace)
+    platform_spec = compile_build_set(plan, config=config)
 
     images: list[ContainerImage] = []
-    for row in _rows_for(build_set, config, workspace, system_tags):
+    for row in _rows_for(plan):
         try:
             images.append(await entity_client.create(row))
         except EntityConflictError:
@@ -138,7 +121,7 @@ async def submit_build_set(
 
     await create_job(
         CreatePlatformJobRequest(
-            name=job_name,
+            name=plan.job_name,
             description=f"Container image build for {build_set.name} revision {build_set.revision}",
             source=JOB_SOURCE,
             spec=build_set.model_dump(mode="json"),
@@ -151,7 +134,7 @@ async def submit_build_set(
         "submitted build set %s revision %s as job %s with %d image(s)",
         build_set.name,
         build_set.revision,
-        job_name,
+        plan.job_name,
         len(images),
     )
-    return SubmitResult(job=job_name, images=images)
+    return SubmitResult(job=plan.job_name, images=images)

@@ -20,9 +20,9 @@ from typing import ClassVar
 from fastapi import APIRouter, Depends, HTTPException
 from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
-from nemo_builder_plugin.compile import BuildCompileError
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.plan import BuildCompileError
 from nemo_builder_plugin.schema import BuildSet
 from nemo_builder_plugin.submit import submit_build_set
 from nemo_platform import AsyncNeMoPlatform

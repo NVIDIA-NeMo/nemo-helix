@@ -11,19 +11,20 @@ posture the namespace admits -- neither of which a packet can tell you.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from nemo_builder_plugin.run import supervise
 from nemo_builder_plugin.run.supervise import (
     KANIKO_CAPABILITIES,
     RESULT_MARKER,
+    SANDBOX_ROOT,
     _build_script,
     _exit_code,
     _pod_manifest,
     _results_from_log,
 )
-from nemo_builder_plugin.steps import SandboxGroup, SandboxImage, SandboxSpec
+from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, SandboxSpec, WorkLayout
 
 
 def _sandbox(**overrides: object) -> SandboxSpec:
@@ -37,20 +38,10 @@ def _sandbox(**overrides: object) -> SandboxSpec:
     return SandboxSpec.model_validate(base)
 
 
-def _group(n: int = 2) -> SandboxGroup:
+def _group(n: int = 2, *, source: ContextSource | None = None) -> SandboxGroup:
     return SandboxGroup(
-        context_sub_path="context/fs-a",
-        output_sub_path="out",
-        images=[
-            SandboxImage(
-                image=f"demo-1-{i}",
-                platform="linux/amd64",
-                context="/ctx",
-                dockerfile="Dockerfile",
-                layout=f"/out/demo-1-{i}",
-            )
-            for i in range(n)
-        ],
+        source=source or ContextSource(fileset="fs-a"),
+        images=[SandboxImage(image=f"demo-1-{i}", platform="linux/amd64", dockerfile="Dockerfile") for i in range(n)],
     )
 
 
@@ -104,14 +95,36 @@ class TestThePostureTheNamespaceAdmits:
 class TestMounts:
     def test_context_is_read_only_and_output_is_not(self) -> None:
         mounts = {m.mount_path: m for m in _pod().spec.containers[0].volume_mounts}
-        assert mounts["/ctx"].read_only is True
-        assert not mounts["/out"].read_only
+        assert mounts["/nmp-work/context/fs-a"].read_only is True
+        assert not mounts["/nmp-work/out"].read_only
 
     def test_subpaths_are_scoped_to_this_job_and_this_group(self) -> None:
         """A Dockerfile sees its own context and no other source in the set, and no other job."""
         mounts = {m.mount_path: m for m in _pod().spec.containers[0].volume_mounts}
-        assert mounts["/ctx"].sub_path == "jobs/default/abc/context/fs-a"
-        assert mounts["/out"].sub_path == "jobs/default/abc/out"
+        assert mounts["/nmp-work/context/fs-a"].sub_path == "jobs/default/abc/context/fs-a"
+        assert mounts["/nmp-work/out"].sub_path == "jobs/default/abc/out"
+
+    def test_each_mount_is_the_same_layout_path_under_the_sandbox_root(self) -> None:
+        """The sandbox has no path scheme of its own: what it builds from and writes to are the
+        layout's paths, re-rooted. A subtree context is the case where a second scheme would
+        show."""
+        pod = _pod_manifest(
+            name="nmp-sbx-abc-g0",
+            group=_group(source=ContextSource(fileset="fs-a", context_path="env/tests")),
+            sandbox=_sandbox(),
+            pvc="nmp-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        for mount in pod.spec.containers[0].volume_mounts:
+            relative = PurePosixPath(mount.sub_path).relative_to("jobs/default/abc")
+            assert PurePosixPath(mount.mount_path) == SANDBOX_ROOT / relative
+
+    def test_the_script_builds_from_and_writes_to_the_mounted_paths(self) -> None:
+        script = _build_script(_group(1), _sandbox())
+        mounts = {m.mount_path for m in _pod().spec.containers[0].volume_mounts}
+        assert f"--context=dir://{WorkLayout(SANDBOX_ROOT).context(ContextSource(fileset='fs-a'))}" in script
+        assert "--oci-layout-path=/nmp-work/out/demo-1-0" in script
+        assert {"/nmp-work/context/fs-a", "/nmp-work/out"} == mounts
 
 
 class TestDns:
@@ -168,16 +181,9 @@ class TestTheBuildScriptRuns:
         monkeypatch.setattr(supervise, "KANIKO_EXECUTOR", str(executor))
 
         group = SandboxGroup(
-            context_sub_path="context/fs-a",
-            output_sub_path="out",
+            source=ContextSource(fileset="fs-a"),
             images=[
-                SandboxImage(
-                    image=f"demo-1-{i}",
-                    platform="linux/amd64",
-                    context="/ctx",
-                    dockerfile=dockerfile,
-                    layout=f"/out/demo-1-{i}",
-                )
+                SandboxImage(image=f"demo-1-{i}", platform="linux/amd64", dockerfile=dockerfile)
                 for i, dockerfile in enumerate(dockerfiles)
             ],
         )

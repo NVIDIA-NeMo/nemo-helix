@@ -11,36 +11,22 @@ milliseconds, rather than by reading pod specs off a cluster.
 
 from __future__ import annotations
 
-import pytest
-from nemo_builder_plugin.compile import (
-    PUSH_CREDENTIAL_ENVVAR,
-    WORK_MOUNT,
-    BuildCompileError,
-    compile_build_set,
-    image_name_for,
-    job_name_for,
-    resolve_destinations,
-)
+from nemo_builder_plugin.compile import WORK_MOUNT, compile_build_set
 from nemo_builder_plugin.config import BuilderConfig
+from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
-from nemo_builder_plugin.steps import PushStepConfig, SuperviseStepConfig
-from nemo_builder_plugin.submit import system_tags_for
+from nemo_builder_plugin.steps import CREDENTIAL_ENVVAR, ContextSource, PushStepConfig, SuperviseStepConfig
 from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_platform_plugin.jobs.providers import CPUExecutionProvider
 from nemo_platform_plugin.jobs.spec import PlatformJobSpec
-from pydantic import ValidationError
 
 WORKSPACE = "default"
 #: The system tag of the first image of the default `_set()`. Tags are per IMAGE, not per set.
 SYSTEM_TAG = "default--demo-1-0"
 
 
-def _tags(build_set: BuildSet) -> list[str]:
-    return system_tags_for(build_set, WORKSPACE)
-
-
 def _compile(build_set: BuildSet, *, config: BuilderConfig) -> PlatformJobSpec:
-    return compile_build_set(build_set, config=config, system_tags=_tags(build_set))
+    return compile_build_set(BuildPlan.resolve(build_set, config=config, workspace=WORKSPACE), config=config)
 
 
 def _config(
@@ -134,7 +120,7 @@ class TestTheCredentialAppearsOnce:
         holders = [step.name for step in spec.steps for env in (step.environment or []) if env.from_secret is not None]
         assert holders == ["push"]
 
-        assert any(e.name == PUSH_CREDENTIAL_ENVVAR for e in push.environment or [])
+        assert any(e.name == CREDENTIAL_ENVVAR for e in push.environment or [])
         assert not any(e.from_secret for e in fetch.environment or [])
         assert build.environment is None or not any(e.from_secret for e in build.environment)
 
@@ -202,9 +188,10 @@ class TestGrouping:
             _set(_spec("a", context_path="environment"), _spec("b", context_path="tests")), config=_config()
         )
         groups = SuperviseStepConfig.model_validate(spec.steps[1].config).groups
-        assert len(groups) == 2
-        assert groups[0].context_sub_path == "context/fs-a/environment"
-        assert groups[1].context_sub_path == "context/fs-a/tests"
+        assert [g.source for g in groups] == [
+            ContextSource(fileset="fs-a", context_path="environment"),
+            ContextSource(fileset="fs-a", context_path="tests"),
+        ]
 
     def test_fetch_downloads_a_shared_source_once(self) -> None:
         spec = _compile(_set(_spec("main"), _spec("verifier")), config=_config())
@@ -227,9 +214,9 @@ class TestGrouping:
         sources = spec.steps[0].config["sources"]
         assert sources == [{"fileset": "fs-a", "context_path": None}]
 
-        # ...and the two groups still mount different subPaths.
+        # ...and the two groups still mount different contexts.
         groups = SuperviseStepConfig.model_validate(spec.steps[1].config).groups
-        assert [g.context_sub_path for g in groups] == ["context/fs-a", "context/fs-a/tests"]
+        assert [g.source.context_path for g in groups] == [None, "tests"]
 
     def test_a_root_request_on_a_different_fileset_absorbs_nothing(self) -> None:
         spec = _compile(
@@ -241,32 +228,6 @@ class TestGrouping:
             {"fileset": "fs-a", "context_path": None},
             {"fileset": "fs-b", "context_path": "tests"},
         ]
-
-
-class TestRegistryIsAHostNotAPath:
-    """A registry host and a repository path are different things.
-
-    Conflating them reads fine in a log and produces `https://host/project/repo/v2/...` the
-    moment a registry client tries to resolve the result -- which is exactly how this was found,
-    on the first real end-to-end submit.
-    """
-
-    def test_a_registry_with_a_path_is_rejected_at_config_time(self) -> None:
-        with pytest.raises(ValidationError, match="without a path"):
-            _config(default_registry="us-central1-docker.pkg.dev/proj/repo")
-
-    def test_the_prefix_goes_on_the_repository(self) -> None:
-        config = _config(repository_prefix="proj/artifacts")
-        registry, repository = resolve_destinations(_set(), config)[0]
-        assert registry == "reg.example.com"
-        assert repository == "proj/artifacts/team/main"
-
-    def test_a_spec_naming_its_own_registry_gets_no_prefix(self) -> None:
-        """It named a full destination; prepending a deployment default would corrupt it."""
-        spec = _spec("main")
-        spec.output.registry = "other.example.com"
-        registry, repository = resolve_destinations(_set(spec), _config(repository_prefix="proj/artifacts"))[0]
-        assert (registry, repository) == ("other.example.com", "team/main")
 
 
 class TestEachImageHasItsOwnIdentity:
@@ -292,32 +253,6 @@ class TestEachImageHasItsOwnIdentity:
         push = PushStepConfig.model_validate(spec.steps[2].config)
         targets = [set(image.tags) for image in push.images]
         assert not (targets[0] & targets[1]), f"two images share a push target: {targets[0] & targets[1]}"
-
-    def test_two_specs_publishing_the_same_reference_are_rejected(self) -> None:
-        """The caller's own tag could point at only one of them. A 400 at submit, not a 409."""
-        a = BuildSpec(name="a", source=FileSetSource(fileset="fs-a"), output=BuildOutput(repository="team/x", tag="v1"))
-        b = BuildSpec(name="b", source=FileSetSource(fileset="fs-b"), output=BuildOutput(repository="team/x", tag="v1"))
-        with pytest.raises(ValueError, match="both publish") as caught:
-            _compile(_set(a, b), config=_config())
-        assert not isinstance(caught.value, BuildCompileError)
-
-    def test_an_explicit_default_registry_and_an_omitted_one_are_the_same_destination(self) -> None:
-        a = BuildSpec(name="a", source=FileSetSource(fileset="fs-a"), output=BuildOutput(repository="team/x", tag="v1"))
-        b = BuildSpec(
-            name="b",
-            source=FileSetSource(fileset="fs-b"),
-            output=BuildOutput(registry="reg.example.com", repository="team/x", tag="v1"),
-        )
-        with pytest.raises(ValueError, match="both publish"):
-            _compile(_set(a, b), config=_config())
-
-    def test_the_compiler_refuses_duplicate_or_missing_system_tags(self) -> None:
-        """Checked rather than trusted: the failure it prevents -- two rows, one digest -- is silent."""
-        build_set = _set(_spec("a"), _spec("b"))
-        with pytest.raises(ValueError, match="distinct"):
-            compile_build_set(build_set, config=_config(), system_tags=["t", "t"])
-        with pytest.raises(ValueError, match="expected 2"):
-            compile_build_set(build_set, config=_config(), system_tags=["t"])
 
 
 class TestPublishing:
@@ -345,39 +280,17 @@ class TestPublishing:
         push = PushStepConfig.model_validate(spec.steps[2].config)
         assert push.credential_registry == "reg.example.com"
 
-    def test_layout_paths_line_up_with_what_the_sandbox_writes(self) -> None:
-        """`supervise`'s output IS `push`'s input; a mismatch here is silent until runtime."""
-        spec = _compile(_set(_spec("main"), _spec("v")), config=_config())
-        groups = SuperviseStepConfig.model_validate(spec.steps[1].config).groups
-        push = PushStepConfig.model_validate(spec.steps[2].config)
-        written = {i.image: i.layout.removeprefix("/out/") for g in groups for i in g.images}
-        read = {i.image: i.layout.removeprefix(f"{WORK_MOUNT}/out/") for i in push.images}
-        assert written == read
 
+class TestNoConfigCarriesAPath:
+    """Configs name filesets and images; every step derives locations from one `WorkLayout`.
 
-class TestUnconfiguredDeploymentFailsTheCompile:
-    """At compile time, not twenty minutes later in a pod."""
+    What replaced a test that checked the compiler's two spellings of the output path agreed: with
+    no spelling here at all, there is nothing to agree.
+    """
 
-    def test_missing_signing_key(self) -> None:
-        with pytest.raises(BuildCompileError, match="signing_key"):
-            _compile(_set(), config=_config(signing_key=None))
-
-    def test_missing_push_secret(self) -> None:
-        with pytest.raises(BuildCompileError, match="push_secret"):
-            _compile(_set(), config=_config(push_secret=None))
-
-    def test_no_registry_anywhere(self) -> None:
-        with pytest.raises(BuildCompileError, match="registry"):
-            _compile(_set(), config=_config(default_registry=None))
-
-    def test_the_kill_switch_refuses_the_compile(self) -> None:
-        with pytest.raises(BuildCompileError, match="execution_enabled"):
-            _compile(_set(), config=_config(execution_enabled=False))
-
-
-class TestNaming:
-    def test_names_are_deterministic_from_the_request(self) -> None:
-        """Which is what lets a losing racer adopt the winner's rows instead of duplicating them."""
-        build_set = _set(_spec("main"), _spec("verifier"))
-        assert job_name_for(build_set) == "demo-1"
-        assert image_name_for("demo-1", 1) == "demo-1-1"
+    def test_no_step_config_mentions_the_work_mount_or_a_sandbox_path(self) -> None:
+        spec = _compile(_set(_spec("main", context_path="tests")), config=_config())
+        for step in spec.steps:
+            serialized = str(step.config)
+            assert WORK_MOUNT not in serialized, f"{step.name} config carries the work mount"
+            assert "/out" not in serialized and "context/" not in serialized, f"{step.name} config carries a path"

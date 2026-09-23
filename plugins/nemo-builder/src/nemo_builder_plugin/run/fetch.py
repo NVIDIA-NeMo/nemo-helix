@@ -19,24 +19,22 @@ bytes onto a volume.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from nemo_builder_plugin.run.context import (
     context_hash,
     job_identity,
     read_step_config,
     split_fileset_ref,
+    work_mount,
 )
-from nemo_builder_plugin.steps import FetchStepConfig
+from nemo_builder_plugin.steps import ContextSource, FetchStepConfig, WorkLayout
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client_provider import get_task_nemo_client
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.types import ListFilesQueryParams
 
 logger = logging.getLogger(__name__)
-
-#: Written beside each fetched context. See the note at the bottom of this module.
-CONTEXT_HASH_FILE = ".nmp-context-hash"
 
 
 def _safe_destination(root: Path, relative_path: str) -> Path:
@@ -76,6 +74,42 @@ def _download_fileset(
     return count
 
 
+def fetch_source(client: FilesClient, layout: WorkLayout, source: ContextSource, *, workspace: str) -> str:
+    """Download one source to ``layout.context(source)``, and return its context hash.
+
+    Files reports entry paths relative to the fileset root even when the listing is narrowed to
+    ``context_path``, so entries are written under the *fileset's* directory -- and a subtree
+    then lands at ``layout.context(source)`` because that is where the layout puts it, inside its
+    fileset. Writing them under the context directory instead would nest the subtree inside
+    itself (``tests/tests/Dockerfile``).
+    """
+    source_workspace, name = split_fileset_ref(source.fileset, workspace)
+    fileset_dir = Path(layout.fileset(source.fileset))
+    context_dir = Path(layout.context(source))
+    fileset_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(
+        "fetching fileset %s/%s%s -> %s",
+        source_workspace,
+        name,
+        f" ({source.context_path})" if source.context_path else "",
+        context_dir,
+    )
+    count = _download_fileset(
+        client,
+        workspace=source_workspace,
+        name=name,
+        context_path=source.context_path,
+        destination=fileset_dir,
+    )
+    context_dir.mkdir(parents=True, exist_ok=True)
+
+    digest = context_hash(context_dir)
+    Path(layout.context_hash_file(source)).write_text(digest)
+    logger.info("fetched %d file(s), context hash %s", count, digest)
+    return digest
+
+
 def main() -> int:
     config = FetchStepConfig.model_validate(read_step_config())
     workspace, _ = job_identity()
@@ -85,35 +119,10 @@ def main() -> int:
     # deliberately not a service identity: a service identity would read any fileset in the
     # deployment, which is the confused deputy this step exists to remove.
     client = client_from_platform(get_task_nemo_client("builder"), FilesClient)
-
-    dest_root = Path(config.dest)
-    dest_root.mkdir(parents=True, exist_ok=True)
+    layout = WorkLayout(PurePosixPath(work_mount()))
 
     for source in config.sources:
-        source_workspace, name = split_fileset_ref(source.fileset, workspace)
-        destination = dest_root / source.fileset
-        if source.context_path:
-            destination = destination / source.context_path
-        destination.mkdir(parents=True, exist_ok=True)
-
-        logger.info(
-            "fetching fileset %s/%s%s -> %s",
-            source_workspace,
-            name,
-            f" ({source.context_path})" if source.context_path else "",
-            destination,
-        )
-        count = _download_fileset(
-            client,
-            workspace=source_workspace,
-            name=name,
-            context_path=source.context_path,
-            destination=destination,
-        )
-
-        digest = context_hash(destination)
-        (destination.parent / f"{destination.name}{CONTEXT_HASH_FILE}").write_text(digest)
-        logger.info("fetched %d file(s), context hash %s", count, digest)
+        fetch_source(client, layout, source, workspace=workspace)
 
     return 0
 

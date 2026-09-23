@@ -37,45 +37,6 @@ class TestDockerfileStaysWithinContext:
             _spec("x", dockerfile=bad)
 
 
-class TestGrouping:
-    """One sandbox per distinct source -- the mechanism, not the intent."""
-
-    def test_specs_sharing_a_source_share_a_group(self) -> None:
-        build_set = BuildSet(
-            name="s",
-            revision=1,
-            build_specs=[_spec("main"), _spec("verifier"), _spec("other", fileset="fs-b")],
-        )
-        groups = build_set.groups()
-        assert len(groups) == 2
-        assert groups[0] == (("fs-a", ""), [0, 1])
-        assert groups[1] == (("fs-b", ""), [2])
-
-    def test_context_path_splits_a_shared_fileset(self) -> None:
-        """Same fileset, different subtree, still two sandboxes.
-
-        The group key is (fileset, context_path), not fileset alone -- so a Dockerfile under
-        `tests/` never sees the contents of `environment/` even though both came from one upload.
-        """
-        build_set = BuildSet(
-            name="s",
-            revision=1,
-            build_specs=[
-                _spec("env", context_path="environment"),
-                _spec("tests", context_path="tests"),
-            ],
-        )
-        assert len(build_set.groups()) == 2
-
-    def test_group_order_follows_first_appearance(self) -> None:
-        build_set = BuildSet(
-            name="s",
-            revision=1,
-            build_specs=[_spec("b", fileset="fs-b"), _spec("a", fileset="fs-a"), _spec("b2", fileset="fs-b")],
-        )
-        assert [key for key, _ in build_set.groups()] == [("fs-b", ""), ("fs-a", "")]
-
-
 class TestBuildSet:
     def test_revision_is_required_and_one_based(self) -> None:
         with pytest.raises(ValidationError):

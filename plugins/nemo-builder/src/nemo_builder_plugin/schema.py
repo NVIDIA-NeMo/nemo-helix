@@ -40,16 +40,6 @@ class FileSetSource(BaseModel):
         ),
     )
 
-    @property
-    def group_key(self) -> tuple[str, str]:
-        """What ``supervise`` groups sandboxes by.
-
-        One sandbox per distinct ``(fileset, context_path)``, so a Dockerfile can never read the
-        context of a *different* source in the same set. Specs sharing a source share a sandbox,
-        which is the common shape and also the cheap one.
-        """
-        return (self.fileset, self.context_path or "")
-
 
 class BuildOutput(BaseModel):
     """Where one built image is published."""
@@ -130,16 +120,3 @@ class BuildSet(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("build_spec names must be unique within a set")
         return self
-
-    def groups(self) -> list[tuple[tuple[str, str], list[int]]]:
-        """Specs grouped by distinct source, preserving first-appearance order.
-
-        Returns ``[((fileset, context_path), [spec_index, ...]), ...]``. One sandbox per group.
-        Indices rather than specs because the index is the image's identity within the set --
-        ``ContainerImage.name`` is ``<job>-<index>`` -- so carrying it here keeps the compiler
-        from recomputing a positional fact.
-        """
-        ordered: dict[tuple[str, str], list[int]] = {}
-        for index, spec in enumerate(self.build_specs):
-            ordered.setdefault(spec.source.group_key, []).append(index)
-        return list(ordered.items())

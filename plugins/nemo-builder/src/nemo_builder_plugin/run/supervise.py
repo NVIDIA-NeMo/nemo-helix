@@ -26,18 +26,22 @@ from __future__ import annotations
 import logging
 import shlex
 import time
+from pathlib import PurePosixPath
 
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
 from kubernetes import watch as k8s_watch
 from nemo_builder_plugin.run.context import job_identity, read_step_config
-from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig
+from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
 from nemo_platform_plugin.jobs.constants import job_storage_subpath
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_CONTEXT_MOUNT = "/ctx"
-SANDBOX_OUTPUT_MOUNT = "/out"
+#: Where the sandbox sees the job's `WorkLayout`. Only two parts of it are mounted -- see
+#: `_volume_mounts` -- and they appear at the same layout paths every other step uses, under
+#: this root. An unusual name on purpose: a Dockerfile that touches this directory in a `RUN`
+#: touches the mounted volume, so it should not be one a Dockerfile would plausibly use.
+SANDBOX_ROOT = PurePosixPath("/nmp-work")
 
 #: The five capabilities kaniko needs out of containerd's default fourteen. Measured by ablation:
 #: dropping all of them fails at `chown /etc/gshadow: operation not permitted`, because extracting
@@ -73,17 +77,19 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     ``true``, so every image reported 0 and ``supervise`` logged a failed build as built. Found on
     the cluster, where a Dockerfile written to fail printed ``NMP_IMAGE_RESULT ... 0``.
     """
+    view = WorkLayout(SANDBOX_ROOT)
     lines = ["set -u"]
     for image in group.images:
+        layout = view.output(image.image)
         args = [
             KANIKO_EXECUTOR,
-            f"--context=dir://{image.context}",
+            f"--context=dir://{view.context(group.source)}",
             f"--dockerfile={image.dockerfile}",
             f"--custom-platform={image.platform}",
             "--no-push",
             "--no-push-cache",
-            f"--oci-layout-path={image.layout}",
-            f"--digest-file={image.layout}.digest",
+            f"--oci-layout-path={layout}",
+            f"--digest-file={layout}.digest",
             "--cleanup",
             "--verbosity=info",
         ]
@@ -95,6 +101,25 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
         lines.append(" ".join(shlex.quote(a) for a in args))
         lines.append(f'echo "{RESULT_MARKER} {image.image} $?"')
     return "\n".join(lines)
+
+
+def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeMount]:
+    """The sandbox's two windows onto the work volume, each at the layout path it has everywhere.
+
+    ``sub_path`` is the layout rooted at this job's slice of the volume; ``mount_path`` is the
+    same layout rooted at :data:`SANDBOX_ROOT`. Its own context, read-only -- no other source in
+    the set, and no other job -- and the output directory, where it writes OCI layouts.
+    """
+    volume, view = WorkLayout(PurePosixPath(job_sub_path)), WorkLayout(SANDBOX_ROOT)
+    return [
+        k8s.V1VolumeMount(
+            name="work",
+            sub_path=str(volume.context(group.source)),
+            mount_path=str(view.context(group.source)),
+            read_only=True,
+        ),
+        k8s.V1VolumeMount(name="work", sub_path=str(volume.outputs), mount_path=str(view.outputs)),
+    ]
 
 
 def _pod_manifest(
@@ -148,19 +173,7 @@ def _pod_manifest(
                         capabilities=k8s.V1Capabilities(drop=["ALL"], add=KANIKO_CAPABILITIES),
                     ),
                     # No env, no env_from, no secret volume. There is nothing here to read.
-                    volume_mounts=[
-                        k8s.V1VolumeMount(
-                            name="work",
-                            mount_path=SANDBOX_CONTEXT_MOUNT,
-                            sub_path=f"{job_sub_path}/{group.context_sub_path}",
-                            read_only=True,
-                        ),
-                        k8s.V1VolumeMount(
-                            name="work",
-                            mount_path=SANDBOX_OUTPUT_MOUNT,
-                            sub_path=f"{job_sub_path}/{group.output_sub_path}",
-                        ),
-                    ],
+                    volume_mounts=_volume_mounts(group, job_sub_path),
                     resources=k8s.V1ResourceRequirements(
                         requests={"cpu": sandbox.cpu, "memory": sandbox.memory},
                     ),

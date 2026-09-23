@@ -15,13 +15,16 @@ to a ConfigMap, mounts it, and points ``NEMO_JOB_STEP_CONFIG_FILE_PATH`` at the 
 
 **Read these by what each one does not carry.**
 
-- ``fetch`` is told where to put things. It is not told any registry, tag, or credential.
+- ``fetch`` is told what to download. It is not told any registry, tag, or credential.
 - ``supervise`` is told how to build. It is **not told where anything will be pushed** -- no
   registry, no tags, no secret name. The sandbox does not push, so the step orchestrating it has
   no reason to know where the trusted step intends to write, and not telling it means a
   compromise of it learns nothing about the destination.
 - ``push`` is told where to publish and how to sign. It is not told anything about a fileset, a
   context, or a Dockerfile -- it publishes bytes it did not produce and cannot reproduce.
+
+**No config carries a path.** Configs name things -- a fileset, an image -- and every step
+derives where those things live from one :class:`WorkLayout`.
 
 No step config carries a credential *value*. ``push_secret`` is a name that the jobs launcher
 resolves in-pod against the Secrets service, as the submitting principal. The value never enters
@@ -30,31 +33,101 @@ this structure, the Job object, or etcd.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+#: The environment variable `push` reads the registry credential from. The compiler wires it with
+#: `from_secret`, so the jobs launcher resolves the value in-pod and it never enters a job spec.
+CREDENTIAL_ENVVAR = "NMP_REGISTRY_AUTH"
+
+
+class ContextSource(BaseModel):
+    """One build context: a whole fileset, or a subtree of one."""
+
+    fileset: str
+    context_path: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# The work volume
+# ---------------------------------------------------------------------------
+
+
+def _relative(part: str) -> PurePosixPath:
+    """A caller-supplied path component, refused if it could leave the directory it is joined to.
+
+    ``PurePosixPath("a") / "/etc"`` is ``/etc``: an absolute component does not nest, it
+    replaces. So a fileset name or ``context_path`` that is absolute, or climbs with ``..``,
+    would point a step outside this job's directory.
+    """
+    path = PurePosixPath(part)
+    if not path.parts or path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"{part!r} is not a relative path inside the work volume")
+    return path
+
+
+@dataclass(frozen=True, slots=True)
+class WorkLayout:
+    """Where everything lives in one job's slice of the work volume. The only definition of it.
+
+    Rooted wherever the caller sees that slice:
+
+    - ``fetch`` and ``push`` mount the slice, and root it at their mount path.
+    - ``supervise`` mounts nothing, but writes the sandbox's ``subPath``\\ s, so it roots it at
+      the slice's path *within* the volume.
+    - The sandbox sees the same layout again under its own root, with only two parts of it
+      mounted: its own context, read-only, and the output directory.
+
+    So what ``fetch`` writes, what the sandbox mounts and builds, and what ``push`` reads are one
+    function of the same names, evaluated under different roots. They cannot disagree.
+    """
+
+    root: PurePosixPath
+
+    def fileset(self, name: str) -> PurePosixPath:
+        """Where ``fetch`` copies a fileset, with its entry paths unchanged."""
+        return self.root / "context" / _relative(name)
+
+    def context(self, source: ContextSource) -> PurePosixPath:
+        """A build context: its fileset's directory, or a subtree inside it.
+
+        Inside, not beside: that is what lets one whole-fileset download serve every subtree of
+        the same fileset.
+        """
+        path = self.fileset(source.fileset)
+        return path / _relative(source.context_path) if source.context_path else path
+
+    def context_hash_file(self, source: ContextSource) -> PurePosixPath:
+        """Beside the context rather than in it, where it would become part of the build."""
+        context = self.context(source)
+        return context.with_name(f"{context.name}.nmp-context-hash")
+
+    @property
+    def outputs(self) -> PurePosixPath:
+        """Where the sandbox writes OCI layouts and ``push`` reads them."""
+        return self.root / "out"
+
+    def output(self, image: str) -> PurePosixPath:
+        """One image's OCI layout. ``image`` is the ``ContainerImage`` row name."""
+        return self.outputs / _relative(image)
+
 
 # ---------------------------------------------------------------------------
 # 1. fetch
 # ---------------------------------------------------------------------------
 
 
-class FetchSource(BaseModel):
-    """One (fileset, context_path) pair to download. Deduplicated by the compiler."""
-
-    fileset: str
-    context_path: str | None = None
-
-
 class FetchStepConfig(BaseModel):
     """Trusted. Holds a Files client. Holds no registry credential. Runs no caller code."""
 
-    dest: str = Field(description="Directory on the work volume to write contexts under.")
-    sources: list[FetchSource] = Field(
+    sources: list[ContextSource] = Field(
         min_length=1,
         description=(
-            "Deduplicated across the set: two specs sharing a fileset cause one download, not "
-            "two. Each lands at `<dest>/<fileset>/`."
+            "Deduplicated across the set: two specs sharing a source cause one download, and a "
+            "whole fileset absorbs requests for its own subtrees."
         ),
     )
 
@@ -124,23 +197,18 @@ class SandboxImage(BaseModel):
 
     image: str = Field(description="`ContainerImage.name` -- the row this invocation is for.")
     platform: str
-    context: str = Field(description="Absolute path to the build context inside the sandbox.")
-    dockerfile: str = Field(description="Dockerfile path, relative to `context`.")
-    layout: str = Field(description="Absolute path to write the OCI layout to.")
+    dockerfile: str = Field(description="Dockerfile path, relative to the group's context.")
 
 
 class SandboxGroup(BaseModel):
     """One sandbox pod. All images here share one source, so they can share one context mount.
 
-    Both paths are **relative to the job's own storage slice**, not to the PVC root. The compiler
-    cannot write an absolute subPath because it does not know the job id -- the job does not
-    exist yet when it runs. ``supervise`` prefixes ``job_storage_subpath(workspace, job_id)``
-    from its own environment, which is the platform's own helper rather than a string this
-    design spells out twice.
+    Where that context and the outputs are mounted is ``supervise``'s to decide, from the
+    :class:`WorkLayout`: it owns the pod. The compiler could not write the ``subPath``\\ s anyway
+    -- they include the job id, and the job does not exist yet when the compiler runs.
     """
 
-    context_sub_path: str = Field(description="This group's context, mounted read-only. Relative to the job slice.")
-    output_sub_path: str = Field(description="Where OCI layouts go, mounted read-write. Relative to the job slice.")
+    source: ContextSource
     images: list[SandboxImage] = Field(min_length=1)
 
 
@@ -174,10 +242,9 @@ class SigningConfig(BaseModel):
 
 
 class PushImage(BaseModel):
-    """One OCI layout to publish."""
+    """One OCI layout to publish. Its path is :meth:`WorkLayout.output` of ``image``."""
 
     image: str = Field(description="`ContainerImage.name` -- the row this will satisfy.")
-    layout: str = Field(description="Absolute path to the OCI layout on the work volume.")
     push_secret: str = Field(description="Secret NAME. Resolved in-pod; the value is never here.")
     tags: list[str] = Field(
         min_length=2,

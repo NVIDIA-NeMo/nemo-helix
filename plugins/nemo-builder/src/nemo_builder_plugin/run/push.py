@@ -32,20 +32,16 @@ import logging
 import os
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from nemo_builder_plugin.run.context import read_step_config
-from nemo_builder_plugin.steps import PushImage, PushStepConfig, SigningConfig
+from nemo_builder_plugin.run.context import read_step_config, work_mount
+from nemo_builder_plugin.steps import CREDENTIAL_ENVVAR, PushImage, PushStepConfig, SigningConfig, WorkLayout
 
 logger = logging.getLogger(__name__)
 
 #: Read in chunks: a layer blob is routinely hundreds of megabytes and a build that OOMs the
 #: trusted step because a caller shipped a large layer is a denial of service with extra steps.
 _CHUNK = 1024 * 1024
-
-#: The env var the compiler wires the registry credential into. The jobs launcher resolves the
-#: secret in-pod, as the submitting principal -- the value never enters the job spec or etcd.
-CREDENTIAL_ENVVAR = "NMP_REGISTRY_AUTH"
 
 
 class CredentialError(Exception):
@@ -194,8 +190,7 @@ def _run(args: list[str]) -> str:
     return result.stdout.strip()
 
 
-def _push_one(image: PushImage, signing: SigningConfig, insecure: bool = False) -> None:
-    layout = Path(image.layout)
+def _push_one(image: PushImage, layout: Path, signing: SigningConfig, insecure: bool = False) -> None:
     digest = validate_layout(layout)
 
     # Destinations come from the compiler. Nothing read off the volume reaches this list.
@@ -235,10 +230,12 @@ def main() -> int:
         logger.error("%s", exc)
         return 1
 
+    work = WorkLayout(PurePosixPath(work_mount()))
     published = 0
     failures = 0
     for image in config.images:
-        if not Path(image.layout).exists():
+        layout = Path(work.output(image.image))
+        if not layout.exists():
             # The build step attempts every spec and does not abort the set, so a missing layout
             # means THAT image failed -- not that this step has nothing to do. Skip it and
             # publish the rest; its row stays `pending` and the reconciler fails it.
@@ -246,7 +243,7 @@ def main() -> int:
             failures += 1
             continue
         try:
-            _push_one(image, config.signing, config.insecure)
+            _push_one(image, layout, config.signing, config.insecure)
             published += 1
         except (LayoutRejected, RuntimeError):
             logger.exception("refusing to publish %s", image.image)
