@@ -31,7 +31,7 @@ from nemo_platform_plugin.inference_middleware import (
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
 from nmp.common.entities.utils import parse_model_entity_ref
-from nmp.core.inference_gateway.api.authz import enforce_resolved_model_workspace_access
+from nmp.core.inference_gateway.api.authz import enforce_model_ref_access
 from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
 from nmp.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -956,7 +956,7 @@ async def virtual_model_proxy(
                 detail=f"Could not resolve model entity from body['model'] after request middleware: {exc}",
             ) from exc
 
-        await enforce_resolved_model_workspace_access(workspace, modified_model_ref.workspace)
+        await enforce_model_ref_access(workspace, modified_model_ref)
 
         resolved_model_entity = model_cache.get_from_model_entity(modified_model_ref.workspace, modified_model_ref.name)
         if resolved_model_entity is None:
