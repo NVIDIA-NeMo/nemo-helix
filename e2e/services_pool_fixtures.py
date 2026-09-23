@@ -8,9 +8,13 @@ from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from _pytest.reports import TestReport
 from nemo_helix import DefaultHttpxClient, NeMoHelix
+from nemo_helix_plugin.client.auth import StaticToken, TokenProvider, TokenProviderAuth
+from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 
 from e2e.services_pool import E2EServicesPool, RunningServices, admin_headers
 
@@ -132,3 +136,50 @@ def services_pool_sdk(_services: str, _services_instance: RunningServices) -> Ne
         max_retries=2,
         default_headers=headers,
     )
+
+
+def _services_pool_auth() -> TokenProvider | None:
+    """Resolve the bearer auth for the pooled platform from the same env the CLI honors."""
+    access_token = os.environ.get("NHX_ACCESS_TOKEN")
+    if access_token:
+        return StaticToken(access_token)
+    context_name = os.environ.get("NHX_CONTEXT_NAME")
+    if context_name:
+        return NemoClient.from_config(context=context_name)._auth
+    return None
+
+
+@pytest.fixture(scope="module", name="services_pool_client")
+def services_pool_client(_services: str, _services_instance: RunningServices) -> Iterator[NemoClient]:
+    """Typed platform client bound to the pooled services instance for this module.
+
+    The transport carries the base URL, admin headers and bearer auth itself so
+    tests can also issue raw ``client._client.get("/path")`` requests against
+    routes that have no typed endpoint.
+    """
+    headers = admin_headers() if _services_instance.auth_enabled else None
+    auth = _services_pool_auth()
+    http_client = httpx.Client(
+        base_url=_services,
+        headers=headers,
+        auth=TokenProviderAuth(auth) if auth is not None else None,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    client = NemoClient(
+        base_url=_services,
+        auth=auth,
+        default_headers=headers,
+        http_client=http_client,
+        owns_http_client=True,
+        retry=RetryPolicy(
+            max_retries=2,
+            retryable_status_codes=(408, 409, 429),
+            retry_all_server_errors=True,
+            respect_retry_decision_headers=True,
+            respect_retry_after_headers=True,
+        ),
+    )
+    try:
+        yield client
+    finally:
+        client.close()
