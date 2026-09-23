@@ -47,6 +47,7 @@ from nhx.core.jobs.controllers.backends.base import (
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesJobStorageConfig,
     KubernetesObjectMetadata,
+    PodStatus,
     common_labels_for_step,
     name_for_step,
 )
@@ -1595,6 +1596,8 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 # ---------------------------------------------------------------------------
 
 _VJ = "nhx.core.jobs.controllers.backends.kubernetes.volcano_job"
+# The decision lives in common, shared with the Kubernetes backend.
+_COMMON = "nhx.core.jobs.controllers.backends.kubernetes.common"
 
 
 def _pending_volcano_step(step: HelixJobStepWithContext) -> None:
@@ -1612,20 +1615,37 @@ def test_stuck_image_pull_fails_a_pending_volcano_job(volcano_job, test_step_pen
     Volcano profiles and silently ignored.
     """
     _pending_volcano_step(test_step_pending)
-    message = 'Image pull did not succeed within 600s (ImagePullBackOff): Failed to pull image "registry.invalid/x:y"'
+    ttl = volcano_job._execution_profile_config.ttl_seconds_image_pull
+    backing_off = PodStatus(
+        task_id="task-1",
+        name="volcano-job-step-abc-xyz",
+        errors={},
+        completed=set(),
+        active=set(),
+        waiting={"nemo-job-task": "ImagePullBackOff"},
+        phase="Pending",
+    )
+    started = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl + 5)
+    detail = 'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": no such host'
+    events = [
+        {"type": "Warning", "reason": "Failed", "message": detail, "first_timestamp": str(started)},
+        {"type": "Warning", "reason": "Failed", "message": "Error: ImagePullBackOff", "first_timestamp": str(started)},
+    ]
 
     with (
-        patch(f"{_VJ}.image_pull_backoff_failure", return_value=message) as decide,
+        patch(f"{_COMMON}.list_pod_status", return_value=[backing_off]),
+        patch(f"{_COMMON}.get_pod_details", return_value=({"events": events}, {}, "")),
         patch.object(volcano_job, "get_volcano_job_by_name", return_value={"metadata": {"name": "vj"}}),
         patch.object(volcano_job, "sync_remove_job_with_status") as remove,
     ):
         volcano_job.sync(test_step_pending)
 
-    decide.assert_called_once()
-    assert decide.call_args.args[3] == volcano_job._execution_profile_config.ttl_seconds_image_pull
     remove.assert_called_once()
     assert remove.call_args.args[1] == HelixJobStatus.ERROR
-    assert remove.call_args.kwargs["error_details"]["message"] == message
+    reported = remove.call_args.kwargs["error_details"]["message"]
+    assert f"within {ttl}s" in reported
+    assert "ImagePullBackOff" in reported
+    assert "registry.invalid/nhx-e2e/no-such-image:missing" in reported
 
 
 def test_volcano_job_not_backing_off_keeps_its_scheduling_ttl(volcano_job, test_step_pending):
@@ -1633,7 +1653,7 @@ def test_volcano_job_not_backing_off_keeps_its_scheduling_ttl(volcano_job, test_
     _pending_volcano_step(test_step_pending)
 
     with (
-        patch(f"{_VJ}.image_pull_backoff_failure", return_value=None),
+        patch(f"{_COMMON}.list_pod_status", return_value=[]),
         patch.object(volcano_job, "get_volcano_job_by_name", return_value={"metadata": {"name": "vj"}}),
         patch.object(volcano_job, "sync_remove_job_with_status") as remove,
         patch.object(volcano_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
