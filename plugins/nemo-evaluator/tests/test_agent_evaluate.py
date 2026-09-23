@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs, TasksetRef
+from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
@@ -25,18 +26,17 @@ from nemo_evaluator.jobs.agent_evaluate import (
     AgentEvalJob,
     AsyncAgentEvalJob,
     _resolve_gym_environment,
-    _to_runtime_task,
 )
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
     AgentEvalTaskInput,
-    AgentEvalTaskSpec,
     AgentTarget,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    ResolvedTask,
     Target,
 )
 from nemo_evaluator.jobs.gym_sandbox import (
@@ -45,6 +45,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
     SandboxUnavailableError,
     SessionBackedGymRunner,
 )
+from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.publication import PublicationOutcome
 from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evaluator.metric_refs import MetricRef
@@ -65,6 +66,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     TrialMeasurements,
 )
 from nemo_evaluator_sdk.enums import AgentFormat
+from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -111,12 +113,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _task_spec() -> AgentEvalTaskSpec:
-    return AgentEvalTaskSpec(
+def _task_spec() -> ResolvedTask:
+    return ResolvedTask(
         id="task-1",
-        intent="Answer the question.",
-        inputs=_task_inputs(instruction="What is 2+2?"),
-        metrics=[_inline_metric()],
+        spec=ResolvedEvaluatorTaskDefinition(
+            kind="evaluator",
+            intent="Answer the question.",
+            inputs=_task_inputs(instruction="What is 2+2?"),
+            metrics=[_inline_metric()],
+        ),
     )
 
 
@@ -220,7 +225,9 @@ async def test_reference_round_trips_from_input_spec_to_runtime_task() -> None:
         input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
     )
     assert isinstance(spec, AgentEvalSpec)
-    assert spec.tasks[0].reference == reference
+    assert all(task.spec.kind == "evaluator" for task in spec.tasks)
+    assert spec.tasks[0].spec.kind == "evaluator"
+    assert spec.tasks[0].spec.reference == reference
     assert _to_runtime_task(spec.tasks[0]).reference == reference
 
 
@@ -249,7 +256,9 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
     )
 
     assert isinstance(spec, AgentEvalSpec)
-    assert spec.tasks[0].inputs.model_dump(exclude_none=True)["gym_row"] == gym_row
+    assert all(task.spec.kind == "evaluator" for task in spec.tasks)
+    assert spec.tasks[0].spec.kind == "evaluator"
+    assert spec.tasks[0].spec.inputs.model_dump(exclude_none=True)["gym_row"] == gym_row
     runtime_task = _to_runtime_task(spec.tasks[0])
     assert runtime_task.inputs["gym_row"] == gym_row
     assert runtime_task.metadata["gym_row_extras"] == gym_row_extras
@@ -794,6 +803,7 @@ def test_input_spec_accepts_stored_metric_reference() -> None:
         target=_runner_target("openai/gpt-5.4"),
     )
     assert isinstance(spec.tasks, list)
+    assert isinstance(spec.tasks[0], AgentEvalTaskInput)
     assert isinstance(spec.tasks[0].metrics[0], MetricRef)
 
 
@@ -806,7 +816,7 @@ def test_input_spec_accepts_a_taskset_reference() -> None:
 
 
 def test_input_spec_rejects_empty_inline_task_list() -> None:
-    with pytest.raises(ValueError, match="at least one task"):
+    with pytest.raises(ValueError, match="at least 1 item"):
         AgentEvalInputSpec(tasks=[], target=_runner_target("openai/gpt-5.4"))
 
 
@@ -829,8 +839,9 @@ async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> Non
     )
 
     assert isinstance(spec, AgentEvalSpec)
+    assert all(task.spec.kind == "evaluator" for task in spec.tasks)
     assert len(spec.tasks) == 1
-    assert isinstance(spec.tasks[0].metrics[0], MetricInline)
+    assert isinstance(spec.tasks[0].spec.metrics[0], MetricInline)
     # Canonical metrics reconstruct to runtime instances.
     assert isinstance(_to_runtime_task(spec.tasks[0]).metrics[0], ExactMatchMetric)
 
@@ -881,8 +892,8 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
     )
 
     assert isinstance(spec, AgentEvalSpec)
-    assert isinstance(spec.tasks, list)
-    bundle = MetricBundle.model_validate(spec.tasks[0].metrics[0].model_dump(mode="json"))
+    assert all(task.spec.kind == "evaluator" for task in spec.tasks)
+    bundle = MetricBundle.model_validate(spec.tasks[0].spec.metrics[0].model_dump(mode="json"))
     assert bundle.payload.kind == "inline"
 
     compiled = await AgentEvalJob.compile(
@@ -896,7 +907,7 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
     _assert_agent_eval_step_entrypoint(job_spec)
     config = cast(dict[str, Any], job_spec.steps[0].config)
     assert config["target"]["kind"] == "fabric"
-    assert config["tasks"][0]["metrics"][0]["payload"]["kind"] == "inline"
+    assert config["tasks"][0]["spec"]["metrics"][0]["payload"]["kind"] == "inline"
 
 
 def _patch_execution_profiles(mocker: MockerFixture, profiles: list[BaseExecutionProfile]) -> None:
@@ -1656,14 +1667,19 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
             AgentEvalTaskInput(
                 id="task-1",
                 intent="Answer.",
-                inputs=_task_inputs(instruction="What is 2+2?"),
+                inputs=_task_inputs(instruction="What is 2+2?", gym_row={}),
+                metadata=[MetadataItem(key="gym_row_extras", value={})],
                 metrics=[_inline_metric()],
             )
         ],
         target=target,
     )
 
-    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    canonical = run_sync(
+        lambda: AgentEvalJob.to_spec(
+            input_spec, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+        )
+    )
     result = AgentEvalJob().run(
         canonical.model_dump(mode="json"),
         ctx=_job_context(tmp_path),
@@ -1700,7 +1716,11 @@ def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: Mock
         trials=precomputed,
     )
 
-    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    canonical = run_sync(
+        lambda: AgentEvalJob.to_spec(
+            input_spec, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+        )
+    )
     result = AgentEvalJob().run(
         canonical.model_dump(mode="json"),
         ctx=_job_context(tmp_path),
@@ -1858,7 +1878,11 @@ def test_precomputed_trial_measurements_validate_across_both_job_specs(
     spec = spec_type.model_validate(
         {
             "trials": [row],
-            "tasks": [_task_spec().model_dump(mode="json")],
+            "tasks": [
+                _task_spec().model_dump(mode="json")
+                if spec_type is AgentEvalSpec
+                else {"id": "task-1", **_task_spec().spec.model_dump(mode="json", exclude={"kind", "provenance"})}
+            ],
         }
     )
 
@@ -1885,7 +1909,11 @@ def test_job_specs_reject_invalid_typed_measurements_without_metadata_fallback(
                         "metadata": {"prompt_tokens": 8, "duration_ms": 1500},
                     }
                 ],
-                "tasks": [_task_spec().model_dump(mode="json")],
+                "tasks": [
+                    _task_spec().model_dump(mode="json")
+                    if spec_type is AgentEvalSpec
+                    else {"id": "task-1", **_task_spec().spec.model_dump(mode="json", exclude={"kind", "provenance"})}
+                ],
             }
         )
 
@@ -1946,3 +1974,76 @@ async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture)
     assert secrets == {"OPENAI_API_KEY": "my-workspace/openai-key"}
     stored_target = cast(dict[str, Any], step.config)["target"]
     assert stored_target["env_secrets"] == {"OPENAI_API_KEY": "my-workspace/openai-key"}
+
+
+@pytest.mark.parametrize("valid", [False, True])
+async def test_gym_submission_validates_before_environment_resolution(monkeypatch, valid) -> None:
+    """Invalid Gym rows stop submission before environment lookups; valid rows reach them."""
+    from unittest.mock import AsyncMock
+
+    from nemo_evaluator.api.schemas import MetadataItem
+
+    resolver = AsyncMock(side_effect=lambda target, **kwargs: target)
+    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolver)
+    request = AgentEvalInputSpec(
+        tasks=[
+            AgentEvalTaskInput(
+                id="task",
+                intent="Run",
+                inputs=TaskInputs.model_validate({"gym_row": {}} if valid else {}),
+                metadata=[MetadataItem(key="gym_row_extras", value={})],
+            )
+        ],
+        target=GymRunnerTarget(agent="simple_agent", agent_config="config.yaml", resources_server="mcqa"),
+    )
+    if valid:
+        await AgentEvalJob.to_spec(
+            request, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+        )
+        resolver.assert_awaited_once()
+    else:
+        with pytest.raises(ValueError, match="missing inputs"):
+            await AgentEvalJob.to_spec(
+                request, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+            )
+        resolver.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        None,
+        ModelTarget(model=Model(url="http://model.test", name="test")),
+        AgentTarget(agent=_agent()),
+        FabricRunnerTarget(config={}),
+        HarborRunnerTarget(),
+    ],
+)
+async def test_non_gym_submission_never_prepares_gym(monkeypatch, target: Target | None) -> None:
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Non-Gym submission invoked Gym preparation")
+
+    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate.prepare_gym_submission", forbidden)
+    request = AgentEvalInputSpec(
+        tasks=[AgentEvalTaskInput(id="task", intent="Answer")],
+        target=target,
+        trials=[
+            AgentEvalTrial(
+                id="trial",
+                task_id="task",
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="Answer"),
+            )
+        ]
+        if target is None
+        else None,
+    )
+    result = await AgentEvalJob.to_spec(
+        request,
+        workspace="default",
+        entity_client=None,
+        async_sdk=_async_platform(),
+        is_local=True,
+    )
+    assert isinstance(result, AgentEvalSpec)
+    assert result.target == target

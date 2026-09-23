@@ -28,7 +28,7 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
     MetricBundlePackagerPolicyError,
     bundle_metric,
 )
-from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentTaskRunner
 from nemo_evaluator_sdk.datasets.loader import prepare_dataset_rows
 from nemo_evaluator_sdk.execution.config import resolve_params
 from nemo_evaluator_sdk.execution.utils import is_metric, is_metric_sequence
@@ -262,19 +262,26 @@ class _SyncEvaluatorPluginExecutor:
         self,
         *,
         tasks: TasksetRef,
-        target: AgentTaskRunner,
+        target: AgentTaskRunner | None = None,
+        trials: list[AgentEvalTrial] | None = None,
         placement: GymPlacement | None = None,
         wait_until_done: bool = False,
     ) -> AgentEvaluatorJobResource:
-        """Submit an agent evaluation over a stored taskset, run by ``target`` and placed by ``placement``.
+        """Submit a stored taskset with a live runner or precomputed trials.
 
         ``target`` is a *live* runner — the object someone already ran locally with
         ``AgentEvaluator()``. :func:`runner_to_target` describes it as the spec that reproduces it
         job-side, and refuses runners carrying state the wire cannot express, so a submitted job
         cannot silently run something other than what was tested.
         """
+        if placement is not None and target is None:
+            raise TypeError("placement requires target; saved trials are not executed")
         resolved_workspace = self._client.require_workspace(self._workspace)
-        spec = AgentEvalInputSpec(tasks=tasks, target=runner_to_target(target, placement))
+        spec = AgentEvalInputSpec(
+            tasks=tasks,
+            target=runner_to_target(target, placement) if target is not None else None,
+            trials=trials,
+        )
         return self.create_agent_eval(
             spec=spec,
             workspace=resolved_workspace,

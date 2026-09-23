@@ -19,15 +19,16 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import nemo_evaluator.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.config import get_config
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.harbor.resolution import map_with_limited_concurrency
 from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
@@ -35,13 +36,14 @@ from nemo_evaluator.jobs.agent_compiler import (
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
-    AgentEvalTaskSpec,
     AgentTarget,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    ResolvedTask,
     Target,
+    validate_task_collection,
 )
 from nemo_evaluator.jobs.gym_environment_package import (
     ENVIRONMENT_MANIFEST_FILENAME,
@@ -56,20 +58,25 @@ from nemo_evaluator.jobs.gym_sandbox import (
     require_fileset_sandbox_storage_identity,
     sandbox_plan_from_environment,
 )
-from nemo_evaluator.jobs.metric_resolution import resolve_metrics_to_inline, to_runtime_bundle
+from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
+from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
-from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
-from nemo_evaluator.task_refs import resolve_agent_eval_tasks
+from nemo_evaluator.task_refs import (
+    groupby_kind,
+    load_tasks,
+    snapshot_task,
+    validate_execution_support,
+    validate_scoring,
+)
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
-from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig, validate_gym_task_row
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
-from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
-from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -130,13 +137,13 @@ def _profile_dependency_unavailable(profile: str) -> HelixJobDependencyUnavailab
 
 
 async def _resolve_gym_environment(
-    target: Target | None,
+    target: GymRunnerTarget,
     *,
     workspace: str,
     async_sdk: AsyncHelixClient | None,
-) -> Target | None:
+) -> GymRunnerTarget:
     """Validate and qualify a Gym environment FileSet through the Files service."""
-    if not isinstance(target, GymRunnerTarget) or target.environment is None:
+    if target.environment is None:
         return target
 
     # Qualify ``workspace/name`` now so later steps do not re-parse a relative or fragmented ref.
@@ -253,24 +260,19 @@ class AgentEvalResultFiles:
     summary: Path
 
 
-def _runtime_metric(metric: MetricInline) -> Metric:
-    """Reconstruct a runtime ``Metric`` from its inline bundle DTO."""
-    return unbundle_metric(to_runtime_bundle(metric))
-
-
-def _to_runtime_task(task: AgentEvalTaskSpec) -> AgentEvalTask:
-    """Reconstruct a runtime ``AgentEvalTask`` (live metrics) from its canonical DTO."""
-    return AgentEvalTask(
-        id=task.id,
-        intent=task.intent,
-        # The runtime task carries plain dicts; the typed DTOs collapse to them, with arbitrary
-        # task-specific inputs preserved and key/value metadata pairs folded into a mapping.
-        inputs=task.inputs.model_dump(exclude_none=True),
-        reference=task.reference,
-        metrics=[_runtime_metric(metric) for metric in task.metrics],
-        views=task.views,
-        metadata={item.key: item.value for item in task.metadata},
-    )
+async def prepare_gym_submission(
+    resolved_tasks: Sequence[ResolvedTask], target: GymRunnerTarget, ctx: SubmitContext
+) -> GymRunnerTarget:
+    """Validate Gym rows and resolve its environment after task compatibility checks."""
+    for task in resolved_tasks:
+        if task.spec.kind != "evaluator":
+            raise ValueError("Gym requires evaluator tasks")
+        validate_gym_task_row(
+            task_id=task.id,
+            inputs=task.spec.inputs.model_dump(exclude_none=True),
+            metadata={item.key: item.value for item in task.metadata},
+        )
+    return await _resolve_gym_environment(target, workspace=ctx.workspace, async_sdk=ctx.async_sdk)
 
 
 def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
@@ -294,6 +296,7 @@ class _AgentEvalJobBase(NemoJob):
     spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     generate_legacy_verbs: ClassVar[bool] = False
+    adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
 
     @classmethod
     async def to_spec(
@@ -312,46 +315,21 @@ class _AgentEvalJobBase(NemoJob):
             if isinstance(input_spec, AgentEvalInputSpec)
             else AgentEvalInputSpec.model_validate_json(input_spec.model_dump_json())
         )
-        entity_client = entity_client if isinstance(entity_client, EntityClient) else None
-        # A `tasks` taskset reference is loaded and expanded into inline task DTOs first, so the
-        # metric-ref resolution below is identical whether the tasks were submitted inline or via a
-        # stored taskset.
-        task_inputs = await resolve_agent_eval_tasks(
-            submit_spec.tasks, workspace=workspace, entity_client=entity_client
-        )
-        resolved_tasks: list[AgentEvalTaskSpec] = []
-        for task in task_inputs:
-            metrics = await resolve_metrics_to_inline(
-                task.metrics,
-                workspace=workspace,
-                entity_client=entity_client,
-                async_sdk=async_sdk,
-            )
-            resolved_tasks.append(
-                AgentEvalTaskSpec(
-                    id=task.id,
-                    intent=task.intent,
-                    inputs=task.inputs,
-                    reference=task.reference,
-                    metrics=metrics,
-                    views=task.views,
-                    metadata=task.metadata,
-                )
-            )
-        resolved_target = await _resolve_gym_environment(
-            submit_spec.target,
+        ctx = SubmitContext(
             workspace=workspace,
+            entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
             async_sdk=async_sdk,
+            adapters=cls.adapters,
         )
-        return AgentEvalSpec(
-            tasks=resolved_tasks,
-            target=resolved_target,
-            trials=submit_spec.trials,
-            max_concurrent_tasks=submit_spec.max_concurrent_tasks,
-            fail_fast=submit_spec.fail_fast,
-            labels=submit_spec.labels,
-            publication=submit_spec.publication,
-        )
+        loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
+        resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
+        validate_task_collection(resolved_tasks)
+        validate_execution_support(resolved_tasks, target=submit_spec.target, adapters=ctx.adapters)
+        target = submit_spec.target
+        if isinstance(target, GymRunnerTarget):
+            target = await prepare_gym_submission(resolved_tasks, target, ctx)
+        validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
+        return AgentEvalSpec(tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"}))
 
     @classmethod
     async def compile(
@@ -650,7 +628,21 @@ class _AgentEvalJobBase(NemoJob):
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
         spec = AgentEvalSpec.model_validate(config)
-        tasks = [_to_runtime_task(task) for task in spec.tasks]
+        prepare_ctx = PrepareContext(
+            storage_root=ctx.storage.persistent,
+            client=platform_client if isinstance(platform_client, NemoClient) else None,
+            async_client=async_client,
+            target=spec.target,
+            trials=spec.trials,
+            adapters=self.adapters,
+        )
+        validate_execution_support(spec.tasks, target=spec.target, adapters=prepare_ctx.adapters)
+        validate_scoring(spec.tasks, target=spec.target, trials=spec.trials, adapters=prepare_ctx.adapters)
+        tasks = [
+            task
+            for kind, group in groupby_kind(spec.tasks)
+            for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
+        ]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
         run_config = AgentEvalRunConfig(
             params=params,

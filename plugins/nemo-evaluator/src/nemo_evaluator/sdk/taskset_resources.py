@@ -10,6 +10,9 @@ as a :class:`TasksetInput` (its members as references to stored tasks) and retur
 
 from __future__ import annotations
 
+import builtins
+from typing import overload
+
 from nemo_evaluator.api.schemas import Revision, Taskset, TasksetInput
 from nemo_evaluator.sdk.query_params import list_params, project_params, revision_selector
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
@@ -23,33 +26,66 @@ class EvaluatorTasksetsResource:
     def __init__(self, client: EvaluatorClient) -> None:
         self._client = client
 
+    @overload
+    def create(
+        self, name: str, *, tasks: builtins.list[str], project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    @overload
     def create(
         self, name: str, *, taskset: TasksetInput, project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    def create(
+        self,
+        name: str,
+        *,
+        tasks: builtins.list[str] | None = None,
+        taskset: TasksetInput | None = None,
+        project: str | None = None,
+        workspace: str | None = None,
     ) -> Taskset:
-        """Store a new taskset (addressed by workspace/name)."""
+        """Create a taskset from stored task IDs or an explicit definition."""
+        if (tasks is None) == (taskset is None):
+            raise ValueError("Supply exactly one of tasks or taskset")
+        body = TasksetInput(task_ids=tasks) if tasks is not None else taskset
+        assert body is not None
         response = self._client.create_taskset(
             name=name,
             workspace=workspace,
-            body=CreateTasksetRequest(root=taskset.model_dump(mode="json")),
+            body=CreateTasksetRequest(root=body.model_dump(mode="json", exclude_unset=True)),
             query_params=project_params(project),
         )
         return Taskset.model_validate(response.data().model_dump(mode="json"))
 
+    @overload
+    def replace(
+        self, name: str, *, tasks: builtins.list[str], project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    @overload
     def replace(
         self, name: str, *, taskset: TasksetInput, project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    def replace(
+        self,
+        name: str,
+        *,
+        tasks: builtins.list[str] | None = None,
+        taskset: TasksetInput | None = None,
+        project: str | None = None,
+        workspace: str | None = None,
     ) -> Taskset:
-        """Publish a revision of a taskset, creating it if absent.
-
-        Members are re-resolved to exact revision digests on every call, so identical member names
-        can still publish a new revision if a member task published in the meantime.
-
-        The response body is the same either way, so this does not report whether a revision was
-        cut — the server signals that with 201 vs 200, which is discarded here. Compare the returned
-        ``revision`` against a prior read if you need to know."""
+        """Upsert a taskset from stored task IDs or an explicit definition."""
+        if (tasks is None) == (taskset is None):
+            raise ValueError("Supply exactly one of tasks or taskset")
+        body = TasksetInput(task_ids=tasks) if tasks is not None else taskset
+        assert body is not None
         response = self._client.replace_taskset(
             name=name,
             workspace=workspace,
-            body=ReplaceTasksetRequest(root=taskset.model_dump(mode="json")),
+            body=ReplaceTasksetRequest(root=body.model_dump(mode="json", exclude_unset=True)),
             query_params=project_params(project),
         )
         return Taskset.model_validate(response.data().model_dump(mode="json"))
@@ -129,33 +165,66 @@ class AsyncEvaluatorTasksetsResource:
     def __init__(self, client: AsyncEvaluatorClient) -> None:
         self._client = client
 
+    @overload
+    async def create(
+        self, name: str, *, tasks: builtins.list[str], project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    @overload
     async def create(
         self, name: str, *, taskset: TasksetInput, project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    async def create(
+        self,
+        name: str,
+        *,
+        tasks: builtins.list[str] | None = None,
+        taskset: TasksetInput | None = None,
+        project: str | None = None,
+        workspace: str | None = None,
     ) -> Taskset:
-        """Store a new taskset (addressed by workspace/name)."""
+        """Create a taskset from stored task IDs or an explicit definition."""
+        if (tasks is None) == (taskset is None):
+            raise ValueError("Supply exactly one of tasks or taskset")
+        body = TasksetInput(task_ids=tasks) if tasks is not None else taskset
+        assert body is not None
         response = await self._client.create_taskset(
             name=name,
             workspace=workspace,
-            body=CreateTasksetRequest(root=taskset.model_dump(mode="json")),
+            body=CreateTasksetRequest(root=body.model_dump(mode="json", exclude_unset=True)),
             query_params=project_params(project),
         )
         return Taskset.model_validate(response.data().model_dump(mode="json"))
 
+    @overload
+    async def replace(
+        self, name: str, *, tasks: builtins.list[str], project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    @overload
     async def replace(
         self, name: str, *, taskset: TasksetInput, project: str | None = None, workspace: str | None = None
+    ) -> Taskset: ...
+
+    async def replace(
+        self,
+        name: str,
+        *,
+        tasks: builtins.list[str] | None = None,
+        taskset: TasksetInput | None = None,
+        project: str | None = None,
+        workspace: str | None = None,
     ) -> Taskset:
-        """Publish a revision of a taskset, creating it if absent.
-
-        Members are re-resolved to exact revision digests on every call, so identical member names
-        can still publish a new revision if a member task published in the meantime.
-
-        The response body is the same either way, so this does not report whether a revision was
-        cut — the server signals that with 201 vs 200, which is discarded here. Compare the returned
-        ``revision`` against a prior read if you need to know."""
+        """Upsert a taskset from stored task IDs or an explicit definition."""
+        if (tasks is None) == (taskset is None):
+            raise ValueError("Supply exactly one of tasks or taskset")
+        body = TasksetInput(task_ids=tasks) if tasks is not None else taskset
+        assert body is not None
         response = await self._client.replace_taskset(
             name=name,
             workspace=workspace,
-            body=ReplaceTasksetRequest(root=taskset.model_dump(mode="json")),
+            body=ReplaceTasksetRequest(root=body.model_dump(mode="json", exclude_unset=True)),
             query_params=project_params(project),
         )
         return Taskset.model_validate(response.data().model_dump(mode="json"))

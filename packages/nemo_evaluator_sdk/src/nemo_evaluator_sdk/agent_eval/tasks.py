@@ -154,8 +154,28 @@ class AgentEvalTask(BaseModel):
         return self
 
 
+def _base_task_fields(task: AgentEvalTask) -> dict[str, Any]:
+    """Field values of ``task`` without runner-only subclass fields (e.g. Harbor ``source_dir``)."""
+    return {key: value for key, value in dict(task).items() if key in AgentEvalTask.model_fields}
+
+
+def as_base_task(task: AgentEvalTask) -> AgentEvalTask:
+    """Return ``task`` as a plain :class:`AgentEvalTask`, dropping runner-only subclass fields.
+
+    A discovered Harbor task carries ``source_dir``, which ``AgentEvalTask`` rejects as an extra
+    field, so ``AgentEvalTask.model_validate(dict(task))`` fails. This keeps every base field by
+    value, including ``Metric`` instances and metadata. A plain task is returned unchanged.
+    """
+    if type(task) is AgentEvalTask:
+        return task
+    return AgentEvalTask.model_validate(_base_task_fields(task))
+
+
 class AgentEvalTaskset(BaseModel):
     """A named set of SDK-native tasks (with optional metadata) to evaluate.
+
+    Serialized tasks are base scoring records; subclass publication paths are not
+    preserved.
 
     Produced by an :class:`AgentEvalTasksetLoader`; the evaluator scores
     ``tasks`` directly and never consumes a loader.
