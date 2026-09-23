@@ -8,9 +8,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nmp.customization_common.schemas.values import OutputNameType
-from nmp.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
-from nmp.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
+from nhx.customization_common.schemas.values import OutputNameType
+from nhx.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
+from nhx.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
 
 
 def _make_output(name: str = "out", out_type: OutputNameType = OutputNameType.MODEL) -> OutputResponse:
@@ -193,7 +193,7 @@ def test_grpo_accepts_a_single_advantage_clip_bound() -> None:
 
 
 def test_grpo_lora_rejects_params_with_all_weights() -> None:
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     with pytest.raises(ValueError, match="lora must be omitted"):
         GRPOTraining(type="grpo", finetuning_type="all_weights", lora=LoRAParams(rank=8))
@@ -302,7 +302,7 @@ def test_negative_val_check_interval_rejected() -> None:
 
 def test_use_triton_defaults_to_unset() -> None:
     """Unset is what lets the compiler resolve it from TP without overriding a caller."""
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     assert LoRAParams().use_triton is None
     t = GRPOTraining(type="grpo", finetuning_type="lora")
@@ -312,7 +312,7 @@ def test_use_triton_defaults_to_unset() -> None:
 def test_triton_lora_rejected_with_tensor_parallelism() -> None:
     """The Triton kernels take raw tensors and TP makes them DTensors; NeMo-RL turns the
     pairing into a bare assert that fires only after the model loads."""
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     with pytest.raises(ValueError, match="use_triton=true is incompatible"):
         GRPOTraining(
@@ -324,7 +324,7 @@ def test_triton_lora_rejected_with_tensor_parallelism() -> None:
 
 
 def test_triton_lora_accepted_without_tensor_parallelism() -> None:
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     t = GRPOTraining(type="grpo", finetuning_type="lora", lora=LoRAParams(rank=16, use_triton=True))
     assert t.lora is not None and t.lora.use_triton is True
@@ -332,7 +332,7 @@ def test_triton_lora_accepted_without_tensor_parallelism() -> None:
 
 def test_triton_lora_explicitly_disabled_is_allowed_with_tensor_parallelism() -> None:
     """False is the value TP needs, so asking for it must not trip the same check."""
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     t = GRPOTraining(
         type="grpo",

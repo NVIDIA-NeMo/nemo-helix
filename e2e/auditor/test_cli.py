@@ -4,20 +4,20 @@
 """CLI smoke tests for the auditor plugin.
 
 Exercises ``nemo auditor configs`` and ``nemo auditor targets`` subcommands
-against a live platform via ``NMP_BASE_URL``, using ``run_nemo_local`` so the
+against a live platform via ``NHX_BASE_URL``, using ``run_nemo_local`` so the
 CLI picks up platform credentials from env without reading the developer's own
 config file.
 """
 
 import json
 
-from nemo_platform import NeMoPlatform
-from nmp.testing import assert_exit_0, run_nemo_local
+from nemo_helix import NeMoHelix
+from nhx.testing import assert_exit_0, run_nemo_local
 
 from e2e.auditor.utils import minimal_audit_config, minimal_audit_target, unique_name
 
 
-def test_cli_config_create_list_delete(sdk: NeMoPlatform, workspace: str) -> None:
+def test_cli_config_create_list_delete(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("cli-cfg")
     base_url = str(sdk.base_url)
 
@@ -49,7 +49,7 @@ def test_cli_config_create_list_delete(sdk: NeMoPlatform, workspace: str) -> Non
     assert all(item["name"] != name for item in listed["data"])
 
 
-def test_cli_target_create_list_delete(sdk: NeMoPlatform, workspace: str) -> None:
+def test_cli_target_create_list_delete(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("cli-tgt")
     base_url = str(sdk.base_url)
 
@@ -75,7 +75,7 @@ def test_cli_target_create_list_delete(sdk: NeMoPlatform, workspace: str) -> Non
     assert_exit_0(result, "CLI delete target")
 
 
-def test_cli_config_update(sdk: NeMoPlatform, workspace: str) -> None:
+def test_cli_config_update(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("cli-upd")
     base_url = str(sdk.base_url)
 

@@ -29,7 +29,7 @@
 # once and registers the remaining members against that same signed image.
 set -euo pipefail
 
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 PORT="${PORT:-18081}"
 BASE="http://127.0.0.1:$PORT/apis/scaled-evals"
 TASK_SRC="$(cd "$(dirname "$0")/../../examples/tasks/hello-world" && pwd)"
@@ -218,10 +218,10 @@ wait_until() {
 # the only link back is the job_id label. That label holds the Platform Job
 # name, which embeds a truncated evaluation id. Matching on the label rather
 # than the object name is what keeps these assertions from being vacuous.
-JOB_ID_LABEL='nmp\.nvidia\.com/job_id'
+JOB_ID_LABEL='nhx\.nvidia\.com/job_id'
 
 job_ids_for() {
-  kubectl get jobs -n "$NS" -l nmp.nvidia.com/managed_by=jobs-controller \
+  kubectl get jobs -n "$NS" -l nhx.nvidia.com/managed_by=jobs-controller \
     -o jsonpath="{range .items[*]}{.metadata.labels.$JOB_ID_LABEL}{\"\n\"}{end}" 2>/dev/null |
     grep "evaluation-${1:0:14}" || true
 }
@@ -229,7 +229,7 @@ job_ids_for() {
 job_count_for() { job_ids_for "$1" | grep -c . || true; }
 
 k8s_job_names_for() {
-  kubectl get jobs -n "$NS" -l nmp.nvidia.com/managed_by=jobs-controller \
+  kubectl get jobs -n "$NS" -l nhx.nvidia.com/managed_by=jobs-controller \
     -o jsonpath="{range .items[*]}{.metadata.labels.$JOB_ID_LABEL}{\" \"}{.metadata.name}{\"\n\"}{end}" 2>/dev/null |
     awk -v want="evaluation-${1:0:14}" 'index($1, want) { print $2 }'
 }

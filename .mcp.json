@@ -5,7 +5,7 @@
       "command": "sh",
       "args": [
         "-c",
-        "uv run nemo-mcp --base-url \"${NMP_BASE_URL:-http://localhost:8080}\""
+        "uv run nemo-mcp --base-url \"${NHX_BASE_URL:-http://localhost:8080}\""
       ]
     }
   }

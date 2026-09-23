@@ -15,24 +15,24 @@ Checks:
 import os
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import SecretsClient
 from trace_reader import get_session
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
-def client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE)
+def client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 # --- Final state checks ---
 
 
-def test_api_key_secret_exists(client: NeMoPlatform) -> None:
+def test_api_key_secret_exists(client: NeMoHelix) -> None:
     """Test that the API key secret was created for provider registration."""
     secrets = client_from_platform(client, SecretsClient)
     response = secrets.get_secret(name="harbor-provider-api-key").data()
@@ -41,7 +41,7 @@ def test_api_key_secret_exists(client: NeMoPlatform) -> None:
     )
 
 
-def test_harbor_test_provider_deleted(client: NeMoPlatform) -> None:
+def test_harbor_test_provider_deleted(client: NeMoHelix) -> None:
     """Test that harbor-test-provider was deleted after initial registration."""
     response = client.inference.providers.list()
     provider_names = [p.name for p in response.data]
@@ -50,7 +50,7 @@ def test_harbor_test_provider_deleted(client: NeMoPlatform) -> None:
     )
 
 
-def test_harbor_final_provider_exists(client: NeMoPlatform) -> None:
+def test_harbor_final_provider_exists(client: NeMoHelix) -> None:
     """Test that harbor-final-provider was registered with correct settings."""
     response = client.inference.providers.retrieve(name="harbor-final-provider")
     assert response.name == "harbor-final-provider", (
@@ -64,7 +64,7 @@ def test_harbor_final_provider_exists(client: NeMoPlatform) -> None:
     )
 
 
-def test_harbor_final_provider_has_secret_ref(client: NeMoPlatform) -> None:
+def test_harbor_final_provider_has_secret_ref(client: NeMoHelix) -> None:
     """Test that harbor-final-provider references the correct API key secret."""
     response = client.inference.providers.retrieve(name="harbor-final-provider")
     assert response.api_key_secret_name == "harbor-provider-api-key", (

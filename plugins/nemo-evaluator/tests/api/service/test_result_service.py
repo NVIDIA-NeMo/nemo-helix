@@ -17,8 +17,8 @@ from nemo_evaluator.api.schemas import AgentEvalResult, EvaluateResult
 from nemo_evaluator.api.service.result_service import ResultService
 from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.entities import ListResponse, PaginationInfo
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entities import ListResponse, PaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 _ResultEntityT = TypeVar("_ResultEntityT", AgentEvalResultEntity, EvaluateResultEntity)
 

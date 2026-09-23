@@ -283,29 +283,29 @@ def build_bootstrap_env(
 ) -> dict[str, str]:
     """Build the bootstrap environment injected into the job sandbox.
 
-    Publishes the broker under both ``NMP_BROKER_*`` and Gym's ``BROKER_*_ENV`` names so the
+    Publishes the broker under both ``NHX_BROKER_*`` and Gym's ``BROKER_*_ENV`` names so the
     runtime and ``Sandbox`` agree on the endpoint.
     """
     env: dict[str, str] = {
-        "NMP_JOB_ID": job_id,
-        "NMP_ENVIRONMENT_PATH": environment_path,
-        "NMP_WORK_PATH": work_path,
-        "NMP_BROKER_URL": broker_url,
-        "NMP_BROKER_TOKEN": broker_token,
+        "NHX_JOB_ID": job_id,
+        "NHX_ENVIRONMENT_PATH": environment_path,
+        "NHX_WORK_PATH": work_path,
+        "NHX_BROKER_URL": broker_url,
+        "NHX_BROKER_TOKEN": broker_token,
         BROKER_URL_ENV: broker_url,
         BROKER_TOKEN_ENV: broker_token,
-        "NMP_MAX_REQUEST_BYTES": str(max_request_bytes),
-        "NMP_MAX_RESPONSE_BYTES": str(max_response_bytes),
+        "NHX_MAX_REQUEST_BYTES": str(max_request_bytes),
+        "NHX_MAX_RESPONSE_BYTES": str(max_response_bytes),
     }
     if rollout_deadline_s is not None:
         # The host gives up just before the client would, so a stuck batch comes back as a
         # readable error instead of the client's own socket timeout.
-        env["NMP_ROLLOUT_DEADLINE_S"] = str(rollout_deadline_s)
+        env["NHX_ROLLOUT_DEADLINE_S"] = str(rollout_deadline_s)
     if dataset_path is not None:
-        env["NMP_DATASET_PATH"] = dataset_path
+        env["NHX_DATASET_PATH"] = dataset_path
     if extra:
         # `extra` carries caller-supplied variables, and a caller does not get to move the broker
-        # endpoint or the mount paths: pointing NMP_BROKER_URL at its own listener would take the
+        # endpoint or the mount paths: pointing NHX_BROKER_URL at its own listener would take the
         # host's rollouts outside the sandbox's mediation entirely.
         reserved = sorted(set(extra) & set(env))
         if reserved:

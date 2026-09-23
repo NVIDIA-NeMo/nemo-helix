@@ -7,10 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "nmp-core.controllerServiceAccountName" . }}
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
   labels:
-    app.kubernetes.io/component: nmp-core-controller
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-core-controller
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 rules:
 - apiGroups: [""]
   resources: ["pods"]
@@ -56,15 +56,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "nmp-core.controllerServiceAccountName" . }}
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 subjects:
 - kind: ServiceAccount
-  name: {{ include "nmp-core.controllerServiceAccountName" . }}
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
   namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
-  name: {{ include "nmp-core.controllerServiceAccountName" . }}
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
   apiGroup: rbac.authorization.k8s.io
 {{- end }}

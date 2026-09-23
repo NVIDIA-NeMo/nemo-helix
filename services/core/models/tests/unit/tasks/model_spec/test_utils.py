@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
-from nmp.core.models.tasks.model_spec.utils import infer_model_head_type, is_embedding_model_v2
+from nhx.core.models.tasks.model_spec.utils import infer_model_head_type, is_embedding_model_v2
 
 TEST_MODEL_FIXTURES_DIR = Path(__file__).parent / "test_data" / "models"
 

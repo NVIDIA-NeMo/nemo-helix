@@ -251,7 +251,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
                                             {
                                                 "type": "http",
                                                 "endpoint": "http://platform/apis/intake/v2/workspaces/w/ingest/atif",
-                                                "header_env": {"X-NMP-Principal-Id": "NMP_HEADER"},
+                                                "header_env": {"X-NHX-Principal-Id": "NHX_HEADER"},
                                             }
                                         ],
                                     },

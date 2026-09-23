@@ -41,10 +41,10 @@ from nat.observability.processor.intermediate_step_serializer import (  # type: 
     IntermediateStepSerializer,
 )
 from nemo_agents_plugin.utils import get_base_url
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ async def nemo_files_telemetry_exporter(config: NemoFilesTelemetryExporterConfig
     """Build an exporter that uploads telemetry to the Nemo Files service."""
     del builder  # unused; required by NAT registration signature
 
-    async_sdk = AsyncNeMoPlatform(base_url=get_base_url())
+    async_sdk = AsyncNeMoHelix(base_url=get_base_url())
     exporter = NemoFilesServiceRawExporter(
         files_client=client_from_platform(async_sdk, AsyncFilesClient),
         workspace=config.workspace,

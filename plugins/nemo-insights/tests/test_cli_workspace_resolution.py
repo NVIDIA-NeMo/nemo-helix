@@ -7,7 +7,7 @@ Regression guard: every ``--workspace`` option on these commands used to be
 declared with a literal ``"default"`` Typer default, so the command body could
 never tell an omitted flag from an explicit ``--workspace default``. The
 workspace the operator selected (``nemo config use-context``, a ``workspace:``
-key in their context, or ``$NMP_WORKSPACE``) was silently discarded and the
+key in their context, or ``$NHX_WORKSPACE``) was silently discarded and the
 command acted on ``default`` -- potentially the wrong tenant, with no warning.
 """
 
@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 import typer
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_insights_plugin import cli
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -108,8 +108,8 @@ class _StubClient:
 
 @pytest.fixture(autouse=True)
 def _no_ambient_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``$NMP_WORKSPACE`` is a real resolver input; keep it out of these tests."""
-    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    """``$NHX_WORKSPACE`` is a real resolver input; keep it out of these tests."""
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -201,14 +201,14 @@ def test_without_cli_state_the_workspace_falls_back_to_default(
 
 
 @pytest.mark.parametrize(("label", "argv"), COMMANDS, ids=[label for label, _ in COMMANDS])
-def test_nmp_workspace_env_is_used_when_no_state_is_installed(
+def test_nhx_workspace_env_is_used_when_no_state_is_installed(
     label: str,
     argv: list[str],
     stubs: tuple[_StubAnalysisConfigs, _StubAnalysisRuns],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     del label
-    monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+    monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
 
     result = runner.invoke(_app(None), argv)
 

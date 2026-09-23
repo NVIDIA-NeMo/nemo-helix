@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "nmp-core.controller-servicename" . }}
+  name: {{ include "nhx-core.controller-servicename" . }}
   labels:
-    app.kubernetes.io/component: nmp-core-controller
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-core-controller
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   annotations:
     {{- with .Values.core.controller.annotations }}
     {{- toYaml . | nindent 4 }}
@@ -23,18 +23,18 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/component: nmp-core-controller
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nhx-core-controller
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
         {{- with .Values.core.controller.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- include "nemo-platform.podAnnotations" . | nindent 8 }}
+        {{- include "nemo-helix.podAnnotations" . | nindent 8 }}
       labels:
-        app.kubernetes.io/component: nmp-core-controller
-        {{- include "nemo-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: nhx-core-controller
+        {{- include "nemo-helix.labels" . | nindent 8 }}
         {{- with .Values.core.controller.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -43,37 +43,37 @@ spec:
       imagePullSecrets:
 {{- $imagePullSecrets | nindent 8 }}
 {{- end }}
-      serviceAccountName: {{ include "nmp-core.controllerServiceAccountName" . }}
+      serviceAccountName: {{ include "nhx-core.controllerServiceAccountName" . }}
       securityContext:
         {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.core.controller.podSecurityContext) | nindent 8 }}
       containers:
-        - name: nmp-core
+        - name: nhx-core
           securityContext:
             {{- include "nemo-common.securityContext" (dict "global" .Values.securityContext "local" .Values.core.controller.securityContext) | nindent 12 }}
-          image: {{ include "nmp-core.image" . | quote }}
+          image: {{ include "nhx-core.image" . | quote }}
           imagePullPolicy: {{ .Values.core.image.pullPolicy }}
           args:
-            {{ include "nmp-core.controllerSelectionArgs" . | nindent 12 | trim }}
-            - "--host={{ include "nemo-platform.bindHost" . }}"
+            {{ include "nhx-core.controllerSelectionArgs" . | nindent 12 | trim }}
+            - "--host={{ include "nemo-helix.bindHost" . }}"
             - "--port={{ .Values.core.controller.service.port | default 8000 }}"
             {{- range .Values.core.controller.extraArgs }}
             - {{ . | quote }}
             {{- end }}
           env:
-            - name: NMP_CONFIG_FILE_PATH
-              value: /etc/nmp/config.yaml
-            - name: NMP_BASE_URL
-              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}
+            - name: NHX_CONFIG_FILE_PATH
+              value: /etc/nhx/config.yaml
+            - name: NHX_BASE_URL
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
             # In-cluster API Service DNS. Deployed agents use this as their inference
-            # endpoint, since NMP_BASE_URL may not be reachable from an agent pod.
-            - name: NMP_INTERNAL_BASE_URL
-              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}
-            {{- if include "nemo-platform.embeddedPdpEnabled" . }}
-            - name: NMP_AUTH_POLICY_DECISION_POINT_BASE_URL
-              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}
+            # endpoint, since NHX_BASE_URL may not be reachable from an agent pod.
+            - name: NHX_INTERNAL_BASE_URL
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+            {{- if include "nemo-helix.embeddedPdpEnabled" . }}
+            - name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
-              value: {{ include "nmp-core.controller-servicename" . }}
+              value: {{ include "nhx-core.controller-servicename" . }}
             {{- include "nemo-common.otel-env" (dict "root" $ "local" .Values) | indent 12 }}
             {{- if ( and .Values.externalDatabase.uriSecret.name .Values.externalDatabase.uriSecret.key ) }}
             - name: DATABASE_URL
@@ -102,8 +102,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            {{ include "nemo-platform.env" . | nindent 12 | trim }}
-            {{ include "nemo-platform.controller.env" . | nindent 12 | trim }}
+            {{ include "nemo-helix.env" . | nindent 12 | trim }}
+            {{ include "nemo-helix.controller.env" . | nindent 12 | trim }}
           ports:
             - name: http
               containerPort: {{ .Values.core.controller.service.port | default 8000 }}
@@ -124,12 +124,12 @@ spec:
             {{- toYaml .Values.core.controller.resources | nindent 12 }}
           volumeMounts:
             - name: config
-              mountPath:  /etc/nmp/config.yaml
+              mountPath:  /etc/nhx/config.yaml
               subPath: config.yaml
       volumes:
         - name: config
           configMap:
-            name: {{ include "nemo-platform.platform-configmap" . }}
+            name: {{ include "nemo-helix.platform-configmap" . }}
       {{- with .Values.core.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

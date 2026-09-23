@@ -416,18 +416,18 @@ class TestEvaluator:
 
         assert not hasattr(evaluator_module, "Evaluatorv2")
 
-    def test_evaluator_module_import_does_not_require_nemo_platform(self, mocker: MockerFixture):
+    def test_evaluator_module_import_does_not_require_nemo_helix(self, mocker: MockerFixture):
         evaluator_module = sys.modules.pop("nemo_evaluator_sdk.execution.evaluator", None)
         real_import = builtins.__import__
 
-        def import_without_nemo_platform(name: str, *args: Any, **kwargs: Any) -> object:
-            if name == "nemo_platform" or name.startswith("nemo_platform."):
-                raise ModuleNotFoundError("No module named 'nemo_platform'", name="nemo_platform")
+        def import_without_nemo_helix(name: str, *args: Any, **kwargs: Any) -> object:
+            if name == "nemo_helix" or name.startswith("nemo_helix."):
+                raise ModuleNotFoundError("No module named 'nemo_helix'", name="nemo_helix")
             if name == "nemo_evaluator" or name.startswith("nemo_evaluator."):
                 raise ModuleNotFoundError("No module named 'nemo_evaluator'", name="nemo_evaluator")
             return real_import(name, *args, **kwargs)
 
-        mocker.patch("builtins.__import__", side_effect=import_without_nemo_platform)
+        mocker.patch("builtins.__import__", side_effect=import_without_nemo_helix)
         try:
             imported = importlib.import_module("nemo_evaluator_sdk.execution.evaluator")
             assert imported.Evaluator is not None

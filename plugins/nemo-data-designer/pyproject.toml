@@ -8,9 +8,9 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
 dependencies = [
-    "nemo-platform-plugin",
-    "nemo-platform",
-    "nmp-customization-common",
+    "nemo-helix-plugin",
+    "nemo-helix",
+    "nhx-customization-common",
     "data-designer==0.9.3",
     "data-designer-nemo",
     "httpx>=0.27",
@@ -60,7 +60,7 @@ test = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 data-designer-nemo = [
-  "nemo-platform-plugin",
+  "nemo-helix-plugin",
   "data-designer==0.9.3",
   "anyio>=4.0",
   "duckdb",
@@ -68,7 +68,7 @@ data-designer-nemo = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-platform-plugin = [
+nemo-helix-plugin = [
   "anthropic>=0.88.0",
   "fastapi>=0.115.4",
   "jsonschema>=4.0.0",
@@ -81,7 +81,7 @@ nemo-platform-plugin = [
 ]
 
 [build-system]
-requires = ["hatchling", "nmp-build-tools"]
+requires = ["hatchling", "nhx-build-tools"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel.hooks.custom]
@@ -92,11 +92,11 @@ packages = ["src/nemo_data_designer_plugin"]
 
 
 [tool.uv.sources]
-nemo-platform = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nemo-helix = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
-nmp-build-tools = { workspace = true }
-nmp-customization-common = { workspace = true }
+nhx-build-tools = { workspace = true }
+nhx-customization-common = { workspace = true }
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 
 [[tool.uv.index]]
@@ -114,7 +114,7 @@ markers = [
 
 [tool.bundle-package]
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }
-nemo-platform-plugin = { source = "../../packages/nemo_platform_plugin/src/nemo_platform_plugin", module = "nemo_platform_plugin" }
+nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_plugin", module = "nemo_helix_plugin" }
 
 # Opt this plugin into OpenAPI spec generation
 [tool.nemo.openapi]

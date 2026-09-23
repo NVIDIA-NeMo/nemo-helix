@@ -4,7 +4,7 @@
 """
 Integration smoke test for the entities service MCP server.
 
-Creates and tests an MCP server instance that is connected to a running NeMo Platform instance.
+Creates and tests an MCP server instance that is connected to a running NeMo Helix instance.
 """
 
 from __future__ import annotations
@@ -15,31 +15,31 @@ from typing import Any, Generator
 import pytest
 from fastmcp import FastMCP
 from mcp.types import TextContent
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nmp.common.sdk_factory import get_platform_sdk
-from nmp.core.entities.mcp.server import create_server
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nhx.common.sdk_factory import get_platform_sdk
+from nhx.core.entities.mcp.server import create_server
 
 
 @pytest.fixture(scope="module")
-def nmp_base_url() -> str:
-    """Get NeMo Platform base URL from environment or use default."""
-    return os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+def nhx_base_url() -> str:
+    """Get NeMo Helix base URL from environment or use default."""
+    return os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 
 
 @pytest.fixture(scope="module")
-def nemo_sdk(nmp_base_url: str) -> Generator[NeMoPlatform, None, None]:
+def nemo_sdk(nhx_base_url: str) -> Generator[NeMoHelix, None, None]:
     """Create NeMo SDK client for direct API validation."""
-    os.environ.setdefault("NMP_BASE_URL", nmp_base_url)
+    os.environ.setdefault("NHX_BASE_URL", nhx_base_url)
     client = get_platform_sdk()
     yield client
 
 
 @pytest.fixture(scope="module")
-def mcp_server(nmp_base_url: str) -> Generator[FastMCP, None, None]:
+def mcp_server(nhx_base_url: str) -> Generator[FastMCP, None, None]:
     """Create entities MCP server instance."""
-    server = create_server(nmp_base_url)
+    server = create_server(nhx_base_url)
     yield server
 
 
@@ -52,8 +52,8 @@ def _text_content(tool_result: Any) -> str:
 class TestEntitiesMCPServerSmoke:
     """Smoke tests for entities MCP server basic functionality."""
 
-    def test_nmp_connection(self, nemo_sdk: NeMoPlatform) -> None:
-        """Verify we can connect to NeMo Platform instance."""
+    def test_nhx_connection(self, nemo_sdk: NeMoHelix) -> None:
+        """Verify we can connect to NeMo Helix instance."""
         response = client_from_platform(nemo_sdk, WorkspacesClient).list_workspaces()
         assert response is not None
         assert response.page().items is not None
@@ -72,11 +72,11 @@ class TestEntitiesMCPServerSmoke:
         assert "delete_workspace" in tool_names
 
     @pytest.mark.asyncio
-    async def test_list_workspaces_matches_sdk(self, mcp_server: FastMCP, nemo_sdk: NeMoPlatform) -> None:
+    async def test_list_workspaces_matches_sdk(self, mcp_server: FastMCP, nemo_sdk: NeMoHelix) -> None:
         """
         Verify list_workspaces MCP tool returns consistent data with SDK.
 
-        Ensures the MCP server is properly connected to NeMo Platform and returning real data.
+        Ensures the MCP server is properly connected to NeMo Helix and returning real data.
         """
         import json
 
@@ -116,7 +116,7 @@ class TestEntitiesMCPServerSmoke:
                 raise RuntimeError("platform unavailable")
 
         monkeypatch.setattr(
-            "nmp.core.entities.mcp.server.client_from_platform",
+            "nhx.core.entities.mcp.server.client_from_platform",
             lambda sdk, client_cls: FailingWorkspacesClient(),
         )
         bad_server = create_server("http://unused.example.com")

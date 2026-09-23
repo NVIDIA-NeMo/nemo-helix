@@ -9,7 +9,7 @@ permissive OTLP route. OTLP ingest does **not** auto-create the queryable
 separately POSTs the reward (mirroring exactly the row the ATIF importer used to
 create: ``name="reward"``, ``NUMERIC``, targeting the EVALUATOR span).
 
-The protobuf build mirrors nemo-platform's own
+The protobuf build mirrors nemo-helix's own
 ``services/intake/tests/integration/spans/conftest.py::make_otlp_request`` helper,
 which is the canonical reference for what the OTLP ingest route accepts.
 """

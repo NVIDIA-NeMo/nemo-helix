@@ -7,13 +7,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - NMP_IMAGE_REGISTRY=my-registry/nemo-platform-dev
-      # BAKE_TAG / NMP_IMAGE_TAG default to `git rev-parse --short HEAD` inside the container
+      - NHX_IMAGE_REGISTRY=my-registry/nemo-helix-dev
+      # BAKE_TAG / NHX_IMAGE_TAG default to `git rev-parse --short HEAD` inside the container
       # when unset. Set both on the host before `docker compose up` to pin a baked tag:
       #   export BAKE_TAG=$(git rev-parse --short HEAD)
       #   export BASE_TAG_AUTOMODEL=$BAKE_TAG
-      #   export NMP_IMAGE_TAG=$BAKE_TAG
-      - NMP_IMAGE_TAG=${NMP_IMAGE_TAG:-}
+      #   export NHX_IMAGE_TAG=$BAKE_TAG
+      - NHX_IMAGE_TAG=${NHX_IMAGE_TAG:-}
       - BASE_TAG_AUTOMODEL=${BASE_TAG_AUTOMODEL:-}
       - BAKE_TAG=${BAKE_TAG:-}
     deploy:

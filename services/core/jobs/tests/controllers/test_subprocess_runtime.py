@@ -7,13 +7,13 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nmp.common.auth import Principal
-from nmp.common.auth.models import NMP_PRINCIPAL_ENVVAR
-from nmp.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
-from nmp.core.jobs.controllers.backends.subprocess_runtime import (
-    NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
-    NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nhx.common.auth import Principal
+from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
+from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
+from nhx.core.jobs.controllers.backends.subprocess_runtime import (
+    NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
+    NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
     SERVICE_JOBS_BEARER_HEADERS,
     SubprocessOtelLogger,
     _build_otlp_log_exporter,
@@ -51,8 +51,8 @@ def test_inject_secret_env_vars():
     )
     env = {
         NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
-        NMP_PRINCIPAL_ENVVAR: principal.model_dump_json(exclude_none=True),
-        "NMP_SECRETS_URL": "http://secrets.example",
+        NHX_PRINCIPAL_ENVVAR: principal.model_dump_json(exclude_none=True),
+        "NHX_SECRETS_URL": "http://secrets.example",
     }
 
     response = MagicMock()
@@ -60,30 +60,30 @@ def test_inject_secret_env_vars():
     response.__enter__.return_value = response
     response.__exit__.return_value = None
 
-    with patch("nmp.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen:
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen:
         updated_env = inject_secret_env_vars(env.copy())
 
     assert updated_env["HF_TOKEN"] == "secret-value"
     request = mock_urlopen.call_args.args[0]
     assert request.full_url == "http://secrets.example/apis/secrets/v2/workspaces/default/secrets/hf-token/access"
-    assert request.get_header("X-nmp-principal-id") == "service:jobs"
-    assert request.get_header("X-nmp-actor-aliases") == "service:jobs"
-    assert request.get_header("X-nmp-principal-on-behalf-of") == "creator@example.com"
-    assert request.get_header("X-nmp-subject-account-id") == "account-creator"
-    assert request.get_header("X-nmp-subject-aliases") == "legacy-creator,creator@example.com"
+    assert request.get_header("X-nhx-principal-id") == "service:jobs"
+    assert request.get_header("X-nhx-actor-aliases") == "service:jobs"
+    assert request.get_header("X-nhx-principal-on-behalf-of") == "creator@example.com"
+    assert request.get_header("X-nhx-subject-account-id") == "account-creator"
+    assert request.get_header("X-nhx-subject-aliases") == "legacy-creator,creator@example.com"
 
 
 def test_inject_secret_env_vars_rejects_missing_value_field():
     env = {
         NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
-        "NMP_SECRETS_URL": "http://secrets.example",
+        "NHX_SECRETS_URL": "http://secrets.example",
     }
     response = MagicMock()
     response.read.return_value = json.dumps({"data": "secret-value"}).encode("utf-8")
     response.__enter__.return_value = response
     response.__exit__.return_value = None
 
-    with patch("nmp.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response):
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response):
         with pytest.raises(RuntimeError, match="missing string value field"):
             inject_secret_env_vars(env.copy())
 
@@ -91,7 +91,7 @@ def test_inject_secret_env_vars_rejects_missing_value_field():
 def test_inject_secret_env_vars_rejects_non_http_secrets_url():
     env = {
         NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
-        "NMP_SECRETS_URL": "file:///tmp/secrets",
+        "NHX_SECRETS_URL": "file:///tmp/secrets",
     }
 
     with pytest.raises(ValueError, match="absolute http or https URL"):
@@ -138,7 +138,7 @@ def test_local_otel_logger_close_flushes_and_shuts_down():
 
 
 def test_build_otlp_log_exporter_keeps_default_http_exporter_for_tcp():
-    with patch("nmp.core.jobs.controllers.backends.subprocess_runtime.OTLPLogExporter") as exporter:
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.OTLPLogExporter") as exporter:
         result = _build_otlp_log_exporter({}, "http://files.example/otlp/v1/logs")
 
     assert result is exporter.return_value
@@ -153,16 +153,16 @@ def test_build_otlp_log_exporter_uses_workload_identity_headers_when_configured(
     subject_token_file.write_text("subject-token", encoding="utf-8")
     env = {
         WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR: str(subject_token_file),
-        "NMP_AUTH_URL": "http://auth.example",
-        "NMP_BASE_URL": "http://base.example",
+        "NHX_AUTH_URL": "http://auth.example",
+        "NHX_BASE_URL": "http://base.example",
     }
     provider = MagicMock()
     provider.get_access_token.return_value = "access-token"
 
     with (
-        patch("nmp.core.jobs.controllers.backends.subprocess_runtime.OTLPLogExporter") as exporter,
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.OTLPLogExporter") as exporter,
         patch(
-            "nmp.core.jobs.controllers.backends.subprocess_runtime.resolve_workload_exchange_provider",
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.resolve_workload_exchange_provider",
             return_value=provider,
         ) as resolve_provider,
     ):
@@ -179,24 +179,24 @@ def test_build_otlp_log_exporter_uses_workload_identity_headers_when_configured(
 
 def test_build_otlp_log_exporter_uses_unix_socket_session_for_uds():
     env = {
-        NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds",
-        NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR: "/tmp/nemo-platform.sock",
+        NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds",
+        NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR: "/tmp/nemo-helix.sock",
     }
 
-    with patch("nmp.core.jobs.controllers.backends.subprocess_runtime.OTLPLogExporter") as exporter:
-        result = _build_otlp_log_exporter(env, "http://nemo-platform.local/otlp/v1/logs")
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.OTLPLogExporter") as exporter:
+        result = _build_otlp_log_exporter(env, "http://nemo-helix.local/otlp/v1/logs")
 
     assert result is exporter.return_value
     kwargs = exporter.call_args.kwargs
-    assert kwargs["endpoint"] == "http://nemo-platform.local/otlp/v1/logs"
+    assert kwargs["endpoint"] == "http://nemo-helix.local/otlp/v1/logs"
     assert kwargs["headers"] == SERVICE_JOBS_BEARER_HEADERS
     assert isinstance(kwargs["session"], _UnixSocketOTLPSession)
     kwargs["session"].close()
 
 
 def test_build_otlp_log_exporter_rejects_uds_without_socket_path():
-    with pytest.raises(ValueError, match=NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR):
+    with pytest.raises(ValueError, match=NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR):
         _build_otlp_log_exporter(
-            {NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds"},
-            "http://nemo-platform.local/otlp/v1/logs",
+            {NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds"},
+            "http://nemo-helix.local/otlp/v1/logs",
         )

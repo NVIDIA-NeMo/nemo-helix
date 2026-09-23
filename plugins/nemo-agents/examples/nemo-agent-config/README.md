@@ -62,18 +62,18 @@ make bootstrap-python
 source .venv/bin/activate
 
 export NVIDIA_API_KEY="<your NVIDIA API key>"
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 if curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null; then
-  echo "Using the running NeMo Platform instance at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null; then
+  echo "Using the running NeMo Helix instance at $NHX_BASE_URL"
 else
   nemo setup --auto --start-services --install-skills --no-deploy-agent
 fi
 
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 

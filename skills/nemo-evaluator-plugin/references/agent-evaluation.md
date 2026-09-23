@@ -5,7 +5,7 @@ Read this file for agentic task-driven evaluation, direct SDK runners, platform
 
 ## Choose standalone SDK or platform job
 
-Use `AgentEvaluator` for lightweight in-process evaluation that does not require a running nemo-platform:
+Use `AgentEvaluator` for lightweight in-process evaluation that does not require a running nemo-helix:
 
 ```python
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
@@ -137,7 +137,7 @@ survives into taskset-driven runs; inline tasks are for one-off submissions.
 
 Set `views` on a task to roll two or more of its metric outputs into one named,
 reported score. See
-[Score by Component](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/score-by-component).
+[Score by Component](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/score-by-component).
 
 ## Choose a platform target
 
@@ -176,7 +176,7 @@ Use `discover_gym_tasks` to turn Gym JSONL rows into task definitions and attach
 `GymRewardMetric` to score each rollout's reward. A standalone
 `GymAgentTaskRunner` requires `agent`, `agent_config`, and `resources_server`.
 
-For a durable job that uses components already installed in `nmp-gym-tasks`,
+For a durable job that uses components already installed in `nhx-gym-tasks`,
 submit the validated live runner as shown above or build a `GymRunnerTarget`:
 
 ```python
@@ -194,9 +194,9 @@ target = GymRunnerTarget(
 The caller chooses between a local SDK run and a durable platform job. A local
 run executes Evaluator and the `gym` subprocesses on the caller's machine. For
 a platform job, sandbox placement is an operator decision: sandbox-enabled
-deployments run Gym in a separate `nmp-gym-host`; deployments without
+deployments run Gym in a separate `nhx-gym-host`; deployments without
 OpenSandbox can run trusted, built-in Gym components together with Evaluator in
-`nmp-gym-tasks`. The latter is the colocated compatibility path, not a separate
+`nhx-gym-tasks`. The latter is the colocated compatibility path, not a separate
 submission interface.
 
 A custom environment supplies Gym component configuration, code, and
@@ -209,7 +209,7 @@ FileSet-backed environments require sandboxed platform execution. Evaluator
 compiles them into two ordered Jobs steps:
 
 1. `stage-environment` downloads the FileSet onto job-scoped shared storage.
-2. `agent-evaluate` provisions `nmp-gym-host` with the environment mounted
+2. `agent-evaluate` provisions `nhx-gym-host` with the environment mounted
    read-only, collects and scores rollouts, then destroys the host.
 
 ```python

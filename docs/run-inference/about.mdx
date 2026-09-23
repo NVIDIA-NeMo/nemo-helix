@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="run-inference-about"></a>
 
-The NeMo Platform provides APIs for registering external model providers and routing inference requests through a unified gateway.
+The NeMo Helix provides APIs for registering external model providers and routing inference requests through a unified gateway.
 
 ```mermaid
 flowchart LR
@@ -279,8 +279,8 @@ the canonical checks for "is the gateway up?":
 
 | Endpoint | Purpose |
 |---|---|
-| `GET {NMP_BASE_URL}/health/ready` | Readiness — returns 200 once dependent services are up |
-| `GET {NMP_BASE_URL}/health/live` | Liveness |
+| `GET {NHX_BASE_URL}/health/ready` | Readiness — returns 200 once dependent services are up |
+| `GET {NHX_BASE_URL}/health/live` | Liveness |
 
 ```bash
 curl -s http://localhost:8080/health/ready

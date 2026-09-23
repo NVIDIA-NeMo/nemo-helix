@@ -8,7 +8,7 @@ import {
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
@@ -40,7 +40,7 @@ interface AgentEvalTableRow {
 }
 
 const isTerminalJob = (job: EvalJobRow): boolean =>
-  PlatformJobTerminalStatuses.some((status) => status === job.status);
+  HelixJobTerminalStatuses.some((status) => status === job.status);
 
 const timestampMs = (value?: string): number => {
   const time = utcToLocalDate(value)?.getTime();

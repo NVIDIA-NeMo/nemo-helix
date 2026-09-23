@@ -3,18 +3,18 @@
 
 [project]
 name = "nemo-agents-plugin"
-description = "NeMo Agents Plugin — agent lifecycle management on the NeMo Platform."
+description = "NeMo Agents Plugin — agent lifecycle management on the NeMo Helix."
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nemo-platform",
-    "nemo-platform-plugin",
+    "nemo-helix",
+    "nemo-helix-plugin",
     "nemo-deployments-plugin",
     "nemo-optimization-plugin",
     "nemo-agents-example-calculator",
     "nemo-agents-example-email-phishing",
     "nemo-agents-example-email-security",
     # NAT 1.9 is the first line whose cryptography cap (>=48,<49) overlaps
-    # data-designer's, so it is what makes the published nemo-platform[all]
+    # data-designer's, so it is what makes the published nemo-helix[all]
     # wheel resolvable at all; 1.8.0 caps cryptography at <47. That line ships
     # only pre-releases today, and uv accepts a pre-release solely when a
     # requirement it reads names one, so every NAT distribution in the closure
@@ -32,7 +32,7 @@ dependencies = [
     "botocore>=1.40.46,<1.40.62",
     "httpx>=0.27",
     "pyyaml>=6.0",
-    # Base, not optional: the generated nemo-platform extra mirrors this list only,
+    # Base, not optional: the generated nemo-helix extra mirrors this list only,
     # and the plugin advertises `agents.package-agent` unconditionally.
     "jinja2>=3.1",
     "python-on-whales>=0.60",
@@ -106,8 +106,8 @@ packages = [
 [tool.uv.sources]
 
 nemo-deployments-plugin = { workspace = true }
-nemo-platform = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nemo-helix = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
 nemo-agents-example-calculator = { workspace = true }
 nemo-agents-example-email-phishing = { workspace = true }
@@ -120,7 +120,7 @@ asyncio_mode = "auto"
 markers = [
     "integration: service integration tests",
 ]
-# "src" puts nemo_agents_plugin on sys.path.  nemo-platform is resolved
+# "src" puts nemo_agents_plugin on sys.path.  nemo-helix is resolved
 # from the workspace — run `uv sync` at the repo root before running these tests.
 pythonpath = ["src"]
 

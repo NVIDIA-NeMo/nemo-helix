@@ -3,7 +3,7 @@
 
 # NeMo Helix rename HOW-TO
 
-Use these scripts from the repository root to preview, apply, and verify the NeMo Platform to NeMo Helix rename.
+Use these scripts from the repository root to preview, apply, and verify the NeMo Helix to NeMo Helix rename.
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ tools/rename/rename-to-nemo-helix.sh --repo-dir /path/to/checkout
 tools/rename/rename-to-nemo-helix.sh --include-glob 'docs/**' --include-glob '*.md'
 ```
 
-Expected outcome: the script updates UTF-8 text file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned. Acronym-only replacements are intentionally explicit: separated tokens such as `nmp_common`, `nmp-common`, and `NMP_*`; known all-caps/PascalCase code prefixes such as `NMP_BASE_URL`, `NMPJobContext`, `NMPOIDCConfig`, `NmpCliRunner`, and `NmpContext`; and allowlisted lowercase names such as `nmpclient`, `nmpcontext`, `nmpBaseURLEnv`, `nmp-intake`, and `nmp2` are renamed, while `snmp` and larger opaque alphanumeric values are left unchanged. Bare `Platform` is renamed only inside CamelCase/code identifiers such as `PlatformJobStep`, `CreatePlatformJobRequest`, and `AsyncCustomizationPlatformClients`; standalone prose `Platform` is left for human review.
+Expected outcome: the script updates UTF-8 text file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned. Acronym-only replacements are intentionally explicit: separated tokens such as `nhx_common`, `nhx-common`, and `NHX_*`; known all-caps/PascalCase code prefixes such as `NHX_BASE_URL`, `NHXJobContext`, `NHXOIDCConfig`, `NhxCliRunner`, and `NhxContext`; and allowlisted lowercase names such as `nhxclient`, `nhxcontext`, `nhxBaseURLEnv`, `nhx-intake`, and `nhx2` are renamed, while `snmp` and larger opaque alphanumeric values are left unchanged. Bare `Platform` is renamed only inside CamelCase/code identifiers such as `HelixJobStep`, `CreateHelixJobRequest`, and `AsyncCustomizationHelixClients`; standalone prose `Platform` is left for human review.
 
 If a previous rename attempt stopped after making changes, inspect the worktree and then resume the remaining passes with:
 

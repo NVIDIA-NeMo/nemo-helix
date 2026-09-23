@@ -19,9 +19,9 @@ from nemo_anonymizer_plugin.sdk import http
 from nemo_anonymizer_plugin.sdk.errors import AnonymizerJobError
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
 from nemo_anonymizer_plugin.sdk.logging import with_logging
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ TERMINAL_INCOMPLETE_STATUSES = {"cancelled", "cancelling", "error"}
 T = TypeVar("T")
 
 
-def _job_url(platform: http.PlatformClient, workspace: str | None, path: str) -> str:
+def _job_url(platform: http.HelixClient, workspace: str | None, path: str) -> str:
     return http.url(platform, workspace, f"/jobs/run{path}")
 
 
@@ -75,7 +75,7 @@ class AnonymizerJobResource:
         _raise_for_status(resp)
         return resp.json()
 
-    def get_job_status(self) -> PlatformJobStatus | None:
+    def get_job_status(self) -> HelixJobStatus | None:
         resp = self._client().get(
             _job_url(self._platform, self._workspace, _job_path(self._job_name, "/status")),
             headers=http.headers(self._platform),
@@ -179,7 +179,7 @@ class AsyncAnonymizerJobResource:
         _raise_for_status(resp)
         return resp.json()
 
-    async def get_job_status(self) -> PlatformJobStatus | None:
+    async def get_job_status(self) -> HelixJobStatus | None:
         resp = await self._client().get(
             _job_url(self._platform, self._workspace, _job_path(self._job_name, "/status")),
             headers=http.headers(self._platform),
@@ -238,7 +238,7 @@ class AsyncAnonymizerJobResource:
             return fallback
 
 
-def _status_is_complete(status: PlatformJobStatus | None, raise_if_not_complete: bool) -> bool:
+def _status_is_complete(status: HelixJobStatus | None, raise_if_not_complete: bool) -> bool:
     if status == "completed":
         return True
     if status in TERMINAL_INCOMPLETE_STATUSES:

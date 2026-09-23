@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from data_designer_nemo.context.validation import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDInvalidConfigError
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 LOCAL_PROVIDER_A = "local-provider-a"
 LOCAL_PROVIDER_B = "local-provider-b"
@@ -55,21 +55,19 @@ def _simple_config(
 async def test_remote_validate_runs_remote_validators(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     config = _simple_config()
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNeMoHelix)
 
     def validate_tools(validated_config: dd.DataDesignerConfig) -> None:
         assert validated_config is config
         calls.append("tools")
 
-    async def validate_seed(
-        validated_config: dd.DataDesignerConfig, workspace: str, async_sdk: AsyncNeMoPlatform
-    ) -> None:
+    async def validate_seed(validated_config: dd.DataDesignerConfig, workspace: str, async_sdk: AsyncNeMoHelix) -> None:
         assert validated_config is config
         assert workspace == u.WORKSPACE_NAME
         assert async_sdk is sdk
         calls.append("seed")
 
-    async def validate_personas(validated_config: dd.DataDesignerConfig, async_sdk: AsyncNeMoPlatform) -> None:
+    async def validate_personas(validated_config: dd.DataDesignerConfig, async_sdk: AsyncNeMoHelix) -> None:
         assert validated_config is config
         assert async_sdk is sdk
         calls.append("personas")
@@ -86,7 +84,7 @@ async def test_remote_validate_runs_remote_validators(monkeypatch: pytest.Monkey
 
 async def test_remote_validate_rejects_unsupported_seed_config() -> None:
     config = _simple_config(seed_source=dd.DataFrameSeedSource(df=pd.DataFrame(data={"a": [1, 2, 3]})))
-    dd_ctx = DataDesignerValidationContext(AsyncMock(spec=AsyncNeMoPlatform), u.WORKSPACE_NAME)
+    dd_ctx = DataDesignerValidationContext(AsyncMock(spec=AsyncNeMoHelix), u.WORKSPACE_NAME)
 
     errors = await dd_ctx.validate(config)
 
@@ -101,7 +99,7 @@ async def test_remote_validate_aggregates_multiple_failures() -> None:
         tool_configs=[dd.ToolConfig(tool_alias="hello", providers=["provider"])],
         seed_source=dd.DataFrameSeedSource(df=pd.DataFrame(data={"a": [1, 2, 3]})),
     )
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNeMoHelix)
     dd_ctx = DataDesignerValidationContext(sdk, u.WORKSPACE_NAME)
 
     errors = await dd_ctx.validate(config)

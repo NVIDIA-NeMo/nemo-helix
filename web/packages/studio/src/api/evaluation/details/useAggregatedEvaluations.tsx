@@ -10,7 +10,7 @@ import {
 import {
   EvaluateJob,
   EvaluateJobsPage,
-  PlatformJobListResultResponse,
+  HelixJobListResultResponse,
 } from '@nemo/sdk/generated/evaluator/schema';
 import { useDetailsChartsStore } from '@studio/api/evaluation/details/useDetailsChartsStore';
 import { getEvaluationJobModel, isEvaluationJobSucceeded } from '@studio/selectors/evaluationJob';
@@ -117,12 +117,12 @@ export const useUniqueModelsByConfig = (workspace: string | undefined, evaluatio
  * Example usage in a component:
  * useAggregatedEvaluationResults(config);
  *
- * @returns UseQueryResult<PlatformJobListResultResponse[], Error>
+ * @returns UseQueryResult<HelixJobListResultResponse[], Error>
  */
 export const useAggregatedEvaluationResults = (config: NamedEntity) => {
   const { selectedEvaluations } = useDetailsChartsStore();
 
-  return useQuery<PlatformJobListResultResponse[], Error>({
+  return useQuery<HelixJobListResultResponse[], Error>({
     queryKey: ['aggregatedEvaluationResults', config, selectedEvaluations],
     queryFn: async () => {
       if (!config.workspace) {

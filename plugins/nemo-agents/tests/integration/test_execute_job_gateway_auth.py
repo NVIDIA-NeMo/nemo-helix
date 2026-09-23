@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
-from nemo_platform_plugin.client.oidc import WorkloadTokenExchangeProvider
-from nemo_platform_plugin.config import Configuration
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.client.oidc import WorkloadTokenExchangeProvider
+from nemo_helix_plugin.config import Configuration
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Request, Response
 
@@ -25,14 +25,14 @@ pytestmark = pytest.mark.integration
 def test_real_agent_calls_gateway_and_returns_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpserver: HTTPServer, identity_mode: str
 ) -> None:
-    monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.delenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
-    monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
-    monkeypatch.delenv("NMP_AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.delenv("NHX_AUTH_ENABLED", raising=False)
     Configuration.clear_cache()
     proof = tmp_path / "proof"
     proof.write_text("test-job-subject-token")
-    monkeypatch.setenv("NMP_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     provider = WorkloadTokenExchangeProvider(
         token_endpoint=httpserver.url_for("/token"),
         client_id="job",
@@ -40,19 +40,19 @@ def test_real_agent_calls_gateway_and_returns_file(
         allow_http=True,
     )
     if identity_mode == "workload":
-        monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(proof))
+        monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(proof))
         # Only discovery is replaced. Token exchange, expiry handling, the proxy,
         # Fabric, Deep Agents and its file tool all execute normally.
         monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", lambda **kwargs: provider)
     elif identity_mode == "principal":
-        monkeypatch.setenv("NMP_PRINCIPAL", json.dumps({"id": "test-job-user", "groups": ["test-workspace-users"]}))
+        monkeypatch.setenv("NHX_PRINCIPAL", json.dumps({"id": "test-job-user", "groups": ["test-workspace-users"]}))
     else:
         # Jobs also carry an anonymous principal when platform auth is disabled
-        # in YAML rather than through NMP_AUTH_ENABLED.
+        # in YAML rather than through NHX_AUTH_ENABLED.
         config_file = tmp_path / "config.yaml"
         config_file.write_text("auth:\n  enabled: false\n")
-        monkeypatch.setenv("NMP_CONFIG_FILE_PATH", str(config_file))
-        monkeypatch.setenv("NMP_PRINCIPAL", '{"id":"","groups":[]}')
+        monkeypatch.setenv("NHX_CONFIG_FILE_PATH", str(config_file))
+        monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"","groups":[]}')
     issued: list[str] = []
     seen: list[str] = []
 
@@ -71,15 +71,15 @@ def test_real_agent_calls_gateway_and_returns_file(
         if request.headers.get("Transfer-Encoding") or request.content_length != len(request.get_data()):
             return Response("Unexpected request framing", status=400)
         authorization = request.headers.get("Authorization", "")
-        identity = request.headers.get("X-NMP-Principal-Id", "")
+        identity = request.headers.get("X-NHX-Principal-Id", "")
         if identity_mode == "workload":
             authenticated = bool(issued) and authorization == f"Bearer {issued[-1]}" and not identity
         elif identity_mode == "principal":
             authenticated = (
                 not authorization
                 and identity == "test-job-user"
-                and request.headers.get("X-NMP-Principal-Groups") == "test-workspace-users"
-                and not request.headers.get("X-NMP-Internal")
+                and request.headers.get("X-NHX-Principal-Groups") == "test-workspace-users"
+                and not request.headers.get("X-NHX-Internal")
             )
         else:
             authenticated = authorization == "Bearer not-used" and not identity
@@ -196,14 +196,14 @@ def test_real_agent_exports_its_trajectory_through_the_proxy(
     proxy exchanges on demand, the export here goes out under a token that did
     not exist when the job began.
     """
-    monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
-    monkeypatch.delenv("NMP_AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.delenv("NHX_AUTH_ENABLED", raising=False)
     Configuration.clear_cache()
     proof = tmp_path / "proof"
     proof.write_text("test-job-subject-token")
-    monkeypatch.setenv("NMP_BASE_URL", httpserver.url_for(""))
-    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(proof))
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(proof))
     provider = WorkloadTokenExchangeProvider(
         token_endpoint=httpserver.url_for("/token"),
         client_id="job",

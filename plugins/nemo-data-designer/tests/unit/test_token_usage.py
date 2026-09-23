@@ -9,7 +9,7 @@ import pytest
 from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
 from data_designer.engine.observability import RuntimeCorrelation, runtime_correlation_provider
 from data_designer_nemo.token_usage import capture_data_designer_token_usage
-from nemo_platform_plugin.job_usage import LocalJobUsageReporter
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 
 
 def _event(*, input_tokens: int, output_tokens: int, correlation: RuntimeCorrelation | None) -> TokenUsageEvent:

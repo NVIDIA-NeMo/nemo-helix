@@ -3,9 +3,9 @@
 
 # Guardrails with Custom Configuration (CLI)
 
-You have access to the `nemo` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Available CLI Commands
 
@@ -81,7 +81,7 @@ A full guardrail configuration with both input and output self-check rails:
 
 ## Context
 
-The NeMo Platform API server is running locally. You need to set up a real inference provider so guardrails can use an LLM for self-check evaluations. The `ANTHROPIC_API_KEY` environment variable contains an API key that works with NVIDIA's inference API.
+The NeMo Helix API server is running locally. You need to set up a real inference provider so guardrails can use an LLM for self-check evaluations. The `ANTHROPIC_API_KEY` environment variable contains an API key that works with NVIDIA's inference API.
 
 Several built-in guardrail configurations exist. Use `nemo guardrail configs list-global` to inspect them and understand the expected config structure.
 

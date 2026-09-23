@@ -51,17 +51,17 @@ from nemo_agents_plugin.schema import (
     DeploymentPage,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.auth import current_auth_context
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.schema import PaginationData
 
 logger = logging.getLogger(__name__)
 

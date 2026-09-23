@@ -7,11 +7,11 @@ import uuid
 
 import httpx
 import pytest
-from nmp.testing import grant_workspace_role
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import (
     managed_workload_workspace_get_command,
-    nmp_api_image,
+    nhx_api_image,
     require_capability,
     runtime_tls_config,
 )
@@ -186,7 +186,7 @@ def test_provider_workload_deployment_runs_with_managed_obo(
         "containers": [
             {
                 "name": "workload-workspace-get",
-                "image": nmp_api_image(),
+                "image": nhx_api_image(),
                 "command": ["sh", "-c"],
                 "args": [managed_workload_workspace_get_command(task_config={"workspace": auth_idp_workspace})],
                 "env": [dict(item) for item in runtime_config.env],

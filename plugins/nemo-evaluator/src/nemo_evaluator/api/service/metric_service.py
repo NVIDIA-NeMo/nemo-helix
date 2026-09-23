@@ -32,16 +32,16 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.entities import MetricBundleEntity
 from nemo_evaluator.metric_storage import delete_bundle_by_ref, store_bundle
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle as RuntimeMetricBundle
-from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClientProtocol,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.filter_ops import FilterOperation
-from nemo_platform_plugin.log_utils import sanitize_for_log
-from nemo_platform_plugin.schema import Page, PaginationData
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.filter_ops import FilterOperation
+from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.schema import Page, PaginationData
 
 #: Reserved name prefix for content-addressed derived metrics (auto-stored from inline task metrics).
 _DERIVED_METRIC_PREFIX = "derived."

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { customFetch } from '@agent-hardener/api/fetcher';
-import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk } from '@agent-hardener/api/platform';
 import type { PluginSdk } from '@agent-hardener/types';
 import { useMutation } from '@tanstack/react-query';
 
@@ -35,7 +35,7 @@ async function uploadToFileset(
 
 /** Store an uploaded garak hitlog (.jsonl); the ref feeds a replay-mode war-game via `--replay`. */
 export const useUploadHitlogFileset = () => {
-  const platform = usePlatformSdk();
+  const platform = useHelixSdk();
   return useMutation({
     mutationFn: (params: UploadFilesetParams) =>
       uploadToFileset(platform, params, 'hitlog', 'application/jsonl'),
@@ -44,7 +44,7 @@ export const useUploadHitlogFileset = () => {
 
 /** Store an uploaded benign suite (requests.csv); the ref overrides the manifest suite via `--benign-suite`. */
 export const useUploadBenignSuiteFileset = () => {
-  const platform = usePlatformSdk();
+  const platform = useHelixSdk();
   return useMutation({
     mutationFn: (params: UploadFilesetParams) =>
       uploadToFileset(platform, params, 'benign-suite', 'text/csv'),
@@ -58,7 +58,7 @@ export const useUploadBenignSuiteFileset = () => {
  * to re-resolve against — so this upload is the target, not a cache of one.
  */
 export const useUploadProjectFileset = () => {
-  const platform = usePlatformSdk();
+  const platform = useHelixSdk();
   return useMutation({
     mutationFn: (params: UploadFilesetParams) =>
       uploadToFileset(platform, params, 'project', 'application/zip'),

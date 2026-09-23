@@ -16,14 +16,14 @@ from nemo_deployments_plugin.backends.workload_identity import (
     workload_identity_requested,
 )
 from nemo_deployments_plugin.entities import DeploymentConfig, K8sDeploymentConfig
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import (
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     WorkloadDelegationConflictError,
     WorkloadDelegationStore,
     as_aware_utc,
 )
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth.workload_identity import (
     build_kubernetes_pod_uid_workload_delegation,
     get_workload_delegation_audience,
     workload_delegation_expires_at,

@@ -18,7 +18,7 @@ from nemo_data_designer_plugin.retrieval.manifest import (
     write_generation_manifest,
 )
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
-from nemo_platform_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
 
 
 def test_fileset_corpus_must_match_job_workspace(tmp_path: Path) -> None:

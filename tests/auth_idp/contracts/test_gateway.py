@@ -6,8 +6,8 @@ import uuid
 
 import httpx
 import pytest
-from nemo_platform_ext.client.tls import HttpxTLSConfig
-from nmp.testing import grant_workspace_role
+from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
 
@@ -72,9 +72,9 @@ def _assert_trusted_identity_headers(
     required_scopes: set[str] | None = None,
 ) -> None:
     expected_aliases = _expected_aliases_from_token_claims(claims)
-    assert response.headers["x-nmp-principal-id"] == expected_aliases[0]
-    assert response.headers["x-nmp-actor-aliases"] == ",".join(expected_aliases)
-    scopes = response.headers.get("x-nmp-scopes", "").split()
+    assert response.headers["x-nhx-principal-id"] == expected_aliases[0]
+    assert response.headers["x-nhx-actor-aliases"] == ",".join(expected_aliases)
+    scopes = response.headers.get("x-nhx-scopes", "").split()
     if required_scopes is not None:
         assert required_scopes.issubset(scopes)
 
@@ -156,17 +156,17 @@ def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_
     authenticated_principal_id = str(workload_provider_token.claims["sub"])
     headers = {
         "Authorization": f"Bearer {workload_provider_token.access_token}",
-        "X-NMP-Principal-Id": "service:bootstrap",
-        "X-NMP-Actor-Account-Id": "account-attacker",
-        "X-NMP-Actor-Aliases": "service:bootstrap,attacker@example.com",
-        "X-NMP-Principal-Email": "attacker@example.com",
-        "X-NMP-Principal-Groups": "platform-admins",
-        "X-NMP-Principal-On-Behalf-Of": "user:attacker",
-        "X-NMP-Principal-On-Behalf-Of-Email": "attacker@example.com",
-        "X-NMP-Principal-On-Behalf-Of-Groups": "platform-admins",
-        "X-NMP-Subject-Account-Id": "account-attacker-subject",
-        "X-NMP-Subject-Aliases": "user:attacker,attacker@example.com",
-        "X-NMP-Scopes": "platform:write",
+        "X-NHX-Principal-Id": "service:bootstrap",
+        "X-NHX-Actor-Account-Id": "account-attacker",
+        "X-NHX-Actor-Aliases": "service:bootstrap,attacker@example.com",
+        "X-NHX-Principal-Email": "attacker@example.com",
+        "X-NHX-Principal-Groups": "platform-admins",
+        "X-NHX-Principal-On-Behalf-Of": "user:attacker",
+        "X-NHX-Principal-On-Behalf-Of-Email": "attacker@example.com",
+        "X-NHX-Principal-On-Behalf-Of-Groups": "platform-admins",
+        "X-NHX-Subject-Account-Id": "account-attacker-subject",
+        "X-NHX-Subject-Aliases": "user:attacker,attacker@example.com",
+        "X-NHX-Scopes": "platform:write",
     }
     tls_config = runtime_tls_config(auth_idp_runtime)
 

@@ -34,7 +34,7 @@ round-trip, where volumes bind eagerly.
 How it runs, and where:
 
 - ``container_only``: this test only runs against an **external cluster**
-  (``NMP_BASE_URL`` set) — the Kind CPU e2e CI job, whose Helm-deployed platform
+  (``NHX_BASE_URL`` set) — the Kind CPU e2e CI job, whose Helm-deployed platform
   is configured with a nemo-deployments ``k8s`` executor (see
   ``e2e/k8s/values/kind.yaml``). It is skipped for the subprocess harness (local
   / plain e2e job), which has no k8s executor. This is the inverse of the docker
@@ -56,7 +56,7 @@ How it runs, and where:
 from __future__ import annotations
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from e2e.deployments_helpers import (
     run_job_deployment_lifecycle,
@@ -70,7 +70,7 @@ _K8S_TIMEOUT_SECONDS = 420
 pytestmark = [pytest.mark.container_only]
 
 
-def test_k8s_service_deployment_reaches_ready(sdk: NeMoPlatform, workspace: str) -> None:
+def test_k8s_service_deployment_reaches_ready(sdk: NeMoHelix, workspace: str) -> None:
     """A restart_policy=Always nginx service reconciles to a k8s Deployment+Service (READY)."""
     run_service_deployment_lifecycle(
         sdk,
@@ -80,7 +80,7 @@ def test_k8s_service_deployment_reaches_ready(sdk: NeMoPlatform, workspace: str)
     )
 
 
-def test_k8s_job_deployment_reaches_succeeded(sdk: NeMoPlatform, workspace: str) -> None:
+def test_k8s_job_deployment_reaches_succeeded(sdk: NeMoHelix, workspace: str) -> None:
     """A restart_policy=Never alpine job reconciles to a k8s Job that completes (SUCCEEDED)."""
     run_job_deployment_lifecycle(
         sdk,

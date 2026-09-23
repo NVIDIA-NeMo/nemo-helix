@@ -127,12 +127,12 @@ prints a final answer to stdout, and exits non-zero on failure works unchanged.
 
 ## Running a real `tests/agentic-use` task
 
-`platform_runtime.py` adds the NeMo-Platform-specific glue the toy path
+`platform_runtime.py` adds the NeMo-Helix-specific glue the toy path
 deliberately omits, so the example can drive a **real** agentic-use task through
 the same three phases as `nat_runner`:
 
 1. **BUILD** — `ensure_task_image` builds the task's `environment/Dockerfile`
-   (or `environment.yaml`) into `nmp-nat-<task>:latest`.
+   (or `environment.yaml`) into `nhx-nat-<task>:latest`.
 2. **AGENT** — `NatWorkflowRuntime` runs `nat run --config_file workflow.yml`
    inside that image via the SDK's `DockerEnvironmentProvider`, capturing
    `nat_agent.log` + `trajectory.json`.
@@ -198,7 +198,7 @@ gate: ~/rae-workspace/gate.json  (gate_passed: true, pass_rate=1.000)
 > text, not per-message `usage` — `runtime_sec` is still recorded.
 >
 > **Prerequisites (real path):** a working Docker daemon, the
-> `nmp-agentic-base:latest` base image, and `NVIDIA_API_KEY`. The AUT backend
+> `nhx-agentic-base:latest` base image, and `NVIDIA_API_KEY`. The AUT backend
 > additionally needs an inference model the platform **inference gateway**
 > exposes as a valid model entity: either set `INFERENCE_NVIDIA_API_KEY` so
 > `providers.yaml` seeds its virtual model and pass that as `--agent-model`, or
@@ -215,16 +215,16 @@ gate: ~/rae-workspace/gate.json  (gate_passed: true, pass_rate=1.000)
 | `--aut-agent-name` | Name of the deployed AUT (aut backend). |
 | `--aut-agent-config` | NAT config for the AUT; created/recreated if needed. |
 | `--no-seed-providers` | Skip seeding `providers.yaml` (aut backend). |
-| `--skip-build` | Skip BUILD; require `nmp-nat-<name>:latest` to already exist. |
+| `--skip-build` | Skip BUILD; require `nhx-nat-<name>:latest` to already exist. |
 | `--verify` | Run the pytest VERIFY phase and add `VerifierRewardMetric`. |
-| `--nmp-base-url` | Platform URL injected into the workflow/agent + containers. |
+| `--nhx-base-url` | Platform URL injected into the workflow/agent + containers. |
 | `--agent-model` | Model for the workflow / AUT agent. |
 
 ## Files
 
 - `run_agent_eval.py` — CLI harness (toy online + offline rescore + real task + gate).
 - `workflow_runtime.py` — toy runtime adapter, trial serde, example tasks, metric.
-- `platform_runtime.py` — NeMo-Platform glue + workflow backend (BUILD/AGENT/VERIFY).
+- `platform_runtime.py` — NeMo-Helix glue + workflow backend (BUILD/AGENT/VERIFY).
 - `aut_runtime.py` — AUT backend: create/seed/deploy/invoke a deployed agent.
 - `usage.py` — token-usage extraction ported from `nat_runner._extract_usage_metrics`.
 - `aut_agent.workspace.example.yml` — task-capable AUT config matched to `workspace-basic-mcp` (verified green).

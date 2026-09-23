@@ -6,7 +6,7 @@
 Registered under ``nemo.customization.contributors`` (key ``rl``). The
 customization router hub (``nemo-customizer-plugin``) discovers this class and
 merges its routes/CLI/authz/SDK. Shared shape lives in
-:class:`nmp.customization_common.contributor.base.BaseContributor`.
+:class:`nhx.customization_common.contributor.base.BaseContributor`.
 """
 
 from __future__ import annotations
@@ -14,11 +14,11 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
-from nemo_platform_plugin.customization_contributor import (
+from nemo_helix_plugin.customization_contributor import (
     CustomizationCLISummary,
     CustomizationContributorSDKResources,
 )
-from nmp.customization_common.contributor.base import BaseContributor
+from nhx.customization_common.contributor.base import BaseContributor
 
 from nemo_rl_plugin.config import RlPluginConfig, generate_rl_id, get_config
 from nemo_rl_plugin.jobs.jobs import RlJob

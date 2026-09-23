@@ -33,18 +33,18 @@ from nemo_evaluator.revisions import (
     list_revisions,
     publish_revision,
 )
-from nemo_platform_plugin.entities import (
+from nemo_helix_plugin.entities import (
     EntityClientProtocol,
     EntityUpdateClientProtocol,
     PaginationInfo,
 )
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-from nemo_platform_plugin.filter_ops import FilterOperation
-from nemo_platform_plugin.log_utils import sanitize_for_log
-from nemo_platform_plugin.schema import Page, PaginationData
+from nemo_helix_plugin.filter_ops import FilterOperation
+from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.schema import Page, PaginationData
 
 logger = logging.getLogger(__name__)
 

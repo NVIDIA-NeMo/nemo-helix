@@ -6,10 +6,10 @@ set -e
 
 source /app/image-env.sh
 
-echo '=== Pre-pulling nmp-automodel job images ==='
+echo '=== Pre-pulling nhx-automodel job images ==='
 if command -v docker &> /dev/null && [ -S /var/run/docker.sock ]; then
-    TRAINING_IMAGE="${NMP_IMAGE_REGISTRY}/nmp-automodel-training:${NMP_IMAGE_TAG}"
-    TASKS_IMAGE="${NMP_IMAGE_REGISTRY}/nmp-customizer-tasks:${NMP_IMAGE_TAG}"
+    TRAINING_IMAGE="${NHX_IMAGE_REGISTRY}/nhx-automodel-training:${NHX_IMAGE_TAG}"
+    TASKS_IMAGE="${NHX_IMAGE_REGISTRY}/nhx-customizer-tasks:${NHX_IMAGE_TAG}"
 
     docker pull "$TRAINING_IMAGE" && echo "Pulled ${TRAINING_IMAGE}" || \
         echo "WARNING: Failed to pull ${TRAINING_IMAGE} — bake and push with BASE_TAG_AUTOMODEL=${BASE_TAG_AUTOMODEL}"

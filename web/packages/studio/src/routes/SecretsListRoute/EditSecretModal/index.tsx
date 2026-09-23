@@ -16,7 +16,7 @@ import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledT
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import type { PlatformSecretResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   getSecretsListSecretsQueryKey,
   useSecretsUpdateSecret,
@@ -37,7 +37,7 @@ type EditSecretFormData = z.infer<typeof editSecretFormSchema>;
 
 interface EditSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
-  secret: PlatformSecretResponse;
+  secret: HelixSecretResponse;
 }
 
 export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, open, onClose }) => {

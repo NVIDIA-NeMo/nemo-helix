@@ -3,7 +3,7 @@
 import * as React$2 from "react";
 import React$1, { CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive } from "@assistant-ui/react";
-import { PlatformJobLog, PlatformJobStatus, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { HelixJobLog, HelixJobStatus, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { VariantProps } from "class-variance-authority";
 //#endregion
 //#region src/components/AccessibleTitle/index.d.ts
@@ -9352,7 +9352,7 @@ interface LogLoadProgress {
 //#endregion
 //#region src/components/LogViewer/index.d.ts
 interface LogViewerProps {
-  logs: PlatformJobLog[];
+  logs: HelixJobLog[];
   isLoading?: boolean;
   downloadFilename?: string;
   rows?: number;
@@ -9430,7 +9430,7 @@ interface StatusConfigEntry {
   color: Exclude<BadgeProps['color'], null>;
   icon?: ComponentType<SVGProps<SVGSVGElement>>;
 }
-type BadgeStatus<T = PlatformJobStatus> = Exclude<T, undefined> | 'error' | 'active' | 'in_progress' | 'unavailable' | 'ready' | 'unknown' | 'default' | 'starting' | 'running' | 'failed' | 'deleting' | 'deleted' | 'lost';
+type BadgeStatus<T = HelixJobStatus> = Exclude<T, undefined> | 'error' | 'active' | 'in_progress' | 'unavailable' | 'ready' | 'unknown' | 'default' | 'starting' | 'running' | 'failed' | 'deleting' | 'deleted' | 'lost';
 //#endregion
 //#region src/components/StatusBadge/index.d.ts
 interface StatusBadgeProps<T = string> {
@@ -10573,7 +10573,7 @@ export declare const useStudioDataViewState: <FilterType = Record<string, unknow
 //#endregion
 //#region src/api/filterOperators.d.ts
 /**
- * Mongo-style comparison operators accepted by NeMo Platform's unified filter
+ * Mongo-style comparison operators accepted by NeMo Helix's unified filter
  * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
  *
  * The OpenAPI-generated SDK types model filter fields as bare scalars
@@ -10632,7 +10632,7 @@ interface FetchAllPagesOptions {
 export declare const fetchAllPages: <T>(fetchPage: (page: number, pageSize: number) => Promise<PaginatedResponse<T>>, { pageSize, maxPages }?: FetchAllPagesOptions) => Promise<T[]>;
 //#endregion
 //#region src/utils/query.d.ts
-export declare const getJobRefetchInterval: (status?: PlatformJobStatus) => number | false;
+export declare const getJobRefetchInterval: (status?: HelixJobStatus) => number | false;
 export declare const getSortParam: (sortingState: SortingState) => string;
 /**
  * Maps DataView sorting state to a sort query value when the API only allows specific fields.
@@ -10710,9 +10710,9 @@ export declare const DEFAULT_PAGE = 1;
 export declare const DEFAULT_PAGE_SIZE = 50;
 //#endregion
 //#region src/constants/query.d.ts
-export declare const CJobCancellableStatuses: PlatformJobStatus[];
-export declare const CJobLaunchableStatuses: PlatformJobStatus[];
-export declare const CJobTerminalStatuses: PlatformJobStatus[];
-export declare const PlatformJobTerminalStatuses: PlatformJobStatus[];
+export declare const CJobCancellableStatuses: HelixJobStatus[];
+export declare const CJobLaunchableStatuses: HelixJobStatus[];
+export declare const CJobTerminalStatuses: HelixJobStatus[];
+export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
 export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, index_d_exports as DataView, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };

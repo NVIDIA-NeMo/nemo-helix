@@ -51,7 +51,7 @@ interface DatasetDiscoveryRule {
 
 /**
  * Discovery rules mirroring the Customizer service's heuristics in
- * services/customizer/src/nmp/customizer/tasks/training/datasets/preparation.py.
+ * services/customizer/src/nhx/customizer/tasks/training/datasets/preparation.py.
  *
  * Customizer accepts any .jsonl/.json file in the named subdirs OR any root-level
  * file whose basename matches the given patterns. A lone unmatched root .jsonl is
@@ -60,7 +60,7 @@ interface DatasetDiscoveryRule {
  */
 /**
  * Customizer's default validation-split ratio when no validation files are found.
- * Source: services/customizer/src/nmp/customizer/tasks/training/datasets/preparation.py
+ * Source: services/customizer/src/nhx/customizer/tasks/training/datasets/preparation.py
  * (prepare_dataset val_split_ratio=0.1).
  */
 export const CUSTOMIZER_AUTO_VAL_SPLIT_RATIO = 0.1;

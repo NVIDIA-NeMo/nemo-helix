@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Stage a NeMo Platform fileset locally for parsing.
+"""Stage a NeMo Helix fileset locally for parsing.
 
 The caller passes in the SDK client and a default workspace; the parser
 then operates on the staged tempdir, which is cleaned up when the
 context exits.
 
-The workspace-prefix convention follows :class:`nemo_platform_plugin.refs.FilesetRef`
+The workspace-prefix convention follows :class:`nemo_helix_plugin.refs.FilesetRef`
 — ``"name"`` uses the default workspace, ``"workspace/name"`` overrides it.
 """
 
@@ -19,9 +19,9 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.refs import FilesetRef
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,13 @@ class FilesetDownloadError(RuntimeError):
 def fileset_path(
     ref: FilesetRef,
     *,
-    sdk: SyncPlatformClient,
+    sdk: SyncHelixClient,
     workspace: str,
 ) -> Iterator[Path]:
     """Download *ref* to a tempdir and yield the path.
 
-    *sdk* is a platform handle (``NeMoPlatform`` or
-    :class:`~nemo_platform_plugin.client.client.NemoClient`).  Cleanup happens
+    *sdk* is a platform handle (``NeMoHelix`` or
+    :class:`~nemo_helix_plugin.client.client.NemoClient`).  Cleanup happens
     when the context exits.
 
     The accepted shapes are ``name`` (uses *workspace* as the workspace) or

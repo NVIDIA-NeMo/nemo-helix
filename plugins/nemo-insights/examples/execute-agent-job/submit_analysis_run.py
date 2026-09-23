@@ -26,8 +26,8 @@ import json
 from typing import Any
 
 import httpx
+from nemo_helix import AsyncNeMoHelix
 from nemo_insights_plugin.platform_client import make_client
-from nemo_platform import AsyncNeMoPlatform
 
 REPORT_RESULT_NAME = "analysis-report"
 
@@ -78,7 +78,7 @@ def _request_preview(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-async def _print_report(client: AsyncNeMoPlatform, base_url: str, workspace: str, job_name: str) -> None:
+async def _print_report(client: AsyncNeMoHelix, base_url: str, workspace: str, job_name: str) -> None:
     """Print the saved analysis report, or explain why it is absent.
 
     Job results are an Agents/Jobs concern, so this reads them through

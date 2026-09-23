@@ -7,33 +7,33 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.entities import DEFAULT_WORKSPACE, EntityClient
-from nmp.common.jobs.log_client import dep_job_logs_client
-from nmp.common.jobs.schemas import InvalidPageCursorError, PlatformJobLog, PlatformJobLogPage
-from nmp.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
-from nmp.core.jobs.app.dispatcher import JobDispatcher
-from nmp.testing import create_test_client
+from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
+from nhx.common.jobs.log_client import dep_job_logs_client
+from nhx.common.jobs.schemas import HelixJobLog, HelixJobLogPage, InvalidPageCursorError
+from nhx.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
+from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.testing import create_test_client
 
 
 @pytest.fixture
-def sample_logs() -> list[PlatformJobLog]:
+def sample_logs() -> list[HelixJobLog]:
     """Create sample job logs for testing."""
     return [
-        PlatformJobLog(
+        HelixJobLog(
             timestamp=datetime(2024, 1, 1, 12, 0, 0),
             job="test-job",
             job_step="step1",
             job_task="task1",
             message="Starting job execution",
         ),
-        PlatformJobLog(
+        HelixJobLog(
             timestamp=datetime(2024, 1, 1, 12, 0, 5),
             job="test-job",
             job_step="step1",
             job_task="task1",
             message="Processing data",
         ),
-        PlatformJobLog(
+        HelixJobLog(
             timestamp=datetime(2024, 1, 1, 12, 0, 10),
             job="test-job",
             job_step="step1",
@@ -58,7 +58,7 @@ class TestJobLogsAPI:
         """Create a real dispatcher with test entity store and mock SDK."""
         projects = ["default/test-project"]
         with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-            mock_nmp_client = MagicMock()
+            mock_nhx_client = MagicMock()
             mock_files = AsyncMock()
             mock_fileset_obj = MagicMock()
             mock_fileset_obj.name = "test-fileset-id"
@@ -66,8 +66,8 @@ class TestJobLogsAPI:
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp
 
-            with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-                dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+            with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+                dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
                 yield dispatcher
 
     @pytest.fixture
@@ -86,7 +86,7 @@ class TestJobLogsAPI:
         # Create a real job
         job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-        mock_logs_client.query_logs.return_value = PlatformJobLogPage(
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(
             data=sample_logs, total=3, next_page=None, prev_page=None
         )
 
@@ -119,7 +119,7 @@ class TestJobLogsAPI:
         # Create a real job
         job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-        mock_logs_client.query_logs.return_value = PlatformJobLogPage(
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(
             data=sample_logs[:2],
             total=3,
             next_page="next_cursor_123",
@@ -153,7 +153,7 @@ class TestJobLogsAPI:
         """Test job logs retrieval with tail parameter."""
         job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-        mock_logs_client.query_logs.return_value = PlatformJobLogPage(
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(
             data=sample_logs[-2:],
             total=3,
             next_page=None,
@@ -216,7 +216,7 @@ class TestJobLogsAPI:
         request = sample_platform_job_request.model_copy(update={"output_location": "shared-fs"})
         job = await dispatcher.create_job(request, DEFAULT_WORKSPACE)
 
-        mock_logs_client.query_logs.return_value = PlatformJobLogPage(
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(
             data=sample_logs, total=3, next_page=None, prev_page=None
         )
 
@@ -278,7 +278,7 @@ class TestJobLogsAPI:
         # Create a real job
         job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-        mock_logs_client.query_logs.return_value = PlatformJobLogPage(data=[], total=0, next_page=None, prev_page=None)
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(data=[], total=0, next_page=None, prev_page=None)
 
         response = test_client.get(f"/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job.name}/logs")
 
@@ -296,7 +296,7 @@ class TestJobLogsAPI:
         # Create a real job
         job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-        mock_logs_client.query_logs.return_value = PlatformJobLogPage(
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(
             data=sample_logs,
             total=len(sample_logs),
             next_page=None,

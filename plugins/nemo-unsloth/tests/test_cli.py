@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 import pytest
 import typer
-from nemo_platform_plugin.scheduler import NemoJobScheduler, submit_path_for
+from nemo_helix_plugin.scheduler import NemoJobScheduler, submit_path_for
 from nemo_unsloth_plugin.cli.inputs import apply_unsloth_job_cli_overrides, load_job_json
 from nemo_unsloth_plugin.contributor import UnslothContributor
 from nemo_unsloth_plugin.jobs.jobs import UnslothJob
@@ -35,7 +35,7 @@ def _plain(text: str) -> str:
 
 def _build_app() -> typer.Typer:
     """Build a generated Typer app, then apply the contributor overrides."""
-    from nemo_platform_plugin.commands import (
+    from nemo_helix_plugin.commands import (
         _add_explain_command,
         _add_submit_command,
     )
@@ -138,11 +138,11 @@ class TestSubmitOverride:
             return {"id": "job-99"}
 
         monkeypatch.setattr(
-            "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+            "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
             fake_submit_remote,
         )
         monkeypatch.setattr(
-            "nemo_platform_plugin.discovery.discover_jobs",
+            "nemo_helix_plugin.discovery.discover_jobs",
             lambda: {"customization.unsloth.jobs": UnslothJob},
         )
 
@@ -159,13 +159,13 @@ class TestSubmitOverride:
                 "--workspace",
                 "acme-corp",
                 "--base-url",
-                "https://nmp.test",
+                "https://nhx.test",
             ],
         )
 
         assert result.exit_code == 0, result.stdout + result.stderr
         assert submitted.workspace == "acme-corp"
-        assert submitted.base_url == "https://nmp.test"
+        assert submitted.base_url == "https://nhx.test"
         # Raw input shape — to_spec runs inside the (mocked-out) submit_remote.
         spec = submitted.spec
         assert spec is not None
@@ -201,7 +201,7 @@ class TestJobsSubmitWire:
             return httpx.Response(200, json={"id": "job-1", "status": "queued"})
 
         monkeypatch.setattr(
-            "nemo_platform_plugin.discovery.discover_jobs",
+            "nemo_helix_plugin.discovery.discover_jobs",
             lambda: {"customization.unsloth.jobs": UnslothJob},
         )
 
@@ -212,11 +212,11 @@ class TestJobsSubmitWire:
         scheduler.submit_remote(
             UnslothJob,
             json.loads(load_job_json(path)),
-            base_url="https://nmp.test",
+            base_url="https://nhx.test",
             workspace="ws-a",
             http_client=httpx.Client(transport=httpx.MockTransport(handler)),
         )
 
         assert capture["method"] == "POST"
-        assert capture["url"] == "https://nmp.test/apis/customization/v2/workspaces/ws-a/unsloth/jobs"
+        assert capture["url"] == "https://nhx.test/apis/customization/v2/workspaces/ws-a/unsloth/jobs"
         assert capture["body"]["spec"]["model"]["name"] == "unsloth/Qwen2.5-0.5B-Instruct"

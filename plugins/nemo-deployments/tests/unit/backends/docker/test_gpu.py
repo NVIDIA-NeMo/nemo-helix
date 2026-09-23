@@ -153,7 +153,7 @@ def test_get_shared_gpu_pool_propagates_invalid_reservation_config() -> None:
     platform_cfg.docker = docker_cfg
 
     with (
-        patch("nemo_platform_plugin.config.Configuration.get_service_config", return_value=platform_cfg),
+        patch("nemo_helix_plugin.config.Configuration.get_service_config", return_value=platform_cfg),
         patch.object(gpu_module, "detect_gpu_device_ids") as detect,
     ):
         with pytest.raises(ValueError, match="bad reserved_gpu_device_ids"):

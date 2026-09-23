@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from nmp_dev_mcp import create_server
+from nhx_dev_mcp import create_server
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ class TestFindFilesSecurity:
                 await server.call_tool(
                     "find_files",
                     {
-                        "pattern": "nmp_dev_mcp.py",
+                        "pattern": "nhx_dev_mcp.py",
                         "path": "tools/mcp-dev-tools",
                         "file_type": "f",
                     },
@@ -125,7 +125,7 @@ class TestFindFilesSecurity:
         )
 
         assert result["success"] is True
-        assert "nmp_dev_mcp.py" in result["stdout"]
+        assert "nhx_dev_mcp.py" in result["stdout"]
 
 
 class TestRunPytestSecurity:

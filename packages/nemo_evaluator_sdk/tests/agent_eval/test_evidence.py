@@ -490,7 +490,7 @@ def test_observation_models_are_exported_from_source_and_vendored_values_package
     from nemo_evaluator_sdk.values import Observation as SourceObservation
     from nemo_evaluator_sdk.values import ObservationResult as SourceObservationResult
 
-    vendored_values = importlib.import_module("nemo_platform.beta.evaluator.values")
+    vendored_values = importlib.import_module("nemo_helix.beta.evaluator.values")
     VendoredObservation = vendored_values.Observation
     VendoredObservationResult = vendored_values.ObservationResult
     assert SourceObservation.__name__ == VendoredObservation.__name__ == "Observation"

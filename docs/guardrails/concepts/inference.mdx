@@ -27,10 +27,10 @@ For the examples below, create a guardrail configuration and VirtualModel:
 ```python
 
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -165,7 +165,7 @@ nemo chat default/guarded-nemotron "What is the capital of France?"
 <Tab title="curl">
 
 ```bash
-curl -s $NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -303,7 +303,7 @@ If the request sets `stream: true` but the guardrail config has output flows wit
 <Tab title="curl">
 
 ```bash
-curl -N -s $NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -N -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -367,7 +367,7 @@ and disabling it or, if needed, redacting captured data before storing or using
 logs in production environments.
 
 ```bash
-curl -s $NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -388,7 +388,7 @@ curl -s $NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/c
 For clients that do not handle extra response fields, configure the request to return guardrail data as a choice in the `choices` list with the role `guardrails_data`:
 
 ```bash
-curl -s $NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -410,7 +410,7 @@ The plugin uses two different header-forwarding paths for main models and task m
 
 The main model is the one IGW resolves from `default_model_entity` and that handles generation. When the plugin builds the per-request main LLM, it forwards a curated allowlist from the inbound request:
 
-- All headers starting with `x-` or `X-` — NeMo Platform principal headers, `x-otel-*`, and any custom `X-Foo` headers your client sets.
+- All headers starting with `x-` or `X-` — NeMo Helix principal headers, `x-otel-*`, and any custom `X-Foo` headers your client sets.
 - W3C Trace Context headers: `traceparent`, `tracestate`, `baggage`.
 
 `Authorization` and other non-allowlisted headers are intentionally dropped — IGW handles auth.
@@ -422,7 +422,7 @@ You can also pin static defaults on a `type: "main"` entry in the guardrail conf
 Task models (content safety, topic control, embeddings, etc.) follow a different rule. The cached LangChain client is shared across requests, so arbitrary inbound headers are **not** forwarded to task models. Instead, each task-model call merges in specific service headers derived from the current request context:
 
 - `traceparent` / `tracestate` for distributed tracing.
-- `X-NMP-Principal-Id` / `X-NMP-Principal-On-Behalf-Of` for service-principal authorization.
+- `X-NHX-Principal-Id` / `X-NHX-Principal-On-Behalf-Of` for service-principal authorization.
 
 If you need a static header on every call to a specific task model — for example a tenant tag or an upstream API key — declare it in that model's `parameters.default_headers`:
 

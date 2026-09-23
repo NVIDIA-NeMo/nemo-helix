@@ -22,7 +22,7 @@ it does — the run's tool-path preflight fails if any tool call skips it.
 ## Running it
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 nemo agent-hardener init --project-dir plugins/nemo-agent-hardener/examples/other-victim \
     --name other-victim --harness other --relay-confirmed \

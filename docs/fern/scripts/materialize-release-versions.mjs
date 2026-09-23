@@ -320,7 +320,7 @@ function cleanGeneratedFiles() {
 }
 
 function materializeRelease(release) {
-  const tempRoot = mkdtempSync(join(tmpdir(), `nemo-platform-docs-${release.dirName}-`));
+  const tempRoot = mkdtempSync(join(tmpdir(), `nemo-helix-docs-${release.dirName}-`));
   const outputRoot = join(generatedRoot, release.dirName);
 
   try {

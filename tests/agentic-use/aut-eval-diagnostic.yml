@@ -4,7 +4,7 @@
 # AUT diagnostic (LLM-judge) eval config for agentic-use.
 #
 # One-time plugin bootstrap (per environment):
-#   uv pip install -e packages/nemo_platform_plugin -e plugins/nemo-agents
+#   uv pip install -e packages/nemo_helix_plugin -e plugins/nemo-agents
 #   uv run _nemo agents evaluate --help
 #
 # Build dataset:

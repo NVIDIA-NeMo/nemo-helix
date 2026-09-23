@@ -23,7 +23,7 @@
 
 # Path to your eval suite. Each subdirectory must be one task with either
 # task.toml (Harbor) or workflow.yml (NAT) plus instruction.md and
-# tests/test_outputs.py. See tests/agentic-use/ in the NeMo Platform repo for a real
+# tests/test_outputs.py. See tests/agentic-use/ in the NeMo Helix repo for a real
 # example.
 evals: /path/to/my-agent/agent-evals
 

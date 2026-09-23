@@ -206,7 +206,7 @@ def create_kernel(use_temporary_venv: bool, requirements_file: str | None) -> tu
     if not use_temporary_venv:
         return "python3", None, None
 
-    from nmp.testing.notebooks import create_temp_venv_with_kernel
+    from nhx.testing.notebooks import create_temp_venv_with_kernel
 
     kernel_name, temp_venv_dir, temp_kernel_spec_dir = create_temp_venv_with_kernel(requirements_file)
     os.environ["VIRTUAL_ENV"] = temp_venv_dir
@@ -217,7 +217,7 @@ def create_kernel(use_temporary_venv: bool, requirements_file: str | None) -> tu
 
 def cleanup_kernel(kernel_name: str, temp_venv_dir: str | None, temp_kernel_spec_dir: str | None) -> None:
     if temp_venv_dir and temp_kernel_spec_dir:
-        from nmp.testing.notebooks import cleanup_temp_venv_and_kernel
+        from nhx.testing.notebooks import cleanup_temp_venv_and_kernel
 
         cleanup_temp_venv_and_kernel(kernel_name, temp_venv_dir, temp_kernel_spec_dir)
 
@@ -243,7 +243,7 @@ def run_selected_notebooks(
     failures: list[Path] = []
 
     try:
-        from nmp.testing.notebooks import execute_notebook
+        from nhx.testing.notebooks import execute_notebook
 
         for selection in selections:
             run_path = selection.path

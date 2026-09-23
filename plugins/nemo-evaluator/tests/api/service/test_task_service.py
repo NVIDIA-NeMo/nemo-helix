@@ -18,7 +18,7 @@ from nemo_evaluator.api.service.task_service import MetricRefNotFoundError, Task
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 
 class _FakeMetricService:

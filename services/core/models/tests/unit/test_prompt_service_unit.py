@@ -8,10 +8,10 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from nmp.common.entities.client import EntityClient, EntityNotFoundError
-from nmp.core.models.api.service.prompt_service import PromptService
-from nmp.core.models.entities import Prompt as PromptEntity
-from nmp.core.models.schemas import (
+from nhx.common.entities.client import EntityClient, EntityNotFoundError
+from nhx.core.models.api.service.prompt_service import PromptService
+from nhx.core.models.entities import Prompt as PromptEntity
+from nhx.core.models.schemas import (
     ChatCompletionTool,
     CreatePromptRequest,
     DeletePromptRequest,

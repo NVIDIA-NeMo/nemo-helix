@@ -17,8 +17,8 @@ from urllib.parse import urlsplit
 PLATFORM_ROOT = Path(__file__).resolve().parents[4]
 CLICKHOUSE_URL = "http://localhost:8123"
 _CLICKHOUSE_LABEL_FILTERS = (
-    "label=nmp.nvidia.com/managed-by=nemo-platform",
-    "label=nmp.nvidia.com/component=intake-clickhouse",
+    "label=nhx.nvidia.com/managed-by=nemo-helix",
+    "label=nhx.nvidia.com/component=intake-clickhouse",
 )
 
 
@@ -72,7 +72,7 @@ def main() -> None:
     runner_temp = Path(os.environ["RUNNER_TEMP"])
     state = runner_temp / "state"
     (state / "clickhouse").mkdir(parents=True, exist_ok=True)
-    (state / "nmp").mkdir(parents=True, exist_ok=True)
+    (state / "nhx").mkdir(parents=True, exist_ok=True)
     log = runner_temp / "platform.log"
 
     subprocess.run(
@@ -81,7 +81,7 @@ def main() -> None:
         env={
             **os.environ,
             "CLICKHOUSE_DATA_DIR": str(state / "clickhouse"),
-            "NMP_INTAKE_CLICKHOUSE_URL": CLICKHOUSE_URL,
+            "NHX_INTAKE_CLICKHOUSE_URL": CLICKHOUSE_URL,
         },
     )
     if not _wait(f"{CLICKHOUSE_URL}/ping", attempts=30, delay=2):
@@ -113,8 +113,8 @@ def main() -> None:
             cwd=PLATFORM_ROOT,
             env={
                 **os.environ,
-                "NMP_DATA_DIR": str(state / "nmp"),
-                "NMP_INTAKE_CLICKHOUSE_URL": CLICKHOUSE_URL,
+                "NHX_DATA_DIR": str(state / "nhx"),
+                "NHX_INTAKE_CLICKHOUSE_URL": CLICKHOUSE_URL,
             },
             stdout=fh,
             stderr=subprocess.STDOUT,

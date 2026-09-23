@@ -1,6 +1,6 @@
 {
   "release": "0.1.0",
-  "platform_name": "NeMo Platform",
+  "platform_name": "NeMo Helix",
   "ncm_long_name": "NVIDIA NeMo Customizer",
   "ncm_short_name": "NeMo Customizer",
   "ndd_long_name": "NVIDIA NeMo Data Designer",

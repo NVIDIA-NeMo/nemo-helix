@@ -11,15 +11,15 @@ a separate binding with granted_at and revoked_at timestamps.
 
 import os
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.iam.client import IAMClient
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.iam.client import IAMClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 
 
-def _get_client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url)
+def _get_client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url)
 
 
 def test_workspace_exists() -> None:

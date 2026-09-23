@@ -3,7 +3,7 @@
 
 # Auth Service Agentic Flows
 
-The Auth service provides workspace management and authorization capabilities. Workspaces are the fundamental organizational unit in NeMo Platform - all resources belong to a workspace.
+The Auth service provides workspace management and authorization capabilities. Workspaces are the fundamental organizational unit in NeMo Helix - all resources belong to a workspace.
 
 **PIC**: Razvan Dinu
 **Priority**: High
@@ -33,7 +33,7 @@ The Auth service provides workspace management and authorization capabilities. W
 - Delete workspace
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - API access
 
 **Success Criteria**:
@@ -59,7 +59,7 @@ The Auth service provides workspace management and authorization capabilities. W
    - Admin: Full access including member management
 
 **Prerequisites**:
-- NeMo Platform with auth enabled
+- NeMo Helix with auth enabled
 - Multiple test principals (users/service accounts)
 
 **Success Criteria**:

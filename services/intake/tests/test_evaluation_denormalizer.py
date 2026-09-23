@@ -9,10 +9,10 @@ import asyncio
 from typing import cast
 
 import pytest
-from nmp.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nmp.intake.entities.experiments import Experiment
-from nmp.intake.experiments.denormalizer import EvaluationDenormalizer
-from nmp.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.intake.entities.experiments import Experiment
+from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
+from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
 
 
 def _sample_rollup(evaluation_name: str) -> EvaluationRollup:

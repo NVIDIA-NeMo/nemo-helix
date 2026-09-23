@@ -9,21 +9,21 @@ from typing import Annotated
 
 import typer
 from nemo_guardrails_plugin.cli_commands.configs import app as configs_app
-from nemo_platform_ext.cli.core.api import build_kwargs
-from nemo_platform_ext.cli.core.code_generator import handle_code_generation
-from nemo_platform_ext.cli.core.context import CLIContext
-from nemo_platform_ext.cli.core.errors import handle_errors
-from nemo_platform_ext.cli.core.formatters import format_output
-from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.stdin_utils import (
+from nemo_helix_ext.cli.core.api import build_kwargs
+from nemo_helix_ext.cli.core.code_generator import handle_code_generation
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.cli.core.errors import handle_errors
+from nemo_helix_ext.cli.core.formatters import format_output
+from nemo_helix_ext.cli.core.help_formatter import collect_warnings, create_typer_app
+from nemo_helix_ext.cli.core.stdin_utils import (
     build_request_body,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
 )
-from nemo_platform_ext.cli.core.types import EntityOutputFormatOption
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import GuardrailCheckRequest
+from nemo_helix_ext.cli.core.types import EntityOutputFormatOption
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import GuardrailCheckRequest
 
 app = create_typer_app(name="guardrail", help="Manage guardrail")
 

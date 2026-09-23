@@ -15,10 +15,10 @@ from insight_agent.config import EvidenceStreamsConfig
 from insight_agent.evidence_streams.builtins import registered_builtin_streams
 from insight_agent.insight import Insight
 from insight_agent.insights_generation.insight_compilation import InsightCompilation
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
 from nemo_insights_plugin.analyst.analyst_backend import AnalystBackend
 from nemo_insights_plugin.analyst.result import AnalystResult, InsightUpdate, NewInsight
 from nemo_insights_plugin.entities import InsightStatus
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelClients
 from nooa.context_blocks import EventBase
 from nooa.unifiedllm import LLMResponse, Tool, UnifiedLLM
 from pydantic import BaseModel, ValidationError

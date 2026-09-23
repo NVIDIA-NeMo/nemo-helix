@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Development Tools MCP Server
+# NeMo Helix Development Tools MCP Server
 
-MCP server providing narrowly-scoped development operations for the NeMo Platform project. These tools execute specific commands via Python subprocess, providing a smoother development experience with dedicated, pre-defined operations.
+MCP server providing narrowly-scoped development operations for the NeMo Helix project. These tools execute specific commands via Python subprocess, providing a smoother development experience with dedicated, pre-defined operations.
 
 ## Overview
 
@@ -29,7 +29,7 @@ python tools/mcp-dev-tools/enable.py
 ```
 
 This will automatically:
-- Add nmp-dev to your **local config** (`~/.claude.json`) without modifying the committed `.mcp.json`
+- Add nhx-dev to your **local config** (`~/.claude.json`) without modifying the committed `.mcp.json`
 - Configure permissions in **`.claude/settings.local.json`** (per-developer local override, uncommitted) - this tool modifies your local settings file for machine-specific or temporary permission changes; the team-wide **`.claude/settings.json`** (committed) should be edited manually for permanent permissions that all developers should have
 - Add tool preference documentation to `AGENTS.local.md`
 
@@ -40,7 +40,7 @@ Then restart Claude Code to load the server.
 If you prefer to configure manually, use the `claude mcp add` command:
 
 ```bash
-claude mcp add nmp-dev -- sh -c "cd tools/mcp-dev-tools && uv run nmp-dev-mcp"
+claude mcp add nhx-dev -- sh -c "cd tools/mcp-dev-tools && uv run nhx-dev-mcp"
 ```
 
 This adds the server to **local scope** (`~/.claude.json`) without affecting the committed `.mcp.json` file.
@@ -51,11 +51,11 @@ Then add permissions to `.claude/settings.local.json`:
 {
   "permissions": {
     "allow": [
-      "mcp__nmp-dev__*"
+      "mcp__nhx-dev__*"
     ]
   },
   "enabledMcpjsonServers": [
-    "nmp-dev"
+    "nhx-dev"
   ]
 }
 ```
@@ -143,7 +143,7 @@ The server is registered in **local scope** using `claude mcp add`. This keeps t
 To manually register the server:
 
 ```bash
-claude mcp add nmp-dev -- sh -c "cd tools/mcp-dev-tools && uv run nmp-dev-mcp"
+claude mcp add nhx-dev -- sh -c "cd tools/mcp-dev-tools && uv run nhx-dev-mcp"
 ```
 
 This creates a local-scoped configuration that won't affect other developers.
@@ -159,12 +159,12 @@ Use the MCP Inspector to test tools:
 npm install -g @modelcontextprotocol/inspector
 
 # Launch with the server
-npx @modelcontextprotocol/inspector uv run nmp-dev-mcp
+npx @modelcontextprotocol/inspector uv run nhx-dev-mcp
 ```
 
 ### Adding New Tools
 
-1. Add tool function to `nmp_dev_mcp.py` with `@server.tool()` decorator
+1. Add tool function to `nhx_dev_mcp.py` with `@server.tool()` decorator
 2. Use `run_command()` helper for subprocess execution
 3. Return structured dict with `success`, `stdout`, `stderr`, etc.
 4. Document the tool in this README
@@ -188,7 +188,7 @@ uv run ruff format tools/mcp-dev-tools
                   │ MCP Protocol
                   ▼
 ┌─────────────────────────────────────┐
-│   NeMo Platform Development Tools MCP Server          │
+│   NeMo Helix Development Tools MCP Server          │
 │  ┌──────────────────────────────┐   │
 │  │  Git Tools                   │   │
 │  │  Test Tools                  │   │

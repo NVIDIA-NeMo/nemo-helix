@@ -10,8 +10,8 @@ from pathlib import Path
 
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from pydantic import Field, RootModel
 
 _GLOB_CHARS = {"*", "?", "["}

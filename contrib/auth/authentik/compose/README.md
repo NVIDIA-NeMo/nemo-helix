@@ -21,7 +21,7 @@ cd contrib/auth/authentik/compose
 docker compose up
 ```
 
-The Compose project name defaults to `nemo-platform-authentik`, so container,
+The Compose project name defaults to `nemo-helix-authentik`, so container,
 network, and volume names do not inherit the generic `compose` directory name.
 Set `COMPOSE_PROJECT_NAME` before running `docker compose` if you need a
 different local namespace.

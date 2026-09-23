@@ -6,9 +6,9 @@ title: "Support Matrix"
 description: ""
 ---
 
-This matrix defines the supported OSS targets for NeMo Platform. It covers the
+This matrix defines the supported OSS targets for NeMo Helix. It covers the
 Python package, CLI, SDK, local services started by `nemo setup`, and
-self-managed Kubernetes deployments installed with the NeMo Platform Helm chart.
+self-managed Kubernetes deployments installed with the NeMo Helix Helm chart.
 
 ## Host Platforms
 
@@ -20,13 +20,13 @@ self-managed Kubernetes deployments installed with the NeMo Platform Helm chart.
 | macOS | [macOS Tahoe 26](https://support.apple.com/en-us/122868) and macOS Sequoia 15 | Supported for CLI, SDK, local services, and cloud/provider workflows. Local NVIDIA GPU workloads are not supported on macOS. |
 | Architecture | x86_64 Linux; Apple Silicon and Intel macOS | NVIDIA GPU workloads require x86_64 Linux. |
 | Windows and WSL | Not supported for the OSS local install path | Use a supported Linux or macOS host for the local install path. |
-| Kubernetes clusters | minikube, kind, EKS, AKS, GKE, OKE, OpenShift, and on-prem Kubernetes | See [Install NeMo Platform with Helm](/documentation/kubernetes-deployment/setup/helm) for prerequisites and cluster-specific notes. |
+| Kubernetes clusters | minikube, kind, EKS, AKS, GKE, OKE, OpenShift, and on-prem Kubernetes | See [Install NeMo Helix with Helm](/documentation/kubernetes-deployment/setup/helm) for prerequisites and cluster-specific notes. |
 
 ## Local Runtime
 
 | Area | Supported | Notes |
 |------|-----------|-------|
-| Package installation | `uv>=0.10.10` recommended for source checkouts; `pip` supported for published packages | The one-line installer sets up `uv` automatically. Published packages can also be installed with `pip install "nemo-platform[all]"`. |
+| Package installation | `uv>=0.10.10` recommended for source checkouts; `pip` supported for published packages | The one-line installer sets up `uv` automatically. Published packages can also be installed with `pip install "nemo-helix[all]"`. |
 | Shell | Bash or zsh | Used by the installer, setup commands, and documented examples. |
 | Browser | Current Chrome, Edge, Firefox, or Safari | Required for the Studio UI and generated documentation. |
 

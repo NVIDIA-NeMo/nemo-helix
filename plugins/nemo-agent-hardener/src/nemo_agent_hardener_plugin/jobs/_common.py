@@ -31,9 +31,9 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     AgentHardenerRunError,
 )
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.secrets.client import SecretsClient
 
 
 def require_provisioned(plugin_config: AgentHardenerConfig) -> None:

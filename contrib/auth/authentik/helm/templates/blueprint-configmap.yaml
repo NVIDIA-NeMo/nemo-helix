@@ -7,7 +7,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: authentik-nemo-blueprint
-  namespace: {{ include "nemo-platform-authentik.namespace" . }}
+  namespace: {{ include "nemo-helix-authentik.namespace" . }}
 data:
   nemo.yaml: |-
 {{ .Files.Get "files/blueprints/nemo.yaml" | indent 4 }}

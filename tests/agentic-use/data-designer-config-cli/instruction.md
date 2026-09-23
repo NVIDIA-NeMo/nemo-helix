@@ -3,9 +3,9 @@
 
 # Data Designer Model Configuration (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Your task is to configure model providers for use with Data Designer.
+You have access to the `nhx` CLI for NeMo Helix operations. Your task is to configure model providers for use with Data Designer.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 

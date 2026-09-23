@@ -4,7 +4,7 @@
 """In-sandbox Gym host HTTP runtime (``GET /health``, ``POST /rollouts/run``).
 
 Started inside the OpenSandbox job image via ``RunHelper`` + ``RolloutCollectionHelper``.
-Reads ``NMP_GYM_GLOBAL_CONFIG`` from bootstrap env (same JSON as colocated Gym, minus Ray GCS).
+Reads ``NHX_GYM_GLOBAL_CONFIG`` from bootstrap env (same JSON as colocated Gym, minus Ray GCS).
 
 Imports only the standard library, PyYAML, and ``nemo_gym`` at runtime: the module source
 is injected verbatim into the sandbox image, where ``nemo_rl`` may not be importable.
@@ -35,13 +35,13 @@ from sandboxed_gym.environment_package import (
     validate_environment_namespaces,
 )
 
-GYM_GLOBAL_CONFIG_ENV_KEY = "NMP_GYM_GLOBAL_CONFIG"
+GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
 #: Set by the orchestrator when the caller supplied an explicit ``environment_path`` (a FileSet).
-#: ``NMP_ENVIRONMENT_PATH`` is also the host's environment *mount*, so it is ``/job/environment``
+#: ``NHX_ENVIRONMENT_PATH`` is also the host's environment *mount*, so it is ``/job/environment``
 #: for image-bundled Gym too; this flag is how a missing ``nemo-environment.yaml`` becomes a
 #: FileSet error instead of a silent fallback to the image-shipped environment.
-ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NMP_ENVIRONMENT_PACKAGE_REQUIRED"
-ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
+ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NHX_ENVIRONMENT_PACKAGE_REQUIRED"
+ENVIRONMENT_OFFLINE_ENV_KEY = "NHX_ENVIRONMENT_OFFLINE"
 HF_CACHE_DIRNAME = ".huggingface"
 UV_CACHE_DIR_KEY = "uv_cache_dir"
 UV_VENV_DIR_KEY = "uv_venv_dir"
@@ -58,14 +58,14 @@ OBSERVABILITY_ENABLED_KEY = "observability_enabled"
 MODEL_CALL_CAPTURE_DIR_KEY = "model_call_capture_dir"
 #: Key this host attaches a rollout's captured model calls under, on the result it returns.
 #: Namespaced so it cannot collide with a Gym field or an environment's own extras.
-MODEL_CALLS_RESULT_KEY = "_nmp_model_calls"
+MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 # uv setting that points Gym's per-server dependency resolver at the staged wheelhouse.
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
-ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nmp_environment_component_selection"
+ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
 # Mirrors DEFAULT_GYM_PORT_RANGE_{LOW,HIGH} in nemo_rl.distributed.virtual_cluster.
 DEFAULT_GYM_PORT_RANGE_LOW = 5000
 DEFAULT_GYM_PORT_RANGE_HIGH = 5999
@@ -84,7 +84,7 @@ _EVENT_LOOP_LOCK = threading.Lock()
 _HEARTBEAT_INTERVAL_S = 15.0
 #: With no hop left to time a rollout out, the host has to be what gives up: a wedged batch would
 #: otherwise heartbeat until the sandbox's ttl_s.
-ROLLOUT_DEADLINE_ENV_KEY = "NMP_ROLLOUT_DEADLINE_S"
+ROLLOUT_DEADLINE_ENV_KEY = "NHX_ROLLOUT_DEADLINE_S"
 _DEFAULT_ROLLOUT_DEADLINE_S = 30 * 60.0
 # Bounded so a deeply recursive failure cannot produce an oversized error response.
 _TRACEBACK_FRAMES = 20
@@ -185,7 +185,7 @@ def _uv_cache_dir() -> str | None:
     # Prefer the explicit env var. The container image sets it, and it sidesteps
     # `uv cache dir`, which exits non-zero whenever the working directory's
     # pyproject.toml pins a [tool.uv] required-version that disagrees with the uv on
-    # PATH - true in the nemo-platform image, whose WORKDIR is the platform workspace.
+    # PATH - true in the nemo-helix image, whose WORKDIR is the platform workspace.
     configured = os.environ.get("UV_CACHE_DIR")
     if configured:
         return configured
@@ -216,7 +216,7 @@ def _apply_uv_dirs(global_config: dict[str, Any]) -> None:
 def _environment_package_required() -> bool:
     """Whether the mounted environment path must be a valid FileSet package.
 
-    The host always mounts something at ``NMP_ENVIRONMENT_PATH`` (typically ``/job/environment``).
+    The host always mounts something at ``NHX_ENVIRONMENT_PATH`` (typically ``/job/environment``).
     Image-bundled Gym has no ``nemo-environment.yaml`` there. FileSet-backed runs do, and must
     fail closed if it is missing rather than starting against the image. The orchestrator sets
     this only when serve config carried an explicit ``environment_path``.
@@ -280,7 +280,7 @@ def _load_runtime_environment_package(
     """Load a mounted package while preserving manifest-free bundled environments."""
     if not environment_path:
         if required:
-            raise RuntimeError("a Gym environment package is required, but NMP_ENVIRONMENT_PATH is empty")
+            raise RuntimeError("a Gym environment package is required, but NHX_ENVIRONMENT_PATH is empty")
         return None
 
     manifest_path = os.path.join(environment_path, ENVIRONMENT_MANIFEST_FILENAME)
@@ -474,15 +474,15 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
     global_config = _load_global_config_dict()
     # Apply writable uv locations before Gym creates per-component environments.
     _apply_uv_dirs(global_config)
-    _apply_model_call_capture(global_config, os.environ.get("NMP_WORK_PATH", "/job/work"))
+    _apply_model_call_capture(global_config, os.environ.get("NHX_WORK_PATH", "/job/work"))
     # Before RunHelper.start() so Gym's child processes inherit the cache paths.
     _apply_huggingface_offline_policy()
     _install_huggingface_cache_fallback(
-        os.environ.get("NMP_DATASET_PATH", ""),
-        os.environ.get("NMP_WORK_PATH", "/job/work"),
+        os.environ.get("NHX_DATASET_PATH", ""),
+        os.environ.get("NHX_WORK_PATH", "/job/work"),
     )
     environment_package = _load_runtime_environment_package(
-        os.environ.get("NMP_ENVIRONMENT_PATH", ""),
+        os.environ.get("NHX_ENVIRONMENT_PATH", ""),
         required=_environment_package_required(),
     )
     # Compose config paths before dependency installation or Gym imports can execute
@@ -494,7 +494,7 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
         _prepend_environment_search_root(str(environment_package.root))
     _install_wheels_v1_dependencies(
         environment_package,
-        os.environ.get("NMP_WORK_PATH", "/job/work"),
+        os.environ.get("NHX_WORK_PATH", "/job/work"),
     )
 
     # Import after the package is wired in: Gym reads extra search roots at import time.
@@ -746,7 +746,7 @@ class Handler(BaseHTTPRequestHandler):
             examples,
             _HEAD_SERVER_CONFIG,
             _ROLLOUT_HELPER,
-            capture_dir=model_call_capture_dir(os.environ.get("NMP_WORK_PATH", "/job/work")),
+            capture_dir=model_call_capture_dir(os.environ.get("NHX_WORK_PATH", "/job/work")),
             # Captures share the response with the rollouts they annotate, and a response over
             # the cap is refused whole -- so an unbudgeted capture would turn "traces too big"
             # into "every result lost". Half leaves the records themselves the same room they
@@ -823,9 +823,9 @@ class Handler(BaseHTTPRequestHandler):
         )
         envelope = {
             "results": results,
-            "job_id": os.environ.get("NMP_JOB_ID", ""),
-            "environment_path": os.environ.get("NMP_ENVIRONMENT_PATH", ""),
-            "work_path": os.environ.get("NMP_WORK_PATH", ""),
+            "job_id": os.environ.get("NHX_JOB_ID", ""),
+            "environment_path": os.environ.get("NHX_ENVIRONMENT_PATH", ""),
+            "work_path": os.environ.get("NHX_WORK_PATH", ""),
         }
         body = json.dumps(envelope).encode("utf-8")
         if len(body) > self.max_response_bytes:
@@ -873,8 +873,8 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     global _READY, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
-    Handler.max_request_bytes = _env_int("NMP_MAX_REQUEST_BYTES", Handler.max_request_bytes)
-    Handler.max_response_bytes = _env_int("NMP_MAX_RESPONSE_BYTES", Handler.max_response_bytes)
+    Handler.max_request_bytes = _env_int("NHX_MAX_REQUEST_BYTES", Handler.max_request_bytes)
+    Handler.max_response_bytes = _env_int("NHX_MAX_RESPONSE_BYTES", Handler.max_response_bytes)
     # Set from the caller's rollout_timeout_s. This, not that timeout, is what actually bounds a
     # batch: the client's is a per-read socket timeout, and the heartbeat keeps resetting it.
     Handler.rollout_deadline_s = _env_float(ROLLOUT_DEADLINE_ENV_KEY, Handler.rollout_deadline_s)
@@ -883,7 +883,7 @@ def main() -> None:
     _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
     _READY = True
 
-    port = _env_int("NMP_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
+    port = _env_int("NHX_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
     # Threaded so chunked rollouts overlap and /health stays answerable mid-batch.
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 

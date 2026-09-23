@@ -7,12 +7,12 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
-from nmp.common.auth import AuthClient
-from nmp.common.auth.dependencies import auth_client_context
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig
-from nmp.core.entities.api.v2.utils import _applicable_principal_strings, get_accessible_workspaces
-from nmp.core.entities.entities import Entity
+from nhx.common.auth import AuthClient
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
+from nhx.core.entities.api.v2.utils import _applicable_principal_strings, get_accessible_workspaces
+from nhx.core.entities.entities import Entity
 
 TEST_PRINCIPAL = "test-user@example.com"
 

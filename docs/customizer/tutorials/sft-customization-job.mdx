@@ -5,7 +5,7 @@ title: "Full SFT Customization"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/sft-customization-job.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/sft-customization-job.ipynb)
 
 Learn how to fine-tune all model weights using supervised fine-tuning (SFT) to customize LLM behavior for your specific tasks.
 
@@ -50,28 +50,28 @@ Supervised Fine-Tuning (SFT) customizes model behavior, injects new knowledge, a
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
-2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **At least one GPU with CUDA 13+**
 
 ## Quick Start
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```
 
 ```python
 import json
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(
-    base_url=NMP_BASE_URL,
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(
+    base_url=NHX_BASE_URL,
     workspace="default"
 )
 ```
@@ -296,7 +296,7 @@ This tutorial's default model is gated, so the fileset includes `token_secret=hf
 import time
 
 # Create a fileset pointing to the desired Hugging Face model
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-base"

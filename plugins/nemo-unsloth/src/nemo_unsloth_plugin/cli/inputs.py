@@ -3,7 +3,7 @@
 
 """CLI overrides for the Unsloth contributor.
 
-The override machinery is shared in :mod:`nmp.customization_common.cli.overrides`; this
+The override machinery is shared in :mod:`nhx.customization_common.cli.overrides`; this
 module supplies the Unsloth specifics: the ``UnslothJobInput`` schema (via
 ``load_job_json``) and the ``JOB_JSON`` help text.
 """
@@ -12,8 +12,8 @@ import json
 from pathlib import Path
 
 import typer
-from nmp.customization_common.cli.overrides import apply_job_cli_overrides
-from nmp.customization_common.cli.uploads import SpecRefs
+from nhx.customization_common.cli.overrides import apply_job_cli_overrides
+from nhx.customization_common.cli.uploads import SpecRefs
 
 from nemo_unsloth_plugin.schema import UnslothJobInput
 

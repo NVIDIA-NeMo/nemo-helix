@@ -3,9 +3,9 @@
 
 """Example plugin controller — registered under ``nemo.controllers``.
 
-Demonstrates the :class:`~nemo_platform_plugin.controller.NemoController` pattern:
+Demonstrates the :class:`~nemo_helix_plugin.controller.NemoController` pattern:
 implement :meth:`list_objects` and :meth:`reconcile_one`, use
-:meth:`on_startup` to load configuration via :class:`~nemo_platform_plugin.config.NemoConfig`,
+:meth:`on_startup` to load configuration via :class:`~nemo_helix_plugin.config.NemoConfig`,
 and let the platform manage the loop lifecycle.
 
 The platform runner instantiates this class, calls :meth:`on_startup` once,
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from nemo_platform_plugin.controller import NemoController
+from nemo_helix_plugin.controller import NemoController
 
 logger = logging.getLogger(__name__)
 

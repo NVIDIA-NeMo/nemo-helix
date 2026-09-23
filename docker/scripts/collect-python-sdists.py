@@ -32,14 +32,14 @@ class Sdist:
 
 
 def source_collection_enabled() -> bool:
-    return os.environ.get("NMP_COLLECT_SOURCES", "0").strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("NHX_COLLECT_SOURCES", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def record_source_collection_disabled(output_dir: Path) -> None:
     manifests = output_dir / "manifests"
     manifests.mkdir(parents=True, exist_ok=True)
     (manifests / "source-collection-disabled.txt").write_text(
-        "source collection disabled; set NMP_COLLECT_SOURCES=1 to enable\n",
+        "source collection disabled; set NHX_COLLECT_SOURCES=1 to enable\n",
         encoding="utf-8",
     )
 

@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from nmp.common.entities.client import EntityClient
-from nmp.core.models.service import ModelsService
-from nmp.testing import create_test_client
-from nmp.testing.blockbuster import blockbuster_fixture
+from nhx.common.entities.client import EntityClient
+from nhx.core.models.service import ModelsService
+from nhx.testing import create_test_client
+from nhx.testing.blockbuster import blockbuster_fixture
 
 blockbuster = blockbuster_fixture(autouse=True)
 

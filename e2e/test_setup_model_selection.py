@@ -19,21 +19,21 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_platform import APIStatusError, NeMoPlatform
-from nemo_platform_ext.cli.commands import setup as setup_commands
-from nemo_platform_ext.cli.commands.setup import ModelPair, SetupClients
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nmp.common.config import Configuration
-from nmp.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_SERVED_MODELS_HEADER
-from nmp.core.inference_gateway.config import InferenceGatewayConfig
-from nmp.testing import MockProviderResponse, add_mock_provider
+from nemo_helix import APIStatusError, NeMoHelix
+from nemo_helix_ext.cli.commands import setup as setup_commands
+from nemo_helix_ext.cli.commands.setup import ModelPair, SetupClients
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nhx.common.config import Configuration
+from nhx.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_SERVED_MODELS_HEADER
+from nhx.core.inference_gateway.config import InferenceGatewayConfig
+from nhx.testing import MockProviderResponse, add_mock_provider
 
 pytestmark = [pytest.mark.timeout(300)]
 
-SETUP_MOD = "nemo_platform_ext.cli.commands.setup"
+SETUP_MOD = "nemo_helix_ext.cli.commands.setup"
 
 
 def _unique_suffix() -> str:
@@ -55,7 +55,7 @@ def _chat_response(content: str) -> dict[str, Any]:
     }
 
 
-def _advertise_models_without_routes(sdk: NeMoPlatform, workspace: str, name: str, entities: list[str]) -> str:
+def _advertise_models_without_routes(sdk: NeMoHelix, workspace: str, name: str, entities: list[str]) -> str:
     """Create a mock provider that serves *entities* before their routes exist.
 
     This is ``add_mock_provider`` without the passthrough VirtualModels it
@@ -83,7 +83,7 @@ def _advertise_models_without_routes(sdk: NeMoPlatform, workspace: str, name: st
     return provider_name
 
 
-def _run_auto_setup(sdk: NeMoPlatform, workspace: str, provider_name: str) -> ModelPair | None:
+def _run_auto_setup(sdk: NeMoHelix, workspace: str, provider_name: str) -> ModelPair | None:
     """Run ``_run_auto_mode`` for *provider_name* and return the persisted pair."""
     with (
         patch.dict("os.environ", {"NEMO_DEFAULT_MODEL": "", "NEMO_FAST_MODEL": ""}),
@@ -112,7 +112,7 @@ def _run_auto_setup(sdk: NeMoPlatform, workspace: str, provider_name: str) -> Mo
     return save_pair.call_args.args[1]
 
 
-def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoPlatform, workspace: str):
+def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoHelix, workspace: str):
     """The largest model that answers becomes the default, the smallest the fast model."""
     suffix = _unique_suffix()
     ultra = f"nvidia-nemotron-ultra-500b-{suffix}"
@@ -142,7 +142,7 @@ def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoPlatform, 
     assert saved == ModelPair(default=f"{workspace}/{large}", fast=f"{workspace}/{nano}")
 
 
-def test_auto_setup_waits_for_a_late_published_model_route(sdk: NeMoPlatform, workspace: str):
+def test_auto_setup_waits_for_a_late_published_model_route(sdk: NeMoHelix, workspace: str):
     """Cold start: discovery reports a model before its route is published.
 
     The gateway 404s the model until the controller creates its passthrough
@@ -169,7 +169,7 @@ def test_auto_setup_waits_for_a_late_published_model_route(sdk: NeMoPlatform, wo
     assert saved == ModelPair(default=f"{workspace}/{entity}", fast=f"{workspace}/{entity}")
 
 
-def test_auto_setup_saves_nothing_when_no_model_answers(sdk: NeMoPlatform, workspace: str):
+def test_auto_setup_saves_nothing_when_no_model_answers(sdk: NeMoHelix, workspace: str):
     """A provider whose models all fail leaves the default unset rather than broken."""
     suffix = _unique_suffix()
     entity = f"nvidia-nemotron-nano-9b-{suffix}"

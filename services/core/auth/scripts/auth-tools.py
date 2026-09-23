@@ -456,7 +456,7 @@ def check(
             / "core"
             / "auth"
             / "src"
-            / "nmp"
+            / "nhx"
             / "core"
             / "auth"
             / "assets"
@@ -544,7 +544,7 @@ def check(
         console.print("  3. [bold]Verify[/bold] if new endpoints require additional authorization permissions")
         console.print("  4. Update role definitions if needed to grant appropriate access")
         console.print(
-            "  5. Commit the changes to [cyan]services/core/auth/src/nmp/core/auth/assets/static-authz.yaml[/cyan]\n"
+            "  5. Commit the changes to [cyan]services/core/auth/src/nhx/core/auth/assets/static-authz.yaml[/cyan]\n"
         )
 
     if orphaned:
@@ -724,7 +724,7 @@ def update(
             / "core"
             / "auth"
             / "src"
-            / "nmp"
+            / "nhx"
             / "core"
             / "auth"
             / "assets"
@@ -959,7 +959,7 @@ def sort(
             / "core"
             / "auth"
             / "src"
-            / "nmp"
+            / "nhx"
             / "core"
             / "auth"
             / "assets"
@@ -1005,7 +1005,7 @@ def stats(
             / "core"
             / "auth"
             / "src"
-            / "nmp"
+            / "nhx"
             / "core"
             / "auth"
             / "assets"
@@ -1236,7 +1236,7 @@ def _generate_permissions_reference(auth_config: Dict) -> str:
     )
     lines.append("")
     lines.append(
-        "Complete reference of all permissions across the NeMo Platform APIs. "
+        "Complete reference of all permissions across the NeMo Helix APIs. "
         "Each permission controls access to a specific operation within an individual API. "
         "Permissions are assigned to users through "
         "[roles](/documentation/access-control/authorization/roles-and-permissions)."
@@ -1251,7 +1251,7 @@ def _generate_permissions_reference(auth_config: Dict) -> str:
     lines.append("<Note>")
     lines.append("")
     lines.append(
-        "PlatformAdmin is omitted — it bypasses permission checks entirely at the policy level. "
+        "HelixAdmin is omitted — it bypasses permission checks entirely at the policy level. "
         "JobRunner is intended for workload identities, not interactive users."
     )
     lines.append("")
@@ -1311,7 +1311,7 @@ def generate_docs(
             / "core"
             / "auth"
             / "src"
-            / "nmp"
+            / "nhx"
             / "core"
             / "auth"
             / "assets"
@@ -1377,7 +1377,7 @@ def sync_plugins(
             / "core"
             / "auth"
             / "src"
-            / "nmp"
+            / "nhx"
             / "core"
             / "auth"
             / "assets"
@@ -1387,7 +1387,7 @@ def sync_plugins(
         auth_path = project_root / auth_path
 
     try:
-        from nmp.core.auth.app.bundle import get_degraded_plugins, merge_plugin_authz_contributions
+        from nhx.core.auth.app.bundle import get_degraded_plugins, merge_plugin_authz_contributions
     except ImportError as exc:
         console.print(f"[red]Cannot import plugin authz merge: {exc}[/red]")
         console.print("[yellow]Run from repo root with workspace packages installed (uv sync).[/yellow]")

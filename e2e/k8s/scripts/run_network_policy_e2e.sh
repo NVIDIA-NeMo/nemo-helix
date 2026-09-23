@@ -16,8 +16,8 @@ export KIND_ENABLE_GATEWAY="${KIND_ENABLE_GATEWAY:-false}"
 export NAMESPACE="${NAMESPACE:-${KUBE_NAMESPACE:-default}}"
 export HELM_VALUES="${HELM_VALUES:-${REPO_ROOT}/e2e/k8s/values/kind.yaml}"
 
-if [ -z "${NMP_E2E_REGISTRY:-}" ] || [ -z "${NMP_E2E_TAG:-}" ]; then
-    log_warn "NMP_E2E_REGISTRY/NMP_E2E_TAG not set; Helm will use chart default images. For source checkouts, set them to a branch-built nmp-api image."
+if [ -z "${NHX_E2E_REGISTRY:-}" ] || [ -z "${NHX_E2E_TAG:-}" ]; then
+    log_warn "NHX_E2E_REGISTRY/NHX_E2E_TAG not set; Helm will use chart default images. For source checkouts, set them to a branch-built nhx-api image."
 fi
 
 network_policy_values="${REPO_ROOT}/e2e/k8s/values/network-policies.yaml"

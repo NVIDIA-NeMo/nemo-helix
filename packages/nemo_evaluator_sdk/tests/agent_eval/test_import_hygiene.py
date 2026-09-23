@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Guardrail: the agent_eval package must stay free of NeMo-Platform imports.
+"""Guardrail: the agent_eval package must stay free of NeMo-Helix imports.
 
-The SDK is consumed by NeMo-Platform adapters, never the reverse. This test
+The SDK is consumed by NeMo-Helix adapters, never the reverse. This test
 fails if any module under ``agent_eval`` imports a platform-specific package,
 which keeps the promoted generics from leaking coupling into the SDK.
 """
@@ -22,7 +22,7 @@ AGENT_EVAL_ROOT = Path(next(iter(agent_eval.__path__))).resolve()
 # Import statements that would couple the SDK to the platform / adapter.
 _FORBIDDEN = re.compile(
     r"^\s*(?:from|import)\s+"
-    r"(nemo_platform|nmp_[A-Za-z0-9_]+|nat_runner|runtimes(?:\.|\s|$)|evaluator_agent_eval)",
+    r"(nemo_helix|nhx_[A-Za-z0-9_]+|nat_runner|runtimes(?:\.|\s|$)|evaluator_agent_eval)",
     re.MULTILINE,
 )
 
@@ -35,4 +35,4 @@ def test_agent_eval_has_no_platform_imports() -> None:
             line_no = text.count("\n", 0, match.start()) + 1
             offenders.append(f"{path.relative_to(AGENT_EVAL_ROOT)}:{line_no}: {match.group(0).strip()}")
 
-    assert not offenders, "agent_eval must not import NeMo-Platform packages:\n" + "\n".join(offenders)
+    assert not offenders, "agent_eval must not import NeMo-Helix packages:\n" + "\n".join(offenders)

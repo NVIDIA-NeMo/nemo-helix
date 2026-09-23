@@ -3,8 +3,8 @@
 
 import warnings
 
-from nemo_platform_plugin.models.types import ModelSpec as PluginModelSpec
-from nmp.core.models.schemas import ModelSpec
+from nemo_helix_plugin.models.types import ModelSpec as PluginModelSpec
+from nhx.core.models.schemas import ModelSpec
 
 _MINIMAL = {
     "checkpoint_model_name": "meta-llama/Llama-3.2-1b-instruct",

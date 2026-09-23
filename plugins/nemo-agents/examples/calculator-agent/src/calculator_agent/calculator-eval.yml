@@ -30,7 +30,7 @@ llms:
     # platform, override via --base-url or NEMO_BASE_URL.
     #
     # ${NEMO_DEFAULT_MODEL} resolves to the model configured on the SDK
-    # context (``nemo_platform.config.get_context().default_model``) so the
+    # context (``nemo_helix.config.get_context().default_model``) so the
     # example works against whichever model your platform has registered as
     # a VirtualModel.  To pin a different judge, replace this with a
     # specific entity name (see `nemo inference virtual-models list

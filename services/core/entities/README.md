@@ -3,7 +3,7 @@
 
 # Entity Store
 
-Generic entity storage service with schema-agnostic design, part of the NeMo Platform Core infrastructure.
+Generic entity storage service with schema-agnostic design, part of the NeMo Helix Core infrastructure.
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@ Generic entity storage service with schema-agnostic design, part of the NeMo Pla
 
 ## Overview
 
-Entity Store provides a schema-agnostic storage system for all entity types in the NeMo Platform. It treats entity-specific data as opaque JSONB, enabling type-safe client SDKs to be built on top while keeping the storage layer completely generic.
+Entity Store provides a schema-agnostic storage system for all entity types in the NeMo Helix. It treats entity-specific data as opaque JSONB, enabling type-safe client SDKs to be built on top while keeping the storage layer completely generic.
 
 ### Key Features
 

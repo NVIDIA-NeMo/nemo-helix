@@ -3,7 +3,7 @@
 
 """Kind smoke e2e for models → deployments_plugin → plugin k8s backend.
 
-Runs against a real cluster when ``NMP_BASE_URL`` / ``NMP_E2E_CLUSTER_URL`` is set
+Runs against a real cluster when ``NHX_BASE_URL`` / ``NHX_E2E_CLUSTER_URL`` is set
 (the ``kind-cpu-smoke`` CI job). Uses a CPU-only generic container image with no
 NGC credentials.
 """
@@ -14,7 +14,7 @@ import time
 import uuid
 
 import pytest
-from nemo_platform import NeMoPlatform, NotFoundError
+from nemo_helix import NeMoHelix, NotFoundError
 
 # Kind smoke generic deployment image (python -m http.server). Keep in sync with
 # .github/actions/setup-kind-cluster/action.yaml GENERIC_HTTP_* prepull vars.
@@ -31,7 +31,7 @@ def _unique_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
-def _deployment_diagnostic(sdk: NeMoPlatform, *, workspace: str, name: str, prefix: str) -> str:
+def _deployment_diagnostic(sdk: NeMoHelix, *, workspace: str, name: str, prefix: str) -> str:
     try:
         deployment = sdk.inference.deployments.retrieve(name, workspace=workspace)
     except NotFoundError:
@@ -45,7 +45,7 @@ def _deployment_diagnostic(sdk: NeMoPlatform, *, workspace: str, name: str, pref
 
 
 def _wait_for_deployment_ready(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -85,7 +85,7 @@ def _wait_for_deployment_ready(
 
 
 def _wait_for_deployment_deleted(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -114,7 +114,7 @@ def _wait_for_deployment_deleted(
     pytest.fail(f"Deployment {name!r} was not deleted within {timeout_seconds}s; last status={last_status!r}")
 
 
-def test_generic_model_deployment_lifecycle(sdk: NeMoPlatform, workspace: str) -> None:
+def test_generic_model_deployment_lifecycle(sdk: NeMoHelix, workspace: str) -> None:
     """Create → READY → delete a generic CPU deployment on the plugin k8s backend."""
     config_name = _unique_name("kind-generic-cfg")
     deployment_name = _unique_name("kind-generic-dep")

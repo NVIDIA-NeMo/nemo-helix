@@ -17,10 +17,10 @@ import uuid
 import pytest
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.sdk import NeMoPlatform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 pytestmark = [
     pytest.mark.integration,
@@ -39,7 +39,7 @@ def _unique(prefix: str) -> str:
 
 @pytest.mark.timeout(300)
 def test_metric_type_filter_narrows_listing(subprocess_platform: str) -> None:
-    client = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()

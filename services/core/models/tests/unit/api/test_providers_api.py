@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.auth import AuthClient, Principal, get_auth_client
-from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
-from nmp.core.models.api.v2.providers import router
-from nmp.core.models.schemas import ModelProvider, ModelProviderStatus
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
+from nhx.core.models.api.v2.providers import router
+from nhx.core.models.schemas import ModelProvider, ModelProviderStatus
 
 
 @pytest.fixture
@@ -50,8 +50,8 @@ def mock_sdk():
 @pytest.fixture
 def test_app(mock_model_provider_service, mock_auth_client, mock_sdk):
     """Create a FastAPI test app with mocked dependencies."""
-    from nmp.common.service.dependencies import get_sdk_client
-    from nmp.core.models.api.dependencies import get_model_provider_service
+    from nhx.common.service.dependencies import get_sdk_client
+    from nhx.core.models.api.dependencies import get_model_provider_service
 
     app = FastAPI()
 

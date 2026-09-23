@@ -35,18 +35,18 @@ def test_no_sidecar_when_auth_disabled() -> None:
 def test_builds_sidecar_when_requested_and_auth_on() -> None:
     with (
         patch(f"{_MOD}.platform_auth_enabled", return_value=True),
-        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nmp-api:local"),
-        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-platform-api:8080"),
+        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
+        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-helix-api:8080"),
     ):
         container = build_auth_proxy_container(_config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"))
     assert container is not None
     assert container.name == AUTH_PROXY_CONTAINER_NAME
-    assert container.image == "my-registry/nmp-api:local"
+    assert container.image == "my-registry/nhx-api:local"
     assert container.command == ["nemo", "services", "run", "--sidecars", "auth-proxy"]
     assert container.restart_policy == "Always"
     env = {e.name: e.value for e in container.env}
-    assert env["NMP_AUTH_PROXY_PRINCIPAL"] == "agents"
-    assert env["NMP_BASE_URL"] == "http://nemo-platform-api:8080"
+    assert env["NHX_AUTH_PROXY_PRINCIPAL"] == "agents"
+    assert env["NHX_BASE_URL"] == "http://nemo-helix-api:8080"
     # Loopback exec probe (proxy binds 127.0.0.1, so pod-IP httpGet would be refused).
     assert container.readiness_probe is not None
     assert container.readiness_probe.exec_action is not None
@@ -56,8 +56,8 @@ def test_builds_sidecar_when_requested_and_auth_on() -> None:
 def test_sidecar_stamps_on_behalf_of_when_set() -> None:
     with (
         patch(f"{_MOD}.platform_auth_enabled", return_value=True),
-        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nmp-api:local"),
-        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-platform-api:8080"),
+        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
+        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-helix-api:8080"),
     ):
         container = build_auth_proxy_container(
             _config(
@@ -68,20 +68,20 @@ def test_sidecar_stamps_on_behalf_of_when_set() -> None:
         )
     assert container is not None
     env = {e.name: e.value for e in container.env}
-    assert env["NMP_AUTH_PROXY_PRINCIPAL"] == "agents"
-    assert env["NMP_AUTH_PROXY_ON_BEHALF_OF"] == "user:alice"
+    assert env["NHX_AUTH_PROXY_PRINCIPAL"] == "agents"
+    assert env["NHX_AUTH_PROXY_ON_BEHALF_OF"] == "user:alice"
 
 
 def test_sidecar_omits_on_behalf_of_when_unset() -> None:
     with (
         patch(f"{_MOD}.platform_auth_enabled", return_value=True),
-        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nmp-api:local"),
-        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-platform-api:8080"),
+        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
+        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-helix-api:8080"),
     ):
         container = build_auth_proxy_container(_config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"))
     assert container is not None
     env = {e.name: e.value for e in container.env}
-    assert "NMP_AUTH_PROXY_ON_BEHALF_OF" not in env
+    assert "NHX_AUTH_PROXY_ON_BEHALF_OF" not in env
 
 
 def test_sidecar_without_identity_is_rejected() -> None:

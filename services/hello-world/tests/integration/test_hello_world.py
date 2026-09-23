@@ -18,9 +18,9 @@ from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform import NeMoPlatform
-from nmp.hello_world.service import HelloWorldService
-from nmp.testing.client import SDKTestClientAdapter, create_test_client
+from nemo_helix import NeMoHelix
+from nhx.hello_world.service import HelloWorldService
+from nhx.testing.client import SDKTestClientAdapter, create_test_client
 
 # Default workspace for tests
 DEFAULT_WORKSPACE = "default"
@@ -42,15 +42,15 @@ def http_client() -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture(scope="module")
-def sdk(http_client: TestClient) -> NeMoPlatform:
+def sdk(http_client: TestClient) -> NeMoHelix:
     """SDK client backed by the test client."""
-    return NeMoPlatform(base_url="http://testserver", http_client=SDKTestClientAdapter(http_client))
+    return NeMoHelix(base_url="http://testserver", http_client=SDKTestClientAdapter(http_client))
 
 
 class TestHelloWorld:
     """Tests for the hello-world service endpoints."""
 
-    def test_hello_endpoint_returns_message(self, sdk: NeMoPlatform):
+    def test_hello_endpoint_returns_message(self, sdk: NeMoHelix):
         """Test that /apis/hello-world/v2/workspaces/{workspace}/hello returns the expected message."""
         response = sdk._client.get(f"{HELLO_WORLD_API_PREFIX}/v2/workspaces/{DEFAULT_WORKSPACE}/hello")
         assert response.status_code == 200
@@ -59,13 +59,13 @@ class TestHelloWorld:
         assert "message" in data
         assert data["message"] == f"Hello World from workspace '{DEFAULT_WORKSPACE}'"
 
-    def test_hello_endpoint_content_type(self, sdk: NeMoPlatform):
+    def test_hello_endpoint_content_type(self, sdk: NeMoHelix):
         """Test that /apis/hello-world/v2/workspaces/{workspace}/hello returns JSON content type."""
         response = sdk._client.get(f"{HELLO_WORLD_API_PREFIX}/v2/workspaces/{DEFAULT_WORKSPACE}/hello")
         assert response.status_code == 200
         assert "application/json" in response.headers.get("content-type", "")
 
-    def test_hello_endpoint_in_openapi(self, sdk: NeMoPlatform):
+    def test_hello_endpoint_in_openapi(self, sdk: NeMoHelix):
         """Test that /apis/hello-world/v2/workspaces/{workspace}/hello is documented in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -83,7 +83,7 @@ class TestHelloWorld:
 class TestHelloWorldJobs:
     """Tests for the hello-world job endpoints."""
 
-    def test_jobs_routes_in_openapi(self, sdk: NeMoPlatform):
+    def test_jobs_routes_in_openapi(self, sdk: NeMoHelix):
         """Test that job endpoints are documented in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -97,7 +97,7 @@ class TestHelloWorldJobs:
         assert "post" in paths[jobs_path]
         assert "get" in paths[jobs_path]
 
-    def test_jobs_schema_in_openapi(self, sdk: NeMoPlatform):
+    def test_jobs_schema_in_openapi(self, sdk: NeMoHelix):
         """Test that job schemas are in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -109,7 +109,7 @@ class TestHelloWorldJobs:
         assert "HelloWorldJobConfig" in schemas
         assert "HelloWorldJobRequest" in schemas
 
-    def test_job_config_schema_has_message_field(self, sdk: NeMoPlatform):
+    def test_job_config_schema_has_message_field(self, sdk: NeMoHelix):
         """Test that HelloWorldJobConfig has message field."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -123,7 +123,7 @@ class TestHelloWorldJobs:
         assert properties["message"].get("type") == "string"
 
     @pytest.mark.skip(reason=JOBS_SKIP_REASON)
-    def test_create_job_and_wait_for_completion(self, sdk: NeMoPlatform):
+    def test_create_job_and_wait_for_completion(self, sdk: NeMoHelix):
         """Test that a job can be created and reaches completed status."""
         job_request = {
             "name": "e2e-hello-world-job",
@@ -165,7 +165,7 @@ class TestHelloWorldJobs:
 class TestHelloWorldMessages:
     """Tests for the hello-world message entity endpoints."""
 
-    def test_messages_routes_in_openapi(self, sdk: NeMoPlatform):
+    def test_messages_routes_in_openapi(self, sdk: NeMoHelix):
         """Test that message endpoints are documented in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -181,7 +181,7 @@ class TestHelloWorldMessages:
         assert "get" in paths[messages_path]
         assert messages_name_path in paths
 
-    def test_message_crud_lifecycle(self, sdk: NeMoPlatform):
+    def test_message_crud_lifecycle(self, sdk: NeMoHelix):
         """Test full CRUD lifecycle for messages."""
         # Use default workspace (auto-created by entity-store)
         test_workspace = DEFAULT_WORKSPACE
@@ -235,7 +235,7 @@ class TestHelloWorldMessages:
     @pytest.mark.skip(
         reason="TODO: Re-enable once entity store supports unique constraint on (workspace_id, entity_type, name)"
     )
-    def test_create_duplicate_message_fails(self, sdk: NeMoPlatform):
+    def test_create_duplicate_message_fails(self, sdk: NeMoHelix):
         """Test that creating a duplicate message returns 409."""
         test_workspace = DEFAULT_WORKSPACE
         test_name = f"dup-message-{uuid.uuid4().hex[:8]}"
@@ -260,7 +260,7 @@ class TestHelloWorldMessages:
         # Cleanup
         sdk._client.delete(f"{HELLO_WORLD_API_PREFIX}/v2/workspaces/{test_workspace}/messages/{test_name}")
 
-    def test_get_nonexistent_message_returns_404(self, sdk: NeMoPlatform):
+    def test_get_nonexistent_message_returns_404(self, sdk: NeMoHelix):
         """Test that getting a non-existent message returns 404."""
         response = sdk._client.get(f"{HELLO_WORLD_API_PREFIX}/v2/workspaces/{DEFAULT_WORKSPACE}/messages/fake-message")
         assert response.status_code == 404

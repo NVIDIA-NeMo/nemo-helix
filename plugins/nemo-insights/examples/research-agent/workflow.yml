@@ -36,7 +36,7 @@ llms:
     _type: nim
     # Direct NIM model name (slash/dot form), so `uv run main.py` hits NIM
     # at integrate.api.nvidia.com directly. When deploying through
-    # nemo-platform (`nemo agents deploy`), swap to the lowercase-hyphenated
+    # nemo-helix (`nemo agents deploy`), swap to the lowercase-hyphenated
     # platform entity ID (e.g. `meta-llama-3-3-70b-instruct`) — the platform
     # inference gateway validates names against that format. List entity IDs
     # with `nemo models list`.

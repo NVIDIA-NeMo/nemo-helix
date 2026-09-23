@@ -7,12 +7,12 @@ These pin the three behaviours that make ``nemo agents`` usable against a
 remote, secured, multi-workspace platform:
 
 - **Base URL** resolves through the shared CLI context the rest of the CLI
-  uses (``nemo config set --base-url`` / ``NMP_BASE_URL``), with an explicit
+  uses (``nemo config set --base-url`` / ``NHX_BASE_URL``), with an explicit
   ``--base-url`` / ``NEMO_BASE_URL`` still taking precedence, and the resolved
   target echoed to stderr so a mis-pointed command is visible instead of
   silently hitting localhost.
 - **Workspace** resolves through the active CLI context (``nemo config
-  use-context`` / ``$NMP_WORKSPACE``) when ``--workspace`` is omitted, instead
+  use-context`` / ``$NHX_WORKSPACE``) when ``--workspace`` is omitted, instead
   of silently acting on ``default`` — with an explicit ``--workspace`` still
   winning and ``default`` preserved when no CLI state is installed.
 - **Auth** headers from the shared context (the ``Authorization: Bearer``
@@ -256,7 +256,7 @@ def test_platform_invoke_attaches_auth_and_targets_context_base_url() -> None:
 # The bug these pin: declaring ``--workspace`` with a literal ``"default"``
 # Typer default makes an omitted flag indistinguishable from an explicit
 # ``--workspace default``, so the workspace the user selected (via
-# ``nemo config use-context`` / ``$NMP_WORKSPACE``) was silently discarded and
+# ``nemo config use-context`` / ``$NHX_WORKSPACE``) was silently discarded and
 # the command acted on ``default`` — potentially the wrong tenant.
 
 
@@ -278,14 +278,14 @@ def _invoke_capturing(args: list[str], **kwargs: Any) -> tuple[Any, list[httpx.R
 
 def test_workspace_falls_back_to_active_context_workspace(monkeypatch) -> None:
     """With no ``--workspace``, commands act on the active CLI context's workspace."""
-    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     _, captured = _invoke_capturing(["list"], obj=_FakeCLIContext(workspace="team-a"))
     assert _workspace_from(captured[0]) == "team-a"
 
 
 def test_workspace_flag_overrides_active_context_workspace(monkeypatch) -> None:
     """An explicit ``--workspace`` still wins over the active context."""
-    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     _, captured = _invoke_capturing(
         ["list", "--workspace", "flag-ws"],
         obj=_FakeCLIContext(workspace="team-a"),
@@ -295,14 +295,14 @@ def test_workspace_flag_overrides_active_context_workspace(monkeypatch) -> None:
 
 def test_workspace_defaults_without_cli_state(monkeypatch) -> None:
     """No CLI state and no flag -> ``default``, preserving direct/unit invocation."""
-    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     _, captured = _invoke_capturing(["list"])
     assert _workspace_from(captured[0]) == "default"
 
 
 def test_workspace_falls_back_to_env_without_cli_state(monkeypatch) -> None:
-    """``$NMP_WORKSPACE`` applies when no CLI state object is installed."""
-    monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+    """``$NHX_WORKSPACE`` applies when no CLI state object is installed."""
+    monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
     _, captured = _invoke_capturing(["list"])
     assert _workspace_from(captured[0]) == "env-ws"
 
@@ -311,18 +311,18 @@ def test_state_workspace_wins_over_the_env_fallback(monkeypatch) -> None:
     """A reporting CLI state short-circuits the resolver's bare env lookup.
 
     Internal ordering, not user-facing precedence: a real ``CLIContext``
-    applies ``$NMP_WORKSPACE`` before ``get_workspace()`` answers, so the env
+    applies ``$NHX_WORKSPACE`` before ``get_workspace()`` answers, so the env
     var still wins in practice. ``_FakeCLIContext`` ignores the environment
     on purpose so this isolates the fallback path.
     """
-    monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+    monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
     _, captured = _invoke_capturing(["list"], obj=_FakeCLIContext(workspace="team-a"))
     assert _workspace_from(captured[0]) == "team-a"
 
 
 def test_workspace_resolution_applies_to_subgroup_commands(monkeypatch) -> None:
     """Resolution is not list-only: nested groups honour the context too."""
-    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     _, captured = _invoke_capturing(
         ["deployments", "list"],
         obj=_FakeCLIContext(workspace="team-a"),

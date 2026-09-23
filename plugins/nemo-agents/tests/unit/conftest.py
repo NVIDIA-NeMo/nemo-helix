@@ -12,11 +12,11 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import FilesetFileOutput, FilesetOutput
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 
 PLATFORM_BASE_URL = "http://test"
 
@@ -37,11 +37,11 @@ def _make_platform_client(
     )
 
 
-PlatformClientFactory = Callable[..., NemoClient]
+HelixClientFactory = Callable[..., NemoClient]
 
 
 @pytest.fixture
-def make_platform_client() -> PlatformClientFactory:
+def make_platform_client() -> HelixClientFactory:
     """Build a :class:`NemoClient` over ``httpx.MockTransport`` standing in for the CLI's platform handle.
 
     Without a handler every request fails loudly, so a test that only expects
@@ -140,21 +140,21 @@ def fake_transfers(monkeypatch: pytest.MonkeyPatch) -> FakeFilesetTransfers:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_nmp_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory):
-    """Pin ``NMP_DATA_DIR`` to a per-test tempdir for every test in this tree.
+def _isolate_nhx_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory):
+    """Pin ``NHX_DATA_DIR`` to a per-test tempdir for every test in this tree.
 
     Belt-and-braces against accidental writes to ``~/.local/share/nemo``: any
-    test that resolves :func:`nmp_user_data_dir` (directly or via
+    test that resolves :func:`nhx_user_data_dir` (directly or via
     ``AgentsConfig`` defaults) will land under a tempdir that pytest
     cleans up, never the developer's real homedir.  Tests that need to
     exercise the env-var resolution itself (XDG, explicit path) override
     this in their own fixtures via ``monkeypatch``.
     """
-    isolated = tmp_path_factory.mktemp("nmp-data")
-    monkeypatch.setenv("NMP_DATA_DIR", str(isolated))
+    isolated = tmp_path_factory.mktemp("nhx-data")
+    monkeypatch.setenv("NHX_DATA_DIR", str(isolated))
     # Configuration is cached; reset so the override takes effect for tests
     # that read `AgentsConfig.get()`.
-    from nemo_platform_plugin.config import Configuration
+    from nemo_helix_plugin.config import Configuration
 
     Configuration.clear_cache()
     yield
@@ -166,7 +166,7 @@ def ctx(tmp_path: Path) -> JobContext:
     """:class:`JobContext` with platform-style storage rooted in ``tmp_path``.
 
     Mirrors the shape ``run_task`` builds via
-    :func:`nemo_platform_plugin.tasks.dispatcher.build_ctx_from_env` and the
+    :func:`nemo_helix_plugin.tasks.dispatcher.build_ctx_from_env` and the
     scheduler builds via ``_build_local_context``: a per-job tempdir
     containing ``persistent/`` and ``ephemeral/`` subdirs plus a
     :class:`LocalJobResults` sink rooted at ``persistent/results/``.

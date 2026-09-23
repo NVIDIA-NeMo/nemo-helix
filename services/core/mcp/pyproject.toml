@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-core-mcp"
-description = "Model Context Protocol server for NeMo Platform"
+name = "nhx-core-mcp"
+description = "Model Context Protocol server for NeMo Helix"
 dependencies = [
-    "nmp-common",
-    "nmp-entities",
-    "nemo-platform-sdk",
+    "nhx-common",
+    "nhx-entities",
+    "nemo-helix-sdk",
     "fastmcp>=3.2.0",  # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High): fix in >=3.2.0
 ]
 requires-python = ">=3.11,<3.15"
@@ -28,12 +28,12 @@ classifiers = [
 version = "0.0.0"
 
 [project.scripts]
-nemo-mcp = "nmp.core.mcp.main:main"
+nemo-mcp = "nhx.core.mcp.main:main"
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-entities = { workspace = true }
-nemo-platform-sdk = { workspace = true }
+nhx-common = { workspace = true }
+nhx-entities = { workspace = true }
+nemo-helix-sdk = { workspace = true }
 
 
 [build-system]
@@ -46,4 +46,4 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]

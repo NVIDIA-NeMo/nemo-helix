@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatTimeInSeconds, getDifferenceInMilliseconds } from '@nemo/common/src/utils/date';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import * as safeSynthesizerApi from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
@@ -30,7 +30,7 @@ vi.mock('@studio/util/date', () => ({
 vi.mock('@studio/routes/SafeSynthesizerJobDetailsRoute/util', () => ({
   getFileType: vi.fn(() => 'jsonl'),
   isJobTerminated: vi.fn(
-    (status: PlatformJobStatus) =>
+    (status: HelixJobStatus) =>
       status === 'completed' || status === 'error' || status === 'cancelled'
   ),
   getElapsedTime: vi.fn((created_at?: string, resultSummary_created_at?: string) => {

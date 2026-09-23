@@ -4,8 +4,8 @@
 """K8s-only E2E tests for auditor job submission.
 
 These tests submit real audit jobs and poll for completion. They require:
-  - ``NMP_BASE_URL`` pointing at a K8s deployment (set via ``container_only`` marker)
-  - garak installed at ``/app/.garak_venv/bin/python`` in the auditor-tasks image
+  - ``NHX_BASE_URL`` pointing at a K8s deployment (set via ``container_only`` marker)
+  - garak installed at ``/app/.garak_venv/bin/python`` in the nhx-auditor-tasks image
   - mock inference provider support (``mock_provider_prefix: igw-mock-`` in Helm values)
 
 The probe used is ``test.Test`` — garak's single-message blank probe, which is the
@@ -19,12 +19,12 @@ from collections.abc import Iterator
 from contextlib import suppress
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.testing import add_mock_provider, short_unique_name
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing import add_mock_provider, short_unique_name
 
 from e2e.auditor.utils import minimal_audit_config, unique_name
 
@@ -48,7 +48,7 @@ def _chat_completion(content: str = "I'm happy to help!") -> dict:
     }
 
 
-def _wait_for_audit_job(sdk: NeMoPlatform, job_name: str, workspace: str) -> str:
+def _wait_for_audit_job(sdk: NeMoHelix, job_name: str, workspace: str) -> str:
     deadline = time.monotonic() + AUDIT_JOB_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         status_resp = client_from_platform(sdk, JobsClient).get_job_status(name=job_name, workspace=workspace)
@@ -59,7 +59,7 @@ def _wait_for_audit_job(sdk: NeMoPlatform, job_name: str, workspace: str) -> str
     raise TimeoutError(f"Audit job {job_name!r} did not complete within {AUDIT_JOB_TIMEOUT_SECONDS}s")
 
 
-def _cleanup_audit_job(sdk: NeMoPlatform, job_name: str, workspace: str) -> None:
+def _cleanup_audit_job(sdk: NeMoHelix, job_name: str, workspace: str) -> None:
     with suppress(Exception):
         jobs = client_from_platform(sdk, JobsClient)
         jobs.cancel_job(name=job_name, workspace=workspace)
@@ -67,7 +67,7 @@ def _cleanup_audit_job(sdk: NeMoPlatform, job_name: str, workspace: str) -> None
         jobs.delete_job(name=job_name, workspace=workspace)
 
 
-def _add_mock_provider_or_skip(sdk: NeMoPlatform, workspace: str, name: str) -> str:
+def _add_mock_provider_or_skip(sdk: NeMoHelix, workspace: str, name: str) -> str:
     """Create a mock inference provider, skipping the test if the deployment doesn't support one."""
     try:
         provider = add_mock_provider(
@@ -91,7 +91,7 @@ def _add_mock_provider_or_skip(sdk: NeMoPlatform, workspace: str, name: str) -> 
 
 
 @pytest.fixture(scope="module")
-def audit_workspace(sdk: NeMoPlatform) -> Iterator[str]:
+def audit_workspace(sdk: NeMoHelix) -> Iterator[str]:
     workspaces = client_from_platform(sdk, WorkspacesClient)
     name = short_unique_name("e2e-audit")
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
@@ -103,14 +103,14 @@ def audit_workspace(sdk: NeMoPlatform) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module")
-def mock_provider_name(sdk: NeMoPlatform, audit_workspace: str) -> str:
+def mock_provider_name(sdk: NeMoHelix, audit_workspace: str) -> str:
     """Create a canned-response mock provider for the module; workspace deletion cascades cleanup."""
     provider_name = short_unique_name("audit-mock")
     return _add_mock_provider_or_skip(sdk, audit_workspace, provider_name)
 
 
 @pytest.fixture(scope="module")
-def audit_config_name(sdk: NeMoPlatform, audit_workspace: str) -> Iterator[str]:
+def audit_config_name(sdk: NeMoHelix, audit_workspace: str) -> Iterator[str]:
     name = short_unique_name("e2e-audit-cfg")
     sdk.auditor.configs.create(
         workspace=audit_workspace,
@@ -125,7 +125,7 @@ def audit_config_name(sdk: NeMoPlatform, audit_workspace: str) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module")
-def audit_target_name(sdk: NeMoPlatform, audit_workspace: str, mock_provider_name: str) -> Iterator[str]:
+def audit_target_name(sdk: NeMoHelix, audit_workspace: str, mock_provider_name: str) -> Iterator[str]:
     name = short_unique_name("e2e-audit-tgt")
     sdk.auditor.targets.create(
         workspace=audit_workspace,
@@ -135,7 +135,7 @@ def audit_target_name(sdk: NeMoPlatform, audit_workspace: str, mock_provider_nam
         options={
             "openai": {
                 "OpenAICompatible": {
-                    "nmp_uri_spec": {
+                    "nhx_uri_spec": {
                         "inference_gateway": {
                             "workspace": audit_workspace,
                             "provider": mock_provider_name,
@@ -157,7 +157,7 @@ def audit_target_name(sdk: NeMoPlatform, audit_workspace: str, mock_provider_nam
 
 @pytest.mark.skip("re-enable after auditor image rebuilt")
 def test_audit_job_submit_blank_probe(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     audit_workspace: str,
     mock_provider_name: str,
 ) -> None:
@@ -175,7 +175,7 @@ def test_audit_job_submit_blank_probe(
         "options": {
             "openai": {
                 "OpenAICompatible": {
-                    "nmp_uri_spec": {
+                    "nhx_uri_spec": {
                         "inference_gateway": {
                             "workspace": audit_workspace,
                             "provider": mock_provider_name,
@@ -192,7 +192,7 @@ def test_audit_job_submit_blank_probe(
         final_status = _wait_for_audit_job(sdk, job_name, audit_workspace)
         assert final_status == "completed", (
             f"Audit job {job_name!r} ended with status {final_status!r} instead of 'completed'. "
-            "Check that garak is installed at /app/.garak_venv/bin/python in the auditor-tasks image."
+            "Check that garak is installed at /app/.garak_venv/bin/python in the nhx-auditor-tasks image."
         )
     finally:
         _cleanup_audit_job(sdk, job_name, audit_workspace)
@@ -200,7 +200,7 @@ def test_audit_job_submit_blank_probe(
 
 @pytest.mark.skip("re-enable after auditor image rebuilt")
 def test_audit_job_submit_with_entity_refs(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     audit_workspace: str,
     audit_config_name: str,
     audit_target_name: str,
@@ -222,7 +222,7 @@ def test_audit_job_submit_with_entity_refs(
 
 
 def test_audit_job_appears_in_list(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     audit_workspace: str,
     audit_config_name: str,
     audit_target_name: str,

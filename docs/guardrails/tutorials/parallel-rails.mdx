@@ -8,7 +8,7 @@ description: ""
 
 <a id="guardrails-tutorials-parallel-rails"></a>
 
-Run input and output rails in parallel to improve the response time of guardrail checks. This tutorial shows how to enable parallel rails using the NeMo Platform Python SDK.
+Run input and output rails in parallel to improve the response time of guardrail checks. This tutorial shows how to enable parallel rails using the NeMo Helix Python SDK.
 
 ## When to Use Parallel Rails Execution
 
@@ -37,8 +37,8 @@ Sequential execution is recommended for the following:
 
 Before you begin:
 
-- You have access to a running NeMo Platform.
-- `NMP_BASE_URL` is set to the NeMo Platform base URL.
+- You have access to a running NeMo Helix.
+- `NHX_BASE_URL` is set to the NeMo Helix base URL.
 - A `ModelProvider` is configured with an LLM provider. Follow [Setup](/documentation/get-started) if you haven't done this yet.
 
 This tutorial uses the following NIMs, available on `build.nvidia.com`:
@@ -55,10 +55,10 @@ Instantiate the platform client.
 
 ```python
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```

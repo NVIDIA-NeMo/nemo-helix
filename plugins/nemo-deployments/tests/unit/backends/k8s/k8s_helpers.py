@@ -28,7 +28,7 @@ from nemo_deployments_plugin.entities import (
     WorkloadIdentitySpec,
 )
 from nemo_deployments_plugin.types import RestartPolicy
-from nemo_platform_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext
 
 
 def sample_config(*, restart_policy: RestartPolicy = "Never") -> DeploymentConfig:

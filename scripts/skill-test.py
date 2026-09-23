@@ -35,10 +35,10 @@ from pathlib import Path
 import yaml
 
 SKILL_GLOBS = [
-    "packages/nemo_platform_ext/src/nemo_platform_ext/skills/*/SKILL.md",
+    "packages/nemo_helix_ext/src/nemo_helix_ext/skills/*/SKILL.md",
     ".agents/skills/*/SKILL.md",
     "plugins/*/src/*/skills/*/SKILL.md",
-    "sdk/python/nemo-platform/src/nemo_platform/cli/commands/skills/content/*/SKILL.md",
+    "sdk/python/nemo-helix/src/nemo_helix/cli/commands/skills/content/*/SKILL.md",
     "packages/*/src/*/.agents/skills/*/SKILL.md",
 ]
 

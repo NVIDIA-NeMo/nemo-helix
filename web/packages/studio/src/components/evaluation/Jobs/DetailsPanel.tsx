@@ -6,7 +6,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
@@ -63,7 +63,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
   };
 
   const isTerminalStatus =
-    evaluationJob?.status && PlatformJobTerminalStatuses.includes(evaluationJob.status);
+    evaluationJob?.status && HelixJobTerminalStatuses.includes(evaluationJob.status);
   const canCancelJob = evaluationJob?.status && !isTerminalStatus;
   const liveSeconds = useLiveSeconds({
     startDate: !isTerminalStatus ? utcToLocalDate(evaluationJob?.created_at) : undefined,
@@ -164,7 +164,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
               status ? (
                 <Flex align="center" gap="2">
                   <StatusBadge status={status} />
-                  {PlatformJobTerminalStatuses.includes(status)
+                  {HelixJobTerminalStatuses.includes(status)
                     ? durationMs !== undefined && formatDurationMs(durationMs)
                     : formatTimeInSeconds(liveSeconds)}
                 </Flex>

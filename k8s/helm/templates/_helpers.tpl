@@ -6,23 +6,23 @@ SPDX-License-Identifier: Apache-2.0
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "nemo-platform.name" -}}
+{{- define "nemo-helix.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "nemo-platform.chart" -}}
+{{- define "nemo-helix.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "nemo-platform.labels" -}}
-helm.sh/chart: {{ include "nemo-platform.chart" . }}
-{{ include "nemo-platform.selectorLabels" . }}
+{{- define "nemo-helix.labels" -}}
+helm.sh/chart: {{ include "nemo-helix.chart" . }}
+{{ include "nemo-helix.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -32,31 +32,31 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "nemo-platform.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "nemo-platform.name" . }}
+{{- define "nemo-helix.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "nemo-helix.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Calculate the config from structured and unrendered base platform, with overrides
 */}}
-{{- define "nemo-platform.calculatedConfig" -}}
-{{ tpl (mergeOverwrite (include "nemo-platform.unstructuredConfig" . | fromYaml) .Values.platformConfig | toYaml) . }}
+{{- define "nemo-helix.calculatedConfig" -}}
+{{ tpl (mergeOverwrite (include "nemo-helix.unstructuredConfig" . | fromYaml) .Values.platformConfig | toYaml) . }}
 {{- end -}}
 
 {{/*
 Calculate the config from the unrendered base platform, before any overrides
 */}}
-{{- define "nemo-platform.unstructuredConfig" -}}
+{{- define "nemo-helix.unstructuredConfig" -}}
 {{ include (print $.Template.BasePath "/_config-render.tpl") . }}
 {{- end -}}
 
 {{/*
 Determine if authentication is enabled from the calculated platform config (platformConfig.auth.enabled).
-Returns "true" when auth is enabled, empty string otherwise. Use with: {{- if include "nemo-platform.authEnabled" . }}
+Returns "true" when auth is enabled, empty string otherwise. Use with: {{- if include "nemo-helix.authEnabled" . }}
 */}}
-{{- define "nemo-platform.authEnabled" -}}
-{{- $config := include "nemo-platform.calculatedConfig" . | fromYaml -}}
+{{- define "nemo-helix.authEnabled" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
 {{- if and $config $config.auth (eq $config.auth.enabled true) -}}
 true
 {{- end -}}
@@ -66,8 +66,8 @@ true
 Determine if the calculated platform config uses the embedded PDP provider.
 Returns "true" when auth is enabled and auth.policy_decision_point_provider is "embedded".
 */}}
-{{- define "nemo-platform.embeddedPdpEnabled" -}}
-{{- $config := include "nemo-platform.calculatedConfig" . | fromYaml -}}
+{{- define "nemo-helix.embeddedPdpEnabled" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
 {{- if and $config $config.auth (eq $config.auth.enabled true) (eq $config.auth.policy_decision_point_provider "embedded") -}}
 true
 {{- end -}}
@@ -77,7 +77,7 @@ true
 Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 */}}
-{{- define "nemo-platform.fullname" -}}
+{{- define "nemo-helix.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -93,8 +93,8 @@ We truncate at 63 chars because some Kubernetes name fields are limited to this 
 {{/*
 Create the name of the configmap to use
 */}}
-{{- define "nemo-platform.platform-configmap" -}}
-{{- printf "%s-config" (include "nemo-platform.fullname" .) }}
+{{- define "nemo-helix.platform-configmap" -}}
+{{- printf "%s-config" (include "nemo-helix.fullname" .) }}
 {{- end }}
 
 {{/*
@@ -102,11 +102,11 @@ Default backend service name for ingress/HTTPRoute/OpenShift Route.
 When auth and Envoy proxy are enabled, returns the Envoy service name; otherwise the API service name.
 Use in values (e.g. ingress.hosts[].paths[].service) with tpl so routing points to the correct backend.
 */}}
-{{- define "nemo-platform.ingressBackendService" -}}
-{{- if and (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled -}}
-{{ include "nmp-envoy.servicename" . }}
+{{- define "nemo-helix.ingressBackendService" -}}
+{{- if and (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled -}}
+{{ include "nhx-envoy.servicename" . }}
 {{- else -}}
-{{ include "nmp-api.api-servicename" . }}
+{{ include "nhx-api.api-servicename" . }}
 {{- end -}}
 {{- end -}}
 
@@ -115,8 +115,8 @@ Default backend port for ingress/HTTPRoute/OpenShift Route.
 When auth and Envoy proxy are enabled, returns the Envoy service port; otherwise the API service port.
 Use in values (e.g. ingress.hosts[].paths[].port) with tpl so routing points to the correct backend.
 */}}
-{{- define "nemo-platform.ingressBackendPort" -}}
-{{- if and (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled -}}
+{{- define "nemo-helix.ingressBackendPort" -}}
+{{- if and (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled -}}
 {{ .Values.envoyProxy.service.port }}
 {{- else -}}
 {{ .Values.api.service.port }}
@@ -126,23 +126,23 @@ Use in values (e.g. ingress.hosts[].paths[].port) with tpl so routing points to 
 {{/*
 Bind address for in-cluster platform runner pods.
 */}}
-{{- define "nemo-platform.bindHost" -}}
-{{- $config := include "nemo-platform.calculatedConfig" . | fromYaml -}}
+{{- define "nemo-helix.bindHost" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
 {{- dig "service" "host" "0.0.0.0" $config -}}
 {{- end -}}
 
 {{/*
 Internal API URL for pods that need to call the platform API service.
 */}}
-{{- define "nemo-platform.internalBaseUrl" -}}
-{{- printf "http://%s:%s" (include "nmp-api.api-servicename" .) (toString .Values.api.service.port) -}}
+{{- define "nemo-helix.internalBaseUrl" -}}
+{{- printf "http://%s:%s" (include "nhx-api.api-servicename" .) (toString .Values.api.service.port) -}}
 {{- end -}}
 
 {{/*
 Loopback API URL for the API pod itself when embedded auth must call back into the
 local process instead of the cluster Service.
 */}}
-{{- define "nemo-platform.apiLoopbackBaseUrl" -}}
+{{- define "nemo-helix.apiLoopbackBaseUrl" -}}
 {{- printf "http://localhost:%s" (toString .Values.api.service.port) -}}
 {{- end -}}
 
@@ -150,8 +150,8 @@ local process instead of the cluster Service.
 Validate that Envoy retires idle upstream API connections before Uvicorn closes
 them. This avoids reusing a backend connection that the API already dropped.
 */}}
-{{- define "nemo-platform.validateEnvoyKeepAliveTimeouts" -}}
-{{- if and .Values.api.enabled (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled -}}
+{{- define "nemo-helix.validateEnvoyKeepAliveTimeouts" -}}
+{{- if and .Values.api.enabled (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled -}}
 {{- $apiKeepAliveSeconds := .Values.api.server.keepAliveTimeoutSeconds | int -}}
 {{- if lt $apiKeepAliveSeconds 1 -}}
 {{- fail "api.server.keepAliveTimeoutSeconds must be greater than 0" -}}
@@ -170,7 +170,7 @@ them. This avoids reusing a backend connection that the API already dropped.
 {{/*
 Pod annotations
 */}}
-{{- define "nemo-platform.podAnnotations" -}}
+{{- define "nemo-helix.podAnnotations" -}}
 checksum/config: {{ include (print $.Template.BasePath "/platform-configmap.yaml") . | sha256sum }}
 {{- end -}}
 
@@ -179,32 +179,32 @@ Name of the Secret containing API environment values or the secrets service
 default encryption key. Existing default-encryption-key Secrets are mounted with
 secretKeyRef instead of envFrom.
 */}}
-{{- define "nemo-platform.apiEnvSecretName" -}}
-{{- .Values.envFromSecret | default (include "nemo-platform.defaultEncryptionKeyExistingSecretName" .) | default (printf "%s-api-env" (include "nemo-platform.fullname" .)) -}}
+{{- define "nemo-helix.apiEnvSecretName" -}}
+{{- .Values.envFromSecret | default (include "nemo-helix.defaultEncryptionKeyExistingSecretName" .) | default (printf "%s-api-env" (include "nemo-helix.fullname" .)) -}}
 {{- end -}}
 
 {{/*
 Environment variable name used by the secrets service secret_key provider.
 */}}
-{{- define "nemo-platform.defaultEncryptionKeyEnvName" -}}
-NMP_SECRETS_DEFAULT_ENCRYPTION_KEY
+{{- define "nemo-helix.defaultEncryptionKeyEnvName" -}}
+NHX_SECRETS_DEFAULT_ENCRYPTION_KEY
 {{- end -}}
 
 {{/*
 Existing Secret name for the secrets service default encryption key.
 */}}
-{{- define "nemo-platform.defaultEncryptionKeyExistingSecretName" -}}
+{{- define "nemo-helix.defaultEncryptionKeyExistingSecretName" -}}
 {{- .Values.secrets.defaultEncryptionKey.existingSecret.name | default "" -}}
 {{- end -}}
 
 {{/*
 Secret key that contains the secrets service default encryption key.
 */}}
-{{- define "nemo-platform.defaultEncryptionKeySecretKey" -}}
-{{- if include "nemo-platform.defaultEncryptionKeyExistingSecretName" . -}}
-{{- .Values.secrets.defaultEncryptionKey.existingSecret.key | default (include "nemo-platform.defaultEncryptionKeyEnvName" .) -}}
+{{- define "nemo-helix.defaultEncryptionKeySecretKey" -}}
+{{- if include "nemo-helix.defaultEncryptionKeyExistingSecretName" . -}}
+{{- .Values.secrets.defaultEncryptionKey.existingSecret.key | default (include "nemo-helix.defaultEncryptionKeyEnvName" .) -}}
 {{- else -}}
-{{- include "nemo-platform.defaultEncryptionKeyEnvName" . -}}
+{{- include "nemo-helix.defaultEncryptionKeyEnvName" . -}}
 {{- end -}}
 {{- end -}}
 
@@ -214,8 +214,8 @@ Generation is install-only. On upgrade, a missing generated key is unrecoverable
 without restoring the original key or rotating/re-encrypting secrets through the
 supported admin flow, so the chart must not generate a replacement.
 */}}
-{{- define "nemo-platform.generateDefaultEncryptionKey" -}}
-{{- if and .Release.IsInstall (not .Values.envFromSecret) (not (include "nemo-platform.defaultEncryptionKeyExistingSecretName" .)) (not .Values.secrets.defaultEncryptionKey.value) .Values.secrets.defaultEncryptionKey.generated.enabled -}}
+{{- define "nemo-helix.generateDefaultEncryptionKey" -}}
+{{- if and .Release.IsInstall (not .Values.envFromSecret) (not (include "nemo-helix.defaultEncryptionKeyExistingSecretName" .)) (not .Values.secrets.defaultEncryptionKey.value) .Values.secrets.defaultEncryptionKey.generated.enabled -}}
 true
 {{- end -}}
 {{- end -}}
@@ -223,8 +223,8 @@ true
 {{/*
 Whether an upgrade should require the generated API env Secret to already exist.
 */}}
-{{- define "nemo-platform.requireExistingGeneratedDefaultEncryptionKey" -}}
-{{- if and .Release.IsUpgrade (not .Values.envFromSecret) (not (include "nemo-platform.defaultEncryptionKeyExistingSecretName" .)) (not .Values.secrets.defaultEncryptionKey.value) .Values.secrets.defaultEncryptionKey.generated.enabled -}}
+{{- define "nemo-helix.requireExistingGeneratedDefaultEncryptionKey" -}}
+{{- if and .Release.IsUpgrade (not .Values.envFromSecret) (not (include "nemo-helix.defaultEncryptionKeyExistingSecretName" .)) (not .Values.secrets.defaultEncryptionKey.value) .Values.secrets.defaultEncryptionKey.generated.enabled -}}
 true
 {{- end -}}
 {{- end -}}
@@ -232,16 +232,16 @@ true
 {{/*
 Name shared by the key generation hook RBAC and Job resources.
 */}}
-{{- define "nemo-platform.defaultEncryptionKeyGeneratorName" -}}
-{{- printf "%s-api-env-keygen" (include "nemo-platform.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "nemo-helix.defaultEncryptionKeyGeneratorName" -}}
+{{- printf "%s-api-env-keygen" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 ServiceAccount name for the key generation hook.
 */}}
-{{- define "nemo-platform.defaultEncryptionKeyGeneratorServiceAccountName" -}}
+{{- define "nemo-helix.defaultEncryptionKeyGeneratorServiceAccountName" -}}
 {{- if .Values.secrets.defaultEncryptionKey.generated.serviceAccount.create -}}
-{{- default (include "nemo-platform.defaultEncryptionKeyGeneratorName" .) .Values.secrets.defaultEncryptionKey.generated.serviceAccount.name -}}
+{{- default (include "nemo-helix.defaultEncryptionKeyGeneratorName" .) .Values.secrets.defaultEncryptionKey.generated.serviceAccount.name -}}
 {{- else -}}
 {{- required "secrets.defaultEncryptionKey.generated.serviceAccount.name is required when secrets.defaultEncryptionKey.generated.serviceAccount.create is false" .Values.secrets.defaultEncryptionKey.generated.serviceAccount.name -}}
 {{- end -}}
@@ -271,7 +271,7 @@ JSON list of image pull secret names for scripts that create pods.
 Embedded PostgreSQL full name (service and secret name when postgresql.enabled).
 */}}
 {{- define "nemo-common.postgresql.fullname" -}}
-{{- printf "%s-postgres" (include "nemo-platform.fullname" . | trunc 54 | trimSuffix "-") -}}
+{{- printf "%s-postgres" (include "nemo-helix.fullname" . | trunc 54 | trimSuffix "-") -}}
 {{- end -}}
 
 {{/*
@@ -279,7 +279,7 @@ Name of the service account to use for the embedded PostgreSQL pod.
 */}}
 {{- define "nemo-common.postgresql.serviceAccountName" -}}
 {{- if .Values.postgresql.serviceAccount.create -}}
-{{- default (printf "%s-postgres" (include "nemo-platform.fullname" .)) .Values.postgresql.serviceAccount.name }}
+{{- default (printf "%s-postgres" (include "nemo-helix.fullname" .)) .Values.postgresql.serviceAccount.name }}
 {{- else -}}
 {{- default "default" .Values.postgresql.serviceAccount.name }}
 {{- end -}}
@@ -372,7 +372,7 @@ nemo-common.database.password generates a POSTGRES_DB_PASSWORD environment value
 Embedded ClickHouse full name (service and generated secret name).
 */}}
 {{- define "nemo-common.clickhouse.fullname" -}}
-{{- printf "%s-clickhouse" (include "nemo-platform.fullname" . | trunc 51 | trimSuffix "-") -}}
+{{- printf "%s-clickhouse" (include "nemo-helix.fullname" . | trunc 51 | trimSuffix "-") -}}
 {{- end -}}
 
 {{/*
@@ -544,21 +544,21 @@ Determine if multi-node networking is enabled for any cloud provider.
 Returns "true" if any cloud provider networking is enabled, empty string otherwise.
 
 Usage:
-  {{- if include "nemo-platform.multinodeNetworkingEnabled" . }}
+  {{- if include "nemo-helix.multinodeNetworkingEnabled" . }}
 */}}
-{{- define "nemo-platform.multinodeNetworkingEnabled" -}}
+{{- define "nemo-helix.multinodeNetworkingEnabled" -}}
 {{- if or .Values.multinodeNetworking.aws.enabled .Values.multinodeNetworking.azure.enabled .Values.multinodeNetworking.gcp.enabled .Values.multinodeNetworking.oci.enabled -}}
 true
 {{- end -}}
 {{- end -}}
 
 {{/*
-nemo-platform.env generates an env var array out of a dict to allow better
+nemo-helix.env generates an env var array out of a dict to allow better
 interleaving, easier use and default settings. It will still work if a you use
 an array to render directly, but it is not recommended. It is available across
 all pods.
 */}}
-{{- define "nemo-platform.env" -}}
+{{- define "nemo-helix.env" -}}
 {{- if and .Values.env (kindIs "slice" .Values.env) -}}
 {{- toYaml .Values.env -}}
 {{- else if and .Values.env (kindIs "map" .Values.env) -}}
@@ -575,11 +575,11 @@ all pods.
 {{- end -}}
 
 {{/*
-nemo-platform.api.env generates an env var array out of a dict to allow better
+nemo-helix.api.env generates an env var array out of a dict to allow better
 interleaving, easier use and default settings. It will still work if a you use
 an array to render directly, but it is not recommended. It is available ONLY to the api pod.
 */}}
-{{- define "nemo-platform.api.env" -}}
+{{- define "nemo-helix.api.env" -}}
 {{- if and .Values.api.env (kindIs "slice" .Values.api.env) -}}
 {{- toYaml .Values.api.env -}}
 {{- else if and .Values.api.env (kindIs "map" .Values.api.env) -}}
@@ -596,11 +596,11 @@ an array to render directly, but it is not recommended. It is available ONLY to 
 {{- end -}}
 
 {{/*
-nemo-platform.controller.env generates an env var array out of a dict to allow better
+nemo-helix.controller.env generates an env var array out of a dict to allow better
 interleaving, easier use and default settings. It will still work if a you use
 an array to render directly, but it is not recommended. It is available ONLY to the controller pod.
 */}}
-{{- define "nemo-platform.controller.env" -}}
+{{- define "nemo-helix.controller.env" -}}
 {{- if and .Values.core.controller.env (kindIs "slice" .Values.core.controller.env) -}}
 {{- toYaml .Values.core.controller.env -}}
 {{- else if and .Values.core.controller.env (kindIs "map" .Values.core.controller.env) -}}
@@ -617,10 +617,10 @@ an array to render directly, but it is not recommended. It is available ONLY to 
 {{- end -}}
 
 {{/*
-nemo-platform.envoyProxy.env generates an env var array from .Values.envoyProxy.env (map of
-NAME: value or NAME: valueFrom: {object}). Same format as nemo-platform.api.env.
+nemo-helix.envoyProxy.env generates an env var array from .Values.envoyProxy.env (map of
+NAME: value or NAME: valueFrom: {object}). Same format as nemo-helix.api.env.
 */}}
-{{- define "nemo-platform.envoyProxy.env" -}}
+{{- define "nemo-helix.envoyProxy.env" -}}
 {{- if and .Values.envoyProxy.env (kindIs "slice" .Values.envoyProxy.env) -}}
 {{- toYaml .Values.envoyProxy.env -}}
 {{- else if and .Values.envoyProxy.env (kindIs "map" .Values.envoyProxy.env) -}}
@@ -639,6 +639,6 @@ NAME: value or NAME: valueFrom: {object}). Same format as nemo-platform.api.env.
 {{/*
 Create the name of the models files auth secret (HF_TOKEN for Files service pull-through).
 */}}
-{{- define "nemo-platform.modelsFilesAuthSecretName" -}}
-{{- printf "%s-models-files-token" (include "nemo-platform.fullname" .) }}
+{{- define "nemo-helix.modelsFilesAuthSecretName" -}}
+{{- printf "%s-models-files-token" (include "nemo-helix.fullname" .) }}
 {{- end }}

@@ -3,10 +3,10 @@
 
 # NeMo Insights
 
-NeMo Platform plugin for analyzing agent telemetry and persisting actionable insights.
+NeMo Helix plugin for analyzing agent telemetry and persisting actionable insights.
 
 Analysis uses [trace-intel](https://github.com/NVIDIA-NeMo/labs-trace-intel).
-NeMo Platform supplies authenticated trace and model access and stores the resulting insights.
+NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
 
 ## Install from the monorepo
 
@@ -28,10 +28,10 @@ uv run nemo agents analyst doctor
 uv run nemo agents analyst run
 ```
 
-Run `nemo setup` first to select the default and fast NeMo Platform Model Entities.
+Run `nemo setup` first to select the default and fast NeMo Helix Model Entities.
 The NeMo Analyst uses the default model to compile insights and the fast model for
 evidence streams; an existing context without `fast_model` reuses `default_model`.
-Provider credentials remain in NeMo Platform Secrets.
+Provider credentials remain in NeMo Helix Secrets.
 
 The profile contract consumed by Insights is deliberately small:
 
@@ -49,10 +49,10 @@ resolved relative to the profile. When it is omitted, Insights looks for
 
 An adjacent `.env` is loaded when a profile is found, without replacing
 variables already set in the shell. For this shared profile workflow,
-`NMP_BASE_URL` is the only base-URL environment variable. Resolution order is
+`NHX_BASE_URL` is the only base-URL environment variable. Resolution order is
 explicit command-line flags, then profile values (for `agent`, `ethos`,
-and `workspace`) or `NMP_BASE_URL` (for the base URL), then the built-in
-defaults. `--base-url` takes precedence over `NMP_BASE_URL`.
+and `workspace`) or `NHX_BASE_URL` (for the base URL), then the built-in
+defaults. `--base-url` takes precedence over `NHX_BASE_URL`.
 
 ### Telemetry requirement
 
@@ -102,14 +102,14 @@ A run and the `agents.execute` job backing it share one name, so `get` returns
 both together. `--wait` polls to a terminal job state and exits non-zero unless
 the job completed. `create` fills the default/fast model pair from your CLI
 config unless you pass `--default-model` / `--fast-model`; the request must
-carry it because the NeMo Platform process cannot read that file.
+carry it because the NeMo Helix process cannot read that file.
 
 `analysis enable` stores the effective default/fast pair in the server-side
 analysis config so scheduled jobs do not depend on the operator's local CLI
 file. Re-run `enable` after changing the pair with `nemo setup`. Existing
 enabled records created before model-pair persistence must also be re-enabled.
 
-`--base-url` defaults to `NMP_BASE_URL`, then `http://localhost:8080`.
+`--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
 
 ## API and SDK
 
@@ -143,8 +143,8 @@ environment wins. All settings live under `analyst`, with the
 | — (see below) | `analyst.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
 | — (see below) | `analyst.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
 | — (see below) | `analyst.job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
-| — (see below) | `analyst.base_url` | unset | NeMo Platform base URL passed to analyst jobs. When unset, jobs use their active platform context. |
-| — (see below) | `analyst.inference_api_key_secret_name` | unset | NeMo Platform secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
+| — (see below) | `analyst.base_url` | unset | NeMo Helix base URL passed to analyst jobs. When unset, jobs use their active platform context. |
+| — (see below) | `analyst.inference_api_key_secret_name` | unset | NeMo Helix secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
 
 ```bash
 export NEMO_INSIGHTS_ANALYST_FREQUENCY=weekly

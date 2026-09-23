@@ -26,8 +26,8 @@ from nemo_example_plugin.functions.greet import (
     GreetFunction,
     GreetSpec,
 )
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
 
 # ---------------------------------------------------------------------------
 # 1. Direct unit-test path — no FastAPI

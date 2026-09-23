@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Script to parse the output of bake --print and generate a list of nmp images
+Script to parse the output of bake --print and generate a list of nhx images
 """
 
 import json

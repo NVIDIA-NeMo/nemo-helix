@@ -17,10 +17,10 @@ The Evaluator plugin SDK uses inline model objects from `nemo_evaluator_sdk`. Pa
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
@@ -55,7 +55,7 @@ model = Model(
 
 For `nemo_evaluator_sdk.Evaluator` runs, the `SecretRef` root names an environment variable available to the local Python process. For example, `api_key_secret=SecretRef(root="NVIDIA_API_KEY")` reads `os.environ["NVIDIA_API_KEY"]`.
 
-For remote `evaluator.submit(...)` jobs, the `SecretRef` root must name a NeMo platform secret in the target workspace. Create the secret before submitting the job:
+For remote `evaluator.submit(...)` jobs, the `SecretRef` root must name a NeMo Helix secret in the target workspace. Create the secret before submitting the job:
 
 ```python
 client.secrets.create(

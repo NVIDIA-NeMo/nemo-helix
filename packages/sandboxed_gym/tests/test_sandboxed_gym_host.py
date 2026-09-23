@@ -43,9 +43,9 @@ def test_build_bootstrap_env_sets_required_keys():
         2048,
         dataset_path="/job/dataset",
     )
-    assert env["NMP_JOB_ID"] == "job-1"
-    assert env["NMP_BROKER_URL"] == "http://broker:51234"
-    assert env["NMP_DATASET_PATH"] == "/job/dataset"
+    assert env["NHX_JOB_ID"] == "job-1"
+    assert env["NHX_BROKER_URL"] == "http://broker:51234"
+    assert env["NHX_DATASET_PATH"] == "/job/dataset"
     assert "OPENSANDBOX_API_KEY" not in env
     assert env[BROKER_URL_ENV] == "http://broker:51234"
     assert env[BROKER_TOKEN_ENV] == "token"
@@ -377,7 +377,7 @@ def test_gym_host_spec_forwards_the_rollout_deadline():
 
     spec = build_gym_host_spec(cfg, broker)
 
-    assert spec.bootstrap_env["NMP_ROLLOUT_DEADLINE_S"] == "120.0"
+    assert spec.bootstrap_env["NHX_ROLLOUT_DEADLINE_S"] == "120.0"
 
 
 def test_gym_host_spec_carries_global_config_in_bootstrap():
@@ -527,7 +527,7 @@ def test_gym_host_spec_leaves_the_index_alone_by_default():
 
 def test_the_caller_dialect_accepts_an_offline_environment():
     """`env.nemo_gym` is `extra="forbid"`, so a key the platform emits and this model lacks is
-    not ignored -- it fails validation. nmp/rl's grpo_config sets `environment_offline` on an
+    not ignored -- it fails validation. nhx/rl's grpo_config sets `environment_offline` on an
     offline manifest, so without the field a sandboxed run with one cannot start at all."""
     from sandboxed_gym.host.models import NemoGymSandboxedConfig
 
