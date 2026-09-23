@@ -21,12 +21,13 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, MetricInline, TaskInput, TaskInputs
+from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, MetricInline, MetricRef, TaskInput, TaskInputs
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
@@ -63,10 +64,13 @@ def _task_input(metric: MetricInline) -> TaskInput:
 
 @pytest.mark.timeout(300)
 def test_inline_task_metric_normalizes_to_derived_metric(subprocess_platform: str) -> None:
-    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    evaluator_client = EvaluatorClient(
+        base_url=subprocess_platform, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2)
+    )
+    WorkspacesClient.from_client(evaluator_client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
+    client = Evaluator(evaluator_client)
 
     inline = _inline_metric(_unique("marker"))
     task_a = _unique("task-a")
@@ -74,40 +78,42 @@ def test_inline_task_metric_normalizes_to_derived_metric(subprocess_platform: st
     derived_name: str | None = None
     try:
         # The inline metric is offloaded: the stored task holds a single derived reference, not a bundle.
-        created_a = client.evaluator.tasks.create(task_a, task=_task_input(inline), workspace=WORKSPACE)
+        created_a = client.tasks.create(task_a, task=_task_input(inline), workspace=WORKSPACE)
         assert isinstance(created_a.spec, EvaluatorTaskDefinition)
         assert len(created_a.spec.metrics) == 1
-        derived_ref = created_a.spec.metrics[0].root
+        derived_metric = created_a.spec.metrics[0]
+        assert isinstance(derived_metric, MetricRef)
+        derived_ref = derived_metric.root
         assert derived_ref.startswith(f"{WORKSPACE}/derived.")
         derived_name = derived_ref.split("/", 1)[1]
 
         # A second task with byte-identical inline content dedupes to the same derived metric.
-        created_b = client.evaluator.tasks.create(task_b, task=_task_input(inline), workspace=WORKSPACE)
+        created_b = client.tasks.create(task_b, task=_task_input(inline), workspace=WORKSPACE)
         assert isinstance(created_b.spec, EvaluatorTaskDefinition)
-        assert created_b.spec.metrics[0].root == derived_ref
+        assert created_b.spec.metrics[0] == derived_metric
 
         # The derived metric is a real, Files-backed, flagged metric.
-        fetched = client.evaluator.metrics.retrieve(derived_name, workspace=WORKSPACE)
+        fetched = client.metrics.retrieve(derived_name, workspace=WORKSPACE)
         assert fetched.derived is True
         assert fetched.bundle_ref
 
         # Hidden from the curated default listing...
-        default_names = {m.name for m in client.evaluator.metrics.list(workspace=WORKSPACE, page_size=1000).data}
+        default_names = {m.name for m in client.metrics.list(workspace=WORKSPACE, page_size=1000).data}
         assert derived_name not in default_names
 
         # ...but addressable when explicitly included, exactly once (content-addressed dedup).
-        with_derived = client.evaluator.metrics.list(workspace=WORKSPACE, include_derived=True, page_size=1000).data
+        with_derived = client.metrics.list(workspace=WORKSPACE, include_derived=True, page_size=1000).data
         matching = [m for m in with_derived if m.name == derived_name]
         assert len(matching) == 1
         assert matching[0].derived is True
     finally:
         for name in (task_a, task_b):
             try:
-                client.evaluator.tasks.delete(name, workspace=WORKSPACE)
+                client.tasks.delete(name, workspace=WORKSPACE)
             except Exception:
                 pass
         if derived_name is not None:
             try:
-                client.evaluator.metrics.delete(derived_name, workspace=WORKSPACE)
+                client.metrics.delete(derived_name, workspace=WORKSPACE)
             except Exception:
                 pass
