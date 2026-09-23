@@ -32,7 +32,6 @@ from nemo_helix_ext.cli.commands.setup import (
     _SERVICE_STARTUP_POLL_INTERVAL,
     _SERVICE_STARTUP_TIMEOUT_SECONDS,
     KNOWN_PROVIDERS,
-    ONBOARDING_PATHS,
     KeyValidationResult,
     ModelPair,
     SetupClients,
@@ -68,14 +67,12 @@ from nemo_helix_ext.cli.commands.setup import (
     _order_candidates_by_size,
     _parse_csv_flag,
     _pick_default_chat_entity,
-    _print_onboarding,
     _print_sample_setup_complete,
     _print_setup_complete,
     _probe_model_entity,
     _prompt_custom_provider,
     _prompt_post_setup_path,
     _register_provider_interactive,
-    _render_onboarding_card,
     _require_supported_python,
     _resolve_provider_for_url,
     _resolve_setup_workspace,
@@ -2373,7 +2370,6 @@ class TestInteractiveModelPairSelection:
                 f"{self._MOD}._print_setup_complete",
                 side_effect=lambda *args, **kwargs: event_order.append("complete"),
             ),
-            patch(f"{self._MOD}._maybe_deploy_agent") as deploy_agent,
             patch(
                 f"{self._MOD}._prompt_post_setup_path",
                 side_effect=lambda *args, **kwargs: event_order.append("post_setup") or "sample",
@@ -2405,12 +2401,10 @@ class TestInteractiveModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         select_model_pair.assert_called_once_with(client, "default", provider_name="anthropic")
         assert selected_path == "sample"
-        deploy_agent.assert_not_called()
         workspaces_client = cli_context.typed_client.return_value
         ensure_workspace.assert_called_once_with(
             workspaces_client,
@@ -2463,7 +2457,6 @@ class TestInteractiveModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         mock_select_model_pair.assert_not_called()
@@ -2512,7 +2505,6 @@ class TestInteractiveModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         mock_select_model_pair.assert_not_called()
@@ -3485,7 +3477,6 @@ class TestValidateApiKeyIntegration:
                 _make_mock_client(),
                 "default",
                 "http://localhost:8080",
-                None,
                 None,
             )
         assert exc_info.value.exit_code == 1
@@ -5030,47 +5021,6 @@ class TestVerifyHelixHealth:
         assert "yellow" in printed.lower() or "nemo services status" in printed
 
 
-class TestRenderOnboardingCard:
-    def test_optimize_card_includes_note(self):
-        with patch(f"{SETUP_MOD}.console") as mock_console:
-            _render_onboarding_card("optimize")
-
-        panel = mock_console.print.call_args_list[0].args[0]
-        assert "agent's project directory" in panel.renderable
-
-    def test_optimize_card_uses_published_agents_docs_url(self):
-        with patch(f"{SETUP_MOD}.console") as mock_console:
-            _render_onboarding_card("optimize")
-
-        panel = mock_console.print.call_args_list[0].args[0]
-        content = panel.renderable
-        assert "https://docs.nvidia.com/nemo-helix/documentation/agents" in content
-        assert "https://docs.nvidia.com/nemo-helix/agents" not in content
-
-    def test_explore_card_contains_skill_prompt_and_docs(self):
-        with patch(f"{SETUP_MOD}.console") as mock_console:
-            _render_onboarding_card("explore")
-
-        panel = mock_console.print.call_args_list[0].args[0]
-        content = panel.renderable
-        assert "What can I do with NeMo Helix?" in content
-        assert "docs.nvidia.com/nemo-helix" in content
-
-    def test_unknown_value_is_silently_skipped(self):
-        with patch(f"{SETUP_MOD}.console") as mock_console:
-            _render_onboarding_card("nonexistent")
-
-        mock_console.print.assert_not_called()
-
-    def test_all_paths_render_without_error(self):
-        for path in ONBOARDING_PATHS:
-            with patch(f"{SETUP_MOD}.console") as mock_console:
-                _render_onboarding_card(path.value)
-
-            panel = mock_console.print.call_args_list[0].args[0]
-            assert hasattr(panel, "renderable")
-
-
 class TestPrintSetupComplete:
     def test_shows_setup_complete_and_summary(self):
         with (
@@ -5127,48 +5077,3 @@ class TestPromptPostSetupPath:
             default="sample",
             indent=2,
         )
-
-
-class TestPrintOnboarding:
-    def test_shows_choice(self):
-        with (
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="optimize") as mock_choice,
-            patch(f"{SETUP_MOD}._render_onboarding_card") as mock_card,
-            patch(f"{SETUP_MOD}.console"),
-        ):
-            _print_onboarding()
-
-        mock_choice.assert_called_once()
-        mock_card.assert_called_once_with("optimize")
-
-    def test_explore_path_renders_card(self):
-        with (
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
-            patch(f"{SETUP_MOD}._render_onboarding_card") as mock_card,
-            patch(f"{SETUP_MOD}.console"),
-        ):
-            _print_onboarding()
-
-        mock_card.assert_called_once_with("explore")
-
-    def test_demo_agent_shown_when_deployed(self):
-        with (
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
-            patch(f"{SETUP_MOD}._render_onboarding_card"),
-            patch(f"{SETUP_MOD}.console") as mock_console,
-        ):
-            _print_onboarding(demo_deployed=True)
-
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "calculator-agent" in printed
-
-    def test_demo_agent_hidden_when_not_deployed(self):
-        with (
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="explore"),
-            patch(f"{SETUP_MOD}._render_onboarding_card"),
-            patch(f"{SETUP_MOD}.console") as mock_console,
-        ):
-            _print_onboarding(demo_deployed=False)
-
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "calculator-agent" not in printed

@@ -168,44 +168,6 @@ def _provider_type_for_connection(name: str, host_url: str) -> str:
     return "custom"
 
 
-# ---------------------------------------------------------------------------
-# Onboarding paths — shown after setup completes
-# ---------------------------------------------------------------------------
-
-
-_NEMO_DOCS_ROOT_URL = "https://docs.nvidia.com/nemo-helix"
-_NEMO_DOCS_URL = f"{_NEMO_DOCS_ROOT_URL}/documentation"
-
-
-@dataclass(frozen=True)
-class OnboardingPath:
-    """A goal-oriented onboarding option shown at the end of interactive setup."""
-
-    value: str
-    label: str
-    skill_prompt: str
-    docs_url: str
-    note: str | None = None
-
-
-ONBOARDING_PATHS: tuple[OnboardingPath, ...] = (
-    OnboardingPath(
-        value="optimize",
-        label="Build and optimize agents",
-        skill_prompt="Build and optimize an agent using NeMo Helix",
-        docs_url=f"{_NEMO_DOCS_URL}/agents",
-        note="Open a coding agent session in your agent's project directory",
-    ),
-    OnboardingPath(
-        value="explore",
-        label="Explore the platform",
-        skill_prompt="What can I do with NeMo Helix?",
-        docs_url=_NEMO_DOCS_URL,
-    ),
-)
-
-_ONBOARDING_PATHS_BY_VALUE: dict[str, OnboardingPath] = {p.value: p for p in ONBOARDING_PATHS}
-
 _POST_SETUP_OPTIONS: tuple[tuple[str, str], ...] = (
     ("sample", "Create a sample workspace and demo agent"),
     ("explore", "I would like to explore NeMo Helix on my own"),
@@ -2735,7 +2697,10 @@ def setup_command(
     ] = None,
     deploy_agent: Annotated[
         bool | None,
-        typer.Option("--deploy-agent/--no-deploy-agent", help="Deploy the demo calculator agent"),
+        typer.Option(
+            "--deploy-agent/--no-deploy-agent",
+            help="Deploy the demo calculator agent in --auto mode",
+        ),
     ] = None,
     resume: Annotated[
         bool,
@@ -2756,8 +2721,8 @@ def setup_command(
 
     Uses an already-running platform, starts local services, or connects the
     CLI to an existing remote deployment. Then selects and registers an
-    inference provider, picks default and fast agent models, installs coding
-    agent skills, and optionally deploys a demo agent.
+    inference provider, picks default and fast agent models, and installs
+    coding agent skills. Auto mode can optionally deploy a demo agent.
 
     The active config context remembers the Platform URL. When a remote
     deployment is already reachable, setup asks whether to continue with it,
@@ -2784,7 +2749,7 @@ def setup_command(
       nemo setup --auto --start-services --ready-timeout 360
       NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
       nemo setup --workspace my-workspace
-      nemo setup --no-install-skills --no-deploy-agent
+      nemo setup --no-install-skills
       nemo --base-url http://localhost:8080 setup
     """
     cli_context: CLIContext = ctx.obj
@@ -2899,7 +2864,6 @@ def setup_command(
                 workspace,
                 base_url,
                 install_skills,
-                deploy_agent,
                 skills_agents=skills_agents_list,
                 skills_scope=skills_scope,
                 skills_from=skills_from_list,
@@ -3030,7 +2994,6 @@ def _run_interactive_mode(
     workspace: str,
     base_url: str,
     install_skills: bool | None,
-    deploy_agent: bool | None,
     *,
     skills_agents: list[str] | None = None,
     skills_scope: Scope | None = None,
@@ -3112,19 +3075,6 @@ def _run_interactive_mode(
             certificate_authority=certificate_authority,
         )
 
-        # TODO: Remove this legacy step after the replacement onboarding flow is validated.
-        # console.print("\n[bold]Step 7: Demo agent (optional)[/bold]\n")
-        # demo_deployed = _maybe_deploy_agent(
-        #     base_url,
-        #     workspace,
-        #     auto=False,
-        #     deploy_agent=deploy_agent,
-        #     default_model=default_model,
-        #     headers=_platform_request_headers(cli_context),
-        #     certificate_authority=certificate_authority,
-        # )
-        # _print_onboarding(demo_deployed=demo_deployed)
-
         selected_path = _prompt_post_setup_path()
         if selected_path == "sample":
             workspaces_client = cli_context.typed_client(WorkspacesClient)
@@ -3178,33 +3128,6 @@ def _interactive_collect_provider() -> tuple[str, str, str | None, str | None, d
         api_key = None
 
     return selected.name, selected.host_url, api_key, selected.auth_header_format, selected.default_extra_headers
-
-
-def _render_onboarding_card(value: str) -> None:
-    """Print a Rich Panel card for the selected onboarding path."""
-    path = _ONBOARDING_PATHS_BY_VALUE.get(value)
-    if path is None:
-        return
-
-    lines: list[str] = []
-    if path.note:
-        lines.append(f"  [bold]{path.note}[/bold]")
-        lines.append("")
-    lines.append("  [bold]Ask your coding agent:[/bold]")
-    lines.append(f'  [cyan]"{path.skill_prompt}"[/cyan]')
-    lines.append("")
-    lines.append(f"  [bold]Docs:[/bold]  [link={path.docs_url}]{path.docs_url}[/link]")
-
-    console.print(
-        Panel(
-            "\n".join(lines),
-            title=f"[bold]{path.label}[/bold]",
-            title_align="left",
-            border_style="green",
-            box=box.ROUNDED,
-            padding=(1, 1),
-        )
-    )
 
 
 def _print_setup_complete(
@@ -3268,22 +3191,3 @@ def _prompt_post_setup_path() -> str:
         default="sample",
         indent=2,
     )
-
-
-def _print_onboarding(*, demo_deployed: bool = False) -> None:
-    """Present goal-oriented onboarding paths."""
-    if demo_deployed:
-        console.print(f"  Demo agent: {_DEMO_AGENT_NAME}")
-
-    console.print("\n[bold cyan]Getting started[/bold cyan]")
-
-    options = [(p.value, p.label) for p in ONBOARDING_PATHS]
-    selected = prompt_choice(
-        "Select how you would like to get started",
-        options,
-        default="optimize",
-        indent=2,
-    )
-
-    console.print()
-    _render_onboarding_card(selected)
