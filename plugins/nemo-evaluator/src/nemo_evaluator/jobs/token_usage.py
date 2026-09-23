@@ -15,7 +15,7 @@ from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.inference import requests_log_var
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.job_usage import JobTokenUsage, JobUsageReporter
+from nemo_helix_plugin.job_usage import JobTokenUsage, JobUsageReporter
 
 logger = logging.getLogger(__name__)
 
