@@ -201,6 +201,30 @@ def test_an_ordinary_mapping_lookup_is_not_a_gate(tmp_path: Path) -> None:
     assert check_test_gates.orphaned_gates(tmp_path, workflows) == {}
 
 
+def test_another_objects_environ_is_not_os_environ(tmp_path: Path) -> None:
+    """``os`` is not the only name that can carry an ``environ``.
+
+    A test shim or a WSGI-style object named ``environ`` reads like the real thing to an attribute
+    match, so both the subscript and the ``.get`` forms have to check what the attribute hangs off.
+    """
+    tests = tmp_path / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_shim.py").write_text(
+        "import pytest\n\n"
+        "flags = _shim()\n\n"
+        "pytestmark = [\n"
+        '    pytest.mark.skipif(not flags.environ.get("RUN_FAST"), reason="off"),\n'
+        '    pytest.mark.skipif(not flags.environ["RUN_SLOW"], reason="off"),\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")
+
+    assert check_test_gates.orphaned_gates(tmp_path, workflows) == {}
+
+
 def test_an_infrastructure_probe_is_not_a_gate(tmp_path: Path) -> None:
     # `skipif(not docker_available())` skips visibly when the infra is absent and runs when present,
     # so it is not the failure mode this guards. Only env-var opt-ins are.

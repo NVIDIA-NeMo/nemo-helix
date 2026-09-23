@@ -88,12 +88,10 @@ def _env_reads(node: ast.AST, constants: dict[str, str]) -> set[str]:
     """Variables read by ``os.environ[X]``, ``os.environ.get(X)`` or ``os.getenv(X)`` under ``node``."""
     found: set[str] = set()
     for inner in ast.walk(node):
-        if isinstance(inner, ast.Subscript):
-            value = inner.value
-            if isinstance(value, ast.Attribute) and value.attr == "environ":
-                name = _env_name(inner.slice, constants)
-                if name:
-                    found.add(name)
+        if isinstance(inner, ast.Subscript) and _is_os_environ(inner.value):
+            name = _env_name(inner.slice, constants)
+            if name:
+                found.add(name)
         elif isinstance(inner, ast.Call) and _reads_os_environ(inner.func) and inner.args:
             name = _env_name(inner.args[0], constants)
             if name:
@@ -104,18 +102,29 @@ def _env_reads(node: ast.AST, constants: dict[str, str]) -> set[str]:
 def _reads_os_environ(func: ast.AST) -> bool:
     """Whether a call target is ``os.environ.get`` or ``os.getenv``, and not something else's.
 
-    Anchored to ``os`` on purpose. Matching any ``.get`` would read an ordinary mapping lookup --
-    ``flags.get("RUN_FAST")`` inside a ``skipif`` -- as an environment gate, and report it as an
-    orphan. A false positive here fails the build over a variable nobody was ever meant to set,
-    which is worse than the miss it would be guarding against.
+    Anchored to ``os`` on purpose, all the way down. Matching any ``.get`` would read an ordinary
+    mapping lookup -- ``flags.get("RUN_FAST")`` inside a ``skipif`` -- as an environment gate, and
+    matching any ``.environ`` would do the same for ``flags.environ.get("RUN_FAST")``. A false
+    positive here fails the build over a variable nobody was ever meant to set, which is worse than
+    the miss it would be guarding against.
     """
     if not isinstance(func, ast.Attribute):
         return False
     if func.attr == "getenv":
         return isinstance(func.value, ast.Name) and func.value.id == "os"
     if func.attr == "get":
-        return isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
+        return _is_os_environ(func.value)
     return False
+
+
+def _is_os_environ(node: ast.AST) -> bool:
+    """Whether an expression is ``os.environ`` itself, and not some other object's ``environ``."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "os"
+    )
 
 
 def gate_variables(tree: ast.AST) -> set[str]:
