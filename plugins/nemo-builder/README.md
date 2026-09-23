@@ -59,18 +59,24 @@ Verified independently of the control plane, from inside the cluster:
 | `supervise` has **no** work-volume mount | ✅ observed — absence is the control, and it holds |
 | namespace still refuses the BuildKit posture | ✅ re-run after the green build |
 | sandbox reaches the internet and nothing private | ✅ 7/7, against cluster-derived addresses |
-| 130 unit tests, `ruff` and `ty` clean | ✅ |
+| 139 unit tests, `ruff` and `ty` clean | ✅ |
 
-A second run, built to hit the conditions the first one never did -- one set, two different
-Dockerfiles published to the **same repository**, and a third Dockerfile that **fails**:
+A second run, built to hit the conditions the first one never did -- one set (`fixcheck`), two
+different Dockerfiles published to the **same repository**, and a third Dockerfile that **fails**
+-- plus a one-image set (`allfail`) whose only build fails:
 
 | | |
 |---|---|
-| the failing image does not stop the others publishing | ✅ 2 `ready`, 1 `failed`; `supervise` completed, `push` ran |
+| the failing image does not stop the others publishing | ✅ `supervise` recorded `kaniko exited 1`, completed anyway; `push` published the other two |
+| a set where nothing built stops before `push` | ✅ `supervise` exited non-zero, `push` was never scheduled, the row failed |
 | two images in one repository get distinct digests | ✅ and each digest's image contains its own Dockerfile's output |
 | the caller's tags point at the right images | ✅ `:staging` and `:prod` match their rows |
 | two specs publishing one reference are refused | ✅ 400 at submit, nothing created |
 | the job still ends honestly as an error | ✅ `push` exits non-zero for the image with no layout |
+
+The first row passed once before, **for the wrong reason**: `supervise` was recording every
+build as a success, so it never had a failure to stop on. The rows above are from `fixcheck`
+revision 2, after that was fixed -- see *Found afterwards*, below.
 
 ### The two environments, and why both exist
 
@@ -148,7 +154,8 @@ handling.
 1. **One failed image published nothing.** `supervise` exited 1 on any failure, and the Jobs
    dispatcher schedules the next step only on `COMPLETED` -- so `push` never ran, for the whole
    set. The exit code is a scheduling decision, not a report; it is now non-zero only when nothing
-   built. *Verified on the cluster by the second run above.*
+   built. *Verified on the cluster by the second run above -- the rerun, not the first attempt,
+   which passed only because of the bug in* Found afterwards.
 2. **Two images could record one digest.** The system tag was per set, so two specs in one
    repository pushed the same tag and the second overwrote the first. It is now per image. This
    flaw is **inherited from RFC 001** (line 2200), whose worked example happens to use three
@@ -180,6 +187,35 @@ handling.
 **Not covered:** the review stopped early and never examined how exposed `push`'s credentials are
 to the attacker-controlled manifest content that `crane` and `cosign` parse. That is the most
 important unreviewed surface in this plugin.
+
+## Found afterwards
+
+Two more, found by reading the code line by line after the review's fixes had landed. Neither was
+caught by the unit tests, the review, or two cluster runs, and both sat at a handoff to a program
+the tests never ran: a shell, and crane.
+
+1. **`supervise` recorded every build as a success.** The sandbox script ran `kaniko … || true`
+   and then printed `$?` -- which, after `|| true`, is the exit status of `true`. The cluster log
+   said so plainly, `NMP_IMAGE_RESULT fixcheck-1-2 0` for a Dockerfile written to fail, and
+   nothing was reading it for that. It also voided the first cluster check of review fix 1:
+   `push` ran because `supervise` never saw a failure, which the old exit rule would have allowed
+   too. The unit test asserted that `|| true` was *present*; its replacement runs the generated
+   script in a real shell against a stand-in executor, and fails with the old line restored.
+2. **A bare `user:password` push credential could never be used.** `push` filed it under a host
+   read from an environment variable that nothing set, so the Docker config held the key `""`,
+   crane matched it to no registry, and pushed anonymously -- invisible on minikube, whose
+   registry is anonymous. It is now bound to the deployment's `default_registry`, handed over by
+   the compiler, and deliberately **not** to a destination a spec names: that would send the
+   credential to any host a caller chose. With nothing to bind it to, `push` refuses before
+   pushing anything. *Verified with the real crane binary against a password-protected
+   `registry:3`: the old step image got 401 on a read and a push, the new one pushed. cosign reads
+   the same Docker config through the same library, but was not separately exercised.*
+
+**Found while verifying that, and not fixed:** the reconciler speaks only the Bearer token flow.
+A registry that challenges with `Basic` -- `registry:3` with htpasswd, for one -- has its realm
+treated as a token URL, and the resulting `ValueError` is not a `RegistryError`, so it escapes
+the reconcile loop's handling. `push` can now publish to such a registry; the reconciler cannot
+read back what it published.
 
 ## Deliberately out of scope
 
