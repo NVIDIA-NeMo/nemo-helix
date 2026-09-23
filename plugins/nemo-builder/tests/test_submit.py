@@ -41,8 +41,8 @@ class FakeEntityClient:
 
 def _config() -> BuilderConfig:
     return BuilderConfig(
-        default_registry="reg.example.com",
-        push_secret="my-reg-secret",
+        registry="reg.example.com",
+        push_credential_secret="registry-push-credential",
         signing_key="k8s://nhx-builds/cosign-key",
     )
 

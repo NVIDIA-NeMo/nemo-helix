@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Literal
 
+from nemo_builder_plugin.identity import validate_repository
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import Field, field_validator
 
@@ -119,28 +120,32 @@ class BuilderConfig(NemoConfig):
 
     # --- Publishing -------------------------------------------------------
 
-    default_registry: str | None = Field(
+    registry: str | None = Field(
         default=None,
         description=(
-            "Registry HOST used when a BuildOutput omits one -- `us-central1-docker.pkg.dev`, "
-            "not `us-central1-docker.pkg.dev/project/repo`. A host and a repository path are "
-            "different things, and conflating them produces a reference that looks right in a "
-            "log and builds the URL `https://host/project/repo/v2/...` when anything tries to "
-            "resolve it. Validated below rather than trusted.\n\n"
-            "No safe default; unset fails the compile."
+            "The registry HOST every image is published to -- `us-central1-docker.pkg.dev`, not "
+            "`us-central1-docker.pkg.dev/project/repo`. One per deployment, and a caller cannot "
+            "name another: whatever runs a built image has to pull it, and one registry means one "
+            "pull credential for every workload that does.\n\n"
+            "A host and a repository path are different things, and conflating them produces a "
+            "reference that looks right in a log and builds the URL "
+            "`https://host/project/repo/v2/...` when anything tries to resolve it. Validated below "
+            "rather than trusted.\n\n"
+            "No safe default; unset fails the submit."
         ),
     )
     repository_prefix: str = Field(
         default="",
         description=(
-            "Path prepended to every `BuildOutput.repository`. This is where a registry's "
-            "project/repo path belongs -- for GAR, `<project>/<artifact-repo>`. Kept separate "
-            "from `default_registry` so `ContainerImage.registry` stays a host that a registry "
+            "Path every image is published under, ahead of the submitting workspace: images land "
+            "at `<repository_prefix>/<workspace>/<output.repository>`. This is where a "
+            "registry's project/repo path belongs -- for GAR, `<project>/<artifact-repo>`. Kept "
+            "separate from `registry` so `ContainerImage.registry` stays a host that a registry "
             "client can actually connect to."
         ),
     )
 
-    @field_validator("default_registry")
+    @field_validator("registry")
     @classmethod
     def _registry_is_a_host(cls, value: str | None) -> str | None:
         """A registry is a host, optionally with a port. It is not a path.
@@ -150,22 +155,31 @@ class BuilderConfig(NemoConfig):
         """
         if value and "/" in value:
             raise ValueError(
-                f"default_registry must be a host without a path, got {value!r}. "
+                f"registry must be a host without a path, got {value!r}. "
                 "Put the project/repository path in `repository_prefix` instead."
             )
         return value
 
-    push_secret: str | None = Field(
+    @field_validator("repository_prefix")
+    @classmethod
+    def _prefix_is_a_repository_path(cls, value: str) -> str:
+        """Normalized once here, so the composed path has exactly one `/` between its parts."""
+        value = value.strip("/")
+        return validate_repository(value) if value else value
+
+    push_credential_secret: str | None = Field(
         default=None,
         description=(
-            "Name of the Secrets entry holding the registry credential. Resolved in-pod by the "
-            "jobs launcher as the submitting principal -- the value never enters a job spec, "
-            "and never enters a pod that ran a Dockerfile.\n\n"
-            "**A bare name resolves in the SUBMITTER'S workspace**, not the platform's: the Jobs "
-            "backend qualifies it with the job's workspace. So every workspace that submits builds "
-            "needs a secret of exactly this name, and whatever it holds is the credential `push` "
-            "uses -- the submitter's, not the operator's, despite this being operator config. "
-            "Whether that is the intended ownership is an open decision."
+            "Name of the Kubernetes Secret, in `namespace`, holding the credential `push` "
+            "publishes with: a `kubernetes.io/dockerconfigjson` Secret, as `kubectl create secret "
+            "docker-registry` makes. It needs write access to `registry` under "
+            "`repository_prefix`, and nothing more.\n\n"
+            "The operator's credential, delivered the way the signing key is: `push` reads it "
+            "through the Kubernetes API as `nhx-build-push`, the only ServiceAccount granted `get` "
+            "on it (deploy/20-rbac.yaml). Deliberately NOT a Secrets-service entry. The Jobs "
+            "launcher resolves those as the submitting principal, so an operator credential "
+            "delivered that way would have to be readable by everyone who can submit a build.\n\n"
+            "No safe default; unset fails the submit."
         ),
     )
     signing_key: str | None = Field(
@@ -181,11 +195,12 @@ class BuilderConfig(NemoConfig):
         default="",
         description=(
             "Read-only registry credential for the RECONCILER, which resolves digests and checks "
-            "for signatures. Separate from `push_secret` on purpose: this one never writes, so "
-            "it should be scoped to pulls. For GAR the pair is `oauth2accesstoken` plus an "
-            "access token.\n\n"
-            "PoC-only shape. A production deployment resolves this from the Secrets service as "
-            "the platform, rather than from operator config."
+            "for signatures. Separate from `push_credential_secret` on purpose: this one never "
+            "writes, so it should be scoped to pulls. For GAR the pair is `oauth2accesstoken` "
+            "plus an access token.\n\n"
+            "Supply both from a Kubernetes Secret as `NEMO_BUILDER_REGISTRY_USERNAME` and "
+            "`NEMO_BUILDER_REGISTRY_PASSWORD` -- environment variables override the config file -- "
+            "rather than in the file itself, which is a ConfigMap. See deploy/local/platform.yaml."
         ),
     )
     registry_password: str = Field(default="", description="See `registry_username`.")

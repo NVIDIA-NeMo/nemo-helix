@@ -27,6 +27,10 @@ cannot read a context even by mistake. Absence is the control. The platform appl
 
 **It emits no paths.** Configs name filesets and images; each step finds them through
 :class:`~nemo_builder_plugin.steps.WorkLayout`.
+
+**It emits no secrets.** The Jobs launcher resolves a job's secrets as the submitting principal,
+and the one credential a build needs is the operator's, so nothing here goes through it. ``push``
+is told the name of a Kubernetes Secret and reads it as its own ServiceAccount.
 """
 
 from __future__ import annotations
@@ -34,7 +38,6 @@ from __future__ import annotations
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.steps import (
-    CREDENTIAL_ENVVAR,
     ContextSource,
     FetchStepConfig,
     PushImage,
@@ -50,13 +53,7 @@ from nemo_helix_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
-from nemo_helix_plugin.jobs.spec import (
-    HelixJobEnvironmentVariable,
-    HelixJobSecret,
-    HelixJobSecretEnvironmentVariableRef,
-    HelixJobSpec,
-    HelixJobStepSpec,
-)
+from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 
 #: Where the work volume is mounted in `fetch` and `push`, and therefore the root of their
 #: `WorkLayout`. Setting it is also what asks the Kubernetes backend for the mount.
@@ -152,7 +149,6 @@ def _push_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
     images = [
         PushImage(
             image=image.name,
-            push_secret=plan.push_secret,
             # The caller's tag AND the system tag. A build that pushed only the first would be
             # invisible to the reconciler, which resolves the second.
             tags=[image.caller_ref, image.system_ref],
@@ -167,19 +163,15 @@ def _push_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
             profile=config.push_profile,
             container=ContainerSpec(command=["nhx-build", "push"]),
         ),
-        environment=[
-            HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT),
-            # The credential appears exactly once in the whole document, on the last step.
-            HelixJobEnvironmentVariable(
-                name=CREDENTIAL_ENVVAR,
-                from_secret=HelixJobSecretEnvironmentVariableRef(name=plan.push_secret),
-            ),
-        ],
+        # Declaring this is what asks for the work volume. There is no credential here: `push`
+        # reads its own, from the Secret its config names.
+        environment=[HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT)],
         config=PushStepConfig(
             signing=SigningConfig(key=plan.signing_key, storage=config.signature_storage),
             images=images,
-            # The operator's registry, not any destination a spec named. See the field.
-            credential_registry=config.default_registry,
+            registry=plan.registry,
+            credential_secret=plan.push_credential_secret,
+            namespace=config.namespace,
             insecure=config.registry_insecure,
         ).model_dump(),
     )
@@ -187,8 +179,4 @@ def _push_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
 
 def compile_build_set(plan: BuildPlan, *, config: BuilderConfig) -> HelixJobSpec:
     """Compile a resolved plan into the job that builds it."""
-    return HelixJobSpec(
-        steps=[_fetch_step(plan, config), _build_step(plan, config), _push_step(plan, config)],
-        # Declared on the job, consumed by exactly one step.
-        secrets=[HelixJobSecret(name=plan.push_secret)],
-    )
+    return HelixJobSpec(steps=[_fetch_step(plan, config), _build_step(plan, config), _push_step(plan, config)])

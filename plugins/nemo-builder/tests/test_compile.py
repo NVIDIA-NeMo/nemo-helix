@@ -15,7 +15,7 @@ from nemo_builder_plugin.compile import WORK_MOUNT, compile_build_set
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
-from nemo_builder_plugin.steps import CREDENTIAL_ENVVAR, ContextSource, PushStepConfig, SuperviseStepConfig
+from nemo_builder_plugin.steps import ContextSource, PushStepConfig, SuperviseStepConfig
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
@@ -31,20 +31,20 @@ def _compile(build_set: BuildSet, *, config: BuilderConfig) -> HelixJobSpec:
 
 def _config(
     *,
-    default_registry: str | None = "reg.example.com",
+    registry: str | None = "reg.example.com",
     repository_prefix: str = "",
     sandbox_cpu: str = "2",
     sandbox_memory: str = "8Gi",
-    push_secret: str | None = "my-reg-secret",
+    push_credential_secret: str | None = "registry-push-credential",
     signing_key: str | None = "k8s://nhx-builds/cosign-key",
     execution_enabled: bool = True,
 ) -> BuilderConfig:
     return BuilderConfig(
-        default_registry=default_registry,
+        registry=registry,
         repository_prefix=repository_prefix,
         sandbox_cpu=sandbox_cpu,
         sandbox_memory=sandbox_memory,
-        push_secret=push_secret,
+        push_credential_secret=push_credential_secret,
         signing_key=signing_key,
         execution_enabled=execution_enabled,
     )
@@ -110,26 +110,23 @@ class TestItSurvivesTheWire:
         HelixJobSpec.model_validate(on_the_wire)
 
 
-class TestTheCredentialAppearsOnce:
+class TestTheCredentialNeverEntersTheJob:
     """Requirement 7, as a property of the emitted document."""
 
-    def test_only_the_push_step_receives_the_credential(self) -> None:
+    def test_no_step_resolves_a_secret_through_jobs(self) -> None:
+        """The launcher resolves a job's secrets as the SUBMITTER. The push credential is the
+        operator's, so routing it that way would make it readable by everyone who can submit."""
+        spec = _compile(_set(), config=_config())
+        assert not spec.secrets
+        assert not [env for step in spec.steps for env in (step.environment or []) if env.from_secret is not None]
+
+    def test_only_the_push_step_is_told_where_the_credential_is(self) -> None:
         spec = _compile(_set(), config=_config())
         fetch, build, push = spec.steps
-
-        holders = [step.name for step in spec.steps for env in (step.environment or []) if env.from_secret is not None]
-        assert holders == ["push"]
-
-        assert any(e.name == CREDENTIAL_ENVVAR for e in push.environment or [])
-        assert not any(e.from_secret for e in fetch.environment or [])
-        assert build.environment is None or not any(e.from_secret for e in build.environment)
-
-    def test_the_secret_value_never_enters_the_spec(self) -> None:
-        """`from_secret` is a NAME. The launcher resolves it in-pod, as the submitter."""
-        spec = _compile(_set(), config=_config())
-        assert spec.secrets is not None
-        assert [s.name for s in spec.secrets] == ["my-reg-secret"]
-        assert all(s.value is None for s in spec.secrets)
+        told = PushStepConfig.model_validate(push.config)
+        assert (told.credential_secret, told.namespace) == ("registry-push-credential", "nhx-builds")
+        assert "registry-push-credential" not in str(fetch.config)
+        assert "registry-push-credential" not in str(build.config)
 
 
 class TestTheBuildStepCannotReachTheWorkVolume:
@@ -153,7 +150,7 @@ class TestTheSandboxIsToldNothingAboutPublishing:
         spec = _compile(_set(), config=_config())
         serialized = str(spec.steps[1].config)
         assert "reg.example.com" not in serialized
-        assert "my-reg-secret" not in serialized
+        assert "registry-push-credential" not in serialized
         assert SYSTEM_TAG not in serialized
         assert "cosign" not in serialized
 
@@ -260,25 +257,15 @@ class TestPublishing:
         spec = _compile(_set(), config=_config())
         push = PushStepConfig.model_validate(spec.steps[2].config)
         assert push.images[0].tags == [
-            "reg.example.com/team/main:v1",
-            f"reg.example.com/team/main:{SYSTEM_TAG}",
+            "reg.example.com/default/team/main:v1",
+            f"reg.example.com/default/team/main:{SYSTEM_TAG}",
         ]
 
-    def test_a_spec_may_override_the_default_registry(self) -> None:
-        spec_with_registry = _spec("main")
-        spec_with_registry.output.registry = "other.example.com"
-        spec = _compile(_set(spec_with_registry), config=_config())
+    def test_every_image_goes_to_the_deployments_registry_under_its_workspace(self) -> None:
+        spec = _compile(_set(_spec("main"), _spec("verifier")), config=_config())
         push = PushStepConfig.model_validate(spec.steps[2].config)
-        assert all(t.startswith("other.example.com/") for t in push.images[0].tags)
-
-    def test_the_credential_is_bound_to_the_operators_registry_not_a_callers(self) -> None:
-        """A spec naming its own registry changes where bytes go, never where the credential goes.
-        Deriving the credential's host from destinations would send it to any host a caller names."""
-        spec_with_registry = _spec("main")
-        spec_with_registry.output.registry = "attacker.example.com"
-        spec = _compile(_set(spec_with_registry), config=_config())
-        push = PushStepConfig.model_validate(spec.steps[2].config)
-        assert push.credential_registry == "reg.example.com"
+        assert push.registry == "reg.example.com"
+        assert all(tag.startswith("reg.example.com/default/") for image in push.images for tag in image.tags)
 
 
 class TestNoConfigCarriesAPath:

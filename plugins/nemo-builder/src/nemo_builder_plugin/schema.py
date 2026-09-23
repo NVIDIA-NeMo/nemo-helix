@@ -18,7 +18,8 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from nemo_builder_plugin.identity import validate_repository, validate_tag
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class FileSetSource(BaseModel):
@@ -42,19 +43,37 @@ class FileSetSource(BaseModel):
 
 
 class BuildOutput(BaseModel):
-    """Where one built image is published."""
+    """Where one built image is published: a repository and tag, never a registry.
 
-    registry: str | None = Field(
-        default=None,
+    Every image goes to the deployment's one registry, at
+    ``<repository_prefix>/<workspace>/<repository>``, pushed with the operator's credential. One
+    registry is what lets every workload that runs a built image pull it with one credential. The
+    workspace in the path is what keeps one tenant out of another's repositories: the credential
+    can write anywhere under the prefix, so the registry cannot tell workspaces apart, and the
+    compiler is the only thing that can.
+    """
+
+    # A caller still sending `registry` gets a 422 rather than having it ignored -- an ignored
+    # `registry` would publish somewhere other than where the caller asked.
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str = Field(
         description=(
-            "Registry host to push to. Omit to use the deployment's default registry. A "
-            "deployment with neither fails the COMPILE, not the build -- an unconfigured "
-            "destination is a property of the request being unanswerable, which the caller "
-            "should learn at submit."
-        ),
+            "Repository path within this workspace's part of the registry, e.g. `team/app`. "
+            "Components on the OCI grammar; no `..`, so it cannot leave the workspace's path."
+        )
     )
-    repository: str = Field(description="Repository path within the registry.")
     tag: str = Field(description="The caller's tag. The system tag is pushed alongside it.")
+
+    @field_validator("repository")
+    @classmethod
+    def _repository_is_an_oci_path(cls, value: str) -> str:
+        return validate_repository(value)
+
+    @field_validator("tag")
+    @classmethod
+    def _tag_is_an_oci_tag(cls, value: str) -> str:
+        return validate_tag(value)
 
 
 class BuildSpec(BaseModel):

@@ -19,7 +19,7 @@ def _spec(
     return BuildSpec(
         name=name,
         source=FileSetSource(fileset=fileset, context_path=context_path),
-        output=BuildOutput(registry="reg.example.com", repository=f"team/{name}", tag="v1"),
+        output=BuildOutput(repository=f"team/{name}", tag="v1"),
         dockerfile=dockerfile,
     )
 
@@ -35,6 +35,27 @@ class TestDockerfileStaysWithinContext:
     def test_does_not_escape(self, bad: str) -> None:
         with pytest.raises(ValidationError):
             _spec("x", dockerfile=bad)
+
+
+class TestBuildOutput:
+    """The compiler composes the path under the workspace, so the caller's part must stay a part."""
+
+    def test_a_registry_is_refused_rather_than_ignored(self) -> None:
+        """Ignored, it would publish somewhere other than where the caller asked."""
+        with pytest.raises(ValidationError, match="registry"):
+            BuildOutput.model_validate({"registry": "elsewhere.example.com", "repository": "team/app", "tag": "v1"})
+
+    @pytest.mark.parametrize(
+        "bad", ["../team-b/app", "team/../../app", "/team/app", "team//app", "team/app/", "Team/App"]
+    )
+    def test_a_repository_cannot_leave_the_workspaces_path(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="repository"):
+            BuildOutput(repository=bad, tag="v1")
+
+    @pytest.mark.parametrize("bad", ["", "-v1", "v1@sha256", "a" * 129])
+    def test_a_tag_must_be_an_oci_tag(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="tag"):
+            BuildOutput(repository="team/app", tag=bad)
 
 
 class TestBuildSet:

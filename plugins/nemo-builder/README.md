@@ -79,7 +79,7 @@ All routes are under `/apis/builder/v2/workspaces/{workspace}`.
       "source": {"fileset": "hello-context", "context_path": null},
       "dockerfile": "Dockerfile",
       "platform": "linux/amd64",
-      "output": {"registry": null, "repository": "demo/hello", "tag": "v1"}
+      "output": {"repository": "demo/hello", "tag": "v1"}
     }
   ]
 }
@@ -94,8 +94,14 @@ All routes are under `/apis/builder/v2/workspaces/{workspace}`.
 | `source.context_path` | Optional subdirectory of the fileset to use as the context. Omit it to use the whole fileset. |
 | `dockerfile` | Path relative to the context. Absolute paths and `..` are rejected. Defaults to `Dockerfile`. |
 | `platform` | Passed to kaniko. Defaults to `linux/amd64`. |
-| `output.registry` | Registry host. Omit it to use the deployment's `default_registry`. |
-| `output.repository`, `output.tag` | Where the image is published. With the default registry, the deployment's `repository_prefix` is prepended. |
+| `output.repository`, `output.tag` | Where the image is published, within your workspace's part of the registry. |
+
+Every image goes to the deployment's one registry, at
+`<registry>/<repository_prefix>/<workspace>/<output.repository>:<output.tag>`. A caller can't name
+a registry: whatever runs the image has to pull it, and one registry means one pull credential for
+every workload that does. The workspace in the path keeps workspaces out of each other's
+repositories. To publish somewhere else, copy the image out afterwards, for example with
+`crane copy`.
 
 A successful submit returns `201` with the job name and the `pending` rows. Poll the rows, not
 the job: images in a set finish independently.
@@ -103,9 +109,9 @@ the job: images in a set finish independently.
 | Status | When |
 |---|---|
 | `201` | Rows created and job submitted. |
-| `400` | Two specs would publish the same `registry/repository:tag`. |
-| `409` | This deployment can't build: builds are switched off (`execution_enabled: false`), `push_secret` or `signing_key` is unset, or an image has no registry. |
-| `422` | The body failed validation, for example a Dockerfile path outside the context, duplicate spec names, or a `revision` below 1. |
+| `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. |
+| `409` | This deployment can't build: builds are switched off (`execution_enabled: false`), or `registry`, `push_credential_secret` or `signing_key` is unset. |
+| `422` | The body failed validation, for example a Dockerfile path outside the context, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid in an image reference, or an unknown field such as `output.registry`. |
 | `500` | Anything else, including reusing a `name` and `revision` that were already submitted. |
 
 ### `GET /container-images` and `GET /container-images/{name}`
@@ -116,7 +122,7 @@ the job: images in a set finish independently.
 |---|---|
 | `status` | `pending`, `ready` or `failed`. Only the reconciler changes it, and `ready` and `failed` are final. |
 | `status_detail` | Why a row failed. |
-| `registry`, `repository` | Where the image lives. |
+| `registry`, `repository` | Where the image lives: the deployment's registry, and `<repository_prefix>/<workspace>/<output.repository>`. |
 | `digest` | What the registry serves for this image, set once when the row becomes `ready`. Pin `<registry>/<repository>@<digest>`. |
 | `manifest_digest` | The per-platform manifest when the tag resolves to an index; otherwise equal to `digest`. |
 | `tag` | The system tag the reconciler resolved. |
@@ -156,8 +162,10 @@ published some of its images. A row fails when:
 - the image is there but has no signature, because an unsigned build doesn't count as a success
 
 The reconciler authenticates with `registry_username` and `registry_password`, which only need
-read access, and uses HTTPS unless `registry_insecure` is set. Run exactly one replica: there is
-no leader election.
+read access, and uses HTTPS unless `registry_insecure` is set. Supply them from a Kubernetes Secret
+as `NEMO_BUILDER_REGISTRY_USERNAME` and `NEMO_BUILDER_REGISTRY_PASSWORD` rather than in the config
+file; `deploy/local/platform.yaml` shows how. Run exactly one replica: there is no leader
+election.
 
 ## Configuration
 
@@ -169,20 +177,24 @@ builder:
   namespace: nhx-builds
   work_pvc: nhx-build-work
   sandbox_image: gcr.io/kaniko-project/executor:debug
-  default_registry: us-central1-docker.pkg.dev   # a host only, never host/path
-  repository_prefix: my-project/my-repo          # prepended to output.repository
-  push_secret: registry-credential               # a Secrets entry, looked up in the submitter's workspace
+  registry: us-central1-docker.pkg.dev           # a host only, never host/path
+  repository_prefix: my-project/my-repo          # images land at <prefix>/<workspace>/<repository>
+  push_credential_secret: registry-push-credential  # a Kubernetes Secret in `namespace`
   signing_key: k8s://nhx-builds/cosign-key       # a cosign key reference
-  registry_username: oauth2accesstoken           # read-only, for the reconciler
-  registry_password: <token>
   reconcile_interval_seconds: 10
   execution_enabled: true                        # false refuses new builds; reads keep working
 ```
 
-Three settings have no safe default: `push_secret`, `signing_key`, and a registry for every image
-(`default_registry`, or `output.registry` on each spec). If any is missing, submits fail with a
-`409` rather than as a build that dies in a pod. The push credential is either a Docker config
-JSON or `user:password`. A `user:password` credential is only ever sent to `default_registry`.
+Three settings have no safe default: `registry`, `push_credential_secret` and `signing_key`. If any
+is missing, submits fail with a `409` rather than as a build that dies in a pod.
+
+The push credential is the operator's: a `kubernetes.io/dockerconfigjson` Secret in the build
+namespace, with write access to `registry` under `repository_prefix`. The `push` step reads it
+through the Kubernetes API as `nhx-build-push`, the only ServiceAccount that can, the same way it
+reads the signing key. It is not a Secrets-service entry, because Jobs resolves those as the
+submitter, and every submitter would then be able to read it. The reconciler's read-only
+credential (`registry_username`, `registry_password`) is separate; see
+[The image reconciler](#the-image-reconciler).
 
 The platform also needs three Jobs execution profiles, one per step: `build-fetch`,
 `build-control` and `build-push`, each naming its ServiceAccount. `config/platform-config.minikube.yaml`
@@ -201,7 +213,7 @@ directory with `kubectl apply -f`:
 |---|---|
 | `00-namespace.yaml` | Creates `nhx-builds`, enforcing the `baseline` Pod Security Standard |
 | `10-serviceaccounts.yaml` | The three step identities |
-| `20-rbac.yaml` | Pod management for `nhx-build-control` only, and read access to the signing key for `nhx-build-push` only |
+| `20-rbac.yaml` | Pod management for `nhx-build-control` only, and read access to the signing key and push credential for `nhx-build-push` only |
 | `30-networkpolicy.yaml` | Sandbox egress: the public internet, minus private, link-local and cluster ranges |
 | `40-work-volume.yaml` | The shared work volume |
 | `negative-control.sh` | Checks that the namespace still refuses a pod with BuildKit's privileges |
@@ -234,13 +246,23 @@ plugins/nemo-builder/deploy/negative-control.sh       # must print PASS
 plugins/nemo-builder/deploy/sandbox-egress-probe.sh   # must print PASS
 ```
 
-**2. Signing key.** Keep `keys/cosign.pub` if you want to verify signatures later.
+**2. Signing key and push credential.** Keep `keys/cosign.pub` if you want to verify signatures
+later.
 
 ```bash
 mkdir -p keys && chmod 777 keys
 docker run --rm -v "$PWD/keys:/work" -w /work -e COSIGN_PASSWORD= \
   ghcr.io/sigstore/cosign/cosign:v2.5.3 generate-key-pair
 kubectl -n nhx-builds create secret generic cosign-key --from-file=cosign.key=keys/cosign.key
+```
+
+The local registry needs no login, so the push credential is an empty Docker config. Against a
+real registry, use `kubectl create secret docker-registry` with `--docker-server` set to the
+config's `registry`.
+
+```bash
+kubectl -n nhx-builds create secret generic registry-push-credential \
+  --type=kubernetes.io/dockerconfigjson --from-literal=.dockerconfigjson='{"auths":{}}'
 ```
 
 **3. Images.** Build the platform image with this plugin added, and the image the build steps run
@@ -267,7 +289,7 @@ you rebuild, use a new tag, and update `deploy/local/platform.yaml` and the conf
 
 **4. Platform.** `deploy/local/` runs the platform services the builder needs in one pod with
 SQLite. It also runs an anonymous registry at `registry.nhx-builds.svc.cluster.local:5000`, which
-is the config's `default_registry`.
+is the config's `registry`.
 
 ```bash
 kubectl apply -f plugins/nemo-builder/deploy/local/
@@ -283,12 +305,9 @@ In another terminal:
 export NHX_BASE_URL=http://localhost:8080
 ```
 
-**5. Push credential and build context.** The minikube config names its push secret
-`local-registry`. The local registry needs no login, so an empty Docker config works.
+**5. Build context.**
 
 ```bash
-nemo secrets create local-registry --value '{"auths":{}}' --workspace default
-
 mkdir -p hello && cat > hello/Dockerfile <<'EOF'
 FROM docker.io/library/python:3.13-slim
 RUN pip install --no-cache-dir six==1.16.0
@@ -342,8 +361,8 @@ contain the Dockerfile's output:
 ```bash
 kubectl -n nhx-builds run check --rm -i --restart=Never --image=nhx-build:local --command -- sh -c '
   sleep 2
-  crane digest --insecure registry.nhx-builds.svc.cluster.local:5000/demo/hello:v1
-  crane export --insecure registry.nhx-builds.svc.cluster.local:5000/demo/hello:v1 - | tar -xO hello.txt'
+  crane digest --insecure registry.nhx-builds.svc.cluster.local:5000/default/demo/hello:v1
+  crane export --insecure registry.nhx-builds.svc.cluster.local:5000/default/demo/hello:v1 - | tar -xO hello.txt'
 ```
 
 To build again, submit with `"revision": 2`.
@@ -384,10 +403,8 @@ The tests need no cluster, registry or running platform.
 - **Kubernetes only, with the platform inside the cluster.** Build pods call back to Files,
   Secrets and Jobs, so a control plane outside the cluster can't run builds.
 - **One build node.** The work volume is `ReadWriteOnce`. A `ReadWriteMany` volume would lift this.
-- **No registry allowlist.** A spec can publish to any registry it names. The push credential is
-  only ever sent to `default_registry`, but the image is pushed wherever the spec says.
-- **`push_secret` is looked up in the submitter's workspace**, so each submitting workspace needs a
-  secret of that name, and the credential used is theirs rather than the operator's.
+- **One registry per deployment.** Every image is published to `registry`, under the submitting
+  workspace's path. Publishing anywhere else means copying the image out afterwards.
 - **Registries that challenge with Basic auth** can be pushed to, but the reconciler only handles
   Bearer tokens and can't resolve images on them.
 - **Each submission needs a new `revision`.** Reusing a `name` and `revision` returns `500`.

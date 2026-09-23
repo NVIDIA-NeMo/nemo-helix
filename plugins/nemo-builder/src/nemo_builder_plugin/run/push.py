@@ -33,9 +33,13 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 
+from kubernetes import client as k8s
+from kubernetes import config as k8s_config
+from kubernetes.client.exceptions import ApiException
 from nemo_builder_plugin.run.context import read_step_config, work_mount
-from nemo_builder_plugin.steps import CREDENTIAL_ENVVAR, PushImage, PushStepConfig, SigningConfig, WorkLayout
+from nemo_builder_plugin.steps import PushImage, PushStepConfig, SigningConfig, WorkLayout
 
 logger = logging.getLogger(__name__)
 
@@ -44,50 +48,69 @@ logger = logging.getLogger(__name__)
 _CHUNK = 1024 * 1024
 
 
+#: The key `kubectl create secret docker-registry` writes, and the only one this step reads.
+DOCKERCONFIGJSON_KEY = ".dockerconfigjson"
+
+
 class CredentialError(Exception):
-    """The injected credential cannot be turned into something crane and cosign will use."""
+    """The push credential cannot be read, or is not something crane and cosign will use."""
 
 
-def _materialize_credential(registry: str | None) -> str | None:
-    """Write the injected credential where crane and cosign will look for it.
+class _SecretReader(Protocol):
+    """The one Kubernetes call this step makes. `CoreV1Api` satisfies it; so does a test double."""
+
+    def read_namespaced_secret(self, name: str, namespace: str) -> k8s.V1Secret: ...
+
+
+def _read_credential(api: _SecretReader, *, namespace: str, name: str) -> str:
+    """The push credential, read from its Kubernetes Secret as this step's own ServiceAccount.
+
+    The route the signing key already takes: `nhx-build-push` holds `get` on this one Secret, by
+    name, and no other step holds it. Not a Secrets-service entry, because the Jobs launcher
+    resolves those as the submitter -- which would mean every submitter could read the operator's
+    credential.
+    """
+    try:
+        secret = api.read_namespaced_secret(name=name, namespace=namespace)
+    except ApiException as exc:
+        raise CredentialError(f"cannot read Secret {namespace}/{name}: {exc.status} {exc.reason}") from exc
+    encoded = (secret.data or {}).get(DOCKERCONFIGJSON_KEY)
+    if not encoded:
+        raise CredentialError(
+            f"Secret {namespace}/{name} has no {DOCKERCONFIGJSON_KEY!r} key; "
+            "create it with `kubectl create secret docker-registry`"
+        )
+    return base64.b64decode(encoded).decode()
+
+
+def _materialize_credential(docker_config: str, *, registry: str) -> str:
+    """Write the credential where crane and cosign will look for it, and return that directory.
 
     Both read a Docker config, so the value has to land on a filesystem somewhere -- there is no
     "pass a credential on the command line" for either, and doing so would put it in the process
     table anyway. It goes to a 0600 file in a private temp directory rather than to the default
     `~/.docker/config.json`, so its lifetime is this process and its reach is this step.
 
-    Accepts either a full dockerconfigjson or a bare `user:password`, because a deployment's
-    Secrets entry is more likely to hold whichever its operator already had.
-
-    **A bare credential names no host, so it is bound to ``registry``** -- the deployment's
-    default registry, handed over by the compiler. An earlier version read the host from an
-    environment variable nothing set, wrote the credential under the key ``""``, and crane,
-    matching no host, pushed anonymously. With no registry to bind to, this refuses rather than
-    guessing: the alternative guesses are the images' destinations, which a caller chooses.
+    **A missing entry for ``registry`` is logged, not refused.** crane with no matching entry
+    pushes anonymously, and against an anonymous registry that succeeds -- which is how an
+    earlier version shipped a credential that never reached crane without anything noticing. A
+    deployment on an anonymous registry legitimately has no entry, so this is a warning rather
+    than a refusal, but it is one that says exactly what will happen.
     """
-    raw = os.environ.get(CREDENTIAL_ENVVAR)
-    if not raw:
-        logger.warning("%s is not set; pushing anonymously", CREDENTIAL_ENVVAR)
-        return None
-
-    raw = raw.strip()
-    if raw.startswith("{"):
-        config = raw
-    else:
-        username, separator, password = raw.partition(":")
-        if not separator:
-            raise CredentialError(f"{CREDENTIAL_ENVVAR} is neither a docker config nor `user:password`")
-        if not registry:
-            raise CredentialError(
-                f"{CREDENTIAL_ENVVAR} is a bare `user:password`, which names no registry, and this "
-                "deployment has no default_registry to bind it to. Store a dockerconfigjson instead."
-            )
-        auth = base64.b64encode(f"{username}:{password}".encode()).decode()
-        config = json.dumps({"auths": {registry: {"auth": auth}}})
+    try:
+        document = json.loads(docker_config)
+    except json.JSONDecodeError as exc:
+        raise CredentialError("the push credential is not a Docker config JSON document") from exc
+    auths = document.get("auths") if isinstance(document, dict) else None
+    if not isinstance(auths, dict):
+        raise CredentialError("the push credential is not a Docker config: it has no `auths` map")
+    hosts = {host.removeprefix("https://").removeprefix("http://").rstrip("/") for host in auths}
+    if registry not in hosts:
+        logger.warning("the push credential has no entry for %s; crane and cosign will push anonymously", registry)
 
     directory = tempfile.mkdtemp(prefix="nhx-docker-")
     path = Path(directory) / "config.json"
-    path.write_text(config)
+    path.write_text(docker_config)
     path.chmod(0o600)
     os.environ["DOCKER_CONFIG"] = directory
     logger.info("registry credential materialized at %s", directory)
@@ -222,8 +245,10 @@ def _push_one(image: PushImage, layout: Path, signing: SigningConfig, insecure: 
 
 def main() -> int:
     config = PushStepConfig.model_validate(read_step_config())
+    k8s_config.load_incluster_config()
     try:
-        _materialize_credential(config.credential_registry)
+        docker_config = _read_credential(k8s.CoreV1Api(), namespace=config.namespace, name=config.credential_secret)
+        _materialize_credential(docker_config, registry=config.registry)
     except CredentialError as exc:
         # Nothing is pushed. Publishing anonymously when a credential was configured would hide
         # the misconfiguration behind a registry's 401, or worse, succeed somewhere it shouldn't.

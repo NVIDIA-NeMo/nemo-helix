@@ -8,9 +8,9 @@
 # five services the builder actually touches plus the builder itself, against SQLite, in one pod.
 #
 # It exists because of the single thing that stopped the first PoC run: **build pods call back to
-# the platform**. `fetch` reads Files, the launcher resolves Secrets, steps report status. A
-# control plane on a laptop has no address a cluster pod can reach, so the spine could not be
-# closed. In-cluster, `nemo-helix.nhx-platform.svc` resolves and the loop closes.
+# the platform**. `fetch` reads Files, and every step reports its status. A control plane on a
+# laptop has no address a cluster pod can reach, so the spine could not be closed. In-cluster,
+# `nemo-helix.nhx-platform.svc` resolves and the loop closes.
 #
 # What this does NOT prove, precisely because it is one pod with SQLite: the chart's own
 # correctness, Postgres, multi-replica behaviour, or the single-writer property of the reconciler
@@ -162,6 +162,13 @@ spec:
             - { name: DATABASE_DIALECT, value: sqlite }
             - { name: DATABASE_PATH, value: /var/lib/nemo/nhx-platform.db }
             - { name: NHX_CONFIG_WARNINGS_DISABLED, value: "1" }
+            # The reconciler's read-only registry credential, from a Secret rather than the
+            # ConfigMap -- environment variables override the config file. Optional because the
+            # local registry is anonymous: with no `nhx-registry-read` Secret these stay unset.
+            - name: NEMO_BUILDER_REGISTRY_USERNAME
+              valueFrom: { secretKeyRef: { name: nhx-registry-read, key: username, optional: true } }
+            - name: NEMO_BUILDER_REGISTRY_PASSWORD
+              valueFrom: { secretKeyRef: { name: nhx-registry-read, key: password, optional: true } }
           ports:
             - containerPort: 8080
           volumeMounts:

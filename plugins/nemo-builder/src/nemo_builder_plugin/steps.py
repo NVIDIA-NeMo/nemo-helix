@@ -26,9 +26,9 @@ to a ConfigMap, mounts it, and points ``NEMO_JOB_STEP_CONFIG_FILE_PATH`` at the 
 **No config carries a path.** Configs name things -- a fileset, an image -- and every step
 derives where those things live from one :class:`WorkLayout`.
 
-No step config carries a credential *value*. ``push_secret`` is a name that the jobs launcher
-resolves in-pod against the Secrets service, as the submitting principal. The value never enters
-this structure, the Job object, or etcd.
+No step config carries a credential *value*. ``push`` is told the NAME of a Kubernetes Secret
+and reads it itself, as its own ServiceAccount; the value never enters this structure, the Job
+object, or any other step.
 """
 
 from __future__ import annotations
@@ -38,10 +38,6 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, Field
-
-#: The environment variable `push` reads the registry credential from. The compiler wires it with
-#: `from_secret`, so the jobs launcher resolves the value in-pod and it never enters a job spec.
-CREDENTIAL_ENVVAR = "NHX_REGISTRY_AUTH"
 
 
 class ContextSource(BaseModel):
@@ -245,7 +241,6 @@ class PushImage(BaseModel):
     """One OCI layout to publish. Its path is :meth:`WorkLayout.output` of ``image``."""
 
     image: str = Field(description="`ContainerImage.name` -- the row this will satisfy.")
-    push_secret: str = Field(description="Secret NAME. Resolved in-pod; the value is never here.")
     tags: list[str] = Field(
         min_length=2,
         description=(
@@ -266,16 +261,15 @@ class PushStepConfig(BaseModel):
 
     signing: SigningConfig
     images: list[PushImage] = Field(min_length=1)
-    credential_registry: str | None = Field(
-        default=None,
+    registry: str = Field(description="The deployment's registry host. Every tag in `images` is on it.")
+    credential_secret: str = Field(
         description=(
-            "The one registry host a bare `user:password` credential is presented to: the "
-            "deployment's `default_registry`. Never derived from the images' destinations, "
-            "because a spec may name its own registry, and binding the credential to whatever "
-            "host a caller names would hand it to that host. A dockerconfigjson credential "
-            "ignores this -- it already says which hosts it is for."
+            "NAME of the Kubernetes Secret holding the push credential. `push` reads it through "
+            "the Kubernetes API as its own ServiceAccount, the only one granted `get` on it, so "
+            "the value never enters a job spec or reaches any other step."
         ),
     )
+    namespace: str = Field(description="Where `credential_secret` lives: the build namespace.")
     insecure: bool = Field(
         default=False,
         description=(

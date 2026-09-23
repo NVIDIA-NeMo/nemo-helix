@@ -89,6 +89,23 @@ def normalize_digest(value: str) -> str:
     return digest
 
 
+def validate_repository(repository: str) -> str:
+    """A repository path on the OCI grammar: ``/``-separated components, each one legal.
+
+    Refuses an empty component, a leading or trailing ``/``, and ``..`` -- which is what keeps a
+    caller's path inside whatever prefix the compiler joins it under.
+    """
+    if not repository or any(not _REPOSITORY_COMPONENT.fullmatch(part) for part in repository.split("/")):
+        raise ImageIdentityError(f"invalid repository path: {repository!r}")
+    return repository
+
+
+def validate_tag(tag: str) -> str:
+    if not _TAG.fullmatch(tag):
+        raise ImageIdentityError(f"invalid tag: {tag!r}")
+    return tag
+
+
 def parse_reference(image_ref: str) -> ImageReference:
     """Parse a reference that already names its registry explicitly.
 
@@ -122,11 +139,8 @@ def parse_reference(image_ref: str) -> ImageReference:
     if ":" in last:
         last, tag = last.rsplit(":", 1)
         parts[-1] = last
-        if not _TAG.fullmatch(tag):
-            raise ImageIdentityError(f"invalid tag: {tag!r}")
-    repository = "/".join(parts)
-    if not repository or any(not _REPOSITORY_COMPONENT.fullmatch(part) for part in parts):
-        raise ImageIdentityError(f"invalid repository path: {repository!r}")
+        validate_tag(tag)
+    repository = validate_repository("/".join(parts))
     if digest and tag:
         raise ImageIdentityError("reference must use a tag or a digest, not tag-plus-digest form")
     if not digest and not tag:
@@ -222,7 +236,7 @@ def split_system_tag(tag: str) -> tuple[str, str, int, int]:
     return workspace, set_name, int(revision), int(index)
 
 
-# --- Registry policy is NOT here yet, and that is a gap rather than an omission. ---
+# --- Registry policy is NOT here, and push destinations no longer need it. ---
 #
 # RFC 001 pairs identity with a registry allowlist, and makes normalization and allowlisting ONE
 # feature on purpose: a raw string comparison against a list containing `docker.io` matches none
@@ -231,10 +245,9 @@ def split_system_tag(tag: str) -> tuple[str, str, int, int]:
 # `normalize_reference`, so that an allowlist check cannot be written against an unnormalized
 # string.
 #
-# It is absent because three of its semantics are still open decisions (`M1-9`): host-only or
-# host-plus-repository-prefix granularity, one list or two (push destinations and admitted
-# registrations are not the same grant -- pushing somewhere is bounded by the caller's own
-# credential, admitting from somewhere is not), and what an unqualified reference means.
-#
-# Until it lands, **nothing bounds where this system pushes.** That is acceptable only because
-# the PoC is single-tenant against a lab registry.
+# A caller cannot name a push destination at all: every image goes to the deployment's one
+# registry, under a path the compiler composes. What still wants an allowlist is the two places
+# a caller-named registry remains -- a base image's `FROM`, which the pull-through mirror bounds
+# (`M2-1`, not built), and registering an image this system did not build
+# (`POST /container-images`, `M1-10`, not built). Its open semantics (`M1-9`) are open only for
+# those.

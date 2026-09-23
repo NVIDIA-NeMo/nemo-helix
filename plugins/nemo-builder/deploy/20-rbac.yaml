@@ -84,3 +84,42 @@ subjects:
   - kind: ServiceAccount
     name: nhx-build-push
     namespace: nhx-builds
+---
+# The push credential, readable by the one step that pushes.
+#
+# `builder.push_credential_secret` names a `kubernetes.io/dockerconfigjson` Secret in this
+# namespace, and `push` reads it through the Kubernetes API as its own ServiceAccount -- the route
+# the signing key takes, for the same reason: `get` on exactly this Secret, by name, and nothing
+# else. The name here must match that setting.
+#
+# It is the OPERATOR's credential, so it is deliberately not a Secrets-service entry: the Jobs
+# launcher resolves those as the submitting principal, which would mean everyone able to submit a
+# build could read it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-read-push-credential
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["registry-push-credential"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-read-push-credential
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-read-push-credential
+subjects:
+  - kind: ServiceAccount
+    name: nhx-build-push
+    namespace: nhx-builds

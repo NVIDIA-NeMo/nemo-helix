@@ -82,9 +82,12 @@ builder:
   work_pvc: nhx-build-work
   sandbox_image: gcr.io/kaniko-project/executor:debug
 
-  # A Service name, which only resolves inside the cluster -- so this config is not usable from
-  # outside it. That is fine here and is the reason the control plane moved in-cluster.
-  default_registry: registry.nhx-builds.svc.cluster.local:5000
+  # The one registry every image goes to; a caller cannot name another. A Service name, which
+  # only resolves inside the cluster -- so this config is not usable from outside it. That is
+  # fine here and is the reason the control plane moved in-cluster.
+  registry: registry.nhx-builds.svc.cluster.local:5000
+  # Images land at <repository_prefix>/<workspace>/<output.repository>. Empty here, so a build
+  # in `default` asking for `demo/hello` publishes `default/demo/hello`.
   repository_prefix: ""
 
   # Plain HTTP. Never do this against anything holding real artifacts: the digest an HTTP
@@ -92,10 +95,10 @@ builder:
   # registry is supposed to provide.
   registry_insecure: true
 
-  # The compiler requires a push secret to exist even though this registry is anonymous, because
-  # a deployment that cannot publish should fail the submit rather than the build. The Secrets
-  # entry holds an empty docker config.
-  push_secret: local-registry
+  # A Kubernetes Secret in nhx-builds, readable only by nhx-build-push (deploy/20-rbac.yaml).
+  # Required even though this registry is anonymous, because a deployment that cannot publish
+  # should fail the submit rather than the build; here it holds an empty docker config.
+  push_credential_secret: registry-push-credential
   signing_key: k8s://nhx-builds/cosign-key
   signature_storage: tag
 

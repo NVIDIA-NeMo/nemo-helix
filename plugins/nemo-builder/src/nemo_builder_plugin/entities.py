@@ -168,7 +168,9 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
     status_detail: str | None = None
 
     registry: str = Field(description="Registry host the image lives on.")
-    repository: str = Field(description="Repository path within the registry.")
+    repository: str = Field(
+        description="Repository path within the registry: `<repository_prefix>/<workspace>/<output.repository>`."
+    )
     provenance: Provenance
     platform: str = Field(
         default="linux/amd64",
