@@ -17,6 +17,7 @@ import httpx
 import nemo_helix_ext.cli.commands.setup as setup_commands
 import pytest
 import typer
+import yaml as _yaml
 from click.exceptions import Exit as ClickExit
 from nemo_helix_ext.cli.commands.setup import (
     _AGENT_API_READINESS_POLL_INTERVAL,
@@ -85,6 +86,8 @@ from nemo_helix_ext.cli.commands.setup import (
     _select_usable_model_pair,
     _services_log_suggests_port_conflict,
     _start_services_background,
+    _upload_sample_dataset,
+    _upload_sample_eval_config,
     _validate_api_key,
     _verify_platform_health,
     _wait_for_models,
@@ -109,6 +112,8 @@ from nemo_helix_ext.local.process import PortConflict
 from nemo_helix_ext.ui.prompts import UserCancelled
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, raise_for_status
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
@@ -543,6 +548,112 @@ class TestEnsureWorkspaceExists:
 
         with pytest.raises(RuntimeError, match="permission denied"):
             _ensure_workspace_exists(workspaces_client, "sample")
+
+
+class TestUploadSampleDataset:
+    def test_creates_dataset_fileset_and_uploads_packaged_jsonl(self):
+        files_client = MagicMock(spec=FilesClient)
+        fileset = MagicMock(purpose=FilesetPurpose.DATASET)
+        files_client.create_fileset.return_value = _entity_response(fileset)
+        files_client.upload_file.return_value = _entity_response(MagicMock())
+        dataset = MagicMock()
+        dataset.read_bytes.return_value = b'{"user_message":"review"}\n'
+
+        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=dataset):
+            uploaded = _upload_sample_dataset(files_client, "sample")
+
+        assert uploaded is True
+        files_client.create_fileset.assert_called_once_with(
+            workspace="sample",
+            body=CreateFilesetRequest(
+                name="esec-eval-data",
+                description="Evaluation dataset for the NeMo setup sample email security agent.",
+                purpose=FilesetPurpose.DATASET,
+            ),
+            exist_ok=True,
+        )
+        files_client.update_fileset.assert_not_called()
+        files_client.upload_file.assert_called_once_with(
+            workspace="sample",
+            name="esec-eval-data",
+            path="dataset.jsonl",
+            content=b'{"user_message":"review"}\n',
+        )
+
+    def test_promotes_an_existing_generic_fileset_to_dataset(self):
+        files_client = MagicMock(spec=FilesClient)
+        files_client.create_fileset.return_value = _entity_response(MagicMock(purpose=FilesetPurpose.GENERIC))
+        files_client.update_fileset.return_value = _entity_response(MagicMock())
+        files_client.upload_file.return_value = _entity_response(MagicMock())
+        dataset = MagicMock()
+        dataset.read_bytes.return_value = b"{}\n"
+
+        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=dataset):
+            uploaded = _upload_sample_dataset(files_client, "sample")
+
+        assert uploaded is True
+        files_client.update_fileset.assert_called_once_with(
+            workspace="sample",
+            name="esec-eval-data",
+            body=UpdateFilesetRequest(purpose=FilesetPurpose.DATASET),
+        )
+
+    def test_skips_upload_when_packaged_dataset_is_missing(self):
+        files_client = MagicMock(spec=FilesClient)
+
+        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=None):
+            uploaded = _upload_sample_dataset(files_client, "sample")
+
+        assert uploaded is False
+        files_client.create_fileset.assert_not_called()
+        files_client.upload_file.assert_not_called()
+
+
+class TestUploadSampleEvalConfig:
+    def test_uploads_dataset_driven_config_with_resolved_dataset(self):
+        files_client = MagicMock(spec=FilesClient)
+        files_client.upload_file.return_value = _entity_response(MagicMock())
+        config_asset = MagicMock()
+        config_asset.read_text.return_value = "dataset: <workspace>/<fileset>#dataset.jsonl\nmetrics: []\n"
+
+        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=config_asset):
+            uploaded = _upload_sample_eval_config(files_client, "sample")
+
+        assert uploaded is True
+        config_asset.read_text.assert_called_once_with(encoding="utf-8")
+        files_client.upload_file.assert_called_once()
+        upload = files_client.upload_file.call_args.kwargs
+        assert upload["workspace"] == "sample"
+        assert upload["name"] == "esec-eval-data"
+        assert upload["path"] == "eval-config.yaml"
+        assert _yaml.safe_load(upload["content"]) == {
+            "dataset": "sample/esec-eval-data#dataset.jsonl",
+            "metrics": [],
+        }
+
+    def test_skips_upload_when_packaged_config_is_missing(self):
+        files_client = MagicMock(spec=FilesClient)
+
+        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=None):
+            uploaded = _upload_sample_eval_config(files_client, "sample")
+
+        assert uploaded is False
+        files_client.upload_file.assert_not_called()
+
+    def test_reports_invalid_packaged_config(self):
+        files_client = MagicMock(spec=FilesClient)
+        config_asset = MagicMock()
+        config_asset.read_text.return_value = "- not\n- a\n- mapping\n"
+
+        with (
+            patch(f"{SETUP_MOD}._sample_asset_path", return_value=config_asset),
+            patch(f"{SETUP_MOD}.console") as mock_console,
+        ):
+            uploaded = _upload_sample_eval_config(files_client, "sample")
+
+        assert uploaded is False
+        files_client.upload_file.assert_not_called()
+        assert "packaged eval config must be a mapping" in mock_console.print.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
@@ -2274,6 +2385,14 @@ class TestInteractiveModelPairSelection:
                 f"{self._MOD}._maybe_deploy_sample_agent",
                 side_effect=lambda *args, **kwargs: event_order.append("agent") or True,
             ) as deploy_sample_agent,
+            patch(
+                f"{self._MOD}._upload_sample_dataset",
+                side_effect=lambda *args, **kwargs: event_order.append("dataset") or True,
+            ) as upload_sample_dataset,
+            patch(
+                f"{self._MOD}._upload_sample_eval_config",
+                side_effect=lambda *args, **kwargs: event_order.append("evaluation") or True,
+            ) as upload_sample_eval_config,
         ):
             selected_path = _run_interactive_mode(
                 cli_context,
@@ -2300,7 +2419,9 @@ class TestInteractiveModelPairSelection:
             headers=None,
             certificate_authority=None,
         )
-        assert event_order == ["skills", "complete", "post_setup", "workspace", "agent"]
+        upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
+        upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
+        assert event_order == ["skills", "complete", "post_setup", "workspace", "agent", "dataset", "evaluation"]
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
         """When the new provider is still syncing, setup should not show a misleading picker."""
@@ -2365,6 +2486,8 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._print_setup_complete"),
             patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
             patch(f"{self._MOD}._maybe_deploy_sample_agent") as deploy_sample_agent,
+            patch(f"{self._MOD}._upload_sample_dataset", return_value=True) as upload_sample_dataset,
+            patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
             patch(f"{self._MOD}.console") as mock_console,
         ):
             _run_interactive_mode(
@@ -2384,6 +2507,8 @@ class TestInteractiveModelPairSelection:
             headers=None,
             certificate_authority=None,
         )
+        upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
+        upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
         printed_lines = [call.args[0] for call in mock_console.print.call_args_list if call.args]
         assert any(
             "Models from existing providers are available, but not from 'my-ollama-custom' yet." in line
