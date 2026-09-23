@@ -17,6 +17,21 @@ The middleware supports OpenAI Chat Completions requests and runs only in
 `request_middleware`. Protocol translation and response middleware are not
 supported.
 
+## Upgrading from the legacy middleware
+
+Before upgrading an existing Switchyard VirtualModel:
+
+1. Remove `nemo-switchyard` entries from `response_middleware`.
+2. Remove middleware calls whose `config_type` is `translate`.
+3. Ensure clients and every routed backend use the OpenAI Chat Completions
+   request/response shape.
+4. Update or recreate the VirtualModel with one of the supported request
+   middleware configurations below.
+
+Perform the VirtualModel migration together with the plugin upgrade. Legacy
+translation and response-middleware configurations are rejected rather than
+silently ignored.
+
 | `config_type` | Purpose | Required configuration |
 | --- | --- | --- |
 | `random_routing` | Weighted choice between two models | `strong`, `weak`, `strong_probability` |

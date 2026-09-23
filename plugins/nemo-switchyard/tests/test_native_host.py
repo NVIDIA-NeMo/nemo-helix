@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
-from types import SimpleNamespace
+from copy import deepcopy
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -178,6 +178,53 @@ async def test_run_stream_serves_judge_then_routes_user_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_noop_outcome_preserves_original_openai_body() -> None:
+    body = {
+        "model": "ws/router",
+        "messages": [
+            {"role": "user", "name": "customer", "content": "hello"},
+            {"role": "system", "content": "late instruction"},
+            {"role": "assistant", "content": None, "refusal": "cannot comply"},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "search", "description": "find", "parameters": {"type": "object"}},
+            }
+        ],
+        "parallel_tool_calls": False,
+    }
+    original = deepcopy(body)
+    request = InferenceRequest(body=body, headers={}, path="v1/chat/completions", typed_body=body)
+
+    await run_native_stream(
+        algorithm=FakeAlgorithm(),
+        request=request,
+        models={"any": ["ws/strong"]},
+        headers={},
+        transport=RecordingTransport(),
+    )
+
+    assert request.body == {**original, "model": "ws/strong"}
+
+
+@pytest.mark.asyncio
+async def test_failed_judge_call_allows_algorithm_fallback_done() -> None:
+    algorithm = FakeAlgorithm(judge=True)
+    request = _request()
+
+    await run_native_stream(
+        algorithm=algorithm,
+        request=request,
+        models={"judge": ["ws/judge"], "any": ["ws/strong"]},
+        headers={},
+        transport=RecordingTransport(InferenceMiddlewareError("judge unavailable", status_code=502)),
+    )
+
+    assert request.body["model"] == "ws/strong"
+
+
+@pytest.mark.asyncio
 async def test_run_stream_rejects_non_openai_chat_path() -> None:
     with pytest.raises(InferenceMiddlewareError) as exc:
         await run_native_stream(
@@ -236,6 +283,27 @@ async def test_run_stream_times_out() -> None:
             transport=RecordingTransport(),
             timeout=0.01,
         )
+
+    assert exc.value.status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_run_stream_timeout_includes_lock_wait() -> None:
+    lock = asyncio.Lock()
+    await lock.acquire()
+    try:
+        with pytest.raises(InferenceMiddlewareError) as exc:
+            await run_native_stream(
+                algorithm=FakeAlgorithm(),
+                request=_request(),
+                models={"any": ["ws/strong"]},
+                headers={},
+                transport=RecordingTransport(),
+                timeout=0.01,
+                lock=lock,
+            )
+    finally:
+        lock.release()
 
     assert exc.value.status_code == 504
 
@@ -317,6 +385,17 @@ def test_random_mapper_preserves_existing_config_shape() -> None:
     assert models == {"any": ["ws/strong", "ws/weak"]}
 
 
+def test_random_mapper_defaults_to_even_probability() -> None:
+    weights, _seed, _models = map_random_routing_config(
+        {
+            "strong": {"model": "ws/strong"},
+            "weak": {"model": "ws/weak"},
+        }
+    )
+
+    assert weights == [0.5, 0.5]
+
+
 def test_models_any_excludes_judge() -> None:
     mapping = models_map_from_config(
         {"models": {"judge": ["ws/j"], "capable": ["ws/s"], "efficient": ["ws/w"]}},
@@ -394,17 +473,15 @@ async def test_judge_transport_does_not_forward_caller_credentials() -> None:
         return_value=ModelProviderInferenceTarget(
             model_provider_gateway_url="https://provider.example/v1",
             served_model_name="served-judge",
+            default_extra_body={"temperature": 0.2, "provider_default": True},
+            required_extra_body={"temperature": 0.0, "provider_required": True},
+            outbound_headers={
+                "X-Api-Key": "provider-secret",
+                "X-Default": "default",
+                "X-Required": "required",
+            },
         )
     )
-    provider = SimpleNamespace(
-        api_key_secret_name="judge-key",
-        auth_header_format="X-Api-Key: {{auth_secret | trim}}",
-        default_extra_headers={"X-Default": "default"},
-        required_extra_headers={"X-Required": "required"},
-    )
-    provider_info = SimpleNamespace(model_provider=provider, secret_value=" provider-secret ")
-    entity = SimpleNamespace(model_providers=[(object(), provider_info)])
-    middleware.get_model_entity = MagicMock(return_value=entity)
     response = MagicMock(status_code=200)
     response.json.return_value = {"id": "ok"}
     client = AsyncMock()
@@ -415,13 +492,19 @@ async def test_judge_transport_does_not_forward_caller_credentials() -> None:
     with patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client):
         await IgwJudgeTransport(middleware).complete(
             "ws/judge",
-            {"messages": []},
+            {"messages": [], "temperature": 0.8},
             {"authorization": "Bearer caller"},
         )
 
     posted = client.post.await_args
     assert posted.args[0] == "https://provider.example/v1/chat/completions"
-    assert posted.kwargs["json"]["model"] == "served-judge"
+    assert posted.kwargs["json"] == {
+        "messages": [],
+        "model": "served-judge",
+        "provider_default": True,
+        "provider_required": True,
+        "temperature": 0.0,
+    }
     assert posted.kwargs["headers"] == {
         "X-Api-Key": "provider-secret",
         "X-Default": "default",

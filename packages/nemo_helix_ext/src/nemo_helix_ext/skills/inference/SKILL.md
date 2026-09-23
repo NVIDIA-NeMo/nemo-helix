@@ -77,6 +77,21 @@ For platform startup (`nemo services run`), Switchyard install, and state reset,
 
 ---
 
+## Upgrading legacy Switchyard VirtualModels
+
+Native Switchyard routing is request-only and supports the OpenAI Chat
+Completions shape. Before upgrading the plugin, update or recreate affected
+VirtualModels:
+
+1. Remove `nemo-switchyard` from `response_middleware`.
+2. Remove middleware calls with `config_type: translate`.
+3. Confirm clients and routed backends use OpenAI Chat Completions.
+4. Configure `random_routing`, `stage_router`, or capability-mode
+   `llm_classifier` in `request_middleware`.
+
+Make these VirtualModel changes together with the plugin upgrade; legacy
+translation and response-middleware configurations are rejected.
+
 ## CLI gotchas (real failures observed)
 
 - **`nemo secrets create`** uses `--from-file` (pipe key in). No `--value` flag.

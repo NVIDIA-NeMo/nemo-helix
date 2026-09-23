@@ -1290,6 +1290,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-insights-plugin
     #   nemo-safe-synthesizer
     #   nemo-safe-synthesizer-plugin
+    #   nemo-switchyard-plugin
     #   nemoguardrails
     #   nhx-auth
     #   nhx-automodel
@@ -1414,7 +1415,6 @@ jinja2==3.1.6 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-agents-plugin
     #   nemo-evaluator-sdk
     #   nemo-helix
-    #   nemo-switchyard-plugin
     #   nemoguardrails
     #   nemohelix
     #   nvidia-nat-core

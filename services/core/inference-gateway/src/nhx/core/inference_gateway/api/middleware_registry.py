@@ -44,6 +44,7 @@ from nemo_helix_plugin.inference_middleware_models import (
 from nhx.common.config import get_platform_config
 from nhx.common.entities.utils import parse_entity_ref
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
+from nhx.core.inference_gateway.api.provider_request import render_auth_header
 from nhx.core.inference_gateway.api.typed_request import parse_typed_request
 from nhx.core.inference_gateway.api.typed_response import TypedResponseStream, parse_typed_response
 
@@ -156,13 +157,28 @@ class InferenceMiddlewareCacheAccessorImpl:
             raise KeyError(f"Model entity {model_entity_id!r} not in ModelCache")
 
         served_name, provider_info = entity_info.model_providers[0]
-        base_url = provider_info.model_provider.host_url.rstrip("/")
+        provider = provider_info.model_provider
+        base_url = provider.host_url.rstrip("/")
         if append_v1_suffix and not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
+
+        outbound_headers = {
+            **(provider.default_extra_headers or {}),
+            **(provider.required_extra_headers or {}),
+        }
+        if provider_info.secret_value:
+            header_name, header_value = render_auth_header(provider_info.secret_value, provider.auth_header_format)
+            outbound_headers[header_name] = header_value
 
         return ModelProviderInferenceTarget(
             model_provider_gateway_url=base_url,
             served_model_name=served_name,
+            default_extra_body=dict(provider.default_extra_body or {}),
+            required_extra_body=dict(provider.required_extra_body or {}),
+            outbound_headers=outbound_headers,
+            missing_secret_name=provider.api_key_secret_name
+            if provider.api_key_secret_name and not provider_info.secret_value
+            else None,
         )
 
     def get_backend_format(self, virtual_model_id: str, model_entity_id: str) -> BackendFormat | None:

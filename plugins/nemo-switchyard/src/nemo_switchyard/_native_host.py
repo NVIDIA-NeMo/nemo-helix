@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
-from jinja2 import Environment
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareError,
     InferenceRequest,
@@ -29,8 +29,6 @@ JUDGE_HTTP_TIMEOUT_SECONDS = 30.0
 NATIVE_STREAM_TIMEOUT_SECONDS = 60.0
 _SESSION_HEADER = "x-switchyard-session-id"
 _REQUEST_ID_HEADER = "x-request-id"
-_DEFAULT_AUTH_HEADER = "Authorization: Bearer {{ auth_secret }}"
-_JINJA_ENV = Environment(autoescape=False)  # noqa: S701  # nosec B701
 
 
 class JudgeTransport(Protocol):
@@ -78,7 +76,11 @@ def wrap_llm_response(payload: Mapping[str, Any]) -> Any:
     return agg
 
 
-def apply_outcome_to_request(request: InferenceRequest, outcome: Any) -> None:
+def apply_outcome_to_request(
+    request: InferenceRequest,
+    outcome: Any,
+    original_llm_request: dict[str, Any] | None = None,
+) -> None:
     selected = list(getattr(outcome, "selected_model_ids", ()) or ())
     if not selected:
         raise InferenceMiddlewareError(
@@ -86,8 +88,8 @@ def apply_outcome_to_request(request: InferenceRequest, outcome: Any) -> None:
             status_code=500,
         )
     rewritten = getattr(outcome, "request", None)
-    if isinstance(rewritten, dict):
-        request.body = apply_llm_request_to_openai_body(request.body, rewritten)
+    if isinstance(rewritten, dict) and rewritten != original_llm_request:
+        request.body = apply_llm_request_to_openai_body(request.body, rewritten, original_llm_request)
     request.body["model"] = selected[0]
     request.typed_body = request.body
 
@@ -112,12 +114,22 @@ class IgwJudgeTransport:
     ) -> dict[str, Any]:
         del headers
         target = self._middleware.get_inference_url_and_model(model_entity_id)
+        if target.missing_secret_name:
+            raise InferenceMiddlewareError(
+                f"Switchyard judge provider secret {target.missing_secret_name!r} is not cached; "
+                "IGW must refresh ModelCache before native judge calls.",
+                status_code=502,
+            )
         url = f"{target.model_provider_gateway_url.rstrip('/')}/chat/completions"
-        payload = {**body, "model": target.served_model_name}
-        outbound = _provider_outbound_headers(self._middleware, model_entity_id)
+        payload = {
+            **target.default_extra_body,
+            **body,
+            "model": target.served_model_name,
+            **target.required_extra_body,
+        }
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout)) as client:
-                response = await client.post(url, json=payload, headers=outbound)
+                response = await client.post(url, json=payload, headers=target.outbound_headers)
         except httpx.TimeoutException as exc:
             raise InferenceMiddlewareError(
                 f"Switchyard judge timed out after {self._timeout}s",
@@ -143,7 +155,7 @@ async def _serve_call(call: Any, transport: JudgeTransport, headers: dict[str, s
     if not models:
         error = InferenceMiddlewareError("Switchyard CallModel listed no models", status_code=500)
         call.fail(error)
-        raise error
+        return
     chat_body = llm_request_to_openai_chat(dict(call.request))
     last_error: Exception | None = None
     for model_id in models:
@@ -159,7 +171,6 @@ async def _serve_call(call: Any, transport: JudgeTransport, headers: dict[str, s
             continue
     assert last_error is not None
     call.fail(last_error)
-    raise last_error
 
 
 def _immediate_not_wired() -> None:
@@ -178,17 +189,19 @@ async def run_native_stream(
     headers: dict[str, str],
     transport: JudgeTransport,
     timeout: float = NATIVE_STREAM_TIMEOUT_SECONDS,
+    lock: asyncio.Lock | None = None,
 ) -> InferenceRequest:
     """Drive ``run_stream`` until Done. Does not call the user model on empty response."""
     require_openai_chat_path(request.path)
     try:
         return await asyncio.wait_for(
-            _run_native_stream(
+            _run_native_stream_with_lock(
                 algorithm=algorithm,
                 request=request,
                 models=models,
                 headers=headers,
                 transport=transport,
+                lock=lock,
             ),
             timeout=timeout,
         )
@@ -197,6 +210,33 @@ async def run_native_stream(
             f"Switchyard run_stream timed out after {timeout}s",
             status_code=504,
         ) from exc
+
+
+async def _run_native_stream_with_lock(
+    *,
+    algorithm: Any,
+    request: InferenceRequest,
+    models: Mapping[str, Sequence[str]],
+    headers: dict[str, str],
+    transport: JudgeTransport,
+    lock: asyncio.Lock | None,
+) -> InferenceRequest:
+    if lock is None:
+        return await _run_native_stream(
+            algorithm=algorithm,
+            request=request,
+            models=models,
+            headers=headers,
+            transport=transport,
+        )
+    async with lock:
+        return await _run_native_stream(
+            algorithm=algorithm,
+            request=request,
+            models=models,
+            headers=headers,
+            transport=transport,
+        )
 
 
 async def _run_native_stream(
@@ -208,6 +248,7 @@ async def _run_native_stream(
     transport: JudgeTransport,
 ) -> InferenceRequest:
     request_dict = native_request_dict(request.body)
+    original_llm_request = deepcopy(request_dict)
     categories = {key: list(value) for key, value in models.items()}
     libsy_headers = routing_headers(headers)
     outcome: Any = None
@@ -228,49 +269,5 @@ async def _run_native_stream(
         raise InferenceMiddlewareError("Switchyard run_stream ended without Done", status_code=500)
     if getattr(outcome, "response", None) is not None:
         _immediate_not_wired()
-    apply_outcome_to_request(request, outcome)
+    apply_outcome_to_request(request, outcome, original_llm_request)
     return request
-
-
-def _provider_outbound_headers(middleware: NemoInferenceMiddleware, model_entity_id: str) -> dict[str, str]:
-    """Build provider auth and extra headers; never copies the inbound caller map."""
-    headers: dict[str, str] = {}
-    entity = middleware.get_model_entity(model_entity_id)
-    if entity is None:
-        return headers
-    pairs = getattr(entity, "model_providers", None)
-    info = None
-    provider = None
-    if pairs:
-        _served, info = pairs[0]
-        provider = getattr(info, "model_provider", None)
-    if provider is None:
-        providers = getattr(entity, "providers", None) or []
-        provider = providers[0] if providers else None
-    if provider is None:
-        return headers
-    defaults = getattr(provider, "default_extra_headers", None) or {}
-    required = getattr(provider, "required_extra_headers", None) or {}
-    headers.update(dict(defaults))
-    headers.update(dict(required))
-    secret = getattr(info, "secret_value", None) if info is not None else None
-    secret_name = getattr(provider, "api_key_secret_name", None)
-    if secret_name and not secret:
-        raise InferenceMiddlewareError(
-            f"Switchyard judge provider secret {secret_name!r} is not cached; "
-            "IGW must refresh ModelCache before native judge calls.",
-            status_code=502,
-        )
-    if secret:
-        header_name, header_value = _render_auth_header(str(secret), getattr(provider, "auth_header_format", None))
-        headers[header_name] = header_value
-    return headers
-
-
-def _render_auth_header(secret_value: str, auth_header_format: str | None) -> tuple[str, str]:
-    template = auth_header_format or _DEFAULT_AUTH_HEADER
-    rendered = _JINJA_ENV.from_string(template).render(auth_secret=secret_value)
-    name, _, value = rendered.partition(": ")
-    if not value:
-        return "Authorization", f"Bearer {secret_value}"
-    return name, value

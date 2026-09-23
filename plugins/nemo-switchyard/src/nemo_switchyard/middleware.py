@@ -57,14 +57,14 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         config_type = _config_type(middleware_config)
         binding = self._lookup_binding(ctx, config_type)
         try:
-            async with binding.lock:
-                return await run_native_stream(
-                    algorithm=binding.algorithm,
-                    request=request,
-                    models=binding.models,
-                    headers=dict(request.headers),
-                    transport=IgwJudgeTransport(self),
-                )
+            return await run_native_stream(
+                algorithm=binding.algorithm,
+                request=request,
+                models=binding.models,
+                headers=dict(request.headers),
+                transport=IgwJudgeTransport(self),
+                lock=binding.lock,
+            )
         except InferenceMiddlewareError:
             raise
         except Exception as exc:

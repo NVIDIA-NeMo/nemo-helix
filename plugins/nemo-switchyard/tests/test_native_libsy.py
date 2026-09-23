@@ -86,6 +86,9 @@ async def test_native_stage_router_without_classifier() -> None:
         {
             "picker": "efficient_first",
             "confidence_threshold": 0.5,
+            "only_on_wrong_signal_escalation": True,
+            "capable_system_prompt": "Use the capable model.",
+            "efficient_system_prompt": "Use the efficient model.",
             "models": {
                 "capable": ["workspace/strong"],
                 "efficient": ["workspace/weak"],
@@ -120,6 +123,7 @@ async def test_native_llm_classifier_judge_uses_openai_wire() -> None:
         {
             "mode": "capability",
             "base_threshold": 0.5,
+            "max_output_tokens": 64,
             "models": {
                 "judge": ["workspace/judge"],
                 "capable": ["workspace/strong"],
@@ -163,3 +167,20 @@ async def test_native_llm_classifier_judge_uses_openai_wire() -> None:
     assert out is request
     assert transport.bodies
     assert request.body["model"] in {"workspace/strong", "workspace/weak"}
+
+
+def test_native_stage_router_classifier_accepts_max_output_tokens() -> None:
+    algorithm = build_native_algorithm(
+        "stage_router",
+        {
+            "picker": "efficient_first",
+            "confidence_threshold": 0.5,
+            "classifier": {"base_threshold": 0.5, "max_output_tokens": 32},
+            "models": {
+                "capable": ["workspace/strong"],
+                "efficient": ["workspace/weak"],
+            },
+        },
+    )
+
+    assert algorithm is not None

@@ -145,14 +145,24 @@ def openai_chat_to_agg(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def apply_llm_request_to_openai_body(openai_body: dict[str, Any], llm_request: dict[str, Any]) -> dict[str, Any]:
+def apply_llm_request_to_openai_body(
+    openai_body: dict[str, Any],
+    llm_request: dict[str, Any],
+    original_llm_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Overlay routing-time IR rewrites onto the original OpenAI Chat body."""
+    original = original_llm_request or openai_chat_to_llm_request(openai_body)
     rewritten = llm_request_to_openai_chat(llm_request, model=openai_body.get("model"))
     merged = deepcopy(openai_body)
-    if rewritten.get("messages"):
+    if llm_request.get("instructions") != original.get("instructions") or llm_request.get("messages") != original.get(
+        "messages"
+    ):
         merged["messages"] = rewritten["messages"]
-    if "tools" in rewritten:
-        merged["tools"] = rewritten["tools"]
+    if llm_request.get("tools") != original.get("tools"):
+        if "tools" in rewritten:
+            merged["tools"] = rewritten["tools"]
+        else:
+            merged.pop("tools", None)
     return merged
 
 

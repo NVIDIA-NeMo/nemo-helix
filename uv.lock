@@ -5621,7 +5621,7 @@ nemo-safe-synthesizer-plugin = [
     { name = "uvicorn", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 nemo-switchyard = [
-    { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
@@ -6065,6 +6065,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'all'" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0" },
+    { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'auditor-service'", specifier = ">=0.28.1,<1.0.0" },
     { name = "httpx", marker = "extra == 'auth-service'", specifier = ">=0.27.0" },
@@ -6086,14 +6087,17 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'nemo-helix-sdk'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-insights-plugin'" },
     { name = "httpx", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.27.2" },
+    { name = "httpx", marker = "extra == 'nemo-switchyard'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nhx-customization-common'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'plugins'" },
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'rl-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'services'" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.0" },
+    { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'unsloth-service'", specifier = ">=0.27.0" },
     { name = "httpx-aiohttp", marker = "extra == 'aiohttp'", specifier = ">=0.1.9" },
@@ -6108,18 +6112,14 @@ requires-dist = [
     { name = "insight-agent", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "insight-agent", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
-    { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'harbor'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=3.1.6" },
-    { name = "jinja2", marker = "extra == 'nemo-switchyard'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'plugins'", specifier = ">=3.1" },
-    { name = "jinja2", marker = "extra == 'plugins'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'services'", specifier = ">=3.1" },
-    { name = "jinja2", marker = "extra == 'services'", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", marker = "extra == 'harbor'", specifier = ">=1.7.0" },
     { name = "jsonpath-ng", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.7.0" },
     { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.23.0" },
@@ -7494,14 +7494,14 @@ name = "nemo-switchyard-plugin"
 version = "0.1.0"
 source = { editable = "plugins/nemo-switchyard" }
 dependencies = [
-    { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-switchyard", specifier = "==0.3.0" },
 ]

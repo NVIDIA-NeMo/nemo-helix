@@ -94,7 +94,7 @@ def map_random_routing_config(config: dict[str, Any]) -> tuple[list[float], int 
         raise InferenceMiddlewareError("strong.model is required", status_code=400)
     if not isinstance(weak_id, str) or not weak_id:
         raise InferenceMiddlewareError("weak.model is required", status_code=400)
-    strong_p = _require_unit_interval(config.get("strong_probability"), "strong_probability")
+    strong_p = _require_unit_interval(config.get("strong_probability", 0.5), "strong_probability")
     seed = config.get("rng_seed")
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
         raise InferenceMiddlewareError("rng_seed must be an integer when set", status_code=400)
@@ -198,6 +198,7 @@ def _build_stage_router(libsy: Any, config: dict[str, Any]) -> Any:
                 threshold_step=float(classifier_cfg.get("threshold_step", 0.0)),
                 recent_turn_window=classifier_cfg.get("recent_turn_window"),
                 prompt=classifier_cfg.get("prompt"),
+                max_output_tokens=classifier_cfg.get("max_output_tokens"),
             )
         )
     return libsy.stage_router(
@@ -208,6 +209,9 @@ def _build_stage_router(libsy: Any, config: dict[str, Any]) -> Any:
         tool_semantics=config.get("tool_semantics"),
         escalation_note=(config.get("handoff_notes") or {}).get("escalation_note"),
         deescalation_note=(config.get("handoff_notes") or {}).get("deescalation_note"),
+        only_on_wrong_signal_escalation=config.get("only_on_wrong_signal_escalation", False),
+        capable_system_prompt=config.get("capable_system_prompt"),
+        efficient_system_prompt=config.get("efficient_system_prompt"),
     )
 
 
@@ -220,5 +224,6 @@ def _build_llm_classifier(libsy: Any, config: dict[str, Any]) -> Any:
         recent_turn_window=config.get("recent_turn_window"),
         prompt=config.get("prompt"),
         response_format_type=config.get("response_format_type", "json_schema"),
+        max_output_tokens=config.get("max_output_tokens"),
     )
     return libsy.llm_classifier(libsy.LlmClassifierConfig.capability(config=task))
