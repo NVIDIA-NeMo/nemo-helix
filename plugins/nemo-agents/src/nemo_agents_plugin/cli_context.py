@@ -89,7 +89,7 @@ def resolve_base_url(base_url: str | None) -> str:
 def resolve_context_headers() -> dict[str, str]:
     """Return auth (and other) default headers from the shared CLI context.
 
-    Mirrors ``nemo_platform_plugin.commands._resolve_submit_auth_headers``:
+    Mirrors ``nemo_platform_plugin.commands.resolve_submit_auth_headers``:
     reads the SDK client config off the shared context so ``nemo agents``
     attaches the same ``Authorization: Bearer`` token as the rest of the CLI
     (i.e. the token established by ``nemo auth login``).  Returns an empty

@@ -9386,14 +9386,28 @@ Plugin commands for customization.
 **Usage:**
 
 ```shell
-nemo customization [OPTIONS] COMMAND [ARGS]...
+nemo customization [OPTIONS] [COMMAND] [ARGS]...
 ```
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NMP_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--base-url`: Override the platform API host.
+* `--cluster`: Name of a cluster in the CLI config.
 
 **Help:**
 
 * `--install-completion`: Install completion for the current shell.
 * `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
+
+**Resource Creation Options:**
+
+* `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
+* `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
+* `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment, for GRPO.
+* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 **Commands:**
 
@@ -9488,6 +9502,36 @@ Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
 non-zero when the job does not complete.
 
+Pass --upload-model with a local path or a HuggingFace repo id, and
+--upload-dataset with a local path, to create those resources as part of this
+submit. Either flag can be used on its own. Submit creates the fileset, uploads
+the files, registers the model entity, and fills the reference into the job it
+sends. Your job JSON file is not modified.
+
+Each flag takes one file or one directory, the same as 'nemo files upload'. A
+directory is uploaded whole, so put several files in one when a backend reads
+more than one.
+
+A reference must be set in one place only. Submit refuses when the job JSON
+already names the model or dataset and the matching flag is passed, rather than
+choosing between the two for you. Remove the field from the job JSON to create
+it here, or drop the flag to use what the file names.
+
+Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
+create the resources and print their references without submitting anything.
+
+One --upload-dataset fills both dataset.training and dataset.validation with
+the new fileset. Automodel finds the train and validation files inside it by
+name, so upload a directory holding both.
+
+Creating a resource that already exists fails unless you pass --exist-ok,
+which applies to whichever sources you gave.
+
+Important: with --exist-ok the existing fileset is reused and its files are not
+re-uploaded. Edits you made to a local file after that fileset was created are
+not part of this job, and nothing fails to tell you so. Delete the fileset, or
+upload into it yourself, when you need the new contents.
+
 Run 'nemo customization automodel explain' to print the job JSON schema.
 
 **Usage:**
@@ -9519,6 +9563,14 @@ nemo customization automodel submit [OPTIONS] JOB_JSON
 * `--watch`: Wait for the job to finish, showing its status and logs.
 * `--timeout <INTEGER RANGE>`: Give up waiting after this many seconds. Waits indefinitely when omitted.
 * `--poll-interval <INTEGER RANGE>`: Seconds between status checks while waiting. [default: 3]
+
+**Resource Creation Options:**
+
+* `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
+* `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
+* `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
+* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 #### nemo customization rl
 
@@ -9604,6 +9656,37 @@ Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
 non-zero when the job does not complete.
 
+Pass --upload-model with a local path or a HuggingFace repo id, and
+--upload-dataset with a local path, to create those resources as part of this
+submit. Either flag can be used on its own. Submit creates the fileset, uploads
+the files, registers the model entity, and fills the reference into the job it
+sends. Your job JSON file is not modified.
+
+Each flag takes one file or one directory, the same as 'nemo files upload'. A
+directory is uploaded whole, so put several files in one when a backend reads
+more than one.
+
+A reference must be set in one place only. Submit refuses when the job JSON
+already names the model or dataset and the matching flag is passed, rather than
+choosing between the two for you. Remove the field from the job JSON to create
+it here, or drop the flag to use what the file names.
+
+Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
+create the resources and print their references without submitting anything.
+
+Uploaded files keep their local names. NeMo-RL reads both splits from one
+fileset, so point --upload-dataset at a local directory holding training.jsonl
+and validation.jsonl. For GRPO, --upload-environment takes the environment
+directory. Build and validate that package first; submit only uploads it.
+
+Creating a resource that already exists fails unless you pass --exist-ok,
+which applies to whichever sources you gave.
+
+Important: with --exist-ok the existing fileset is reused and its files are not
+re-uploaded. Edits you made to a local file after that fileset was created are
+not part of this job, and nothing fails to tell you so. Delete the fileset, or
+upload into it yourself, when you need the new contents.
+
 Run 'nemo customization rl explain' to print the job JSON schema.
 
 **Usage:**
@@ -9635,6 +9718,14 @@ nemo customization rl submit [OPTIONS] JOB_JSON
 * `--watch`: Wait for the job to finish, showing its status and logs.
 * `--timeout <INTEGER RANGE>`: Give up waiting after this many seconds. Waits indefinitely when omitted.
 * `--poll-interval <INTEGER RANGE>`: Seconds between status checks while waiting. [default: 3]
+
+**Resource Creation Options:**
+
+* `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
+* `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
+* `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
+* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 #### nemo customization unsloth
 
@@ -9718,6 +9809,36 @@ Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
 non-zero when the job does not complete.
 
+Pass --upload-model with a local path or a HuggingFace repo id, and
+--upload-dataset with a local path, to create those resources as part of this
+submit. Either flag can be used on its own. Submit creates the fileset, uploads
+the files, registers the model entity, and fills the reference into the job it
+sends. Your job JSON file is not modified.
+
+Each flag takes one file or one directory, the same as 'nemo files upload'. A
+directory is uploaded whole, so put several files in one when a backend reads
+more than one.
+
+A reference must be set in one place only. Submit refuses when the job JSON
+already names the model or dataset and the matching flag is passed, rather than
+choosing between the two for you. Remove the field from the job JSON to create
+it here, or drop the flag to use what the file names.
+
+Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
+create the resources and print their references without submitting anything.
+
+One --upload-dataset fills both dataset.path and dataset.validation_path with
+the new fileset, so upload a directory holding a training and a validation
+file.
+
+Creating a resource that already exists fails unless you pass --exist-ok,
+which applies to whichever sources you gave.
+
+Important: with --exist-ok the existing fileset is reused and its files are not
+re-uploaded. Edits you made to a local file after that fileset was created are
+not part of this job, and nothing fails to tell you so. Delete the fileset, or
+upload into it yourself, when you need the new contents.
+
 Run 'nemo customization unsloth explain' to print the job JSON schema.
 
 **Usage:**
@@ -9749,6 +9870,14 @@ nemo customization unsloth submit [OPTIONS] JOB_JSON
 * `--watch`: Wait for the job to finish, showing its status and logs.
 * `--timeout <INTEGER RANGE>`: Give up waiting after this many seconds. Waits indefinitely when omitted.
 * `--poll-interval <INTEGER RANGE>`: Seconds between status checks while waiting. [default: 3]
+
+**Resource Creation Options:**
+
+* `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
+* `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
+* `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
+* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 #### nemo customization automodel.jobs
 

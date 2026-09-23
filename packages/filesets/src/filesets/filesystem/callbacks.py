@@ -6,7 +6,7 @@ from __future__ import annotations
 from fsspec.callbacks import Callback
 
 
-def _create_rich_progress(transient: bool = False):
+def _create_rich_progress(transient: bool = False, console=None):
     """Create a Rich Progress instance with adaptive columns.
 
     The progress bar uses custom columns that render differently based on
@@ -69,6 +69,7 @@ def _create_rich_progress(transient: bool = False):
         TextColumn("•"),
         TimeElapsedColumn(),
         transient=transient,
+        console=console,
     )
 
 
@@ -91,12 +92,16 @@ class RichProgressCallback(Callback):
         self,
         description: str = "Transferring",
         transient: bool = False,
+        console=None,
     ):
         """Initialize the Rich progress callback.
 
         Args:
             description: Text to display next to the progress bar.
             transient: If True, remove the progress bar after completion.
+            console: Rich console to draw on. Defaults to Rich's global console
+                (stdout); pass a stderr console when stdout carries output
+                that scripts parse.
         """
         try:
             import rich  # noqa: F401
@@ -108,7 +113,7 @@ class RichProgressCallback(Callback):
 
         super().__init__()
         self._description = description
-        self._progress = _create_rich_progress(transient=transient)
+        self._progress = _create_rich_progress(transient=transient, console=console)
         self._main_task_id: TaskID | None = None
 
     def set_size(self, size: int | None) -> None:
@@ -129,8 +134,10 @@ class RichProgressCallback(Callback):
             return
         self._progress.advance(self._main_task_id, advance=inc)
 
-    def branched(self, path_1: str, _path_2: str, **_kwargs) -> RichFileProgressCallback:
+    def branched(self, path_1: str, path_2: str, **kwargs) -> RichFileProgressCallback:
         """Create a child callback for an individual file transfer."""
+        # Names match fsspec's ``Callback.branched`` so keyword callers still work.
+        del path_2, kwargs
         filename = path_1.rsplit("/", 1)[-1] if "/" in path_1 else path_1
         return RichFileProgressCallback(filename, progress=self._progress)
 
