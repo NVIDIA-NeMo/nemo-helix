@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from nmp.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
 
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
@@ -98,7 +98,7 @@ def test_too_many_evaluations_to_sort_returns_413(client: TestClient, monkeypatc
     # The whole filtered set is sorted in memory; over the cap we refuse rather than return a
     # silently truncated result. 413 (distinct from the 400 bad-sort-field case) so a caller can tell
     # the two apart. Shrink the cap so the test stays fast.
-    from nmp.intake.api.v2.experiments import endpoints
+    from nhx.intake.api.v2.experiments import endpoints
 
     monkeypatch.setattr(endpoints, "_MAX_GROUP_EVALUATIONS", 2)
     group_resp = client.post(EXPERIMENTS, json={"name": "big-grp"})

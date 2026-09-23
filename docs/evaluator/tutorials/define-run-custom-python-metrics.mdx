@@ -30,10 +30,10 @@ Keep custom metric code dependency-light. Local execution runs your metric in th
 
 ## Prerequisites
 
-Install the PyPI `nemo-platform` wrapper package, which includes the Evaluator SDK. The `all` extra is defined by the wrapper package; if you are working from a source checkout, run `make bootstrap` from the repository root instead.
+Install the PyPI `nemo-helix` wrapper package, which includes the Evaluator SDK. The `all` extra is defined by the wrapper package; if you are working from a source checkout, run `make bootstrap` from the repository root instead.
 
 ```bash
-pip install "nemo-platform[all]"
+pip install "nemo-helix[all]"
 ```
 
 Verify that the SDK imports:
@@ -44,7 +44,7 @@ import nemo_evaluator_sdk
 print(nemo_evaluator_sdk.version)
 ```
 
-You do not need a running NeMo Platform instance to define the metric or run it locally. Start NeMo Platform and configure platform resources before submitting the durable remote job.
+You do not need a running NeMo Helix instance to define the metric or run it locally. Start NeMo Helix and configure platform resources before submitting the durable remote job.
 
 ## 1. Understand the Metric Contract
 
@@ -276,7 +276,7 @@ With this mapping in place, every row still preserves its original `model_expres
 
 ## 6. Prepare Platform Resources
 
-To run the same metric remotely, install and start NeMo Platform using the [Setup guide](/documentation/get-started). You also need:
+To run the same metric remotely, install and start NeMo Helix using the [Setup guide](/documentation/get-started). You also need:
 
 - A model entity that can be referenced as `workspace/model-name`. See [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) for model setup details.
 - A platform secret for the model, if the model requires an API key.
@@ -284,13 +284,13 @@ To run the same metric remotely, install and start NeMo Platform using the [Setu
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 WORKSPACE = "custom-python-metrics"
-MODEL_REF = os.environ.get("NMP_EVAL_MODEL_REF", "default/my-model")
+MODEL_REF = os.environ.get("NHX_EVAL_MODEL_REF", "default/my-model")
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 ```
@@ -300,7 +300,7 @@ client = NeMoPlatform(
 Create a workspace for the tutorial. If it already exists, continue using it.
 
 ```python
-from nemo_platform import ConflictError
+from nemo_helix import ConflictError
 
 try:
     client.workspaces.create(name=WORKSPACE)
@@ -385,7 +385,7 @@ The `nemo_evaluator_sdk` package provides metric and runtime types, such as `Met
 
 ## 7. Submit a Durable Evaluator Job
 
-Pass `CloudpickleMetricBundlePackager()` to `client.evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NMP_EVAL_MODEL_REF`.
+Pass `CloudpickleMetricBundlePackager()` to `client.evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NHX_EVAL_MODEL_REF`.
 
 ```python
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager

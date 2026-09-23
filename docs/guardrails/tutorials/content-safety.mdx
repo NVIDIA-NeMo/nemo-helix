@@ -8,7 +8,7 @@ description: ""
 
 <a id="guardrails-content-safety"></a>
 
-Learn how to use NeMo Platform to apply content safety checks to user inputs and LLM outputs with the NVIDIA Nemotron Content Safety NIM. Content safety checks detect and block harmful, abusive, or policy-violating content before it reaches users.
+Learn how to use NeMo Helix to apply content safety checks to user inputs and LLM outputs with the NVIDIA Nemotron Content Safety NIM. Content safety checks detect and block harmful, abusive, or policy-violating content before it reaches users.
 
 For the content safety checks, this tutorial uses the [Llama-3.1-Nemotron-Safety-Guard-8B-v3](https://build.nvidia.com/nvidia/llama-3_1-nemotron-safety-guard-8b-v3) NIM, which is trained to classify input or output content as safe or unsafe.
 
@@ -18,8 +18,8 @@ For the main model, this tutorial uses the [Nemotron 3.5 Lightning 30B-A3B](http
 
 Before you begin:
 
-- You have access to a running NeMo Platform.
-- `NMP_BASE_URL` is set to the NeMo Platform base URL.
+- You have access to a running NeMo Helix.
+- `NHX_BASE_URL` is set to the NeMo Helix base URL.
 - A `ModelProvider` is configured with an LLM provider. Follow [Setup](/documentation/get-started) if you haven't done this yet.
 
 This tutorial uses the following NIMs, available on `build.nvidia.com`:
@@ -45,10 +45,10 @@ Instantiate the platform client.
 
 ```python
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```

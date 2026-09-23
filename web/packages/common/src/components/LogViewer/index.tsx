@@ -6,7 +6,7 @@ import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { formatLogs, type LogLoadProgress } from '@nemo/common/src/utils/logs';
-import type { PlatformJobLog } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
   Button,
@@ -55,7 +55,7 @@ function useThrottledValue<T>(value: T, intervalMs: number): T {
 }
 
 interface LogViewerProps {
-  logs: PlatformJobLog[];
+  logs: HelixJobLog[];
   isLoading?: boolean;
   downloadFilename?: string;
   rows?: number;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { Banner, Card, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { useDataDesignerJobFromRoute } from '@studio/routes/DataDesignerJobDetailsRoute/useDataDesignerJobFromRoute';
@@ -11,7 +11,7 @@ import type { FC } from 'react';
 export const JobLogsSection: FC = () => {
   const { workspace, jobName, job } = useDataDesignerJobFromRoute();
 
-  const isRunning = !(job?.status != null && PlatformJobTerminalStatuses.includes(job.status));
+  const isRunning = !(job?.status != null && HelixJobTerminalStatuses.includes(job.status));
 
   const {
     data: logs,

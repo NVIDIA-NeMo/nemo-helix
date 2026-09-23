@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
-from nemo_platform_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -380,7 +380,7 @@ def test_usage_show_fileset_builds_sdk_with_context_base_url_and_auth(app, tmp_n
     """A fileset ref builds the platform client with the shared context's base URL + auth token.
 
     Pins P0 parity for ``usage show``: it must honor ``nemo config`` /
-    ``NMP_BASE_URL`` and attach the ``Authorization`` bearer token, instead
+    ``NHX_BASE_URL`` and attach the ``Authorization`` bearer token, instead
     of defaulting to localhost with no auth.
     """
     captured: dict[str, object] = {}

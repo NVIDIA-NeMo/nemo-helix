@@ -5,14 +5,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 
 @contextmanager
-def managed_admin_workspace(admin_sdk: NeMoPlatform, workspace_name: str) -> Iterator[str]:
+def managed_admin_workspace(admin_sdk: NeMoHelix, workspace_name: str) -> Iterator[str]:
     workspaces = client_from_platform(admin_sdk, WorkspacesClient)
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=workspace_name)).data()
     try:

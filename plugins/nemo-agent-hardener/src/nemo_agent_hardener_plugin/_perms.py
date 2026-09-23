@@ -10,7 +10,7 @@ route handlers — never as bare strings.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class AgentHardenerRunPerms(PermissionSet, namespace="agent-hardener.runs"):

@@ -34,11 +34,11 @@ def test_supported_file_includes_missing_osrb_file_types(tmp_path: Path) -> None
     files = {
         "e2e/conftest.py": 'print("ok")\n',
         "k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl": "# title\n",
-        "sdk/python/nemo-platform/Brewfile": 'brew "uv"\n',
-        "sdk/python/nemo-platform/bin/publish-pypi": "#!/usr/bin/env bash\n",
+        "sdk/python/nemo-helix/Brewfile": 'brew "uv"\n',
+        "sdk/python/nemo-helix/bin/publish-pypi": "#!/usr/bin/env bash\n",
         "services/core/entities/alembic/README": "Generic single-database configuration.\n",
         "services/core/entities/alembic/script.py.mako": '"""${message}"""\n',
-        "services/core/entities/src/nmp/core/entities/api/v2/entities/entities.http": "// Example\n",
+        "services/core/entities/src/nhx/core/entities/api/v2/entities/entities.http": "// Example\n",
     }
 
     for relpath, content in files.items():

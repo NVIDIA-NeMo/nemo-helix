@@ -10,10 +10,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
-KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-nmp-e2e}"
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-nhx-e2e}"
 KIND_NODE_IMAGE="${KIND_NODE_IMAGE:-kindest/node:v1.33.7@sha256:d26ef333bdb2cbe9862a0f7c3803ecc7b4303d8cea8e814b481b09949d353040}"
 KUBE_NAMESPACE="${KUBE_NAMESPACE:-default}"
-KUBE_GATEWAY_NAME="${KUBE_GATEWAY_NAME:-nmp-e2e-gateway}"
+KUBE_GATEWAY_NAME="${KUBE_GATEWAY_NAME:-nhx-e2e-gateway}"
 CLOUD_PROVIDER_KIND_VERSION="${CLOUD_PROVIDER_KIND_VERSION:-v0.10.0}"
 GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.4.1}"
 GATEWAY_API_STANDARD_CRD_BASE_URL="${GATEWAY_API_STANDARD_CRD_BASE_URL:-https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/${GATEWAY_API_VERSION}/config/crd/standard}"
@@ -199,7 +199,7 @@ if [ -n "${GITHUB_ENV:-}" ]; then
         echo "KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME}"
         if [ "${KIND_ENABLE_GATEWAY}" = "true" ]; then
             echo "KUBE_GATEWAY_NAME=${KUBE_GATEWAY_NAME}"
-            echo "NMP_E2E_CLUSTER_URL="
+            echo "NHX_E2E_CLUSTER_URL="
         fi
     } >> "${GITHUB_ENV}"
 fi

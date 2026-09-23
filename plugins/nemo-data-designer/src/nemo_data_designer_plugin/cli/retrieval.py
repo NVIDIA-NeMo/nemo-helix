@@ -10,8 +10,8 @@ import shlex
 
 import typer
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalPrepareJobConfig
-from nemo_platform_plugin.cli_options import WorkspaceOption
-from nemo_platform_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
 
 retrieval_app = typer.Typer(
     name="retrieval",

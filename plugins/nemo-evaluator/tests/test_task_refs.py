@@ -26,8 +26,8 @@ from nemo_evaluator.task_refs import (
     resolve_agent_eval_tasks,
     resolve_taskset_ref,
 )
-from nemo_platform_plugin.entities import EntityBase
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entities import EntityBase
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from pydantic import ValidationError
 
 _EntityT = TypeVar("_EntityT", bound=EntityBase)

@@ -33,7 +33,7 @@ def isolate_checked_in_insights(monkeypatch, tmp_path):
             {
                 "agent": "content-dedup",
                 "workspace": "nvq",
-                "base_url": "https://nemo-platform-freeplay.dev.aire.nvidia.com",
+                "base_url": "https://nemo-helix-freeplay.dev.aire.nvidia.com",
                 "state": "state-v7",
             },
         )
@@ -150,7 +150,7 @@ def stub_reingest(monkeypatch):
 
     def fake_resolve(explicit=None, **kw):
         calls["platform_root"].append(explicit)
-        return Path(explicit) if explicit else Path("/stub/nemo-platform")
+        return Path(explicit) if explicit else Path("/stub/nemo-helix")
 
     def fake_load(root):
         calls["catalog_root"].append(Path(root))
@@ -1540,7 +1540,7 @@ def test_analyze_live_skips_restore_and_targets_stanza(monkeypatch, tmp_path, st
     monkeypatch.setattr("evaluation.adapters.IntakeAdapter.analyze", fake_analyze)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "nvq", "--live"])
     cli.main()
-    assert seen["base_url"] == "https://nemo-platform-freeplay.dev.aire.nvidia.com"  # the stanza, not localhost
+    assert seen["base_url"] == "https://nemo-helix-freeplay.dev.aire.nvidia.com"  # the stanza, not localhost
     assert stub_reingest["ingest"] == []  # no restore in live mode
 
 
@@ -1890,10 +1890,10 @@ def test_restore_state_only_takes_refs_not_files(monkeypatch, tmp_path, stub_rei
 def test_restore_platform_root_flag_reaches_catalog(monkeypatch, tmp_path, stub_reingest):
     monkeypatch.setattr(cli, "TMP", tmp_path)
     bundle = _make_export_bundle(tmp_path / "b.tar.zst", workspaces=("nvq",))
-    monkeypatch.setattr(sys, "argv", ["evaluation", "restore", str(bundle), "--platform-root", "/opt/nemo-platform"])
+    monkeypatch.setattr(sys, "argv", ["evaluation", "restore", str(bundle), "--platform-root", "/opt/nemo-helix"])
     cli.main()
-    assert stub_reingest["platform_root"] == ["/opt/nemo-platform"]
-    assert stub_reingest["catalog_root"] == [Path("/opt/nemo-platform")]
+    assert stub_reingest["platform_root"] == ["/opt/nemo-helix"]
+    assert stub_reingest["catalog_root"] == [Path("/opt/nemo-helix")]
 
 
 def test_restore_seeds_run_records_only(monkeypatch, tmp_path, stub_reingest):
@@ -2692,13 +2692,13 @@ def test_roundtrip_base_and_platform_root_flags(monkeypatch, tmp_path, stub_rein
             "--base",
             "http://ci-host:8080",
             "--platform-root",
-            "/opt/nemo-platform",
+            "/opt/nemo-helix",
         ],
     )
     cli.main()
     assert stub_roundtrip["calls"][0]["base_url"] == "http://ci-host:8080"
-    assert stub_reingest["platform_root"] == ["/opt/nemo-platform"]
-    assert stub_reingest["catalog_root"] == [Path("/opt/nemo-platform")]
+    assert stub_reingest["platform_root"] == ["/opt/nemo-helix"]
+    assert stub_reingest["catalog_root"] == [Path("/opt/nemo-helix")]
 
 
 def test_roundtrip_legacy_bundle_exits(monkeypatch, tmp_path, stub_reingest, stub_roundtrip):
@@ -2744,11 +2744,11 @@ def test_publish_platform_root_threaded(monkeypatch, tmp_path, stub_reingest, st
             "--base",
             "http://ci-host:8080",
             "--platform-root",
-            "/opt/nemo-platform",
+            "/opt/nemo-helix",
         ],
     )
     cli.main()
-    assert stub_reingest["platform_root"] == ["/opt/nemo-platform"]
-    assert stub_reingest["catalog_root"] == [Path("/opt/nemo-platform")]
+    assert stub_reingest["platform_root"] == ["/opt/nemo-helix"]
+    assert stub_reingest["catalog_root"] == [Path("/opt/nemo-helix")]
     assert stub_roundtrip["calls"][0]["base_url"] == "http://ci-host:8080"
     assert published == [bundle]

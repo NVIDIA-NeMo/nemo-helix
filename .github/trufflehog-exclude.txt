@@ -8,3 +8,7 @@ services/core/jobs/tests/test_telemetry\.py
 # snippet (e.g. GHSA-8wmf-6v46-5gfg). These are generated scan artifacts,
 # never a place real credentials live.
 third_party/osv-licenses.*\.json
+
+packages/nhx_common/tests/config/test_config\.py
+
+plugins/_temporary-scaled-evals/deploy/.*

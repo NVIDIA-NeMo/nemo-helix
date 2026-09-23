@@ -6,10 +6,10 @@
 
 version: 1
 metadata:
-  name: nemo-platform-oidc
+  name: nemo-helix-oidc
   labels:
     blueprints.goauthentik.io/instantiate: "true"
-    blueprints.goauthentik.io/description: "NeMo Platform OIDC provider + demo workload identity"
+    blueprints.goauthentik.io/description: "NeMo Helix OIDC provider + demo workload identity"
 
 entries:
   - model: authentik_providers_oauth2.scopemapping
@@ -26,12 +26,12 @@ entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-provider
     identifiers:
-      name: nemo-platform
+      name: nemo-helix
     attrs:
-      name: nemo-platform
+      name: nemo-helix
       client_type: confidential
-      client_id: nemo-platform
-      client_secret: nemo-platform-secret-dev
+      client_id: nemo-helix
+      client_secret: nemo-helix-secret-dev
       grant_types:
         - authorization_code
         - refresh_token
@@ -54,11 +54,11 @@ entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-cli-provider
     identifiers:
-      name: nemo-platform-cli
+      name: nemo-helix-cli
     attrs:
-      name: nemo-platform-cli
+      name: nemo-helix-cli
       client_type: public
-      client_id: nemo-platform-cli
+      client_id: nemo-helix-cli
       grant_types:
         - authorization_code
         - refresh_token
@@ -86,11 +86,11 @@ entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-workload-provider
     identifiers:
-      name: nemo-platform-workload
+      name: nemo-helix-workload
     attrs:
-      name: nemo-platform-workload
+      name: nemo-helix-workload
       client_type: public
-      client_id: nemo-platform-workload
+      client_id: nemo-helix-workload
       grant_types:
         - password
       sub_mode: user_username
@@ -112,7 +112,7 @@ entries:
     identifiers:
       slug: nemo
     attrs:
-      name: NeMo Platform
+      name: NeMo Helix
       slug: nemo
       provider: !KeyOf nemo-provider
 
@@ -120,7 +120,7 @@ entries:
     identifiers:
       slug: nemo-cli
     attrs:
-      name: NeMo Platform CLI
+      name: NeMo Helix CLI
       slug: nemo-cli
       provider: !KeyOf nemo-cli-provider
 
@@ -128,7 +128,7 @@ entries:
     identifiers:
       slug: nemo-workload
     attrs:
-      name: NeMo Platform Workload Identity
+      name: NeMo Helix Workload Identity
       slug: nemo-workload
       provider: !KeyOf nemo-workload-provider
 

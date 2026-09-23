@@ -9,7 +9,7 @@ Two functions cover the canonical wire shapes:
   simplest possible NemoFunction: validate spec, await some work, return
   a Pydantic model.
 - :class:`CountFunction` — streaming (NDJSON, one frame per line). Yields
-  :class:`Tick` frames, then a :class:`~nemo_platform_plugin.functions.frames.Done`
+  :class:`Tick` frames, then a :class:`~nemo_helix_plugin.functions.frames.Done`
   terminator. The route adapter wraps the stream with framework-managed
   heartbeat injection.
 
@@ -17,7 +17,7 @@ Both are exposed under the ``nemo.functions`` entry-point group as
 ``example.greet`` and ``example.count``. The example plugin's
 :class:`~nemo_example_plugin.service.ExampleService` mounts the
 auto-derived routers under ``/apis/example/v2/workspaces/{workspace}``
-via :func:`~nemo_platform_plugin.functions.routes.add_function_routes`.
+via :func:`~nemo_helix_plugin.functions.routes.add_function_routes`.
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ from collections.abc import AsyncIterator
 from typing import ClassVar, Literal
 
 from nemo_example_plugin.core import say_hello
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Done
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.frames import Done
 from pydantic import BaseModel, Field
 
 
@@ -73,8 +73,8 @@ class Tick(BaseModel):
     """Per-iteration frame emitted by :class:`CountFunction`.
 
     The ``kind`` discriminator follows the convention shared with
-    :class:`~nemo_platform_plugin.functions.frames.Heartbeat` /
-    :class:`~nemo_platform_plugin.functions.frames.Done` so client-side
+    :class:`~nemo_helix_plugin.functions.frames.Heartbeat` /
+    :class:`~nemo_helix_plugin.functions.frames.Done` so client-side
     consumers can branch on a single field across all framework and
     plugin frames.
     """

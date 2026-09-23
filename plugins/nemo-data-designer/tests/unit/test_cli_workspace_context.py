@@ -26,7 +26,7 @@ import typer
 from nemo_data_designer_plugin.cli import inputs
 from nemo_data_designer_plugin.cli import renderers as renderers_mod
 from nemo_data_designer_plugin.cli.retrieval import retrieval_app
-from nemo_platform_plugin.cli_renderer import RendererContext
+from nemo_helix_plugin.cli_renderer import RendererContext
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -45,8 +45,8 @@ class _State:
 
 @pytest.fixture(autouse=True)
 def _no_env_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``$NMP_WORKSPACE`` sits between the context and ``"default"``; keep it out."""
-    monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+    """``$NHX_WORKSPACE`` sits between the context and ``"default"``; keep it out."""
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
 
 
 # --------------------------------------------------------------------------

@@ -34,7 +34,7 @@ from sandboxed_gym.host.models import GymHostHandle, GymHostSpec, GymHostVolumeM
 LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 1.0
-_CONTAINER_PREFIX = "nmp-gym-host-"
+_CONTAINER_PREFIX = "nhx-gym-host-"
 
 
 class DockerHostError(RuntimeError):
@@ -60,7 +60,7 @@ class DockerGymHostProvider:
         docker: str | None = None,
         network: str | None = None,
     ) -> None:
-        self._root = Path(root_dir or "/tmp/nmp-gym-host").expanduser()
+        self._root = Path(root_dir or "/tmp/nhx-gym-host").expanduser()
         self._docker = docker or shutil.which("docker") or "docker"
         self._network = network
         self._containers: dict[str, str] = {}
@@ -107,7 +107,7 @@ class DockerGymHostProvider:
         for key, value in spec.bootstrap_env.items():
             argv += ["-e", f"{key}={value}"]
         # The runtime reads its port from the environment; publishing alone would not move it.
-        argv += ["-e", f"NMP_RUNTIME_HTTP_PORT={spec.runtime_http_port}"]
+        argv += ["-e", f"NHX_RUNTIME_HTTP_PORT={spec.runtime_http_port}"]
         for key, value in (spec.resources or {}).items():
             if key == "cpu":
                 argv += ["--cpus", str(value)]

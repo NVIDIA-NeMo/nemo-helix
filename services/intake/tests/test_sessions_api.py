@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from nmp.intake.spans.api.sessions import get_session
-from nmp.intake.spans.domain import IntakeSession, SpanStatus
-from nmp.intake.spans.service import IntakeSpansService, SessionNotFoundError
+from nhx.intake.spans.api.sessions import get_session
+from nhx.intake.spans.domain import IntakeSession, SpanStatus
+from nhx.intake.spans.service import IntakeSpansService, SessionNotFoundError
 
 
 @pytest.mark.asyncio

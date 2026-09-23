@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Seed NMP with resources required by the IGW guardrails benchmark."""
+"""Seed NHX with resources required by the IGW guardrails benchmark."""
 
 from __future__ import annotations
 
@@ -27,23 +27,23 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     VM_NAME,
     WORKSPACE,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import CreateGuardrailConfigRequest
-from nemo_platform_plugin.inference_middleware import BackendFormat
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import CreateModelProviderRequest, ModelProvider
-from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
-from nemo_platform_plugin.virtual_models.types import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import CreateModelProviderRequest, ModelProvider
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import (
     CreateVirtualModelRequest,
     MiddlewareCall,
     VirtualModel,
     VirtualModelInferenceConfig,
 )
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class SeededResources:
 
 
 def seed_benchmark(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     nemoguardrails_repo_root: Path,
     generated_dir: Path,
@@ -86,7 +86,7 @@ def seed_benchmark(
     """Create workspace, providers, GuardrailConfig, and VirtualModel.
 
     All ``create`` calls are idempotent (``exist_ok=True``) so this is safe to
-    rerun against a reused NMP instance.
+    rerun against a reused NHX instance.
     """
     generated_dir.mkdir(parents=True, exist_ok=True)
     workspaces_client = client_from_platform(sdk, WorkspacesClient)
@@ -150,7 +150,7 @@ def seed_benchmark(
         content_safety_model_entity=cs_entity,
     )
     # Persist the same payload shape the old shell harness produced for debuggability.
-    (generated_dir / "content_safety_local_nmp_request.json").write_text(
+    (generated_dir / "content_safety_local_nhx_request.json").write_text(
         json.dumps(
             {
                 "name": GUARDRAIL_CONFIG,
@@ -282,9 +282,9 @@ def build_guardrail_config_data(
     source_config_dir: Path,
     content_safety_model_entity: str,
 ) -> dict[str, Any]:
-    """Read the upstream content_safety_local config and rewrite it for NMP.
+    """Read the upstream content_safety_local config and rewrite it for NHX.
 
-    The upstream config references an HTTP base_url; in NMP we instead route by
+    The upstream config references an HTTP base_url; in NHX we instead route by
     ``model_entity_id`` resolved via the inference gateway. Prompts are inlined
     from the sibling ``prompts.yml`` file.
     """

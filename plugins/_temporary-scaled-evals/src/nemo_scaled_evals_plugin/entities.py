@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import Field
 from scaled_evals.api.schemas.evaluations import Evaluation
 

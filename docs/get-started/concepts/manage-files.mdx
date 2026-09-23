@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="manage-files"></a>
 
-NeMo Platform provides a file storage interface through the **Files** service.
+NeMo Helix provides a file storage interface through the **Files** service.
 The Files service supports multiple storage backends and can be used to store datasets for training, evaluation results, model artifacts, and other files.
 
 ## Concepts
@@ -86,10 +86,10 @@ All Python SDK examples that follow assume this client initialization:
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL") or "http://localhost:8080",
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL") or "http://localhost:8080",
     workspace="default",
 )
 ```
@@ -136,10 +136,10 @@ nemo files filesets create my-files \
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -518,7 +518,7 @@ The CLI displays progress bars automatically during uploads and downloads. This 
 Track progress during large file transfers using the `RichProgressCallback` context manager:
 
 ```python
-from nemo_platform.filesets import RichProgressCallback
+from nemo_helix.filesets import RichProgressCallback
 
 # Upload a directory with progress bar
 with RichProgressCallback(description="Uploading dataset") as callback:

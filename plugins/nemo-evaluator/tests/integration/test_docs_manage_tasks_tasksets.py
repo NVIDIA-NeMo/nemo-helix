@@ -34,10 +34,10 @@ from nemo_evaluator.api.schemas import (
     TasksetRef,
 )
 from nemo_evaluator_sdk import ExactMatchMetric
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.sdk import NeMoPlatform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 pytestmark = [
     pytest.mark.integration,
@@ -51,13 +51,13 @@ WORKSPACE = "default"
 
 
 @pytest.fixture
-def doc_client(subprocess_platform: str) -> NeMoPlatform:
+def doc_client(subprocess_platform: str) -> NeMoHelix:
     """The doc's own ``Initialize the SDK`` snippet, with the base URL the fixture provides.
 
     ``workspace=`` on the constructor is part of what is being checked: every later snippet omits a
     per-call workspace and relies on this default.
     """
-    client = NeMoPlatform(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -70,7 +70,7 @@ def _unique(prefix: str) -> str:
 
 
 @pytest.mark.timeout(300)
-def test_the_manage_tasks_walkthrough(doc_client: NeMoPlatform) -> None:
+def test_the_manage_tasks_walkthrough(doc_client: NeMoHelix) -> None:
     """``Manage Tasks`` through ``Tag a revision`` — create, read, publish, pin, tag."""
     client = doc_client
     tasks = client.evaluator.tasks
@@ -141,7 +141,7 @@ def test_the_manage_tasks_walkthrough(doc_client: NeMoPlatform) -> None:
 
 
 @pytest.mark.timeout(300)
-def test_the_manage_tasksets_walkthrough(doc_client: NeMoPlatform) -> None:
+def test_the_manage_tasksets_walkthrough(doc_client: NeMoHelix) -> None:
     """``Manage Tasksets`` and ``Pin the taskset itself`` — membership pinning is the claim."""
     client = doc_client
     tasks = client.evaluator.tasks

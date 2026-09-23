@@ -80,6 +80,28 @@ function imageOverrides(
   };
 }
 
+/**
+ * The `executor_config` every workspace-sourced config sends.
+ *
+ * Shared by the bound and unbound creators so the two cannot drift: both render the
+ * same `AdvancedSettingsAccordion`, so a field collected by one is collected by both
+ * and must reach the API from both.
+ *
+ * Blank is meaningful for `disk_size`, as it is for the image overrides: omitting it
+ * lets the platform apply its own default (`"50Gi"`) rather than pinning that value
+ * from the client, which would silently outlive any change to the default.
+ */
+function executorConfigFromValues(values: WizardFormValues): ContainerExecutorConfig {
+  const diskSize = values.diskSize?.trim();
+  const additionalEnvs = additionalEnvsFormToApi(values.additionalEnvs);
+  return {
+    gpu: values.gpu,
+    ...(diskSize ? { disk_size: diskSize } : {}),
+    ...(additionalEnvs ? { additional_envs: additionalEnvs } : {}),
+    ...imageOverrides(values),
+  };
+}
+
 async function createNgcDeployment(
   workspace: string,
   values: WizardFormValues,
@@ -190,10 +212,7 @@ async function createHuggingFaceDeployment(
       model_name: modelEntityName,
       lora_enabled: values.loraEnabled,
     },
-    executor_config: {
-      gpu: values.gpu,
-      ...imageOverrides(values),
-    },
+    executor_config: executorConfigFromValues(values),
     model_entity_id: `${workspace}/${modelEntityName}`,
   });
 
@@ -260,11 +279,45 @@ export async function createWorkspaceDeploymentConfig(
       model_name: modelName,
       lora_enabled: values.loraEnabled,
     },
-    executor_config: {
-      gpu: values.gpu,
-      ...imageOverrides(values),
-    },
+    executor_config: executorConfigFromValues(values),
     model_entity_id: `${modelNamespace}/${modelName}`,
+  });
+}
+
+/**
+ * Create an **unbound** `ModelDeploymentConfig` — an engine and an executor, and no model.
+ *
+ * For a run that produces its own Model Entity (`all_weights`, `lora_merged`, DPO),
+ * the model this config will serve does not exist at submit time and cannot be named.
+ * A config carrying neither `model_entity_id` nor `model_spec.model_name` is a
+ * template: `is_unbound_deployment_config` recognises it, every compiler accepts it
+ * from any job, and the model_entity task binds it to the trained model when the run
+ * finishes — copying this engine, executor and serving options onto a derived config
+ * that names the new model. The template itself is left alone, so it stays reusable.
+ *
+ * `lora_enabled` is still sent. It is a serving option rather than a model link, it
+ * survives the copy onto the derived config, and it is what decides whether adapters
+ * trained against the output model can later be served alongside it.
+ *
+ * The reason to create anything up front is the same as for a bound config:
+ * `_validate_engine_config` runs synchronously inside `create_deployment_config`, so a
+ * missing image for the NIM engine is rejected in milliseconds — before the caller
+ * commits to a training run.
+ */
+export async function createUnboundDeploymentConfig(
+  workspace: string,
+  values: WizardFormValues,
+  configName: string,
+  reportStage: ReportStage
+): Promise<ModelDeploymentConfig> {
+  reportStage('Creating deployment configuration…');
+  return await modelsCreateDeploymentConfig(workspace, {
+    name: configName,
+    engine: values.engine,
+    model_spec: {
+      lora_enabled: values.loraEnabled,
+    },
+    executor_config: executorConfigFromValues(values),
   });
 }
 
@@ -390,14 +443,65 @@ export async function ensureWorkspaceDeploymentConfig(
   configName: string,
   reportStage: ReportStage
 ): Promise<EnsuredDeploymentConfig> {
-  try {
-    const config = await createWorkspaceDeploymentConfig(
-      workspace,
-      values,
-      configName,
-      reportStage
+  return ensureDeploymentConfig(
+    workspace,
+    configName,
+    () => createWorkspaceDeploymentConfig(workspace, values, configName, reportStage),
+    reportStage
+  );
+}
+
+/**
+ * Create the unbound template, or adopt the one already under that name.
+ *
+ * The output flow derives the name from the run's output model, so a collision only
+ * happens when that name is reused — which the backend also tolerates, updating the
+ * existing Model Entity rather than failing. Failing the submit over the config alone
+ * would be a worse answer than deploying with the settings already recorded, so this
+ * adopts for the same reason the adapter flow does, and reports it the same way.
+ */
+export async function ensureUnboundDeploymentConfig(
+  workspace: string,
+  values: WizardFormValues,
+  configName: string,
+  reportStage: ReportStage
+): Promise<EnsuredDeploymentConfig> {
+  const ensured = await ensureDeploymentConfig(
+    workspace,
+    configName,
+    () => createUnboundDeploymentConfig(workspace, values, configName, reportStage),
+    reportStage
+  );
+
+  // Adoption is only safe here while the adopted config is itself unbound. A config
+  // under this name that names a model would be handed to a job that will produce a
+  // different one -- the compiler rejects that, but only once the job is submitted,
+  // so the user would see a backend error with no obvious link to the config the form
+  // silently reused. Fail here instead, where the name can be named.
+  //
+  // The predicate matches `is_unbound_deployment_config`: `model_namespace` alone is
+  // not a binding, so it is deliberately not checked.
+  const boundTo = ensured.config.model_entity_id || ensured.config.model_spec?.model_name;
+  if (ensured.reused && boundTo) {
+    throw new Error(
+      `A deployment configuration named "${configName}" already exists and is bound to ` +
+        `"${boundTo}". This run creates its own model, so it needs a configuration that ` +
+        'names none. Rename the output model, or delete that configuration.'
     );
-    return { config, reused: false };
+  }
+
+  return ensured;
+}
+
+/** Shared create-or-adopt: only a 409 on the name is an adoption; everything else propagates. */
+async function ensureDeploymentConfig(
+  workspace: string,
+  configName: string,
+  create: () => Promise<ModelDeploymentConfig>,
+  reportStage: ReportStage
+): Promise<EnsuredDeploymentConfig> {
+  try {
+    return { config: await create(), reused: false };
   } catch (error) {
     if (!isVersionConflictError(error)) throw error;
 

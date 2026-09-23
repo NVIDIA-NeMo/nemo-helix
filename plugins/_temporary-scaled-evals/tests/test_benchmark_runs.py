@@ -675,7 +675,7 @@ def test_create_run_resolves_version_once_for_run_and_members() -> None:
         "0.13.2",
         "scaled-evals-api:dev",
         None,
-        "nemo-platform-plugin-overlay-v1",
+        "nemo-helix-plugin-overlay-v1",
         "0.1.13",
     )
     assert run_insert.args[1][10].obj["qualification"]["release"]["version"] == "0.13.2"

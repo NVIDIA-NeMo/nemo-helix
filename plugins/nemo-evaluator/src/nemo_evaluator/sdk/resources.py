@@ -55,9 +55,9 @@ from nemo_evaluator_sdk.values import (
     Model,
     ModelRef,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform, NemoPluginSDKResources
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix, NemoPluginSDKResources
 
 
 class Evaluator:
@@ -74,7 +74,7 @@ class Evaluator:
         self.tasksets = EvaluatorTasksetsResource(self._client)
 
     @classmethod
-    def from_sdk(cls, sdk: NeMoPlatform) -> Evaluator:
+    def from_sdk(cls, sdk: NeMoHelix) -> Evaluator:
         return cls(client_from_platform(sdk, EvaluatorClient))
 
     def plugin_status(self) -> dict[str, object]:
@@ -251,7 +251,7 @@ class AsyncEvaluator:
         self.tasksets = AsyncEvaluatorTasksetsResource(self._client)
 
     @classmethod
-    def from_sdk(cls, async_sdk: AsyncNeMoPlatform) -> AsyncEvaluator:
+    def from_sdk(cls, async_sdk: AsyncNeMoHelix) -> AsyncEvaluator:
         return cls(client_from_platform(async_sdk, AsyncEvaluatorClient))
 
     async def plugin_status(self) -> dict[str, object]:

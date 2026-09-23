@@ -9,7 +9,7 @@ and the Agents ``optimize`` job implementation.
 ## Prerequisites
 
 Install the agents CLI (``uv sync --package nemo-agents-plugin``) and a running
-NeMo Platform instance you have access to (workspace + inference credentials).
+NeMo Helix instance you have access to (workspace + inference credentials).
 See [examples/hermes-optimize/README.md](examples/hermes-optimize/README.md#one-time-setup-platform)
 for the full one-time setup, including the Hermes harness install.
 
@@ -51,7 +51,7 @@ analyzer; MCP servers are declared statically under ``mcp.servers``.
 Job registration: ``agents.optimize`` (mounted by the agents plugin, which also
 owns the ``prepare-fileset`` CLI command).  ``compile`` selects the ``subprocess``
 execution profile when the platform registers one and otherwise the ``cpu``
-profile with the ``nmp-cpu-tasks`` image.
+profile with the ``nhx-cpu-tasks`` image.
 Backend registry: ``nemo.optimization.backends`` (``optuna``, ``ga`` stub).
 
 Trials execute the Agent under Test in the study's own process tree; see
@@ -59,7 +59,7 @@ Trials execute the Agent under Test in the study's own process tree; see
 container isolation (not implemented).
 
 This package is intentionally not a Customizer contributor. A future
-Experimentalist / Customizer agent may call the same library.
+Customizer agent may call the same library.
 
 ## Next Steps
 

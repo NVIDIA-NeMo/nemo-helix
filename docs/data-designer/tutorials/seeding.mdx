@@ -60,14 +60,14 @@ Upload the symptom-to-diagnosis dataset to a Files API Fileset:
 import os
 import tempfile
 import urllib.request
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 WORKSPACE = "default"
 FILESET_NAME = "seed-data"
 FILE_PATH = "symptom_to_diagnosis.csv"
 
-base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=base_url, workspace=WORKSPACE)
+base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=base_url, workspace=WORKSPACE)
 
 # Create fileset
 client.files.filesets.create(name=FILESET_NAME)

@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
 
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
 # The deprecated pre-rename path; kept as a hidden alias for backwards compatibility.

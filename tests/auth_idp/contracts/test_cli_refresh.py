@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from nemo_platform_ext.auth.helpers import decode_jwt_claims, discover_nmp_config, generate_unsigned_jwt
-from nemo_platform_ext.cli.app import app
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_ext.auth.helpers import decode_jwt_claims, discover_nhx_config, generate_unsigned_jwt
+from nemo_helix_ext.cli.app import app
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from typer.testing import CliRunner
 
 from tests.auth_idp.common import require_capability, runtime_tls_config
@@ -87,7 +87,7 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
     require_capability(auth_idp_case, "device_flow")
     require_capability(auth_idp_case, "gateway_authn")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
     assert oidc.client_id
     assert oidc.device_authorization_endpoint
     assert oidc.token_endpoint
@@ -127,23 +127,23 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
         refresh_token=refresh_token,
     )
 
-    monkeypatch.setenv("NMP_CONFIG_FILE", str(config_path))
-    monkeypatch.delenv("NMP_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_path))
+    monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, raising=False)
     runtime_oidc = replace(
         oidc,
         device_authorization_endpoint=runtime_device_authorization_endpoint,
         token_endpoint=runtime_token_endpoint,
     )
-    monkeypatch.setattr("nemo_platform.client.bootstrap.discover_nmp_config", lambda *_args, **_kwargs: runtime_oidc)
+    monkeypatch.setattr("nemo_helix.client.bootstrap.discover_nhx_config", lambda *_args, **_kwargs: runtime_oidc)
     monkeypatch.setattr(
-        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
+        "nemo_helix_ext.client.bootstrap.discover_nhx_config",
         lambda *_args, **_kwargs: runtime_oidc,
     )
 
-    cli_env = {"NMP_CONFIG_FILE": str(config_path)}
+    cli_env = {"NHX_CONFIG_FILE": str(config_path)}
     if "verify" in tls_config:
-        cli_env[NMP_CLIENT_SSL_CERT_FILE_ENVVAR] = tls_config["verify"]
+        cli_env[NHX_CLIENT_SSL_CERT_FILE_ENVVAR] = tls_config["verify"]
 
     result = CliRunner().invoke(
         app,

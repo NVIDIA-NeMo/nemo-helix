@@ -92,12 +92,12 @@ def test_static_authentik_blueprint_declares_workload_provider_defaults() -> Non
 
     workload_provider = _entry_by_id(blueprint, "nemo-workload-provider")
     assert workload_provider["model"] == "authentik_providers_oauth2.oauth2provider"
-    assert workload_provider["identifiers"] == {"name": "nemo-platform-workload"}
+    assert workload_provider["identifiers"] == {"name": "nemo-helix-workload"}
     workload_provider_attrs = _attrs(workload_provider)
 
-    assert workload_provider_attrs["name"] == "nemo-platform-workload"
+    assert workload_provider_attrs["name"] == "nemo-helix-workload"
     assert workload_provider_attrs["client_type"] == "public"
-    assert workload_provider_attrs["client_id"] == "nemo-platform-workload"
+    assert workload_provider_attrs["client_id"] == "nemo-helix-workload"
     assert workload_provider_attrs["access_token_validity"] == "minutes=5"
 
     cli_provider = _entry_by_id(blueprint, "nemo-cli-provider")
@@ -107,7 +107,7 @@ def test_static_authentik_blueprint_declares_workload_provider_defaults() -> Non
     workload_application = _entry_by_identifier(blueprint, "authentik_core.application", "slug", "nemo-workload")
     assert workload_application["identifiers"] == {"slug": "nemo-workload"}
     workload_application_attrs = _attrs(workload_application)
-    assert workload_application_attrs["name"] == "NeMo Platform Workload Identity"
+    assert workload_application_attrs["name"] == "NeMo Helix Workload Identity"
     assert workload_application_attrs["slug"] == "nemo-workload"
     assert workload_application_attrs["provider"] == TaggedYamlValue("!KeyOf", "nemo-workload-provider")
 

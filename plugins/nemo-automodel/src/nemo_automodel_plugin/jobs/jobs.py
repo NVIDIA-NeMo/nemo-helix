@@ -4,7 +4,7 @@
 """Automodel training job (NemoJob).
 
 Shared scaffold (``to_spec`` + the Docker-runtime guard) lives in
-:class:`nmp.customization_common.contributor.jobs.BaseSubmitJob`; ``compile`` stays here
+:class:`nhx.customization_common.contributor.jobs.BaseSubmitJob`; ``compile`` stays here
 because it validates for training and resolves the execution profile from the
 schema (automodel-specific).
 """
@@ -17,14 +17,14 @@ from typing import ClassVar
 from nemo_automodel_plugin.config import get_config
 from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, ValidationError
 from nemo_automodel_plugin.transform import transform_input_to_output
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.docker import validate_gpu_available_for_docker
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nmp.automodel.compile import platform_job_config_compiler
-from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
-from nmp.customization_common.service.platform_client import (
-    AsyncCustomizationPlatformClients,
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nhx.automodel.compile import platform_job_config_compiler
+from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
 )
 from pydantic import BaseModel
@@ -49,7 +49,7 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
         cls,
         job_input: AutomodelJobInput,
         workspace: str,
-        platform: AsyncCustomizationPlatformClients,
+        platform: AsyncCustomizationHelixClients,
     ) -> AutomodelJobOutput:
         return await transform_input_to_output(job_input, workspace, platform)
 
@@ -60,10 +60,10 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         del entity_client, options
         platform = async_customization_platform_clients_from_platform(async_sdk)
         canonical = (
@@ -80,7 +80,7 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
         try:
             canonical.validate_for_training()
         except ValidationError as e:
-            raise PlatformJobCompilationError(str(e)) from e
+            raise HelixJobCompilationError(str(e)) from e
 
         plugin_config = get_config()
         execution_profile = (

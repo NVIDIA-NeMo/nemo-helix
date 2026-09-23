@@ -6,13 +6,13 @@ from enum import Enum
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.guardrails.app.services.configs.sources import (
+from nhx.guardrails.app.services.configs.sources import (
     FileSystemConfigSource,
     YamlConfigSource,
     _enum_to_primitive,
     _normalize,
 )
-from nmp.guardrails.entities.values._private import RailsConfig
+from nhx.guardrails.entities.values._private import RailsConfig
 
 
 class ConfigOptionEnum(Enum):

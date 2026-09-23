@@ -157,7 +157,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -345,7 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -377,7 +377,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -409,7 +409,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -572,11 +572,11 @@ components:
         \           AnonymizerConfig \u2014 replace/rewrite mode + detection params.\n\
         \  data:             AnonymizerInputSpec \u2014 HTTP(S) URL or fileset source\
         \ + text/id columns.\n  model_configs:    DD ``ModelConfig`` list. ``provider``\
-        \ on each entry must\n                    reference a NeMo Platform inference\
+        \ on each entry must\n                    reference a NeMo Helix inference\
         \ provider name (optionally\n                    ``workspace/provider``).\
         \ Optional on the request model for\n                    compatibility, but\
         \ required by plugin preview/run execution\n                    so requests\
-        \ route through NeMo Platform Inference Gateway.\n  selected_models:  Optional\
+        \ route through NeMo Helix Inference Gateway.\n  selected_models:  Optional\
         \ role->alias overrides. Omitted roles fall back\n                    to the\
         \ upstream library YAML defaults."
     AnonymizerStepConfig:
@@ -877,6 +877,248 @@ components:
         \ \u2014 they are not produced by user code. Plugins relying on\nstrict frame\
         \ typing on the receiving side should ignore unknown\n``kind`` values or include\
         \ :class:`Heartbeat` in their own\ndiscriminated union."
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
     ImageInferenceParams:
       properties:
         generation_type:
@@ -1047,248 +1289,6 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
     PreviewDatasetFrame:
       properties:
         kind:
@@ -1448,7 +1448,7 @@ components:
         spec:
           $ref: '#/components/schemas/AnonymizerStepConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -1528,7 +1528,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.

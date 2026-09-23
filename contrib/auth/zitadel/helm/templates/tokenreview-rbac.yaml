@@ -8,7 +8,7 @@ kind: ClusterRole
 metadata:
   name: nemo-zitadel-workload-token-reviewer
   labels:
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
@@ -19,12 +19,12 @@ kind: ClusterRoleBinding
 metadata:
   name: nemo-zitadel-workload-token-reviewer
   labels:
-    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+    {{- include "nemo-helix-zitadel.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: nemo-zitadel-workload-token-reviewer
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.integration.nemoPlatform.apiServiceAccountName }}
-    namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+    name: {{ .Values.integration.nemoHelix.apiServiceAccountName }}
+    namespace: {{ include "nemo-helix-zitadel.namespace" . }}

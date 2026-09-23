@@ -3,7 +3,7 @@
 
 """SDK resources for the Agent Hardener plugin.
 
-Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.agent_hardener`` via the ``nemo.sdk``
+Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.agent_hardener`` via the ``nemo.sdk``
 entry-point. Exposes ``run(config=..., env_file=..., workspace=...)`` which executes the
 ``agent-hardener.war-game`` job locally, in-process, plus ``client.agent_hardener.runs`` to read run records.
 """
@@ -21,8 +21,8 @@ from nemo_agent_hardener_plugin.filesets import upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
-from nemo_platform_plugin.agent_hardener.client import AgentHardenerClient
-from nemo_platform_plugin.agent_hardener.types import (
+from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
+from nemo_helix_plugin.agent_hardener.types import (
     AGENT_HARDENER_MANIFEST_TYPE,
     AGENT_HARDENER_RUN_TYPE,
     InspectProjectRequest,
@@ -33,13 +33,13 @@ from nemo_platform_plugin.agent_hardener.types import (
     ValidateModelRequest,
     WarGameModels,
 )
-from nemo_platform_plugin.client.adapter import PlatformClient, client_from_platform
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import Entity, ListEntitiesQueryParams
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.adapter import HelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import Entity, ListEntitiesQueryParams
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 _JSON_MAP_ADAPTER = TypeAdapter(JsonMap)
@@ -85,7 +85,7 @@ def _run_to_dict(entity: Entity) -> JsonMap:
 
 
 def _run_war_game(
-    sync_sdk: PlatformClient,
+    sync_sdk: SyncHelixClient,
     *,
     config: str | None,
     manifest_id: str | None,
@@ -145,7 +145,7 @@ def _run_war_game(
 
 
 def _run_synth_benign(
-    sync_sdk: PlatformClient, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
+    sync_sdk: SyncHelixClient, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
 ) -> JsonMap:
     """Blocking benign-suite synthesis for a saved manifest, shared by the sync and async resources.
 
@@ -165,9 +165,8 @@ def _run_synth_benign(
 def _list_newest(entities: EntitiesClient, entity_type: str, *, workspace: str, limit: int) -> list[JsonMap]:
     """Return at most *limit* records of *entity_type*, newest first.
 
-    ``entities.list`` returns a ``SyncDefaultPagination`` whose ``__iter__`` auto-paginates, so
-    ``page_size`` bounds the *page*, not the total — iterating it walks the entire history. We ask for
-    one page of *limit* and take only that page's items, which is a single request.
+    ``EntitiesClient.list_entities`` returns a typed paginated response. We ask for one page of *limit*
+    and take only that page's items, which is a single request.
     """
     page = entities.list_entities(
         entity_type=entity_type,
@@ -180,7 +179,7 @@ def _list_newest(entities: EntitiesClient, entity_type: str, *, workspace: str, 
 class _RunsResource:
     """``client.agent_hardener.runs`` — read AgentHardenerRun records from the entity store."""
 
-    def __init__(self, platform: PlatformClient) -> None:
+    def __init__(self, platform: SyncHelixClient) -> None:
         self._platform = platform
 
     def list(self, *, workspace: str = "default", limit: int = 20) -> Sequence[JsonMap]:
@@ -203,7 +202,7 @@ class _ManifestsResource:
     share one implementation of manifest creation (resolution, persistence, validation).
     """
 
-    def __init__(self, platform: PlatformClient) -> None:
+    def __init__(self, platform: SyncHelixClient) -> None:
         self._platform = platform
 
     def _client(self) -> AgentHardenerClient:
@@ -258,7 +257,7 @@ class _ManifestsResource:
 class AgentHardenerPluginResource:
     """Sync SDK namespace mounted as ``client.agent_hardener``."""
 
-    def __init__(self, platform: PlatformClient) -> None:
+    def __init__(self, platform: SyncHelixClient) -> None:
         self._platform = platform
         self._runs: _RunsResource | None = None
         self._manifests: _ManifestsResource | None = None
@@ -400,7 +399,7 @@ class AgentHardenerPluginResource:
 class AsyncAgentHardenerPluginResource:
     """Async SDK namespace mounted as ``client.agent_hardener``."""
 
-    def __init__(self, platform: PlatformClient) -> None:
+    def __init__(self, platform: HelixClient) -> None:
         self._platform = platform
 
     async def run(

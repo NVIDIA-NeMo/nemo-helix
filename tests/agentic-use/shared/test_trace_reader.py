@@ -83,7 +83,7 @@ def test_parse_session_handles_mcp_tools() -> None:
                     {
                         "type": "tool_use",
                         "id": "tool-1",
-                        "name": "mcp__nmp__create_workspace",
+                        "name": "mcp__nhx__create_workspace",
                         "input": {"name": "test-workspace"},
                     }
                 ],
@@ -101,7 +101,7 @@ def test_parse_session_handles_mcp_tools() -> None:
 
         mcp_calls = session.get_mcp_calls()
         assert len(mcp_calls) == 1
-        assert mcp_calls[0].name == "mcp__nmp__create_workspace"
+        assert mcp_calls[0].name == "mcp__nhx__create_workspace"
         assert mcp_calls[0].input["name"] == "test-workspace"
 
 

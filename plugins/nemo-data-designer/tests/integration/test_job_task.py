@@ -34,8 +34,8 @@ from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
 from nemo_data_designer_plugin.jobs.task_results import ANALYSIS_RESULT_NAME, ARTIFACTS_RESULT_NAME
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import JobsClient
 
 pytestmark = pytest.mark.integration
 
@@ -67,7 +67,7 @@ def _list_job_results(ctx: u.CreateJobTestContext, job_name: str):
 
 @pytest.fixture
 def _failing_result_manager() -> Generator[None]:
-    with patch("nemo_platform_plugin.jobs.result_manager.ResultManager", u.FailingResultManager):
+    with patch("nemo_helix_plugin.jobs.result_manager.ResultManager", u.FailingResultManager):
         yield
 
 

@@ -12,7 +12,7 @@ else
     echo 'WARNING: Docker socket not found - job execution will not work'
 fi
 
-cd /app && /app/.venv/bin/nemo services run > /tmp/nmp-api.log 2>&1 &
+cd /app && /app/.venv/bin/nemo services run > /tmp/nhx-api.log 2>&1 &
 API_PID=$!
 echo "Started API server with PID: $API_PID"
 
@@ -22,7 +22,7 @@ for i in {1..60}; do
         CONSECUTIVE_SUCCESS=$((CONSECUTIVE_SUCCESS+1))
         echo "Health check passed ($CONSECUTIVE_SUCCESS/3)"
         if [ "$CONSECUTIVE_SUCCESS" -ge 3 ]; then
-            echo 'NeMo Platform API ready and stable'
+            echo 'NeMo Helix API ready and stable'
             break
         fi
     else
@@ -33,13 +33,13 @@ done
 
 if [ "$CONSECUTIVE_SUCCESS" -lt 3 ]; then
     echo 'API failed to become stable!'
-    cat /tmp/nmp-api.log
+    cat /tmp/nhx-api.log
     kill $API_PID 2>/dev/null
     exit 1
 fi
 
 echo '=== Pre-configuring CLI auth ==='
-/app/.venv/bin/nmp auth login --base-url http://localhost:8080 --unsigned-token --email agent@harbor.local --no-exp
+/app/.venv/bin/nhx auth login --base-url http://localhost:8080 --unsigned-token --email agent@harbor.local --no-exp
 
 bash /app/setup-env.sh
 

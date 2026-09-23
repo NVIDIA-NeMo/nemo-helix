@@ -3,7 +3,7 @@
 
 """Module-level state mapping VirtualModels to registered Switchyard factories.
 
-NOTE: Module-level state is necessary because the nemo_platform_plugin interface passes only
+NOTE: Module-level state is necessary because the nemo_helix_plugin interface passes only
 config_type in middleware_config (not the full config or factory_name), so we need
 a lookup keyed by (vm_key, config_type, phase). IGW has its own caching layer but
 doesn't expose it for this purpose. State is cleared on shutdown to prevent stale

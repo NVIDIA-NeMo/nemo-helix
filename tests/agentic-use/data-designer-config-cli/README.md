@@ -3,7 +3,7 @@
 
 # Data Designer Model Configuration - CLI Eval
 
-This Harbor eval tests the ability to configure model providers for Data Designer using the NeMo Platform CLI.
+This Harbor eval tests the ability to configure model providers for Data Designer using the NeMo Helix CLI.
 
 ## What This Eval Tests
 
@@ -21,7 +21,7 @@ This eval corresponds to **Flow #26 - Configure Models** from the Data Designer 
 
 1. Build the agentic-base image:
    ```bash
-   docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+   docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
    ```
 
 2. Set up your Anthropic API credentials:

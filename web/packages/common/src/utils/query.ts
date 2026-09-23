@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
 import * as DataView from '../components/DataView/internal';
 import { JOB_POLLING_INTERVAL_MS } from '../constants';
 
-export const getJobRefetchInterval = (status?: PlatformJobStatus): number | false => {
+export const getJobRefetchInterval = (status?: HelixJobStatus): number | false => {
   if (!status || !CJobTerminalStatuses.includes(status)) {
     return JOB_POLLING_INTERVAL_MS;
   }

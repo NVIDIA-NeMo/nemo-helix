@@ -14,7 +14,7 @@ The NeMo CLI uses a configuration file to store connection settings, credentials
 
 ## Configuration file
 
-The configuration is stored in `~/.config/nmp/config.yaml`. If the `XDG_CONFIG_HOME` environment variable is set, the file is stored in `$XDG_CONFIG_HOME/nmp/config.yaml` instead. You can also specify a custom location with the `NMP_CONFIG_FILE` environment variable.
+The configuration is stored in `~/.config/nhx/config.yaml`. If the `XDG_CONFIG_HOME` environment variable is set, the file is stored in `$XDG_CONFIG_HOME/nhx/config.yaml` instead. You can also specify a custom location with the `NHX_CONFIG_FILE` environment variable.
 
 ## Manage configuration
 
@@ -39,7 +39,7 @@ The full view includes every saved context, cluster, and user. JSON output is us
 Set specific values:
 
 ```bash
-nemo config set --base-url https://nmp.example.com
+nemo config set --base-url https://nhx.example.com
 nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
 nemo config set --workspace my-workspace
 nemo config set --access-token -
@@ -64,24 +64,24 @@ Environment variables override configuration file settings. This is useful for C
 
 | Variable | Description |
 |----------|-------------|
-| `NMP_CONFIG_FILE` | Path to configuration file |
-| `NMP_CURRENT_CONTEXT` | Override current context |
-| `NMP_BASE_URL` | API base URL |
-| `NMP_ACCESS_TOKEN` | Access token for authentication |
-| `NMP_WORKSPACE` | Default workspace |
-| `NMP_OUTPUT_FORMAT` | Output format (table, json, yaml, csv, markdown) |
-| `NMP_TIMESTAMP_FORMAT` | Timestamp format (relative, iso8601) |
-| `NMP_COLOR_OUTPUT` | Enable/disable colored output (true/false) |
+| `NHX_CONFIG_FILE` | Path to configuration file |
+| `NHX_CURRENT_CONTEXT` | Override current context |
+| `NHX_BASE_URL` | API base URL |
+| `NHX_ACCESS_TOKEN` | Access token for authentication |
+| `NHX_WORKSPACE` | Default workspace |
+| `NHX_OUTPUT_FORMAT` | Output format (table, json, yaml, csv, markdown) |
+| `NHX_TIMESTAMP_FORMAT` | Timestamp format (relative, iso8601) |
+| `NHX_COLOR_OUTPUT` | Enable/disable colored output (true/false) |
 | `NEMO_TELEMETRY_ENABLED` | Enable CLI telemetry only when set to `true`; any other explicit value disables it |
 
 Example:
 
 ```bash
 # Use a different context for this command
-NMP_CURRENT_CONTEXT=production nemo workspaces list
+NHX_CURRENT_CONTEXT=production nemo workspaces list
 
 # Override base URL
-NMP_BASE_URL=https://nmp.example.com nemo models list
+NHX_BASE_URL=https://nhx.example.com nemo models list
 ```
 
 ## Configuration precedence
@@ -89,8 +89,8 @@ NMP_BASE_URL=https://nmp.example.com nemo models list
 Settings are resolved in this order (highest priority first):
 
 1. **Command-line flags** - `--base-url`, `--context`, etc.
-2. **Environment variables** - `NMP_BASE_URL`, `NMP_CURRENT_CONTEXT`, etc.
-3. **Configuration file** - `~/.config/nmp/config.yaml`
+2. **Environment variables** - `NHX_BASE_URL`, `NHX_CURRENT_CONTEXT`, etc.
+3. **Configuration file** - `~/.config/nhx/config.yaml`
 4. **Defaults** - Built-in default values
 
 This means you can set defaults in your config file and override them as needed with environment variables or flags.
@@ -137,7 +137,7 @@ If completion isn't working, make sure you've restarted your shell and that your
 
 ## Telemetry
 
-NeMo Platform collects anonymous usage data to improve the product. On your first run, the CLI prints a notice to standard error explaining what data is collected and how to opt out.
+NeMo Helix collects anonymous usage data to improve the product. On your first run, the CLI prints a notice to standard error explaining what data is collected and how to opt out.
 
 For the full product disclosure, including bundled library telemetry and third-party endpoint notes, see [Telemetry and Privacy](/documentation/reference/telemetry-and-privacy).
 
@@ -156,7 +156,7 @@ Collected data includes:
 
 The events are batched and sent to NVIDIA's telemetry endpoint with no user identifiers, device fingerprints, hostnames, or machine-derived identifiers attached.
 
-The only linking value is a random session identifier stored in local platform state. It carries no user or device identity and is automatically rotated every 30 days; if the local state file is missing a creation date, NeMo Platform replaces it with a new identifier.
+The only linking value is a random session identifier stored in local platform state. It carries no user or device identity and is automatically rotated every 30 days; if the local state file is missing a creation date, NeMo Helix replaces it with a new identifier.
 
 ### What Data Is Not Collected
 
@@ -179,7 +179,7 @@ Then run any `nemo` command. This disables telemetry for the CLI and bundled plu
 
 #### 2. Configuration File
 
-Add this to your configuration file at `~/.config/nmp/config.yaml`:
+Add this to your configuration file at `~/.config/nhx/config.yaml`:
 
 ```yaml
 telemetry_enabled: false
@@ -195,19 +195,19 @@ The `--no-telemetry` flag disables telemetry for a single command only.
 
 <Note>
 
-These three layers are independent. NeMo Platform sends telemetry only when you have not disabled it in any of them. Setting any one layer to off disables telemetry, and no layer turns it back on. For example, if you leave the environment variable unset but set `telemetry_enabled: false` in your config file, telemetry stays off.
+These three layers are independent. NeMo Helix sends telemetry only when you have not disabled it in any of them. Setting any one layer to off disables telemetry, and no layer turns it back on. For example, if you leave the environment variable unset but set `telemetry_enabled: false` in your config file, telemetry stays off.
 
 </Note>
 
 ### Bundled Plugins
 
-NeMo Platform ships with plugins that emit their own anonymous usage telemetry. The `NEMO_TELEMETRY_ENABLED` environment variable is the recommended single off switch: set it to `false` to disable telemetry for the CLI and for NeMo tools that share this telemetry system. The config file setting and the `--no-telemetry` flag apply to the CLI.
+NeMo Helix ships with plugins that emit their own anonymous usage telemetry. The `NEMO_TELEMETRY_ENABLED` environment variable is the recommended single off switch: set it to `false` to disable telemetry for the CLI and for NeMo tools that share this telemetry system. The config file setting and the `--no-telemetry` flag apply to the CLI.
 
 ### First-Run Notice
 
 On your first run, the CLI writes this notice to standard error:
 
-> NeMo Platform collects anonymous usage data to improve the product. No prompts, data, or personal information leave your machine. Turn it off at any time with NEMO_TELEMETRY_ENABLED=false.
+> NeMo Helix collects anonymous usage data to improve the product. No prompts, data, or personal information leave your machine. Turn it off at any time with NEMO_TELEMETRY_ENABLED=false.
 
 The notice appears only once, and you can opt out at any time using one of the methods above.
 

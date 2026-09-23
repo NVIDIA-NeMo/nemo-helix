@@ -12,10 +12,10 @@ running the behavioral assertions.
 
 ## Prerequisites
 
-- A source checkout of `NVIDIA-NeMo/nemo-platform`
+- A source checkout of `NVIDIA-NeMo/nemo-helix`
 - `docker`, `kind`, `kubectl`, and `helm` available on your workstation
 - A local `chainsaw` binary, or Docker access to `ghcr.io/kyverno/chainsaw:v0.2.3`
-- `NGC_API_KEY` with access to the NeMo Platform chart and container images
+- `NGC_API_KEY` with access to the NeMo Helix chart and container images
 - Permission to create and delete the local Kind cluster and Kubernetes namespaces
 
 ## Run The Smoke Test
@@ -28,8 +28,8 @@ Set the image and namespace inputs, then run the source-checkout smoke script:
 
 ```sh
 export NGC_API_KEY=<your-ngc-api-key>
-export KIND_CLUSTER_NAME=nmp-network-policy
-export KUBE_NAMESPACE=nemo-platform
+export KIND_CLUSTER_NAME=nhx-network-policy
+export KUBE_NAMESPACE=nemo-helix
 
 e2e/k8s/scripts/run_network_policy_e2e.sh
 ```
@@ -49,13 +49,13 @@ only for a post-smoke API check if you expose the API with `kubectl
 port-forward`:
 
 ```sh
-kubectl -n "$KUBE_NAMESPACE" port-forward svc/nemo-platform-api 8080:8080
+kubectl -n "$KUBE_NAMESPACE" port-forward svc/nemo-helix-api 8080:8080
 ```
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080")
+client = NeMoHelix(base_url="http://localhost:8080")
 for workspace in client.workspaces.list().data:
     print(workspace.name)
 ```
@@ -73,8 +73,8 @@ Set `CHAINSAW_IMAGE` to override the Chainsaw container image used when a local
 `chainsaw` binary is not installed. The default is
 `ghcr.io/kyverno/chainsaw:v0.2.3`.
 
-When testing source changes, set `NMP_E2E_REGISTRY` and `NMP_E2E_TAG` to a
-branch-built `nmp-api` image. CI supplies these from the CPU smoke image build.
+When testing source changes, set `NHX_E2E_REGISTRY` and `NHX_E2E_TAG` to a
+branch-built `nhx-api` image. CI supplies these from the CPU smoke image build.
 If the image is in private GHCR, export `GITHUB_TOKEN` so the setup script can
 create the pull secret.
 

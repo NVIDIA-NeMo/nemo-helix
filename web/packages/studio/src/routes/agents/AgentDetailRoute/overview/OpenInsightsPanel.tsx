@@ -71,7 +71,7 @@ export const OpenInsightsPanel: FC<OpenInsightsPanelProps> = ({
         <Flex justify="center" align="center" padding="density-xl" className="min-h-60">
           <Text kind="body/regular/md" className="max-w-72 text-center text-secondary">
             {awaitingTelemetry
-              ? 'Generating insights requires importing traces or integrating your agent with NeMo Platform.'
+              ? 'Generating insights requires importing traces or integrating your agent with NeMo Helix.'
               : "Insights are filed by the analyst from this agent's traces, feedback, and evaluation scores. Once analysis has run, recurring problems show up here with the traces that prove them."}
           </Text>
         </Flex>

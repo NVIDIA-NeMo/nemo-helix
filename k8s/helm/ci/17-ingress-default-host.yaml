@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/17-ingress-default-host.yaml
+# CI validates by running: helm template nemo-helix . -f ci/17-ingress-default-host.yaml
 # Tests that setting ingress.defaultHost renders one Ingress rule with that host and default paths (backend is API service).
 
 ingress:
   enabled: true
-  defaultHost: "nmp.example.com"
+  defaultHost: "nhx.example.com"
 

@@ -63,11 +63,18 @@ These values match the Nemotron embed recipe. Automodel fills comparable default
 | Learning rate | `optimizer.learning_rate` | `1e-5` (sweep `5e-6` / `2e-5`) |
 | Warmup | `optimizer.warmup_steps` | `5` |
 | Weight decay | `optimizer.weight_decay` | `0.01` |
-| Epochs | `schedule.epochs` | `1`–`2` on NVDocs-scale or real corpora (`3` is for tiny example sets) |
+| Epochs | `schedule.epochs` | `1` to start, raised while `retrieve-eval` metrics keep improving; the published NVDocs reference run used `3` |
 | Global batch | `batch.global_batch_size` | `128` |
 | Micro batch | `batch.micro_batch_size` | `4` |
 | Sequence length | `training.max_seq_length` / `training.retrieval.query_max_length` and `passage_max_length` | `512` |
 | Passages | `training.retrieval.train_n_passages` | `5` (1 positive + 4 hard negatives) |
+
+Validation data is optional. Automodel first looks in the `dataset.training`
+fileset for files named `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl`. If
+none exists, `schedule.validation_split` deterministically holds out part of
+the discovered training rows; the default is `0.1` (10%). This split drives
+validation loss and checkpoint selection. It is separate from the frozen
+`eval_beir` split used by `retrieve-eval` to compare retrieval quality.
 
 Score the fine-tuned model and the base model on the same frozen `eval_beir` split. Regenerating the split between runs makes the difference reflect data variance as much as model quality.
 
@@ -83,10 +90,10 @@ Score the fine-tuned model and the base model on the same frozen `eval_beir` spl
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

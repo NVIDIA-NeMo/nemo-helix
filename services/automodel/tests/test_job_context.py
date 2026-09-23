@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for NMPJobContext."""
+"""Unit tests for NHXJobContext."""
 
 from pathlib import Path
 
 import pytest
-from nmp.automodel.app.constants import DEFAULT_JOB_STORAGE_PATH, NMP_FILES_URL_ENVVAR, NMP_JOBS_URL_ENVVAR
-from nmp.common.entities.constants import DEFAULT_WORKSPACE
-from nmp.common.jobs.constants import (
+from nhx.automodel.app.constants import DEFAULT_JOB_STORAGE_PATH, NHX_FILES_URL_ENVVAR, NHX_JOBS_URL_ENVVAR
+from nhx.common.entities.constants import DEFAULT_WORKSPACE
+from nhx.common.jobs.constants import (
     DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -18,14 +18,14 @@ from nmp.common.jobs.constants import (
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nmp.customization_common.service.context import (
+from nhx.customization_common.service.context import (
     DEFAULT_ATTEMPT_ID,
     DEFAULT_JOB_ID,
     DEFAULT_STEP,
     DEFAULT_TASK,
-    NMPJobContext,
+    NHXJobContext,
 )
-from nmp.customization_common.service.path_utils import (
+from nhx.customization_common.service.path_utils import (
     CURRENT_NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     CURRENT_PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     LEGACY_NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVARS,
@@ -51,7 +51,7 @@ def _clear_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-class TestNMPJobContextFromEnv:
+class TestNHXJobContextFromEnv:
     def test_uses_defaults_when_env_vars_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _clear_path_env(monkeypatch)
         for var in (
@@ -60,12 +60,12 @@ class TestNMPJobContextFromEnv:
             NEMO_JOB_ATTEMPT_ID_ENVVAR,
             NEMO_JOB_STEP_ENVVAR,
             NEMO_JOB_TASK_ENVVAR,
-            NMP_JOBS_URL_ENVVAR,
-            NMP_FILES_URL_ENVVAR,
+            NHX_JOBS_URL_ENVVAR,
+            NHX_FILES_URL_ENVVAR,
         ):
             monkeypatch.delenv(var, raising=False)
 
-        ctx = NMPJobContext.from_env()
+        ctx = NHXJobContext.from_env()
 
         assert ctx.workspace == DEFAULT_WORKSPACE
         assert ctx.job_id == DEFAULT_JOB_ID
@@ -84,12 +84,12 @@ class TestNMPJobContextFromEnv:
         monkeypatch.setenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, "attempt-5")
         monkeypatch.setenv(NEMO_JOB_STEP_ENVVAR, "training")
         monkeypatch.setenv(NEMO_JOB_TASK_ENVVAR, "train-model")
-        monkeypatch.setenv(NMP_JOBS_URL_ENVVAR, "http://jobs.example.com")
-        monkeypatch.setenv(NMP_FILES_URL_ENVVAR, "http://files.example.com")
+        monkeypatch.setenv(NHX_JOBS_URL_ENVVAR, "http://jobs.example.com")
+        monkeypatch.setenv(NHX_FILES_URL_ENVVAR, "http://files.example.com")
         monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, "/custom/storage")
         monkeypatch.setenv(NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR, "/custom/config.json")
 
-        ctx = NMPJobContext.from_env()
+        ctx = NHXJobContext.from_env()
 
         assert ctx.workspace == "test-workspace"
         assert ctx.job_id == "job-123"
@@ -104,7 +104,7 @@ class TestNMPJobContextFromEnv:
         monkeypatch.setenv(CURRENT_PERSISTENT_JOB_STORAGE_PATH_ENVVAR, "/var/run/scratch/job")
         monkeypatch.setenv(LEGACY_PERSISTENT_JOB_STORAGE_PATH_ENVVARS[0], "/run/scratch/job")
 
-        ctx = NMPJobContext.from_env()
+        ctx = NHXJobContext.from_env()
 
         assert ctx.storage_path == Path("/var/run/scratch/job")
 
@@ -112,7 +112,7 @@ class TestNMPJobContextFromEnv:
         _clear_path_env(monkeypatch)
         monkeypatch.setenv(LEGACY_PERSISTENT_JOB_STORAGE_PATH_ENVVARS[0], "/run/scratch/job")
 
-        ctx = NMPJobContext.from_env()
+        ctx = NHXJobContext.from_env()
 
         assert ctx.storage_path == Path("/run/scratch/job")
 
@@ -120,6 +120,6 @@ class TestNMPJobContextFromEnv:
         _clear_path_env(monkeypatch)
         monkeypatch.setenv(LEGACY_NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVARS[0], "/run/scratch/config/job.json")
 
-        ctx = NMPJobContext.from_env()
+        ctx = NHXJobContext.from_env()
 
         assert ctx.config_path == Path("/run/scratch/config/job.json")

@@ -356,7 +356,7 @@ class TestWorkspaceResolution:
     Regression guard: ``--workspace`` used to be declared with a literal
     ``"default"`` Typer default, so the command body could never tell an
     omitted flag from an explicit one and the workspace selected via
-    ``nemo config use-context`` (or ``$NMP_WORKSPACE``) was silently
+    ``nemo config use-context`` (or ``$NHX_WORKSPACE``) was silently
     discarded.
     """
 
@@ -386,7 +386,7 @@ class TestWorkspaceResolution:
         assert captured[0].url.path == "/apis/auditor/v2/workspaces/team-alpha/configs"
 
     def test_falls_back_to_default_without_state(self, runner, app, monkeypatch) -> None:
-        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
 
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"data": []})
@@ -399,7 +399,7 @@ class TestWorkspaceResolution:
         assert captured[0].url.path == "/apis/auditor/v2/workspaces/default/configs"
 
     def test_falls_back_to_env_without_state(self, runner, app, monkeypatch) -> None:
-        monkeypatch.setenv("NMP_WORKSPACE", "env-ws")
+        monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
 
         def handler(req: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"data": []})

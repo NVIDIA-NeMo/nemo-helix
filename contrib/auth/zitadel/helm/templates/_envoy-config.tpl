@@ -3,21 +3,21 @@ SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All 
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- define "nemo-platform-zitadel.envoyConfig" -}}
-{{- $zitadel := required "nemo-platform.zitadelEnvoy is required" .Values.zitadelEnvoy -}}
+{{- define "nemo-helix-zitadel.envoyConfig" -}}
+{{- $zitadel := required "nemo-helix.zitadelEnvoy is required" .Values.zitadelEnvoy -}}
 {{- $tlsMountPath := "" -}}
 {{- range .Values.envoyProxy.extraVolumeMounts -}}
 {{- if eq (index . "name") "workload-token-tls" -}}
 {{- $tlsMountPath = index . "mountPath" -}}
 {{- end -}}
 {{- end -}}
-{{- $tlsMountPath = required "nemo-platform.envoyProxy.extraVolumeMounts must include workload-token-tls" $tlsMountPath -}}
-{{- $apiServiceName := include "nmp-api.api-servicename" . -}}
-{{- $publicGateway := required "nemo-platform.zitadelPublicGateway is required" .Values.zitadelPublicGateway -}}
-{{- $publicGatewayHost := required "nemo-platform.zitadelPublicGateway.host is required" $publicGateway.host -}}
-{{- $publicGatewayPort := required "nemo-platform.zitadelPublicGateway.port is required" $publicGateway.port -}}
+{{- $tlsMountPath = required "nemo-helix.envoyProxy.extraVolumeMounts must include workload-token-tls" $tlsMountPath -}}
+{{- $apiServiceName := include "nhx-api.api-servicename" . -}}
+{{- $publicGateway := required "nemo-helix.zitadelPublicGateway is required" .Values.zitadelPublicGateway -}}
+{{- $publicGatewayHost := required "nemo-helix.zitadelPublicGateway.host is required" $publicGateway.host -}}
+{{- $publicGatewayPort := required "nemo-helix.zitadelPublicGateway.port is required" $publicGateway.port -}}
 {{- $publicGatewayAuthority := printf "%s:%s" $publicGatewayHost (toString $publicGatewayPort) -}}
-{{- $spoofHeaders := concat .Values.envoyProxy.trustedHeaders (list "x-nmp-authorized" "x-nmp-scopes") | uniq -}}
+{{- $spoofHeaders := concat .Values.envoyProxy.trustedHeaders (list "x-nhx-authorized" "x-nhx-scopes") | uniq -}}
 admin:
   address:
     socket_address:
@@ -53,7 +53,7 @@ static_resources:
                       domains: ["*"]
                       routes:
                         - match:
-                            prefix: "/.well-known/nemo-platform/"
+                            prefix: "/.well-known/nemo-helix/"
                           route:
                             cluster: nemo
                           typed_per_filter_config:
@@ -265,13 +265,13 @@ static_resources:
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:
-                              - exact: x-nmp-principal-id
-                              - exact: x-nmp-principal-email
-                              - exact: x-nmp-principal-groups
-                              - exact: x-nmp-principal-on-behalf-of
-                              - exact: x-nmp-principal-on-behalf-of-email
-                              - exact: x-nmp-principal-on-behalf-of-groups
-                              - exact: x-nmp-scopes
+                              - exact: x-nhx-principal-id
+                              - exact: x-nhx-principal-email
+                              - exact: x-nhx-principal-groups
+                              - exact: x-nhx-principal-on-behalf-of
+                              - exact: x-nhx-principal-on-behalf-of-email
+                              - exact: x-nhx-principal-on-behalf-of-groups
+                              - exact: x-nhx-scopes
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

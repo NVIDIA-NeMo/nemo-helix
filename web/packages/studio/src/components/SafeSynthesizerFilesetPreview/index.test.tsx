@@ -3,7 +3,7 @@
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/files';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   useSafeSynthesizerDownloadJobResultSyntheticData,
   useSafeSynthesizerListJobResults,
@@ -130,7 +130,7 @@ const createMockJob = (overrides?: Partial<GenerateJob>): GenerateJob => ({
   id: 'test-job-id',
   name: 'test-job',
   workspace: 'test-workspace',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   spec: {
     data_source: 'fileset://test-workspace/test-dataset/source-data.csv',
     config: {},
@@ -145,7 +145,7 @@ const createMockJobWithFilesetUrl = (overrides?: Partial<GenerateJob>): Generate
   id: 'test-job-id',
   name: 'test-job',
   workspace: 'test-workspace',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   spec: {
     data_source: 'fileset://test-workspace/test-dataset/source-data.csv',
     config: {},
@@ -230,7 +230,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
 
   describe('API Hook Configuration', () => {
     it('should enable job results query when job status is completed', () => {
-      const job = createMockJob({ status: PlatformJobStatus.completed });
+      const job = createMockJob({ status: HelixJobStatus.completed });
       render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
 
       expect(mockUseListJobResults).toHaveBeenCalledWith(
@@ -245,7 +245,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
     });
 
     it('should disable job results query when job status is not completed', () => {
-      const job = createMockJob({ status: PlatformJobStatus.active });
+      const job = createMockJob({ status: HelixJobStatus.active });
       render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
 
       expect(mockUseListJobResults).toHaveBeenCalledWith(
@@ -260,7 +260,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
     });
 
     it('should disable results query when job is not terminated', () => {
-      const job = createMockJob({ status: PlatformJobStatus.active });
+      const job = createMockJob({ status: HelixJobStatus.active });
       render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
 
       expect(mockUseListJobResults).toHaveBeenCalledWith(
@@ -275,7 +275,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
     });
 
     it('should enable results query when job is terminated', () => {
-      const job = createMockJob({ status: PlatformJobStatus.completed });
+      const job = createMockJob({ status: HelixJobStatus.completed });
       render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
 
       expect(mockUseListJobResults).toHaveBeenCalledWith(

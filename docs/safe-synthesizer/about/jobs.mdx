@@ -120,13 +120,13 @@ The `SafeSynthesizerJobBuilder` provides a high-level interface for common workf
 import os
 import pandas as pd
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
 # Placeholders
 df: pd.DataFrame = pd.DataFrame()
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

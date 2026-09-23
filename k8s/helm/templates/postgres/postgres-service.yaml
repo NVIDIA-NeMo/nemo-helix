@@ -10,7 +10,7 @@ metadata:
   name: {{ include "nemo-common.postgresql.fullname" . }}
   labels:
     app.kubernetes.io/component: postgres
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
   ports:
@@ -20,5 +20,5 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/component: postgres
-    {{- include "nemo-platform.selectorLabels" . | nindent 4 }}
+    {{- include "nemo-helix.selectorLabels" . | nindent 4 }}
 {{- end }}

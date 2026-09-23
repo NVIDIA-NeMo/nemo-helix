@@ -20,7 +20,7 @@ Run these commands from the repository root:
 
 ```bash
 export NVIDIA_API_KEY="<your NVIDIA API key>"
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 make bootstrap-python
 source .venv/bin/activate
@@ -34,7 +34,7 @@ Start ClickHouse for Intake:
 services/intake/scripts/spans/run_clickhouse.sh
 ```
 
-Set up NeMo Platform without deploying the default demo agent:
+Set up NeMo Helix without deploying the default demo agent:
 
 ```bash
 nemo setup --auto --start-services --install-skills --no-deploy-agent
@@ -45,7 +45,7 @@ Confirm the Platform is ready before continuing:
 
 ```bash
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null
+  "$NHX_BASE_URL/health/ready" >/dev/null
 ```
 
 ## Run without MCP

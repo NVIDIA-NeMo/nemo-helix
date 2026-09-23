@@ -11,28 +11,28 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from docker.errors import APIError, NotFound
-from nemo_platform.types.shared import AuthContext as SdkAuthContext
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nmp.common.auth import (
-    NMP_PRINCIPAL_ENVVAR,
+from nemo_helix.types.shared import AuthContext as SdkAuthContext
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nhx.common.auth import (
+    NHX_PRINCIPAL_ENVVAR,
     AuthContext,
     Principal,
     docker_delegation_name,
     parse_opaque_docker_proof_token,
     verify_opaque_docker_proof_token_hash,
 )
-from nmp.common.config import PlatformConfig
-from nmp.common.docker.gpu_pool import DockerGPUPool
-from nmp.common.jobs.constants import (
+from nhx.common.config import HelixConfig
+from nhx.common.docker.gpu_pool import DockerGPUPool
+from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.app.constants import (
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import (
     JOB_ATTEMPT_ID_LABEL,
     JOB_CONTROLLER_INSTANCE_ID_LABEL,
     JOB_EXECUTION_BACKEND_LABEL,
@@ -49,25 +49,25 @@ from nmp.core.jobs.app.constants import (
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
 )
-from nmp.core.jobs.app.providers import (
+from nhx.core.jobs.app.providers import (
     ComputeResources,
     ComputeResourceSpec,
     ContainerSpec,
     CPUExecutionProvider,
     GPUExecutionProvider,
 )
-from nmp.core.jobs.app.schemas import (
-    PlatformJobEnvironmentVariable,
-    PlatformJobSecretEnvironmentVariableRef,
-    PlatformJobStepSpec,
+from nhx.core.jobs.app.schemas import (
+    HelixJobEnvironmentVariable,
+    HelixJobSecretEnvironmentVariableRef,
+    HelixJobStepSpec,
 )
-from nmp.core.jobs.controllers.backends.base import (
-    NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
+from nhx.core.jobs.controllers.backends.base import (
+    NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_PATH,
 )
-from nmp.core.jobs.controllers.backends.docker import (
+from nhx.core.jobs.controllers.backends.docker import (
     DEFAULT_VOLUME_PERMISSIONS_IMAGE,
     DOCKER_CONTAINER_START_WORKERS,
     DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL,
@@ -78,14 +78,14 @@ from nmp.core.jobs.controllers.backends.docker import (
     DockerVolumeMount,
     GPUDockerJobBackend,
 )
-from nmp.core.jobs.controllers.backends.exceptions import (
+from nhx.core.jobs.controllers.backends.exceptions import (
     FailedToScheduleError,
     JobStorageError,
     ResourceAllocationError,
     SchedulingDeferred,
 )
-from nmp.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
-from nmp.core.jobs.entities import STEP_SPEC_NAME_CONFIG_KEY
+from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
+from nhx.core.jobs.entities import STEP_SPEC_NAME_CONFIG_KEY
 from pydantic import ValidationError
 
 from services.core.jobs.tests.controllers.client_mocks import data_response
@@ -95,7 +95,7 @@ TEST_JOBS_CONTROLLER_INSTANCE_ID = "test-owner"
 
 @pytest.fixture(autouse=True)
 def docker_owner_id(monkeypatch):
-    monkeypatch.setenv("NMP_JOBS_DOCKER_OWNER_ID", TEST_JOBS_CONTROLLER_INSTANCE_ID)
+    monkeypatch.setenv("NHX_JOBS_DOCKER_OWNER_ID", TEST_JOBS_CONTROLLER_INSTANCE_ID)
 
 
 def owned_container_labels(labels: dict) -> dict:
@@ -122,7 +122,7 @@ def workload_token_exchange_auth_config(enabled: bool = True) -> SimpleNamespace
     return SimpleNamespace(
         oidc=SimpleNamespace(
             workload_token_exchange_enabled=enabled,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             audience=None,
         )
     )
@@ -182,11 +182,11 @@ def docker_client_mock(monkeypatch):
 
 
 @pytest.fixture
-def docker_job(mock_nmp_client, docker_client_mock, mock_platform_config) -> Iterator[CPUDockerJobBackend]:
+def docker_job(mock_nhx_client, docker_client_mock, mock_platform_config) -> Iterator[CPUDockerJobBackend]:
     """Create a DockerJobBackend instance with mocked docker client."""
-    with patch("nmp.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config):
+    with patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config):
         docker_job = CPUDockerJobBackend(
-            mock_nmp_client,
+            mock_nhx_client,
             DockerJobExecutionProfileConfig(storage=DockerJobStorageConfig(volume_name="test_jobs_storage")),
             profile_name="default",
         )
@@ -197,14 +197,14 @@ def docker_job(mock_nmp_client, docker_client_mock, mock_platform_config) -> Ite
 @pytest.fixture
 def test_job_step():
     """Create a test job step for testing."""
-    return PlatformJobStepWithContext(
+    return HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -219,25 +219,25 @@ def test_job_step():
             ),
             config={"test_param": "value"},
             environment=[
-                PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
-                PlatformJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
+                HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
+                HelixJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
 
 @pytest.fixture
 def test_job_step_with_persistence():
     """Create a test job step for testing."""
-    return PlatformJobStepWithContext(
+    return HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         name="test-step",
         workspace="default",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -252,12 +252,12 @@ def test_job_step_with_persistence():
             ),
             config={"test_param": "value"},
             environment=[
-                PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
-                PlatformJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/var/test"),
-                PlatformJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
+                HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
+                HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/var/test"),
+                HelixJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
 
@@ -316,7 +316,7 @@ def test_docker_job_schedule(docker_job, docker_client_mock, test_job_step):
     assert env[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
 
     # Assert that config warnings are disabled
-    assert env["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+    assert env["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
     # Verify resource constraints
     assert kwargs["mem_limit"] == "2g"
@@ -386,7 +386,7 @@ def test_docker_job_with_persistence_schedule(docker_job, docker_client_mock, te
     assert env[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
 
     # Assert that config warnings are disabled
-    assert env["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+    assert env["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
     # Verify resource constraints
     assert kwargs["mem_limit"] == "2g"
@@ -458,7 +458,7 @@ def test_docker_job_sync(docker_job, docker_client_mock, mock_jobs_client, test_
     assert update.status == "pending"
 
     # Test sync with container not found and job not in pending state
-    test_job_step.status = PlatformJobStatus.ACTIVE
+    test_job_step.status = HelixJobStatus.ACTIVE
     mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
     update = docker_job.sync(test_job_step)
     assert update.status == "error"
@@ -468,20 +468,20 @@ def test_docker_job_sync_active_missing_container_uses_terminal_task_fallback(
     docker_job, docker_client_mock, mock_jobs_client, test_job_step
 ):
     """A removed Docker container should not fail a step whose task already finished."""
-    test_job_step.status = PlatformJobStatus.ACTIVE
+    test_job_step.status = HelixJobStatus.ACTIVE
     now = datetime.datetime.now(datetime.timezone.utc)
     mock_jobs_client.list_job_step_tasks.return_value = data_response(
         SimpleNamespace(
             data=[
                 SimpleNamespace(
-                    status=PlatformJobStatus.ACTIVE,
+                    status=HelixJobStatus.ACTIVE,
                     status_details={"message": "Job is running"},
                     error_details={},
                     created_at=now - datetime.timedelta(seconds=2),
                     updated_at=now - datetime.timedelta(seconds=2),
                 ),
                 SimpleNamespace(
-                    status=PlatformJobStatus.COMPLETED,
+                    status=HelixJobStatus.COMPLETED,
                     status_details={"message": "Download complete"},
                     error_details={},
                     created_at=now,
@@ -494,7 +494,7 @@ def test_docker_job_sync_active_missing_container_uses_terminal_task_fallback(
 
     update = docker_job.sync(test_job_step)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     assert update.status_details == {"message": "Download complete"}
     assert update.error_details == {}
     mock_jobs_client.update_job_step_task.assert_not_called()
@@ -506,14 +506,14 @@ def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl
     """Terminal task state wins even when active-step TTL is exceeded."""
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_active
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 60)
-    test_job_step.status = PlatformJobStatus.ACTIVE
+    test_job_step.status = HelixJobStatus.ACTIVE
     test_job_step.created_at = old_timestamp
     test_job_step.updated_at = old_timestamp
     mock_jobs_client.list_job_step_tasks.return_value = data_response(
         SimpleNamespace(
             data=[
                 SimpleNamespace(
-                    status=PlatformJobStatus.COMPLETED,
+                    status=HelixJobStatus.COMPLETED,
                     status_details={"message": "Download complete"},
                     error_details={},
                     created_at=old_timestamp,
@@ -526,7 +526,7 @@ def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl
 
     update = docker_job.sync(test_job_step)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     assert update.error_details == {}
     mock_jobs_client.update_job_step_task.assert_not_called()
 
@@ -534,7 +534,7 @@ def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl
 def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_job_step):
     """Test that the cancel method stops the container."""
 
-    test_job_step.status = PlatformJobStatus.PAUSING
+    test_job_step.status = HelixJobStatus.PAUSING
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
@@ -562,7 +562,7 @@ def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_jo
 def test_docker_job_sync_cancelling_sigterm(docker_job, docker_client_mock, test_job_step):
     """Test that the cancel method stops the container."""
 
-    test_job_step.status = PlatformJobStatus.CANCELLING
+    test_job_step.status = HelixJobStatus.CANCELLING
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
@@ -594,7 +594,7 @@ def test_docker_job_sync_cancelling_nonzero_exit(
 ):
     """Cancellation intent wins over entrypoint-specific post-stop exit codes."""
 
-    test_job_step.status = PlatformJobStatus.CANCELLING
+    test_job_step.status = HelixJobStatus.CANCELLING
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
@@ -619,7 +619,7 @@ def test_docker_job_sync_cancelling_nonzero_exit(
     assert update.error_details == {}
     docker_client_mock.containers.get.assert_called_with("job-test-job-id-test-step")
     task_update = mock_jobs_client.update_job_step_task.call_args.kwargs["body"]
-    assert task_update.status == PlatformJobStatus.CANCELLED
+    assert task_update.status == HelixJobStatus.CANCELLED
     assert task_update.error_stack == ""
     # Container removed as part of cleanup_steps
     container_mock.remove.assert_not_called()
@@ -630,14 +630,14 @@ def test_docker_job_schedule_no_resources(docker_job, docker_client_mock):
     # Create a provider without resources attribute
     provider = CPUExecutionProvider(container=ContainerSpec(image="test-image:latest"))
 
-    test_job_step = PlatformJobStepWithContext(
+    test_job_step = HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         workspace="default",
         fileset="test-logs-fileset",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -645,9 +645,9 @@ def test_docker_job_schedule_no_resources(docker_job, docker_client_mock):
                 container=ContainerSpec(image="test-image"),
             ),
             config={"test_param": "value"},
-            environment=[PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value")],
+            environment=[HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value")],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     # Should not raise an AttributeError
@@ -679,14 +679,14 @@ def test_docker_job_schedule_with_secrets(docker_job, docker_client_mock):
     # Create a provider without resources attribute
     provider = CPUExecutionProvider(container=ContainerSpec(image="test-image:latest"))
 
-    test_job_step = PlatformJobStepWithContext(
+    test_job_step = HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -695,16 +695,16 @@ def test_docker_job_schedule_with_secrets(docker_job, docker_client_mock):
             ),
             config={"test_param": "value"},
             environment=[
-                PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
+                HelixJobEnvironmentVariable(
                     name="SECRET_ENV_VAR",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(
+                    from_secret=HelixJobSecretEnvironmentVariableRef(
                         name="test-secret",
                     ),
                 ),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     # Should not raise an AttributeError
@@ -739,14 +739,14 @@ def test_docker_job_nemo_job_secrets_format_same_and_cross_workspace(docker_job,
     """
     provider = CPUExecutionProvider(container=ContainerSpec(image="test-image:latest"))
     # Step in workspace "default"; one secret in same workspace, one in other workspace
-    test_job_step = PlatformJobStepWithContext(
+    test_job_step = HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -755,17 +755,17 @@ def test_docker_job_nemo_job_secrets_format_same_and_cross_workspace(docker_job,
             ),
             config={},
             environment=[
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(
                     name="LOCAL_SECRET",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(name="local-secret"),
+                    from_secret=HelixJobSecretEnvironmentVariableRef(name="local-secret"),
                 ),
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(
                     name="CROSS_WORKSPACE_SECRET",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
+                    from_secret=HelixJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
                 ),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     docker_job.schedule(provider, test_job_step)
@@ -792,25 +792,25 @@ def test_docker_job_nemo_job_secrets_format_same_and_cross_workspace(docker_job,
     }
 
 
-def test_docker_job_profile_environment_applied(mock_nmp_client, docker_client_mock, mock_platform_config):
+def test_docker_job_profile_environment_applied(mock_nhx_client, docker_client_mock, mock_platform_config):
     """Profile environment (e.g. HOME=/tmp) is applied to scheduled job containers."""
     provider = CPUExecutionProvider(container=ContainerSpec(image="test-image:latest"))
     config = DockerJobExecutionProfileConfig(
         storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
         env={"HOME": "/tmp"},
     )
-    with patch("nmp.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config):
-        backend = CPUDockerJobBackend(mock_nmp_client, config, profile_name="default")
+    with patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config):
+        backend = CPUDockerJobBackend(mock_nhx_client, config, profile_name="default")
         backend._client = docker_client_mock
 
-    test_job_step = PlatformJobStepWithContext(
+    test_job_step = HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         workspace="default",
         fileset="test-logs-fileset",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -818,9 +818,9 @@ def test_docker_job_profile_environment_applied(mock_nmp_client, docker_client_m
                 container=ContainerSpec(image="test-image"),
             ),
             config={},
-            environment=[PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value")],
+            environment=[HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value")],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     backend.schedule(provider, test_job_step)
@@ -836,9 +836,9 @@ def test_docker_job_profile_environment_applied(mock_nmp_client, docker_client_m
     assert env_vars.get("ENV_VAR") == "test_value"
 
 
-def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nmp_client, docker_client_mock, test_job_step):
+def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nhx_client, docker_client_mock, test_job_step):
     """Job containers use routable service_discovery URLs instead of local in-process service URLs."""
-    platform_config = PlatformConfig(  # type: ignore[abstract]
+    platform_config = HelixConfig(  # type: ignore[abstract]
         base_url="http://127.0.0.1:8080",
         services="jobs,files,models,secrets",
         service_discovery={
@@ -847,9 +847,9 @@ def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nmp_client,
         },
         loopback_address="nemo-gateway",
     )
-    with patch("nmp.core.jobs.controllers.backends.docker.get_platform_config", return_value=platform_config):
+    with patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=platform_config):
         backend = CPUDockerJobBackend(
-            mock_nmp_client,
+            mock_nhx_client,
             DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -865,13 +865,13 @@ def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nmp_client,
     container_args = create_call_args[1] if create_call_args[1] else create_call_args[0][0]
     env_vars = container_args.get("environment", {})
 
-    assert env_vars["NMP_BASE_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_AUTH_URL"] == "https://nemo-auth:8080"
-    assert env_vars["NMP_JOBS_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_FILES_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_MODELS_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_SECRETS_URL"] == "https://nemo-gateway:8080"
-    assert env_vars[NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR].startswith("https://nemo-gateway:8080/apis/files/")
+    assert env_vars["NHX_BASE_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_AUTH_URL"] == "https://nemo-auth:8080"
+    assert env_vars["NHX_JOBS_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_FILES_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_MODELS_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_SECRETS_URL"] == "https://nemo-gateway:8080"
+    assert env_vars[NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR].startswith("https://nemo-gateway:8080/apis/files/")
 
 
 def test_docker_job_execution_profile_config_rejects_reserved_env_vars():
@@ -887,7 +887,7 @@ def test_docker_job_execution_profile_config_rejects_reserved_env_vars():
 
 def test_docker_job_rejects_reserved_step_auth_env_vars(docker_job, test_job_step):
     test_job_step.step_spec.environment.append(
-        PlatformJobEnvironmentVariable(name=WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, value="/tmp/token")
+        HelixJobEnvironmentVariable(name=WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, value="/tmp/token")
     )
 
     with pytest.raises(ValueError, match=WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR):
@@ -908,7 +908,7 @@ def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled
     docker_job._workload_delegation_store = workload_delegation_store
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=auth_config),
         patch.object(
             docker_job,
             "_write_workload_identity_subject_token",
@@ -924,7 +924,7 @@ def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled
     delegation = workload_delegation_store.register.call_args.args[0]
     assert delegation.name == expected_delegation_name
     assert delegation.workload_subject == expected_delegation_name
-    assert delegation.workload_audience == "nemo-platform"
+    assert delegation.workload_audience == "nemo-helix"
     assert delegation.workload_workspace == test_job_step_with_auth_context.workspace
     assert delegation.workload_kind == "job"
     assert delegation.workload_id == test_job_step_with_auth_context.job
@@ -953,7 +953,7 @@ def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled
     kwargs = job_create_call.kwargs
     env = kwargs["environment"]
     assert env[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
-    assert NMP_PRINCIPAL_ENVVAR not in env
+    assert NHX_PRINCIPAL_ENVVAR not in env
 
     mounts = kwargs["mounts"]
     workload_identity_mount = next(m for m in mounts if m["Target"] == WORKLOAD_IDENTITY_VOLUME_PATH)
@@ -1002,9 +1002,9 @@ def test_docker_schedule_cleans_task_volumes_when_workload_identity_proof_token_
     docker_job, docker_client_mock, test_job_step_with_auth_context
 ):
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
         patch(
-            "nmp.core.jobs.controllers.backends.docker.build_docker_opaque_workload_delegation",
+            "nhx.core.jobs.controllers.backends.docker.build_docker_opaque_workload_delegation",
             side_effect=JobStorageError("proof failed"),
         ),
         pytest.raises(JobStorageError, match="proof failed"),
@@ -1024,7 +1024,7 @@ def test_docker_schedule_cleans_task_volumes_when_workload_identity_registration
     docker_job._workload_delegation_store = workload_delegation_store
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
         patch.object(docker_job, "_write_workload_identity_subject_token") as write_token,
         pytest.raises(JobStorageError, match="register failed"),
     ):
@@ -1050,7 +1050,7 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_workloa
     docker_job._workload_delegation_store = workload_delegation_store
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
         patch.object(
             docker_job,
             "_write_workload_identity_subject_token",
@@ -1111,7 +1111,7 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_configu
     docker_job._workload_delegation_store = workload_delegation_store
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
         patch.object(docker_job, "_write_workload_identity_subject_token") as write_token,
         patch.object(docker_job, "configure_container", side_effect=RuntimeError("configure failed")),
         pytest.raises(RuntimeError, match="configure failed"),
@@ -1141,7 +1141,7 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_submit_
     docker_job._workload_delegation_store = workload_delegation_store
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
         patch.object(docker_job, "_write_workload_identity_subject_token") as write_token,
         pytest.raises(RuntimeError, match="submit failed"),
     ):
@@ -1181,10 +1181,10 @@ def test_docker_sync_does_not_restore_opaque_workload_token_refresher_from_conta
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container
 
-    test_job_step.status = PlatformJobStatus.ACTIVE
+    test_job_step.status = HelixJobStatus.ACTIVE
     update = docker_job.sync(test_job_step)
 
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
 
 
 def test_docker_sync_does_not_restore_opaque_workload_token_refresher_from_mounted_volume(
@@ -1213,10 +1213,10 @@ def test_docker_sync_does_not_restore_opaque_workload_token_refresher_from_mount
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container
 
-    test_job_step.status = PlatformJobStatus.ACTIVE
+    test_job_step.status = HelixJobStatus.ACTIVE
     update = docker_job.sync(test_job_step)
 
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
 
 
 def test_docker_shutdown_closes_client(docker_job, docker_client_mock):
@@ -1233,7 +1233,7 @@ def test_docker_job_execution_profile_config_has_no_workload_identity_surface():
     assert "workload_identity" not in properties
 
 
-def test_schedule_docker_gpu(mock_nmp_client, docker_client_mock):
+def test_schedule_docker_gpu(mock_nhx_client, docker_client_mock):
     """Test GPU job scheduling defers when the pool is temporarily full."""
 
     gpus = 2
@@ -1252,7 +1252,7 @@ def test_schedule_docker_gpu(mock_nmp_client, docker_client_mock):
         }
     )
 
-    step = PlatformJobStepWithContext.model_validate(
+    step = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-id",
             "job": "job-test-job-id",
@@ -1271,7 +1271,7 @@ def test_schedule_docker_gpu(mock_nmp_client, docker_client_mock):
     )
     assert step is not None
 
-    step_two = PlatformJobStepWithContext.model_validate(
+    step_two = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-two-id",
             "job": "job-test-job-id",
@@ -1290,7 +1290,7 @@ def test_schedule_docker_gpu(mock_nmp_client, docker_client_mock):
     )
     assert step_two is not None
 
-    step_three = PlatformJobStepWithContext.model_validate(
+    step_three = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-three-id",
             "job": "job-test-job-id",
@@ -1310,13 +1310,13 @@ def test_schedule_docker_gpu(mock_nmp_client, docker_client_mock):
     assert step_three is not None
 
     # Mock SharedResourceManager to provide GPU pool
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         # Each step will request 2 GPUs. Make the third one fail.
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0, 2, 3, 6, 7])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1372,7 +1372,7 @@ def test_schedule_docker_gpu(mock_nmp_client, docker_client_mock):
     assert len([v for v in executor.gpu_pool.gpu_to_workload_id.values() if v is None]) == 1
 
 
-def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nmp_client, docker_client_mock):
+def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nhx_client, docker_client_mock):
     """Full but sufficient GPU pools should defer scheduling instead of erroring."""
     gpu_executor_config = GPUExecutionProvider.model_validate(
         {
@@ -1384,13 +1384,13 @@ def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nmp_c
         }
     )
 
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_pool.allocate_gpu("already-running", num_requested=1)
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1404,7 +1404,7 @@ def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nmp_c
     assert executor.gpu_pool.gpu_to_workload_id == {0: "already-running"}
 
 
-def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nmp_client, docker_client_mock):
+def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nhx_client, docker_client_mock):
     """GPU requests larger than the pool are permanent resource allocation errors."""
     gpu_executor_config = GPUExecutionProvider.model_validate(
         {
@@ -1416,12 +1416,12 @@ def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nmp_clien
         }
     )
 
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1435,7 +1435,7 @@ def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nmp_clien
     assert executor.gpu_pool.gpu_to_workload_id == {0: None}
 
 
-def test_gpu_cleanup_on_job_completion(mock_nmp_client, docker_client_mock):
+def test_gpu_cleanup_on_job_completion(mock_nhx_client, docker_client_mock):
     """Test that GPU resources are released when a job completes successfully."""
 
     gpu_executor_config = GPUExecutionProvider.model_validate(
@@ -1452,7 +1452,7 @@ def test_gpu_cleanup_on_job_completion(mock_nmp_client, docker_client_mock):
         }
     )
 
-    step = PlatformJobStepWithContext.model_validate(
+    step = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-id",
             "job": "job-gpu-cleanup-test",
@@ -1471,12 +1471,12 @@ def test_gpu_cleanup_on_job_completion(mock_nmp_client, docker_client_mock):
     )
 
     # Mock SharedResourceManager to provide GPU pool
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1518,7 +1518,7 @@ def test_gpu_cleanup_on_job_completion(mock_nmp_client, docker_client_mock):
     docker_client_mock.containers.list.return_value = [container_mock]
 
     # Update step status to ACTIVE (as scheduler would do)
-    step.status = PlatformJobStatus.ACTIVE
+    step.status = HelixJobStatus.ACTIVE
 
     # Sync the job
     update = executor.sync(step)
@@ -1536,7 +1536,7 @@ def test_gpu_cleanup_on_job_completion(mock_nmp_client, docker_client_mock):
     assert executor.gpu_pool.gpu_to_workload_id[0] is None
 
 
-def test_gpu_cleanup_on_job_error(mock_nmp_client, docker_client_mock):
+def test_gpu_cleanup_on_job_error(mock_nhx_client, docker_client_mock):
     """Test that GPU resources are released when a job fails with an error."""
 
     gpu_executor_config = GPUExecutionProvider.model_validate(
@@ -1553,7 +1553,7 @@ def test_gpu_cleanup_on_job_error(mock_nmp_client, docker_client_mock):
         }
     )
 
-    step = PlatformJobStepWithContext.model_validate(
+    step = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-id",
             "job": "job-gpu-error-test",
@@ -1572,12 +1572,12 @@ def test_gpu_cleanup_on_job_error(mock_nmp_client, docker_client_mock):
     )
 
     # Mock SharedResourceManager to provide GPU pool
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1622,7 +1622,7 @@ def test_gpu_cleanup_on_job_error(mock_nmp_client, docker_client_mock):
     docker_client_mock.containers.list.return_value = [container_mock]
 
     # Update step status to ACTIVE (as scheduler would do)
-    step.status = PlatformJobStatus.ACTIVE
+    step.status = HelixJobStatus.ACTIVE
 
     # Sync the job - this should detect error and release the GPU
     update = executor.sync(step)
@@ -1661,10 +1661,10 @@ def _gpu_step(
     step_id: str = "test-gpu-step-id",
     job: str = "test-gpu-job",
     name: str = "gpu-step",
-    status: PlatformJobStatus | str = PlatformJobStatus.CREATED,
-) -> PlatformJobStepWithContext:
+    status: HelixJobStatus | str = HelixJobStatus.CREATED,
+) -> HelixJobStepWithContext:
     gpu_executor_config = _gpu_executor_config()
-    return PlatformJobStepWithContext.model_validate(
+    return HelixJobStepWithContext.model_validate(
         {
             "id": step_id,
             "job": job,
@@ -1683,13 +1683,13 @@ def _gpu_step(
     )
 
 
-def _gpu_backend(mock_nmp_client, docker_client_mock) -> GPUDockerJobBackend:
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+def _gpu_backend(mock_nhx_client, docker_client_mock) -> GPUDockerJobBackend:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1700,7 +1700,7 @@ def _gpu_backend(mock_nmp_client, docker_client_mock) -> GPUDockerJobBackend:
 
 
 def _gpu_container(
-    step: PlatformJobStepWithContext,
+    step: HelixJobStepWithContext,
     *,
     status: str = "exited",
     exit_code: int = 0,
@@ -1733,10 +1733,10 @@ def _gpu_container(
     return container
 
 
-def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nmp_client, docker_client_mock):
+def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nhx_client, docker_client_mock):
     """A deleted step before container start must not leave its GPU allocation orphaned."""
     step = _gpu_step(step_id="deleted-step-id", job="job-deleted-before-start", name="gpu-deleted-step")
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
 
     executor.gpu_pool.allocate_gpu(step.id)
     assert executor.gpu_pool.gpu_to_workload_id[0] == step.id
@@ -1748,12 +1748,12 @@ def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nmp_client, d
     executor._jobs.update_job_step_status.assert_not_called()
 
 
-@pytest.mark.parametrize("terminal_status", [PlatformJobStatus.CANCELLED, PlatformJobStatus.PAUSED])
+@pytest.mark.parametrize("terminal_status", [HelixJobStatus.CANCELLED, HelixJobStatus.PAUSED])
 def test_gpu_pool_released_when_cancel_scheduling_sees_terminal_step(
-    mock_nmp_client, docker_client_mock, terminal_status
+    mock_nhx_client, docker_client_mock, terminal_status
 ):
     step = _gpu_step(step_id=f"{terminal_status.value}-step-id")
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
     refreshed_step = MagicMock()
     refreshed_step.status = terminal_status
 
@@ -1768,17 +1768,17 @@ def test_gpu_pool_released_when_cancel_scheduling_sees_terminal_step(
 @pytest.mark.parametrize(
     "refreshed_status,expected_update_status",
     [
-        (PlatformJobStatus.CANCELLED, None),
-        (PlatformJobStatus.PAUSED, None),
-        (PlatformJobStatus.CANCELLING, PlatformJobStatus.CANCELLED),
-        (PlatformJobStatus.PAUSING, PlatformJobStatus.PAUSED),
+        (HelixJobStatus.CANCELLED, None),
+        (HelixJobStatus.PAUSED, None),
+        (HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED),
+        (HelixJobStatus.PAUSING, HelixJobStatus.PAUSED),
     ],
 )
 def test_gpu_pool_released_when_cancel_scheduling_removes_created_container_before_release(
-    mock_nmp_client, docker_client_mock, refreshed_status, expected_update_status
+    mock_nhx_client, docker_client_mock, refreshed_status, expected_update_status
 ):
     step = _gpu_step(step_id=f"{refreshed_status.value}-created-container-step-id")
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
     container_mock = _gpu_container(step, status="created", task_id="task-pre-start-stop")
     refreshed_step = MagicMock()
     refreshed_step.status = refreshed_status
@@ -1805,11 +1805,11 @@ def test_gpu_pool_released_when_cancel_scheduling_removes_created_container_befo
         assert executor._jobs.update_job_step_status.call_args.kwargs["body"].status == expected_update_status
 
 
-def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_nmp_client, docker_client_mock):
+def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_nhx_client, docker_client_mock):
     step = _gpu_step(step_id="cancelling-lost-step-id")
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
     refreshed_step = MagicMock()
-    refreshed_step.status = PlatformJobStatus.CANCELLING
+    refreshed_step.status = HelixJobStatus.CANCELLING
 
     executor.gpu_pool.allocate_gpu(step.id)
     executor.get_step_safe = MagicMock(return_value=refreshed_step)
@@ -1820,16 +1820,16 @@ def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_
     executor._jobs.update_job_step_status.assert_called_once()
 
 
-def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nmp_client, docker_client_mock):
+def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nhx_client, docker_client_mock):
     """Cleanup after job deletion releases GPUs even when terminal sync never saw the step."""
     step_id = "deleted-terminal-step-id"
 
-    with patch("nmp.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1872,7 +1872,7 @@ def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_
 
 
 def test_gpu_cleanup_releases_retained_deleted_step_container_without_terminal_sync(
-    mock_nmp_client, docker_client_mock
+    mock_nhx_client, docker_client_mock
 ):
     """Retained terminal containers must free GPUs before the cleanup TTL expires."""
     step = _gpu_step(
@@ -1880,7 +1880,7 @@ def test_gpu_cleanup_releases_retained_deleted_step_container_without_terminal_s
         job="job-retained-deleted-before-sync",
         name="gpu-step",
     )
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
     executor._execution_profile_config.cleanup_completed_jobs_immediately = False
     executor._execution_profile_config.ttl_seconds_after_finished = 300
 
@@ -1899,10 +1899,10 @@ def test_gpu_cleanup_releases_retained_deleted_step_container_without_terminal_s
 
 
 def test_gpu_pool_released_when_failed_schedule_after_configure_container(
-    mock_nmp_client, docker_client_mock, mock_platform_config
+    mock_nhx_client, docker_client_mock, mock_platform_config
 ):
     step = _gpu_step(step_id="submit-failed-step-id", job="job-submit-failed")
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
     executor._container_run_threadpool = MagicMock()
     executor._container_run_threadpool.submit.side_effect = RuntimeError("threadpool unavailable")
 
@@ -1914,7 +1914,7 @@ def test_gpu_pool_released_when_failed_schedule_after_configure_container(
             acquired += 1
 
         with (
-            patch("nmp.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config),
+            patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config),
             pytest.raises(RuntimeError, match="threadpool unavailable"),
         ):
             executor.schedule_single_container(_gpu_executor_config(), step)
@@ -1929,9 +1929,9 @@ def test_gpu_pool_released_when_failed_schedule_after_configure_container(
             executor._container_start_admission.release()
 
 
-def test_gpu_failed_schedule_removes_created_container_before_releasing_pool(mock_nmp_client, docker_client_mock):
+def test_gpu_failed_schedule_removes_created_container_before_releasing_pool(mock_nhx_client, docker_client_mock):
     step = _gpu_step(step_id="run-failed-created-container-step-id", job="job-run-failed")
-    executor = _gpu_backend(mock_nmp_client, docker_client_mock)
+    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
     container_mock = _gpu_container(step, status="created", task_id="task-run-failed")
 
     executor.gpu_pool.allocate_gpu(step.id)
@@ -2237,22 +2237,22 @@ def test_schedule_additional_volume_mounts(docker_job: CPUDockerJobBackend, dock
     "step_status,expected_result,should_update_status,expected_final_status,expected_message",
     [
         # Terminal states - should return True but not update status
-        (PlatformJobStatus.CANCELLED, True, False, None, None),
-        (PlatformJobStatus.PAUSED, True, False, None, None),
+        (HelixJobStatus.CANCELLED, True, False, None, None),
+        (HelixJobStatus.PAUSED, True, False, None, None),
         # Transition states - should return True and update status
         (
-            PlatformJobStatus.CANCELLING,
+            HelixJobStatus.CANCELLING,
             True,
             True,
-            PlatformJobStatus.CANCELLED,
+            HelixJobStatus.CANCELLED,
             "Job is cancelled, not creating container",
         ),
-        (PlatformJobStatus.PAUSING, True, True, PlatformJobStatus.PAUSED, "Job is paused, not creating container"),
+        (HelixJobStatus.PAUSING, True, True, HelixJobStatus.PAUSED, "Job is paused, not creating container"),
         # Non-cancelling/pausing states - should return False and not update status
-        (PlatformJobStatus.ACTIVE, False, False, None, None),
-        (PlatformJobStatus.PENDING, False, False, None, None),
-        (PlatformJobStatus.COMPLETED, False, False, None, None),
-        (PlatformJobStatus.ERROR, False, False, None, None),
+        (HelixJobStatus.ACTIVE, False, False, None, None),
+        (HelixJobStatus.PENDING, False, False, None, None),
+        (HelixJobStatus.COMPLETED, False, False, None, None),
+        (HelixJobStatus.ERROR, False, False, None, None),
     ],
 )
 def test_cancel_scheduling(
@@ -2555,7 +2555,7 @@ def test_created_step_does_not_ttl_before_backend_acceptance(docker_job, docker_
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     test_job_step.created_at = old_timestamp
     test_job_step.updated_at = old_timestamp
-    test_job_step.status = PlatformJobStatus.CREATED
+    test_job_step.status = HelixJobStatus.CREATED
     executor_config = test_job_step.step_spec.executor
     docker_job._container_run_threadpool = MagicMock()
 
@@ -2565,7 +2565,7 @@ def test_created_step_does_not_ttl_before_backend_acceptance(docker_job, docker_
         if docker_job._container_run_threadpool.submit.called:
             docker_job._container_start_admission.release()
 
-    assert result.status == PlatformJobStatus.PENDING
+    assert result.status == HelixJobStatus.PENDING
     docker_job._container_run_threadpool.submit.assert_called_once()
 
 
@@ -2594,7 +2594,7 @@ def test_failed_schedule_logs_status_update_failure_and_releases_admission(docke
     )
     docker_job._jobs.update_job_step_status.side_effect = RuntimeError("jobs service unavailable")
 
-    with patch("nmp.core.jobs.controllers.backends.docker.logger.exception") as log_exception:
+    with patch("nhx.core.jobs.controllers.backends.docker.logger.exception") as log_exception:
         docker_job.run_container(test_job_step, {})
 
     log_exception.assert_any_call("Failed to schedule container for job step")
@@ -2614,7 +2614,7 @@ def test_failed_schedule_revokes_prepared_workload_delegation(docker_job, test_j
 
     docker_job.run_container(
         test_job_step,
-        {"_nmp_workload_delegation_name": "job:prepared-delegation"},
+        {"_nhx_workload_delegation_name": "job:prepared-delegation"},
     )
 
     workload_delegation_store.revoke.assert_called_once_with("job:prepared-delegation")
@@ -2627,7 +2627,7 @@ def test_terminal_step_update_revokes_workload_delegation(docker_job, test_job_s
     container.name = "job-test-job-id-test-step"
     container.labels = {JOB_TASK_ID_LABEL: "task-success"}
     docker_job.map_docker_container_status_to_platform_status = MagicMock(
-        return_value=(PlatformJobStatus.COMPLETED, {}, "")
+        return_value=(HelixJobStatus.COMPLETED, {}, "")
     )
     docker_job.docker_state_debug_fields = MagicMock(return_value={})
     expected_delegation_name = docker_delegation_name(
@@ -2639,10 +2639,10 @@ def test_terminal_step_update_revokes_workload_delegation(docker_job, test_job_s
     workload_delegation_store = workload_delegation_store_mock()
     docker_job._workload_delegation_store = workload_delegation_store
 
-    with patch("nmp.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()):
+    with patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()):
         update = docker_job.create_step_update(test_job_step_with_auth_context, container)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
     docker_job._jobs.update_job_step_task.assert_called_once()
 
@@ -2653,7 +2653,7 @@ def test_resuming_step_skips_before_active_ttl_enforcement(docker_job, test_job_
     old_created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     test_job_step.created_at = old_created
     test_job_step.updated_at = datetime.datetime.now(datetime.timezone.utc)
-    test_job_step.status = PlatformJobStatus.RESUMING
+    test_job_step.status = HelixJobStatus.RESUMING
     assert docker_job.should_enforce_before_active_ttl(test_job_step) is False
 
 
@@ -2663,7 +2663,7 @@ def test_before_active_ttl_uses_latest_of_created_and_updated(docker_job, test_j
     old_created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     test_job_step.created_at = old_created
     test_job_step.updated_at = datetime.datetime.now(datetime.timezone.utc)
-    test_job_step.status = PlatformJobStatus.PENDING
+    test_job_step.status = HelixJobStatus.PENDING
     assert docker_job.check_step_ttl_before_active(test_job_step, ttl_seconds) is False
 
 
@@ -2673,7 +2673,7 @@ def test_cleanup_pending_created_container_by_ttl(docker_job, docker_client_mock
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_before_active
 
     # Set the step to PENDING status
-    test_job_step.status = PlatformJobStatus.PENDING
+    test_job_step.status = HelixJobStatus.PENDING
 
     # Create a step with an created_at timestamp that exceeds the TTL (35 minutes ago)
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
@@ -2701,7 +2701,7 @@ def test_cleanup_pending_created_container_by_ttl(docker_job, docker_client_mock
     result = docker_job.sync(test_job_step)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details == {"message": "Job timed out after reaching max TTL of 1800 seconds"}
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 1800 seconds"}
 
@@ -2715,7 +2715,7 @@ def test_cleanup_pending_created_container_by_ttl(docker_job, docker_client_mock
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
     assert task_call.kwargs["step"] == test_job_step.name
-    assert task_call.kwargs["body"].status == PlatformJobStatus.ERROR
+    assert task_call.kwargs["body"].status == HelixJobStatus.ERROR
     assert task_call.kwargs["body"].status_details == {
         "message": "Job timed out after reaching max TTL of 1800 seconds"
     }
@@ -2726,7 +2726,7 @@ def test_pending_running_container_preempts_before_active_ttl(docker_job, docker
     """If Docker is running, reconcile PENDING to ACTIVE instead of timing out first."""
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_before_active
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
-    test_job_step.status = PlatformJobStatus.PENDING
+    test_job_step.status = HelixJobStatus.PENDING
     test_job_step.created_at = old_timestamp
     test_job_step.updated_at = old_timestamp
 
@@ -2748,7 +2748,7 @@ def test_pending_running_container_preempts_before_active_ttl(docker_job, docker
 
     result = docker_job.sync(test_job_step)
 
-    assert result.status == PlatformJobStatus.ACTIVE.value
+    assert result.status == HelixJobStatus.ACTIVE.value
     assert result.status_details == {"message": "Job is running"}
     container_mock.kill.assert_not_called()
 
@@ -2757,7 +2757,7 @@ def test_pending_exited_container_preempts_before_active_ttl(docker_job, docker_
     """If Docker already exited successfully, reconcile PENDING to COMPLETED instead of timing out first."""
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_before_active
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
-    test_job_step.status = PlatformJobStatus.PENDING
+    test_job_step.status = HelixJobStatus.PENDING
     test_job_step.created_at = old_timestamp
     test_job_step.updated_at = old_timestamp
 
@@ -2779,7 +2779,7 @@ def test_pending_exited_container_preempts_before_active_ttl(docker_job, docker_
 
     result = docker_job.sync(test_job_step)
 
-    assert result.status == PlatformJobStatus.COMPLETED.value
+    assert result.status == HelixJobStatus.COMPLETED.value
     assert result.status_details == {"message": "Job completed successfully with exit code 0"}
     container_mock.kill.assert_not_called()
 
@@ -2790,7 +2790,7 @@ def test_cleanup_active_by_ttl(docker_job, docker_client_mock, mock_jobs_client,
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_active
 
     # Set the step to ACTIVE status
-    test_job_step.status = PlatformJobStatus.ACTIVE
+    test_job_step.status = HelixJobStatus.ACTIVE
 
     # Create a step with an created_at timestamp that exceeds the TTL (25 hours ago)
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 3600)
@@ -2817,7 +2817,7 @@ def test_cleanup_active_by_ttl(docker_job, docker_client_mock, mock_jobs_client,
     result = docker_job.sync(test_job_step)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details == {"message": "Job timed out after reaching max TTL of 86400 seconds"}
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 86400 seconds"}
 
@@ -2831,7 +2831,7 @@ def test_cleanup_active_by_ttl(docker_job, docker_client_mock, mock_jobs_client,
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
     assert task_call.kwargs["step"] == test_job_step.name
-    assert task_call.kwargs["body"].status == PlatformJobStatus.ERROR
+    assert task_call.kwargs["body"].status == HelixJobStatus.ERROR
     assert task_call.kwargs["body"].status_details == {
         "message": "Job timed out after reaching max TTL of 86400 seconds"
     }
@@ -2848,7 +2848,7 @@ def test_ttl_enforcement_handles_409_when_kill_races_with_stopped_container(
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_before_active
 
     # Set the step to PENDING status
-    test_job_step.status = PlatformJobStatus.PENDING
+    test_job_step.status = HelixJobStatus.PENDING
 
     # Create a step with an created_at timestamp that exceeds the TTL
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
@@ -2882,7 +2882,7 @@ def test_ttl_enforcement_handles_409_when_kill_races_with_stopped_container(
     result = docker_job.sync(test_job_step)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details == {"message": "Job timed out after reaching max TTL of 1800 seconds"}
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 1800 seconds"}
 
@@ -2896,7 +2896,7 @@ def test_ttl_enforcement_handles_409_when_kill_races_with_stopped_container(
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
     assert task_call.kwargs["step"] == test_job_step.name
-    assert task_call.kwargs["body"].status == PlatformJobStatus.ERROR
+    assert task_call.kwargs["body"].status == HelixJobStatus.ERROR
     assert task_call.kwargs["body"].status_details == {
         "message": "Job timed out after reaching max TTL of 1800 seconds"
     }
@@ -2906,7 +2906,7 @@ def test_ttl_enforcement_handles_409_when_kill_races_with_stopped_container(
 def test_sync_stop_container_already_stopped(docker_job, docker_client_mock, mock_jobs_client, test_job_step):
     """Test that sync handles gracefully when container.stop() is called on already stopped container."""
     # Set the step to CANCELLING status (which triggers sync_stop_container)
-    test_job_step.status = PlatformJobStatus.CANCELLING
+    test_job_step.status = HelixJobStatus.CANCELLING
 
     # Create a mock container that's already stopped (with owner labels so we attempt stop)
     container_mock = MagicMock()
@@ -2939,7 +2939,7 @@ def test_sync_stop_container_already_stopped(docker_job, docker_client_mock, moc
 
     # Verify that the sync still completes successfully and returns the appropriate status
     # Since the container is exited with code 0 and step is CANCELLING, it should be CANCELLED
-    assert result.status == PlatformJobStatus.CANCELLED.value
+    assert result.status == HelixJobStatus.CANCELLED.value
     assert "Job was cancelled successfully" in result.status_details["message"]
     assert result.error_details == {}
 
@@ -2950,7 +2950,7 @@ def test_sync_stop_container_already_stopped(docker_job, docker_client_mock, moc
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
     assert task_call.kwargs["step"] == test_job_step.name
-    assert task_call.kwargs["body"].status == PlatformJobStatus.CANCELLED
+    assert task_call.kwargs["body"].status == HelixJobStatus.CANCELLED
     assert task_call.kwargs["body"].status_details == {"message": "Job was cancelled successfully with exit code 0"}
     assert task_call.kwargs["body"].error_details == {}
     assert task_call.kwargs["body"].error_stack == ""
@@ -2958,7 +2958,7 @@ def test_sync_stop_container_already_stopped(docker_job, docker_client_mock, moc
 
 def test_sync_stop_container_skips_when_not_owned_by_jobs_controller(docker_job, docker_client_mock, test_job_step):
     """sync_stop_container must not call container.stop() if the container is not owned by this controller."""
-    test_job_step.status = PlatformJobStatus.CANCELLING
+    test_job_step.status = HelixJobStatus.CANCELLING
 
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
@@ -2972,7 +2972,7 @@ def test_sync_stop_container_skips_when_not_owned_by_jobs_controller(docker_job,
     result = docker_job.sync(test_job_step)
 
     container_mock.stop.assert_not_called()
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert "not owned" in result.error_details.get("message", "")
 
 
@@ -2984,14 +2984,14 @@ def test_sync_stop_container_skips_when_not_owned_by_jobs_controller(docker_job,
 @pytest.fixture
 def test_job_step_with_auth_context():
     """Create a test job step with auth context for testing."""
-    return PlatformJobStepWithContext(
+    return HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -3000,7 +3000,7 @@ def test_job_step_with_auth_context():
             ),
             config={"test_param": "value"},
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
         auth_context=AuthContext(
             principal_id="creator@example.com",
             principal_email="creator@example.com",
@@ -3010,10 +3010,10 @@ def test_job_step_with_auth_context():
 
 
 def test_docker_job_schedule_with_auth_context(docker_job, docker_client_mock, test_job_step_with_auth_context):
-    """Test that scheduling sets NMP_PRINCIPAL and launcher OTLP headers when auth_context is present.
+    """Test that scheduling sets NHX_PRINCIPAL and launcher OTLP headers when auth_context is present.
 
     Verifies GitLab issue #3390 Gap 2: job tasks should run with the creating
-    user's auth context, propagated via the NMP_PRINCIPAL environment variable
+    user's auth context, propagated via the NHX_PRINCIPAL environment variable
     and private launcher OTLP headers for authenticated telemetry export.
     """
     step_spec = test_job_step_with_auth_context.step_spec
@@ -3029,12 +3029,12 @@ def test_docker_job_schedule_with_auth_context(docker_job, docker_client_mock, t
     create_call_args = docker_client_mock.containers.create.call_args
     kwargs = create_call_args[1] if create_call_args[1] else create_call_args[0][0]
 
-    # Verify NMP_PRINCIPAL env var is set
+    # Verify NHX_PRINCIPAL env var is set
     env = kwargs["environment"]
-    assert NMP_PRINCIPAL_ENVVAR in env
+    assert NHX_PRINCIPAL_ENVVAR in env
 
     # Verify JSON structure uses Principal field names (id, email, groups)
-    principal_json = env[NMP_PRINCIPAL_ENVVAR]
+    principal_json = env[NHX_PRINCIPAL_ENVVAR]
     principal_data = json.loads(principal_json)
 
     assert principal_data == {
@@ -3046,9 +3046,9 @@ def test_docker_job_schedule_with_auth_context(docker_job, docker_client_mock, t
     }
 
     # Verify launcher application log auth is not configured through env headers.
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env
-    assert "NMP_JOB_LAUNCHER_LOGS_EXPORTER" not in env
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env
+    assert "NHX_JOB_LAUNCHER_LOGS_EXPORTER" not in env
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env
 
     # Verify no globally scoped OTEL header environment variables are set
     assert "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in env
@@ -3074,10 +3074,10 @@ def test_docker_job_schedule_without_auth_context(docker_job, docker_client_mock
 
     # Verify auth env vars are NOT set
     env = kwargs["environment"]
-    assert NMP_PRINCIPAL_ENVVAR not in env
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env
-    assert "NMP_JOB_LAUNCHER_LOGS_EXPORTER" not in env
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env
+    assert NHX_PRINCIPAL_ENVVAR not in env
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env
+    assert "NHX_JOB_LAUNCHER_LOGS_EXPORTER" not in env
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env
 
 
 def test_docker_job_schedule_with_auth_context_empty_groups():
@@ -3144,12 +3144,12 @@ def test_docker_job_schedule_with_auth_context_sdk_model_none_groups(
     create_call_args = docker_client_mock.containers.create.call_args
     kwargs = create_call_args[1] if create_call_args[1] else create_call_args[0][0]
 
-    # Verify NMP_PRINCIPAL env var is set correctly
+    # Verify NHX_PRINCIPAL env var is set correctly
     env = kwargs["environment"]
-    assert NMP_PRINCIPAL_ENVVAR in env
+    assert NHX_PRINCIPAL_ENVVAR in env
 
     # Verify JSON structure - groups should be empty list (default) not None
-    principal_json = env[NMP_PRINCIPAL_ENVVAR]
+    principal_json = env[NHX_PRINCIPAL_ENVVAR]
     principal_data = json.loads(principal_json)
 
     assert principal_data["id"] == "user@example.com"
@@ -3226,7 +3226,7 @@ def test_persistent_storage_cleanup_rejects_non_final_step_when_job_is_terminal(
     """Keep shared job storage when a completed container belongs to an intermediate step."""
     docker_job._jobs.get_job.return_value = data_response(
         SimpleNamespace(
-            status=PlatformJobStatus.COMPLETED,
+            status=HelixJobStatus.COMPLETED,
             platform_spec=SimpleNamespace(
                 steps=[
                     SimpleNamespace(name="download"),
@@ -3250,7 +3250,7 @@ def test_persistent_storage_cleanup_rejects_non_final_step_when_job_is_terminal(
 def test_persistent_storage_cleanup_allows_final_step_when_job_is_terminal(docker_job):
     docker_job._jobs.get_job.return_value = data_response(
         SimpleNamespace(
-            status=PlatformJobStatus.COMPLETED,
+            status=HelixJobStatus.COMPLETED,
             platform_spec=SimpleNamespace(
                 steps=[
                     SimpleNamespace(name="download"),

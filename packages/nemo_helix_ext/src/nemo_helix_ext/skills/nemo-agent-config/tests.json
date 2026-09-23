@@ -1,0 +1,75 @@
+{
+  "skill": "nemo-agent-config",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use nemo-agent-config to write an agent.yaml for my support agent.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run the nemo-agent-config skill and validate this nemo-agents-spec-v1 config.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Invoke nemo-agent-config for a Platform agent config using the codex harness.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I need to create an agent.yaml with codex as the default harness and NVIDIA as the default model provider.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Help me edit agent.yaml to configure the hermes harness block for a NeMo Helix agent.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Can you adapt this agent config to nemo-agents-spec-v1 and make sure the paths are relative?",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Convert this old NAT workflow YAML into the new NeMo Helix agent.yaml format.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I have an old NAT agent.yml and want to migrate it to nemo-agents-spec-v1.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Create agent.yaml for nemo-agents-spec-v1 with codex as the default harness.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "The agent design is done. I only need to add telemetry and MCP server config to agent.yaml.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I have an existing NeMo agent.yaml config file and want to switch default_harness from hermes to codex.",
+      "expected_skill": "nemo-agent-config"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Write a generic Kubernetes YAML file for a deployment and service.",
+      "expected_skill_not": "nemo-agent-config"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Build me a LangChain DeepAgents app from scratch in a new Python package.",
+      "expected_skill_not": "nemo-agent-config"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Help me pick which LLM to use for a support triage agent.",
+      "expected_skill_not": "nemo-agent-config"
+    }
+  ]
+}

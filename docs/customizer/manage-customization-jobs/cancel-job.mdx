@@ -10,11 +10,11 @@ description: ""
 
 Before you can cancel a customization job, make sure that you have:
 
-- Obtained the base URL of your NeMo Platform.
-- Set the `NMP_BASE_URL` environment variable to your NeMo Platform endpoint
+- Obtained the base URL of your NeMo Helix.
+- Set the `NHX_BASE_URL` environment variable to your NeMo Helix endpoint
 
 ```bash
-export NMP_BASE_URL="https://your-nmp-base-url"
+export NHX_BASE_URL="https://your-nhx-base-url"
 ```
 
 ---
@@ -27,11 +27,11 @@ Use the SDK to cancel a job:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # Initialize the client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

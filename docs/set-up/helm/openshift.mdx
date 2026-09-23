@@ -7,11 +7,11 @@ description: ""
 ---
 <a id="nemo-ms-install-openshift"></a>
 
-The NeMo Platform chart works on Red Hat OpenShift when security context overrides are applied. OpenShift’s **restricted** or **restricted-v2** Security Context Constraint (SCC) requires pods to run as non-root with explicit `runAsUser` and `runAsNonRoot`.
+The NeMo Helix chart works on Red Hat OpenShift when security context overrides are applied. OpenShift’s **restricted** or **restricted-v2** Security Context Constraint (SCC) requires pods to run as non-root with explicit `runAsUser` and `runAsNonRoot`.
 
 ## Values
 
-You can override the default values for the NeMo Platform chart to make it compatible with OpenShift.
+You can override the default values for the NeMo Helix chart to make it compatible with OpenShift.
 
 1. **Create the OpenShift values file.** Save the following as `openshift-values.yaml`:
 
@@ -43,9 +43,9 @@ You can override the default values for the NeMo Platform chart to make it compa
 2. **Install** with your custom values and the OpenShift overrides (order matters; later files override earlier). Complete the [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites) and follow [Install](/documentation/kubernetes-deployment/setup/helm/install), using the provided OpenShift values file.
 
  ```sh
- helm upgrade --install "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
-   --version "$NMP_HELM_CHART_VERSION" \
-   --namespace "$NMP_NAMESPACE" \
+ helm upgrade --install "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
+   --version "$NHX_HELM_CHART_VERSION" \
+   --namespace "$NHX_NAMESPACE" \
    --create-namespace \
    -f values.yaml \
    -f openshift-values.yaml
@@ -67,8 +67,8 @@ If you see "unable to validate against any security context constraint" or "cont
 If you want to validate your values are being applied correctly, you can use the `helm template` command to see the rendered templates.
 
 ```sh
-helm template "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
-  --version "$NMP_HELM_CHART_VERSION" \
+helm template "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
+  --version "$NHX_HELM_CHART_VERSION" \
   -f values.yaml \
   -f openshift-values.yaml
 ```

@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Agentic-use Evals for NeMo Platform (AUT + NAT)
+# Agentic-use Evals for NeMo Helix (AUT + NAT)
 
-This directory contains agentic benchmark tasks for evaluating a NeMo platform
+This directory contains agentic benchmark tasks for evaluating a NeMo Helix
 agent-under-test (AUT).  The current orchestration path runs task instructions
 through the AUT (via `nemo agents invoke`) and verifies success with existing
 `pytest` assertions in each task's `tests/test_outputs.py`.
@@ -18,7 +18,7 @@ Each test provides:
 
 In practice this translates to:
 1. a markdown task description (`instruction.md`),
-2. a Docker environment that starts NeMo Platform services,
+2. a Docker environment that starts NeMo Helix services,
 3. a Python verifier (`tests/test_outputs.py`) that checks API state.
 
 This benchmark currently uses `tests/agentic-use/nat_runner.py` in AUT mode.
@@ -32,7 +32,7 @@ work lands.
 
 ```bash
 # 0) Initialize plugin-backed agents CLI commands (required once per env)
-uv pip install -e packages/nemo_platform_plugin -e plugins/nemo-agents
+uv pip install -e packages/nemo_helix_plugin -e plugins/nemo-agents
 uv run _nemo agents evaluate --help
 
 # 1) Run correctness checks with task-specific pytest verifiers
@@ -97,11 +97,11 @@ but it is no longer the canonical quality gate for agent performance or
 benchmark numbers.
 
 Optional diagnostic-only eval (not used for promotion decisions). The
-`_nemo` binary is the pre-vendor entry point for the `nemo_platform_ext`
-CLI (see `packages/nemo_platform_ext/pyproject.toml`); we use it here so
+`_nemo` binary is the pre-vendor entry point for the `nemo_helix_ext`
+CLI (see `packages/nemo_helix_ext/pyproject.toml`); we use it here so
 the example matches the binary that's actually wired up in dev. The
 explicit `--base-url` keeps the run pointed at your local platform even
-if your shell exports a remote `NMP_BASE_URL`:
+if your shell exports a remote `NHX_BASE_URL`:
 ```bash
 uv run _nemo --base-url http://localhost:18080 agents evaluate --spec '{
   "agent": "<your-agent>",
@@ -112,8 +112,8 @@ uv run _nemo --base-url http://localhost:18080 agents evaluate --spec '{
 ```
 
 Notes:
-- `nat_runner.py` defaults to local platform URL `http://localhost:8080` and ignores `NMP_BASE_URL` from your shell unless you explicitly pass `--nmp-base-url`.
-- `_nemo agents evaluate` still reads shell environment when `--base-url` is omitted, so if your shell exports a remote `NMP_BASE_URL` the run will hit the wrong cluster — always pass `--base-url http://localhost:18080` when running diagnostics locally.
+- `nat_runner.py` defaults to local platform URL `http://localhost:8080` and ignores `NHX_BASE_URL` from your shell unless you explicitly pass `--nhx-base-url`.
+- `_nemo agents evaluate` still reads shell environment when `--base-url` is omitted, so if your shell exports a remote `NHX_BASE_URL` the run will hit the wrong cluster — always pass `--base-url http://localhost:18080` when running diagnostics locally.
 - `passrate_token_policy_gate.py` is intended for fresh, comparable artifacts (same manifest/runner generation). Mixed old and new `nat-jobs` outputs can report missing runtime fields.
 - Runtime tie-breaker is conditional by design and only applies when baseline and candidate token totals are exactly tied.
 - For faster local dev loops, prefer `--no-aut-seed-providers` after provider setup is already known-good. This skips per-task provider bootstrap/wait and significantly reduces runtime.
@@ -169,7 +169,7 @@ Known-good local flow:
 
 ```bash
 # Build or refresh the base and task images first.
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 python tests/agentic-use/nat_runner.py \
   --manifest manifests/evaluator_agent_benchmark_mvp.txt \
@@ -295,7 +295,7 @@ requirements) so dataset artifacts capture task assumptions explicitly.
 `plugins/nemo-agents` plugin. If `nemo/_nemo agents ...` is missing:
 
 ```bash
-uv pip install -e packages/nemo_platform_plugin -e plugins/nemo-agents
+uv pip install -e packages/nemo_helix_plugin -e plugins/nemo-agents
 uv run _nemo agents evaluate --help
 ```
 
@@ -308,16 +308,16 @@ uv run _nemo agents evaluate --help
 
 1. BUILD PHASE
    ┌──────────────────┐
-   │ Dockerfile.agentic-base│ (repo root, required to package NeMo Platform)
+   │ Dockerfile.agentic-base│ (repo root, required to package NeMo Helix)
    │ - Install deps   │
-   │ - Setup NeMo Platform API  │
+   │ - Setup NeMo Helix API  │
    │ - Install NAT    │
    │ - Install agents │
    └────────┬─────────┘
             │ docker build
             ▼
    ┌──────────────────┐
-   │ nmp-agentic-base:latest│ (base image)
+   │ nhx-agentic-base:latest│ (base image)
    └────────┬─────────┘
             │
             │ Referenced by
@@ -325,13 +325,13 @@ uv run _nemo agents evaluate --help
    ┌──────────────────┐
    │ environment/     │
    │   Dockerfile     │ (in each test)
-   │ FROM nmp-agentic-base  │
+   │ FROM nhx-agentic-base  │
    └────────┬─────────┘
             │ Harbor builds
             ▼
    ┌──────────────────┐
    │  Test Container  │
-   │ - NeMo Platform API ready  │
+   │ - NeMo Helix API ready  │
    │ - MCP configured │
    │ - AUT + CLI      │
    └────────┬─────────┘
@@ -346,8 +346,8 @@ uv run _nemo agents evaluate --help
             ▼
    ┌──────────────────┐
    │  Nemo AUT Agent  │ → Uses Nemo tools/skills
-   │  + Gateway/SDK   │ → Calls NeMo Platform API
-   │  + NeMo Platform API       │ → Creates resources
+   │  + Gateway/SDK   │ → Calls NeMo Helix API
+   │  + NeMo Helix API       │ → Creates resources
    └────────┬─────────┘
 
 3. VERIFICATION PHASE
@@ -398,8 +398,8 @@ tests/agentic-use/
 
 **Contains**:
 - Ubuntu 24.04 with Python 3.11
-- NeMo Platform code and dependencies (via `uv sync`)
-- NeMo Platform API server (auto-starts via ENTRYPOINT with 3-check health validation)
+- NeMo Helix code and dependencies (via `uv sync`)
+- NeMo Helix API server (auto-starts via ENTRYPOINT with 3-check health validation)
 - MCP server configuration (`.mcp.json`)
 - Non-root `harbor` user (UID 1001) for Claude Code
 - Claude Code CLI with wrapper script that auto-adds `--dangerously-skip-permissions`
@@ -407,11 +407,11 @@ tests/agentic-use/
 
 **Build once, use for all tests**:
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 ```
 
 **Why at repo root?**
-- Needs access to entire NeMo Platform codebase (`COPY . /app`)
+- Needs access to entire NeMo Helix codebase (`COPY . /app`)
 - Provides proper build context for `uv sync`
 
 ### 2. Environment: `environment/Dockerfile` (Per Test)
@@ -422,7 +422,7 @@ docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
 
 **Contents**:
 ```dockerfile
-FROM nmp-agentic-base:latest
+FROM nhx-agentic-base:latest
 # All configuration inherited from base image
 ```
 
@@ -470,9 +470,9 @@ timeout_sec = 60.0
 
 **Example**:
 ```markdown
-# Task: Create and Verify NeMo Platform Workspace
+# Task: Create and Verify NeMo Helix Workspace
 
-Your goal is to complete the following workspace operations using the NeMo Platform MCP tools:
+Your goal is to complete the following workspace operations using the NeMo Helix MCP tools:
 
 1. Create a new workspace with ID: `harbor-test-workspace`
 2. Verify that the workspace was successfully created
@@ -511,13 +511,13 @@ source /app/tests/agentic-use/shared/verify-tests.sh
 The shared script at `shared/verify-tests.sh` runs pytest on `test_outputs.py` and writes the reward.
 
 #### `tests/test_outputs.py` - Verification Logic (Required)
-**This file MUST exist** when using the shared test runner. It contains pytest tests that verify the agent completed the task correctly (typically by querying NeMo Platform API).
+**This file MUST exist** when using the shared test runner. It contains pytest tests that verify the agent completed the task correctly (typically by querying NeMo Helix API).
 
 **How it works**:
 1. Harbor copies `tests/` directory contents to `/tests/` in the container
 2. After agent completes, `nat_runner.py` executes the verifier phase (`pytest` against `/tests/test_outputs.py`)
 3. The shared script runs pytest on `/tests/test_outputs.py`
-4. Pytest checks if the agent accomplished the task (by querying NeMo Platform API)
+4. Pytest checks if the agent accomplished the task (by querying NeMo Helix API)
 5. Result written to `/logs/verifier/reward.txt` (1 = pass, 0 = fail)
 
 ## Test Execution
@@ -532,7 +532,7 @@ export NVIDIA_API_KEY='nvapi-...'
 
 ```bash
 # Step 1: Build base image (do this once, or when Dockerfile.agentic-base changes)
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 # Step 2: Run a specific task against AUT
 python tests/agentic-use/nat_runner.py \
@@ -562,14 +562,14 @@ cat nat-jobs/<timestamp>-<task>/verifier/test-stdout.txt
 ### Test API manually
 ```bash
 # Run container interactively
-docker run -it --rm -p 8000:8000 nmp-agentic-base:latest
+docker run -it --rm -p 8000:8000 nhx-agentic-base:latest
 
 # In another terminal:
 curl http://localhost:8000/health
 curl http://localhost:8000/v2/workspaces
 
 # Test MCP server
-docker exec -it $(docker ps -q --filter ancestor=nmp-agentic-base:latest) \
+docker exec -it $(docker ps -q --filter ancestor=nhx-agentic-base:latest) \
   /app/.venv/bin/nemo-mcp --base-url http://localhost:8000
 ```
 
@@ -585,12 +585,12 @@ cp -r tests/agentic-use/example-test-template \
 - **task.toml**: Update metadata (category, tags, difficulty)
 - **instruction.md**: Write new task description
 - **tests/test_outputs.py**: Write verification logic for your task
-- **environment/Dockerfile**: Usually no changes needed (just `FROM nmp-agentic-base:latest`)
+- **environment/Dockerfile**: Usually no changes needed (just `FROM nhx-agentic-base:latest`)
 
 ### 3. Test it
 ```bash
 # Rebuild base if Dockerfile.agentic-base changed
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 # Run your test
 python tests/agentic-use/nat_runner.py your-new-test \
@@ -603,7 +603,7 @@ python tests/agentic-use/nat_runner.py your-new-test \
 
 1. **AUT is the primary target**: benchmark the deployed platform agent, not task-local workflow agents
 2. **Thin environments**: each task's `environment/Dockerfile` should remain minimal
-3. **API-based verification**: tests query NeMo Platform API to verify AUT actions
+3. **API-based verification**: tests query NeMo Helix API to verify AUT actions
 4. **Clear success criteria**: `instruction.md` should unambiguously state expected outcomes
 5. **Baseline metrics matter**: track pass/fail and token/latency signals for optimization loops
 
@@ -631,8 +631,8 @@ python tests/agentic-use/nat_runner.py your-new-test \
 - Look at verifier output: `nat-jobs/<timestamp>-<task>/verifier/test-stdout.txt`
 
 ### Docker image not found
-- Build base image: `docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .`
-- Verify image exists: `docker images | grep nmp-agentic-base`
+- Build base image: `docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .`
+- Verify image exists: `docker images | grep nhx-agentic-base`
 - Run build and test together to avoid image disappearing
 
 ## References

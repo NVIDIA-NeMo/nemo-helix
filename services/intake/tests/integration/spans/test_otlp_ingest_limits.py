@@ -5,10 +5,10 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.service import IntakeService
-from nmp.intake.spans.clickhouse_client import ClickHouseSettings
-from nmp.testing import create_test_client
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.service import IntakeService
+from nhx.intake.spans.clickhouse_client import ClickHouseSettings
+from nhx.testing import create_test_client
 
 
 @pytest.fixture

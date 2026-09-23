@@ -6,13 +6,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nmp.common.files.storage_config import LocalStorageConfig, S3StorageConfig
-from nmp.common.jobs.schemas import InvalidPageCursorError, LogPageCursorV1, PaginationDirection, decode_log_page_cursor
-from nmp.core.files.app.backends.local import LocalStorageImpl
-from nmp.core.files.app.backends.s3 import S3StorageImpl
-from nmp.core.files.app.log_db import DuckDBLogRepository
-from nmp.core.files.app.log_storage import LogEntry, LogStorage
-from nmp.core.files.exceptions import InvalidFilterError, InvalidPathError
+from nhx.common.files.storage_config import LocalStorageConfig, S3StorageConfig
+from nhx.common.jobs.schemas import InvalidPageCursorError, LogPageCursorV1, PaginationDirection, decode_log_page_cursor
+from nhx.core.files.app.backends.local import LocalStorageImpl
+from nhx.core.files.app.backends.s3 import S3StorageImpl
+from nhx.core.files.app.log_db import DuckDBLogRepository
+from nhx.core.files.app.log_storage import LogEntry, LogStorage
+from nhx.core.files.exceptions import InvalidFilterError, InvalidPathError
 
 
 @pytest.fixture
@@ -572,7 +572,7 @@ def test_log_repository_uses_hardened_duckdb_config(local_storage, monkeypatch):
         captured_config = config
         raise RuntimeError("connect intercepted")
 
-    monkeypatch.setattr("nmp.core.files.app.log_db.duckdb.connect", _fake_connect)
+    monkeypatch.setattr("nhx.core.files.app.log_db.duckdb.connect", _fake_connect)
 
     with pytest.raises(RuntimeError, match="connect intercepted"):
         DuckDBLogRepository._query_offset_page(

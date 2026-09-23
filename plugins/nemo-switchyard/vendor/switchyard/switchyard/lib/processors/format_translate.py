@@ -10,7 +10,7 @@ format translation happens *inside* the LLM backend (e.g.
 outbound translation happens in :class:`DefaultResponseTranslator`.
 The host's chain has dedicated slots for both.
 
-When the host (NeMo Platform IGW) owns the LLM call, neither slot is available
+When the host (NeMo Helix IGW) owns the LLM call, neither slot is available
 — IGW supplies its own backend and there's no
 :class:`ResponseTranslator` slot. Format translation has to live in
 processors instead. The three processors here are the IGW equivalent

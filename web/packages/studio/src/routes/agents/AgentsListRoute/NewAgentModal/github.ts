@@ -7,7 +7,7 @@ const GITHUB_HOSTS = new Set(['github.com', 'www.github.com']);
 
 export class GitHubSourceError extends Error {}
 
-/** Mirrors the Experimentalist plugin's `<git-url>[@<ref>][#<agent_path>]` agent spec. */
+/** Parses the `<git-url>[@<ref>][#<agent_path>]` agent spec. */
 export interface GitHubAgentSource {
   owner: string;
   repo: string;

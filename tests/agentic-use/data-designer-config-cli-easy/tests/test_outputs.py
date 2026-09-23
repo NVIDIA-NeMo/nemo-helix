@@ -11,15 +11,15 @@ This test checks:
 
 import os
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import SecretsClient
 
 
 def test_secret_created() -> None:
     """Test that the dd-test-api-key secret was successfully created."""
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    client = NeMoPlatform(base_url=nmp_base_url, workspace="default")
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    client = NeMoHelix(base_url=nhx_base_url, workspace="default")
 
     # List secrets and check for our test secret
     secrets = client_from_platform(client, SecretsClient)
@@ -31,8 +31,8 @@ def test_secret_created() -> None:
 
 def test_provider_created() -> None:
     """Test that the dd-test-provider model provider was successfully created."""
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    client = NeMoPlatform(base_url=nmp_base_url, workspace="default")
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    client = NeMoHelix(base_url=nhx_base_url, workspace="default")
 
     # List providers and check for our test provider
     response = client.inference.providers.list()
@@ -46,8 +46,8 @@ def test_provider_created() -> None:
 
 def test_provider_configuration() -> None:
     """Test that the provider has the correct configuration."""
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    client = NeMoPlatform(base_url=nmp_base_url, workspace="default")
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    client = NeMoHelix(base_url=nhx_base_url, workspace="default")
 
     # Get the specific provider
     provider = client.inference.providers.retrieve(name="dd-test-provider")

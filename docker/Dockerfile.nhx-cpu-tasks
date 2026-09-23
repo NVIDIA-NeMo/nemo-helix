@@ -1,0 +1,97 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# NHX CPU Tasks - CPU-only batch task execution
+
+ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_CPU_TASKS_RUNTIME_BASE=nhx-python-base
+
+FROM ${NHX_PYTHON_BASE} AS builder
+COPY --from=nhx-workspace . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --only-group cpu-tasks --no-editable
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv run --no-project --python /app/.venv/bin/python \
+        /usr/local/bin/collect-workspace-sdists.py \
+        --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-cpu-tasks && \
+    uv run --no-project --python /app/.venv/bin/python \
+        /usr/local/bin/collect-python-sdists.py \
+        --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-cpu-tasks \
+        --lock-file /app/uv.lock \
+        --label app-venv && \
+    bash /usr/local/bin/collect-apt-sources.sh /app/.source-distributions/nhx-cpu-tasks/apt --installed && \
+    uv run --no-project --python /app/.venv/bin/python \
+        /usr/local/bin/collect-cpython-source.py \
+        --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-cpu-tasks
+RUN mkdir -p /app/.runtime-home/nvs
+
+# Job steps and plugin tasks may shell out to small POSIX utilities. Keep the
+# runtime distroless while preserving that command surface in one final layer.
+# NVIDIA distroless maps /bin to /usr/bin, so merge utilities into /usr/bin.
+FROM scratch AS cpu-task-runtime-tools
+COPY --from=root-busybox /bin/chmod /usr/bin/chmod
+COPY --from=root-busybox /bin/sh /usr/bin/sh
+COPY --from=root-busybox /bin/ls /usr/bin/ls
+COPY --from=root-busybox /bin/mkdir /usr/bin/mkdir
+COPY --from=root-busybox /bin/ln /usr/bin/ln
+COPY --from=root-busybox /bin/rm /usr/bin/rm
+COPY --from=root-busybox /bin/cp /usr/bin/cp
+COPY --from=root-busybox /bin/wget /usr/bin/wget
+COPY --from=root-busybox /bin/tar /usr/bin/tar
+COPY --from=root-busybox /bin/mv /usr/bin/mv
+COPY --from=root-busybox /bin/cat /usr/bin/cat
+COPY --from=root-busybox /bin/head /usr/bin/head
+COPY --from=root-busybox /bin/tail /usr/bin/tail
+COPY --from=root-busybox /bin/grep /usr/bin/grep
+COPY --from=root-busybox /bin/sed /usr/bin/sed
+COPY --from=root-busybox /bin/tee /usr/bin/tee
+COPY --from=root-busybox /bin/echo /usr/bin/echo
+COPY --from=root-busybox /bin/sleep /usr/bin/sleep
+COPY --from=root-busybox /bin/dirname /usr/bin/dirname
+COPY --from=root-busybox /bin/basename /usr/bin/basename
+COPY --from=root-busybox /bin/find /usr/bin/find
+COPY --from=builder /bin/bash /usr/bin/bash
+COPY --from=builder /bin/uv /usr/bin/uv
+COPY --from=builder /usr/bin/env /usr/bin/env
+COPY docker/scripts/cve-cleanup.sh /usr/bin/cve-cleanup.sh
+
+FROM ${NHX_CPU_TASKS_RUNTIME_BASE} AS runtime
+
+COPY --from=cpu-task-runtime-tools /usr/bin/ /usr/bin/
+
+ENV USERNAME=nvs \
+    HOME=/home/nvs
+COPY --chown=1000:1000 --from=builder /app/.runtime-home/nvs /home/nvs
+COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
+COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-cpu-tasks/ /usr/share/nemo-helix/source-distributions/nhx-cpu-tasks/
+COPY --chown=1000:1000 --from=builder /app/plugins/nemo-data-designer/tiktoken-cache /app/tiktoken-cache
+ENV TIKTOKEN_CACHE_DIR=/app/tiktoken-cache
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/.venv/lib/python${PY_VERSION}/site-packages"
+USER 0
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
+    sh /bin/cve-cleanup.sh && \
+    python /tmp/remove-listed-files.py /tmp/file-removals.txt
+ENTRYPOINT ["/app/.venv/bin/nemo-helix"]
+# Override CMD with "run" in orchestration (e.g., Helm, docker-compose)
+CMD ["--help"]
+
+FROM runtime AS smoke-test
+# Every job declaring `container = "cpu-tasks"` runs its task module in this
+# image, so a plugin missing from the cpu-tasks dependency group surfaces as an
+# import error at job runtime rather than at build time. The script verifies the
+# Evaluator/Gym imports, the `python -m` task entrypoints, the Fabric adapter
+# data files, and that the vendored claude/codex CLIs actually launch. It
+# reports every failure in one run rather than aborting at the first.
+RUN --mount=type=bind,source=docker/scripts/smoke-test-cpu-tasks.py,target=/tmp/smoke-test-cpu-tasks.py,readonly \
+    /app/.venv/bin/python /tmp/smoke-test-cpu-tasks.py
+
+FROM runtime

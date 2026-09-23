@@ -3,16 +3,16 @@
 
 # Filesets Package
 
-This package provides `FilesetFileSystem`, an fsspec-compatible filesystem for working with NeMo Platform filesets. It also serves as a migration guide from Datastore (HuggingFace Hub) to the Files Service.
+This package provides `FilesetFileSystem`, an fsspec-compatible filesystem for working with NeMo Helix filesets. It also serves as a migration guide from Datastore (HuggingFace Hub) to the Files Service.
 
 ## Quick Start
 
 The `FilesetFileSystem` is available directly from the SDK via `sdk.files.fsspec`:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(base_url="http://nmp-host")
+sdk = NeMoHelix(base_url="http://nhx-host")
 
 # List files
 sdk.files.fsspec.ls("my-workspace/my-fileset/")
@@ -37,7 +37,7 @@ sdk.files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/file.txt")
 | Datastore (Old) | Files Service (New) |
 |-----------------|---------------------|
 | `HfFileSystem` | `sdk.files.fsspec` |
-| `huggingface_hub.HfApi` | `nemo_platform.NeMoPlatform` SDK |
+| `huggingface_hub.HfApi` | `nemo_helix.NeMoHelix` SDK |
 | HuggingFace Hub protocol (`/v1/hf`) | Files API (`/v2/workspaces/{ws}/filesets/{name}`) |
 | Repositories + Branches | Workspaces + Filesets |
 
@@ -66,9 +66,9 @@ api = HfApi(endpoint=endpoint, token=token)
 
 **After (SDK):**
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(base_url=nmp_host, default_headers={"Authorization": f"Bearer {token}"})
+sdk = NeMoHelix(base_url=nhx_host, default_headers={"Authorization": f"Bearer {token}"})
 ```
 
 ---
@@ -388,7 +388,7 @@ class NemoDataStoreClient:
 **After (SDK):**
 ```python
 class FilesetClient:
-    def __init__(self, sdk: NeMoPlatform):
+    def __init__(self, sdk: NeMoHelix):
         self.sdk = sdk
 
     def download_model(self, workspace: str, fileset: str, destination: str) -> str:
@@ -401,7 +401,7 @@ class FilesetClient:
 
 # Async version - same initialization, just use async methods
 class AsyncFilesetClient:
-    def __init__(self, sdk: NeMoPlatform):
+    def __init__(self, sdk: NeMoHelix):
         self.sdk = sdk
 
     async def download_model(self, workspace: str, fileset: str, destination: str) -> str:
@@ -458,10 +458,10 @@ except Exception as e:
 If you need a `FilesetFileSystem` instance without going through the SDK (e.g., for custom configuration), you can import it directly:
 
 ```python
-from nemo_platform import NeMoPlatform
-from nemo_platform.filesets import FilesetFileSystem
+from nemo_helix import NeMoHelix
+from nemo_helix.filesets import FilesetFileSystem
 
-sdk = NeMoPlatform(base_url="http://nmp-host")
+sdk = NeMoHelix(base_url="http://nhx-host")
 fs = FilesetFileSystem(sdk=sdk)
 ```
 
@@ -470,7 +470,7 @@ fs = FilesetFileSystem(sdk=sdk)
 To use `fileset://` URLs with fsspec or libraries that support fsspec URLs:
 
 ```python
-from nemo_platform.filesets import FilesetFileSystem
+from nemo_helix.filesets import FilesetFileSystem
 
 # Register the fileset:// protocol globally with fsspec
 FilesetFileSystem.register_fsspec()

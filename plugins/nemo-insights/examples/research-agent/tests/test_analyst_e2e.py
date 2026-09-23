@@ -6,7 +6,7 @@
 This exercises the whole loop against *real* services and *real* LLM APIs:
 
 1. Start ClickHouse (auto-provisioned via the platform's docker helper).
-2. Start the NeMo Platform (``nemo services run``) with Intake + Insights.
+2. Start the NeMo Helix (``nemo services run``) with Intake + Insights.
 3. Clear all spans for the test project.
 4. Run the research agent on three questions (concurrently) so it logs
    traces to Intake.
@@ -16,7 +16,7 @@ This exercises the whole loop against *real* services and *real* LLM APIs:
 Required setup (the test is **opt-in** because it costs real tokens and needs
 Docker):
 
-- ``NMP_INSIGHTS_E2E=1`` — opt in; otherwise the test skips.
+- ``NHX_INSIGHTS_E2E=1`` — opt in; otherwise the test skips.
 - ``NVIDIA_API_KEY`` and ``TAVILY_API_KEY`` — for the research agent's NIM
   model + Tavily search. Read from the example's ``.env`` (or the shell).
   The test also runs ``nemo setup --auto`` against its isolated Platform, so
@@ -25,22 +25,22 @@ Docker):
   supplied in addition when the optimizer models use another provider; they do
   not replace the NVIDIA credential required by the research agent under test.
 - Docker — required to auto-start ClickHouse if one isn't already at
-  ``NMP_INTAKE_CLICKHOUSE_URL`` (default ``http://localhost:8123``). A missing
+  ``NHX_INTAKE_CLICKHOUSE_URL`` (default ``http://localhost:8123``). A missing
   Docker daemon fails the test.
 
-Optional overrides: ``NMP_INSIGHTS_E2E_PORT`` (default ``18080``),
-``NEMO_PLATFORM_DIR`` (default ``~/code/nemo-platform``, where the ClickHouse
-helper script lives), and ``NMP_INTAKE_CLICKHOUSE_{URL,USER,PASSWORD,DATABASE}``.
+Optional overrides: ``NHX_INSIGHTS_E2E_PORT`` (default ``18080``),
+``NEMO_HELIX_DIR`` (default ``~/code/nemo-helix``, where the ClickHouse
+helper script lives), and ``NHX_INTAKE_CLICKHOUSE_{URL,USER,PASSWORD,DATABASE}``.
 
 Run it from the example's venv so every dependency
-(``nemo-platform[services]``, the NAT langchain provider, and the Insights
+(``nemo-helix[services]``, the NAT langchain provider, and the Insights
 plugin) is present::
 
     cd examples/research-agent
-    NMP_INSIGHTS_E2E=1 uv run pytest tests/test_analyst_e2e.py -s
+    NHX_INSIGHTS_E2E=1 uv run pytest tests/test_analyst_e2e.py -s
 
 The test is isolated from any platform you already have running: it binds a
-dedicated port, uses a throwaway ``NMP_DATA_DIR``, and scopes all data to the
+dedicated port, uses a throwaway ``NHX_DATA_DIR``, and scopes all data to the
 ``research-agent-e2e-test`` project so it never touches real ``research-agent``
 spans or Insights.
 """
@@ -76,13 +76,13 @@ QUESTIONS = [
     "List three open-source vector databases and one differentiator each.",
 ]
 
-PORT = int(os.environ.get("NMP_INSIGHTS_E2E_PORT", "18080"))
+PORT = int(os.environ.get("NHX_INSIGHTS_E2E_PORT", "18080"))
 BASE_URL = f"http://127.0.0.1:{PORT}"
-CLICKHOUSE_URL = os.environ.get("NMP_INTAKE_CLICKHOUSE_URL", "http://localhost:8123")
-CLICKHOUSE_USER = os.environ.get("NMP_INTAKE_CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD = os.environ.get("NMP_INTAKE_CLICKHOUSE_PASSWORD", "")
-CLICKHOUSE_DB = os.environ.get("NMP_INTAKE_CLICKHOUSE_DATABASE", "intake")
-PLATFORM_DIR = Path(os.environ.get("NEMO_PLATFORM_DIR", str(Path.home() / "code" / "nemo-platform")))
+CLICKHOUSE_URL = os.environ.get("NHX_INTAKE_CLICKHOUSE_URL", "http://localhost:8123")
+CLICKHOUSE_USER = os.environ.get("NHX_INTAKE_CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = os.environ.get("NHX_INTAKE_CLICKHOUSE_PASSWORD", "")
+CLICKHOUSE_DB = os.environ.get("NHX_INTAKE_CLICKHOUSE_DATABASE", "intake")
+PLATFORM_DIR = Path(os.environ.get("NEMO_HELIX_DIR", str(Path.home() / "code" / "nemo-helix")))
 
 MIN_TRACES = 3
 SERVER_START_TIMEOUT_S = 180
@@ -92,8 +92,8 @@ SPAN_VISIBLE_TIMEOUT_S = 120
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.skipif(
-        os.environ.get("NMP_INSIGHTS_E2E") != "1",
-        reason="opt-in only; set NMP_INSIGHTS_E2E=1 to run the real end-to-end test",
+        os.environ.get("NHX_INSIGHTS_E2E") != "1",
+        reason="opt-in only; set NHX_INSIGHTS_E2E=1 to run the real end-to-end test",
     ),
 ]
 
@@ -118,12 +118,12 @@ def _subprocess_env() -> dict[str, str]:
     env.update(_load_dotenv(EXAMPLE_DIR / ".env"))
     env.update(
         {
-            "NMP_BASE_URL": BASE_URL,
-            "NMP_CONFIG_FILE": str(TMP_DIR / "e2e-nmp-config.yaml"),
-            "NMP_INTAKE_CLICKHOUSE_URL": CLICKHOUSE_URL,
-            "NMP_INTAKE_CLICKHOUSE_USER": CLICKHOUSE_USER,
-            "NMP_INTAKE_CLICKHOUSE_PASSWORD": CLICKHOUSE_PASSWORD,
-            "NMP_INTAKE_CLICKHOUSE_DATABASE": CLICKHOUSE_DB,
+            "NHX_BASE_URL": BASE_URL,
+            "NHX_CONFIG_FILE": str(TMP_DIR / "e2e-nhx-config.yaml"),
+            "NHX_INTAKE_CLICKHOUSE_URL": CLICKHOUSE_URL,
+            "NHX_INTAKE_CLICKHOUSE_USER": CLICKHOUSE_USER,
+            "NHX_INTAKE_CLICKHOUSE_PASSWORD": CLICKHOUSE_PASSWORD,
+            "NHX_INTAKE_CLICKHOUSE_DATABASE": CLICKHOUSE_DB,
         }
     )
     return env
@@ -134,7 +134,7 @@ def _subprocess_env() -> dict[str, str]:
 # entry-point callables are always importable. Invoke those directly so the
 # test does not depend on the script wrappers existing on disk.
 _CLI_CALLABLES = {
-    "nemo": ("nemo_platform.cli.app", "cli"),
+    "nemo": ("nemo_helix.cli.app", "cli"),
     "nat": ("nat.cli.main", "run_cli"),
 }
 
@@ -184,9 +184,7 @@ def clickhouse() -> None:
 
     script = PLATFORM_DIR / "services" / "intake" / "scripts" / "spans" / "run_clickhouse.sh"
     if not script.exists():
-        pytest.fail(
-            f"ClickHouse helper script not found at {script}; set NEMO_PLATFORM_DIR to your nemo-platform checkout"
-        )
+        pytest.fail(f"ClickHouse helper script not found at {script}; set NEMO_HELIX_DIR to your nemo-helix checkout")
 
     result = subprocess.run(["bash", str(script)], capture_output=True, text=True)
     if result.returncode != 0:
@@ -256,12 +254,12 @@ def _server_ready() -> bool:
 def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - ordering dep
     """Start `nemo services run` on a dedicated port with isolated storage."""
     TMP_DIR.mkdir(exist_ok=True)
-    data_dir = TMP_DIR / "e2e-nmp-data"
+    data_dir = TMP_DIR / "e2e-nhx-data"
     log_path = TMP_DIR / "e2e_platform_server.log"
 
     env = _subprocess_env()
     # Isolate entity/Insight storage from any platform already running locally.
-    env["NMP_DATA_DIR"] = str(data_dir)
+    env["NHX_DATA_DIR"] = str(data_dir)
 
     log = open(log_path, "w")
     proc = subprocess.Popen(

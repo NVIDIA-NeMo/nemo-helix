@@ -4,9 +4,9 @@
 import json
 from pathlib import Path
 
-from nmp.automodel.entities.values import TrainingType
-from nmp.automodel.tasks.training.datasets import validation as validation_mod
-from nmp.automodel.tasks.training.datasets.validation import DatasetValidator
+from nhx.automodel.entities.values import TrainingType
+from nhx.automodel.tasks.training.datasets import validation as validation_mod
+from nhx.automodel.tasks.training.datasets.validation import DatasetValidator
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

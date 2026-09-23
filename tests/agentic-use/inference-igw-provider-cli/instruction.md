@@ -3,9 +3,9 @@
 
 # Inference via IGW with Provider (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
@@ -13,7 +13,7 @@ An inference API key is available in the `ANTHROPIC_API_KEY` environment variabl
 
 ## Task
 
-Using the `nmp` CLI, complete the following steps in order:
+Using the `nhx` CLI, complete the following steps in order:
 
 1. Create a secret named `nvidia-api-key` with the value from the `ANTHROPIC_API_KEY` environment variable
 2. Register a model provider named `nvidia-inference` pointing to `https://inference-api.nvidia.com/v1` using the secret from step 1

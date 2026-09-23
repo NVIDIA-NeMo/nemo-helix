@@ -45,8 +45,8 @@ from nemo_data_designer_plugin.functions._types import (
     PreviewFrame,
     ProcessorOutputFrame,
 )
-from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel, TypeAdapter
 from rich.markup import escape
 
@@ -271,7 +271,7 @@ class CreateRenderer(CLIRenderer):
 
     The job submit path is non-streaming. The framework's single-value
     driver calls :meth:`on_frame` exactly once, with the decoded
-    ``PlatformJobResponse``, so there is no frame-kind ambiguity to resolve
+    ``HelixJobResponse``, so there is no frame-kind ambiguity to resolve
     here (unlike :class:`PreviewRenderer`, which reads an NDJSON stream of
     mixed frames). The only guard is on the response *shape*: an unexpected
     payload falls back to the raw dump so the job's identity is never lost.

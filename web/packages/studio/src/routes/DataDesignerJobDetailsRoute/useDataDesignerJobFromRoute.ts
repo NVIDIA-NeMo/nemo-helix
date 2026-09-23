@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useDataDesignerGetCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -15,7 +15,7 @@ export const useDataDesignerJobFromRoute = () => {
     query: {
       refetchInterval: (q) => {
         const status = q.state.data?.status;
-        const isTerminated = status && PlatformJobTerminalStatuses.includes(status);
+        const isTerminated = status && HelixJobTerminalStatuses.includes(status);
         return isTerminated ? false : 3000;
       },
     },

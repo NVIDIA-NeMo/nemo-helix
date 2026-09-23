@@ -56,7 +56,7 @@ This means that for a custom evaluation, the target LLM endpoint is unable to co
 
 ## Inference SSL Error
 
-An evaluation job that uses an HTTPS model endpoint can fail if the endpoint certificate or DNS name is not trusted by the local environment. Verify that the model URL is reachable from the host running NeMo Platform and that the endpoint presents a valid certificate for its hostname.
+An evaluation job that uses an HTTPS model endpoint can fail if the endpoint certificate or DNS name is not trusted by the local environment. Verify that the model URL is reachable from the host running NeMo Helix and that the endpoint presents a valid certificate for its hostname.
 
 ```
 Error: HTTPSConnectionPool(host="<NIM Proxy URL>", port=443): Max retries exceeded with url: /v1/chat/completions (Caused by SSLError(SSLError))
@@ -88,7 +88,7 @@ The error contains the details about the checks that failed.
 
 `EVALUATOR_BASE_URL` is a placeholder for the URL of the evaluator API in examples.
 For local setup, the platform API defaults to `http://localhost:8080`.
-If you changed the platform URL, use the value configured in `NMP_BASE_URL` or in your CLI context.
+If you changed the platform URL, use the value configured in `NHX_BASE_URL` or in your CLI context.
 
 ## Agent evaluation job failures
 
@@ -111,9 +111,9 @@ mean artifact finalization is complete.
 |---|---|---|
 | `Gym environment FileSets require sandboxed execution` | The target sets `environment`, but sandboxing is disabled | Enable `evaluator.sandboxed_gym_default` or omit the custom environment |
 | Cluster is not marked sandbox-capable | Evaluator is configured to sandbox, but its capability gate is false | Install OpenSandbox, then enable the platform and Evaluator capability settings |
-| Missing `sandbox_runtime_image` or `sandbox_job_storage_pvc_claim` | Required operator configuration is incomplete | Configure the `nmp-gym-host` image and shared Jobs PVC |
+| Missing `sandbox_runtime_image` or `sandbox_job_storage_pvc_claim` | Required operator configuration is incomplete | Configure the `nhx-gym-host` image and shared Jobs PVC |
 | Sandbox has no route to a model | Both model base URLs and additional egress lists are empty or incomplete | Add the model endpoint to `sandbox_policy_base_urls` |
-| Credential-shaped `env_vars` are rejected | A plaintext API key, password, or token would be visible to environment code | Store the value in NeMo Platform Secrets and map it through `env_secrets` |
+| Credential-shaped `env_vars` are rejected | A plaintext API key, password, or token would be visible to environment code | Store the value in NeMo Helix Secrets and map it through `env_secrets` |
 | Jobs PVC and sandbox PVC do not match | FileSet staging writes to a different claim from the Gym host mount | Set `sandbox_job_storage_pvc_claim` to the Jobs execution profile's PVC |
 | FileSet has the wrong purpose or no manifest | The package is not an Evaluator Gym environment | Use `purpose=environment` and place `nemo-environment.yaml` at the FileSet root |
 | Agent produces no rollout | The package registers the agent instance under another name | Set `agent_ref_name` to the registered instance |

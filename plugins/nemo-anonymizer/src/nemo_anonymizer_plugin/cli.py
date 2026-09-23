@@ -12,7 +12,7 @@ import typer
 import yaml
 from anonymizer.config.anonymizer_config import AnonymizerConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
-from nemo_platform_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI
 
 
 class AnonymizerCLI(NemoCLI):

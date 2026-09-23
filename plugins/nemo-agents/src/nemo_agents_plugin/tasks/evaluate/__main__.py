@@ -3,7 +3,7 @@
 
 """Task entrypoint for ``agents.evaluate`` (``python -m nemo_agents_plugin.tasks.evaluate``).
 
-Loads the step config, builds :class:`~nemo_platform_plugin.job_context.JobContext`,
+Loads the step config, builds :class:`~nemo_helix_plugin.job_context.JobContext`,
 and calls :meth:`EvaluateAgentJob.run` with its concrete ``ctx``/``sdk`` signature.
 """
 
@@ -15,10 +15,10 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
+from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 

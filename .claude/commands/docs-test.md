@@ -18,7 +18,7 @@ The script automatically loads environment variables from a .env file in the rep
 Example .env file:
 
 ```sh
-NMP_BASE_URL=http://localhost:8080
+NHX_BASE_URL=http://localhost:8080
 NVIDIA_API_KEY=nvapi-your-key-here
 HF_TOKEN=hf_your-token-here
 NGC_API_KEY=your-ngc-key-here
@@ -27,7 +27,7 @@ NGC_API_KEY=your-ngc-key-here
 You can also override environment variables inline:
 
 ```sh
-NMP_BASE_URL=http://custom-url:8080 uv run python docs/fern/scripts/run_notebooks.py docs/run-inference/
+NHX_BASE_URL=http://custom-url:8080 uv run python docs/fern/scripts/run_notebooks.py docs/run-inference/
 ```
 
 ## Language filters

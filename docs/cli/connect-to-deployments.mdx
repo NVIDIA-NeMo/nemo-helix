@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Connect the CLI to Deployments"
-description: "Configure, authenticate, and switch between NeMo Platform deployments."
+description: "Configure, authenticate, and switch between NeMo Helix deployments."
 ---
 
-Use named CLI contexts to connect to one or more local or remote NeMo Platform deployments.
+Use named CLI contexts to connect to one or more local or remote NeMo Helix deployments.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ Use named CLI contexts to connect to one or more local or remote NeMo Platform d
 Save the deployment URL in the current CLI context:
 
 ```bash
-nemo config set --base-url https://nmp.example.com
+nemo config set --base-url https://nhx.example.com
 ```
 
 Verify the saved URL:
@@ -43,8 +43,8 @@ A context is a user-defined name for a set of connection settings. Names such as
 Create a context for each deployment. Use `--activate` to make one of them current:
 
 ```bash
-nemo config set --context staging --base-url https://nmp.staging.example.com
-nemo config set --context production --base-url https://nmp.example.com --activate
+nemo config set --context staging --base-url https://nhx.staging.example.com
+nemo config set --context production --base-url https://nhx.example.com --activate
 ```
 
 If the saved configuration has no current context, the next written context becomes current automatically. Otherwise, creating another context does not switch the current context.
@@ -111,7 +111,7 @@ context is removed, but cluster and user records remain. To also remove
 unreferenced cluster and user records, pass `--prune-orphans`.
 
 <Note>
-`NMP_BASE_URL` and `NMP_CURRENT_CONTEXT` override saved configuration for all contexts. If switching contexts does not change the target deployment, unset those variables or update them for the current shell.
+`NHX_BASE_URL` and `NHX_CURRENT_CONTEXT` override saved configuration for all contexts. If switching contexts does not change the target deployment, unset those variables or update them for the current shell.
 </Note>
 
 ## Next Steps

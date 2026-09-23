@@ -10,16 +10,16 @@ from dataclasses import dataclass
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_ext.auth.helpers import generate_unsigned_jwt
-from nmp.common.config import AuthConfig
-from nmp.core.entities.app.repository import get_async_session_maker
-from nmp.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
-from nmp.testing.client import create_test_client
+from nemo_helix_ext.auth.helpers import generate_unsigned_jwt
+from nhx.common.config import AuthConfig
+from nhx.core.entities.app.repository import get_async_session_maker
+from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
+from nhx.testing.client import create_test_client
 from sqlalchemy import select
 
 AUTHENTIK_ISSUER = "https://authentik.example.test/application/o/nemo/"
 IAM_ROLE_BINDINGS_PATH = "/apis/auth/v2/iam/role-bindings"
-SERVICE_HEADERS = {"X-NMP-Principal-Id": "service:integration-test"}
+SERVICE_HEADERS = {"X-NHX-Principal-Id": "service:integration-test"}
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
 
 # Each test boots the full platform and reloads policy data on every PDP call

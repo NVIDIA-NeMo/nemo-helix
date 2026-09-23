@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  PlatformJobResponse,
-  PlatformJobResponsesPage,
-  PlatformJobStatus,
+  HelixJobResponse,
+  HelixJobResponsesPage,
+  HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -28,20 +28,20 @@ vi.mock('use-debounce', () => ({
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const WORKSPACE = workspace1.workspace;
 
-const makeJob = (name: string): PlatformJobResponse => ({
+const makeJob = (name: string): HelixJobResponse => ({
   id: `id-${name}`,
   attempt_id: `attempt-${name}`,
   name,
   workspace: WORKSPACE,
   source: 'evaluator-metrics',
   fileset: 'fileset-1',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   platform_spec: { steps: [] },
   created_at: '2025-06-01T10:00:00Z',
   updated_at: '2025-06-01T12:00:00Z',
 });
 
-const page = (name: string): PlatformJobResponsesPage => ({
+const page = (name: string): HelixJobResponsesPage => ({
   data: [makeJob(name)],
   pagination: {
     page: 1,

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Evaluate Agents & Models"
-description: "Score agents and models in NeMo Platform — dataset-driven metrics over labeled data and task-driven agent evaluation — with the same scoring interface across local and platform execution."
+description: "Score agents and models in NeMo Helix — dataset-driven metrics over labeled data and task-driven agent evaluation — with the same scoring interface across local and platform execution."
 ---
 
 <a id="nemo-ms-evaluator-about"></a>
@@ -15,13 +15,13 @@ tracking. Scoring covers deterministic and similarity checks, LLM-as-a-judge, an
 metrics for RAG and agentic behavior.
 
 <Button href="/documentation/evaluate-models/tutorials" variant="secondary">**Tutorials**</Button>
-<Button href="https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/packages/nemo_evaluator_sdk" variant="secondary">**Open Source SDK**</Button>
+<Button href="https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/packages/nemo_evaluator_sdk" variant="secondary">**Open Source SDK**</Button>
 
 ---
 
-## Two shapes of evaluation
+## Three shapes of evaluation
 
-Evaluation comes in two shapes, told apart by what produces the thing you score:
+Evaluation comes in three shapes, told apart by what produces the thing you score:
 
 - **Dataset-driven evaluation** — score a model or pipeline over a fixed dataset. Metrics compare each
   output against a reference, and the same metric set applies to every row. Reach for it for model
@@ -32,17 +32,23 @@ Evaluation comes in two shapes, told apart by what produces the thing you score:
   and other evidence) — and carries its own metrics, so one suite can grade heterogeneous work. Reach
   for it when the system under test *acts* and the process matters as much as the outcome. Entry
   point: [Agent Evaluation](/documentation/evaluate-models/agent-eval).
+- **Retrieval-driven evaluation** — score how well a retriever ranks documents. A `Retrieval` target
+  ranks a BEIR corpus against queries and relevance judgments, and retrieval metrics score the
+  rankings. Reach for it when tuning embeddings or a reranker. Entry point: the `retrieve-eval` job,
+  described in
+  [Evaluation Approaches](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation).
 
 <Note>
 
-**Metrics are the shared scorer, not a third mode.** The same deterministic and LLM-as-a-judge
-scorers work in either shape — what changes is the input being scored, not the scorer.
+**Metrics are the shared scorer, not a shape of their own.** The same deterministic and
+LLM-as-a-judge scorers work in any of the three — what changes is the input being scored, not the
+scorer.
 
 </Note>
 
 For how the two shapes differ in detail — the evidence each exposes, an at-a-glance comparison, and
 guidance on choosing — see
-[Dataset-Driven vs Task-Driven Evaluation](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation).
+[Evaluation Approaches](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation).
 
 ---
 
@@ -86,7 +92,7 @@ dataset = [
 config = RunConfig(limit_samples=100, parallelism=8)
 ```
 
-### 2. Run it — three dataset-driven modes
+### 2. Run it — two dataset-driven modes
 
 The same `metric`, `dataset`, and `config` run in two places. What changes is the **caller** — a
 bare SDK evaluator for local iteration, or the platform's `client.evaluator` resource for durable
@@ -97,16 +103,16 @@ execution.
 | **Local SDK** | `Evaluator()` (`nemo_evaluator_sdk`) | `await evaluator.run(metrics=[metric], dataset=dataset, config=config)` | Fast in-process iteration with no platform services. |
 | **Remote job** | `client.evaluator` | `evaluator.submit(metric=metric, dataset=dataset, config=config)` | Durable, monitored platform jobs for production and regressions. |
 
-The platform caller is mounted on a `NeMoPlatform` client:
+The platform caller is mounted on a `NeMoHelix` client:
 
 ```python
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = client.evaluator
@@ -121,8 +127,8 @@ result = job.get_result()
 
 **Agent evaluation has local interfaces and durable platform interfaces.**
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
-that do not require running nemo-platform.
-- Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
+that do not require running nemo-helix.
+- Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate` job for durable runs with inline
 tasks or stored tasksets. A locally validated `GymAgentTaskRunner` can also be submitted with
 `client.evaluator.submit(tasks=TasksetRef(...), target=runner)`; other runner targets use an
 agent-evaluate spec.
@@ -137,10 +143,10 @@ the same and execution gains platform capabilities:
 | Capability | Local SDK | Platform (`client.evaluator`) |
 |------------|-----------|-------------------------------|
 | **Execution** | Local in-process run | Durable platform jobs |
-| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Platform [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
-| **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Platform [Filesets](/documentation/get-started/core-concepts/manage-files) |
+| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Helix [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
+| **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Helix [Filesets](/documentation/get-started/core-concepts/manage-files) |
 | **Results** | Returned in memory | Platform artifact storage with typed result download |
-| **Authentication** | Local environment variables | Local env vars for local runs; NeMo Platform [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |
+| **Authentication** | Local environment variables | Local env vars for local runs; NeMo Helix [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |
 
 ### Live vs. jobs, online vs. offline
 

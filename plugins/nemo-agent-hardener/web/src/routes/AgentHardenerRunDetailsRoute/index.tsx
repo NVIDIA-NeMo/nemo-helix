@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk } from '@agent-hardener/api/platform';
 import { CancelJobButton } from '@agent-hardener/components/CancelJobButton';
 import { HardenPanel } from '@agent-hardener/components/HardenPanel';
 import {
@@ -86,7 +86,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
 
   // The platform job behind this run drives the interview/review HITL over its status_details.
   const jobName = run?.job_id ?? '';
-  const { useJobsGetJob, useJobsUpdateJobStatusDetails } = usePlatformSdk();
+  const { useJobsGetJob, useJobsUpdateJobStatusDetails } = useHelixSdk();
   const { data: job } = useJobsGetJob(workspace, jobName, {
     query: {
       enabled: Boolean(jobName),

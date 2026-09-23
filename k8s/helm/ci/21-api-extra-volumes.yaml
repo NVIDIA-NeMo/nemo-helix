@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/21-api-extra-volumes.yaml
+# CI validates by running: helm template nemo-helix . -f ci/21-api-extra-volumes.yaml
 # Exercises API extra volume/mount rendering with workload token exchange config.
 
 api:
@@ -11,11 +11,11 @@ api:
         secretName: nemo-workload-token-signing-key
   extraVolumeMounts:
     - name: workload-token-signing-key
-      mountPath: /etc/nmp/workload-token
+      mountPath: /etc/nhx/workload-token
       readOnly: true
 platformConfig:
   auth:
     oidc:
       workload_token_exchange_enabled: true
       workload_token_key_id: nemo-workload-exchange
-      workload_token_private_key_file: /etc/nmp/workload-token/private-key.pem
+      workload_token_private_key_file: /etc/nhx/workload-token/private-key.pem

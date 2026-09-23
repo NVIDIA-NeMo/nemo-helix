@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 
 from nemo_example_plugin.entities import ExampleItem
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
-from nemo_platform_plugin.seed import NemoSeedJob
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.seed import NemoSeedJob
 
 logger = logging.getLogger(__name__)
 

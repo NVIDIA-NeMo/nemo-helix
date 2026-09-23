@@ -27,9 +27,9 @@ from nemo_agents_plugin.cli_context import (
     resolve_context_headers,
 )
 from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset
-from nemo_platform_plugin.cli_options import workspace_help
-from nemo_platform_plugin.cli_state import resolve_cli_workspace
-from nemo_platform_plugin.client.client import NemoClient
+from nemo_helix_plugin.cli_options import workspace_help
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.client.client import NemoClient
 
 logger = logging.getLogger(__name__)
 

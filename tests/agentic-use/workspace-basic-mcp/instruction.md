@@ -3,7 +3,7 @@
 
 # Workspace Creation Test
 
-You have access to a NeMo Platform MCP server with workspace management tools.
+You have access to a NeMo Helix MCP server with workspace management tools.
 
 ## Task
 

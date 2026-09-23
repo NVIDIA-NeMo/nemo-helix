@@ -10,7 +10,7 @@ description: ""
 A **task** is a stored, reusable definition of an agent-eval unit of work: an intent (what the agent
 should do), the inputs it receives, and the metrics that score it. A **taskset** is a named grouping
 of tasks. Both are first-class entities in the Evaluator plugin, addressed by `workspace/name` and
-managed through the `nemo_platform` SDK.
+managed through the `nemo_helix` SDK.
 
 Use stored tasks and tasksets when you want to define an evaluation unit once and reference it across
 runs, share it across a team, or assemble suites — rather than re-declaring the intent, inputs, and
@@ -43,10 +43,10 @@ definition freely without accumulating versions.
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -429,15 +429,15 @@ client.evaluator.metrics.delete("answer-exact-match")
 
 ## Async usage
 
-`AsyncNeMoPlatform` exposes the same surface; await each call.
+`AsyncNeMoHelix` exposes the same surface; await each call.
 
 ```python
 import asyncio
 
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 async def main() -> None:
-    client = AsyncNeMoPlatform(base_url="http://localhost:8080", workspace="default")
+    client = AsyncNeMoHelix(base_url="http://localhost:8080", workspace="default")
     page = await client.evaluator.tasks.list()
     for item in page.data:
         print(item.name)

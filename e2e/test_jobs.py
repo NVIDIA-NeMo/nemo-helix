@@ -15,15 +15,15 @@ param types and filtered to tests that work without Docker.
 import uuid
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.testing.e2e import wait_for_job_logs, wait_for_platform_job
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nhx.testing.e2e import wait_for_job_logs, wait_for_platform_job
 
 from e2e.services_pool import RunningServices
 
@@ -36,7 +36,7 @@ pytestmark = [
 ]
 
 
-def _job_diagnostic_message(sdk: NeMoPlatform, job, workspace: str, prefix: str) -> str:
+def _job_diagnostic_message(sdk: NeMoHelix, job, workspace: str, prefix: str) -> str:
     """Build a diagnostic message with job error details and logs for assertion failures."""
     parts = [prefix]
     if job.status_details:
@@ -54,7 +54,7 @@ def _job_diagnostic_message(sdk: NeMoPlatform, job, workspace: str, prefix: str)
     return "\n".join(parts)
 
 
-def test_basic_platform_job_lifecycle(sdk: NeMoPlatform, workspace: str):
+def test_basic_platform_job_lifecycle(sdk: NeMoHelix, workspace: str):
     """Test a basic platform job lifecycle: create, run, complete.
 
     Verifies the platform jobs system works end-to-end:
@@ -67,7 +67,7 @@ def test_basic_platform_job_lifecycle(sdk: NeMoPlatform, workspace: str):
         client_from_platform(sdk, JobsClient)
         .create_job(
             workspace=workspace,
-            body=CreatePlatformJobRequest(
+            body=CreateHelixJobRequest(
                 source=JOB_SOURCE,
                 spec={"test": "value"},
                 platform_spec={
@@ -98,7 +98,7 @@ def test_basic_platform_job_lifecycle(sdk: NeMoPlatform, workspace: str):
     assert "Hello from e2e test!" in all_messages, "Step logs do not contain expected output"
 
 
-def test_job_logs_across_multiple_batches(sdk: NeMoPlatform, workspace: str):
+def test_job_logs_across_multiple_batches(sdk: NeMoHelix, workspace: str):
     """Test that logs spanning multiple OTLP batches are correctly stored and retrieved.
 
     The OTLP BatchProcessor batches logs before sending, so logs output with
@@ -116,7 +116,7 @@ def test_job_logs_across_multiple_batches(sdk: NeMoPlatform, workspace: str):
         client_from_platform(sdk, JobsClient)
         .create_job(
             workspace=workspace,
-            body=CreatePlatformJobRequest(
+            body=CreateHelixJobRequest(
                 source=JOB_SOURCE,
                 spec={"test": "multi-batch-logs"},
                 platform_spec={
@@ -155,13 +155,13 @@ def test_job_logs_across_multiple_batches(sdk: NeMoPlatform, workspace: str):
         )
 
 
-def test_job_config_is_readable(sdk: NeMoPlatform, workspace: str):
+def test_job_config_is_readable(sdk: NeMoHelix, workspace: str):
     """Test that a job can read its configuration via $NEMO_JOB_STEP_CONFIG_FILE_PATH."""
     job = (
         client_from_platform(sdk, JobsClient)
         .create_job(
             workspace=workspace,
-            body=CreatePlatformJobRequest(
+            body=CreateHelixJobRequest(
                 source=JOB_SOURCE,
                 spec={"test": "value"},
                 platform_spec={
@@ -199,7 +199,7 @@ def test_job_config_is_readable(sdk: NeMoPlatform, workspace: str):
     assert "Hello from job config!" in all_messages, "Step logs do not show config was read"
 
 
-def test_job_passing_data_between_steps(sdk: NeMoPlatform, workspace: str):
+def test_job_passing_data_between_steps(sdk: NeMoHelix, workspace: str):
     """Test that data can be passed between job steps via persistent storage."""
     persistent_storage_env = {
         "name": "NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH",
@@ -208,7 +208,7 @@ def test_job_passing_data_between_steps(sdk: NeMoPlatform, workspace: str):
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "value"},
             platform_spec={
@@ -256,14 +256,14 @@ def test_job_passing_data_between_steps(sdk: NeMoPlatform, workspace: str):
     assert "Data from first step" in all_messages, "Second step did not receive data from first step"
 
 
-def test_job_using_secret_environment_variable(sdk: NeMoPlatform, workspace: str):
+def test_job_using_secret_environment_variable(sdk: NeMoHelix, workspace: str):
     """Test that a job can use secret environment variables."""
     secret_name = f"e2e-secret-{uuid.uuid4().hex[:8]}"
     secret_value = "s3cret-val"
 
     secrets = client_from_platform(sdk, SecretsClient)
     secret = secrets.create_secret(
-        workspace=workspace, body=PlatformSecretCreateRequest(name=secret_name, value=secret_value)
+        workspace=workspace, body=HelixSecretCreateRequest(name=secret_name, value=secret_value)
     ).data()
     assert secret.name is not None, "Failed to create platform secret"
 
@@ -273,7 +273,7 @@ def test_job_using_secret_environment_variable(sdk: NeMoPlatform, workspace: str
             client_from_platform(sdk, JobsClient)
             .create_job(
                 workspace=workspace,
-                body=CreatePlatformJobRequest(
+                body=CreateHelixJobRequest(
                     source=JOB_SOURCE,
                     spec={"test": "value"},
                     platform_spec={
@@ -321,13 +321,13 @@ def test_job_using_secret_environment_variable(sdk: NeMoPlatform, workspace: str
                 pass
 
 
-def test_job_with_expected_failure(sdk: NeMoPlatform, workspace: str):
+def test_job_with_expected_failure(sdk: NeMoHelix, workspace: str):
     """Test that a job correctly reports failure when a step exits non-zero."""
     job = (
         client_from_platform(sdk, JobsClient)
         .create_job(
             workspace=workspace,
-            body=CreatePlatformJobRequest(
+            body=CreateHelixJobRequest(
                 source=JOB_SOURCE,
                 spec={"test": "value"},
                 platform_spec={
@@ -356,12 +356,12 @@ def test_job_with_expected_failure(sdk: NeMoPlatform, workspace: str):
     assert "This step will fail" in step_logs.data[0].message, "Step logs do not contain expected output"
 
 
-def test_job_cancel_immediately(sdk: NeMoPlatform, workspace: str):
+def test_job_cancel_immediately(sdk: NeMoHelix, workspace: str):
     """Test that a job can be created and then cancelled immediately."""
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "value"},
             platform_spec={
@@ -388,12 +388,12 @@ def test_job_cancel_immediately(sdk: NeMoPlatform, workspace: str):
     )
 
 
-def test_job_cancel_once_active(sdk: NeMoPlatform, workspace: str):
+def test_job_cancel_once_active(sdk: NeMoHelix, workspace: str):
     """Test that an active job can be cancelled."""
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "value"},
             platform_spec={
@@ -430,12 +430,12 @@ def test_job_cancel_once_active(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_job_pause_resume(sdk: NeMoPlatform, workspace: str):
+def test_job_pause_resume(sdk: NeMoHelix, workspace: str):
     """Test that a job can be paused and then resumed after being paused."""
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "value"},
             platform_spec={
@@ -475,12 +475,12 @@ def test_job_pause_resume(sdk: NeMoPlatform, workspace: str):
     assert completed_job.status == "completed", f"Job failed with status: {completed_job.status}"
 
 
-def test_job_pause_and_cancel(sdk: NeMoPlatform, workspace: str):
+def test_job_pause_and_cancel(sdk: NeMoHelix, workspace: str):
     """Test that a job can be paused and then cancelled after being paused."""
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "value"},
             platform_spec={
@@ -513,7 +513,7 @@ def test_job_pause_and_cancel(sdk: NeMoPlatform, workspace: str):
     assert cancelled_job.status == "cancelled", f"Job should have been cancelled but has status: {cancelled_job.status}"
 
 
-def test_job_using_additional_volume(sdk: NeMoPlatform, workspace: str, _services_instance: RunningServices):
+def test_job_using_additional_volume(sdk: NeMoHelix, workspace: str, _services_instance: RunningServices):
     """Test that a job can use an additional volume to store data between steps."""
     if _services_instance.config_path is not None and _services_instance.docker_network_name is None:
         pytest.skip("Requires a container-backed platform with /mnt/additional_storage mounted")
@@ -525,7 +525,7 @@ def test_job_using_additional_volume(sdk: NeMoPlatform, workspace: str, _service
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "data-between-steps"},
             platform_spec={
@@ -577,12 +577,12 @@ def test_job_using_additional_volume(sdk: NeMoPlatform, workspace: str, _service
 
 @pytest.mark.container_only
 @pytest.mark.parametrize("bad_image", ["__invalid_ubuntu:image", "ubuntu:does-not-exist-1234"])
-def test_job_invalid_image_format(sdk: NeMoPlatform, workspace: str, bad_image: str):
+def test_job_invalid_image_format(sdk: NeMoHelix, workspace: str, bad_image: str):
     """Test that a job with a bad image fails appropriately."""
     jobs = client_from_platform(sdk, JobsClient)
     job = jobs.create_job(
         workspace=workspace,
-        body=CreatePlatformJobRequest(
+        body=CreateHelixJobRequest(
             source=JOB_SOURCE,
             spec={"test": "value"},
             platform_spec={

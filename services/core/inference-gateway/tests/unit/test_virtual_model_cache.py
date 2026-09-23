@@ -9,15 +9,15 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nemo_platform import APIConnectionError, APIStatusError, AsyncNeMoPlatform
-from nemo_platform.types.inference.middleware_call import MiddlewareCall
-from nemo_platform.types.inference.virtual_model import VirtualModel
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nemo_helix import APIConnectionError, APIStatusError, AsyncNeMoHelix
+from nemo_helix.types.inference.middleware_call import MiddlewareCall
+from nemo_helix.types.inference.virtual_model import VirtualModel
+from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareConfigRef,
     MiddlewareRegistry,
     PrefetchResult,
 )
-from nmp.core.inference_gateway.api.virtual_model_cache import (
+from nhx.core.inference_gateway.api.virtual_model_cache import (
     VirtualModelCache,
     VirtualModelCacheRefreshError,
     refresh_virtual_model_cache,
@@ -43,9 +43,9 @@ def _make_vm(workspace: str, name: str, default_model_entity: str | None = None)
     )
 
 
-def _make_sdk_with_vms(vms: list[VirtualModel]) -> AsyncNeMoPlatform:
+def _make_sdk_with_vms(vms: list[VirtualModel]) -> AsyncNeMoHelix:
     """Return a mock SDK whose inference.virtual_models.list() yields *vms* as an async iterator."""
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    sdk = MagicMock(spec=AsyncNeMoHelix)
 
     async def _async_iter(_self=None):
         for vm in vms:
@@ -147,7 +147,7 @@ async def test_refresh_replaces_stale_entries():
 @pytest.mark.asyncio
 async def test_refresh_raises_on_api_connection_error():
     """APIConnectionError is wrapped in VirtualModelCacheRefreshError."""
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    sdk = MagicMock(spec=AsyncNeMoHelix)
     paginator = MagicMock()
 
     async def _raise():
@@ -164,7 +164,7 @@ async def test_refresh_raises_on_api_connection_error():
 @pytest.mark.asyncio
 async def test_refresh_raises_on_api_status_error():
     """APIStatusError is wrapped in VirtualModelCacheRefreshError."""
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    sdk = MagicMock(spec=AsyncNeMoHelix)
     mock_response = MagicMock()
     mock_response.status_code = 503
     paginator = MagicMock()
@@ -183,7 +183,7 @@ async def test_refresh_raises_on_api_status_error():
 @pytest.mark.asyncio
 async def test_refresh_raises_on_unexpected_error():
     """Any unexpected exception is wrapped in VirtualModelCacheRefreshError."""
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    sdk = MagicMock(spec=AsyncNeMoHelix)
     paginator = MagicMock()
 
     async def _raise():
@@ -205,7 +205,7 @@ async def test_refresh_does_not_mutate_cache_on_error():
     await refresh_virtual_model_cache(cache, sdk_good)
 
     # Now simulate a failure on the second refresh
-    sdk_bad = MagicMock(spec=AsyncNeMoPlatform)
+    sdk_bad = MagicMock(spec=AsyncNeMoHelix)
     paginator = MagicMock()
 
     async def _raise():

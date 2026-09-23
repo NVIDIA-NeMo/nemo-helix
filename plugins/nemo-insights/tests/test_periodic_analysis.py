@@ -15,6 +15,17 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import yaml
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import SpanFilterParam, SpanGroup, SpanGroupsPage
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
+from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
+from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin.analysis_runs import mint_analysis_run_name
 from nemo_insights_plugin.analyst.analyst_backend import (
     InsightsFileStore,
@@ -41,25 +52,14 @@ from nemo_insights_plugin.entities import (
 )
 from nemo_insights_plugin.schedule import is_due, previous_scheduled
 from nemo_insights_plugin.schema import AnalysisRunResponse, CreateAnalysisRunRequest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import SpanFilterParam, SpanGroup, SpanGroupsPage
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.jobs.spec import PlatformJobSpec
-from nemo_platform_plugin.jobs.types import ListJobsQueryParams, PlatformJobResponse
-from nemo_platform_plugin.schema import PaginationData
 from pydantic import JsonValue, ValidationError
 
 _BASE_URL = "https://example.com"
 _T = TypeVar("_T")
 
 
-def _async_platform() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url=_BASE_URL)
+def _async_platform() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(base_url=_BASE_URL)
 
 
 def _http_not_found_error() -> httpx.HTTPStatusError:
@@ -470,7 +470,7 @@ class _IntakeWithGroups:
 
 
 def _patch_intake_groups(monkeypatch: pytest.MonkeyPatch, groups: _SpanGroups) -> None:
-    def fake_client_from_platform(platform: AsyncNeMoPlatform, client_cls: type[object]) -> object:
+    def fake_client_from_platform(platform: AsyncNeMoHelix, client_cls: type[object]) -> object:
         del platform
         if client_cls is AsyncIntakeClient:
             return _IntakeWithGroups(groups)
@@ -742,7 +742,7 @@ class _RecordingJobs:
     def __init__(
         self,
         *,
-        jobs: list[PlatformJobResponse] | None = None,
+        jobs: list[HelixJobResponse] | None = None,
     ) -> None:
         self.runs: list[CreateAnalysisRunRequest] = []
         self.query_params: list[ListJobsQueryParams | None] = []
@@ -753,7 +753,7 @@ class _RecordingJobs:
         *,
         workspace: str | None = None,
         query_params: ListJobsQueryParams | None = None,
-    ) -> _AsyncItems[PlatformJobResponse]:
+    ) -> _AsyncItems[HelixJobResponse]:
         del workspace
         self.query_params.append(query_params)
         return _AsyncItems(self._listed_jobs)
@@ -781,7 +781,7 @@ class _RunStatusLookup:
 async def _controller(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    jobs: list[PlatformJobResponse] | None = None,
+    jobs: list[HelixJobResponse] | None = None,
     run_status: AnalysisRunStatus | None = None,
 ) -> AsyncIterator[tuple[InsightsAnalysisController, _RecordingJobs]]:
     controller = InsightsAnalysisController()
@@ -876,17 +876,17 @@ async def test_controller_skips_active_job(monkeypatch: pytest.MonkeyPatch) -> N
     async with _controller(
         monkeypatch,
         jobs=[
-            PlatformJobResponse(
+            HelixJobResponse(
                 name="existing-analysis-job",
                 id="job-1",
                 attempt_id="attempt-1",
                 workspace="default",
                 source="agents.execute",
-                platform_spec=PlatformJobSpec.model_validate(
+                platform_spec=HelixJobSpec.model_validate(
                     {"steps": [{"name": "analysis", "executor": {"provider": "cpu", "container": {"image": "test"}}}]}
                 ),
                 fileset="fileset-1",
-                status=PlatformJobStatus.ACTIVE,
+                status=HelixJobStatus.ACTIVE,
                 custom_fields={"insights_analysis_agent": "research-agent"},
             )
         ],

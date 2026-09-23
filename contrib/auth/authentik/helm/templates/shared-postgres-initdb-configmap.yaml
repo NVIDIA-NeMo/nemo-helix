@@ -8,9 +8,9 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ .Values.sharedPostgresql.serviceName }}-initdb
-  namespace: {{ include "nemo-platform-authentik.namespace" . }}
+  namespace: {{ include "nemo-helix-authentik.namespace" . }}
   labels:
-    {{- include "nemo-platform-authentik.labels" . | nindent 4 }}
+    {{- include "nemo-helix-authentik.labels" . | nindent 4 }}
     app.kubernetes.io/component: shared-postgresql
 data:
   01-create-application-databases.sh: |-

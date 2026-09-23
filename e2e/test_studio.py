@@ -12,17 +12,17 @@ All tests self-skip when Studio static files are not mounted.
 
 import re
 
-from nemo_platform import NeMoPlatform
-from nmp.testing.pytest_outcomes import pytest_skip
+from nemo_helix import NeMoHelix
+from nhx.testing.pytest_outcomes import pytest_skip
 
 
-def _studio_available(sdk: NeMoPlatform) -> bool:
+def _studio_available(sdk: NeMoHelix) -> bool:
     """Check if the Studio UI is available (static files are mounted)."""
     response = sdk._client.get("/studio/")
     return response.status_code == 200
 
 
-def test_studio_index_html(sdk: NeMoPlatform):
+def test_studio_index_html(sdk: NeMoHelix):
     """Test that /studio/ serves the index.html correctly.
 
     This verifies:
@@ -56,7 +56,7 @@ def test_studio_index_html(sdk: NeMoPlatform):
     assert "STUDIO_UI_" not in html, "Found unreplaced STUDIO_UI_ marker in index.html"
 
 
-def test_studio_spa_routing(sdk: NeMoPlatform):
+def test_studio_spa_routing(sdk: NeMoHelix):
     """Test that SPA routing returns index.html for client-side routes.
 
     This verifies that the static_files_path is correctly configured and
@@ -83,7 +83,7 @@ def test_studio_spa_routing(sdk: NeMoPlatform):
         assert "<script" in response.text.lower(), f"SPA route {route} didn't return app HTML"
 
 
-def test_studio_js_bundle(sdk: NeMoPlatform):
+def test_studio_js_bundle(sdk: NeMoHelix):
     """Test that the Studio JS bundle is production-ready.
 
     This verifies:
@@ -117,7 +117,7 @@ def test_studio_js_bundle(sdk: NeMoPlatform):
     )
 
 
-def test_studio_css_assets(sdk: NeMoPlatform):
+def test_studio_css_assets(sdk: NeMoHelix):
     """Test that CSS assets are served correctly from static_files_path.
 
     This verifies that the static file serving works for different asset types.

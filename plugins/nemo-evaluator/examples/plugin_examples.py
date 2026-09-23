@@ -39,16 +39,16 @@ from nemo_evaluator_sdk.values import (
     SecretRef,
 )
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform import APIError, AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client import errors as files_errors
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError as ClientConflictError
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.secrets.client import AsyncSecretsClient, SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix import APIError, AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client import errors as files_errors
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient, SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from pydantic import SecretStr
 
 if TYPE_CHECKING:
@@ -56,10 +56,10 @@ if TYPE_CHECKING:
 
 
 DEFAULT_BASE_URL = "http://localhost:8080"
-DEFAULT_WORKSPACE = os.getenv("NMP_EVALUATOR_DEFAULT_WORKSPACE", "default")
-DEFAULT_API_KEY_SECRET = os.getenv("NMP_EVALUATOR_DEFAULT_API_KEY_SECRET", "NVIDIA_API_KEY")
-DATASET_NAME = os.getenv("NMP_EVALUATOR_PLUGIN_FILESET", "helpsteer2-eval")
-HELPSTEER2_REMOTE_PATH = os.getenv("NMP_EVALUATOR_HELPSTEER2_REMOTE_PATH", "validation.jsonl.gz")
+DEFAULT_WORKSPACE = os.getenv("NHX_EVALUATOR_DEFAULT_WORKSPACE", "default")
+DEFAULT_API_KEY_SECRET = os.getenv("NHX_EVALUATOR_DEFAULT_API_KEY_SECRET", "NVIDIA_API_KEY")
+DATASET_NAME = os.getenv("NHX_EVALUATOR_PLUGIN_FILESET", "helpsteer2-eval")
+HELPSTEER2_REMOTE_PATH = os.getenv("NHX_EVALUATOR_HELPSTEER2_REMOTE_PATH", "validation.jsonl.gz")
 HELPFULNESS_PROMPT_V1 = (
     "You are an evaluator. Rate the response's helpfulness from 0-4. "
     'Return only a JSON object with this shape: {"helpfulness": <integer>}.'
@@ -80,7 +80,7 @@ LOCAL_HELPSTEER2_ROWS = (
 
 model = Model(
     url="https://integrate.api.nvidia.com/v1/chat/completions",
-    name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3-nano-30b-a3b"),
+    name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
     # Local evaluator and local plugin execution resolve this as an environment variable name.
     api_key_secret=SecretRef(root=DEFAULT_API_KEY_SECRET),
 )
@@ -108,10 +108,10 @@ def configure_example_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 
-async def _new_client() -> AsyncNeMoPlatform:
+async def _new_client() -> AsyncNeMoHelix:
     """Create a platform client and verify the evaluator plugin is reachable."""
-    client = AsyncNeMoPlatform(
-        base_url=os.getenv("NMP_BASE_URL", DEFAULT_BASE_URL),
+    client = AsyncNeMoHelix(
+        base_url=os.getenv("NHX_BASE_URL", DEFAULT_BASE_URL),
         workspace=DEFAULT_WORKSPACE,
         timeout=30000.0,
     )
@@ -126,10 +126,10 @@ async def _new_client() -> AsyncNeMoPlatform:
     return client
 
 
-def _new_sync_client() -> NeMoPlatform:
+def _new_sync_client() -> NeMoHelix:
     """Create a sync platform client and verify the evaluator plugin is reachable."""
-    client = NeMoPlatform(
-        base_url=os.getenv("NMP_BASE_URL", DEFAULT_BASE_URL),
+    client = NeMoHelix(
+        base_url=os.getenv("NHX_BASE_URL", DEFAULT_BASE_URL),
         workspace=DEFAULT_WORKSPACE,
         timeout=30000.0,
     )
@@ -144,7 +144,7 @@ def _new_sync_client() -> NeMoPlatform:
     return client
 
 
-async def _close_client(client: AsyncNeMoPlatform) -> None:
+async def _close_client(client: AsyncNeMoHelix) -> None:
     """Close the platform client while tolerating local-run loop shutdown."""
     try:
         await client.close()
@@ -182,7 +182,7 @@ def write_local_helpsteer2_dataset(dataset_path: Path, *, row_count: int) -> Non
     dataset_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-async def ensure_example_fileset(client: AsyncNeMoPlatform) -> FilesetRef:
+async def ensure_example_fileset(client: AsyncNeMoHelix) -> FilesetRef:
     """Create or reuse the HelpSteer2 fileset, then verify the selected split downloads."""
     workspace = client.workspace or DEFAULT_WORKSPACE
     files = client_from_platform(client, AsyncFilesClient)
@@ -218,7 +218,7 @@ async def ensure_example_fileset(client: AsyncNeMoPlatform) -> FilesetRef:
     return FilesetRef(root=f"{fileset.workspace}/{fileset.name}").with_fragment(HELPSTEER2_REMOTE_PATH)
 
 
-def ensure_example_fileset_sync(client: NeMoPlatform) -> FilesetRef:
+def ensure_example_fileset_sync(client: NeMoHelix) -> FilesetRef:
     """Create or reuse the HelpSteer2 fileset with a sync client, then verify the selected split downloads."""
     workspace = client.workspace or DEFAULT_WORKSPACE
     files = client_from_platform(client, FilesClient)
@@ -251,7 +251,7 @@ def ensure_example_fileset_sync(client: NeMoPlatform) -> FilesetRef:
     return FilesetRef(root=f"{fileset.workspace}/{fileset.name}").with_fragment(HELPSTEER2_REMOTE_PATH)
 
 
-async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNeMoPlatform) -> str:
+async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNeMoHelix) -> str:
     """Resolve an API key secret name and ensure it exists on the platform."""
     secret_name = DEFAULT_API_KEY_SECRET.lower().replace("_", "-")
     secrets = client_from_platform(client, AsyncSecretsClient)
@@ -268,7 +268,7 @@ async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNe
             ) from None
         try:
             await secrets.create_secret(
-                body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
+                body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
                 workspace=workspace,
             )
             print("API key secret created for workspace")
@@ -280,14 +280,14 @@ async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNe
 async def model_with_valid_secret(
     *,
     workspace: str,
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
 ) -> Model:
     """Return a model carrying the API-key secret that a submitted platform job needs."""
     secret_name = await ensure_submit_evaluator_api_key_secret(workspace, client)
     return model.model_copy(update={"api_key_secret": SecretRef(root=secret_name)})
 
 
-def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NeMoPlatform) -> str:
+def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NeMoHelix) -> str:
     """Sync mirror of :func:`ensure_submit_evaluator_api_key_secret`."""
     secret_name = DEFAULT_API_KEY_SECRET.lower().replace("_", "-")
     secrets = client_from_platform(client, SecretsClient)
@@ -304,7 +304,7 @@ def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NeMoPlat
             ) from None
         try:
             secrets.create_secret(
-                body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
+                body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
                 workspace=workspace,
             )
             print("API key secret created for workspace")
@@ -313,7 +313,7 @@ def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NeMoPlat
     return secret_name
 
 
-def model_with_valid_secret_sync(*, workspace: str, client: NeMoPlatform) -> Model:
+def model_with_valid_secret_sync(*, workspace: str, client: NeMoHelix) -> Model:
     """Sync mirror of :func:`model_with_valid_secret`.
 
     The module-level ``model`` names an environment variable, which was correct while the plugin
@@ -483,7 +483,7 @@ def extract_helpfulness_scores(
 
 async def _run_online_metric_example_body(
     *,
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     dataset: PluginDatasetInput,
     workflow_label: str,
     is_online: bool,
@@ -526,13 +526,13 @@ async def _run_online_metric_example_body(
         result.print_summary()
 
 
-async def run_nmp_online_metric_example(
+async def run_nhx_online_metric_example(
     is_online: bool = False,
     limit_samples: int = 2,
 ) -> None:
     """Evaluate one metric through the plugin SDK using run or submit."""
     _print_example_separator(
-        run_nmp_online_metric_example.__name__,
+        run_nhx_online_metric_example.__name__,
         is_online=is_online,
         limit_samples=limit_samples,
     )
@@ -550,13 +550,13 @@ async def run_nmp_online_metric_example(
         await _close_client(client)
 
 
-def run_nmp_online_metric_example_sync_client(
+def run_nhx_online_metric_example_sync_client(
     is_online: bool = False,
     limit_samples: int = 2,
 ) -> None:
     """Evaluate one metric through the plugin SDK using a sync platform client."""
     _print_example_separator(
-        run_nmp_online_metric_example_sync_client.__name__,
+        run_nhx_online_metric_example_sync_client.__name__,
         is_online=is_online,
         limit_samples=limit_samples,
     )
@@ -606,19 +606,19 @@ def run_nmp_online_metric_example_sync_client(
         client.close()
 
 
-async def run_nmp_online_metric_local_file_example(
+async def run_nhx_online_metric_local_file_example(
     is_online: bool = False,
     limit_samples: int = 2,
 ) -> None:
     """Evaluate one metric through the plugin SDK using a local JSONL Path dataset."""
     _print_example_separator(
-        run_nmp_online_metric_local_file_example.__name__,
+        run_nhx_online_metric_local_file_example.__name__,
         is_online=is_online,
         limit_samples=limit_samples,
     )
     client = await _new_client()
     try:
-        with TemporaryDirectory(prefix="nmp-evaluator-plugin-") as dataset_dir:
+        with TemporaryDirectory(prefix="nhx-evaluator-plugin-") as dataset_dir:
             dataset_path = Path(dataset_dir) / "helpsteer2-local.jsonl"
             write_local_helpsteer2_dataset(dataset_path, row_count=limit_samples)
             await _run_online_metric_example_body(
@@ -632,13 +632,13 @@ async def run_nmp_online_metric_local_file_example(
         await _close_client(client)
 
 
-async def run_nmp_llm_judge_example(
+async def run_nhx_llm_judge_example(
     is_online: bool = False,
     limit_samples: int = 2,
 ) -> None:
     """Evaluate a helpfulness judge through the plugin SDK using run or submit."""
     _print_example_separator(
-        run_nmp_llm_judge_example.__name__,
+        run_nhx_llm_judge_example.__name__,
         is_online=is_online,
         limit_samples=limit_samples,
     )
@@ -692,17 +692,17 @@ async def run_examples(*, include_submit: bool = False, include_model_calls: boo
         print("All plugin examples submit platform jobs; pass --include-submit to run them.")
         return
 
-    await run_nmp_online_metric_example(is_online=False)
-    await run_nmp_online_metric_local_file_example(is_online=False)
+    await run_nhx_online_metric_example(is_online=False)
+    await run_nhx_online_metric_local_file_example(is_online=False)
 
     if include_model_calls:
-        await run_nmp_llm_judge_example(is_online=True)
+        await run_nhx_llm_judge_example(is_online=True)
 
 
 def run_sync_examples(*, include_submit: bool = False) -> None:
     """Execute the synchronous example workflows exposed by this module."""
     if include_submit:
-        run_nmp_online_metric_example_sync_client(is_online=False)
+        run_nhx_online_metric_example_sync_client(is_online=False)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

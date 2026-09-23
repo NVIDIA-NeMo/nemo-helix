@@ -10,22 +10,22 @@ from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.secret_resolver import validate_secret
 from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
-from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import ListFilesQueryParams
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_SEED_TYPES = {"directory", "file_contents", "hf", "nmp"}
+_SUPPORTED_SEED_TYPES = {"directory", "file_contents", "hf", "nhx"}
 _UNSUPPORTED_SEED_TYPES_MESSAGE = (
-    "The NeMo Platform Data Designer service only supports seed data from HuggingFace "
-    "or the NeMo Platform Files service (FilesetFile, Directory, or FileContents seed sources "
+    "The NeMo Helix Data Designer service only supports seed data from HuggingFace "
+    "or the NeMo Helix Files service (FilesetFile, Directory, or FileContents seed sources "
     "referencing fileset paths). Upload your data to the Files service, adjust your config, and try again."
 )
 _DATAFRAME_SEED_TYPE = "df"
 LOCAL_DATAFRAME_SEED_ERROR_MESSAGE = (
-    "Dataframe seed sources are not supported on the NeMo Platform. "
+    "Dataframe seed sources are not supported on the NeMo Helix. "
     "Save your data to a file or directory and update your config before trying again. "
     "If you intend to run this same workload remotely, upload the file or directory to the Files service."
 )
@@ -34,7 +34,7 @@ LOCAL_DATAFRAME_SEED_ERROR_MESSAGE = (
 async def validate_seed(
     dd_config: dd.DataDesignerConfig,
     workspace: str,
-    sdk: AsyncPlatformClient,
+    sdk: AsyncHelixClient,
 ) -> str | None:
     if (seed_source := _get_seed_source(dd_config)) is None:
         return None
@@ -45,7 +45,7 @@ async def validate_seed(
         # In local execution context, a HF seed source token will always "resolve"
         # because the composite secret resolver includes a plaintext resolver.
         # In remote execution context, a HF seed source token must be a reference
-        # to a Nemo Platform secret (if provided).
+        # to a Nemo Helix secret (if provided).
         if (token := seed_source.token) is not None:
             await validate_secret(sdk, token, workspace)
         return None
@@ -57,7 +57,7 @@ async def validate_seed(
 async def _validate_seed_from_files_service(
     seed_source: FilesetFileSeedSource | dd.DirectorySeedSource | dd.FileContentsSeedSource,
     workspace: str,
-    sdk: AsyncPlatformClient,
+    sdk: AsyncHelixClient,
 ) -> str | None:
     try:
         workspace, fileset_name, fragment = parse_fileset_ref(seed_source.path, workspace_fallback=workspace)

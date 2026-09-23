@@ -6,17 +6,17 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.files.metadata import FilesetMetadata
-from nemo_platform_plugin.files.storage_config import LocalStorageConfig
-from nemo_platform_plugin.files.types import FilesetFileOutput, FilesetOutput, ListFilesetFilesResponse
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nmp.common.api.parsed_filter import ParsedFilter
-from nmp.common.entities.client import EntityClient
-from nmp.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
-from nmp.core.models.api.service.model_entity_service import ModelEntityService
-from nmp.core.models.entities import Model
-from nmp.core.models.schemas import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.files.metadata import FilesetMetadata
+from nemo_helix_plugin.files.storage_config import LocalStorageConfig
+from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput, ListFilesetFilesResponse
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.common.entities.client import EntityClient
+from nhx.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
+from nhx.core.models.api.service.model_entity_service import ModelEntityService
+from nhx.core.models.entities import Model
+from nhx.core.models.schemas import (
     APIEndpointData,
     ContainerExecutorConfig,
     CreateModelAdapterRequest,
@@ -29,7 +29,7 @@ from nmp.core.models.schemas import (
     UpdateAdapterRequest,
     UpdateModelEntityRequest,
 )
-from nmp.testing import create_test_client
+from nhx.testing import create_test_client
 
 
 @pytest.fixture
@@ -59,14 +59,14 @@ def _mock_files_client():
     mock_response = MagicMock()
     mock_response.data.return_value = fileset_output
     mock_fc.get_fileset.return_value = mock_response
-    with patch("nmp.core.models.api.permissions.client_from_platform", return_value=mock_fc):
+    with patch("nhx.core.models.api.permissions.client_from_platform", return_value=mock_fc):
         yield mock_fc
 
 
 @pytest.fixture
 def model_entity_service(entity_client, _mock_files_client):
     """Create a ModelEntityService with MockEntityClient for integration testing."""
-    async_sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    async_sdk = AsyncMock(spec=AsyncNeMoHelix)
     async_sdk.files.list = AsyncMock(
         return_value=ListFilesetFilesResponse(
             data=[
@@ -85,7 +85,7 @@ def model_entity_service(entity_client, _mock_files_client):
 
 @pytest.fixture
 def adapter_entity_service(model_entity_service):
-    from nmp.core.models.api.service.adapter_entity_service import AdapterEntityService
+    from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 
     return AdapterEntityService(model_entity_service.entity_client, sdk=model_entity_service.sdk)
 

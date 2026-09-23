@@ -25,8 +25,8 @@ class OpenShellTLSConfig(BaseModel):
     client_key_path: str | None = Field(default=None, description="Path to the client private key (mTLS).")
 
 
-class PlatformEgressConfig(BaseModel):
-    """The NeMo platform endpoint a sandbox must always be able to reach.
+class HelixEgressConfig(BaseModel):
+    """The NeMo Helix endpoint a sandbox must always be able to reach.
 
     Environment-specific: on the docker driver a sandbox reaches the platform at
     host.docker.internal:8080; an in-cluster (k8s) driver uses the platform Service
@@ -94,8 +94,8 @@ class OpenShellExecutorConfig(BaseModel):
             "disable it entirely (e.g. gateway-managed inference via inference.local)."
         ),
     )
-    platform_egress: PlatformEgressConfig | None = Field(
-        default_factory=PlatformEgressConfig,
+    platform_egress: HelixEgressConfig | None = Field(
+        default_factory=HelixEgressConfig,
         description=(
             "Platform endpoint a sandbox reaches directly. Drives the generated default policy "
             "(when default_policy_path is unset) and is injected into every policy as a mandatory "

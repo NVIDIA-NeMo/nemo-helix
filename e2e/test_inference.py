@@ -7,8 +7,8 @@ These tests verify that mock provider mode works through the real platform
 subprocess, exercising provider CRUD, model entity routing, OpenAI routing,
 chat completions, streaming, and error simulation.
 
-Mock provider mode is enabled by the NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX
-env var set in conftest.py. Tests use ``add_mock_provider()`` from nmp.testing
+Mock provider mode is enabled by the NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX
+env var set in conftest.py. Tests use ``add_mock_provider()`` from nhx.testing
 to create providers that return canned responses without a real inference backend.
 """
 
@@ -16,8 +16,8 @@ import uuid
 from typing import Any, cast
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nmp.testing import MockProviderResponse, add_mock_provider
+from nemo_helix import NeMoHelix
+from nhx.testing import MockProviderResponse, add_mock_provider
 
 from e2e.utils import collect_sse_chunks
 
@@ -31,7 +31,7 @@ def _unique_name(prefix: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_provider_create_and_list(sdk: NeMoPlatform, workspace: str):
+def test_provider_create_and_list(sdk: NeMoHelix, workspace: str):
     """Create a mock provider and verify it appears in the provider list."""
     provider = add_mock_provider(
         sdk,
@@ -45,7 +45,7 @@ def test_provider_create_and_list(sdk: NeMoPlatform, workspace: str):
     assert provider.name in names
 
 
-def test_provider_create_and_delete(sdk: NeMoPlatform, workspace: str):
+def test_provider_create_and_delete(sdk: NeMoHelix, workspace: str):
     """Create then delete a mock provider."""
     provider = add_mock_provider(
         sdk,
@@ -66,7 +66,7 @@ def test_provider_create_and_delete(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_provider_route(sdk: NeMoPlatform, workspace: str):
+def test_chat_completion_via_provider_route(sdk: NeMoHelix, workspace: str):
     """Send a chat completion request routed by provider name."""
     chat_response = {
         "id": "chatcmpl-provider",
@@ -106,7 +106,7 @@ def test_chat_completion_via_provider_route(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_model_entity_route(sdk: NeMoPlatform, workspace: str):
+def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, workspace: str):
     """Send a chat completion request routed by model entity name."""
     entity_name = _unique_name("model-entity")
     chat_response = {
@@ -145,7 +145,7 @@ def test_chat_completion_via_model_entity_route(sdk: NeMoPlatform, workspace: st
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_openai_route(sdk: NeMoPlatform, workspace: str):
+def test_chat_completion_via_openai_route(sdk: NeMoHelix, workspace: str):
     """Send a chat completion request via the OpenAI-compatible route."""
     entity_name = _unique_name("openai-model")
     chat_response = {
@@ -186,7 +186,7 @@ def test_chat_completion_via_openai_route(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_streaming_chat_completion(sdk: NeMoPlatform, workspace: str):
+def test_streaming_chat_completion(sdk: NeMoHelix, workspace: str):
     """Streaming chat completion returns SSE chunks with content."""
     chat_response = {
         "id": "chatcmpl-stream",
@@ -233,7 +233,7 @@ def test_streaming_chat_completion(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_model_list_via_openai_route(sdk: NeMoPlatform, workspace: str):
+def test_model_list_via_openai_route(sdk: NeMoHelix, workspace: str):
     """The OpenAI /v1/models endpoint lists routable VirtualModels.
 
     Adding a mock provider creates a model entity, for which the reconciler
@@ -259,9 +259,9 @@ def test_model_list_via_openai_route(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_mock_provider_error_simulation(sdk: NeMoPlatform, workspace: str):
+def test_mock_provider_error_simulation(sdk: NeMoHelix, workspace: str):
     """Mock providers can simulate HTTP error responses."""
-    from nemo_platform import InternalServerError
+    from nemo_helix import InternalServerError
 
     provider = add_mock_provider(
         sdk,
@@ -287,7 +287,7 @@ def test_mock_provider_error_simulation(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_per_model_sequential_responses(sdk: NeMoPlatform, workspace: str):
+def test_per_model_sequential_responses(sdk: NeMoHelix, workspace: str):
     """Mock providers support different sequential responses per model."""
     entity_main = _unique_name("main-llm")
     entity_safety = _unique_name("safety-llm")
@@ -367,7 +367,7 @@ def test_per_model_sequential_responses(sdk: NeMoPlatform, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_virtual_model_created_by_mock_provider(sdk: NeMoPlatform, workspace: str):
+def test_virtual_model_created_by_mock_provider(sdk: NeMoHelix, workspace: str):
     """add_mock_provider creates a passthrough VirtualModel for each served entity."""
     entity_name = _unique_name("vm-check")
     add_mock_provider(

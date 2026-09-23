@@ -2,7 +2,7 @@
   "name": "@nemo/sdk",
   "version": "1.0.0",
   "private": true,
-  "description": "A collection of generated types and hooks for NeMo Platform.",
+  "description": "A collection of generated types and hooks for NeMo Helix.",
   "sideEffects": false,
   "scripts": {
     "gen": "tsx ./orval/generate.ts",

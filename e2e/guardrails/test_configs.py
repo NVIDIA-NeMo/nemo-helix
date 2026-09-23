@@ -9,9 +9,9 @@ of validation errors; this file keeps e2e coverage focused on the user-facing
 create, retrieve, list, update, and delete workflow.
 """
 
-import nemo_platform
+import nemo_helix
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from e2e.guardrails.utils import CONTENT_SAFETY_INPUT_FLOW, RailType, content_safety_config, unique_name
 
@@ -24,7 +24,7 @@ def _config_data(workspace: str, *, rail_types: tuple[RailType, ...] = ("input",
     )
 
 
-def test_guardrail_config_create_and_retrieve(sdk: NeMoPlatform, workspace: str) -> None:
+def test_guardrail_config_create_and_retrieve(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("crud-config")
 
     created = sdk.guardrail.configs.create(
@@ -51,7 +51,7 @@ def test_guardrail_config_create_and_retrieve(sdk: NeMoPlatform, workspace: str)
     assert retrieved.data.rails.input.flows == [CONTENT_SAFETY_INPUT_FLOW]
 
 
-def test_guardrail_config_create_and_list(sdk: NeMoPlatform, workspace: str) -> None:
+def test_guardrail_config_create_and_list(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("list-config")
     created = sdk.guardrail.configs.create(
         workspace=workspace,
@@ -71,7 +71,7 @@ def test_guardrail_config_create_and_list(sdk: NeMoPlatform, workspace: str) -> 
     assert listed_config.updated_at is not None
 
 
-def test_guardrail_config_update(sdk: NeMoPlatform, workspace: str) -> None:
+def test_guardrail_config_update(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("update-config")
     created = sdk.guardrail.configs.create(
         workspace=workspace,
@@ -95,7 +95,7 @@ def test_guardrail_config_update(sdk: NeMoPlatform, workspace: str) -> None:
     assert updated.data.rails.output is not None
 
 
-def test_guardrail_config_delete(sdk: NeMoPlatform, workspace: str) -> None:
+def test_guardrail_config_delete(sdk: NeMoHelix, workspace: str) -> None:
     name = unique_name("delete-config")
     sdk.guardrail.configs.create(
         workspace=workspace,
@@ -109,12 +109,12 @@ def test_guardrail_config_delete(sdk: NeMoPlatform, workspace: str) -> None:
 
     sdk.guardrail.configs.delete(workspace=workspace, name=name)
 
-    with pytest.raises(nemo_platform.NotFoundError):
+    with pytest.raises(nemo_helix.NotFoundError):
         sdk.guardrail.configs.retrieve(workspace=workspace, name=name)
 
 
 def test_guardrail_config_create_duplicate_name_returns_conflict(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
 ) -> None:
     name = unique_name("duplicate-config")
@@ -127,7 +127,7 @@ def test_guardrail_config_create_duplicate_name_returns_conflict(
         data=config_data,
     )
 
-    with pytest.raises(nemo_platform.ConflictError):
+    with pytest.raises(nemo_helix.ConflictError):
         sdk.guardrail.configs.create(
             workspace=workspace,
             name=name,

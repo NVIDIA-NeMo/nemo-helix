@@ -3,7 +3,7 @@
 
 """Shared test doubles for the agent-hardener plugin.
 
-The job/SDK seams take concrete types (:class:`JobContext`, ``NeMoPlatform``) that are impractical to
+The job/SDK seams take concrete types (:class:`JobContext`, ``NeMoHelix``) that are impractical to
 build in a unit test, so these factories return duck-typed stand-ins narrowed with :func:`typing.cast`.
 The cast is deliberate and lives here only: keeping the fakes in one place means a stub that drifts from
 the real shape is fixed once, rather than per file — the drift that let a bad fixture hide a real bug
@@ -16,8 +16,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job_context import JobContext
 
 
 def make_job_context(
@@ -43,14 +43,14 @@ def make_job_context(
     )
 
 
-def make_sdk(entities: Any = None, **namespaces: Any) -> NeMoPlatform:
-    """A ``NeMoPlatform`` stand-in exposing only the namespaces a test needs (usually ``entities``)."""
-    return cast(NeMoPlatform, SimpleNamespace(entities=entities, **namespaces))
+def make_sdk(entities: Any = None, **namespaces: Any) -> NeMoHelix:
+    """A ``NeMoHelix`` stand-in exposing only the namespaces a test needs (usually ``entities``)."""
+    return cast(NeMoHelix, SimpleNamespace(entities=entities, **namespaces))
 
 
-def make_async_sdk(**namespaces: Any) -> AsyncNeMoPlatform:
-    """An ``AsyncNeMoPlatform`` stand-in (the async SDK resources only read ``base_url``)."""
-    return cast(AsyncNeMoPlatform, SimpleNamespace(**namespaces))
+def make_async_sdk(**namespaces: Any) -> AsyncNeMoHelix:
+    """An ``AsyncNeMoHelix`` stand-in (the async SDK resources only read ``base_url``)."""
+    return cast(AsyncNeMoHelix, SimpleNamespace(**namespaces))
 
 
 def make_entity(**data: Any) -> Any:

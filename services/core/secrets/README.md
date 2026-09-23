@@ -16,7 +16,7 @@ If you are using VSCode, you can use this launch configuration to start the Secr
             "name": "Debug Platform",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/platform/src/nmp/platform/main.py",
+            "program": "${workspaceFolder}/platform/src/nhx/platform/main.py",
             "args": [
                 "run",
                 "--services",
@@ -27,7 +27,7 @@ If you are using VSCode, you can use this launch configuration to start the Secr
                 "--port=8000",
             ],
             "env": {
-                "NMP_CONFIG_FILE_PATH": "${workspaceFolder}/platform/config/local.yaml",
+                "NHX_CONFIG_FILE_PATH": "${workspaceFolder}/platform/config/local.yaml",
             },
         }
     ]
@@ -41,8 +41,8 @@ A secret name must start with a lowercase letter, end with a lowercase letter or
 With the SDK, you can test secrets functionality by running:
 
 ```python
-from nemo_platform import NeMoPlatform
-sdk = NeMoPlatform(base_url="http://localhost:8080")
+from nemo_helix import NeMoHelix
+sdk = NeMoHelix(base_url="http://localhost:8080")
 
 # Create a secret
 secret = sdk.secrets.create(
@@ -98,28 +98,28 @@ To use secrets in the Jobs API factory, you can define them in the Job compiler 
 For example:
 
 ```python
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 from pydantic import BaseModel
 # Import the job compiling building blocks
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
     EnvironmentVariable,
     EnvironmentVariableFromSecret,
 )
 
-sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
 
 class JobConfig(BaseModel):
     # Define your job configuration here
     pass
 
-async def platform_job_compiler(model: JobConfig) -> PlatformJobSpec:
-    return PlatformJobSpec(
+async def platform_job_compiler(model: JobConfig) -> HelixJobSpec:
+    return HelixJobSpec(
         steps=[
-            PlatformJobStep(
+            HelixJobStep(
                 name="job-using-secrets",
                 executor=CPUExecutionProviderSpec(
                     provider="cpu",

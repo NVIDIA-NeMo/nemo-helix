@@ -7,7 +7,7 @@ import pytest
 import yaml
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import validator_for
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
 from tests.auth_idp.providers import load_provider_config, load_provider_configs
 
@@ -40,7 +40,7 @@ def test_all_provider_manifests_share_the_same_contract(monkeypatch):
             "interactive_user_password_grant",
             {
                 "grant_type": "password",
-                "client_id": "nemo-platform",
+                "client_id": "nemo-helix",
                 "username": "nemo-user",
                 "password": "shared-secret",
                 "scope": "openid email groups",
@@ -91,7 +91,7 @@ def test_authentik_manifest_declares_real_token_acquisition_contract():
     assert token_acquisition["token_endpoint"]
     setup_grant = token_acquisition["e2e_setup_password_grant"]
     assert setup_grant["grant_type"] == "password"
-    assert setup_grant["client_id"] == "nemo-platform"
+    assert setup_grant["client_id"] == "nemo-helix"
     assert setup_grant["username"] == "nemo-setup"
     assert setup_grant["password"] == "nemo-setup-token-secret-dev"
     assert "password_env_var" not in setup_grant
@@ -104,11 +104,11 @@ def test_authentik_manifest_declares_real_token_acquisition_contract():
     assert workload_identity["principal_id"]
     assert not workload_identity["principal_id"].startswith(principal_contract["internal_service_prefix_reserved"])
     assert workload_identity["expected_groups"] == ["nemo-workloads"]
-    assert workload_contract["audience"] == "nemo-platform"
+    assert workload_contract["audience"] == "nemo-helix"
     assert workload_contract["groups_format"] == "comma_string"
     assert workload_contract["token_env_vars"] == [WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR]
-    assert workload_contract["forwarded_headers"]["principal_id"] == "X-NMP-Principal-Id"
-    assert workload_contract["forwarded_headers"]["principal_groups"] == "X-NMP-Principal-Groups"
+    assert workload_contract["forwarded_headers"]["principal_id"] == "X-NHX-Principal-Id"
+    assert workload_contract["forwarded_headers"]["principal_groups"] == "X-NHX-Principal-Groups"
 
 
 def test_authentik_manifest_declares_provider_test_runtimes():
@@ -194,7 +194,7 @@ def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
     assert provider.interactive_user_password_grant is None
     assert provider.workload_provider_password_grant is not None
     assert provider.workload_provider_password_grant["grant_type"] == "password"
-    assert provider.workload_audience == "nemo-platform"
+    assert provider.workload_audience == "nemo-helix"
     assert provider.workload_principal_claim == "sub"
     assert provider.workload_groups_claim == "groups"
     assert provider.workload_groups_format == "comma_string"

@@ -27,7 +27,7 @@ repos:
     hooks:
       - id: openapi-generator
         # Generate openapi spec for platform
-        name: Generate NeMo Platform OpenAPI Specification
+        name: Generate NeMo Helix OpenAPI Specification
         language: system
         entry: bash script/generate-openapi-spec.sh
         pass_filenames: false
@@ -36,9 +36,9 @@ repos:
         # which results in failed CI pipelines.
         files: |
           (?x)^(
-              # NMP Common schemas
-              packages/nmp_common/src/nmp_common/datamodel/.*|
-              packages/nmp_common/src/nmp_common/api/.*|
+              # NHX Common schemas
+              packages/nhx_common/src/nhx_common/datamodel/.*|
+              packages/nhx_common/src/nhx_common/api/.*|
 
               # Individual microservices
               services/evaluator/src/evaluator/api/.*|
@@ -55,6 +55,10 @@ repos:
 
   - repo: local
     hooks:
+      - id: verify-nemo-helix-rename
+        name: Verify NeMo Helix rename consistency
+        entry: tools/rename/verify-nemo-helix-rename.sh
+        language: system
       - id: config-reference-docs
         name: Check config reference doc is up to date
         entry: bash -c 'uv run generate-config-docs && git diff --exit-code docs/set-up/config-reference.mdx'
@@ -63,25 +67,24 @@ repos:
         files: |
           (?x)^(
             script/generate_config_docs\.py|
-            packages/nmp_common/.*|
+            packages/nhx_common/.*|
             services/.*/src/.*/config\.py|
             docs/set-up/config-reference\.mdx
           )$
 
-  - repo: https://github.com/norwoodj/helm-docs
-    # The container itself is 'latest' no matter what here
-    rev: v1.14.2
+  - repo: local
     hooks:
       - id: helm-docs
+        name: Generate Helm docs
+        entry: flox -q activate --dir . -- helm-docs --chart-search-root=k8s/helm/ --template-files=k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl
+        language: system
+        pass_filenames: false
         files: |
           (?x)^(
             k8s/helm/values\.yaml|
             k8s/helm/Chart\.yaml|
             k8s/helm/helm-docs-template/nemo-helm-readme\.md\.gotmpl
           )$
-        args:
-          - --chart-search-root=k8s/helm/
-          - --template-files=k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl
 
   - repo: local
     hooks:
@@ -101,21 +104,21 @@ repos:
         verbose: true
       - id: uv-version-consistency
         name: Check CI and Flox uv versions
-        entry: ./tools/lint/check-uv-version.sh
+        entry: flox -q activate --dir . -- ./tools/lint/check-uv-version.sh
         language: system
         files: '^(Makefile|pyproject\.toml|\.github/workflows/.*\.ya?ml|tools/python/\.flox/env/manifest\.toml)$'
         pass_filenames: false
       - id: python-version-consistency
         name: Check Make and Flox Python versions
-        entry: ./tools/lint/check-python-version.sh
+        entry: flox -q activate --dir . -- ./tools/lint/check-python-version.sh
         language: system
         files: '^(Makefile|tools/python/\.flox/env/manifest\.toml)$'
         pass_filenames: false
       - id: node-version-consistency
         name: Check Node.js and pnpm versions
-        entry: ./tools/lint/check-node-version.sh
+        entry: flox -q activate --dir . -- ./tools/lint/check-node-version.sh
         language: system
-        files: '^(Makefile|\.nvmrc|web/package\.json|tools/nodejs/\.flox/env/manifest\.toml|\.github/workflows/ci\.yaml|\.github/actions/build-nemo-platform-wheel/action\.yaml)$'
+        files: '^(Makefile|\.nvmrc|web/package\.json|tools/nodejs/\.flox/env/manifest\.toml|\.github/workflows/ci\.yaml|\.github/actions/build-nemo-helix-wheel/action\.yaml)$'
         pass_filenames: false
       - id: copyright-fix
         name: Fix copyright headers
@@ -157,13 +160,13 @@ repos:
 
   - repo: local
     hooks:
-      - id: no-nmp-common-in-plugins
-        name: Plugins must not import from nmp-common
+      - id: no-nhx-common-in-plugins
+        name: Plugins must not import from nhx-common
         # If this fails: check whether the function/class you need already exists in
-        # nemo_platform_plugin (packages/nemo_platform_plugin). If it does, import
-        # from there instead. If it doesn't, move the code from nmp_common into
-        # nemo_platform_plugin so plugins can access it without depending on nmp_common.
-        entry: 'from nmp\.common|from nmp_common|import nmp\.common|import nmp_common'
+        # nemo_helix_plugin (packages/nemo_helix_plugin). If it does, import
+        # from there instead. If it doesn't, move the code from nhx_common into
+        # nemo_helix_plugin so plugins can access it without depending on nhx_common.
+        entry: 'from nhx\.common|from nhx_common|import nhx\.common|import nhx_common'
         language: pygrep
         files: ^plugins/.*\.py$
         exclude: __pycache__

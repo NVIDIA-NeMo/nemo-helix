@@ -5,12 +5,12 @@
 
 ## Overview
 
-This eval tests whether a coding agent can configure and use a MockLLM provider through the NeMo Platform Inference Gateway (IGW) using the CLI.
+This eval tests whether a coding agent can configure and use a MockLLM provider through the NeMo Helix Inference Gateway (IGW) using the CLI.
 
 ## Environment Setup
 
 - The Inference Gateway runs in mock provider mode (`igw-mock-` prefix enabled)
-- MCP tools are disabled; the agent must use the `nmp` CLI
+- MCP tools are disabled; the agent must use the `nhx` CLI
 - No mock provider is pre-created; the agent must create and configure it
 
 ## What the Agent Should Do
@@ -30,7 +30,7 @@ The verifier checks:
 
 ```text
 environment/
-  Dockerfile       - Extends nmp-agentic-base:latest with mock provider env var, disables MCP
+  Dockerfile       - Extends nhx-agentic-base:latest with mock provider env var, disables MCP
 instruction.md     - Task description for the agent
 task.toml          - Harbor configuration (timeouts, resources)
 tests/

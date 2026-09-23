@@ -10,13 +10,13 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TypeVar
 
-from nemo_platform import APIConnectionError, APIStatusError, NotFoundError
-from nemo_platform.resources.models import AsyncModelsResource as BaseAsyncModelsResource
-from nemo_platform.resources.models import ModelsResource as BaseModelsResource
-from nemo_platform.types.inference import ModelDeployment, ModelProvider
-from nemo_platform.types.inference.gateway.openai.v1 import OpenAIModelResp
-from nemo_platform.types.models import ModelEntity
-from nemo_platform_plugin.models.refs import (
+from nemo_helix import APIConnectionError, APIStatusError, NotFoundError
+from nemo_helix.resources.models import AsyncModelsResource as BaseAsyncModelsResource
+from nemo_helix.resources.models import ModelsResource as BaseModelsResource
+from nemo_helix.types.inference import ModelDeployment, ModelProvider
+from nemo_helix.types.inference.gateway.openai.v1 import OpenAIModelResp
+from nemo_helix.types.models import ModelEntity
+from nemo_helix_plugin.models.refs import (
     ResolvedModelReference,
     first_provider_ref,
     model_entity_route_openai_url,
@@ -151,7 +151,7 @@ class ModelsResource(BaseModelsResource):
     Adds convenience methods for OpenAI integration and deployment management.
 
     Example:
-        >>> sdk = NeMoPlatform(base_url="http://nmp-host", workspace="default")
+        >>> sdk = NeMoHelix(base_url="http://nhx-host", workspace="default")
         >>> sdk.models.get_openai_route_base_url()
         >>> sdk.models.wait_for_status("my-deployment", "READY")
     """
@@ -195,7 +195,7 @@ class ModelsResource(BaseModelsResource):
 
     def get_openai_client(self, *, workspace: str | None = None):
         """
-        Get a sync OpenAI client configured for NeMo Platform's inference gateway.
+        Get a sync OpenAI client configured for NeMo Helix's inference gateway.
 
         This method returns an OpenAI client with the base_url set to the
         OpenAI proxy route for the specified workspace. The client can be
@@ -635,7 +635,7 @@ class AsyncModelsResource(BaseAsyncModelsResource):
     Methods that perform I/O are properly async.
 
     Example:
-        >>> sdk = AsyncNeMoPlatform(base_url="http://nmp-host", workspace="default")
+        >>> sdk = AsyncNeMoHelix(base_url="http://nhx-host", workspace="default")
         >>> sdk.models.get_openai_route_base_url()
         >>> await sdk.models.wait_for_status("my-deployment", "READY")
     """
@@ -673,7 +673,7 @@ class AsyncModelsResource(BaseAsyncModelsResource):
 
     def get_async_openai_client(self, *, workspace: str | None = None):
         """
-        Get an async OpenAI client configured for NeMo Platform's inference gateway.
+        Get an async OpenAI client configured for NeMo Helix's inference gateway.
 
         This method returns an AsyncOpenAI client with the base_url set to the
         OpenAI proxy route for the specified workspace.

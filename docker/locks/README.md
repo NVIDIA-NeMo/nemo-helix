@@ -56,9 +56,9 @@ uv sync --project docker/locks/mamba-wheel-build-py312 --locked --no-install-pro
 
 The Gym task and sandbox-host images use separate lock projects:
 
-- `docker/Dockerfile.nmp-gym-tasks` uses `nmp-gym-tasks` for colocated Gym
+- `docker/Dockerfile.nhx-gym-tasks` uses `nhx-gym-tasks` for colocated Gym
   evaluation.
-- `docker/gym-host/Dockerfile` uses `nmp-gym-host` for the Gym runtime that
+- `docker/gym-host/Dockerfile` uses `nhx-gym-host` for the Gym runtime that
   Evaluator provisions through OpenSandbox.
 
 The locks are separate from the workspace because Gym and Ray are image-specific
@@ -69,8 +69,8 @@ After changing either lock project's `pyproject.toml`, regenerate its lock with
 Python 3.13.15 or newer:
 
 ```bash
-uv lock --project docker/locks/nmp-gym-tasks --python 3.13.15
-uv lock --project docker/locks/nmp-gym-host --python 3.13.15
+uv lock --project docker/locks/nhx-gym-tasks --python 3.13.15
+uv lock --project docker/locks/nhx-gym-host --python 3.13.15
 ```
 
 Verify both image architectures:
@@ -79,15 +79,15 @@ Verify both image architectures:
 
 ::::{tab-item} x86_64
 ```bash
-uv sync --project docker/locks/nmp-gym-tasks --locked --no-install-project --dry-run --python 3.13.15 --python-platform x86_64-unknown-linux-gnu
-uv sync --project docker/locks/nmp-gym-host --locked --no-install-project --dry-run --python 3.13.15 --python-platform x86_64-unknown-linux-gnu
+uv sync --project docker/locks/nhx-gym-tasks --locked --no-install-project --dry-run --python 3.13.15 --python-platform x86_64-unknown-linux-gnu
+uv sync --project docker/locks/nhx-gym-host --locked --no-install-project --dry-run --python 3.13.15 --python-platform x86_64-unknown-linux-gnu
 ```
 ::::
 
 ::::{tab-item} aarch64
 ```bash
-uv sync --project docker/locks/nmp-gym-tasks --locked --no-install-project --dry-run --python 3.13.15 --python-platform aarch64-unknown-linux-gnu
-uv sync --project docker/locks/nmp-gym-host --locked --no-install-project --dry-run --python 3.13.15 --python-platform aarch64-unknown-linux-gnu
+uv sync --project docker/locks/nhx-gym-tasks --locked --no-install-project --dry-run --python 3.13.15 --python-platform aarch64-unknown-linux-gnu
+uv sync --project docker/locks/nhx-gym-host --locked --no-install-project --dry-run --python 3.13.15 --python-platform aarch64-unknown-linux-gnu
 ```
 ::::
 
@@ -106,8 +106,8 @@ relocks dynamically:
 5. Build the matching smoke target:
 
    ```bash
-   docker buildx bake nmp-gym-tasks-smoke-test
-   docker buildx bake nmp-gym-host-smoke-test
+   docker buildx bake nhx-gym-tasks-smoke-test
+   docker buildx bake nhx-gym-host-smoke-test
    ```
 
 6. Run the Evaluator agent-evaluation compiler tests, which verify that Gym

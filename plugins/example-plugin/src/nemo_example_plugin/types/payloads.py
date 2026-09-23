@@ -11,7 +11,7 @@ without pulling in transport concerns.
 from __future__ import annotations
 
 from nemo_example_plugin.entities import ExampleItem
-from nemo_platform_plugin.schema import NemoListResponse
+from nemo_helix_plugin.schema import NemoListResponse
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------

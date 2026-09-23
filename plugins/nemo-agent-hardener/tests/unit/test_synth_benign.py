@@ -13,7 +13,7 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.cli import _shared, war_game
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.job_context import JobContext
 from typer.testing import CliRunner
 
 _HEADER = "tool,payload,label,rationale,persona\n"
@@ -43,7 +43,7 @@ def test_from_agent_resolution_builds_agent_source_entity() -> None:
     assert manifest.agent == "ws1/chatbot"
     assert manifest.port == 8000
     assert manifest.secrets == ["OPENAI_API_KEY"]
-    # _get_data_fields carries only domain fields (what the CLI persists via sdk.entities.create).
+    # _get_data_fields carries only domain fields persisted through the typed entity client.
     assert "benign_suite" in manifest._get_data_fields()
     assert "name" not in manifest._get_data_fields()
 
@@ -312,7 +312,7 @@ def test_synth_benign_job_compile_builds_synth_task_step(monkeypatch: pytest.Mon
         )
     )
 
-    step = list(platform_spec["steps"])[0]  # PlatformJobSpec is a TypedDict; steps is an Iterable
+    step = list(platform_spec["steps"])[0]  # HelixJobSpec is a TypedDict; steps is an Iterable
     # Assert the provider first: it narrows the executor union to the subprocess variant.
     assert step["executor"]["provider"] == "subprocess"
     assert step["executor"]["command"] == ["python", "-m", "nemo_agent_hardener_plugin.tasks.synth_benign"]
