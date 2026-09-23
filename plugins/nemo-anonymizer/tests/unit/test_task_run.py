@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from nemo_anonymizer_plugin.tasks.anonymizer import run as task_run
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
@@ -65,8 +65,8 @@ def test_get_ctx_uses_platform_usage_reporter(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "team-a")
     monkeypatch.setenv(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, str(tmp_path / "ephemeral"))
     monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, str(tmp_path / "persistent"))
-    sdk = NeMoHelix(base_url="http://platform.test", workspace="team-a")
+    client = NemoClient(base_url="http://platform.test", workspace="team-a")
 
-    ctx = task_run._get_ctx(sdk)
+    ctx = task_run._get_ctx(client)
 
     assert isinstance(ctx.usage, HelixJobUsageReporter)

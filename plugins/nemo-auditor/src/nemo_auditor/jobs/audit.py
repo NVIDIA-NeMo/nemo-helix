@@ -33,8 +33,8 @@ from uuid import uuid4
 import garakapi
 import yaml
 from nemo_auditor.entities import AuditConfig, AuditTarget
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.response import NemoResponse
 from nemo_helix_plugin.entities import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -180,8 +180,8 @@ async def _resolve_ref(
 
 def _rewrite_options_uris(
     options: dict,
-    sdk: NeMoHelix | None,
-    async_sdk: AsyncHelixClient | None = None,
+    sdk: NemoClient | None,
+    async_sdk: AsyncNemoClient | None = None,
 ) -> None:
     """Replace ``nhx_uri_spec`` sentinels in ``options`` with concrete ``uri`` values.
 
@@ -347,7 +347,7 @@ class AuditJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient | None,
+        async_sdk: AsyncNemoClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve any name-string refs on ``input_spec`` into inline entities.
@@ -392,7 +392,7 @@ class AuditJob(NemoJob):
     @staticmethod
     def _resolve_entity_client(
         entity_client: object,
-        async_sdk: AsyncHelixClient | None,
+        async_sdk: AsyncNemoClient | None,
     ) -> NemoEntitiesClient:
         """Return a ``NemoEntitiesClient`` from whatever the scheduler handed us.
 
@@ -420,7 +420,7 @@ class AuditJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> object:
@@ -464,8 +464,8 @@ class AuditJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoHelix | None = None,
-        async_sdk: AsyncHelixClient | None = None,
+        sdk: NemoClient | None = None,
+        async_sdk: AsyncNemoClient | None = None,
     ) -> dict:
         spec = AuditSpec.model_validate(config)
 

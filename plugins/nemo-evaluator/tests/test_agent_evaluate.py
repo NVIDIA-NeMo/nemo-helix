@@ -91,7 +91,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.jobs.providers import SubprocessExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile, HelixJobSpec
-from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import JsonValue, ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -1748,15 +1748,16 @@ def test_spec_requires_exactly_one_of_target_or_trials() -> None:
 class TestAgentEvalTask:
     """Coverage for the compiled container/subprocess task entrypoint."""
 
-    def test_main_dispatches_agent_eval_job_with_task_sdk(self, mocker: MockerFixture) -> None:
-        sdk = NeMoHelix(base_url="http://platform.test", workspace="default")
+    def test_main_dispatches_agent_eval_job_with_task_client(self, mocker: MockerFixture) -> None:
+        client = NemoClient(
+            base_url="http://platform.test", workspace="default", http_client=MagicMock(spec=httpx.Client)
+        )
         async_client = AsyncNemoClient(
             base_url="http://platform.test", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
         )
         ctx = MagicMock()
-        get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", return_value=sdk)
         build_ctx = mocker.patch("nemo_evaluator.tasks.runner.build_ctx_from_env", return_value=ctx)
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
+        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client", return_value=client)
         get_async_task_client = mocker.patch(
             "nemo_evaluator.tasks.runner.get_async_task_nemo_client", return_value=async_client
         )
@@ -1765,22 +1766,23 @@ class TestAgentEvalTask:
         exit_code = agent_eval_task_main()
 
         assert exit_code == 0
-        get_platform_sdk.assert_called_once_with("evaluator")
-        build_ctx.assert_called_once_with(sdk)
-        get_task_client.assert_not_called()
+        get_task_client.assert_called_once_with("evaluator")
+        build_ctx.assert_called_once_with(client)
         get_async_task_client.assert_called_once_with("evaluator")
         run_task.assert_called_once_with(AsyncAgentEvalJob, async_client=async_client, ctx=ctx)
 
-    def test_main_returns_setup_exit_code_when_task_sdk_fails(self, mocker: MockerFixture) -> None:
-        get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", side_effect=RuntimeError("boom"))
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
+    def test_main_returns_setup_exit_code_when_task_client_fails(self, mocker: MockerFixture) -> None:
+        get_task_client = mocker.patch(
+            "nemo_evaluator.tasks.runner.get_task_nemo_client", side_effect=RuntimeError("boom")
+        )
+        get_async_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_async_task_nemo_client")
         run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client")
 
         exit_code = agent_eval_task_main()
 
         assert exit_code == SDK_INITIALIZATION_EXIT_CODE
-        get_platform_sdk.assert_called_once_with("evaluator")
-        get_task_client.assert_not_called()
+        get_task_client.assert_called_once_with("evaluator")
+        get_async_task_client.assert_not_called()
         run_task.assert_not_called()
 
 

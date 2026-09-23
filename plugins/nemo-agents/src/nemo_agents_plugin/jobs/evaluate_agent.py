@@ -37,8 +37,8 @@ from nemo_agents_plugin.utils import (
     preflight_validate_llm_models,
     temp_injected_config,
 )
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job import NemoJob
@@ -210,7 +210,7 @@ class EvaluateAgentJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoHelix | None = None,
+        sdk: NemoClient | None = None,
     ) -> dict:
         """Run the evaluation by delegating to the ``nat eval`` CLI.
 
@@ -233,7 +233,7 @@ class EvaluateAgentJob(NemoJob):
 
         Args:
             config: Dict matching :class:`EvaluateAgentSpec`.
-            sdk: Platform SDK handle passed by the task entrypoint. Required when
+            sdk: Sync platform client passed by the task entrypoint. Required when
                 ``cfg.eval_config_fileset`` or a fileset-shaped ``cfg.output``
                 is set (download / upload respectively); a local-directory
                 output runs without it, so the parameter is declared optional
@@ -331,7 +331,7 @@ class EvaluateAgentJob(NemoJob):
         cfg: EvaluateAgentSpec,
         *,
         ctx: JobContext,
-        sdk: NeMoHelix | None,
+        sdk: NemoClient | None,
     ) -> Iterator[Path]:
         """Yield a local path to the eval YAML.
 
@@ -349,8 +349,8 @@ class EvaluateAgentJob(NemoJob):
 
         if sdk is None:
             raise LocalRunError(
-                "EvaluateAgentJob.run requires a 'sdk: NeMoHelix' to download "
-                "eval_config_fileset contents, but no platform SDK was available. "
+                "EvaluateAgentJob.run requires a sync platform client ('sdk') to download "
+                "eval_config_fileset contents, but no platform client was available. "
                 "Set NHX_BASE_URL before using fileset inputs."
             )
 
@@ -396,7 +396,7 @@ class EvaluateAgentJob(NemoJob):
         *,
         workspace: str,
         ctx: JobContext,
-        sdk: NeMoHelix | None,
+        sdk: NemoClient | None,
     ) -> Iterator[Path]:
         """Yield a local base directory for ``nat eval`` outputs.
 
@@ -442,8 +442,8 @@ class EvaluateAgentJob(NemoJob):
 
         if sdk is None:
             raise LocalRunError(
-                "EvaluateAgentJob.run requires a 'sdk: NeMoHelix' to upload "
-                "results to a fileset, but no platform SDK was available. "
+                "EvaluateAgentJob.run requires a sync platform client ('sdk') to upload "
+                "results to a fileset, but no platform client was available. "
                 "Set NHX_BASE_URL or use --output <path> to write results to a local directory instead."
             )
 
@@ -481,14 +481,14 @@ class EvaluateAgentJob(NemoJob):
         *,
         fileset: str,
         workspace: str,
-        sdk: NeMoHelix,
+        sdk: NemoClient,
     ) -> None:
         """Upload *local_dir* recursively to the named fileset.
 
         The fileset is auto-created (idempotent) if it doesn't already
         exist — same semantics as ``nemo files upload <dir> <fileset>``.
 
-        *sdk* is the platform SDK handle injected into :meth:`run` by
+        *sdk* is the sync platform client injected into :meth:`run` by
         the :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler` (signature-based
         DI). The upload goes through the typed Files client that shares the
         SDK's transport.
