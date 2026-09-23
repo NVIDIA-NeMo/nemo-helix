@@ -20,6 +20,7 @@ import yaml
 from optuna.samplers import GridSampler
 from optuna.study import StudyDirection
 
+from nemo_optimization.artifact_utils import sanitize_config_for_artifact
 from nemo_optimization.backends.optuna.artifacts import maybe_write_pareto_plots, write_trials_dataframe
 from nemo_optimization.backends.optuna.early_stop import maybe_stop_if_target_met
 from nemo_optimization.backends.optuna.search_space import (
@@ -276,49 +277,6 @@ def write_optimized_config(output_dir: Path, optimized_config: Mapping[str, Any]
         encoding="utf-8",
     )
     return path
-
-
-_SECRET_VALUE_KEYS = frozenset(
-    {
-        "api_key",
-        "apikey",
-        "password",
-        "passwd",
-        "secret",
-        "token",
-        "authorization",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "nvidia_api_key",
-    }
-)
-
-
-def _is_secret_value_key(key: str) -> bool:
-    lowered = key.lower().replace("-", "_")
-    # Reference fields hold env/secret *names*, not credentials.
-    if lowered.endswith("_env") or lowered in {"api_key_secret", "api_key_env"}:
-        return False
-    if lowered in _SECRET_VALUE_KEYS:
-        return True
-    return any(lowered.endswith(f"_{suffix}") for suffix in ("api_key", "password", "token", "secret"))
-
-
-def sanitize_config_for_artifact(config: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a deep copy with secret-bearing fields redacted for persistent YAML."""
-
-    def _redact(value: Any, *, key: str | None = None) -> Any:
-        if isinstance(value, Mapping):
-            return {k: _redact(v, key=str(k)) for k, v in value.items()}
-        if isinstance(value, list):
-            return [_redact(v, key=key) for v in value]
-        if key is not None and isinstance(value, str) and value and not value.startswith("${"):
-            if _is_secret_value_key(key):
-                return "${REDACTED}"
-        return value
-
-    return _redact(dict(config))
 
 
 class SyntheticTrialEvaluator:

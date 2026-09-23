@@ -6,7 +6,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import nemo_optimization.router as router_module
 import pytest
+from nemo_optimization.backends.ga.backend import GaBackend, GaBackendError
+from nemo_optimization.backends.optuna.backend import OptunaBackend
+from nemo_optimization.backends.optuna.study_driver import StudyDriverError
 from nemo_optimization.backends.protocol import (
     OptimizationBackend,
     OptimizationBackendCapabilities,
@@ -15,6 +19,7 @@ from nemo_optimization.backends.protocol import (
     OptimizationPhaseResult,
     OptimizationPhaseStatus,
 )
+from nemo_optimization.optimizer_config import OptimizerConfigError
 from nemo_optimization.router import OptimizeRouter, OptimizeRouterError
 from nemo_platform_plugin.job_context import JobContext
 
@@ -213,6 +218,88 @@ def test_phase_result_rejects_reserved_artifact_fields() -> None:
 
     with pytest.raises(ValueError, match="reserved result field"):
         result.to_result_dict()
+
+
+@pytest.mark.parametrize(
+    ("factory", "phase", "run_error"),
+    [
+        (GaBackend, OptimizationPhase.NUMERIC, GaBackendError),
+        (OptunaBackend, OptimizationPhase.PROMPT, StudyDriverError),
+    ],
+)
+def test_backends_apply_advertised_capabilities_consistently(
+    factory: type[GaBackend] | type[OptunaBackend],
+    phase: OptimizationPhase,
+    run_error: type[Exception],
+    ctx: JobContext,
+) -> None:
+    backend = factory()
+    request = OptimizationPhaseRequest(payload={}, phase=phase)
+
+    with pytest.raises(OptimizerConfigError, match="supported phases"):
+        backend.validate_phase(request, ctx=ctx)
+    with pytest.raises(run_error, match="supported phases"):
+        backend.run_phase(request, ctx=ctx)
+
+
+def test_protocol_rejects_invalid_capabilities_and_trial_ranges() -> None:
+    with pytest.raises(ValueError, match="at least one phase"):
+        OptimizationBackendCapabilities(phases=())
+    with pytest.raises(ValueError, match="duplicate phases"):
+        OptimizationBackendCapabilities(phases=(OptimizationPhase.PROMPT, OptimizationPhase.PROMPT))
+    with pytest.raises(ValueError, match="trial_number_offset"):
+        OptimizationPhaseRequest(payload={}, phase=OptimizationPhase.PROMPT, trial_number_offset=-1)
+    with pytest.raises(ValueError, match="trial_count"):
+        OptimizationPhaseResult(
+            phase=OptimizationPhase.PROMPT,
+            backend="ga",
+            status=OptimizationPhaseStatus.FAILED,
+            optimized_payload={},
+            trial_count=-1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("result_phase", "result_backend", "message"),
+    [
+        (OptimizationPhase.NUMERIC, "ga", "returned phase"),
+        (OptimizationPhase.PROMPT, "not-ga", "mismatched backend name"),
+    ],
+)
+def test_router_rejects_backend_results_that_violate_the_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    ctx: JobContext,
+    result_phase: OptimizationPhase,
+    result_backend: str,
+    message: str,
+) -> None:
+    class InvalidResultBackend:
+        name = "ga"
+        capabilities = OptimizationBackendCapabilities(phases=(OptimizationPhase.PROMPT,))
+
+        def validate_phase(self, request: OptimizationPhaseRequest, *, ctx: JobContext, sdk=None) -> None:  # noqa: ANN001
+            del request, ctx, sdk
+
+        def run_phase(
+            self,
+            request: OptimizationPhaseRequest,
+            *,
+            ctx: JobContext,
+            sdk=None,  # noqa: ANN001
+        ) -> OptimizationPhaseResult:
+            del request, ctx, sdk
+            return OptimizationPhaseResult(
+                phase=result_phase,
+                backend=result_backend,
+                status=OptimizationPhaseStatus.COMPLETED,
+                optimized_payload={},
+            )
+
+    plan = router_module._PhasePlan(OptimizationPhase.PROMPT, "ga", InvalidResultBackend())
+    monkeypatch.setattr(router_module, "_phase_plan", lambda payload: plan)
+
+    with pytest.raises(OptimizeRouterError, match=message):
+        router_module._run_phases({}, ctx=ctx, sdk=None)
 
 
 def test_backend_protocol_accepts_phase_only_backend() -> None:

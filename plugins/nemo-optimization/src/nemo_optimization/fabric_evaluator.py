@@ -31,6 +31,7 @@ from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvalu
 from nemo_optimization.config_overlay import apply_suggestions
 
 logger = logging.getLogger(__name__)
+_MAX_LOGGED_DIAGNOSTIC_CHARS = 1_000
 
 
 class FabricCandidateEvaluator:
@@ -210,7 +211,7 @@ def reduce_agent_eval_scores(scores: Sequence[AgentEvalTaskScore], metric_names:
                     score.metric_type,
                     score.task_id,
                     score.status,
-                    score.diagnostics,
+                    _bounded_diagnostics(score.diagnostics),
                 )
                 continue
             for output in score.outputs:
@@ -228,6 +229,16 @@ def reduce_agent_eval_scores(scores: Sequence[AgentEvalTaskScore], metric_names:
             )
         reduced[metric_name] = sum(values) / len(values)
     return reduced
+
+
+def _bounded_diagnostics(diagnostics: object) -> str:
+    """Render evaluator diagnostics without allowing unbounded log records."""
+
+    rendered = str(diagnostics)
+    if len(rendered) <= _MAX_LOGGED_DIAGNOSTIC_CHARS:
+        return rendered
+    suffix = "... [truncated]"
+    return rendered[: _MAX_LOGGED_DIAGNOSTIC_CHARS - len(suffix)] + suffix
 
 
 def _build_metrics(payload: Mapping[str, Any], eval_config: Mapping[str, Any]) -> list[Metric]:

@@ -68,9 +68,11 @@ class OptunaBackend:
         sdk: SyncPlatformClient | None = None,
     ) -> None:
         del ctx, sdk
-        if request.phase is not OptimizationPhase.NUMERIC:
+        if not self.capabilities.supports(request.phase):
             raise OptimizerConfigError(
-                f"Optuna backend does not support the {request.phase.value!r} phase.", phase=request.phase.value
+                f"Optuna backend {self.name!r} does not support phase {request.phase.value!r}; "
+                f"supported phases: {[phase.value for phase in self.capabilities.phases]}.",
+                phase=request.phase.value,
             )
         payload = request.payload
         try:
@@ -86,8 +88,11 @@ class OptunaBackend:
         sdk: SyncPlatformClient | None = None,
     ) -> OptimizationPhaseResult:
         del sdk
-        if request.phase is not OptimizationPhase.NUMERIC:
-            raise StudyDriverError(f"Optuna backend does not support the {request.phase.value!r} phase.")
+        if not self.capabilities.supports(request.phase):
+            raise StudyDriverError(
+                f"Optuna backend {self.name!r} does not support phase {request.phase.value!r}; "
+                f"supported phases: {[phase.value for phase in self.capabilities.phases]}."
+            )
         payload = request.payload
         output_dir = ctx.storage.persistent / "results" / RESULT_NAME
         config = _parse_numeric_config(payload)

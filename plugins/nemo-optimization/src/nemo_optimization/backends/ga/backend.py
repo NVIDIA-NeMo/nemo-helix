@@ -55,9 +55,11 @@ class GaBackend:
         sdk: SyncPlatformClient | None = None,
     ) -> None:
         del ctx, sdk
-        if request.phase is not OptimizationPhase.PROMPT:
+        if not self.capabilities.supports(request.phase):
             raise OptimizerConfigError(
-                f"GA backend does not support the {request.phase.value!r} phase.", phase=request.phase.value
+                f"GA backend {self.name!r} does not support phase {request.phase.value!r}; "
+                f"supported phases: {[phase.value for phase in self.capabilities.phases]}.",
+                phase=request.phase.value,
             )
         parse_optimizer_config(request.payload)
 
@@ -69,8 +71,11 @@ class GaBackend:
         sdk: SyncPlatformClient | None = None,
     ) -> OptimizationPhaseResult:
         del sdk
-        if request.phase is not OptimizationPhase.PROMPT:
-            raise GaBackendError(f"GA backend does not support the {request.phase.value!r} phase.")
+        if not self.capabilities.supports(request.phase):
+            raise GaBackendError(
+                f"GA backend {self.name!r} does not support phase {request.phase.value!r}; "
+                f"supported phases: {[phase.value for phase in self.capabilities.phases]}."
+            )
         message = (
             "optimizer.prompt.enabled is not supported yet. "
             "Prompt GA is tracked separately and will be implemented in the GA algorithm stack."

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -12,6 +13,8 @@ from typing import Any, Protocol
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 
 REASONING_OUTPUT_NAME = "reasoning"
+logger = logging.getLogger(__name__)
+_MAX_LOG_IDENTIFIER_CHARS = 200
 
 
 class CandidateEvaluationError(RuntimeError):
@@ -66,7 +69,13 @@ class CandidateEvaluationResult:
                 continue
             try:
                 objective_value = numeric_metric_value(outputs[metric_name], metric_name=metric_name)
-            except CandidateEvaluationError:
+            except CandidateEvaluationError as exc:
+                logger.warning(
+                    "Skipping invalid evaluator reasoning for task %r and metric %r: %s",
+                    score.task_id[:_MAX_LOG_IDENTIFIER_CHARS],
+                    metric_name[:_MAX_LOG_IDENTIFIER_CHARS],
+                    exc,
+                )
                 continue
             rows.append(
                 RowReasoning(

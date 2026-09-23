@@ -91,6 +91,15 @@ def _run_phases(payload: dict[str, Any], *, ctx: JobContext, sdk: SyncPlatformCl
         )
     else:
         result = plan.backend.run_phase(request, ctx=ctx, sdk=sdk)
+        if result.phase is not plan.phase:
+            raise OptimizeRouterError(
+                f"Optimization backend {plan.backend_name!r} returned phase {result.phase.value!r} "
+                f"for a {plan.phase.value!r} request."
+            )
+        if result.backend != plan.backend_name:
+            raise OptimizeRouterError(
+                f"Optimization backend {plan.backend_name!r} returned mismatched backend name {result.backend!r}."
+            )
 
     _write_artifacts(output_dir, experiment_id, result)
     return _result(result, experiment_id=experiment_id, output_dir=output_dir, ctx=ctx)

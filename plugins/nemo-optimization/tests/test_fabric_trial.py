@@ -23,10 +23,18 @@ from nemo_evaluator_sdk.values.evidence import (
 from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvaluationResult
 from nemo_optimization.fabric_evaluator import (
     FabricCandidateEvaluator,
+    _bounded_diagnostics,
     _model_from_fabric,
     build_agent_eval_tasks,
     reduce_agent_eval_scores,
 )
+
+
+def test_bounded_diagnostics_truncates_large_values() -> None:
+    rendered = _bounded_diagnostics(["x" * 2_000])
+
+    assert len(rendered) == 1_000
+    assert rendered.endswith("... [truncated]")
 
 
 def _payload(dataset: Path) -> dict[str, Any]:
@@ -265,7 +273,7 @@ def test_reduce_agent_eval_scores_rejects_invalid_metric_values(value: object) -
         reduce_agent_eval_scores(scores, ["average_score"])
 
 
-def test_reasoning_for_metric_skips_invalid_metric_values() -> None:
+def test_reasoning_for_metric_logs_and_skips_invalid_metric_values(caplog: pytest.LogCaptureFixture) -> None:
     result = CandidateEvaluationResult(
         aggregate_metrics={"average_score": 0.75},
         scores=(
@@ -297,6 +305,8 @@ def test_reasoning_for_metric_skips_invalid_metric_values() -> None:
     )
 
     assert [row.task_id for row in result.reasoning_for_metric("average_score")] == ["valid"]
+    assert "Skipping invalid evaluator reasoning" in caplog.text
+    assert "task 'invalid'" in caplog.text
 
 
 def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
