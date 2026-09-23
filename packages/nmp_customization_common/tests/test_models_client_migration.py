@@ -18,6 +18,7 @@ from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.client.errors import NemoTransportError
 from nemo_platform_plugin.client.types import RetryPolicy
 from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_platform_plugin.jobs.client import AsyncJobsClient
 from nemo_platform_plugin.models.client import AsyncModelsClient, ModelsClient
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.customization_common.service.platform_client import (
@@ -62,6 +63,7 @@ def _async_platform(transport: httpx.MockTransport) -> AsyncCustomizationPlatfor
     return AsyncCustomizationPlatformClients(
         files=AsyncFilesClient.from_client(client),
         models=AsyncModelsClient.from_client(client),
+        jobs=AsyncJobsClient.from_client(client),
     )
 
 

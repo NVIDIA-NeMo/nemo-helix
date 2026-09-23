@@ -60,6 +60,7 @@ from nmp.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     fetch_model_entity,
     validate_adapter_base_model,
+    validate_output_name_not_in_flight,
 )
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.rl.app.constants import (
@@ -667,6 +668,7 @@ async def platform_job_config_compiler(
     me = await fetch_model_entity(job_spec.model, workspace, platform)
     trust_remote_code = me.trust_remote_code or False
 
+    await validate_output_name_not_in_flight(job_spec.output.name, workspace, platform)
     if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora":
         await validate_adapter_base_model(job_spec.output.name, job_spec.model, workspace, platform)
 

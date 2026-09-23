@@ -14,6 +14,7 @@ import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
+from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
@@ -62,7 +63,7 @@ def platform_clients() -> AsyncCustomizationPlatformClients:
     # Default to "no adapter with this output name exists", which is what every test that is
     # not about adapter re-parenting assumes.
     models.get_adapter.side_effect = _not_found()
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=models)
+    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=models, jobs=MagicMock())
 
 
 def _not_found() -> NotFoundError:
@@ -905,3 +906,29 @@ async def test_lora_job_allows_retraining_its_own_adapter(
 
     spec = await platform_job_config_compiler(_adapter_retrain_job(), "default", platform_clients)
     assert spec is not None
+
+
+@pytest.mark.asyncio
+async def test_full_weight_job_rejects_an_output_name_a_running_job_will_register(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two in-flight jobs with one output name share a fileset and collide at registration.
+
+    Checking existing entities misses this: neither job has registered yet. Not LoRA-specific.
+    """
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    running = SimpleNamespace(name="automodel-job-1", status=PlatformJobStatus.ACTIVE, spec={"output": {"name": "out"}})
+    cast(MagicMock, platform_clients.jobs).list.return_value.__aiter__.return_value = [running]
+    job = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(batch_size=4, micro_batch_size=1),
+        output=_output(output_type=OutputNameType.MODEL),
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match=r"Job 'automodel-job-1' \(active\) is already producing"):
+        await platform_job_config_compiler(job, "default", platform_clients)

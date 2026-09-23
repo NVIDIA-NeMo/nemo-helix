@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.jobs.client import AsyncJobsClient
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.models.types import ModelDeploymentConfig
@@ -54,7 +55,9 @@ def _recording_transport(
 
 def _platform(transport: httpx.MockTransport) -> AsyncCustomizationPlatformClients:
     client = AsyncNemoClient(base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=transport))
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncModelsClient.from_client(client))
+    return AsyncCustomizationPlatformClients(
+        files=AsyncMock(), models=AsyncModelsClient.from_client(client), jobs=AsyncJobsClient.from_client(client)
+    )
 
 
 @pytest.mark.asyncio

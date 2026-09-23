@@ -48,6 +48,7 @@ from nmp.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     fetch_model_entity,
     validate_adapter_base_model,
+    validate_output_name_not_in_flight,
 )
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.unsloth.app.constants import (
@@ -357,6 +358,7 @@ async def platform_job_config_compiler(
 
     me = await fetch_model_entity(job_spec.model.name, workspace, platform)
 
+    await validate_output_name_not_in_flight(job_spec.output.name, workspace, platform)
     if _resolve_finetuning_type(job_spec) == FinetuningType.LORA:
         await validate_adapter_base_model(job_spec.output.name, job_spec.model.name, workspace, platform)
     await _validate_deployment_config(workspace, job_spec, platform)

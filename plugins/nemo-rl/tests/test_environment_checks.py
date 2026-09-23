@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from nemo_rl_plugin.environment import check_environment_package
@@ -35,7 +35,7 @@ def _platform(paths: list[str], manifest: bytes = ADAPTER_MANIFEST) -> AsyncCust
     client = Mock()
     client.list_files = AsyncMock(return_value=SimpleNamespace(data=lambda: listing))
     client.download_file = AsyncMock(return_value=SimpleNamespace(read=AsyncMock(return_value=manifest)))
-    return AsyncCustomizationPlatformClients(files=client, models=Mock())
+    return AsyncCustomizationPlatformClients(files=client, models=Mock(), jobs=MagicMock())
 
 
 @pytest.mark.asyncio

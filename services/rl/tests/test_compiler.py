@@ -114,7 +114,7 @@ def platform_clients() -> AsyncCustomizationPlatformClients:
     # Default to "no adapter with this output name exists", which is what every test that is
     # not about adapter re-parenting assumes.
     models.get_adapter.side_effect = _not_found()
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=models)
+    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=models, jobs=MagicMock())
 
 
 # --------------------------------------------------------------------------- #
