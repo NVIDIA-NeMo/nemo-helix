@@ -6,8 +6,8 @@ from dataclasses import replace
 from typing import Callable
 
 import httpx
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
+from nemo_helix import NeMoHelix
+from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 
 from tests.auth_idp.common import jwt_claims
 from tests.auth_idp.device_flow import authenticate_authentik_device_flow
@@ -104,32 +104,32 @@ class ComposeAuthIdpRuntime:
     def deployment_workload_runtime_config(self) -> DeploymentWorkloadRuntimeConfig:
         return DeploymentWorkloadRuntimeConfig(
             env=(
-                {"name": "NMP_BASE_URL", "value": "https://nemo-gateway:8080"},
-                {"name": "NMP_CLIENT_SSL_CERT_FILE", "value": "/etc/nmp/gateway-tls/tls.crt"},
-                {"name": "SSL_CERT_FILE", "value": "/etc/nmp/gateway-tls/tls.crt"},
-                {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nmp/gateway-tls/tls.crt"},
+                {"name": "NHX_BASE_URL", "value": "https://nemo-gateway:8080"},
+                {"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/gateway-tls/tls.crt"},
+                {"name": "SSL_CERT_FILE", "value": "/etc/nhx/gateway-tls/tls.crt"},
+                {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nhx/gateway-tls/tls.crt"},
             ),
         )
 
-    def e2e_setup_sdk(self) -> NeMoPlatform:
+    def e2e_setup_sdk(self) -> NeMoHelix:
         token = self.e2e_setup_token().access_token
-        return NeMoPlatform(
+        return NeMoHelix(
             base_url=self.gateway_base_url,
             default_headers={"Authorization": f"Bearer {token}"},
             max_retries=0,
         )
 
-    def interactive_user_sdk(self) -> NeMoPlatform:
+    def interactive_user_sdk(self) -> NeMoHelix:
         token = self.interactive_user_token().access_token
-        return NeMoPlatform(
+        return NeMoHelix(
             base_url=self.gateway_base_url,
             default_headers={"Authorization": f"Bearer {token}"},
             max_retries=0,
         )
 
-    def workload_provider_sdk(self) -> NeMoPlatform:
+    def workload_provider_sdk(self) -> NeMoHelix:
         token = self.workload_platform_token().access_token
-        return NeMoPlatform(
+        return NeMoHelix(
             base_url=self.gateway_base_url,
             default_headers={"Authorization": f"Bearer {token}"},
             max_retries=0,

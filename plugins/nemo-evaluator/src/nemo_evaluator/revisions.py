@@ -40,18 +40,18 @@ from nemo_evaluator.entities import (
     TasksetEntity,
     TasksetRevisionEntity,
 )
-from nemo_platform_plugin.entities import (
+from nemo_helix_plugin.entities import (
     EntityBase,
     EntityClientProtocol,
     EntityGetterProtocol,
     EntityUpdateClientProtocol,
     ListResponse,
 )
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
 
 logger = logging.getLogger(__name__)
 

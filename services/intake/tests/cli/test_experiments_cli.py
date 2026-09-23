@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 
 import httpx
-from nmp.intake.cli import ExperimentsCLI
+from nhx.intake.cli import ExperimentsCLI
 
 BASE = "/apis/intake/v2/workspaces/default/experiments"
 
@@ -259,11 +259,11 @@ def test_create_code_output_renders_typed_client_without_request(experiments_cli
 
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
-    assert "from nemo_platform_plugin.intake.client import IntakeClient" in result.stdout
+    assert "from nemo_helix_plugin.intake.client import IntakeClient" in result.stdout
     assert 'client = IntakeClient(base_url="http://test/")' in result.stdout
     assert 'body=ExperimentCreateRequest(name="exp-1", description="demo")' in result.stdout
     assert "exist_ok=True" in result.stdout
-    assert "NeMoPlatform" not in result.stdout
+    assert "NeMoHelix" not in result.stdout
 
 
 def test_list_code_output(experiments_cli) -> None:

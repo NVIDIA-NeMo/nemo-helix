@@ -5,11 +5,11 @@
 
 import pytest
 import pytest_asyncio
-from nemo_platform_plugin.client.errors import NotFoundError
-from nmp.common.api.common import Page
-from nmp.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
-from nmp.core.models.api.service.model_deployment_service import ModelDeploymentService
-from nmp.core.models.schemas import (
+from nemo_helix_plugin.client.errors import NotFoundError
+from nhx.common.api.common import Page
+from nhx.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
+from nhx.core.models.api.service.model_deployment_service import ModelDeploymentService
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
@@ -19,8 +19,8 @@ from nmp.core.models.schemas import (
     UpdateModelDeploymentRequest,
     UpdateModelDeploymentStatusRequest,
 )
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import ClientContext, create_test_client
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import ClientContext, create_test_client
 
 
 @pytest.fixture
@@ -483,7 +483,7 @@ async def test_filter_by_status_integration(
     await deployment_service.update_deployment_status(created.workspace, created.name, update_request, version=1)
 
     # Filter by READY status
-    from nmp.common.api.filter import ComparisonOperation, FilterOperator
+    from nhx.common.api.filter import ComparisonOperation, FilterOperator
 
     status_filter = ComparisonOperation(operator=FilterOperator.EQ, field="data.status", value="READY")
     result = await deployment_service.list_deployments(workspace="default", filter_operation=status_filter)
@@ -526,7 +526,7 @@ async def test_update_deployment_with_new_config_version_integration(
     await deployment_config_service.create_deployment_config(config_request, "default")
 
     # Create config v2
-    from nmp.core.models.schemas import UpdateModelDeploymentConfigRequest as UpdateConfigRequest
+    from nhx.core.models.schemas import UpdateModelDeploymentConfigRequest as UpdateConfigRequest
 
     update_config_request = UpdateConfigRequest(
         engine="nim",

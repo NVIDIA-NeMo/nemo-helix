@@ -3,9 +3,9 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useEvaluatorGetEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   Badge,
   Block,
@@ -30,7 +30,7 @@ import { FlaskConical, ScrollText } from 'lucide-react';
 import { FC } from 'react';
 
 const isTerminal = (status?: string) =>
-  !!status && PlatformJobTerminalStatuses.includes(status as never);
+  !!status && HelixJobTerminalStatuses.includes(status as never);
 
 export const EvaluationResultDetailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -140,7 +140,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
               <StatusLogsContent
                 workspace={workspace}
                 jobName={id}
-                jobStatus={job?.status as PlatformJobStatus}
+                jobStatus={job?.status as HelixJobStatus}
               />
             </AccordionPanel>
           </Stack>

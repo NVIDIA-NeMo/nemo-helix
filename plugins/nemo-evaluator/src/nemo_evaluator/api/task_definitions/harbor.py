@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from nemo_evaluator.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
-from nemo_platform_plugin.refs import FILESET_REF_PATTERN
+from nemo_helix_plugin.refs import FILESET_REF_PATTERN
 from pydantic import BaseModel, ConfigDict, Field
 
 

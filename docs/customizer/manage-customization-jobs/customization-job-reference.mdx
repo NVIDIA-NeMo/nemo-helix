@@ -26,7 +26,24 @@ A customization job is submitted with a backend-specific spec (`AutomodelJobInpu
 | `spec.training.lora` | No | LoRA configuration (`{"rank": 16, "alpha": 32, ...}`). Auto-filled with defaults for LoRA regimes |
 | `spec.output` | No | Output artifact configuration (`{"name": "..."}`). Auto-generated if not provided |
 | `spec.integrations` | No | Optional W&B / MLflow tracking configuration (see below) |
-| `spec.deployment_config` | No | Auto-deploy the trained model. Pass a string to reference an existing config by name, or an object with inline NIM deployment parameters (e.g., `{"lora_enabled": true}`). Omit to skip deployment. For a LoRA job, the deployment is created against the **base** model with `lora_enabled: true`, and the adapter is served from it. The RL backend accepts the same field — see [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments) |
+| `spec.deployment_config` | No | Auto-deploy the trained model. Pass a string to reference an existing config by name, or an object with inline NIM deployment parameters (e.g., `{"lora_enabled": true}`). Omit to skip deployment. A referenced config that names no model (neither `model_entity_id` nor `model_spec.model_name`) is an unbound template: its engine and executor settings are copied onto a config for the trained model at deploy time, so it works for full-weight training, whose output model does not exist at submit time. For a LoRA job, the deployment is created against the **base** model with `lora_enabled: true`, and the adapter is served from it. The RL backend accepts the same field — see [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments) |
+
+### Deployment config validation
+
+All three backends (automodel, unsloth, RL) resolve a referenced `deployment_config` at submit time and reject it before any GPU time is spent. A job fails to submit when:
+
+- The string reference does not resolve to a deployment config.
+- The job trains a **standalone LoRA adapter** and the referenced config has `lora_enabled: false` — the deployment could never load the adapter.
+- The job trains a standalone LoRA adapter and the referenced config names a model other than the job's base model. The adapter is served from its base model's deployment, so the config has to target that base.
+- The job registers a **new model entity** (`all_weights`, or a LoRA job with a merged save method) and the referenced config names a different model. The output entity does **not** have to exist yet — a config may point forward at the model the run will produce, which is what Studio creates up front. Retraining is fine for the same reason.
+- The config sets `tool_call_config.tool_call_plugin` and the caller lacks the `models.tool-call-plugin.set` permission.
+
+A merged save (`lora_merged`, or unsloth's `merged_16bit` / `merged_4bit`) folds the adapter into the base weights and produces a standalone model, so the LoRA-specific rules above do not apply to it.
+
+Two config shapes are therefore valid ahead of a model that does not exist yet:
+
+- A **forward reference** — the config names the model the run will produce. Creating it up front means a bad engine or image is rejected in milliseconds at submit instead of after a training run, and the deployment can start the moment training ends. One config per run.
+- An **unbound template** — a config with neither `model_entity_id` nor `model_spec.model_name`. It carries only engine and executor settings, is accepted by any job, and is bound to the trained model at deploy time. Use this to share settings across runs.
 
 ---
 
@@ -42,10 +59,10 @@ Both backends accept the same `integrations` object on the job spec. Add a `wand
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
-client = NeMoPlatform(base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"), workspace="default")
+client = NeMoHelix(base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"), workspace="default")
 
 spec = AutomodelJobInput(
     model="default/qwen3-1.7b",

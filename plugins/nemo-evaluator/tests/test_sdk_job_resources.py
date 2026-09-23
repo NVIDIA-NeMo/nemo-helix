@@ -39,9 +39,9 @@ from nemo_evaluator_sdk.values.results import (
     MetricOutput,
     RowScore,
 )
-from nemo_platform_plugin.client.errors import InternalServerError
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus, PlatformJobStatusResponse
+from nemo_helix_plugin.client.errors import InternalServerError
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from pydantic import BaseModel
 from pytest_mock import MockerFixture
 
@@ -58,15 +58,15 @@ _JOB_PAYLOAD = {
         "dataset": [{"expected": "a", "output": "a"}],
     },
 }
-_STATUS_URL = "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+_STATUS_URL = "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
 _AGGREGATE_URL = (
-    "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/aggregate-scores/download"
+    "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/aggregate-scores/download"
 )
 _ROW_SCORES_URL = (
-    "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/row-scores/download"
+    "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/row-scores/download"
 )
 _ARTIFACTS_URL = (
-    "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
+    "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
 )
 
 
@@ -96,7 +96,7 @@ def job() -> EvaluatorJob:
 def job_resource(http_client: Mock, job: EvaluatorJob) -> EvaluatorJobResource:
     """Return a sync evaluator job resource."""
     client = EvaluatorClient(
-        base_url="https://nmp.test",
+        base_url="https://nhx.test",
         workspace="client-ws",
         default_headers={"Authorization": "Bearer platform-token"},
         http_client=cast(httpx.Client, http_client),
@@ -112,7 +112,7 @@ def job_resource(http_client: Mock, job: EvaluatorJob) -> EvaluatorJobResource:
 async def async_job_resource(async_http_client: httpx.AsyncClient, job: EvaluatorJob) -> AsyncEvaluatorJobResource:
     """Return an async evaluator job resource."""
     client = AsyncEvaluatorClient(
-        base_url="https://nmp.test",
+        base_url="https://nhx.test",
         workspace="client-ws",
         default_headers={"Authorization": "Bearer platform-token"},
         http_client=async_http_client,
@@ -132,19 +132,19 @@ def _stream_response(response: httpx.Response) -> MagicMock:
 
 
 def _status_response(
-    status: PlatformJobStatus | str,
+    status: HelixJobStatus | str,
     *,
     status_details: dict[str, object] | None = None,
     error_details: dict[str, object] | None = None,
-) -> PlatformJobStatusResponse:
+) -> HelixJobStatusResponse:
     """Return a platform job status response for resource tests from an enum or wire value."""
     now = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    return PlatformJobStatusResponse(
+    return HelixJobStatusResponse(
         id="job-id",
         created_at=now,
         error_details=error_details or {},
         name="job-123",
-        status=PlatformJobStatus(status),
+        status=HelixJobStatus(status),
         status_details=status_details or {},
         steps=[],
         updated_at=now,
@@ -205,7 +205,7 @@ def test_name_and_job_properties(job_resource: EvaluatorJobResource, job: Evalua
 def test_metric_job_status_helpers_handle_empty_and_detailed_payloads() -> None:
     """Status helpers should tolerate non-string status values and surface details only when present."""
     status = cast(
-        PlatformJobStatusResponse,
+        HelixJobStatusResponse,
         SimpleNamespace(status=None, status_details={"step": "compile"}),
     )
 
@@ -294,7 +294,7 @@ def test_get_job_status_accepts_nullable_detail_fields(
 def test_check_if_complete_returns_status_result(
     job_resource: EvaluatorJobResource,
     mocker: MockerFixture,
-    status: PlatformJobStatus,
+    status: HelixJobStatus,
     expected: bool,
 ) -> None:
     """Completion checks should distinguish completed, running, and failed jobs."""
@@ -307,7 +307,7 @@ def test_check_if_complete_returns_status_result(
 def test_check_if_complete_raises_when_requested(
     job_resource: EvaluatorJobResource,
     mocker: MockerFixture,
-    status: PlatformJobStatus,
+    status: HelixJobStatus,
 ) -> None:
     """Completion checks should raise for non-completed statuses when requested."""
     mocker.patch.object(job_resource, "get_job_status", return_value=_status_response(status))
@@ -319,7 +319,7 @@ def test_check_if_complete_raises_when_requested(
 def test_check_if_complete_handles_unknown_status(caplog: pytest.LogCaptureFixture) -> None:
     """Unknown statuses should log in soft mode and raise in strict mode."""
     status = cast(
-        PlatformJobStatusResponse,
+        HelixJobStatusResponse,
         SimpleNamespace(status="mystery", name="job-123", error_details={}),
     )
 
@@ -368,7 +368,7 @@ def test_wait_until_done_raises_for_unexpected_terminal_status(
 ) -> None:
     """Unexpected terminal statuses should fail loudly."""
     unexpected = cast(
-        PlatformJobStatusResponse,
+        HelixJobStatusResponse,
         SimpleNamespace(status="done-ish", name="job-123", error_details={}),
     )
 
@@ -384,7 +384,7 @@ def test_wait_until_done_does_not_sleep_after_timeout(
     """Sync timeout must fire before sleeping once the budget is already exhausted."""
     fake_now = [0.0]
 
-    def slow_status() -> PlatformJobStatusResponse:
+    def slow_status() -> HelixJobStatusResponse:
         """Advance the fake clock past the configured timeout on each poll."""
         fake_now[0] += 2.0
         return _status_response("active")
@@ -479,7 +479,7 @@ def test_get_result_filters_aggregate_fields(
     """Requested aggregate_fields should shape downloaded aggregate scores."""
     job = EvaluatorJob.model_validate(_JOB_PAYLOAD)
     client = EvaluatorClient(
-        base_url="https://nmp.test",
+        base_url="https://nhx.test",
         workspace="client-ws",
         default_headers={"Authorization": "Bearer platform-token"},
         http_client=cast(httpx.Client, http_client),
@@ -637,7 +637,7 @@ async def test_async_get_job_status_delegates_to_metric_jobs_resource(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert (
-            str(request.url) == "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+            str(request.url) == "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
         )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, json=status.model_dump(mode="json"))
@@ -659,7 +659,7 @@ async def test_async_get_job_status_accepts_nullable_detail_fields(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert (
-            str(request.url) == "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+            str(request.url) == "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
         )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, json=payload)
@@ -705,7 +705,7 @@ async def test_async_get_result_filters_aggregate_fields(
     """Async requested aggregate_fields should shape downloaded aggregate scores."""
     job = EvaluatorJob.model_validate(_JOB_PAYLOAD)
     client = AsyncEvaluatorClient(
-        base_url="https://nmp.test",
+        base_url="https://nhx.test",
         workspace="client-ws",
         default_headers={"Authorization": "Bearer platform-token"},
         http_client=async_http_client,
@@ -755,7 +755,7 @@ async def test_async_download_artifacts_extracts_artifact_tarball(
     async def handler(request: httpx.Request) -> httpx.Response:
         assert (
             str(request.url)
-            == "https://nmp.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
+            == "https://nhx.test/apis/evaluator/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
         )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, content=_artifact_tar_bytes())

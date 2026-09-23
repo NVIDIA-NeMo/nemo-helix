@@ -15,9 +15,9 @@ sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
 sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
 
-from nmp.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
-from nmp.automodel.tasks.training.backends.checkpoints import ModelType  # noqa: E402
-from nmp.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
+from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
+from nhx.automodel.tasks.training.backends.checkpoints import ModelType  # noqa: E402
+from nhx.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
 
 
 class TestAutomodelBackend:
@@ -37,7 +37,7 @@ class TestAutomodelBackend:
 
         expected = {"best": tmp_path / "best.ckpt"}
         mock_find_selected = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.find_selected_checkpoints",
+            "nhx.automodel.tasks.training.backends.backend.find_selected_checkpoints",
             return_value=expected,
         )
 
@@ -64,7 +64,7 @@ class TestAutomodelBackend:
 
         checkpoint_info = MagicMock()
         mock_process = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.process_selected_checkpoints",
+            "nhx.automodel.tasks.training.backends.backend.process_selected_checkpoints",
             return_value=checkpoint_info,
         )
 
@@ -99,7 +99,7 @@ class TestAutomodelBackend:
 
         expected = {"best": tmp_path / "best.ckpt"}
         mock_find_selected = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.find_selected_checkpoints",
+            "nhx.automodel.tasks.training.backends.backend.find_selected_checkpoints",
             return_value=expected,
         )
 
@@ -122,7 +122,7 @@ class TestAutomodelBackend:
         customizer_config.model.checkpoint_head_type = "cross_encoder"
 
         mock_process = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.process_selected_checkpoints",
+            "nhx.automodel.tasks.training.backends.backend.process_selected_checkpoints",
             return_value=MagicMock(),
         )
 

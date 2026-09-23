@@ -20,8 +20,8 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar, Generic, TypeVar
 
 from nemo_evaluator.api.schemas import AgentEvalResult, EvaluateResult
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.schema import Page, PaginationData
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.schema import Page, PaginationData
 from pydantic import BaseModel
 
 _ResultT = TypeVar("_ResultT", AgentEvalResult, EvaluateResult)

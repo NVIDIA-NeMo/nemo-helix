@@ -26,7 +26,7 @@ class DataDesignerJobConfig(BaseModel):
         return data
 
 
-# This is the internal object we store on the PlatformJobStep to pass to the task.
+# This is the internal object we store on the HelixJobStep to pass to the task.
 class DataDesignerStepConfig(BaseModel):
     job_config: DataDesignerJobConfig
     model_providers: list[dd.ModelProvider]

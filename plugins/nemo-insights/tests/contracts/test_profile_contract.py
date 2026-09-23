@@ -161,10 +161,10 @@ def test_resolve_ethos_uses_configured_then_conventional_precedence(tmp_path: Pa
         resolve_ethos_path(tmp_path, "./missing.md")
 
 
-def test_resolve_base_url_uses_only_explicit_nmp_and_default() -> None:
-    env = {"NMP_BASE_URL": "http://nmp", "NEMO_BASE_URL": "http://ignored"}
+def test_resolve_base_url_uses_only_explicit_nhx_and_default() -> None:
+    env = {"NHX_BASE_URL": "http://nhx", "NEMO_BASE_URL": "http://ignored"}
 
     assert resolve_base_url("http://flag", env) == "http://flag"
-    assert resolve_base_url(None, env) == "http://nmp"
+    assert resolve_base_url(None, env) == "http://nhx"
     assert resolve_base_url(None, {"NEMO_BASE_URL": "http://ignored"}) == DEFAULT_BASE_URL
     assert resolve_base_url("", env) == ""  # explicit empty string is not silently replaced

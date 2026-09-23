@@ -13,17 +13,17 @@ from typing import Any, TypedDict
 
 import httpx
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import (
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import (
     CreateGuardrailConfigRequest,
     GuardrailConfig,
     UpdateGuardrailConfigRequest,
 )
-from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
-from nemo_platform_plugin.virtual_models.types import UpdateVirtualModelRequest
-from nmp.testing.utils import short_unique_name
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import UpdateVirtualModelRequest
+from nhx.testing.utils import short_unique_name
 from typing_extensions import Required
 
 DEFAULT_WORKSPACE = "default"
@@ -239,7 +239,7 @@ def make_guardrail_config(
     *,
     data: dict[str, Any],
 ) -> GuardrailConfig:
-    """Wrap a ``data`` block (the inner PlatformRailsConfig shape) in a GuardrailConfig envelope.
+    """Wrap a ``data`` block (the inner HelixRailsConfig shape) in a GuardrailConfig envelope.
 
     The envelope (``id`` / ``entity_id`` / ``parent`` / timestamps) is
     irrelevant to plugin behaviour but required by the SDK type.
@@ -260,7 +260,7 @@ def make_guardrail_config(
 
 
 def make_middleware_call(config: GuardrailConfig) -> InlineGuardrailsMiddlewareCall:
-    # validate_middleware_config expects the inner PlatformRailsConfig data
+    # validate_middleware_config expects the inner HelixRailsConfig data
     # block (models / rails / prompts), not the entity envelope. The full
     # GuardrailConfig dump silently absorbs envelope fields into model_extra
     # and rails.rails ends up None, so the plugin's input rail gets bypassed.

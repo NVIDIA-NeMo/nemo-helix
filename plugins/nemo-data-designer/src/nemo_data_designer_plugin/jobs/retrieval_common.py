@@ -10,23 +10,23 @@ from typing import Any
 
 from nemo_data_designer_plugin.config import get_config
 from nemo_data_designer_plugin.retrieval.corpus import HF_TOKEN_ENVVAR
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
     EnvironmentVariableFromSecret,
     GPUExecutionProviderSpec,
-    PlatformJobStep,
+    HelixJobStep,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nmp.customization_common.schemas.file_io import DownloadItem, FileIOTaskConfig, FileSetRef
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nhx.customization_common.schemas.file_io import DownloadItem, FileIOTaskConfig, FileSetRef
 from pydantic import BaseModel
 
 _ENTRYPOINT = ["python", "-m"]
-RETRIEVAL_MINE_MODULE = "nmp.automodel.tasks.retrieval_mine"
-_FILE_IO_MODULE = "nmp.customization_common.tasks.file_io"
+RETRIEVAL_MINE_MODULE = "nhx.automodel.tasks.retrieval_mine"
+_FILE_IO_MODULE = "nhx.customization_common.tasks.file_io"
 _FILE_IO_ARGS = ["--service-source", "automodel", "--service-name", "customizer"]
 
 
@@ -56,10 +56,10 @@ def cpu_retrieval_step(
     spec: BaseModel,
     profile: str | None,
     module_args: list[str] | None = None,
-    image: str = "nmp-cpu-tasks",
+    image: str = "nhx-cpu-tasks",
     hf_token_secret: str | None = None,
-) -> PlatformJobStep:
-    return PlatformJobStep(
+) -> HelixJobStep:
+    return HelixJobStep(
         name=name,
         executor=CPUExecutionProviderSpec(
             profile=profile or get_config().job_executor_profile,
@@ -75,19 +75,19 @@ def cpu_retrieval_step(
     )
 
 
-def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | None) -> PlatformJobStep:
+def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | None) -> HelixJobStep:
     """GPU step in the automodel training image.
 
     Falls back to the plugin's ``job_executor_profile``. The profile must name a
     registered GPU executor: the jobs API rejects a spec whose (provider, profile) is unknown.
     """
-    return PlatformJobStep(
+    return HelixJobStep(
         name=name,
         executor=GPUExecutionProviderSpec(
             profile=profile or get_config().job_executor_profile,
             provider="gpu",
             container=ContainerSpec(
-                image=get_qualified_image("nmp-automodel-training"),
+                image=get_qualified_image("nhx-automodel-training"),
                 entrypoint=_ENTRYPOINT,
                 command=[module],
             ),
@@ -107,10 +107,10 @@ async def retrieval_step(
     module: str,
     spec: BaseModel,
     profile: str | None,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncHelixClient,
     gpu: bool = False,
     hf_token_secret: str | None = None,
-) -> PlatformJobStep:
+) -> HelixJobStep:
     del async_sdk
     if gpu:
         # The GPU mining step runs with ``HF_HUB_OFFLINE``; it never reaches the Hub.
@@ -121,8 +121,8 @@ async def retrieval_step(
 async def model_download_step(
     fileset: str,
     profile: str | None,
-    async_sdk: AsyncNeMoPlatform,
-) -> PlatformJobStep:
+    async_sdk: AsyncHelixClient,
+) -> HelixJobStep:
     """Download a model fileset into the job's shared ``model`` directory."""
     del async_sdk
     config = FileIOTaskConfig(download=[DownloadItem(src=FileSetRef.model_validate(fileset), dest="model")])
@@ -132,7 +132,7 @@ async def model_download_step(
         config,
         profile,
         module_args=_FILE_IO_ARGS,
-        image="nmp-customizer-tasks",
+        image="nhx-customizer-tasks",
     )
 
 

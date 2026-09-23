@@ -29,16 +29,16 @@ from nemo_agent_hardener_plugin.jobs.execution import RunOutcome, _run_service_d
 from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
-from nemo_platform_plugin.agent_hardener.types import SynthBenignSpec
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     EnvironmentVariable,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """A single subprocess step running the synth task on the provisioned host (mirrors the war-game).
 
         The ``service`` driver's HITL is relayed through the platform job's ``status_details``, so it must run
@@ -79,9 +79,9 @@ class AgentHardenerSynthBenignJob(NemoJob):
             value = os.environ.get(name)
             if value:
                 environment.append(EnvironmentVariable(name=name, value=value))
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="synth",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",

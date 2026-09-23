@@ -16,13 +16,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_ext.cli.core.context import CLIContext
-from nemo_platform_plugin.client.client import NemoClient
-from nmp.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
-from nmp.intake.cli import ExperimentsCLI
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.service import IntakeService
-from nmp.testing import SDKTestClientAdapter, create_test_client
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_plugin.client.client import NemoClient
+from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.cli import ExperimentsCLI
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.service import IntakeService
+from nhx.testing import SDKTestClientAdapter, create_test_client
 from typer.testing import CliRunner
 
 app = ExperimentsCLI().get_cli()

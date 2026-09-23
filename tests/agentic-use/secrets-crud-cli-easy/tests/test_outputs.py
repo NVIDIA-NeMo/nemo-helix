@@ -13,15 +13,15 @@ Checks:
 import os
 
 import pytest
-from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.client import SecretsClient
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
 def client() -> SecretsClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return SecretsClient(base_url=nmp_base_url, workspace=WORKSPACE)
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return SecretsClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 def test_harbor_test_secret_deleted(client: SecretsClient) -> None:
@@ -44,7 +44,7 @@ def test_harbor_final_secret_exists(client: SecretsClient) -> None:
 def test_secret_value_not_exposed(client: SecretsClient) -> None:
     """Test that secret values are not exposed in list/retrieve responses."""
     response = client.get_secret(name="harbor-final-secret").data()
-    # PlatformSecretResponse should only contain metadata fields, not the secret data.
+    # HelixSecretResponse should only contain metadata fields, not the secret data.
     # The actual secret value is only available via client.access_secret().
     response_dict = response.model_dump()
     assert "data" not in response_dict or response_dict.get("data") is None, (

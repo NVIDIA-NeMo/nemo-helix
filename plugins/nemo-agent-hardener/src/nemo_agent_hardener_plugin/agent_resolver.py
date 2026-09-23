@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Turn a registered NeMo Platform agent into a runnable Agent Hardener victim.
+"""Turn a registered NeMo Helix agent into a runnable Agent Hardener victim.
 
 This is the only intake path. The user names an agent already registered in the platform and the
 plugin hands Agent Hardener a directory containing a runnable agent — a config plus the Dockerfile that
@@ -390,7 +390,7 @@ def shipped_dockerfile(sdk: Any, agent_name: str, workspace: str) -> str | None:
     already put it on the platform — it is simply never read back.
 
     Preferring it matters beyond convenience. A rendered Dockerfile pins the packaging machine's own
-    ``nemo-platform`` version and a fixed ``nemo-relay``, so an agent needing a different Relay has
+    ``nemo-helix`` version and a fixed ``nemo-relay``, so an agent needing a different Relay has
     no way to ask for one, and a platform installed from a git checkout pins a version no index
     serves. The author's own file has neither problem, and it is the image they actually ship.
 
@@ -542,7 +542,7 @@ def resolve_agent_to_manifest(
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
-    ``sdk`` is a ``nemo_platform.NeMoPlatform`` client. ``manifest_dir`` is where
+    ``sdk`` is a ``nemo_helix.NeMoHelix`` client. ``manifest_dir`` is where
     ``agent-hardener.yaml`` will be written (paths in the manifest are relative to it).
 
     Pipeline: parse ref → fetch ``Agent`` config → resolve the victim port from a running
@@ -583,7 +583,7 @@ def resolve_agent_to_manifest(
         project_path = manifest_dir / rel_project
 
     # The author's own Dockerfile wins when they registered one: it is the image they ship, and it
-    # carries neither the rendered file's `nemo-platform==<packaging machine's version>` pin nor its
+    # carries neither the rendered file's `nemo-helix==<packaging machine's version>` pin nor its
     # fixed nemo-relay, so it can be built from a source checkout and can choose its own Relay.
     config_path = materialize_agent_package(
         injected,

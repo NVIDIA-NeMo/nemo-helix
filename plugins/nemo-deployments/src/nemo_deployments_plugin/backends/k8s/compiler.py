@@ -42,14 +42,14 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
 )
 from nemo_deployments_plugin.types import RestartPolicy
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
     WORKLOAD_IDENTITY_VOLUME_PATH,
     get_workload_identity_token_audience,
     workload_identity_env,
 )
-from nemo_platform_plugin.config import ImagePullSecret, get_platform_config
+from nemo_helix_plugin.config import ImagePullSecret, get_platform_config
 
 CONFIG_FILES_VOLUME = "config-files"
 NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"

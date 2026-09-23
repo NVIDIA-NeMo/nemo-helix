@@ -27,7 +27,7 @@ interface NemoEnvironmentYaml {
   };
 }
 
-/** Mirrors `EnvironmentFormat` in services/rl/src/nmp/rl/schemas/environment.py. */
+/** Mirrors `EnvironmentFormat` in services/rl/src/nhx/rl/schemas/environment.py. */
 const ENVIRONMENT_FORMATS = ['native-v1', 'wheels-v1', 'adapter-wheels-v1'] as const;
 
 type EnvironmentFormat = (typeof ENVIRONMENT_FORMATS)[number];
@@ -61,7 +61,7 @@ export interface UseGymEnvironmentManifestResult {
   noConfigWarning: boolean;
   /**
    * Manifest problems that the backend's schema would reject at training time.
-   * Mirrors the pydantic validators in nmp.rl.schemas.environment so a broken
+   * Mirrors the pydantic validators in nhx.rl.schemas.environment so a broken
    * package is visible at selection rather than after the job is queued.
    */
   manifestIssues: string[];
@@ -69,7 +69,7 @@ export interface UseGymEnvironmentManifestResult {
 
 /**
  * Re-implements the manifest and package-layout validators from
- * services/rl/src/nmp/rl/schemas/environment.py and tasks/environment/validate.py.
+ * services/rl/src/nhx/rl/schemas/environment.py and tasks/environment/validate.py.
  * `packagePaths` are relative to the package root (the directory holding
  * nemo-environment.yaml), which is the `env_root` the backend resolves against.
  *

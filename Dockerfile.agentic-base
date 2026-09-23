@@ -80,10 +80,10 @@ RUN npm install -g "@openai/codex@${CODEX_VERSION}" && \
 # Set working directory
 WORKDIR /app
 
-# Copy the entire NeMo Platform repository
+# Copy the entire NeMo Helix repository
 COPY --chown=harbor:harbor . /app
 
-# Install NeMo Platform dependencies with uv (as root for now, but accessible to harbor user).
+# Install NeMo Helix dependencies with uv (as root for now, but accessible to harbor user).
 # Note: Not using --frozen to allow uv to resolve packages for the container's platform.
 # Use --all-packages to ensure all workspace members are installed.
 RUN uv sync --all-packages && \
@@ -93,10 +93,10 @@ RUN uv sync --all-packages && \
 # /switchyard is the container mount point for agentic-use runs that need a
 # sibling Switchyard checkout; nat_runner passes the bind mount through
 # DOCKER_EXTRA_ARGS from the notebook/.env environment.
-ENV PYTHONPATH="/switchyard:/app/services/core/jobs/src:/app/services/core/entities/src:/app/services/core/auth/src:/app/services/core/models/src:/app/services/core/files/src:/app/services/core/secrets/src:/app/services/core/inference-gateway/src:/app/services/core/mcp/src:/app/packages/nmp_platform/src:/app/packages/nmp_common/src"
+ENV PYTHONPATH="/switchyard:/app/services/core/jobs/src:/app/services/core/entities/src:/app/services/core/auth/src:/app/services/core/models/src:/app/services/core/files/src:/app/services/core/secrets/src:/app/services/core/inference-gateway/src:/app/services/core/mcp/src:/app/packages/nhx_platform/src:/app/packages/nhx_common/src"
 
 # Verify critical modules can be imported (fail build early if not)
-RUN /app/.venv/bin/python -c "import nmp.core.jobs; import nmp.core.entities; print('All critical modules imported successfully')"
+RUN /app/.venv/bin/python -c "import nhx.core.jobs; import nhx.core.entities; print('All critical modules imported successfully')"
 
 # Install NAT and related components used by runner backends:
 # - nvidia-nat[mcp,eval,langchain]: nat runtime with plugins used by these eval tasks.
@@ -119,21 +119,21 @@ RUN uv pip install --python /app/.venv/bin/python \
     uv pip install --python /app/.venv/bin/python -e /app/plugins/nemo-agents/examples/calculator-agent && \
     chown -R harbor:harbor /app/.venv
 
-# Set environment variable for NeMo Platform API base URL
-ENV NMP_BASE_URL=http://localhost:8080
+# Set environment variable for NeMo Helix API base URL
+ENV NHX_BASE_URL=http://localhost:8080
 ENV DATABASE_DIALECT=sqlite
-ENV DATABASE_PATH=/data/nmp-platform.db
-ENV NMP_FILES_DEFAULT_STORAGE_CONFIG='{"type":"local","path":"/data/files_storage"}'
+ENV DATABASE_PATH=/data/nhx-platform.db
+ENV NHX_FILES_DEFAULT_STORAGE_CONFIG='{"type":"local","path":"/data/files_storage"}'
 ENV CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 
 # Enable secrets encryption key creation (required since !6106 moved
 # quickstart defaults to env vars instead of config files).
-ENV NMP_SECRETS_ALLOW_KEY_CREATION=1
+ENV NHX_SECRETS_ALLOW_KEY_CREATION=1
 
-# Expose port for NeMo Platform API server
+# Expose port for NeMo Helix API server
 EXPOSE 8080
 
-# Use ENTRYPOINT to start the NeMo Platform API server, wait for it to become healthy,
+# Use ENTRYPOINT to start the NeMo Helix API server, wait for it to become healthy,
 # then exec the provided command as the harbor user.
 #
 # The nat_runner.py orchestrator invokes backend-specific commands in this image
@@ -141,7 +141,7 @@ EXPOSE 8080
 #
 # NVIDIA_API_KEY must be provided at runtime via ``docker run -e NVIDIA_API_KEY=...``
 ENTRYPOINT ["/bin/bash", "-c", "\
-cd /app && /app/.venv/bin/nemo services run > /tmp/nmp-api.log 2>&1 & API_PID=$!; \
+cd /app && /app/.venv/bin/nemo services run > /tmp/nhx-api.log 2>&1 & API_PID=$!; \
 echo 'Started API server with PID: '$API_PID; \
 CONSECUTIVE_SUCCESS=0; \
 for i in {1..60}; do \
@@ -149,7 +149,7 @@ for i in {1..60}; do \
         CONSECUTIVE_SUCCESS=$((CONSECUTIVE_SUCCESS+1)); \
         echo 'Health check passed ('$CONSECUTIVE_SUCCESS'/3)'; \
         if [ $CONSECUTIVE_SUCCESS -ge 3 ]; then \
-            echo 'NeMo Platform API ready and stable'; \
+            echo 'NeMo Helix API ready and stable'; \
             break; \
         fi; \
     else \
@@ -159,7 +159,7 @@ for i in {1..60}; do \
 done; \
 if [ $CONSECUTIVE_SUCCESS -lt 3 ]; then \
     echo 'API failed to become stable!'; \
-    cat /tmp/nmp-api.log; \
+    cat /tmp/nhx-api.log; \
     kill $API_PID 2>/dev/null; \
     exit 1; \
 fi; \

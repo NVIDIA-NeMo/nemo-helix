@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from nemo_platform_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 
 #: Env names a job sets itself, so they cannot be sourced from a secret ref.
 RESERVED_SECRET_ENV_NAMES = frozenset({PERSISTENT_JOB_STORAGE_PATH_ENVVAR})

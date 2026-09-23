@@ -5,9 +5,9 @@ title: "Embedding Model Customization"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb)
 
-Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Platform mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
+Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Helix mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
 
 Pre-trained embeddings handle general retrieval well but underperform on specialized vocabulary, document structure, and query phrasing. Fine-tuning adapts the model to your corpus. Expect larger gains where the base model has the least prior exposure, such as legal, biomedical, and internal engineering documents, and smaller ones on corpora close to its pre-training mix.
 
@@ -35,8 +35,8 @@ Stage 1 writes contrastive rows as JSONL:
 
 ## Prerequisites
 
-- A running NeMo Platform at `NMP_BASE_URL`, default `http://localhost:8080`. See the [Quickstart](/documentation/get-started).
-- The Python SDK: `pip install "nemo-platform[all]"`, or `make bootstrap` from the repo root.
+- A running NeMo Helix at `NHX_BASE_URL`, default `http://localhost:8080`. See the [Quickstart](/documentation/get-started).
+- The Python SDK: `pip install "nemo-helix[all]"`, or `make bootstrap` from the repo root.
 - An NGC API key for the `nvcr.io` NIM images.
 - GPU capacity: 80 GB for training, about 40 GB for mining and evaluation. Serving the base and tuned NIMs side by side takes two GPUs.
 - A fileset-backed encoder entity, created in the next section. Models that Inference Gateway discovers from a running endpoint have `fileset: null` and can be neither trained nor used as the mining encoder.
@@ -44,11 +44,11 @@ Stage 1 writes contrastive rows as JSONL:
 ## 1. Initialize the SDK
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 export NGC_API_KEY=<YOUR_NGC_API_KEY>
 ```
 
-The `nemo` CLI reads `NMP_BASE_URL` too, and `--base-url` overrides it per command. The NGC key becomes a Platform secret so the cluster can pull NIM images:
+The `nemo` CLI reads `NHX_BASE_URL` too, and `--base-url` overrides it per command. The NGC key becomes a Platform secret so the cluster can pull NIM images:
 
 ```bash
 echo "$NGC_API_KEY" | nemo secrets create ngc-api-key --workspace default --from-file -
@@ -60,11 +60,11 @@ import os
 import time
 import uuid
 from IPython.display import clear_output
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
-print(f"Platform: {NMP_BASE_URL}")
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+print(f"Platform: {NHX_BASE_URL}")
 
 ```
 
@@ -88,7 +88,7 @@ nemo models get nemotron-3-embed-1b --workspace default
 The entity is ready once `nemo models get` reports a non-null `fileset` and a populated `spec`. For a gated repo, create the token first with `nemo secrets create hf-token --value "$HF_TOKEN"` and add `"token_secret":"hf-token"` to `--storage`.
 
 ```python
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 NGC_API_KEY = os.environ.get("NGC_API_KEY")
 if not NGC_API_KEY:
@@ -204,9 +204,9 @@ if prepare_status != "completed":
     raise RuntimeError(f"retrieval-prepare finished with status {prepare_status}")
 ```
 
-Stage 1 writes `training.jsonl` and `eval_beir/` under its job result, addressed as `workspace/fileset#path`. In 0.6, Automodel `dataset.training` and `retrieve-eval` `dataset` take a fileset name without a path fragment, so the next cell copies both artifacts to the root of a fileset of its own. Release 0.7 resolves `workspace/fileset#path` directly and the copy is no longer needed.
+Stage 1 writes `training.jsonl` and `eval_beir/` under its job result as `workspace/fileset#path`.
 
-The copy also drops duplicate `(query-id, corpus-id)` rows from `eval_beir/qrels/test.tsv`, which the BEIR loader rejects.
+Automodel `dataset.training` and `retrieve-eval` `dataset` take a fileset name with no path fragment, so copy `training.jsonl` and `eval_beir/` to the root of a dataset fileset. Stage 1 unique-keys `eval_beir/qrels/test.tsv` before writing it; still drop duplicate `(query-id, corpus-id)` rows if you are uploading an older dump, because the BEIR loader rejects them. The next cell does the copy and unique-key.
 
 Freeze the resulting fileset and reuse it for every run. Scoring two runs on different splits measures data variance rather than model quality.
 
@@ -233,7 +233,7 @@ nemo files upload ./artifacts/ nvdocs-embed-artifacts --workspace default
 nemo files list nvdocs-embed-artifacts --workspace default
 ```
 
-Deduplicate `./artifacts/eval_beir/qrels/test.tsv` before the upload; the cell below does it inline.
+Unique-key `./artifacts/eval_beir/qrels/test.tsv` before the upload; the cell below does it inline.
 
 ```python
 import csv
@@ -307,7 +307,9 @@ print("dataset.training and retrieve-eval dataset:", TRAINING_REF)
 
 `model` and `dataset.training` are independent inputs. The entity supplies the encoder weights; the fileset supplies the contrastive rows, with `training.jsonl` at its root. To train on an existing triplet dataset instead, build that fileset in [Train on SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) and point `dataset.training` at it — SPECTER carries no `eval_beir`, so keep the NVDocs artifacts fileset for Stage 4.
 
-These values match the Nemotron embed recipe, except for epochs: the recipe's `3` is calibrated for its example dataset, and NVDocs-scale corpora train for 1–2.
+The NVDocs artifacts fileset has no validation JSONL. `schedule.validation_split: 0.1` therefore creates a deterministic 10% holdout from `training.jsonl`; that holdout produces validation loss and selects the best checkpoint. It does not modify or replace the frozen `eval_beir/` data used in Stage 4. Validation data is optional: when a `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` file is present in the training fileset, Automodel uses it instead of creating the holdout.
+
+These values match the Nemotron embed recipe apart from epochs. This job trains a single pass, the platform default and the cheapest run that still produces a usable checkpoint. The reference scores under [Interpreting results](#interpreting-results) come from a three-epoch run, so expect a single epoch to land below them. Raise `schedule.epochs` once you have a baseline and Stage 4 metrics are still climbing.
 
 | Knob | Value |
 | --- | --- |
@@ -316,7 +318,7 @@ These values match the Nemotron embed recipe, except for epochs: the recipe's `3
 | `training.retrieval.export.primary` | `hf` |
 | Sequence length | 512, the same at mine, train, and eval time |
 | LR / warmup / GBS / MBS | `1e-5` / `5` / `128` / `4` |
-| Epochs | `1` |
+| Epochs | `1` to start; the reference run below used `3` |
 
 `export.primary: hf` writes the Hugging Face checkpoint to the fileset root, where Retriever NIM 2.2.0 looks for it, and keeps ONNX under `alternates/onnx`. Unmerged `lora` is rejected for `bi_encoder`, since an embedding NIM serves a full checkpoint and cannot load a standalone adapter.
 
@@ -338,7 +340,7 @@ nemo customization automodel.jobs submit --workspace default --name embed-nvdocs
       "export": {"primary": "hf"}
     }
   },
-  "schedule": {"epochs": 1},
+  "schedule": {"epochs": 1, "validation_split": 0.1},
   "batch": {"global_batch_size": 128, "micro_batch_size": 4},
   "optimizer": {"learning_rate": 1e-5, "warmup_steps": 5, "weight_decay": 0.01},
   "parallelism": {"num_gpus_per_node": 1},
@@ -372,7 +374,7 @@ spec = AutomodelJobInput(
             "export": {"primary": "hf"},
         },
     },
-    schedule={"epochs": 1},
+    schedule={"epochs": 1, "validation_split": 0.1},
     batch={"global_batch_size": 128, "micro_batch_size": 4},
     optimizer={"learning_rate": 1e-5, "warmup_steps": 5, "weight_decay": 0.01},
     parallelism={"num_gpus_per_node": 1},
@@ -399,7 +401,7 @@ if status.status != "completed":
 
 ### Interpreting contrastive loss
 
-A healthy run drops sharply over the first 20–30% of training, then flattens toward a stable floor with validation loss tracking close behind. Validation loss rising while training loss falls is overfitting: cut epochs. Spikes or NaN mean the learning rate is too high. A curve that never moves points at the learning rate being too low or at the data itself.
+The automatic 10% holdout above supplies the validation loss for this NVDocs job. A healthy run drops sharply over the first 20–30% of training, then flattens toward a stable floor with validation loss tracking close behind. Validation loss rising while training loss falls is overfitting: cut epochs. Spikes or NaN mean the learning rate is too high. A curve that never moves points at the learning rate being too low or at the data itself.
 
 There is no target loss value, since the absolute number depends on batch size, negative count, and temperature. Loss is also not retrieval accuracy: it can keep improving while nDCG stagnates when the mined negatives are too easy. Stage 4 metrics are the ground truth.
 
@@ -522,7 +524,7 @@ print("dim", len(resp["data"][0]["embedding"]))
 Equivalent CLI:
 
 ```bash
-nemo evaluator retrieve-eval submit --workspace default --spec '{
+nemo evaluator retrieve-eval --workspace default --spec '{
   "dataset": "default/nvdocs-embed-artifacts",
   "target": "default/nemotron-3-embed-1b-tuned",
   "baseline": "default/nemotron-3-embed-1b",
@@ -549,7 +551,6 @@ cmd = [
     shutil.which("nemo") or "nemo",
     "evaluator",
     "retrieve-eval",
-    "submit",
     "--workspace",
     "default",
     "--spec",
@@ -557,7 +558,7 @@ cmd = [
 ]
 proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
 if proc.returncode != 0:
-    raise RuntimeError(f"retrieve-eval submit failed:\n{proc.stderr}")
+    raise RuntimeError(f"retrieve-eval failed:\n{proc.stderr}")
 
 eval_job_name = json.loads(proc.stdout[proc.stdout.index("{") :])["name"]
 print("retrieve-eval job:", eval_job_name)
@@ -577,21 +578,31 @@ for row in client.jobs.results.list(eval_job_name, workspace="default").data:
 
 ## Interpreting results
 
-An example result after finetuning for 3 epochs on NVDocs SDG dataset and evaluating on 20,909-query eval_beir split:
+`retrieve-eval` scores the baseline and the target in one job, and the gap between those two is the result. Absolute values shift with the eval split, corpus size, domain, and mining depth, so read a published score as a reference point rather than a number to hit.
+
+These are reference scores for a tuned Nemotron 3 Embed 1B on a 20,909-query NVDocs `eval_beir` split:
 
 ```
-Model: base
-- nDCG@10: 0.56713
-- Recall@10: 0.63753
-- Precision@10: 0.13192
+Base: Nemotron 3 Embed 1B (untuned)
+- nDCG@10: 0.5677
+- Recall@10: 0.6382
+- Recall@100: 0.8251
+- MAP@10: 0.4791
 
-Model: fine-tuned
-- nDCG@10: 0.61696 (+9%)
-- Recall@10: 0.69999 (+10%)
-- Precision@10: 0.14807 (+12%)
+Target: 3 epochs, all_weights, in-batch negatives, global batch 256, micro batch 8, learning rate 2e-5
+- nDCG@10: 0.6198
+- Recall@10: 0.7058
+- Recall@100: 0.8955
+- MAP@10: 0.5284
+
+Uplift
+- nDCG@10: +0.0521 (+9.2%)
+- Recall@10: +0.0675 (+10.6%)
+- Recall@100: +0.0704 (+8.5%)
+- MAP@10: +0.0493 (+10.3%)
 ```
 
-Compare the fine-tuned model against the base checkpoint in the same evaluation. The eval split, corpus size, domain, and mining depth all move the scale.
+That configuration is a ceiling rather than the output of the single-epoch job above: three epochs at twice the batch size and twice the learning rate, scored on the best validation checkpoint. Separate runs on this corpus put the third epoch at roughly +0.3 nDCG@10 points over the second, so most of the gain arrives in the first passes.
 
 ## Hyperparameters
 
@@ -602,7 +613,7 @@ Learning rate is the most sensitive parameter, followed by epochs, warmup, and b
 | Learning rate | `optimizer.learning_rate` | `1e-5`, swept at half and double |
 | Warmup | `optimizer.warmup_steps` | `5`, or 5–10% of total steps |
 | Weight decay | `optimizer.weight_decay` | `0.01` |
-| Epochs | `schedule.epochs` | `1` for 10,000 rows or more, `2` for a few thousand |
+| Epochs | `schedule.epochs` | `1` to start, raised while eval metrics keep improving; the reference run used `3` |
 | Global batch | `batch.global_batch_size` | `128` |
 | Micro batch | `batch.micro_batch_size` | `4` |
 | Sequence length | `training.max_seq_length`, `training.retrieval.query_max_length`, `training.retrieval.passage_max_length` | `512` |

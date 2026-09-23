@@ -9,7 +9,7 @@ import json
 
 import httpx
 import pytest
-from nmp.intake.cli import IntakeCLI
+from nhx.intake.cli import IntakeCLI
 
 WS = "/apis/intake/v2/workspaces/default"
 
@@ -382,7 +382,7 @@ def test_sessions_get_code_output(intake_cli) -> None:
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
     assert 'response = client.get_session(id="sess-1")' in result.stdout
-    assert "NeMoPlatform" not in result.stdout
+    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -842,10 +842,10 @@ def test_code_output_for_reads(intake_cli, args: list[str], expected: str) -> No
 
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
-    assert "from nemo_platform_plugin.intake.client import IntakeClient" in result.stdout
+    assert "from nemo_helix_plugin.intake.client import IntakeClient" in result.stdout
     assert 'client = IntakeClient(base_url="http://test/")' in result.stdout
     assert expected in result.stdout
-    assert "NeMoPlatform" not in result.stdout
+    assert "NeMoHelix" not in result.stdout
 
 
 def test_code_output_for_annotation_create_renders_variant(intake_cli) -> None:
@@ -855,7 +855,7 @@ def test_code_output_for_annotation_create_renders_variant(intake_cli) -> None:
 
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
-    assert "from nemo_platform_plugin.intake.types import NoteAnnotationInput" in result.stdout
+    assert "from nemo_helix_plugin.intake.types import NoteAnnotationInput" in result.stdout
     assert 'body=NoteAnnotationInput(session_id="sess-1", kind="note", text="hi")' in result.stdout
 
 

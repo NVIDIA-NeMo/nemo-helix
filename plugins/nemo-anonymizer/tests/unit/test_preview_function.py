@@ -18,8 +18,8 @@ from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.functions import _preview_worker as worker_module
 from nemo_anonymizer_plugin.functions._preview_logs import request_callback_cvar
 from nemo_anonymizer_plugin.functions.preview import LogFrame, PreviewFunction, PreviewSpec, TraceDatasetFrame
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.function_context import FunctionContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.function_context import FunctionContext
 from pydantic import BaseModel
 
 

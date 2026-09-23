@@ -19,12 +19,12 @@ from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, EvaluateJob
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-from nemo_platform_plugin.sdk import NeMoPlatform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.testing.e2e import wait_for_platform_job
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing.e2e import wait_for_platform_job
 
 #: Opt-in: shares the evaluator-plugin integration opt-in (spins a real ``nemo services`` platform).
 pytestmark = [
@@ -64,7 +64,7 @@ def test_submit_offline_row_eval_persists_result(subprocess_platform: str) -> No
     # dim: submit x subprocess backend, row (EvaluateJob) path. The jobs service compiles + runs
     # EvaluateJob.run() as a host subprocess; run() writes an EvaluateResult through the async task
     # SDK + entity store. Offline (no target or IGW): the dataset already carries the outputs.
-    client = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()

@@ -5,17 +5,17 @@ import os
 
 import pytest
 from fastapi import status
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError as APIStatusError
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import EntityCreateInput, EntityUpdate
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.entities.utils.identifiers import generate_entity_id
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError as APIStatusError
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import EntityCreateInput, EntityUpdate
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.entities.utils.identifiers import generate_entity_id
 
 base_url = os.getenv("BASE_URL", "http://localhost:8080")
-sdk = NeMoPlatform(base_url=base_url, max_retries=0)
+sdk = NeMoHelix(base_url=base_url, max_retries=0)
 
 
 @pytest.fixture(scope="module")

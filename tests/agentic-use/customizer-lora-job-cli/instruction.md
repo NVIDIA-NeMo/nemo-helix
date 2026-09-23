@@ -1,18 +1,18 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# LoRA Customization Job via NeMo Platform Customizer (GPU)
+# LoRA Customization Job via NeMo Helix Customizer (GPU)
 
-This task tests submitting and running a real LoRA fine-tuning job through the **nemo-customizer** plugin with the **nmp-automodel** backend. Training is dispatched through the NeMo Platform jobs pipeline to GPU containers built from the dev registry.
+This task tests submitting and running a real LoRA fine-tuning job through the **nemo-customizer** plugin with the **nhx-automodel** backend. Training is dispatched through the NeMo Helix jobs pipeline to GPU containers built from the dev registry.
 
-You have access to the `nemo` and `nmp` CLIs for NeMo Platform operations. Note: MCP tools are not available in this environment — you must use the CLI.
+You have access to the `nemo` and `nhx` CLIs for NeMo Helix operations. Note: MCP tools are not available in this environment — you must use the CLI.
 
-The CLIs are available at `/app/.venv/bin/nemo` and `/app/.venv/bin/nmp`. The platform API runs at http://localhost:8080. CLI auth is pre-configured.
+The CLIs are available at `/app/.venv/bin/nemo` and `/app/.venv/bin/nhx`. The platform API runs at http://localhost:8080. CLI auth is pre-configured.
 
 ## Context
 
-- The NeMo Platform API server is running with the jobs controller and customization plugin enabled
-- Platform image registry/tag are configured for `my-registry/nemo-platform-dev` (see environment setup)
+- The NeMo Helix API server is running with the jobs controller and customization plugin enabled
+- Platform image registry/tag are configured for `my-registry/nemo-helix-dev` (see environment setup)
 - The Docker backend is configured for GPU job execution; the Docker socket is mounted
 - A workspace `lora-training-workspace` has been pre-created
 - A model entity `smollm-135m` (HF weights fileset `smollm-135m-weights`) has been registered in the workspace
@@ -90,7 +90,7 @@ The task is complete when:
 
 ## Notes
 
-- LoRA/SFT training uses the **automodel** contributor (`nmp-automodel-training` / `nmp-customizer-tasks` images), not the legacy customizer automodel path
+- LoRA/SFT training uses the **automodel** contributor (`nhx-automodel-training` / `nhx-customizer-tasks` images), not the legacy customizer automodel path
 - Model reference format: `workspace/model-entity-name` (e.g., `lora-training-workspace/smollm-135m`)
 - Dataset reference format in job JSON: `workspace/fileset-name` inside `dataset.training`
 - Jobs may take a few minutes depending on dataset size and GPU availability

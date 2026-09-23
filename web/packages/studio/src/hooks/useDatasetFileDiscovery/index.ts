@@ -77,7 +77,7 @@ export const partitionDatasetFiles = (files: FilesetFileOutput[]): PartitionedFi
  * Lists every file in a fileset (no path filter) and partitions them into
  * training / validation buckets using the same discovery rules as the
  * Customizer service. See CUSTOMIZATION_DATASET_DISCOVERY and
- * services/customizer/src/nmp/customizer/tasks/training/datasets/preparation.py.
+ * services/customizer/src/nhx/customizer/tasks/training/datasets/preparation.py.
  */
 export const useDatasetFileDiscovery = ({
   fileset,

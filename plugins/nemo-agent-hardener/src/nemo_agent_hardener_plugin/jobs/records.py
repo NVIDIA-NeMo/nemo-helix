@@ -21,11 +21,11 @@ from nemo_agent_hardener_plugin.entities import (
 )
 from nemo_agent_hardener_plugin.jobs import benign_suite
 from nemo_agent_hardener_plugin.jobs.errors import RunFailure
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import EntityCreateInput, EntityUpdate
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import EntityCreateInput, EntityUpdate
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
 

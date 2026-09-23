@@ -42,15 +42,15 @@ from pathlib import Path
 
 import httpx
 import yaml
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import SpanMode
+from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin.analyst.result import AnalystResult
 from nemo_insights_plugin.entities import Insight, InsightStatus
 from nemo_insights_plugin.schema import InsightListItem, InsightPage
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import SpanMode
-from nemo_platform_plugin.schema import PaginationData
 from pydantic import BaseModel, JsonValue
 
 FilterParam = dict[str, JsonValue]
@@ -169,7 +169,7 @@ class AnalystBackend(ABC):
     primitives. Reads always hit the live platform, even in local insights mode.
     """
 
-    def __init__(self, client: AsyncNeMoPlatform) -> None:
+    def __init__(self, client: AsyncNeMoHelix) -> None:
         self.client = client
         self.intake = client_from_platform(client, AsyncIntakeClient)
 
@@ -436,7 +436,7 @@ class RemoteAnalystBackend(AnalystBackend):
     semantics.
     """
 
-    def __init__(self, client: AsyncNeMoPlatform, mirror: InsightsFileStore | None = None) -> None:
+    def __init__(self, client: AsyncNeMoHelix, mirror: InsightsFileStore | None = None) -> None:
         super().__init__(client)
         self.mirror = mirror
 
@@ -596,7 +596,7 @@ class LocalAnalystBackend(AnalystBackend):
     stored entity.
     """
 
-    def __init__(self, *, client: AsyncNeMoPlatform, path: Path) -> None:
+    def __init__(self, *, client: AsyncNeMoHelix, path: Path) -> None:
         super().__init__(client)
         self.store = InsightsFileStore(path)
 
@@ -678,7 +678,7 @@ class LocalAnalystBackend(AnalystBackend):
 
 def make_analyst_backend(
     *,
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     insights_output: str | None,
     local_only: bool = False,
 ) -> AnalystBackend:

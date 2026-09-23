@@ -402,7 +402,7 @@ describe('seed-dataset columns', () => {
       },
     ]);
     expect(config.seed_config).toEqual({
-      source: { seed_type: 'nmp', path: 'default/my-fileset#data.parquet' },
+      source: { seed_type: 'nhx', path: 'default/my-fileset#data.parquet' },
       sampling_strategy: 'shuffle',
     });
   });
@@ -416,7 +416,7 @@ describe('seed-dataset columns', () => {
     ];
 
     expect(buildDataDesignerConfig(columns).seed_config).toEqual({
-      source: { seed_type: 'nmp', path: 'default/my-fileset#data.parquet' },
+      source: { seed_type: 'nhx', path: 'default/my-fileset#data.parquet' },
     });
   });
 

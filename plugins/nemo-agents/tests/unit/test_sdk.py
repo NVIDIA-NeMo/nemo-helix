@@ -18,7 +18,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.sdk import AgentsResource, AsyncAgentsResource, agents_sdk_resources
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 
 _Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -34,8 +34,8 @@ def _platform(
     *,
     workspace: str | None = "team-a",
     default_headers: Mapping[str, str] | None = None,
-) -> NeMoPlatform:
-    return NeMoPlatform(
+) -> NeMoHelix:
+    return NeMoHelix(
         base_url="http://test",
         workspace=workspace,
         default_headers=default_headers,
@@ -44,8 +44,8 @@ def _platform(
     )
 
 
-def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(
+def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(
         base_url="http://test",
         workspace=workspace,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),

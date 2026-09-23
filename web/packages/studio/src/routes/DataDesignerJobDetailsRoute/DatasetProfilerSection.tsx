@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import {
   Card,
   Flex,
@@ -30,7 +30,7 @@ const ColumnGrid: FC<{ children: React.ReactNode }> = ({ children }) => (
 export const DatasetProfilerSection: FC = () => {
   const { workspace, jobName, job } = useDataDesignerJobFromRoute();
 
-  const isTerminal = job?.status != null && PlatformJobTerminalStatuses.includes(job.status);
+  const isTerminal = job?.status != null && HelixJobTerminalStatuses.includes(job.status);
 
   const { analysis, hasAnalysis, isLoading, isError } = useDataDesignerJobAnalysis(
     workspace,

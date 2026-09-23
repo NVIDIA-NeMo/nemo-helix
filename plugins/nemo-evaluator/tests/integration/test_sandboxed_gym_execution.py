@@ -38,7 +38,7 @@ from sandboxed_gym.runtime.gym_host_runtime import GYM_GLOBAL_CONFIG_ENV_KEY
 
 pytestmark = pytest.mark.integration
 
-RUNTIME_IMAGE = "registry.example.com/nmp-gym-runtime:test"
+RUNTIME_IMAGE = "registry.example.com/nhx-gym-runtime:test"
 
 
 def _tasks(tmp_path: Path) -> list:
@@ -247,7 +247,7 @@ async def _raise_boom(*args: Any, **kwargs: Any) -> Any:
 # Level 2: the real thing, which needs a cluster
 # --------------------------------------------------------------------------------------------
 
-_LIVE_ENV = ("RUN_SANDBOXED_GYM_LIVE", "OPENSANDBOX_DOMAIN", "OPENSANDBOX_API_KEY", "NMP_GYM_RUNTIME_IMAGE")
+_LIVE_ENV = ("RUN_SANDBOXED_GYM_LIVE", "OPENSANDBOX_DOMAIN", "OPENSANDBOX_API_KEY", "NHX_GYM_RUNTIME_IMAGE")
 
 
 @pytest.mark.skipif(
@@ -261,16 +261,16 @@ async def test_a_real_opensandbox_host_serves_rollouts(tmp_path: Path) -> None:
     and the readiness probe. The level-1 tests above deliberately cannot: they replace the provider
     that makes those calls.
 
-    Requires a `NMP_GYM_RUNTIME_IMAGE` carrying NeMo-Gym and the host runtime, and a PVC holding an
+    Requires a `NHX_GYM_RUNTIME_IMAGE` carrying NeMo-Gym and the host runtime, and a PVC holding an
     environment the target selects. Run with::
 
         RUN_SANDBOXED_GYM_LIVE=1 OPENSANDBOX_DOMAIN=... OPENSANDBOX_API_KEY=... \\
-        NMP_GYM_RUNTIME_IMAGE=... NMP_GYM_PVC_CLAIM=... \\
+        NHX_GYM_RUNTIME_IMAGE=... NHX_GYM_PVC_CLAIM=... \\
         uv run pytest plugins/nemo-evaluator/tests/integration/test_sandboxed_gym_execution.py -k real -v
     """
     config = _config(
-        sandbox_runtime_image=os.environ["NMP_GYM_RUNTIME_IMAGE"],
-        sandbox_job_storage_pvc_claim=os.environ.get("NMP_GYM_PVC_CLAIM", "job-storage"),
+        sandbox_runtime_image=os.environ["NHX_GYM_RUNTIME_IMAGE"],
+        sandbox_job_storage_pvc_claim=os.environ.get("NHX_GYM_PVC_CLAIM", "job-storage"),
     )
     runner = SessionBackedGymRunner(
         target=_target(), plan=resolve_sandbox_plan(config, _target()), job_id="eval-live-1"

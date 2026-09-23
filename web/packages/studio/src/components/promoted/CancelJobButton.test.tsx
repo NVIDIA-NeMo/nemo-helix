@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CancelJobButton } from '@nemo/common/src/components/CancelJobButton';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -15,7 +15,7 @@ import { delay, http, HttpResponse } from 'msw';
 
 const JOB_NAME = 'test-job-abc123';
 
-const renderButton = (status?: PlatformJobStatus) =>
+const renderButton = (status?: HelixJobStatus) =>
   render(
     <TestProviders>
       <CancelJobButton workspace={workspace1.name} jobName={JOB_NAME} jobStatus={status} />
@@ -29,7 +29,7 @@ describe('CancelJobButton', () => {
     });
   });
 
-  it.each([PlatformJobStatus.created, PlatformJobStatus.pending, PlatformJobStatus.active])(
+  it.each([HelixJobStatus.created, HelixJobStatus.pending, HelixJobStatus.active])(
     'renders cancel button when status is %s',
     (status) => {
       renderButton(status);
@@ -37,25 +37,23 @@ describe('CancelJobButton', () => {
     }
   );
 
-  it.each([
-    PlatformJobStatus.completed,
-    PlatformJobStatus.cancelled,
-    PlatformJobStatus.error,
-    undefined,
-  ])('does not render when status is %s', (status) => {
-    renderButton(status);
-    expect(screen.queryByRole('button', { name: 'Cancel Job' })).not.toBeInTheDocument();
-  });
+  it.each([HelixJobStatus.completed, HelixJobStatus.cancelled, HelixJobStatus.error, undefined])(
+    'does not render when status is %s',
+    (status) => {
+      renderButton(status);
+      expect(screen.queryByRole('button', { name: 'Cancel Job' })).not.toBeInTheDocument();
+    }
+  );
 
   it('shows disabled "Cancelling..." button when status is cancelling', () => {
-    renderButton(PlatformJobStatus.cancelling);
+    renderButton(HelixJobStatus.cancelling);
     const button = screen.getByRole('button', { name: 'Cancelling...' });
     expect(button).toBeDisabled();
   });
 
   it('opens confirmation modal on click', async () => {
     const user = userEvent.setup();
-    renderButton(PlatformJobStatus.active);
+    renderButton(HelixJobStatus.active);
 
     await user.click(screen.getByRole('button', { name: 'Cancel Job' }));
 
@@ -67,12 +65,12 @@ describe('CancelJobButton', () => {
   it('calls cancel API and closes modal on confirm', async () => {
     server.use(
       http.post(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name/cancel`, () =>
-        HttpResponse.json({ name: JOB_NAME, status: PlatformJobStatus.cancelled })
+        HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelled })
       )
     );
 
     const user = userEvent.setup();
-    renderButton(PlatformJobStatus.active);
+    renderButton(HelixJobStatus.active);
 
     await user.click(screen.getByRole('button', { name: 'Cancel Job' }));
 
@@ -95,7 +93,7 @@ describe('CancelJobButton', () => {
     );
 
     const user = userEvent.setup();
-    renderButton(PlatformJobStatus.active);
+    renderButton(HelixJobStatus.active);
 
     await user.click(screen.getByRole('button', { name: 'Cancel Job' }));
 

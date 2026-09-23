@@ -22,15 +22,15 @@ workload_identity:
   expected_groups:
     - nemo-workloads
 workload_contract:
-  audience: nemo-platform
+  audience: nemo-helix
   principal_claim: sub
   groups_claim: groups
   groups_format: list
   token_env_vars:
-    - NMP_WORKLOAD_IDENTITY_TOKEN_FILE
+    - NHX_WORKLOAD_IDENTITY_TOKEN_FILE
   forwarded_headers:
-    principal_id: X-NMP-Principal-Id
-    principal_groups: X-NMP-Principal-Groups
+    principal_id: X-NHX-Principal-Id
+    principal_groups: X-NHX-Principal-Groups
 token_acquisition:
   token_endpoint: https://127.0.0.1:18084/oauth/v2/token
   # E2E TEST HARNESS ONLY. ZITADEL does not support resource-owner password

@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient
-from nmp.common.api.filter import ComparisonOperation, FilterOperator
-from nmp.common.auth import get_auth_client
-from nmp.common.auth.client import AuthClient
-from nmp.common.auth.models import Principal
-from nmp.core.entities.api.server import app
-from nmp.core.entities.app.repository import WorkspaceRepositoryInterface
-from nmp.core.entities.entities import WorkspaceDeletionStage
+from nhx.common.api.filter import ComparisonOperation, FilterOperator
+from nhx.common.auth import get_auth_client
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.models import Principal
+from nhx.core.entities.api.server import app
+from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
+from nhx.core.entities.entities import WorkspaceDeletionStage
 
 
 def _create_service_principal_auth_client() -> AuthClient:

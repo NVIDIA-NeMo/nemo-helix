@@ -8,9 +8,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_platform_plugin.agents.client import AgentsClient
-from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
-from nemo_platform_plugin.errors import LocalRunError
+from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.errors import LocalRunError
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config
 
@@ -23,7 +23,7 @@ def resolve_agent_config(
     agent: str | None,
     *,
     workspace: str,
-    sdk: SyncPlatformClient | None,
+    sdk: SyncHelixClient | None,
 ) -> dict[str, Any] | None:
     """Fetch a platform-managed agent's config and return a Fabric agent package.
 

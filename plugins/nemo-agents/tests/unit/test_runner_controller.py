@@ -33,9 +33,9 @@ from nemo_agents_plugin.entities import (
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.controller import AgentDeploymentController
 from nemo_agents_plugin.spec_revision import SpecRevision
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 EXPIRATION_NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 
@@ -54,12 +54,12 @@ async def test_controller_startup_adapts_sdk_to_typed_entities_client() -> None:
 
     with (
         patch("nemo_agents_plugin.config.AgentsConfig.get", return_value=AgentsConfig()),
-        patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
+        patch("nemo_helix_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
         patch(
-            "nemo_platform_plugin.client.adapter.client_from_platform",
+            "nemo_helix_plugin.client.adapter.client_from_platform",
             return_value=typed_client,
         ) as mock_adapter,
-        patch("nemo_platform_plugin.entities.EntityClient", return_value=entity_client) as mock_entity_client,
+        patch("nemo_helix_plugin.entities.EntityClient", return_value=entity_client) as mock_entity_client,
     ):
         controller = AgentDeploymentController()
         await controller.on_startup()

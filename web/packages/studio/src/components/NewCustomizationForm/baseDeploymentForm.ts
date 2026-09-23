@@ -10,21 +10,23 @@ import {
 } from '@studio/routes/NewDeploymentRoute/schema';
 
 /**
- * Deploying is the default: without it the run produces nothing servable.
+ * Deployment is opt-out, for every run and both targets.
  *
- * On submit Studio creates the ModelDeploymentConfig and passes its name to the
- * job as `deployment_config`. The job's own model_entity task resolves that name
- * once training finishes and creates the ModelDeployment then — see
- * `launch_model` in `nmp.customization_common.tasks.model_entity.run`.
+ * One constant rather than one per flow: a user who fine-tunes a model means to
+ * use it, and having to discover a switch before that becomes possible makes the
+ * common case the one that needs extra work. Opting out stays a single click for
+ * the runs trained only to be evaluated.
  *
- * Studio deliberately does not create the deployment itself. That is the same
- * end state reached hours earlier, with a serving GPU idling through the entire
- * training run for nothing. Handing the job a config name costs nothing while it
- * trains and still fails fast: `_validate_engine_config` runs synchronously
- * inside `create_deployment_config`, so a bad engine or missing image is
- * rejected before the job is submitted.
+ * Defaulting on costs little because Studio does not create the deployment. On
+ * submit it creates the ModelDeploymentConfig and passes its name to the job as
+ * `deployment_config`; the job's own model_entity task resolves that name once
+ * training finishes and creates the ModelDeployment then — see `launch_model` in
+ * `nhx.customization_common.tasks.model_entity.run`. So no GPU is claimed while
+ * the run is in progress, and the up-front config still fails fast:
+ * `_validate_engine_config` runs synchronously inside `create_deployment_config`,
+ * so a bad engine or missing image is rejected before the job is submitted.
  */
-export const DEFAULT_DEPLOY_BASE_MODEL = true;
+export const DEPLOY_BY_DEFAULT = true;
 
 /**
  * The deployment form nested inside the fine-tuning form reuses `WizardFormValues`
@@ -50,13 +52,42 @@ export function baseDeploymentDefaults(modelRef?: string): WizardFormValues {
 }
 
 /**
- * Deployment base name derived from the base model.
+ * Defaults for deploying the **model this run produces**.
+ *
+ * `modelRef` is set but never sent. The output Model Entity does not exist when the
+ * config is created and will not until the job finishes, so the config is created
+ * unbound — engine and executor only — and the model_entity task binds it to the
+ * trained model at deploy time. The ref is carried anyway because it names the
+ * config (`<output>-config`) and because `createDeploymentWizardSchema` requires it
+ * on the Workspace branch; `createUnboundDeploymentConfig` drops it.
+ *
+ * `loraEnabled` is left at the wizard's default rather than pinned. For a
+ * full-weight model it decides whether adapters trained against it later can be
+ * served alongside it, which is a genuine preference and nothing this run
+ * depends on. It survives onto the derived config the task binds, because it
+ * describes serving rather than which model is served.
+ */
+export function outputDeploymentDefaults(workspace: string, outputName?: string): WizardFormValues {
+  return {
+    ...defaultWizardValues(),
+    source: SOURCE_WORKSPACE,
+    workspacePickerType: WORKSPACE_PICKER_MODEL,
+    modelRef: (outputName ? `${workspace}/${outputName}` : '') as ResourceRef,
+  };
+}
+
+/**
+ * Deployment base name derived from a model name or `workspace/name` reference.
  *
  * `deploymentNameFromWizardBaseName` appends `-deployment` and
  * `configNameFromWizardBaseName` appends `-config`, matching the wizard so the two
  * entry points produce consistently-named assets. Derived rather than
- * user-editable: one deployment per base model is the point, and a free-form name
+ * user-editable: one deployment per model is the point, and a free-form name
  * invites duplicates.
+ *
+ * Used for both flows. The adapter flow passes the base model's ref, so repeated
+ * runs against one base collide on the name; the output flow passes the run's
+ * output name, which is unique per job and therefore cannot.
  */
 export function baseDeploymentName(modelRef: string | undefined): string {
   if (!modelRef) return '';

@@ -4,7 +4,7 @@
 
 """Set up mock inference provider for the content safety eval.
 
-This script runs after the NeMo Platform API server is healthy but before the agent starts.
+This script runs after the NeMo Helix API server is healthy but before the agent starts.
 It configures a mock inference provider that always returns "Yes" to any prompt,
 which makes it suitable for use with guardrails self-check rails (blocking all content).
 
@@ -15,21 +15,21 @@ import json
 import sys
 import time
 
-from nemo_platform import (
+from nemo_helix import (
     APIConnectionError,
     APITimeoutError,
     InternalServerError,
-    NeMoPlatform,
+    NeMoHelix,
     NotFoundError,
     UnprocessableEntityError,
 )
-from nemo_platform import (
+from nemo_helix import (
     ConflictError as SDKConflictError,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import CreateModelEntityRequest
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
 
 # Exceptions we treat as transient readiness errors during setup polling.
 # Anything outside this set (auth errors, bad-request, schema validation
@@ -43,7 +43,7 @@ _TRANSIENT_ROUTING_ERRORS = (
     InternalServerError,
 )
 
-NMP_BASE_URL = "http://localhost:8080"
+NHX_BASE_URL = "http://localhost:8080"
 WORKSPACE = "default"
 MOCK_MODEL_NAME = "mock-llm"
 MOCK_PROVIDER_NAME = f"igw-mock-{MOCK_MODEL_NAME}"
@@ -81,7 +81,7 @@ MOCK_RESPONSE_MAP = {
 }
 
 
-def _register_served_model(sdk: NeMoPlatform, workspace: str, provider_name: str, model_name: str) -> None:
+def _register_served_model(sdk: NeMoHelix, workspace: str, provider_name: str, model_name: str) -> None:
     """Register provider served-model mapping for IGW model discovery."""
     sdk.inference.providers.update_status(
         name=provider_name,
@@ -95,7 +95,7 @@ def _register_served_model(sdk: NeMoPlatform, workspace: str, provider_name: str
     )
 
 
-def _ensure_model_entity(sdk: NeMoPlatform, workspace: str, model_name: str) -> None:
+def _ensure_model_entity(sdk: NeMoHelix, workspace: str, model_name: str) -> None:
     """Create model entity if missing; ignore already-exists conflicts."""
     try:
         client_from_platform(sdk, ModelsClient).create_model(
@@ -110,7 +110,7 @@ def _ensure_model_entity(sdk: NeMoPlatform, workspace: str, model_name: str) -> 
 
 
 def wait_for_model(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     provider_name: str,
     model_name: str,
@@ -139,7 +139,7 @@ def wait_for_model(
 
 
 def wait_for_openai_routing(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     model_name: str,
     timeout: float = 60.0,
@@ -178,7 +178,7 @@ def wait_for_openai_routing(
 
 
 def setup() -> None:
-    sdk = NeMoPlatform(base_url=NMP_BASE_URL)
+    sdk = NeMoHelix(base_url=NHX_BASE_URL)
 
     # Step 1: Create or update mock provider with static "Yes" response.
     # AGENT and VERIFY run in separate containers against the same DB state,

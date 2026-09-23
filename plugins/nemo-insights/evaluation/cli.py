@@ -67,7 +67,7 @@ ANALYST_SOURCE_ROOT = HERE.parent / "src" / "nemo_insights_plugin"
 ANALYST_LOCKFILE = HERE.parents[2] / "uv.lock"
 ANALYST_LOCK_ROOT = "nemo-insights-plugin"
 ENV_PATH = HERE / ".env"
-LOCAL_URL = artifact.LOCAL_URL  # the local NeMo Platform (the default restore/analyze target)
+LOCAL_URL = artifact.LOCAL_URL  # the local NeMo Helix (the default restore/analyze target)
 ANALYST_EXPERIMENT_NAME = "nemo-analyst"
 _REMOTE_AUTH_KEYS = ("auth", "intake_path_prefix", "auth_user_env", "auth_password_env")
 INSIGHTS_SPDX_HEADER = (
@@ -501,7 +501,7 @@ def _restore_export_bundle(
     (``reingest.ingest_bundle`` guards on per-collection counts). Direct
     ``--into`` restores require a fresh, empty target and are not idempotent
     into populated workspaces. Both warn on stale bundles. The catalog
-    inversion is loaded up front so a missing nemo-platform checkout fails
+    inversion is loaded up front so a missing nemo-helix checkout fails
     before any extraction or network I/O. The bundle's ``tmp/`` run records
     are copied beside the local ones (clobbered locals are backed up into
     *backup_dir*, the caller's per-invocation destination); insights never
@@ -678,7 +678,7 @@ def _run_roundtrip(bundle: Path, base: str, platform_root: str | None) -> None:
     """
     if not artifact.is_export_manifest(_read_bundle_manifest(bundle)):
         sys.exit(f"roundtrip: {bundle.name} is not an evaluation export bundle — nothing to guard")
-    # Load the inversion catalog up front so a missing nemo-platform checkout
+    # Load the inversion catalog up front so a missing nemo-helix checkout
     # fails before any extraction or network I/O (same discipline as restore).
     catalog = reingest.load_catalog(reingest.resolve_platform_root(platform_root))
     TMP.mkdir(parents=True, exist_ok=True)
@@ -825,8 +825,8 @@ def main() -> None:
     p_ins.add_argument(
         "--platform-root",
         default=None,
-        help="nemo-platform checkout for the span-attribute-catalog inversion "
-        "(default: $NMP_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-platform).",
+        help="nemo-helix checkout for the span-attribute-catalog inversion "
+        "(default: $NHX_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-helix).",
     )
     p_snap = sub.add_parser(
         "snapshot",
@@ -885,8 +885,8 @@ def main() -> None:
     p_res.add_argument(
         "--platform-root",
         default=None,
-        help="nemo-platform checkout for the span-attribute-catalog inversion "
-        "(default: $NMP_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-platform).",
+        help="nemo-helix checkout for the span-attribute-catalog inversion "
+        "(default: $NHX_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-helix).",
     )
     p_rt = sub.add_parser(
         "roundtrip",
@@ -902,8 +902,8 @@ def main() -> None:
     p_rt.add_argument(
         "--platform-root",
         default=None,
-        help="nemo-platform checkout for the span-attribute-catalog inversion "
-        "(default: $NMP_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-platform).",
+        help="nemo-helix checkout for the span-attribute-catalog inversion "
+        "(default: $NHX_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-helix).",
     )
     p_pub = sub.add_parser(
         "publish",
@@ -929,8 +929,8 @@ def main() -> None:
     p_pub.add_argument(
         "--platform-root",
         default=None,
-        help="nemo-platform checkout for the --base round-trip guard's span-attribute-catalog inversion "
-        "(default: $NMP_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-platform).",
+        help="nemo-helix checkout for the --base round-trip guard's span-attribute-catalog inversion "
+        "(default: $NHX_PLATFORM_ROOT, the CI sibling checkout, then ~/workstation/nemo-helix).",
     )
     p_doc = sub.add_parser("doctor", help="Check prerequisites for a subject (or all).")
     p_doc.add_argument("name", nargs="?", help="Subject name; omit to check every subject.")

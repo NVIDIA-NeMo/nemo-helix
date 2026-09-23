@@ -3,9 +3,9 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import {
-  PlatformJobResponse,
-  PlatformJobResponsesPage,
-  PlatformJobStatus,
+  HelixJobResponse,
+  HelixJobResponsesPage,
+  HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -29,21 +29,21 @@ vi.mock('use-debounce', () => ({
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const WORKSPACE = workspace1.workspace;
 
-const makeJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobResponse => ({
+const makeJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse => ({
   id: 'job-id-1',
   attempt_id: 'attempt-1',
   name: 'my-training-job',
   workspace: WORKSPACE,
   source: 'evaluator-metrics',
   fileset: 'fileset-1',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   platform_spec: { steps: [] },
   created_at: '2025-06-01T10:00:00Z',
   updated_at: '2025-06-01T12:00:00Z',
   ...overrides,
 });
 
-const makeJobsPage = (jobs: PlatformJobResponse[]): PlatformJobResponsesPage => ({
+const makeJobsPage = (jobs: HelixJobResponse[]): HelixJobResponsesPage => ({
   data: jobs,
   pagination: {
     page: 1,

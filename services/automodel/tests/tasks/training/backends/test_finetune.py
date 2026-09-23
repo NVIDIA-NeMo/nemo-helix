@@ -36,7 +36,7 @@ _STUBBED_MODULES = (
     "nemo_automodel.recipes.retrieval.train_bi_encoder",
     "nemo_automodel.recipes.retrieval.train_cross_encoder",
 )
-_FINETUNE = "nmp.automodel.tasks.training.backends.finetune"
+_FINETUNE = "nhx.automodel.tasks.training.backends.finetune"
 
 
 @pytest.fixture
@@ -215,8 +215,8 @@ def test_the_default_keeps_the_diagnostic_metrics_and_drops_the_counters(finetun
     """
     from typing import cast
 
-    from nmp.customization_common.training.callbacks import TrainingProgressCallback
-    from nmp.customization_common.training.progress import JobsServiceProgressReporter
+    from nhx.customization_common.training.callbacks import TrainingProgressCallback
+    from nhx.customization_common.training.progress import JobsServiceProgressReporter
 
     class _Reporter:
         def __init__(self) -> None:
@@ -461,7 +461,7 @@ def _wrapper(finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, recipe: _Fak
         def close(self): ...
 
     monkeypatch.setattr(finetune, "JobsServiceProgressReporter", _Reporter)
-    monkeypatch.setattr(finetune.NMPJobContext, "from_env", classmethod(lambda cls: object()))
+    monkeypatch.setattr(finetune.NHXJobContext, "from_env", classmethod(lambda cls: object()))
     return finetune.AutomodelRecipeWrapper(recipe), reports
 
 

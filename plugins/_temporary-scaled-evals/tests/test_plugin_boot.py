@@ -25,7 +25,7 @@ def _fixture_dsn(role: str, host: str, database: str) -> str:
     return f"postgresql://{role}:{role}@{host}:5432/{database}"
 
 
-PLATFORM_DB_URL = _fixture_dsn("platform", "platform-db", "nemo_platform")
+PLATFORM_DB_URL = _fixture_dsn("platform", "platform-db", "nemo_helix")
 OWN_DB_URL = _fixture_dsn("scaled_evals", "own-db", "scaled_evals")
 
 # Runs in a subprocess so conftest's env presets can't mask a real boot failure.
@@ -67,5 +67,5 @@ def test_plugin_loads_without_test_env_and_keeps_off_the_platform_database() -> 
 
     db_line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DBURL:"))
     assert OWN_DB_URL in db_line, db_line
-    assert "nemo_platform" not in db_line, db_line
+    assert "nemo_helix" not in db_line, db_line
     assert "search_path%3Dscaled_evals" in db_line, db_line

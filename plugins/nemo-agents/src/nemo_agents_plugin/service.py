@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agents plugin service — registers agent lifecycle management on the NeMo Platform."""
+"""Agents plugin service — registers agent lifecycle management on the NeMo Helix."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from typing import ClassVar, NamedTuple
 
 from nemo_agents_plugin.api.v2._perms import GatewayPerms
 from nemo_agents_plugin.authz import scope
-from nemo_platform_plugin.authz import Permission
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import Permission
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 logger = logging.getLogger(__name__)
 

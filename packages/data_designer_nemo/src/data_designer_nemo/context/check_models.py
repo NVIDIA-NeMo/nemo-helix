@@ -6,7 +6,7 @@
 ``create_data_designer`` needs three engine components: a secret resolver,
 seed readers, and a person reader. The real implementations
 (:class:`~data_designer_nemo.context.execution.DataDesignerExecutionContext`) all need a
-sync ``NeMoPlatform``, and an async caller cannot build one — rebuilding a sync
+sync ``NeMoHelix``, and an async caller cannot build one — rebuilding a sync
 SDK from an async one is deliberately unsupported (see
 :mod:`data_designer_nemo.sdk_translation`).
 

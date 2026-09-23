@@ -11,7 +11,7 @@ from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from nemo_auditor.jobs.audit import AuditJob
 from nemo_auditor.service import AuditorPluginService
-from nemo_platform_plugin.scheduler import submit_path_for
+from nemo_helix_plugin.scheduler import submit_path_for
 
 
 def _mounted_post_paths() -> set[str]:

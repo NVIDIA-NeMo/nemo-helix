@@ -2,33 +2,33 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-platform-seed"
+name = "nhx-platform-seed"
 version = "0.0.1"
 description = "Platform seed service and task - runs centralized seeding (auth, guardrails, auditor, and plugin seed jobs) after dependencies are ready"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 
 dependencies = [
-  "nmp-common",
-  "nmp-auth",
-  "nmp-guardrails",
+  "nhx-common",
+  "nhx-auth",
+  "nhx-guardrails",
   "nemo-auditor-plugin",
 ]
 
 [project.scripts]
-platform-seed = "nmp.platform_seed.__main__:main"
+platform-seed = "nhx.platform_seed.__main__:main"
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-auth = { workspace = true }
-nmp-guardrails = { workspace = true }
+nhx-common = { workspace = true }
+nhx-auth = { workspace = true }
+nhx-guardrails = { workspace = true }
 nemo-auditor-plugin = { workspace = true }
 
 [dependency-groups]
 dev = [
   "pytest>=8.3.3",
   "pytest-asyncio>=0.24.0",
-  "nmp-testing",
+  "nhx-testing",
 ]
 
 [tool.pytest.ini_options]
@@ -40,4 +40,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]

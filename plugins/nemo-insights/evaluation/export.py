@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any, TextIO, cast
 from urllib.parse import urlparse
 
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_ext.config.config import Config
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_ext.config.config import Config
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 PAGE_SIZE = 1000
@@ -32,13 +32,13 @@ TRACE_EXPORT_CONCURRENCY = 8
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 
-def make_client(base_url: str) -> AsyncNeMoPlatform:
+def make_client(base_url: str) -> AsyncNeMoHelix:
     """Async SDK client; platform auth only for remote URLs (mirrors ingest's client)."""
     host = (urlparse(base_url).hostname or "").lower()
     config_path = Config.get_default_config_path()
     if host in _LOOPBACK_HOSTS or not config_path.exists():
-        return AsyncNeMoPlatform(base_url=base_url, timeout=60.0)
-    return AsyncNeMoPlatform(base_url=base_url, config_path=config_path, timeout=60.0)
+        return AsyncNeMoHelix(base_url=base_url, timeout=60.0)
+    return AsyncNeMoHelix(base_url=base_url, config_path=config_path, timeout=60.0)
 
 
 def _dump(item) -> dict:
@@ -116,7 +116,7 @@ def export_workspaces(
     since: datetime | None,
     experiment: str | None = None,
     selection: dict | None = None,
-    client: AsyncNeMoPlatform | None = None,
+    client: AsyncNeMoHelix | None = None,
 ) -> dict:
     """Drain spans/annotations/evaluator-results per workspace into JSONL files.
 
@@ -139,7 +139,7 @@ def export_workspaces(
 
 
 async def _resolve_experiment_scope(
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     *,
     workspace: str,
     experiment_name: str,
@@ -195,7 +195,7 @@ async def _resolve_experiment_scope(
 
 
 async def _export_scoped_workspace(
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     *,
     workspace: str,
     ws_dir: Path,
@@ -269,7 +269,7 @@ async def _export_workspaces(
     since: datetime | None,
     experiment: str | None = None,
     selection: dict | None = None,
-    client: AsyncNeMoPlatform | None = None,
+    client: AsyncNeMoHelix | None = None,
 ) -> dict:
     if (experiment is not None or selection is not None) and len(workspaces) != 1:
         raise ValueError("experiment-scoped export requires exactly one workspace")

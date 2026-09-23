@@ -10,7 +10,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useAgentsGetOptimizeJob } from '@nemo/sdk/generated/agents/agents';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, PageHeader, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -25,8 +25,8 @@ import { ScrollText } from 'lucide-react';
 import { type FC, useEffect } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
-const TERMINAL_STATUSES = new Set<PlatformJobStatus>(['completed', 'error', 'cancelled']);
-const FAILED_STATUSES = new Set<PlatformJobStatus>(['error', 'cancelled']);
+const TERMINAL_STATUSES = new Set<HelixJobStatus>(['completed', 'error', 'cancelled']);
+const FAILED_STATUSES = new Set<HelixJobStatus>(['error', 'cancelled']);
 
 export const AgentOptimizationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

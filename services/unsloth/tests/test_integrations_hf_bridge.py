@@ -5,14 +5,14 @@ import json
 from pathlib import Path
 
 import pytest
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nmp.customization_common.service.context import NMPJobContext
-from nmp.unsloth.integrations.hf_bridge import apply_integrations_to_sft_config
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.service.context import NHXJobContext
+from nhx.unsloth.integrations.hf_bridge import apply_integrations_to_sft_config
 
 
 @pytest.fixture
-def job_ctx(tmp_path: Path) -> NMPJobContext:
-    return NMPJobContext(
+def job_ctx(tmp_path: Path) -> NHXJobContext:
+    return NHXJobContext(
         workspace="test-workspace",
         job_id="job-123",
         attempt_id="attempt-1",
@@ -26,7 +26,7 @@ def job_ctx(tmp_path: Path) -> NMPJobContext:
 
 
 class TestApplyIntegrationsToSftConfig:
-    def test_none_integrations(self, job_ctx: NMPJobContext, tmp_path: Path) -> None:
+    def test_none_integrations(self, job_ctx: NHXJobContext, tmp_path: Path) -> None:
         report_to, kwargs, env = apply_integrations_to_sft_config(
             integrations=None,
             job_ctx=job_ctx,
@@ -40,7 +40,7 @@ class TestApplyIntegrationsToSftConfig:
 
     def test_wandb_only_when_api_key_present(
         self,
-        job_ctx: NMPJobContext,
+        job_ctx: NHXJobContext,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -70,13 +70,13 @@ class TestApplyIntegrationsToSftConfig:
         assert env["WANDB_PROJECT"] == "my-project"
         assert env["WANDB_ENTITY"] == "my-team"
         assert env["WANDB_NOTES"] == "notes"
-        assert "service:nemo-platform" in env["WANDB_TAGS"]
+        assert "service:nemo-helix" in env["WANDB_TAGS"]
         assert env["WANDB_DIR"] == str(tmp_path / "wandb")
         assert "MLFLOW_RUN_NAME" not in env
 
     def test_wandb_dir_outside_output_model_upload_tree(
         self,
-        job_ctx: NMPJobContext,
+        job_ctx: NHXJobContext,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("WANDB_API_KEY", "test-key")
@@ -95,7 +95,7 @@ class TestApplyIntegrationsToSftConfig:
 
     def test_wandb_skipped_without_api_key(
         self,
-        job_ctx: NMPJobContext,
+        job_ctx: NHXJobContext,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -116,7 +116,7 @@ class TestApplyIntegrationsToSftConfig:
 
     def test_mlflow_only_sets_training_run_name(
         self,
-        job_ctx: NMPJobContext,
+        job_ctx: NHXJobContext,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -146,12 +146,12 @@ class TestApplyIntegrationsToSftConfig:
         assert env["MLFLOW_EXPERIMENT_NAME"] == "exp-1"
         assert "MLFLOW_RUN_NAME" not in env
         tags = json.loads(env["MLFLOW_TAGS"])
-        assert tags["service"] == "nemo-platform"
+        assert tags["service"] == "nemo-helix"
         assert tags["team"] == "nlp"
 
     def test_both_backends_wandb_name_wins(
         self,
-        job_ctx: NMPJobContext,
+        job_ctx: NHXJobContext,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -178,7 +178,7 @@ class TestApplyIntegrationsToSftConfig:
 
     def test_conflicting_run_names_logs_warning(
         self,
-        job_ctx: NMPJobContext,
+        job_ctx: NHXJobContext,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,

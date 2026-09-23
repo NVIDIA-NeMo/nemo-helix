@@ -1,0 +1,22 @@
+# Packages whose base-image versions MUST be preserved when adding the platform
+# glue into NeMo-RL's venv. NeMo-RL pins these to versions tuned for its
+# Ray/torch ML stack; upgrading any of them can break training.
+#
+# How preservation is actually enforced: the RL training image
+# (docker/Dockerfile.nhx-rl-training) installs the glue with `uv pip install
+# --no-deps`, which skips dependency resolution entirely and therefore never
+# upgrades these packages. This file is the documented "protected set" (parity
+# with docker/unsloth and docker/automodel).
+#
+# NOTE: the `sys_platform == 'never'` marker makes each line a deliberate no-op
+# under `uv pip install --overrides` — the marker is always false, so the line
+# never contributes a requirement and, on its own, pins nothing. Version
+# preservation comes from `--no-deps` above, not from these markers. If this
+# file is ever switched to a hard-pinning `--overrides`/constraints flow,
+# replace these lines with explicit `==<version>` pins captured from the base
+# image at build time.
+prometheus-client; sys_platform == 'never'
+starlette; sys_platform == 'never'
+cryptography; sys_platform == 'never'
+mlflow; sys_platform == 'never'
+ray; sys_platform == 'never'

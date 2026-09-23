@@ -12,16 +12,16 @@ from functools import cached_property
 from typing import Any, Protocol, runtime_checkable
 
 from fsspec.callbacks import Callback
-from nemo_platform.resources.files.files import (
+from nemo_helix.resources.files.files import (
     AsyncFilesResource as GeneratedAsyncFilesResource,
 )
-from nemo_platform.resources.files.files import (
+from nemo_helix.resources.files.files import (
     FilesResource as GeneratedFilesResource,
 )
-from nemo_platform.resources.files.filesets import AsyncFilesetsResource, FilesetsResource
-from nemo_platform.resources.files.otlp.otlp import AsyncOtlpResource, OtlpResource
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetOutput
+from nemo_helix.resources.files.filesets import AsyncFilesetsResource, FilesetsResource
+from nemo_helix.resources.files.otlp.otlp import AsyncOtlpResource, OtlpResource
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput
 
 from filesets import transfer
 from filesets.filesystem.filesystem import (
@@ -72,7 +72,7 @@ class FilesResource:
         if files_client is not None:
             self._client = files_client
         else:
-            from nemo_platform_plugin.client.adapter import client_from_platform
+            from nemo_helix_plugin.client.adapter import client_from_platform
 
             self._client = client_from_platform(client, FilesClient)
 
@@ -542,7 +542,7 @@ class AsyncFilesResource:
         if files_client is not None:
             self._client = files_client
         else:
-            from nemo_platform_plugin.client.adapter import client_from_platform
+            from nemo_helix_plugin.client.adapter import client_from_platform
 
             self._client = client_from_platform(client, AsyncFilesClient)
 

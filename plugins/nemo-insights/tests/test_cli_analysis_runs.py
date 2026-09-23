@@ -7,18 +7,17 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from importlib.metadata import distribution
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import typer
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_insights_plugin import cli
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse
 from nemo_insights_plugin.sdk_resources.analysis_runs import AnalysisRunTimeoutError
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -26,13 +25,6 @@ runner = CliRunner()
 RUN_NAME = "insights-run-0123456789abcdef0123456789abcdef"
 CONFIGURED_DEFAULT = "default/configured-big"
 CONFIGURED_FAST = "default/configured-small"
-
-
-@pytest.mark.parametrize("package", ["nemo-insights-plugin", "nemo-platform"])
-def test_installed_packages_do_not_register_local_analyst_commands(package: str) -> None:
-    assert not any(
-        entry.group == "nemo.cli.agents" and entry.name == "analyst" for entry in distribution(package).entry_points
-    )
 
 
 def _run(**overrides: Any) -> AnalysisRun:

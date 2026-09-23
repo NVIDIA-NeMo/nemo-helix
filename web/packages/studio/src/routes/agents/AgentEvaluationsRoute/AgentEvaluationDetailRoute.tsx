@@ -12,7 +12,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { evaluatorCancelAgentEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-agent-eval-jobs-routes';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
   Button,
@@ -344,7 +344,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
           <StatusLogsContent
             workspace={workspace}
             jobName={jobName}
-            jobStatus={job.status as PlatformJobStatus}
+            jobStatus={job.status as HelixJobStatus}
           />
         </AccordionPanel>
       </Stack>

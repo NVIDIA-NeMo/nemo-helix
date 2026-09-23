@@ -23,9 +23,9 @@ from nemo_deployments_plugin.types import (
     RestartPolicy,
     VolumeStatus,
 )
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 WORKLOAD_IDENTITY_TOKEN_MAX_EXPIRATION_SECONDS = 86400
@@ -366,7 +366,7 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         alias="authProxySidecarIdentity",
         description=(
             "Service-principal name the auth-proxy sidecar stamps (interpolated into "
-            "'X-NMP-Principal-Id: service:<identity>'). Required when auth_proxy_sidecar is True."
+            "'X-NHX-Principal-Id: service:<identity>'). Required when auth_proxy_sidecar is True."
         ),
     )
     auth_proxy_sidecar_on_behalf_of: str | None = Field(
@@ -374,7 +374,7 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         alias="authProxySidecarOnBehalfOf",
         description=(
             "Optional principal id the auth-proxy sidecar delegates to via "
-            "'X-NMP-Principal-On-Behalf-Of'. When set, the service principal acts on behalf of this "
+            "'X-NHX-Principal-On-Behalf-Of'. When set, the service principal acts on behalf of this "
             "identity so the platform scopes the workload's access to what that principal can reach "
             "(e.g. the deployment's creator) rather than the service principal's full reach. "
             "Only meaningful when auth_proxy_sidecar is True."

@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.core.auth.app import account_resolution
-from nmp.core.auth.app.account_resolution import (
+from nhx.core.auth.app import account_resolution
+from nhx.core.auth.app.account_resolution import (
     AccountResolver,
     ServicePrincipalNotAllowedError,
 )
-from nmp.core.auth.config import AuthServiceConfig
-from nmp.core.entities.app.repository.account_identity import AccountIdentityRecord
+from nhx.core.auth.config import AuthServiceConfig
+from nhx.core.entities.app.repository.account_identity import AccountIdentityRecord
 
 
 class _FakeStore:

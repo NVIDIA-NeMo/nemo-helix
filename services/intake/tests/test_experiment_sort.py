@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
-from nmp.intake.api.v2.experiments.endpoints import (
+from nhx.intake.api.v2.experiments.endpoints import (
     _parse_session_sort_keys,
     _parse_sort_keys,
     _sort_evaluations,
     _validate_sort_field,
 )
-from nmp.intake.api.v2.experiments.schemas import EvaluationResponse, EvaluatorAggregate
+from nhx.intake.api.v2.experiments.schemas import EvaluationResponse, EvaluatorAggregate
 
 
 def _exp(

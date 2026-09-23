@@ -49,8 +49,8 @@ from nemo_agents_plugin.entities import (
     ComputeSpecInline,
     EnvironmentSpecInline,
 )
-from nemo_platform_plugin.entities.base import parse_qualified_name
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.entities.base import parse_qualified_name
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 
 class EnvironmentResolutionError(ValueError):

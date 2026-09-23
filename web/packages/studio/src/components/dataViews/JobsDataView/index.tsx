@@ -15,9 +15,9 @@ import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataView
 import { getSortParam } from '@nemo/common/src/utils/query';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
-  PlatformJobListSortField,
-  PlatformJobResponse,
-  PlatformJobsListFilter,
+  HelixJobListSortField,
+  HelixJobResponse,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Tag } from '@nvidia/foundations-react-core';
 import {
@@ -87,14 +87,14 @@ export const JobsDataView = () => {
     {
       page: dataViewState.pagination.state.pageIndex + 1,
       page_size: dataViewState.pagination.state.pageSize,
-      sort: getSortParam(dataViewState.sorting.state) as PlatformJobListSortField,
+      sort: getSortParam(dataViewState.sorting.state) as HelixJobListSortField,
       filter: {
         ...userFilter,
         ...(hasUserSourceFilter
           ? {}
-          : withOperators<PlatformJobsListFilter>({ source: { $nin: hiddenJobSources } })),
+          : withOperators<HelixJobsListFilter>({ source: { $nin: hiddenJobSources } })),
         ...(dataViewState.apiFilter.searchText
-          ? withOperators<PlatformJobsListFilter>({
+          ? withOperators<HelixJobsListFilter>({
               name: { $like: dataViewState.apiFilter.searchText },
             })
           : {}),
@@ -127,7 +127,7 @@ export const JobsDataView = () => {
     .map((source) => ({ label: SOURCE_DISPLAY[source]?.label ?? source, value: source }));
   const mergedSourceOptions = [...sourceFilterOptions, ...dynamicSourceOptions];
 
-  const makeColumns: ComponentProps<typeof StudioDataView<PlatformJobResponse>>['makeColumns'] = ({
+  const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['makeColumns'] = ({
     accessor,
   }) => [
     accessor((original) => original?.name || '', {
@@ -210,11 +210,11 @@ export const JobsDataView = () => {
   }
 
   return (
-    <StudioDataView<PlatformJobResponse>
+    <StudioDataView<HelixJobResponse>
       dataViewState={dataViewState}
       searchField="name"
       makeColumns={makeColumns}
-      onRowClick={(row: PlatformJobResponse, _index, event) =>
+      onRowClick={(row: HelixJobResponse, _index, event) =>
         openRow(event, getJobDetailRoute(row, workspace))
       }
       attributes={{

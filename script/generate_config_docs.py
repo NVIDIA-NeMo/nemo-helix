@@ -6,7 +6,7 @@
 Generate config reference markdown from service config classes.
 
 Imports platform and service config classes directly; requires running under uv
-so workspace packages (nmp.common, nmp.core.*, etc.) are on the import path.
+so workspace packages (nhx.common, nhx.core.*, etc.) are on the import path.
 
 Outputs:
   - docs/set-up/config-reference.mdx  Fern MDX with YAML sections and inline comments
@@ -21,7 +21,7 @@ Usage (run from repository root):
 
   # Options
   uv run generate-config-docs --help
-  uv run generate-config-docs --output-to-file  # Also write standalone example YAML to packages/nmp_platform/config/example-config.yaml
+  uv run generate-config-docs --output-to-file  # Also write standalone example YAML to packages/nhx_platform/config/example-config.yaml
   uv run generate-config-docs --output-to-file /path/example.yaml
   uv run generate-config-docs --output-dir /path
   uv run generate-config-docs --markdown docs/ref.md
@@ -41,17 +41,17 @@ from typing import Any, get_args, get_origin
 
 import yaml
 from nemo_safe_synthesizer_plugin.config import SafeSynthesizerConfig
-from nmp.automodel.config import AutomodelConfig
-from nmp.common.config.base import CommonServiceConfig, PlatformConfig
-from nmp.core.auth.config import AuthServiceConfig
-from nmp.core.entities.config import EntitiesConfig
-from nmp.core.files.config import FilesConfig
-from nmp.core.inference_gateway.config import InferenceGatewayConfig
-from nmp.core.jobs.config import JobsServiceConfig
-from nmp.core.models.config import ModelsConfig
-from nmp.core.secrets.config import SecretsServiceConfig
-from nmp.studio.config import StudioConfig
-from nmp.unsloth.config import UnslothConfig
+from nhx.automodel.config import AutomodelConfig
+from nhx.common.config.base import CommonServiceConfig, HelixConfig
+from nhx.core.auth.config import AuthServiceConfig
+from nhx.core.entities.config import EntitiesConfig
+from nhx.core.files.config import FilesConfig
+from nhx.core.inference_gateway.config import InferenceGatewayConfig
+from nhx.core.jobs.config import JobsServiceConfig
+from nhx.core.models.config import ModelsConfig
+from nhx.core.secrets.config import SecretsServiceConfig
+from nhx.studio.config import StudioConfig
+from nhx.unsloth.config import UnslothConfig
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
@@ -61,7 +61,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # All config classes to include in the reference, in display order.
 # Excluded services (e.g. hello_world) are omitted from this list.
 CONFIG_CLASSES: list[type[Any]] = [
-    PlatformConfig,
+    HelixConfig,
     CommonServiceConfig,
     AuthServiceConfig,
     EntitiesConfig,
@@ -292,7 +292,7 @@ def _get_backend_config_models(model_class: type, field_name: str) -> dict[str, 
     if field_name != "backends":
         return None
     try:
-        from nmp.core.models.config import BACKEND_CONFIG_MODELS, ControllerConfig
+        from nhx.core.models.config import BACKEND_CONFIG_MODELS, ControllerConfig
 
         if model_class is ControllerConfig:
             return BACKEND_CONFIG_MODELS
@@ -306,7 +306,7 @@ def _model_dump_for_yaml(model_class: type) -> dict[str, Any]:
 
     Uses ``model_construct`` rather than ``model_class()`` so post-init
     ``@model_validator`` hooks don't run. Those hooks coerce field values
-    based on the host environment (e.g. ``NemoPlatformConfig.validate_runtime``
+    based on the host environment (e.g. ``NemoHelixConfig.validate_runtime``
     auto-demotes ``runtime: docker`` to ``runtime: none`` when the docker
     socket isn't reachable), which would leak the doc-builder's local
     environment into the static reference output and make the YAML value
@@ -412,12 +412,12 @@ def generate_markdown(entries: list[tuple[str, Any]]) -> str:
         "NVIDIA CORPORATION & AFFILIATES. All rights reserved."
     )
     lines.append("# SPDX-License-Identifier: Apache-2.0")
-    lines.append('title: "NeMo Platform configuration reference"')
+    lines.append('title: "NeMo Helix configuration reference"')
     lines.append('description: ""')
     lines.append("---")
     lines.append("")
     lines.append(
-        "This document describes the structure and defaults for the global config file for the NeMo Platform. "
+        "This document describes the structure and defaults for the global config file for the NeMo Helix. "
         "All sections are shown in YAML format with inline comments for description, default, and possible values."
     )
     lines.append("")
@@ -451,11 +451,11 @@ def main() -> int:
     parser.add_argument(
         "--output-to-file",
         nargs="?",
-        const=REPO_ROOT / "packages" / "nmp_platform" / "config" / "example-config.yaml",
+        const=REPO_ROOT / "packages" / "nhx_platform" / "config" / "example-config.yaml",
         default=None,
         type=Path,
         metavar="PATH",
-        help="Also write a standalone example YAML (defaults to packages/nmp_platform/config/example-config.yaml when flag is given with no path)",
+        help="Also write a standalone example YAML (defaults to packages/nhx_platform/config/example-config.yaml when flag is given with no path)",
     )
     args = parser.parse_args()
 

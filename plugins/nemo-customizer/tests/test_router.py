@@ -14,7 +14,7 @@ from nemo_customizer.router import (
     CustomizationRouterService,
     merge_router_dependencies,
 )
-from nemo_platform_plugin.service import RouterSpec
+from nemo_helix_plugin.service import RouterSpec
 
 
 class _FakeContributor:
@@ -151,8 +151,8 @@ def test_authz_derives_from_contributor_routes(monkeypatch: pytest.MonkeyPatch) 
     Doubles as the Phase-0 derivation gate: the customization hub plus backends
     must derive with no problems and no fail-closed DENY bindings.
     """
-    from nemo_platform_plugin.authz import CallerKind, Permission, path_rule
-    from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+    from nemo_helix_plugin.authz import CallerKind, Permission, path_rule
+    from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
     def _make_contributor(backend: str) -> object:
         class _Contributor:

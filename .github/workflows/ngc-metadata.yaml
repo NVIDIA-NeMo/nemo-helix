@@ -23,8 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         team:
-          - nemo-platform
-          - nemo-platform-dev
+          - nemo-helix
+          - nemo-helix-dev
 
     steps:
       - name: Check out repository

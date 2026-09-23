@@ -8,11 +8,11 @@ from __future__ import annotations
 import os
 
 from nemo_deployments_plugin.entities import DeploymentConfig, EnvVar, SecretRef
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoClientError, NotFoundError
-from nemo_platform_plugin.config import get_platform_config
-from nemo_platform_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
+from nemo_helix_plugin.config import get_platform_config
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
 
 class SecretResolutionError(RuntimeError):
@@ -28,7 +28,7 @@ def platform_ngc_secret_ref() -> SecretRef | None:
     return SecretRef(workspace=parts[0], name=parts[1])
 
 
-async def resolve_secret_ref(sdk: AsyncNeMoPlatform, secret_ref: SecretRef) -> str | None:
+async def resolve_secret_ref(sdk: AsyncNeMoHelix, secret_ref: SecretRef) -> str | None:
     """Resolve a Platform secret value without logging reference or value data."""
     try:
         secrets = client_from_platform(sdk, AsyncSecretsClient)
@@ -42,7 +42,7 @@ async def resolve_secret_ref(sdk: AsyncNeMoPlatform, secret_ref: SecretRef) -> s
     return None
 
 
-async def resolve_deployment_config_secrets(sdk: AsyncNeMoPlatform, config: DeploymentConfig) -> DeploymentConfig:
+async def resolve_deployment_config_secrets(sdk: AsyncNeMoHelix, config: DeploymentConfig) -> DeploymentConfig:
     """Return an execution-only copy whose secret references have plaintext values.
 
     Used by substrates that cannot mount a managed secret object (docker,
@@ -61,7 +61,7 @@ async def resolve_deployment_config_secrets(sdk: AsyncNeMoPlatform, config: Depl
     return resolved
 
 
-async def resolve_deployment_secret_env(sdk: AsyncNeMoPlatform, config: DeploymentConfig) -> dict[str, str]:
+async def resolve_deployment_secret_env(sdk: AsyncNeMoHelix, config: DeploymentConfig) -> dict[str, str]:
     """Collect resolved secret values for every ``secret_ref`` env var.
 
     Used by the k8s substrate to materialize a single per-deployment ``Secret``
@@ -85,7 +85,7 @@ async def resolve_deployment_secret_env(sdk: AsyncNeMoPlatform, config: Deployme
     return secret_env
 
 
-async def _resolve_env_var(sdk: AsyncNeMoPlatform, item: EnvVar) -> EnvVar | None:
+async def _resolve_env_var(sdk: AsyncNeMoHelix, item: EnvVar) -> EnvVar | None:
     """Resolve a secret-backed environment variable to a plaintext ``EnvVar``.
 
     Non-secret vars pass through unchanged. Secret vars that resolve to ``None``
@@ -99,7 +99,7 @@ async def _resolve_env_var(sdk: AsyncNeMoPlatform, item: EnvVar) -> EnvVar | Non
     return EnvVar(name=item.name, value=value)
 
 
-async def _resolve_secret_value(sdk: AsyncNeMoPlatform, item: EnvVar) -> str | None:
+async def _resolve_secret_value(sdk: AsyncNeMoHelix, item: EnvVar) -> str | None:
     """Resolve the plaintext value for a secret-backed env var.
 
     NGC credentials are best-effort: when neither the configured secret nor the

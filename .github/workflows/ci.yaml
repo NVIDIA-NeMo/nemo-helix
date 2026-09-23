@@ -174,9 +174,9 @@ jobs:
           make docker-print TARGET=docker-gpu
           make docker-print TARGET=docker-auditor
           make docker-print TARGET=docker-python-base
-          make docker-print TARGET=nmp-automodel-gpu-wheels
-          make docker-print TARGET=nmp-automodel
-          make docker-print TARGET=nmp-unsloth
+          make docker-print TARGET=nhx-automodel-gpu-wheels
+          make docker-print TARGET=nhx-automodel
+          make docker-print TARGET=nhx-unsloth
 
   build-cpu-smoke-images:
     name: Build CPU smoke images
@@ -215,7 +215,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          name: nmp-builder
+          name: nhx-builder
           driver: docker-container
           cleanup: true
 
@@ -372,7 +372,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          name: nmp-builder
+          name: nhx-builder
           driver: docker-container
           cleanup: true
 
@@ -439,7 +439,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          name: nmp-builder
+          name: nhx-builder
           driver: docker-container
           cleanup: true
 
@@ -491,7 +491,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Kind cluster with NeMo Platform
+      - name: Setup Kind cluster with NeMo Helix
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
@@ -507,8 +507,8 @@ jobs:
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
           NGC_API_KEY: not-used-for-ghcr-cpu-smoke
         run: |
-          test -n "${NMP_E2E_CLUSTER_URL}"
-          export NMP_BASE_URL="${NMP_E2E_CLUSTER_URL}"
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
           uv run --frozen pytest \
             e2e/test_jobs.py::test_job_using_secret_environment_variable \
             e2e/test_models_deployments_plugin.py::test_generic_model_deployment_lifecycle \
@@ -546,7 +546,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Kind cluster with NeMo Platform
+      - name: Setup Kind cluster with NeMo Helix
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
@@ -554,6 +554,17 @@ jobs:
           image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
+
+      - name: Pre-pull agent E2E image into Kind
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: |
+          e2e/k8s/scripts/prepull_kind_images.sh \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-agents-deepagents-e2e:${NHX_E2E_IMAGE_TAG}"
 
       - name: Run jobs and data-designer e2e tests
         shell: bash
@@ -564,13 +575,13 @@ jobs:
           # Let the k8s-mode agent deployment e2e (test_nemo_agents_k8s.py) learn
           # the agent image ref. The Helm platform is configured with a k8s
           # deployments executor (e2e/k8s/values/kind.yaml) and this same
-          # nmp-api image is pre-pulled into the kind nodes, so the agent pod
+          # nhx-agents-deepagents-e2e image is pre-pulled into the kind nodes, so the agent pod
           # resolves it node-locally under IfNotPresent.
-          NMP_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NMP_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: |
-          test -n "${NMP_E2E_CLUSTER_URL}"
-          export NMP_BASE_URL="${NMP_E2E_CLUSTER_URL}"
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
           uv run --frozen pytest \
             e2e \
             -v \
@@ -624,7 +635,7 @@ jobs:
           KIND_IMAGE_PULL_USER: ${{ github.actor }}
           IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
           IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nmp-gym-tasks:${IMAGE_TAG}"
+        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-tasks:${IMAGE_TAG}"
 
       - name: Run Gym agent-evaluate e2e test
         shell: bash
@@ -632,8 +643,8 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
         run: |
-          test -n "${NMP_E2E_CLUSTER_URL}"
-          export NMP_BASE_URL="${NMP_E2E_CLUSTER_URL}"
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
           uv run --frozen pytest \
             e2e/test_evaluator_plugin.py \
             -v \
@@ -691,7 +702,7 @@ jobs:
       - name: Run NetworkPolicy smoke test
         shell: bash
         env:
-          NAMESPACE: nemo-platform
+          NAMESPACE: nemo-helix
           CHAINSAW_REPORT_FORMAT: XML
           CHAINSAW_REPORT_NAME: report-network-policy-smoke
           CHAINSAW_REPORT_PATH: .
@@ -736,7 +747,7 @@ jobs:
       contents: read
     env:
       HELM_FOLDER: k8s/helm
-      HELM_RELEASE_NAME: nemo-platform
+      HELM_RELEASE_NAME: nemo-helix
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -963,7 +974,7 @@ jobs:
         with:
           name: policy-wasm
           retention-days: 1
-          path: services/core/auth/src/nmp/core/auth/assets/policy.wasm
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
 
   python-unit-test-tools:
     name: Python unit tests (tools)
@@ -1020,7 +1031,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
-          path: services/core/auth/src/nmp/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1229,7 +1240,7 @@ jobs:
         run: uv sync --frozen --package nemo-evaluator-sdk --no-dev
       # pytest is not in the package-only sync; install the runner only (do not add SDK deps).
       # WHY BOTH THIS JOB AND THE UNIT TEST:
-      # - Unit-test CI syncs the whole workspace: a sibling (e.g. nemo-platform-sdk) may already
+      # - Unit-test CI syncs the whole workspace: a sibling (e.g. nemo-helix-sdk) may already
       #   provide httpx, so an undeclared SDK dep still imports — green here, broken for consumers
       #   who only installed nemo-evaluator-sdk.
       # - This job: `uv sync --package nemo-evaluator-sdk --no-dev` (no extras/siblings) so that
@@ -1256,7 +1267,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
-          path: services/core/auth/src/nmp/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1279,9 +1290,9 @@ jobs:
         env:
           EXTRA: cpu
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          NMP_FILES_HF_RETRY_ATTEMPTS: "7"
-          NMP_FILES_HF_RETRY_INITIAL_DELAY_SECONDS: "1"
-          NMP_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
+          NHX_FILES_HF_RETRY_ATTEMPTS: "7"
+          NHX_FILES_HF_RETRY_INITIAL_DELAY_SECONDS: "1"
+          NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           # Per-worker crash dumps; pytest's own faulthandler would point them at stderr, which
@@ -1386,12 +1397,12 @@ jobs:
             backend: kubernetes
             command: test k8s
     env:
-      NMP_AUTHENTIK_K8S_RUNTIME: kind
-      NMP_AUTHENTIK_K8S_NAMESPACE: nemo-authentik
-      NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull
-      NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api
-      NMP_AUTHENTIK_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
-      NMP_AUTHENTIK_K8S_REUSE_CLUSTER: "1"
+      NHX_AUTHENTIK_K8S_RUNTIME: kind
+      NHX_AUTHENTIK_K8S_NAMESPACE: nemo-authentik
+      NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull
+      NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api
+      NHX_AUTHENTIK_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
+      NHX_AUTHENTIK_K8S_REUSE_CLUSTER: "1"
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1410,9 +1421,9 @@ jobs:
         if: matrix.backend == 'kubernetes'
         uses: ./.github/actions/setup-kind-cluster
         with:
-          kind-cluster-name: ${{ env.NMP_AUTHENTIK_K8S_CLUSTER_NAME }}
-          install-nemo-platform: "false"
-          kube-namespace: ${{ env.NMP_AUTHENTIK_K8S_NAMESPACE }}
+          kind-cluster-name: ${{ env.NHX_AUTHENTIK_K8S_CLUSTER_NAME }}
+          install-nemo-helix: "false"
+          kube-namespace: ${{ env.NHX_AUTHENTIK_K8S_NAMESPACE }}
           image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
           image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
@@ -1444,20 +1455,20 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
-          path: services/core/auth/src/nmp/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets
       - name: Run auth-idp ${{ matrix.runtime }} tests
         run: >
           contrib/auth/${{ matrix.provider }}/run.sh
           ${{ matrix.command }}
-          --image "${IMAGE_REGISTRY}/nmp-api:${BAKE_TAG}"
+          --image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
           IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
           BAKE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          NMP_AUTHENTIK_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
-          NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ${{ env.NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET }}
-          NMP_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
+          NHX_AUTHENTIK_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
+          NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET }}
+          NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
       - name: Collect Kubernetes logs
         if: always() && matrix.backend == 'kubernetes'
         shell: bash
@@ -1477,8 +1488,8 @@ jobs:
         if: always() && matrix.backend == 'kubernetes'
         shell: bash
         run: |
-          docker rm -f "cloud-provider-kind-${NMP_AUTHENTIK_K8S_CLUSTER_NAME}" || true
-          kind delete cluster --name "${NMP_AUTHENTIK_K8S_CLUSTER_NAME}" || true
+          docker rm -f "cloud-provider-kind-${NHX_AUTHENTIK_K8S_CLUSTER_NAME}" || true
+          kind delete cluster --name "${NHX_AUTHENTIK_K8S_CLUSTER_NAME}" || true
 
   # Build wheels for all packages × python versions. Downstream jobs
   # (wheel-test, python-e2e-test) download these artifacts instead
@@ -1493,7 +1504,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [nemo-platform, nemo-platform-plugin]
+        package: [nemo-helix, nemo-helix-plugin]
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
@@ -1501,14 +1512,14 @@ jobs:
         with:
           persist-credentials: false
       - name: Download policy WASM
-        if: matrix.package == 'nemo-platform'
+        if: matrix.package == 'nemo-helix'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
-          path: services/core/auth/src/nmp/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets
       - name: Build ${{ matrix.package }} wheel
         id: build
-        uses: ./.github/actions/build-nemo-platform-wheel
+        uses: ./.github/actions/build-nemo-helix-wheel
         with:
           package: ${{ matrix.package }}
           out-dir: ${{ github.workspace }}/dist
@@ -1537,14 +1548,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [nemo-platform, nemo-platform-plugin]
+        package: [nemo-helix, nemo-helix-plugin]
         python-version: ["3.12", "3.13", "3.14"]
         # `uv tool install` is the documented front door for the CLI; `venv`
         # covers installs into an environment the user owns. The plugin is a
         # library with no CLI entry point, so it only gets the venv leg.
         install-method: [venv, tool]
         exclude:
-          - package: nemo-platform-plugin
+          - package: nemo-helix-plugin
             install-method: tool
     steps:
       - name: Checkout code
@@ -1564,14 +1575,14 @@ jobs:
           name: ${{ matrix.package }}-wheel-py${{ matrix.python-version }}
           path: ${{ runner.temp }}/wheelcheck
 
-      - name: Install + test nemo-platform CLI
-        if: matrix.package == 'nemo-platform'
+      - name: Install + test nemo-helix CLI
+        if: matrix.package == 'nemo-helix'
         shell: bash
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           INSTALL_METHOD: ${{ matrix.install-method }}
-          NMP_DATA_DIR: ${{ runner.temp }}/nemo-data
-          NMP_AUTH_ENABLED: "false"
+          NHX_DATA_DIR: ${{ runner.temp }}/nemo-data
+          NHX_AUTH_ENABLED: "false"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/wheelcheck/tool-bin
         run: |
@@ -1585,7 +1596,7 @@ jobs:
           WHEEL="${wheels[0]}"
           # Supply-chain: partial-pin the wheel's direct external deps to a committed constraints
           # file. Regenerate with script/compile-wheel-constraints.sh.
-          CONSTRAINTS="${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-platform-services.txt"
+          CONSTRAINTS="${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-helix-services.txt"
           # --no-config: this step runs inside the checkout, so uv would otherwise apply the
           # repo's [tool.uv] override-dependencies and resolve a dependency set no user can get.
           if [[ "${INSTALL_METHOD}" == "tool" ]]; then
@@ -1606,8 +1617,8 @@ jobs:
           export PATH="${BIN_DIR}:${PATH}"
           bash "${GITHUB_WORKSPACE}/script/test-nemo-cli.sh"
 
-      - name: Install + test nemo-platform-plugin
-        if: matrix.package == 'nemo-platform-plugin'
+      - name: Install + test nemo-helix-plugin
+        if: matrix.package == 'nemo-helix-plugin'
         shell: bash
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
@@ -1621,11 +1632,11 @@ jobs:
           fi
           WHEEL="${wheels[0]}"
           # Supply-chain: partial-pin direct external deps via a committed constraints file
-          # (see the nemo-platform CLI step above).
+          # (see the nemo-helix CLI step above).
           cd "${RUNNER_TEMP}/wheelcheck"
           uv venv .venv --python "${PYTHON_VERSION}"
           uv pip install --no-config --python .venv/bin/python \
-            --constraint "${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-platform-plugin.txt" \
+            --constraint "${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-helix-plugin.txt" \
             "${WHEEL}"
           unset PYTHONPATH VIRTUAL_ENV
           # Import the package + a couple of representative submodules
@@ -1633,10 +1644,10 @@ jobs:
           # touch first; if any of them fail to import, the wheel is
           # broken in a way that surfaces immediately on day one.
           .venv/bin/python -c "
-          import nemo_platform_plugin
-          import nemo_platform_plugin.cli
-          import nemo_platform_plugin.commands
-          print('nemo_platform_plugin', getattr(nemo_platform_plugin, '__version__', '<no __version__>'))
+          import nemo_helix_plugin
+          import nemo_helix_plugin.cli
+          import nemo_helix_plugin.commands
+          print('nemo_helix_plugin', getattr(nemo_helix_plugin, '__version__', '<no __version__>'))
           "
 
   # E2E tests: start services from the workspace venv and run the e2e
@@ -1655,7 +1666,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
-          path: services/core/auth/src/nmp/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1670,9 +1681,9 @@ jobs:
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
           NGC_API_KEY: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          NMP_FILES_HF_RETRY_ATTEMPTS: "7"
-          NMP_FILES_HF_RETRY_INITIAL_DELAY_SECONDS: "1"
-          NMP_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
+          NHX_FILES_HF_RETRY_ATTEMPTS: "7"
+          NHX_FILES_HF_RETRY_INITIAL_DELAY_SECONDS: "1"
+          NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
       - name: Dump server logs
         if: always()
         run: |
@@ -1691,11 +1702,10 @@ jobs:
             report.xml
             ${{ runner.temp }}/e2e-services-logs/
 
-  # E2E tests that run on the subprocess harness but need a prebuilt platform
-  # image available in the local Docker daemon (e.g. docker-mode agent
-  # deployments, which deploy the nmp-api image as a sibling container). Marked
-  # `needs_nmp_api_image`; the plain python-e2e-test job skips them because
-  # NMP_E2E_IMAGE_REGISTRY / NMP_E2E_IMAGE_TAG are unset there.
+  # E2E tests that run on the subprocess harness but need the prebuilt
+  # DeepAgents image available in the local Docker daemon. Marked
+  # `needs_agents_e2e_image`; the plain python-e2e-test job skips them because
+  # NHX_E2E_IMAGE_REGISTRY / NHX_E2E_IMAGE_TAG are unset there.
   python-e2e-image-test:
     name: Python e2e tests (prebuilt image)
     needs: [policy-wasm, build-cpu-smoke-images]
@@ -1709,8 +1719,8 @@ jobs:
       contents: read
       packages: read
     env:
-      NMP_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-      NMP_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+      NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1720,7 +1730,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
-          path: services/core/auth/src/nmp/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1733,16 +1743,16 @@ jobs:
         env:
           GHCR_TOKEN: ${{ github.token }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Pull nmp-api image (timed)
+      - name: Pull agent E2E image (timed)
         shell: bash
         run: |
-          image="${NMP_E2E_IMAGE_REGISTRY}/nmp-api:${NMP_E2E_IMAGE_TAG}"
+          image="${NHX_E2E_IMAGE_REGISTRY}/nhx-agents-deepagents-e2e:${NHX_E2E_IMAGE_TAG}"
           echo "Pulling ${image}"
           start=$(date +%s)
           docker pull "$image"
-          echo "nmp-api pull took $(( $(date +%s) - start ))s"
-      - name: Run e2e tests (needs_nmp_api_image)
-        run: make test-e2e PYTEST_EXTRA="-m needs_nmp_api_image"
+          echo "agent E2E image pull took $(( $(date +%s) - start ))s"
+      - name: Run e2e tests (needs_agents_e2e_image)
+        run: make test-e2e PYTEST_EXTRA="-m needs_agents_e2e_image"
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
@@ -2072,7 +2082,7 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   guardrails-benchmark:
-    # Parallel matrix jobs (one NMP per variant) so the two sweeps don't
+    # Parallel matrix jobs (one NHX per variant) so the two sweeps don't
     # share mocks or contend on :8080. `guardrails-benchmark-analyze` merges
     # the artifacts and prints the comparison.
     name: nemo-guardrails plugin benchmark (${{ matrix.variant }})
@@ -2090,10 +2100,10 @@ jobs:
       matrix:
         variant: [with-guardrails, without-guardrails]
     steps:
-      - name: Checkout nemo-platform
+      - name: Checkout nemo-helix
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          path: nemo-platform
+          path: nemo-helix
           persist-credentials: false
       - name: Checkout NeMo-Guardrails
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2104,18 +2114,18 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
-          working-directory: nemo-platform
+          working-directory: nemo-helix
           version: ${{ env.UV_VERSION }}
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Bootstrap Python environment
-        working-directory: nemo-platform
+        working-directory: nemo-helix
         run: make bootstrap-python
         env:
           PYTORCH_DEPS: cpu
       - name: Run benchmark sweep
-        working-directory: nemo-platform
+        working-directory: nemo-helix
         # Pin both variants to the same `--run-id` so when the analyze job
         # downloads both artifacts into one `runs/` parent, they merge into
         # a single run directory the analyzer can read normally.
@@ -2134,7 +2144,7 @@ jobs:
           name: guardrails-benchmark-results-${{ matrix.variant }}
           retention-days: 30
           path: |
-            nemo-platform/plugins/nemo-guardrails/benchmarks/artifacts/runs/
+            nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
 
   guardrails-benchmark-analyze:
     # Merge both variant artifacts and print the comparison table.
@@ -2148,10 +2158,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout nemo-platform
+      - name: Checkout nemo-helix
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          path: nemo-platform
+          path: nemo-helix
           persist-credentials: false
       - name: Download with-guardrails artifact
         # If a variant failed entirely it may have uploaded no artifact;
@@ -2160,16 +2170,16 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: guardrails-benchmark-results-with-guardrails
-          path: nemo-platform/plugins/nemo-guardrails/benchmarks/artifacts/runs/
+          path: nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
       - name: Download without-guardrails artifact
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: guardrails-benchmark-results-without-guardrails
-          path: nemo-platform/plugins/nemo-guardrails/benchmarks/artifacts/runs/
+          path: nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
       - name: Print benchmark comparison
-        working-directory: nemo-platform
-        # `analyze.py` doesn't rely on NMP or AIPerf, so we skip the uv bootstrap
+        working-directory: nemo-helix
+        # `analyze.py` doesn't rely on NHX or AIPerf, so we skip the uv bootstrap
         # step and run it with the runner's `python3` CLI directly.
         run: |
           RUN_DIR=$(find plugins/nemo-guardrails/benchmarks/artifacts/runs -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
@@ -2183,7 +2193,7 @@ jobs:
           name: guardrails-benchmark-results-merged
           retention-days: 30
           path: |
-            nemo-platform/plugins/nemo-guardrails/benchmarks/artifacts/runs/
+            nemo-helix/plugins/nemo-guardrails/benchmarks/artifacts/runs/
 
   coverage-comment:
     name: Post coverage comment
@@ -2266,7 +2276,7 @@ jobs:
         with:
           dir: ./tools/open-policy-agent
           command: |
-            opa test services/core/auth/src/nmp/core/auth/app/policies services/core/auth/src/nmp/core/auth/app/policy_tests services/core/auth/src/nmp/core/auth/assets/static-authz.yaml -v
+            opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
 
   # Required-check pin: branch protection should require this final aggregate.
   # Skipped jobs count as pass so conditional jobs can remain optional.

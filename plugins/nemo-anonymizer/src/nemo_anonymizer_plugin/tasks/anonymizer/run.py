@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Anonymizer task — runs inside the nmp-cpu-tasks container."""
+"""Anonymizer task — runs inside the nhx-cpu-tasks container."""
 
 from __future__ import annotations
 
@@ -15,25 +15,28 @@ from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
 from anonymizer.interface.anonymizer import Anonymizer
 from data_designer.config.models import ModelProvider as DDModelProvider
 from data_designer_nemo.model_provider import (
-    get_nmp_provider,
+    get_nhx_provider,
     parse_provider_reference,
 )
+from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_anonymizer_plugin.app.input import prepare_anonymizer_input
 from nemo_anonymizer_plugin.app.task_config import AnonymizerStepConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
-from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import PlatformJobResults
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.job_usage import HelixJobUsageReporter
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.sdk_provider import get_platform_sdk
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.sdk_provider import get_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +44,7 @@ ARTIFACTS_RESULT_NAME = "artifacts"
 _TASK_LOG_HANDLER_MARKER = "_nemo_anonymizer_task_handler"
 
 
-def run(sdk: SyncPlatformClient | None = None) -> int:
+def run(sdk: SyncHelixClient | None = None) -> int:
     try:
         service_sdk = sdk or get_platform_sdk(as_service="anonymizer")
         return run_step_config(_load_step_config(), ctx=_get_ctx(service_sdk), sdk=service_sdk)
@@ -54,7 +57,7 @@ def run_step_config(
     step_config: AnonymizerStepConfig,
     *,
     ctx: JobContext,
-    sdk: SyncPlatformClient | None = None,
+    sdk: SyncHelixClient | None = None,
 ) -> int:
     try:
         return _run_with_step_config(sdk, step_config, ctx=ctx)
@@ -64,14 +67,14 @@ def run_step_config(
 
 
 def _run_with_step_config(
-    service_sdk: SyncPlatformClient | None,
+    service_sdk: SyncHelixClient | None,
     step_config: AnonymizerStepConfig,
     *,
     ctx: JobContext,
 ) -> int:
     _configure_logging()
     if service_sdk is None:
-        raise RuntimeError("Remote anonymizer task requires a NeMo Platform SDK.")
+        raise RuntimeError("Remote anonymizer task requires a NeMo Helix SDK.")
 
     storage_path = ctx.storage.persistent
     workspace = ctx.workspace
@@ -95,7 +98,8 @@ def _run_with_step_config(
                 artifact_path=storage_path / "anonymizer-artifacts",
             )
         logger.info("Running anonymizer pipeline")
-        result = anonymizer.run(config=request.config, data=prepared_input.input)
+        with capture_data_designer_token_usage(ctx.usage):
+            result = anonymizer.run(config=request.config, data=prepared_input.input)
     finally:
         prepared_input.cleanup()
 
@@ -134,7 +138,7 @@ def _run_with_step_config(
 
 
 def _resolve_provider_endpoints(
-    sdk: SyncPlatformClient,
+    sdk: SyncHelixClient,
     step_config: AnonymizerStepConfig,
     workspace: str,
 ) -> list[DDModelProvider] | None:
@@ -150,8 +154,8 @@ def _resolve_provider_endpoints(
     for raw in step_config.dd_model_providers:
         provider = DDModelProvider.model_validate(raw)
         provider_workspace, provider_name = parse_provider_reference(provider.name, workspace)
-        nmp_provider = get_nmp_provider(sdk, provider_workspace, provider_name)
-        provider.endpoint = models.get_provider_route_openai_url(nmp_provider)
+        nhx_provider = get_nhx_provider(sdk, provider_workspace, provider_name)
+        provider.endpoint = models.get_provider_route_openai_url(nhx_provider)
         refreshed.append(provider)
     return refreshed
 
@@ -223,23 +227,29 @@ def _load_step_config() -> AnonymizerStepConfig:
         return AnonymizerStepConfig.model_validate_json(f.read())
 
 
-def _get_ctx(sdk: SyncPlatformClient) -> JobContext:
+def _get_ctx(sdk: SyncHelixClient) -> JobContext:
     workspace = _get_workspace()
     job_name = _get_job_name()
+    client = client_from_platform(sdk, NemoClient)
     storage = StoragePaths(
         ephemeral=Path(_get_required_env(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR)),
         persistent=Path(_get_required_env(PERSISTENT_JOB_STORAGE_PATH_ENVVAR)),
     )
-    results = PlatformJobResults(
+    results = HelixJobResults(
         workspace=workspace,
         job_name=job_name,
-        client=client_from_platform(sdk, NemoClient),
+        client=client,
     )
     return JobContext(
         workspace=workspace,
         job_id=job_name,
         storage=storage,
         results=results,
+        usage=HelixJobUsageReporter(
+            job_name=job_name,
+            workspace=workspace,
+            jobs_client=JobsClient.from_client(client),
+        ),
     )
 
 

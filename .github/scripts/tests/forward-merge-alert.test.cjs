@@ -63,26 +63,26 @@ function pullFixture(overrides = {}) {
     merge_commit_sha: "release-head",
     base: { ref: "release/0.5" },
     user: { login: "soluwalana" },
-    html_url: "https://github.com/NVIDIA-NeMo/nemo-platform/pull/1789",
+    html_url: "https://github.com/NVIDIA-NeMo/nemo-helix/pull/1789",
     ...overrides,
   };
 }
 
 function messageFixture(overrides = {}) {
   return {
-    repository: "NVIDIA-NeMo/nemo-platform",
+    repository: "NVIDIA-NeMo/nemo-helix",
     pullTitle: "Forward-merge release/0.5 into main",
-    pullUrl: "https://github.com/NVIDIA-NeMo/nemo-platform/pull/1803",
+    pullUrl: "https://github.com/NVIDIA-NeMo/nemo-helix/pull/1803",
     commentUrl:
-      "https://github.com/NVIDIA-NeMo/nemo-platform/pull/1803#issuecomment-1",
+      "https://github.com/NVIDIA-NeMo/nemo-helix/pull/1803#issuecomment-1",
     source: {
       kind: "pull",
-      url: "https://github.com/NVIDIA-NeMo/nemo-platform/pull/1789",
+      url: "https://github.com/NVIDIA-NeMo/nemo-helix/pull/1789",
       label: "#1789",
       authorLogin: "soluwalana",
     },
     conflicts: { kind: "conflicts", files: ["uv.lock"] },
-    runUrl: "https://github.com/NVIDIA-NeMo/nemo-platform/actions/runs/1234",
+    runUrl: "https://github.com/NVIDIA-NeMo/nemo-helix/actions/runs/1234",
     ...overrides,
   };
 }
@@ -116,7 +116,7 @@ test("falls back to release-head commit metadata when no source PR exists", asyn
           getCommit: async () => ({
             data: {
               html_url:
-                "https://github.com/NVIDIA-NeMo/nemo-platform/commit/abcdef1",
+                "https://github.com/NVIDIA-NeMo/nemo-helix/commit/abcdef1",
               author: null,
               commit: { author: { name: "Release Author" } },
             },
@@ -125,7 +125,7 @@ test("falls back to release-head commit metadata when no source PR exists", asyn
       },
     },
     owner: "NVIDIA-NeMo",
-    repo: "nemo-platform",
+    repo: "nemo-helix",
     forwardPullNumber: 1803,
     releaseRef: "release/0.5",
     headSha: "abcdef1234567890",
@@ -133,7 +133,7 @@ test("falls back to release-head commit metadata when no source PR exists", asyn
 
   assert.deepEqual(source, {
     kind: "commit",
-    url: "https://github.com/NVIDIA-NeMo/nemo-platform/commit/abcdef1",
+    url: "https://github.com/NVIDIA-NeMo/nemo-helix/commit/abcdef1",
     label: "abcdef1",
     authorLogin: undefined,
     authorName: "Release Author",
@@ -231,17 +231,17 @@ test("falls back to the basic alert when PR metadata fails", async () => {
     },
   };
   const context = {
-    repo: { owner: "NVIDIA-NeMo", repo: "nemo-platform" },
+    repo: { owner: "NVIDIA-NeMo", repo: "nemo-helix" },
     payload: {
-      repository: { full_name: "NVIDIA-NeMo/nemo-platform" },
+      repository: { full_name: "NVIDIA-NeMo/nemo-helix" },
       issue: {
         number: 1803,
         title: "Forward-merge release/0.5 into main",
-        html_url: "https://github.com/NVIDIA-NeMo/nemo-platform/pull/1803",
+        html_url: "https://github.com/NVIDIA-NeMo/nemo-helix/pull/1803",
       },
       comment: {
         html_url:
-          "https://github.com/NVIDIA-NeMo/nemo-platform/pull/1803#issuecomment-1",
+          "https://github.com/NVIDIA-NeMo/nemo-helix/pull/1803#issuecomment-1",
       },
     },
   };
@@ -251,7 +251,7 @@ test("falls back to the basic alert when PR metadata fails", async () => {
     context,
     core,
     env: {
-      RUN_URL: "https://github.com/NVIDIA-NeMo/nemo-platform/actions/runs/1234",
+      RUN_URL: "https://github.com/NVIDIA-NeMo/nemo-helix/actions/runs/1234",
       SLACK_ALERTS_WEBHOOK: "https://hooks.slack.test/example",
       SLACK_ALERT_USERGROUP_ID: "S0123456789",
       FORWARD_MERGE_RECOVERY_DOCS_URL:
@@ -286,8 +286,7 @@ test("falls back to the basic alert when PR metadata fails", async () => {
       context,
       core,
       env: {
-        RUN_URL:
-          "https://github.com/NVIDIA-NeMo/nemo-platform/actions/runs/1234",
+        RUN_URL: "https://github.com/NVIDIA-NeMo/nemo-helix/actions/runs/1234",
       },
       fetchImpl: async () => assert.fail("fetch should not be called"),
       workspace: ".",

@@ -74,7 +74,7 @@ persisted spec into a new Fileset. The judge is now part of the stored yardstick
 `eval-config.json` **as-is** (`parsePersistedSpec`) — no re-fan, no judge re-pick — so the
 yardstick (tasks + metric + judge) is identical across every run. Only the agent **target** is
 injected at submit; the whole is wrapped as `{ spec }` for the job request. The saved spec is
-also a valid `nemo evaluator agent-evaluate submit --spec-file` input once a `target` is added.
+also a valid `nemo evaluator agent-evaluate --spec-file` input once a `target` is added.
 
 Injected by Studio **at submit** (never stored in the config): the agent **target** only. The
 judge model and `max_concurrent_tasks` are part of the persisted yardstick.

@@ -13,7 +13,7 @@ Docker daemon.
 
 Harbor stays an optional extra because it is heavy, not because of the
 interpreter — the SDK's floor already matches Harbor's own. The SDK is not
-published as a standalone PyPI package. Use a NeMo Platform source checkout; see
+published as a standalone PyPI package. Use a NeMo Helix source checkout; see
 [SETUP.md](../../../../SETUP.md) for toolchain prerequisites. From the repository
 root, install the optional extra:
 
@@ -115,7 +115,7 @@ The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFab
 of `FabricAgent`, Fabric's custom Harbor agent, that resolves the model credential variable and
 endpoint from the `provider/model` slug. The key reaches the container through `agent_env_from_host`, so the job
 directory's `config.json` records `${NVIDIA_API_KEY}` rather than the value. See
-[Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
+[Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
 for the platform job form.
 
 ### On a task image you do not control

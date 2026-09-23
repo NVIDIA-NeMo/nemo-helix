@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { DetailsPanel } from '@studio/components/evaluation/Jobs/DetailsPanel';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -50,7 +50,7 @@ describe('DetailsPanel', () => {
   it('shows an error banner when the job has failed', async () => {
     const failedJob = {
       ...metricEvaluationJob1,
-      status: PlatformJobStatus.error,
+      status: HelixJobStatus.error,
       error_details: { message: 'The evaluation job failed. Please try again.' },
     };
 

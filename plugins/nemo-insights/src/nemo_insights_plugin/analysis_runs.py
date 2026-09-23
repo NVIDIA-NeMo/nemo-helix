@@ -24,25 +24,25 @@ from collections.abc import Awaitable, Mapping
 from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
+from nemo_helix_plugin.client.response import NemoResponse
+from nemo_helix_plugin.config import get_nemo_config
+from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin._perms import AnalysisRunPerms
 from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build_analyst_agent_config
 from nemo_insights_plugin.authz import scope
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.agents.client import AsyncAgentsClient
-from nemo_platform_plugin.agents.types import CreateExecuteJobRequest, JsonObject
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
-from nemo_platform_plugin.client.response import NemoResponse
-from nemo_platform_plugin.config import get_nemo_config
-from nemo_platform_plugin.dependencies import get_sdk_client
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.models.types import ModelEntity
-from nemo_platform_plugin.schema import PaginationData
 from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def mint_analysis_run_name() -> str:
 async def create_analysis_run(
     workspace: str,
     request: CreateAnalysisRunRequest,
-    sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
@@ -105,7 +105,7 @@ async def submit_analysis_run(
     *,
     workspace: str,
     request: CreateAnalysisRunRequest,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncNeMoHelix,
     entity_client: NemoEntitiesClient,
     name: str | None = None,
     profile: str | None = None,
@@ -225,7 +225,7 @@ async def list_analysis_runs(
 async def get_analysis_run(
     workspace: str,
     name: str,
-    sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Get one analysis run, joined with the live state of its backing job."""

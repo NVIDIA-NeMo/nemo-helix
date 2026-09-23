@@ -31,7 +31,7 @@ const SORT_COMPARATORS: Record<ModelEntitySortField, (a: ModelEntity, b: ModelEn
 
 /**
  * Widened input type for `useBaseModels({ filter })`. The generated SDK models
- * filter fields as bare scalars, but the NeMo Platform API accepts operator
+ * filter fields as bare scalars, but the NeMo Helix API accepts operator
  * objects on every field via the same unified filter syntax (`$like`, `$gte`,
  * etc). Coercion back to `ModelEntityFilter` happens once at the SDK boundary
  * below.

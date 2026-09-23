@@ -21,8 +21,8 @@ from nemo_example_plugin.types.payloads import (
     Tick,
     UpdateExampleItemRequest,
 )
-from nemo_platform_plugin.client.endpoint import delete, get, patch, post, put
-from nemo_platform_plugin.client.types import BinaryContent, Paginated, PreparedRequest, Stream
+from nemo_helix_plugin.client.endpoint import delete, get, patch, post, put
+from nemo_helix_plugin.client.types import BinaryContent, Paginated, PreparedRequest, Stream
 
 
 @get("/apis/example/hello/{name}")

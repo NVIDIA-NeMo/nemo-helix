@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Error compatibility helpers for SDK resources mounted on NeMoPlatform."""
+"""Error compatibility helpers for SDK resources mounted on NeMoHelix."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 import httpx
-from nemo_platform_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client.errors import NemoHTTPError
 
 
 @contextmanager

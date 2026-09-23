@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 from nemo_evaluator.api.schemas import Revision, TaskRef, Taskset, TasksetInput
 from nemo_evaluator.sdk.taskset_resources import AsyncEvaluatorTasksetsResource, EvaluatorTasksetsResource
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 
 _BASE = "http://localhost:8080/apis/evaluator/v2/workspaces/default"
 

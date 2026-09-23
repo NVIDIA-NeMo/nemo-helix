@@ -12,9 +12,9 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.studio.config import StudioConfig
-from nmp.studio.plugins import PluginManifestResponse
-from nmp.studio.service import StudioService
+from nhx.studio.config import StudioConfig
+from nhx.studio.plugins import PluginManifestResponse
+from nhx.studio.service import StudioService
 
 
 class FakeTelemetryResponse:
@@ -66,7 +66,7 @@ class TestStudioService:
     def test_module_name(self):
         """Test that the service has the correct module name."""
         service = StudioService()
-        assert service.module_name == "nmp.studio"
+        assert service.module_name == "nhx.studio"
 
 
 class TestTelemetryProxy:
@@ -80,7 +80,7 @@ class TestTelemetryProxy:
     ) -> tuple[TestClient, FakeTelemetryClient]:
         app = FastAPI()
         telemetry_client = fake_client or FakeTelemetryClient()
-        monkeypatch.setattr("nmp.studio.service.shared_async_http_client", lambda: telemetry_client)
+        monkeypatch.setattr("nhx.studio.service.shared_async_http_client", lambda: telemetry_client)
         StudioService().with_config(config).configure_app(app)
         return TestClient(app), telemetry_client
 
@@ -236,9 +236,9 @@ class TestStaticFilesPath:
 
     def test_default_static_files_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """Test that the default path is the packaged static dir."""
-        import nmp.studio
+        import nhx.studio
 
-        expected = Path(nmp.studio.__file__).parent / "static"
+        expected = Path(nhx.studio.__file__).parent / "static"
         service = StudioService()
         monkeypatch.setattr(service, "_source_static_files_path", lambda: None)
         monkeypatch.setattr(service, "_container_static_files_path", lambda: tmp_path / "absent")
@@ -268,7 +268,7 @@ class TestStaticFilesPath:
         """Test that env config can point Studio at source-built assets."""
         static_dir = tmp_path / "static"
         static_dir.mkdir()
-        monkeypatch.setenv("NMP_STUDIO_STATIC_FILES_PATH", str(static_dir))
+        monkeypatch.setenv("NHX_STUDIO_STATIC_FILES_PATH", str(static_dir))
 
         config = StudioConfig()
 
@@ -338,10 +338,10 @@ class TestStaticFilesPath:
         assert StudioService()._container_static_files_path() == Path("/static/studio")
 
     def test_env_static_files_path_shadows_the_config_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """ServiceConfig is environment-first, so images must not bake NMP_STUDIO_STATIC_FILES_PATH."""
-        from nmp.common.config import Configuration
+        """ServiceConfig is environment-first, so images must not bake NHX_STUDIO_STATIC_FILES_PATH."""
+        from nhx.common.config import Configuration
 
-        monkeypatch.setenv("NMP_STUDIO_STATIC_FILES_PATH", str(tmp_path / "from-env"))
+        monkeypatch.setenv("NHX_STUDIO_STATIC_FILES_PATH", str(tmp_path / "from-env"))
 
         config = Configuration.global_settings_to_service_config(
             {"studio": {"static_files_path": str(tmp_path / "from-yaml")}}, StudioConfig
@@ -407,10 +407,10 @@ class TestStaticFilesPath:
         response = client.get("/studio/")
 
         assert response.status_code == 503
-        assert "https://docs.nvidia.com/nemo-platform" in response.text
+        assert "https://docs.nvidia.com/nemo-helix" in response.text
         assert "make bootstrap-studio" not in response.text
         assert "nvm" not in response.text
-        assert "NMP_STUDIO_STATIC_FILES_PATH" not in response.text
+        assert "NHX_STUDIO_STATIC_FILES_PATH" not in response.text
         assert str(missing_static) in response.text
 
     def test_static_dir_without_index_route_explains_recovery(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -462,8 +462,8 @@ class TestStudioConfigEnvReplacements:
     def test_env_replacements_uses_defaults_when_no_global_settings(self, monkeypatch: pytest.MonkeyPatch):
         """Test that defaults from ENV_MAPPINGS are used when config paths can't be resolved."""
         # Mock get_global_settings_from_env to return empty dict
-        from nmp.common import config as common_config
-        from nmp.studio.env_mappings import ENV_MAPPINGS
+        from nhx.common import config as common_config
+        from nhx.studio.env_mappings import ENV_MAPPINGS
 
         monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: {})
 
@@ -486,7 +486,7 @@ class TestStudioConfigEnvReplacements:
                 "telemetry_enabled": "true",
             },
         }
-        from nmp.common import config as common_config
+        from nhx.common import config as common_config
 
         monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: mock_settings)
 
@@ -505,7 +505,7 @@ class TestStudioConfigEnvReplacements:
     def test_env_replacements_empty_global_setting_falls_back_to_config_field(self, monkeypatch: pytest.MonkeyPatch):
         """Test that empty global settings do not block StudioConfig field fallback."""
         mock_settings = {"studio": {"platform_base_url": ""}}
-        from nmp.common import config as common_config
+        from nhx.common import config as common_config
 
         monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: mock_settings)
 
@@ -523,7 +523,7 @@ class TestStudioConfigEnvReplacements:
             call_count += 1
             return {"platform": {"base_url": "http://test.example.com"}}
 
-        from nmp.common import config as common_config
+        from nhx.common import config as common_config
 
         monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", mock_get_settings)
 
@@ -543,7 +543,7 @@ class TestStudioConfigEnvReplacements:
             "platform": {"base_url": "http://0.0.0.0:8080"},
             "studio": {},
         }
-        from nmp.common import config as common_config
+        from nhx.common import config as common_config
 
         monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: mock_settings)
 
@@ -558,7 +558,7 @@ class TestStudioConfigEnvReplacements:
             "platform": {"base_url": "http://0.0.0.0:8080"},
             "studio": {"platform_base_url": "https://studio.example.com"},
         }
-        from nmp.common import config as common_config
+        from nhx.common import config as common_config
 
         monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: mock_settings)
 
@@ -593,7 +593,7 @@ class TestConfigureAppPluginRouter:
 
     def test_plugins_endpoint_is_registered(self):
         manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js")]
-        with patch("nmp.studio.service.discover_plugins", return_value=manifests):
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
             service = StudioService()
             app = FastAPI()
             service.configure_app(app)
@@ -611,7 +611,7 @@ class TestConfigureAppPluginRouter:
         (tmp_path / "styles.css").write_text("body{}")
         manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=tmp_path)]
 
-        with patch("nmp.studio.service.discover_plugins", return_value=manifests):
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
             service = StudioService()
             app = FastAPI()
             service.configure_app(app)
@@ -634,7 +634,7 @@ class TestConfigureAppPluginRouter:
         (subdir / "nested.js").write_text("// nested")
         manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=tmp_path)]
 
-        with patch("nmp.studio.service.discover_plugins", return_value=manifests):
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
             service = StudioService()
             app = FastAPI()
             service.configure_app(app)
@@ -656,7 +656,7 @@ class TestConfigureAppPluginRouter:
         (bundle / "leak.js").symlink_to(secret)
         manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=bundle)]
 
-        with patch("nmp.studio.service.discover_plugins", return_value=manifests):
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
             service = StudioService()
             app = FastAPI()
             service.configure_app(app)
@@ -689,7 +689,7 @@ class TestBuildCSPHeader:
         assert self._directive(csp, "frame-src") == "'none'"
 
     def test_issuer_reaches_connect_and_frame_src(self):
-        csp = self._csp_for({"STUDIO_UI_VITE_AUTH_AUTHORITY": "https://issuer.example.com/realms/nmp"})
+        csp = self._csp_for({"STUDIO_UI_VITE_AUTH_AUTHORITY": "https://issuer.example.com/realms/nhx"})
         assert self._directive(csp, "connect-src") == "'self' https://issuer.example.com"
         assert self._directive(csp, "frame-src") == "'self' https://issuer.example.com"
 

@@ -15,7 +15,7 @@ from nemo_deployments_plugin.constants import (
     DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
     MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
 )
-from nemo_platform_plugin.config import ImagePullSecret
+from nemo_helix_plugin.config import ImagePullSecret
 from pydantic import BaseModel, Field, field_validator
 
 _DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")

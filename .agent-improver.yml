@@ -4,7 +4,7 @@
 # nemo-agent-improver: optimize NeMo's agent skills against Harbor evals.
 #
 # This config improves NeMo itself — the "agent under improvement" is Claude
-# Code using NeMo Platform's CLI/SDK via the skills under .agents/skills/. The
+# Code using NeMo Helix's CLI/SDK via the skills under .agents/skills/. The
 # optimize-skills loop runs the Harbor agentic-use evals, analyzes failures
 # and inefficiencies, and asks Claude to update the skills. It supplants the
 # in-tree tools/self_improve/ package from PR #38 — same workflow, now

@@ -3,13 +3,13 @@
 
 [project]
 name = "data-designer-nemo"
-description = "NeMo-platform integration helpers for the Data Designer library."
+description = "NeMo-Helix integration helpers for the Data Designer library."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
 dependencies = [
-    "nemo-platform",
-    "nemo-platform-plugin",
+    "nemo-helix",
+    "nemo-helix-plugin",
     "data-designer==0.9.3",
     "anyio>=4.0",
     "duckdb",
@@ -32,7 +32,7 @@ packages = ["src/data_designer_nemo"]
 
 
 [tool.uv.sources]
-nemo-platform = { workspace = true }
+nemo-helix = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

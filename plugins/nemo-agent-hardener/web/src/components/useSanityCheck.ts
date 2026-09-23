@@ -5,7 +5,7 @@ import { customFetch } from '@agent-hardener/api/fetcher';
 import { parseJson, parseText, useJobArtifact } from '@agent-hardener/components/useJobArtifact';
 import type { Mitigations } from '@agent-hardener/components/useMitigations';
 import { agentHardenerListRuns, useAgentHardenerCreateJob } from '@agent-hardener/generated/api';
-import type { AgentHardenerRun, PlatformJobStatus } from '@agent-hardener/generated/schema';
+import type { AgentHardenerRun, HelixJobStatus } from '@agent-hardener/generated/schema';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
@@ -97,7 +97,7 @@ export const useSubmitSanityCheck = (workspace: string) => {
 export const useSanityCheckResult = (
   workspace: string,
   jobName: string | undefined,
-  status?: PlatformJobStatus
+  status?: HelixJobStatus
 ) => {
   const artifact = useJobArtifact<ValidationReport>(
     workspace,
@@ -119,7 +119,7 @@ export const useSanityCheckResult = (
 export const useSanityCheckComposedGuardrails = (
   workspace: string,
   jobName: string | undefined,
-  status?: PlatformJobStatus
+  status?: HelixJobStatus
 ): string | undefined =>
   useJobArtifact(workspace, jobName, COMPOSED_GUARDRAILS_RESULT, parseText, status).data;
 

@@ -32,7 +32,7 @@ from nemo_fabric import (
 
 # Defined in the plugin contract package so an extension author can read a result
 # without depending on this package. Re-exported here for convenience.
-from nemo_platform_plugin.agents.execute_extensions import (
+from nemo_helix_plugin.agents.execute_extensions import (
     FabricRuntimeResult as FabricRuntimeResult,
 )
 

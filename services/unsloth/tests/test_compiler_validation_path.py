@@ -8,11 +8,13 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
-from nmp.unsloth.app.jobs.compiler import platform_job_config_compiler
-from nmp.unsloth.schemas import (
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
+from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -21,6 +23,15 @@ from nmp.unsloth.schemas import (
     TrainingSpec,
     UnslothJobOutput,
 )
+
+
+def _platform_mock() -> MagicMock:
+    """Platform client whose adapter lookup reports "no such adapter"."""
+    platform = MagicMock()
+    platform.models.get_adapter = AsyncMock(
+        side_effect=NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+    )
+    return platform
 
 
 def _model_entity() -> ModelEntity:
@@ -56,7 +67,7 @@ def _spec(*, validation_path: str | None) -> UnslothJobOutput:
 
 @pytest.mark.asyncio
 async def test_training_step_gets_local_validation_path_for_same_fileset() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -64,7 +75,7 @@ async def test_training_step_gets_local_validation_path_for_same_fileset() -> No
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path="default/commonsense_qa"),
-            platform=MagicMock(),
+            platform=_platform_mock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -78,7 +89,7 @@ async def test_training_step_gets_local_validation_path_for_same_fileset() -> No
 
 @pytest.mark.asyncio
 async def test_training_step_gets_separate_validation_path_for_different_fileset() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -86,7 +97,7 @@ async def test_training_step_gets_separate_validation_path_for_different_fileset
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path="default/commonsense_qa_val"),
-            platform=MagicMock(),
+            platform=_platform_mock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -100,7 +111,7 @@ async def test_training_step_gets_separate_validation_path_for_different_fileset
 
 @pytest.mark.asyncio
 async def test_upload_step_stamps_output_metadata() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -108,7 +119,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path=None),
-            platform=MagicMock(),
+            platform=_platform_mock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -119,7 +130,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_compiler_applies_profile_to_task_steps() -> None:
-    from nmp.unsloth.app.jobs import compiler as compiler_mod
+    from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
     compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
@@ -127,7 +138,7 @@ async def test_compiler_applies_profile_to_task_steps() -> None:
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path=None),
-            platform=MagicMock(),
+            platform=_platform_mock(),
             profile="custom-gpu",
         )
     finally:

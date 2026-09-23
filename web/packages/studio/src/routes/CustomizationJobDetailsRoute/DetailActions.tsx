@@ -10,7 +10,7 @@ import { useCustomizationCancelAutomodelJob } from '@nemo/sdk/generated/customiz
 import { useCustomizationCancelRlJob } from '@nemo/sdk/generated/customizer/rl-jobs';
 import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer/unsloth-jobs';
 import { getJobsGetJobQueryKey } from '@nemo/sdk/generated/platform/jobs';
-import { PlatformJobStatus, type PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex } from '@nvidia/foundations-react-core';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -23,7 +23,7 @@ import { useNavigate } from 'react-router';
 
 interface DetailActionsProps {
   model?: string;
-  status?: PlatformJobStatus;
+  status?: HelixJobStatus;
   /** Training backend of this job, needed to target the correct per-backend cancel endpoint. */
   backend?: CustomizationBackend;
   /** Job name (from the route). */
@@ -45,9 +45,9 @@ export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, 
       toast.success('Job cancelled successfully.');
       queryClient.setQueryData(
         getJobsGetJobQueryKey(workspace, name),
-        (oldData: PlatformJobResponse | undefined) => {
+        (oldData: HelixJobResponse | undefined) => {
           if (!oldData) return oldData;
-          return { ...oldData, status: PlatformJobStatus.cancelled };
+          return { ...oldData, status: HelixJobStatus.cancelled };
         }
       );
       // Per-step state and the derived duration are a separate query; without this they keep
@@ -85,7 +85,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, 
   };
 
   const isCancellable = status !== undefined && CJobCancellableStatuses.includes(status);
-  const isCancelling = isPending || status === PlatformJobStatus.cancelling;
+  const isCancelling = isPending || status === HelixJobStatus.cancelling;
   const isLaunchable = status !== undefined && CJobLaunchableStatuses.includes(status);
 
   return (

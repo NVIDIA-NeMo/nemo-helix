@@ -29,7 +29,7 @@ from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig, RuntimeConf
 
 
 async def main() -> int:
-    model = os.environ.get("FABRIC_MODEL", "nvidia/nemotron-3-nano-30b-a3b")
+    model = os.environ.get("FABRIC_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
     # The default LocalSecretResolver reads the model credential from the process env. Take it from the
     # env var only (no key-file option): a key file is easy to drop into the repo and commit by accident.

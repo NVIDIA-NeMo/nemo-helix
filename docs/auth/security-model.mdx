@@ -5,7 +5,7 @@
 title: "Security Model"
 description: ""
 ---
-This page describes the security architecture of NeMo Platform authentication and authorization — how requests are authenticated, how access decisions are made, and where trust boundaries lie. It is intended for platform operators and security reviewers evaluating NeMo Platform for production deployment.
+This page describes the security architecture of NeMo Helix authentication and authorization — how requests are authenticated, how access decisions are made, and where trust boundaries lie. It is intended for platform operators and security reviewers evaluating NeMo Helix for production deployment.
 
 For hands-on setup, see [Auth Configuration](/documentation/access-control/deployment). For the authorization model, see [Concepts](/documentation/access-control/concepts).
 
@@ -17,7 +17,7 @@ sequenceDiagram
     participant Client
     participant Gateway
     participant Auth as Auth Service
-    participant Service as NeMo Platform Service
+    participant Service as NeMo Helix Service
     participant PDP as PDP (Embedded or OPA)
 
     Note over Gateway,PDP: Trust Boundary
@@ -26,7 +26,7 @@ sequenceDiagram
     IdP-->>Client: JWT
     Client->>Gateway: Authorization: Bearer token
     Gateway->>Auth: /apis/auth/authenticate
-    Auth-->>Gateway: Trusted X-NMP-Principal-* and X-NMP-Scopes headers
+    Auth-->>Gateway: Trusted X-NHX-Principal-* and X-NHX-Scopes headers
     Gateway->>Service: Forward request with trusted headers
     Service->>PDP: Check authorization
     PDP-->>Service: Allow / deny
@@ -36,32 +36,32 @@ The request flow:
 
 1. **Client** sends a request with a bearer token in the `Authorization` header.
 2. In gateway deployments, **Gateway** calls the auth service's `/apis/auth/authenticate` endpoint; otherwise, the first service validates the token directly.
-3. The validating component derives trusted `X-NMP-Principal-*` and `X-NMP-Scopes` headers.
+3. The validating component derives trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers.
 4. **PDP** (Policy Decision Point) evaluates authorization — checks the principal's role bindings and token scopes against the operation's requirements.
 5. If allowed, the service handles the request.
 
 <Note>
 
-In quickstart deployments without an OIDC provider, the `X-NMP-Principal-*` headers are set directly by the client instead of being derived from a validated JWT. See [Getting Started](/documentation/access-control).
+In quickstart deployments without an OIDC provider, the `X-NHX-Principal-*` headers are set directly by the client instead of being derived from a validated JWT. See [Getting Started](/documentation/access-control).
 
 </Note>
 ## Authentication Modes
 
-NeMo Platform supports two authentication modes: **service-level** bearer-token validation and **gateway bearer-auth callout**.
+NeMo Helix supports two authentication modes: **service-level** bearer-token validation and **gateway bearer-auth callout**.
 
-In both modes, identity arrives in the `Authorization: Bearer <token>` header. The bearer token is validated exactly once — either by the first NeMo Platform service or by the auth service behind the gateway callout. After validation, the authenticated identity (email, subject, groups) is propagated to downstream services via **trusted `X-NMP-Principal-*` headers**. Downstream services accept these headers without re-validating the token, but they still run authorization checks.
+In both modes, identity arrives in the `Authorization: Bearer <token>` header. The bearer token is validated exactly once — either by the first NeMo Helix service or by the auth service behind the gateway callout. After validation, the authenticated identity (email, subject, groups) is propagated to downstream services via **trusted `X-NHX-Principal-*` headers**. Downstream services accept these headers without re-validating the token, but they still run authorization checks.
 
-This "validate once, propagate via headers" design means that **network perimeter security is critical**: anything inside the trust boundary that receives `X-NMP-Principal-*` headers will trust them unconditionally. The gateway must strip these headers from all incoming external requests to prevent clients from forging an identity. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+This "validate once, propagate via headers" design means that **network perimeter security is critical**: anything inside the trust boundary that receives `X-NHX-Principal-*` headers will trust them unconditionally. The gateway must strip these headers from all incoming external requests to prevent clients from forging an identity. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
 ### Service-Level Authentication
 
-The first NeMo Platform service that receives the request validates the bearer token directly:
+The first NeMo Helix service that receives the request validates the bearer token directly:
 
 1. Extracts the `Authorization: Bearer <token>` header
 2. Validates the token using the enabled auth configuration
 3. Extracts the principal identity (email, subject, groups) and scopes
 4. Calls the PDP for an authorization decision
-5. Forwards `X-NMP-Principal-*` headers to downstream services
+5. Forwards `X-NHX-Principal-*` headers to downstream services
 
 No gateway is required. This is the simplest mode and the default.
 
@@ -70,7 +70,7 @@ No gateway is required. This is the simplest mode and the default.
 The gateway (e.g., Envoy with `ext_authz`) authenticates the bearer token before forwarding the request:
 
 1. Gateway calls `/apis/auth/authenticate` with the original `Authorization` header
-2. Auth service validates the bearer token and returns trusted `X-NMP-Principal-*` and `X-NMP-Scopes` headers
+2. Auth service validates the bearer token and returns trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers
 3. Gateway forwards the request with those trusted headers
 4. Services skip bearer-token re-validation and run their normal PDP authorization checks
 
@@ -80,11 +80,11 @@ This rejects unauthenticated requests before they reach platform services while 
 
 A **principal** is an authenticated identity — typically a human user identified by email address. Each request has exactly one principal.
 
-When OIDC is enabled, the principal is resolved from JWT claims: the `sub` claim becomes the principal ID (or `oid` for Azure AD), the `email` claim provides the email (or `upn` for Azure AD), and group memberships come from the `groups` claim. These claim names are configurable. In gateway deployments, the auth service performs this extraction and the gateway forwards the returned `X-NMP-Principal-*` headers.
+When OIDC is enabled, the principal is resolved from JWT claims: the `sub` claim becomes the principal ID (or `oid` for Azure AD), the `email` claim provides the email (or `upn` for Azure AD), and group memberships come from the `groups` claim. These claim names are configurable. In gateway deployments, the auth service performs this extraction and the gateway forwards the returned `X-NHX-Principal-*` headers.
 
 <Note>
 
-**Quickstart shortcut** — When running without OIDC (`email-as-API-key` mode), the principal is the raw value of the `X-NMP-Principal-Id` header, without any token validation. This is intended for quick testing only.
+**Quickstart shortcut** — When running without OIDC (`email-as-API-key` mode), the principal is the raw value of the `X-NHX-Principal-Id` header, without any token validation. This is intended for quick testing only.
 
 </Note>
 ### Trusted Identity Headers
@@ -93,10 +93,10 @@ The following headers carry the authenticated identity through the system:
 
 | Header | Description |
 |---|---|
-| `X-NMP-Principal-Id` | Unique identifier for the principal (required). Resolved from the JWT `sub` claim (or `oid` for Azure AD). |
-| `X-NMP-Principal-Email` | The principal's email address. |
-| `X-NMP-Principal-Groups` | Comma-separated list of groups the principal belongs to (from JWT group claims). |
-| `X-NMP-Scopes` | Space-separated list of token scopes (extracted from the JWT `scp` or `scope` claim). Used by the PDP for scope-based authorization checks. |
+| `X-NHX-Principal-Id` | Unique identifier for the principal (required). Resolved from the JWT `sub` claim (or `oid` for Azure AD). |
+| `X-NHX-Principal-Email` | The principal's email address. |
+| `X-NHX-Principal-Groups` | Comma-separated list of groups the principal belongs to (from JWT group claims). |
+| `X-NHX-Scopes` | Space-separated list of token scopes (extracted from the JWT `scp` or `scope` claim). Used by the PDP for scope-based authorization checks. |
 
 These headers are set after bearer-token validation and forwarded on every internal service-to-service call. As described in [Authentication Modes](#authentication-modes), services inside the trust boundary accept them unconditionally — they are never re-validated. Services still call the PDP for authorization when `auth.enabled=true`.
 
@@ -110,7 +110,7 @@ PDP endpoints under `/apis/auth/v2/authz/` are the exception: service principals
 
 <Note>
 
-Service principals rely on perimeter security — the gateway strips `X-NMP-Principal-*` headers from incoming requests, so external callers cannot forge a `service:` identity. The gateway must also block external access to `/internal/*` paths. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+Service principals rely on perimeter security — the gateway strips `X-NHX-Principal-*` headers from incoming requests, so external callers cannot forge a `service:` identity. The gateway must also block external access to `/internal/*` paths. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
 </Note>
 #### On-Behalf-Of Delegation
@@ -120,7 +120,7 @@ Some operations require a service to act with its own credentials while preservi
 - **Secret access**: A user cannot fetch a secret value directly — only the platform can — but the platform still needs to verify that the user has permission to access the secret's workspace.
 - **Entity store access**: Feature-specific APIs (Models, Evaluation, etc.) check user permissions at the service level, then access the entity store using service credentials with the user's identity attached for `created_by`/`updated_by` attribution.
 
-In these cases, the calling service sets the `X-NMP-Principal-On-Behalf-Of` header to a JSON object containing the original user's identity:
+In these cases, the calling service sets the `X-NHX-Principal-On-Behalf-Of` header to a JSON object containing the original user's identity:
 
 ```json
 {
@@ -137,22 +137,22 @@ The downstream service constructs a principal from this object and evaluates the
 
 #### Job Credential Propagation
 
-Many NeMo Platform operations — customization, evaluation, synthetic data generation — run as asynchronous jobs. When a user submits a job, the platform propagates the submitting user's identity into the job container via the `NMP_PRINCIPAL` environment variable.
+Many NeMo Helix operations — customization, evaluation, synthetic data generation — run as asynchronous jobs. When a user submits a job, the platform propagates the submitting user's identity into the job container via the `NHX_PRINCIPAL` environment variable.
 
 <Note>
 
-Job containers need to run inside the trust boundary — they call NeMo Platform APIs using the propagated identity headers and are subject to the same authorization checks as any other caller. The key distinction is that jobs act as the *user*, not as a privileged service principal, so they can only access resources the submitting user is permitted to reach.
+Job containers need to run inside the trust boundary — they call NeMo Helix APIs using the propagated identity headers and are subject to the same authorization checks as any other caller. The key distinction is that jobs act as the *user*, not as a privileged service principal, so they can only access resources the submitting user is permitted to reach.
 
 </Note>
 ## Authorization: Workspace-Scoped RBAC
 
-NeMo Platform uses **workspace-scoped Role-Based Access Control (RBAC)**. All resources (models, datasets, jobs, evaluations) belong to exactly one workspace, and access is controlled at the workspace level — not per-resource.
+NeMo Helix uses **workspace-scoped Role-Based Access Control (RBAC)**. All resources (models, datasets, jobs, evaluations) belong to exactly one workspace, and access is controlled at the workspace level — not per-resource.
 
 - Users are granted roles (Viewer, Editor, Admin) per workspace via **role bindings**
 - The wildcard principal `*` binds a role for all authenticated users at once
 - Workspaces are private by default; the creator becomes Admin automatically
 
-On top of RBAC, NeMo Platform supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through two independent checks:
+On top of RBAC, NeMo Helix supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through two independent checks:
 
 1. **Scope check** (token level): The JWT must carry at least one of the scopes required by the endpoint (e.g., `platform:read` or `platform:write`). Scopes limit what the *token* can do.
 2. **Permission check** (role level): The principal must have the necessary permissions via role bindings in the workspace. Roles limit what the *user* can do.
@@ -161,7 +161,7 @@ Both must pass. This enables least-privilege token usage — for example, an Edi
 
 For details, see [Authorization Concepts](/documentation/access-control/concepts), [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions), and [API Scopes](/documentation/access-control/authorization/api-scopes).
 
-## What NeMo Platform Does NOT Do
+## What NeMo Helix Does NOT Do
 
 The following are explicitly out of scope for the current implementation:
 

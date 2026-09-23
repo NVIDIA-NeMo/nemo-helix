@@ -18,8 +18,8 @@ import data_designer.config as dd
 import typer
 from data_designer.cli.ui import print_error
 from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.cli_state import resolve_local_cli_sdks
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.cli_state import resolve_local_cli_sdks
 
 OutputFormat = Literal["text", "json"]
 
@@ -33,15 +33,15 @@ def load_builder_or_exit(config_source: str) -> dd.DataDesignerConfigBuilder:
         raise typer.Exit(code=1) from e
 
 
-def resolve_sdks_or_exit(typer_ctx: typer.Context) -> tuple[NeMoPlatform | None, AsyncNeMoPlatform | None]:
+def resolve_sdks_or_exit(typer_ctx: typer.Context) -> tuple[NeMoHelix | None, AsyncNeMoHelix | None]:
     """Resolve the CLI's SDK pair, exiting 1 when neither is configured."""
     sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-    sdk = cast("NeMoPlatform | None", sdk)
-    async_sdk = cast("AsyncNeMoPlatform | None", async_sdk)
+    sdk = cast("NeMoHelix | None", sdk)
+    async_sdk = cast("AsyncNeMoHelix | None", async_sdk)
 
     if sdk is None and async_sdk is None:
         print_error(
-            "No NeMo Platform SDK is available. Run `nemo` from a configured environment "
+            "No NeMo Helix SDK is available. Run `nemo` from a configured environment "
             "or supply credentials via the top-level CLI."
         )
         raise typer.Exit(code=1)
@@ -52,8 +52,8 @@ def resolve_sdks_or_exit(typer_ctx: typer.Context) -> tuple[NeMoPlatform | None,
 def resolve_workspace(
     workspace: str | None,
     *,
-    sdk: NeMoPlatform | None,
-    async_sdk: AsyncNeMoPlatform | None,
+    sdk: NeMoHelix | None,
+    async_sdk: AsyncNeMoHelix | None,
 ) -> str:
     """Pick the workspace to resolve against: explicit flag, then SDK default, then ``"default"``."""
     return (

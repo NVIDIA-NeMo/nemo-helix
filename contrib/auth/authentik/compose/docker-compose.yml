@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: ${COMPOSE_PROJECT_NAME:-nemo-platform-authentik}
+name: ${COMPOSE_PROJECT_NAME:-nemo-helix-authentik}
 
 x-authentik-env: &authentik-env
   AUTHENTIK_REDIS__HOST: authentik-redis
@@ -16,7 +16,7 @@ x-authentik-env: &authentik-env
 
 services:
   nemo:
-    image: ${IMAGE_REGISTRY:-my-registry}/nmp-api:${BAKE_TAG:-local}
+    image: ${IMAGE_REGISTRY:-my-registry}/nhx-api:${BAKE_TAG:-local}
     command:
       [
         "--host",
@@ -31,18 +31,18 @@ services:
     user: "0:0"
     environment:
       MODE: development
-      NMP_CONFIG_FILE_PATH: /etc/nmp/config.yaml
-      NMP_CONFIG_WARNINGS_DISABLED: "1"
-      NMP_AUTH_POLICY_DECISION_POINT_BASE_URL: http://127.0.0.1:8080
-      NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: /var/run/secrets/nemo-platform/workload-token-signing/private-key.pem
-      NMP_SEED_ON_STARTUP: "true"
-      NMP_PLATFORM_SEED_MODEL_PROVIDER_ENABLED: "false"
-      NMP_SECRETS_ALLOW_KEY_CREATION: "1"
+      NHX_CONFIG_FILE_PATH: /etc/nhx/config.yaml
+      NHX_CONFIG_WARNINGS_DISABLED: "1"
+      NHX_AUTH_POLICY_DECISION_POINT_BASE_URL: http://127.0.0.1:8080
+      NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: /var/run/secrets/nemo-helix/workload-token-signing/private-key.pem
+      NHX_SEED_ON_STARTUP: "true"
+      NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED: "false"
+      NHX_SECRETS_ALLOW_KEY_CREATION: "1"
       NEMO_JOBS_DEFAULT_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_ENDPOINT_MODE: network
-      SSL_CERT_FILE: /etc/nmp/gateway-tls/tls.crt
-      REQUESTS_CA_BUNDLE: /etc/nmp/gateway-tls/tls.crt
+      SSL_CERT_FILE: /etc/nhx/gateway-tls/tls.crt
+      REQUESTS_CA_BUNDLE: /etc/nhx/gateway-tls/tls.crt
       AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-dev}
     depends_on:
       gateway-tls-init:
@@ -54,9 +54,9 @@ services:
       retries: 12
       start_period: 20s
     volumes:
-      - ${NEMO_COMPOSE_CONFIG_PATH:-../config/platform-compose-authentik.yaml}:/etc/nmp/config.yaml:ro
-      - ../.generated/workload-token-private-key.pem:/var/run/secrets/nemo-platform/workload-token-signing/private-key.pem:ro
-      - gateway-tls:/etc/nmp/gateway-tls:ro
+      - ${NEMO_COMPOSE_CONFIG_PATH:-../config/platform-compose-authentik.yaml}:/etc/nhx/config.yaml:ro
+      - ../.generated/workload-token-private-key.pem:/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem:ro
+      - gateway-tls:/etc/nhx/gateway-tls:ro
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - nemo-data:/data
     networks:

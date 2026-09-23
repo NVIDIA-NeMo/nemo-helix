@@ -18,7 +18,7 @@ Contract:
 - ``GET  /v1/health/ready`` → ``{"object": "health-response", "message": "ready"}``
   (503 with ``"message": "not ready"`` until the model is loaded)
 
-Runs inside the model container with no dependency on ``nemo_platform``; the
+Runs inside the model container with no dependency on ``nemo_helix``; the
 classifier is imported relative to this directory so the image can copy just
 ``model/`` plus its ``requirements.txt``.
 """

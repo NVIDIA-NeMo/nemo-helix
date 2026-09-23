@@ -4,7 +4,7 @@
 """Task entrypoint for ``agents.evaluate-suite`` (``python -m nemo_agents_plugin.tasks.evaluate_suite``).
 
 Mirrors :mod:`nemo_agents_plugin.tasks.evaluate`: loads the step config, builds
-:class:`~nemo_platform_plugin.job_context.JobContext`, and calls
+:class:`~nemo_helix_plugin.job_context.JobContext`, and calls
 :meth:`EvaluateSuiteJob.run` with its concrete ``ctx`` signature.
 
 This module is invoked by the platform's host-subprocess executor when a
@@ -21,10 +21,10 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
+from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 

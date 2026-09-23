@@ -8,7 +8,7 @@ Evaluator runs Harbor task suites natively — so running LAB is just the SDK's
 Harbor runner (:func:`run_harbor_eval` / :class:`HarborAgentTaskRunner`) pointed at
 LAB's generated Harbor suite. The whole run is one
 :class:`~nemo_evaluator_sdk.agent_eval.evaluator.AgentEvaluator` call in a single
-local process, then the same run can be submitted as a governed NeMo Platform job.
+local process, then the same run can be submitted as a governed NeMo Helix job.
 
 The LAB-specific pieces — downloading the pinned LAB source, generating the Harbor
 tasks, LAB's Harbor agent, and LAB's rubric verifier — are Harbor-native and used
@@ -25,7 +25,7 @@ Two modes:
 Prerequisites:
 
 * Python >= 3.12 and a running Docker daemon.
-* A NeMo Platform source checkout (see SETUP.md for toolchain prerequisites).
+* A NeMo Helix source checkout (see SETUP.md for toolchain prerequisites).
   From the repository root, install Harbor with
   ``uv sync --frozen --package nemo-evaluator-sdk --extra harbor``. The SDK is not
   published as a standalone PyPI package. Harbor is imported lazily.

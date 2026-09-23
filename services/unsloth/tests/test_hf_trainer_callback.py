@@ -6,8 +6,8 @@
 from unittest.mock import MagicMock
 
 import pytest
-from nmp.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
-from nmp.unsloth.tasks.training.backends.hf_trainer_callback import (
+from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
+from nhx.unsloth.tasks.training.backends.hf_trainer_callback import (
     _epoch_from_value,
     create_hf_trainer_progress_callback,
 )

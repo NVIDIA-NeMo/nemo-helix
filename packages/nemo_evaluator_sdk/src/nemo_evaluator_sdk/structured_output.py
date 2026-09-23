@@ -24,8 +24,8 @@ _PROBE_MAX_TOKENS = 4096
 #: mode only passes when the server actually injected the grammar.
 _DEFAULT_PROBE_SCHEMA: dict = {
     "type": "object",
-    "properties": {"__nmp_probe_score": {"type": "integer"}},
-    "required": ["__nmp_probe_score"],
+    "properties": {"__nhx_probe_score": {"type": "integer"}},
+    "required": ["__nhx_probe_score"],
     "additionalProperties": False,
 }
 

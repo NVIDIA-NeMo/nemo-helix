@@ -3,10 +3,17 @@
 
 # NeMo Insights
 
-NeMo Platform plugin for analyzing agent telemetry and persisting actionable insights.
+NeMo Helix plugin for analyzing agent telemetry and persisting actionable insights.
 
 Analysis uses [trace-intel](https://github.com/NVIDIA-NeMo/labs-trace-intel).
-NeMo Platform supplies authenticated trace and model access and stores the resulting insights.
+NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
+
+## Prerequisites
+
+Use a running NeMo Helix with Intake, Insights, Jobs, and a configured
+`agents.execute` runtime. The target agent must already have traces in Intake.
+Run `nemo setup` to select default and fast Platform models, or supply
+`--default-model` and `--fast-model` when submitting analysis.
 
 ## Install from the monorepo
 
@@ -18,26 +25,26 @@ The plugin is installed by default through the root workspace's `enabled-plugins
 
 ## CLI
 
-Submit analysis through NeMo Platform:
+Submit analysis through NeMo Helix. Replace `<run-name>` with the name
+returned by `create`:
 
 ```bash
 uv run nemo insights analysis-runs create --agent research-agent --workspace default --wait
 uv run nemo insights analysis-runs list --agent research-agent
-uv run nemo insights analysis-runs get <run-name>
+uv run nemo insights analysis-runs get "<run-name>"
 ```
 
 AnalysisRuns execute through `agents.execute`; the Insights plugin stores the
-resulting insights in NeMo Platform. `--wait` exits non-zero unless the job
+resulting insights in NeMo Helix. `--wait` exits non-zero unless the job
 completes successfully. A run and its backing job share one name.
 
-Run `nemo setup` first to select the default and fast NeMo Platform models.
 `create` uses those configured models unless you pass `--default-model` and
 `--fast-model`. Add `--ethos ETHOS.md` to supply the agent's intended behavior,
 `--since <ISO-8601 timestamp>` to set a lower time bound, or
 `--evaluation-id <id>` to select one evaluation.
 
 Provide `--agent` and pass the workspace and Ethos explicitly when needed.
-`--base-url` defaults to `NMP_BASE_URL`, then `http://localhost:8080`.
+`--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
 
 ### Telemetry requirement
 
@@ -88,8 +95,8 @@ environment wins. All settings live under `analyst`, with the
 | — (see below) | `analyst.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
 | — (see below) | `analyst.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
 | — (see below) | `analyst.job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
-| — (see below) | `analyst.base_url` | unset | NeMo Platform base URL passed to analyst jobs. When unset, jobs use their active platform context. |
-| — (see below) | `analyst.inference_api_key_secret_name` | unset | NeMo Platform secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
+| — (see below) | `analyst.base_url` | unset | NeMo Helix base URL passed to analyst jobs. When unset, jobs use their active platform context. |
+| — (see below) | `analyst.inference_api_key_secret_name` | unset | NeMo Helix secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
 
 ```bash
 export NEMO_INSIGHTS_ANALYST_FREQUENCY=weekly

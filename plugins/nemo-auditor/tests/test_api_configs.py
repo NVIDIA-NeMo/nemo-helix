@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_auditor.api.v2 import configs as configs_router_module
 from nemo_auditor.entities import AuditConfig
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoPaginationInfo,

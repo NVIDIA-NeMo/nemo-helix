@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from nmp.automodel.tasks.training.datasets.preparation import (
+from nhx.automodel.tasks.training.datasets.preparation import (
     DatasetFormatError,
     discover_dataset_files,
     prepare_dataset,

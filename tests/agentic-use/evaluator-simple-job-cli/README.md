@@ -3,7 +3,7 @@
 
 # Simple Custom Evaluation Job - CLI Harbor Test
 
-Tests launching a custom evaluation job with a string-check metric using the NeMo Platform CLI.
+Tests launching a custom evaluation job with a string-check metric using the NeMo Helix CLI.
 
 ## What This Tests
 
@@ -16,7 +16,7 @@ Tests launching a custom evaluation job with a string-check metric using the NeM
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 export ANTHROPIC_API_KEY='your-key'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
 harbor run -p tests/agentic-use/evaluator-simple-job-cli \

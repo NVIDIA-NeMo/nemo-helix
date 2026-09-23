@@ -6,14 +6,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform, Omit
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nmp.common.api.common import SecretRef
-from nmp.common.auth import AuthClient, Principal
-from nmp.common.config import AuthConfig
-from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
-from nmp.common.secrets.exceptions import SecretNotFoundError
-from nmp.core.files.api.endpoint_helpers import (
+from nemo_helix import AsyncNeMoHelix, Omit
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nhx.common.api.common import SecretRef
+from nhx.common.auth import AuthClient, Principal
+from nhx.common.config import AuthConfig
+from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
+from nhx.common.secrets.exceptions import SecretNotFoundError
+from nhx.core.files.api.endpoint_helpers import (
     CacheContext,
     get_cache_status_for_files,
     get_download_file_info,
@@ -23,12 +23,12 @@ from nmp.core.files.api.endpoint_helpers import (
     resolve_storage_secrets_for_user,
     stream_file_download,
 )
-from nmp.core.files.app.backends.base import FileInfo
-from nmp.core.files.app.backends.huggingface import HuggingfaceStorageConfig
-from nmp.core.files.app.backends.local import LocalStorageConfig
-from nmp.core.files.app.backends.ngc import NGCStorageConfig
-from nmp.core.files.app.cache import CacheStatus
-from nmp.core.files.exceptions import NotFoundError, StorageAccessError
+from nhx.core.files.app.backends.base import FileInfo
+from nhx.core.files.app.backends.huggingface import HuggingfaceStorageConfig
+from nhx.core.files.app.backends.local import LocalStorageConfig
+from nhx.core.files.app.backends.ngc import NGCStorageConfig
+from nhx.core.files.app.cache import CacheStatus
+from nhx.core.files.exceptions import NotFoundError, StorageAccessError
 
 
 @pytest.fixture
@@ -45,8 +45,8 @@ def mock_sdk():
     secrets_client = MagicMock()
     secrets_client.access_secret = AsyncMock()
     with (
-        patch("nmp.common.sdk_factory.get_async_platform_sdk") as mock,
-        patch("nmp.core.files.api.endpoint_helpers.client_from_platform", return_value=secrets_client),
+        patch("nhx.common.sdk_factory.get_async_platform_sdk") as mock,
+        patch("nhx.core.files.api.endpoint_helpers.client_from_platform", return_value=secrets_client),
     ):
         sdk = MagicMock()
         mock.return_value = sdk
@@ -146,17 +146,17 @@ async def test_resolve_storage_secrets_for_user_delegates_effective_principal_cl
             on_behalf_of_authz_aliases=["legacy-creator", "creator@example.com"],
         ),
     )
-    sdk = AsyncNeMoPlatform(base_url="http://testserver")
+    sdk = AsyncNeMoHelix(base_url="http://testserver")
     captured_headers: dict[str, str | Omit] = {}
     secrets_client = MagicMock()
     secrets_client.access_secret = AsyncMock(return_value=_access_result("hf_token_value"))
 
-    def capture_service_sdk(service_sdk: AsyncNeMoPlatform, _client_type: type[object]) -> MagicMock:
+    def capture_service_sdk(service_sdk: AsyncNeMoHelix, _client_type: type[object]) -> MagicMock:
         captured_headers.update(service_sdk.default_headers)
         return secrets_client
 
     try:
-        with patch("nmp.core.files.api.endpoint_helpers.client_from_platform", side_effect=capture_service_sdk):
+        with patch("nhx.core.files.api.endpoint_helpers.client_from_platform", side_effect=capture_service_sdk):
             secrets = await resolve_storage_secrets_for_user(config, "my-workspace", sdk, auth_client)
     finally:
         await sdk.close()
@@ -164,13 +164,13 @@ async def test_resolve_storage_secrets_for_user_delegates_effective_principal_cl
     assert secrets == {"token": "hf_token_value"}
     for header, value in MARK_INTERNAL_REQUEST_HEADERS.items():
         assert captured_headers[header] == value
-    assert captured_headers["X-NMP-Principal-Id"] == "service:files"
-    assert captured_headers["X-NMP-Actor-Aliases"] == "service:files"
-    assert captured_headers["X-NMP-Principal-On-Behalf-Of"] == "creator@example.com"
-    assert captured_headers["X-NMP-Subject-Account-Id"] == "account-creator"
-    assert captured_headers["X-NMP-Subject-Aliases"] == "legacy-creator,creator@example.com"
-    assert captured_headers["X-NMP-Principal-On-Behalf-Of-Email"] == "creator@example.com"
-    assert captured_headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
+    assert captured_headers["X-NHX-Principal-Id"] == "service:files"
+    assert captured_headers["X-NHX-Actor-Aliases"] == "service:files"
+    assert captured_headers["X-NHX-Principal-On-Behalf-Of"] == "creator@example.com"
+    assert captured_headers["X-NHX-Subject-Account-Id"] == "account-creator"
+    assert captured_headers["X-NHX-Subject-Aliases"] == "legacy-creator,creator@example.com"
+    assert captured_headers["X-NHX-Principal-On-Behalf-Of-Email"] == "creator@example.com"
+    assert captured_headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
 
 
 # Tests for get_cache_status_for_files
@@ -329,8 +329,8 @@ def mock_background_tasks():
 async def test_stream_file_download_preflight_not_found_error(mock_storage, mock_request, mock_background_tasks):
     """Test that NotFoundError during preflight is converted to HTTP 404."""
     from fastapi import HTTPException
-    from nmp.core.files.api.endpoint_helpers import stream_file_download
-    from nmp.core.files.exceptions import NotFoundError
+    from nhx.core.files.api.endpoint_helpers import stream_file_download
+    from nhx.core.files.exceptions import NotFoundError
     from starlette.status import HTTP_404_NOT_FOUND
 
     async def error_on_first_chunk():
@@ -355,7 +355,7 @@ async def test_stream_file_download_preflight_not_found_error(mock_storage, mock
 async def test_stream_file_download_preflight_connection_error(mock_storage, mock_request, mock_background_tasks):
     """Test that connection errors during preflight are converted to HTTP 502."""
     from fastapi import HTTPException
-    from nmp.core.files.api.endpoint_helpers import stream_file_download
+    from nhx.core.files.api.endpoint_helpers import stream_file_download
     from starlette.status import HTTP_502_BAD_GATEWAY
 
     async def error_on_first_chunk():
@@ -385,7 +385,7 @@ async def test_get_file_info_storage_access_error_returns_generic_502():
     storage = AsyncMock()
     storage.get_file.side_effect = StorageAccessError("Access denied to gated repository")
 
-    with patch("nmp.core.files.api.endpoint_helpers.logger.exception") as mock_log:
+    with patch("nhx.core.files.api.endpoint_helpers.logger.exception") as mock_log:
         with pytest.raises(HTTPException) as exc_info:
             await get_file_info(storage, "config.json", "default/my-fileset")
 
@@ -532,7 +532,7 @@ async def test_stream_file_download_preflight_success_returns_streaming_response
 ):
     """Test that successful preflight returns StreamingResponse with all chunks."""
     from fastapi.responses import StreamingResponse
-    from nmp.core.files.api.endpoint_helpers import stream_file_download
+    from nhx.core.files.api.endpoint_helpers import stream_file_download
 
     async def mock_download():
         yield b"chunk1"

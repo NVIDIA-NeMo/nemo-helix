@@ -8,14 +8,14 @@ from pathlib import Path
 
 import httpx
 from nemo_guardrails_plugin.benchmarks.paths import RunPaths, build_run_paths
-from nemo_guardrails_plugin.benchmarks.run import _build_nmp_process, _smoke_test
+from nemo_guardrails_plugin.benchmarks.run import _build_nhx_process, _smoke_test
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 
 def _run_paths(tmp_path: Path) -> RunPaths:
     return build_run_paths(
-        nmp_repo_root=tmp_path / "nemo-platform",
+        nhx_repo_root=tmp_path / "nemo-helix",
         nemoguardrails_repo_root=tmp_path / "NeMo-Guardrails",
         run_id="test-run",
     )
@@ -34,8 +34,8 @@ def _seeded_resources() -> SeededResources:
     )
 
 
-def test_nmp_process_uses_benchmark_service_subset(tmp_path: Path) -> None:
-    process = _build_nmp_process(_run_paths(tmp_path))
+def test_nhx_process_uses_benchmark_service_subset(tmp_path: Path) -> None:
+    process = _build_nhx_process(_run_paths(tmp_path))
 
     assert process.cmd == [
         sys.executable,
@@ -56,7 +56,7 @@ def test_smoke_test_retries_until_virtual_model_route_is_ready(monkeypatch) -> N
 
     monkeypatch.setattr("nemo_guardrails_plugin.benchmarks.run.time.sleep", lambda _seconds: None)
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        sdk = NeMoPlatform(base_url="http://platform.test", http_client=http_client, max_retries=0)
+        sdk = NeMoHelix(base_url="http://platform.test", http_client=http_client, max_retries=0)
 
         _smoke_test(sdk, _seeded_resources())
 

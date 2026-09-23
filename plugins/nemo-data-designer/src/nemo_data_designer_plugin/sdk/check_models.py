@@ -42,7 +42,7 @@ from data_designer_nemo.context.execution import create_execution_context
 from nemo_data_designer_plugin.sdk._engine_logs import LogCallback, forward_engine_logs
 from nemo_data_designer_plugin.sdk._engine_pass import run_engine_pass
 from nemo_data_designer_plugin.sdk.logging import ensure_library_logging_handler
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from pydantic import BaseModel, Field, computed_field
 
 # Mirrors what ``PreviewFunction.run`` treats as a failed health check.
@@ -90,7 +90,7 @@ def _make_engine_context_factory(config_builder: dd.DataDesignerConfigBuilder):
     """
 
     def factory(
-        sdk: NeMoPlatform | None,
+        sdk: NeMoHelix | None,
         workspace: str,
         validated_roots: set[str],
     ) -> DataDesignerEngineContext | None:
@@ -111,8 +111,8 @@ def _check_models(data_designer: DataDesigner, config_builder: dd.DataDesignerCo
 async def check_models_config(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoPlatform | None = None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    sdk: NeMoHelix | None = None,
+    async_sdk: AsyncNeMoHelix | None = None,
     workspace: str,
     config_source: str | None = None,
     on_log: LogCallback | None = None,
@@ -130,8 +130,8 @@ async def check_models_config(
 
     Args:
         config_builder: The Data Designer config whose model aliases are probed.
-        sdk: Sync NeMoPlatform SDK. Used for the engine context when present.
-        async_sdk: Async NeMoPlatform SDK. Derived from ``sdk`` when omitted.
+        sdk: Sync NeMoHelix SDK. Used for the engine context when present.
+        async_sdk: Async NeMoHelix SDK. Derived from ``sdk`` when omitted.
             An async-only caller still probes, via a probe-only engine context.
         workspace: Workspace used to resolve provider references and seed
             sources. Pass ``"default"`` if you have no better value.
@@ -173,8 +173,8 @@ async def check_models_config(
 def check_models_config_sync(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoPlatform | None = None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    sdk: NeMoHelix | None = None,
+    async_sdk: AsyncNeMoHelix | None = None,
     workspace: str,
     config_source: str | None = None,
     on_log: LogCallback | None = None,

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
-from nemo_platform_plugin.capabilities import reset_capability_cache
+from nemo_helix_plugin.capabilities import reset_capability_cache
 
 
 @pytest.fixture(autouse=True)

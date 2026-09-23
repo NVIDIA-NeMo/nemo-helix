@@ -23,7 +23,7 @@ not-for:
   - nemo-experiments-upload (use to upload traces and evaluation results into Intake; this skill reads them back out)
   - nemo-evaluator (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
-  nemo-platform >= 0.1.0; requires the Insights plugin, a reachable platform
+  nemo-helix >= 0.1.0; requires the Insights plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call
   on the Analyst's behalf. Requires Jobs and a configured agents.execute runtime.
 maturity: beta
@@ -36,10 +36,24 @@ metadata:
 
 # NeMo Analyst
 
-Analyze an agent's behavior from its own telemetry and record what recurs as
-Insights.
+## Before running
+
+The Analyst reads telemetry; it cannot create it. Confirm all three:
+
+- The target agent already has traces in Intake. No traces means no Insights.
+- The platform is reachable at `NHX_BASE_URL`.
+- The CLI has default and fast Platform models configured through `nemo setup`,
+  or the submission supplies explicit model references. The Platform must have
+  Jobs and an `agents.execute` runtime available to execute the analysis.
+
+An `ETHOS.md` file is optional. It gives the Analyst the agent's intent,
+constraints, and success criteria. Code and traces don't contain that context.
+Without it, the Analyst can only judge an agent against itself.
 
 ## What it produces
+
+Analyze an agent's behavior from its own telemetry and record what recurs as
+Insights.
 
 An Insight is a persistent, named description of one recurring problem, and it
 is the unit of work the rest of the optimization loop runs on. Each carries:
@@ -57,24 +71,12 @@ behavior rather than status or scores, so it finds failures in sessions that
 reported success and passed their evaluations. Two well-evidenced Insights are
 worth more than ten vague ones, so a run that files nothing is a valid outcome.
 
-## Before running
-
-The Analyst reads telemetry; it cannot create it. Confirm all three:
-
-- The target agent already has traces in Intake. No traces means no Insights.
-- The platform is reachable at `NMP_BASE_URL`.
-- The CLI has default and fast Platform models configured through `nemo setup`,
-  or the submission supplies explicit model references. The Platform must have
-  Jobs and an `agents.execute` runtime available to execute the analysis.
-
-An `ETHOS.md` file is optional. It gives the Analyst the agent's intent,
-constraints, and success criteria. Code and traces don't contain that context.
-Without it, the Analyst can only judge an agent against itself.
-
 ## Run it
 
+Replace the quoted placeholders below with the target agent and workspace.
+
 ```bash
-nemo insights analysis-runs create --agent <agent-name> --workspace <workspace> --wait
+nemo insights analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
 ```
 
 Add `--ethos ETHOS.md` to supply the agent's intended behavior, `--since` for
@@ -87,15 +89,15 @@ they are missing, or pass `--default-model` and `--fast-model` explicitly.
 
 ## Where Insights are stored
 
-The Insights plugin creates and updates insights in NeMo Platform after analysis.
+The Insights plugin creates and updates insights in NeMo Helix after analysis.
 Stored insights appear in Studio's optimizer view for the workspace.
 
 ## Verify
 
-Inspect the submitted run and its backing job:
+Replace the quoted placeholders with the submitted run name and workspace:
 
 ```bash
-nemo insights analysis-runs get <run-name> --workspace <workspace>
+nemo insights analysis-runs get "<run-name>" --workspace "<workspace>"
 ```
 
 Confirm the job completed and inspect its analysis report. A completed run may
@@ -105,13 +107,14 @@ Listing all insights for the agent can include earlier runs.
 
 ```bash
 curl --fail-with-body \
-  "$NMP_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
+  "$NHX_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
 ```
 
-On an authenticated platform pass the token through curl's config, not argv:
+On an authenticated platform pass the token through curl's config, not argv.
+Replace `<url>` with the insight URL above:
 
 ```bash
-printf 'header = "Authorization: Bearer %s"' "$(nemo auth token)" | curl -K - <url>
+printf 'header = "Authorization: Bearer %s"' "$(nemo auth token)" | curl --fail-with-body -K - "<url>"
 ```
 
 ## When it finds nothing

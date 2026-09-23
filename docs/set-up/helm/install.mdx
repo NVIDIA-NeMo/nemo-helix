@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Install NeMo Platform Helm Chart"
+title: "Install NeMo Helix Helm Chart"
 description: ""
 ---
 
@@ -21,16 +21,16 @@ Complete [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequ
 Use a pinned chart version for every install and upgrade. For a stable release, use the chart version from the release notes or NGC Catalog. For nightly GHCR charts, the release workflow uses the latest stable SemVer release tag and appends a nightly timestamp, falling back to `k8s/helm/Chart.yaml` if no release tag is available.
 
 ```sh
-export NMP_NAMESPACE=nemo-platform
-export NMP_HELM_RELEASE=nemo-platform
-export NMP_HELM_CHART_VERSION=<chart-version>
+export NHX_NAMESPACE=nemo-helix
+export NHX_HELM_RELEASE=nemo-helix
+export NHX_HELM_CHART_VERSION=<chart-version>
 export NGC_API_KEY=<your-ngc-api-key>
 ```
 
 Create the namespace if you have not already created it:
 
 ```sh
-kubectl create namespace "$NMP_NAMESPACE"
+kubectl create namespace "$NHX_NAMESPACE"
 ```
 
 ## Fetch the chart
@@ -39,16 +39,16 @@ kubectl create namespace "$NMP_NAMESPACE"
 
 <Tab title="Stable NGC">
 
-Add the NeMo Platform Helm repository and inspect the values for the pinned stable chart version:
+Add the NeMo Helix Helm repository and inspect the values for the pinned stable chart version:
 
 ```sh
-helm repo add nemo-platform https://helm.ngc.nvidia.com/nvidia/nemo-platform \
+helm repo add nemo-helix https://helm.ngc.nvidia.com/nvidia/nemo-helix \
   --username '$oauthtoken' \
   --password "$NGC_API_KEY"
 
-helm repo update nemo-platform
-helm show values nemo-platform/nemo-platform \
-  --version "$NMP_HELM_CHART_VERSION" > values.yaml
+helm repo update nemo-helix
+helm show values nemo-helix/nemo-helix \
+  --version "$NHX_HELM_CHART_VERSION" > values.yaml
 ```
 
 </Tab>
@@ -57,20 +57,20 @@ helm show values nemo-platform/nemo-platform \
 If you prefer to fetch the chart archive directly, use the same version variable:
 
 ```sh
-helm pull "https://helm.ngc.nvidia.com/nvidia/nemo-platform/charts/nemo-platform-${NMP_HELM_CHART_VERSION}.tgz" \
+helm pull "https://helm.ngc.nvidia.com/nvidia/nemo-helix/charts/nemo-helix-${NHX_HELM_CHART_VERSION}.tgz" \
   --username '$oauthtoken' \
   --password "$NGC_API_KEY"
 
-helm show values "./nemo-platform-${NMP_HELM_CHART_VERSION}.tgz" > values.yaml
+helm show values "./nemo-helix-${NHX_HELM_CHART_VERSION}.tgz" > values.yaml
 ```
 
 </Tab>
 <Tab title="Nightly GHCR">
 
-NeMo Platform also publishes nightly Helm charts to GitHub Container Registry for testing before a stable NGC release. The package is available at [nemo-platform/nemo-platform](https://github.com/NVIDIA-NeMo/nemo-platform/pkgs/container/nemo-platform%2Fnemo-platform), and the Helm OCI reference is:
+NeMo Helix also publishes nightly Helm charts to GitHub Container Registry for testing before a stable NGC release. The package is available at [nemo-helix/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix/pkgs/container/nemo-helix%2Fnemo-helix), and the Helm OCI reference is:
 
 ```sh
-export NMP_HELM_CHART_REF=oci://ghcr.io/nvidia-nemo/nemo-platform/nemo-platform
+export NHX_HELM_CHART_REF=oci://ghcr.io/nvidia-nemo/nemo-helix/nemo-helix
 ```
 
 Nightly chart versions use the latest released SemVer tag plus a timestamp, for example `<latest-release-version>-nightly-YYYYMMDDHHMMSS`.
@@ -86,8 +86,8 @@ echo "$GITHUB_TOKEN" | helm registry login ghcr.io \
 Inspect the values for the nightly chart:
 
 ```sh
-helm show values "$NMP_HELM_CHART_REF" \
-  --version "$NMP_HELM_CHART_VERSION" > values.yaml
+helm show values "$NHX_HELM_CHART_REF" \
+  --version "$NHX_HELM_CHART_VERSION" > values.yaml
 ```
 
 </Tab>
@@ -105,7 +105,7 @@ imagePullSecrets:
   - name: nvcrimagepullsecret
 ```
 
-Review the [NeMo Platform Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference) before installing. The most common cluster-specific settings are:
+Review the [NeMo Helix Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference) before installing. The most common cluster-specific settings are:
 
 | Cluster type              | What to configure                                                                                                                                                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -130,7 +130,7 @@ volumeBindingMode: WaitForFirstConsumer
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: nemo-platform-local-rwx
+  name: nemo-helix-local-rwx
 spec:
   capacity:
     storage: 200Gi
@@ -139,7 +139,7 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: nemo-local-rwx
   hostPath:
-    path: /var/lib/nemo-platform
+    path: /var/lib/nemo-helix
 EOF
 ```
 
@@ -157,7 +157,7 @@ core:
 For local API access without ingress, use port-forwarding after the release is ready:
 
 ```sh
-kubectl -n "$NMP_NAMESPACE" port-forward svc/nemo-platform-api 8080:8080
+kubectl -n "$NHX_NAMESPACE" port-forward svc/nemo-helix-api 8080:8080
 ```
 
 ### EKS example
@@ -185,7 +185,7 @@ platformConfig:
   files:
     default_storage_config:
       type: s3
-      bucket: my-nemo-platform-bucket
+      bucket: my-nemo-helix-bucket
       region: us-east-1
       use_sdk_auth: true
 ```
@@ -205,9 +205,9 @@ The chart does not install these. Install them before the workloads that need th
 Install from the NGC Helm repository:
 
 ```sh
-helm upgrade --install "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
-  --version "$NMP_HELM_CHART_VERSION" \
-  --namespace "$NMP_NAMESPACE" \
+helm upgrade --install "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
+  --version "$NHX_HELM_CHART_VERSION" \
+  --namespace "$NHX_NAMESPACE" \
   --create-namespace \
   -f values.yaml \
   --wait \
@@ -217,9 +217,9 @@ helm upgrade --install "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
 To install a nightly chart from GHCR, use the OCI reference:
 
 ```sh
-helm upgrade --install "$NMP_HELM_RELEASE" "$NMP_HELM_CHART_REF" \
-  --version "$NMP_HELM_CHART_VERSION" \
-  --namespace "$NMP_NAMESPACE" \
+helm upgrade --install "$NHX_HELM_RELEASE" "$NHX_HELM_CHART_REF" \
+  --version "$NHX_HELM_CHART_VERSION" \
+  --namespace "$NHX_NAMESPACE" \
   --create-namespace \
   -f values.yaml \
   --wait \
@@ -229,8 +229,8 @@ helm upgrade --install "$NMP_HELM_RELEASE" "$NMP_HELM_CHART_REF" \
 If you pulled the chart archive directly, install from the archive:
 
 ```sh
-helm upgrade --install "$NMP_HELM_RELEASE" "./nemo-platform-${NMP_HELM_CHART_VERSION}.tgz" \
-  --namespace "$NMP_NAMESPACE" \
+helm upgrade --install "$NHX_HELM_RELEASE" "./nemo-helix-${NHX_HELM_CHART_VERSION}.tgz" \
+  --namespace "$NHX_NAMESPACE" \
   --create-namespace \
   -f values.yaml \
   --wait \
@@ -244,31 +244,31 @@ The installation process can take approximately 10 minutes for image downloads, 
 Check the release and pod status:
 
 ```sh
-helm status "$NMP_HELM_RELEASE" -n "$NMP_NAMESPACE"
-kubectl get pods -n "$NMP_NAMESPACE"
+helm status "$NHX_HELM_RELEASE" -n "$NHX_NAMESPACE"
+kubectl get pods -n "$NHX_NAMESPACE"
 ```
 
 Wait for the API deployment to become available:
 
 ```sh
-kubectl rollout status deployment/nemo-platform-api -n "$NMP_NAMESPACE" --timeout=10m
+kubectl rollout status deployment/nemo-helix-api -n "$NHX_NAMESPACE" --timeout=10m
 ```
 
 For a local smoke test, port-forward the API service and call the readiness endpoint:
 
 ```sh
-kubectl -n "$NMP_NAMESPACE" port-forward svc/nemo-platform-api 8080:8080 &
-NMP_PORT_FORWARD_PID=$!
-trap 'kill "$NMP_PORT_FORWARD_PID" 2>/dev/null || true' EXIT
+kubectl -n "$NHX_NAMESPACE" port-forward svc/nemo-helix-api 8080:8080 &
+NHX_PORT_FORWARD_PID=$!
+trap 'kill "$NHX_PORT_FORWARD_PID" 2>/dev/null || true' EXIT
 
 for attempt in $(seq 1 30); do
   if curl -sf http://localhost:8080/health/ready; then
     break
   fi
 
-  if ! kill -0 "$NMP_PORT_FORWARD_PID" 2>/dev/null; then
+  if ! kill -0 "$NHX_PORT_FORWARD_PID" 2>/dev/null; then
     echo "Port-forward process exited before the API became ready." >&2
-    wait "$NMP_PORT_FORWARD_PID"
+    wait "$NHX_PORT_FORWARD_PID"
     exit 1
   fi
 
@@ -281,7 +281,7 @@ for attempt in $(seq 1 30); do
 done
 ```
 
-Leave the shell open while running CLI commands through the forwarded port. The trap stops the port-forward when the shell exits; to stop it earlier, run `kill "$NMP_PORT_FORWARD_PID"`.
+Leave the shell open while running CLI commands through the forwarded port. The trap stops the port-forward when the shell exits; to stop it earlier, run `kill "$NHX_PORT_FORWARD_PID"`.
 
 Configure the CLI to use the deployed API:
 
@@ -292,25 +292,25 @@ nemo workspaces list
 
 ## Upgrade the chart
 
-Update `NMP_HELM_CHART_VERSION`, review the release notes for required values changes, and run:
+Update `NHX_HELM_CHART_VERSION`, review the release notes for required values changes, and run:
 
 ```sh
-helm repo update nemo-platform
+helm repo update nemo-helix
 
-helm upgrade "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
-  --version "$NMP_HELM_CHART_VERSION" \
-  --namespace "$NMP_NAMESPACE" \
+helm upgrade "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
+  --version "$NHX_HELM_CHART_VERSION" \
+  --namespace "$NHX_NAMESPACE" \
   -f values.yaml \
   --wait \
   --timeout 20m
 ```
 
-For a release installed from GHCR with `NMP_HELM_CHART_REF`, use the Helm OCI reference:
+For a release installed from GHCR with `NHX_HELM_CHART_REF`, use the Helm OCI reference:
 
 ```sh
-helm upgrade "$NMP_HELM_RELEASE" "$NMP_HELM_CHART_REF" \
-  --version "$NMP_HELM_CHART_VERSION" \
-  --namespace "$NMP_NAMESPACE" \
+helm upgrade "$NHX_HELM_RELEASE" "$NHX_HELM_CHART_REF" \
+  --version "$NHX_HELM_CHART_VERSION" \
+  --namespace "$NHX_NAMESPACE" \
   -f values.yaml \
   --wait \
   --timeout 20m
@@ -321,7 +321,7 @@ helm upgrade "$NMP_HELM_RELEASE" "$NMP_HELM_CHART_REF" \
 To uninstall the Helm release:
 
 ```sh
-helm uninstall "$NMP_HELM_RELEASE" -n "$NMP_NAMESPACE"
+helm uninstall "$NHX_HELM_RELEASE" -n "$NHX_NAMESPACE"
 ```
 
 <Note>
@@ -337,7 +337,7 @@ helm uninstall "$NMP_HELM_RELEASE" -n "$NMP_NAMESPACE"
 If you need a complete teardown for CI/CD pipelines or reinstalling in the same namespace, delete the namespace after `helm uninstall` and inventory CRDs before deleting any cluster-wide API definitions:
 
 ```sh
-kubectl delete namespace "$NMP_NAMESPACE"
+kubectl delete namespace "$NHX_NAMESPACE"
 kubectl get crd -o custom-columns=NAME:.metadata.name,API_GROUP:.spec.group
 ```
 

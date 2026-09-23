@@ -4,7 +4,7 @@
 """
 Integration smoke test for NeMo MCP server.
 
-Creates and tests an MCP server instance that is connected to a running NeMo Platform instance.
+Creates and tests an MCP server instance that is connected to a running NeMo Helix instance.
 """
 
 from __future__ import annotations
@@ -15,30 +15,30 @@ from typing import Any, Generator
 import pytest
 from fastmcp import FastMCP
 from mcp.types import TextContent
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nmp.common.sdk_factory import get_platform_sdk
-from nmp.core.mcp.server import create_server
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nhx.common.sdk_factory import get_platform_sdk
+from nhx.core.mcp.server import create_server
 
 
 @pytest.fixture(scope="module")
-def nmp_base_url() -> str:
-    """Get NeMo Platform base URL from environment or use default."""
-    return os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+def nhx_base_url() -> str:
+    """Get NeMo Helix base URL from environment or use default."""
+    return os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 
 
 @pytest.fixture(scope="module")
-def nemo_sdk(nmp_base_url: str) -> Generator[NeMoPlatform, None, None]:
+def nemo_sdk(nhx_base_url: str) -> Generator[NeMoHelix, None, None]:
     """Create NeMo SDK client for direct API validation."""
-    client = get_platform_sdk(base_url=nmp_base_url)
+    client = get_platform_sdk(base_url=nhx_base_url)
     yield client
 
 
 @pytest.fixture(scope="module")
-def mcp_server(nmp_base_url: str) -> Generator[FastMCP, None, None]:
+def mcp_server(nhx_base_url: str) -> Generator[FastMCP, None, None]:
     """Create MCP server instance."""
-    server = create_server(nmp_base_url)
+    server = create_server(nhx_base_url)
     yield server
 
 
@@ -51,9 +51,9 @@ def _text_content(tool_result: Any) -> str:
 class TestMCPServerSmoke:
     """Smoke tests for MCP server basic functionality."""
 
-    def test_nmp_connection(self, nemo_sdk: NeMoPlatform) -> None:
-        """Verify we can connect to NeMo Platform instance."""
-        # This will raise if NeMo Platform is not accessible
+    def test_nhx_connection(self, nemo_sdk: NeMoHelix) -> None:
+        """Verify we can connect to NeMo Helix instance."""
+        # This will raise if NeMo Helix is not accessible
         response = client_from_platform(nemo_sdk, WorkspacesClient).list_workspaces()
         assert response is not None
         assert response.page().items is not None
@@ -70,11 +70,11 @@ class TestMCPServerSmoke:
         assert "list_workspaces" in tool_names
 
     @pytest.mark.asyncio
-    async def test_list_workspaces_matches_sdk(self, mcp_server: FastMCP, nemo_sdk: NeMoPlatform) -> None:
+    async def test_list_workspaces_matches_sdk(self, mcp_server: FastMCP, nemo_sdk: NeMoHelix) -> None:
         """
         Verify MCP tool returns consistent data with SDK.
 
-        This ensures the MCP server is properly connected to NeMo Platform
+        This ensures the MCP server is properly connected to NeMo Helix
         and returning real data.
         """
         import json
@@ -110,13 +110,13 @@ class TestMCPServerSmoke:
         """
         import json
 
-        import nmp.core.mcp.server as mcp_server_module
-        from nmp.common.mcp import format_error_response
+        import nhx.core.mcp.server as mcp_server_module
+        from nhx.common.mcp import format_error_response
 
         def create_failing_entities_mcp(_base_url: str | None = None) -> FastMCP:
             server = FastMCP("Failing Entities Service")
 
-            @server.tool(description="List workspaces in the NeMo platform")
+            @server.tool(description="List workspaces in the NeMo Helix")
             async def list_workspaces() -> dict[str, object]:
                 try:
                     raise RuntimeError("platform unavailable")

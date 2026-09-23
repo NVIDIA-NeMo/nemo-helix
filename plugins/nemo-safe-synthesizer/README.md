@@ -7,14 +7,14 @@ Use the Safe Synthesizer plugin to create jobs through the platform Jobs service
 
 ## Prerequisites
 
-- A running NeMo Platform with Safe Synthesizer, Jobs, Files, and Secrets services available.
+- A running NeMo Helix with Safe Synthesizer, Jobs, Files, and Secrets services available.
 - A GPU-capable Jobs backend that can pull the configured Safe Synthesizer task image.
 - A Safe Synthesizer job spec, such as `nss-job.json`.
 - Platform filesets and secrets referenced by the job spec.
 
 ## Steps
 
-1. Start NeMo Platform and confirm readiness:
+1. Start NeMo Helix and confirm readiness:
 
    ```bash
    curl -s http://localhost:8080/health/ready

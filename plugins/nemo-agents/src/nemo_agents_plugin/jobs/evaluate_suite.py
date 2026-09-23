@@ -22,20 +22,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
 def _require_absolute(value: str | None, field: str) -> None:
-    """Raise PlatformJobCompilationError if *value* is set and not absolute.
+    """Raise HelixJobCompilationError if *value* is set and not absolute.
 
     The platform's host-subprocess executor runs each step in an ephemeral
-    work dir under ``/tmp/nmp-subprocess-jobs/<job>/<attempt>/<step>/task-<id>``,
+    work dir under ``/tmp/nhx-subprocess-jobs/<job>/<attempt>/<step>/task-<id>``,
     not the caller's project root.  Relative paths on the submit path resolve
     against that work dir, which is empty, and the job silently fails preflight
     (or worse, writes outputs to the work dir that get reaped after the job's
@@ -45,7 +45,7 @@ def _require_absolute(value: str | None, field: str) -> None:
     if value is None:
         return
     if not Path(value).is_absolute():
-        raise PlatformJobCompilationError(
+        raise HelixJobCompilationError(
             f"{field!r} must be an absolute path when submitting via the platform "
             f"(got {value!r}); the subprocess executor's work dir is not the caller's "
             f"cwd. Re-submit with an absolute path."
@@ -99,7 +99,7 @@ class EvaluateSuiteSubmitConfig(EvaluateSuiteConfig):
     default) so the OpenAPI contract matches the runtime behaviour: the
     subprocess executor's work dir is not the caller's cwd, so the
     canonical ``EvaluateSuiteConfig`` fallback to ``Path.cwd()`` would
-    silently land in ``/tmp/nmp-subprocess-jobs/.../task-*/``.  Making
+    silently land in ``/tmp/nhx-subprocess-jobs/.../task-*/``.  Making
     them required at the schema layer surfaces the requirement as a
     422 at submit time instead of a confusing dispatched-job failure.
     """
@@ -143,35 +143,35 @@ class EvaluateSuiteJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        """Single-step PlatformJobSpec running ``nemo_agents_plugin.tasks.evaluate_suite``.
+    ) -> HelixJobSpec:
+        """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.evaluate_suite``.
 
         Dispatched by the platform's host-subprocess executor — same machine as the
         platform (and the user's docker daemon).  No dedicated container image.
         """
-        from nemo_platform_plugin.jobs.api_factory import (
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
             EnvironmentVariableFromSecret,
-            PlatformJobStep,
+            HelixJobStep,
             SubprocessExecutionProviderSpec,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
 
-        # Subprocess work dir is /tmp/nmp-subprocess-jobs/.../task-..., not the
+        # Subprocess work dir is /tmp/nhx-subprocess-jobs/.../task-..., not the
         # caller's cwd.  Relative paths silently fail at preflight or stash
         # outputs in the ephemeral work dir; None defaults fall back to
         # ``Path.cwd()`` inside run() — same hazard.  Require both up front.
         _require_absolute(spec.evals, "evals")
         if spec.agent is None:
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 "'agent' is required when submitting (defaults to Path.cwd() in run(), "
                 "which inside the subprocess executor is the empty task scratch dir)."
             )
         if spec.output is None:
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 "'output' is required when submitting (defaults to Path.cwd()/runs/... in "
                 "run(), writing artifacts to the ephemeral subprocess scratch dir)."
             )
@@ -202,9 +202,9 @@ class EvaluateSuiteJob(NemoJob):
         if spec.anthropic_base_url:
             environment.append(EnvironmentVariable(name="ANTHROPIC_BASE_URL", value=spec.anthropic_base_url))
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="evaluate-suite",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",

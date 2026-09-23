@@ -31,14 +31,14 @@ from nemo_anonymizer_plugin.sdk.errors import (
 )
 from nemo_anonymizer_plugin.sdk.job_resources import AnonymizerJobResource, AsyncAnonymizerJobResource
 from nemo_anonymizer_plugin.sdk.logging import with_logging
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-PlatformResourceClientT = TypeVar("PlatformResourceClientT", NemoClient, AsyncNemoClient)
+HelixResourceClientT = TypeVar("HelixResourceClientT", NemoClient, AsyncNemoClient)
 
 _PREVIEW_FRAME_ADAPTER = TypeAdapter(PreviewFrame)
 _KNOWN_PREVIEW_FRAME_KINDS = {
@@ -152,8 +152,8 @@ class _PreviewFrameCollector:
             logger.error(frame.message)
 
 
-class _BaseAnonymizerResource(Generic[PlatformResourceClientT]):
-    def __init__(self, platform: PlatformResourceClientT) -> None:
+class _BaseAnonymizerResource(Generic[HelixResourceClientT]):
+    def __init__(self, platform: HelixResourceClientT) -> None:
         self._platform = platform
 
     def _headers(self) -> dict[str, str]:

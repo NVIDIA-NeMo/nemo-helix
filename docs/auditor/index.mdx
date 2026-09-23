@@ -14,7 +14,7 @@ NVIDIA NeMo Auditor is released with _early access_ availability and is subject 
 </Warning>
 
 NVIDIA NeMo Auditor audits LLMs by probing them with adversarial prompts and detecting failures such as jailbreaks, prompt injection, encoding bypasses, and unsafe output generation.
-It is powered by [garak](https://github.com/NVIDIA/garak), NVIDIA's open-source LLM vulnerability scanner, and integrates with NeMo Platform so audits can target any model reachable through the Inference Gateway.
+It is powered by [garak](https://github.com/NVIDIA/garak), NVIDIA's open-source LLM vulnerability scanner, and integrates with NeMo Helix so audits can target any model reachable through the Inference Gateway.
 
 <Button href="/documentation/vulnerability-scanning/tutorials" variant="secondary">**Tutorials**</Button>
 <Button href="/documentation/vulnerability-scanning/sdk-resources" variant="secondary">**SDK Resources**</Button>
@@ -35,7 +35,7 @@ The plugin exposes both [synchronous and asynchronous](/documentation/vulnerabil
 
 ## Setup
 
-Before you can run audits, you need a working NeMo Platform install with the auditor plugin enabled and a garak interpreter on disk.
+Before you can run audits, you need a working NeMo Helix install with the auditor plugin enabled and a garak interpreter on disk.
 
 - Follow [Setup](/documentation/get-started) to install the platform and start local services.
 - Install garak in a Python virtual environment. By default the plugin invokes `~/.auditor/.venv/bin/python -m garak`; override the interpreter path with `NEMO_AUDITOR_GARAK_PYTHON` if you installed it elsewhere.
@@ -91,7 +91,7 @@ Field reference for `AuditTarget` (`type`, `model`, `options`).
 </Card>
 <Card title="Inference Gateway" href="/documentation/vulnerability-scanning/targets/inference-gateway">
 
-How `nmp_uri_spec` resolves a target's URI through a NeMo Platform provider.
+How `nhx_uri_spec` resolves a target's URI through a NeMo Helix provider.
 
 </Card>
 

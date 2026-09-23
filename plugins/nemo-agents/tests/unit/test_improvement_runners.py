@@ -177,7 +177,7 @@ async def test_nat_runner_non_zero_exit_is_error_even_with_valid_result_json(tmp
         "import json, sys, argparse, pathlib\n"
         "p = argparse.ArgumentParser()\n"
         "p.add_argument('--jobs-dir', required=True)\n"
-        "p.add_argument('--nmp-base-url')\n"
+        "p.add_argument('--nhx-base-url')\n"
         "p.add_argument('eval_name')\n"
         "args = p.parse_args()\n"
         "out = pathlib.Path(args.jobs_dir)\n"

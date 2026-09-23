@@ -31,6 +31,11 @@ def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
         return False
     found = False
     for line_number, line in enumerate(text.splitlines(), start=1):
+        if path.suffix == ".patch" and line.startswith("-") and not line.startswith("---"):
+            # Patch files may legitimately mention legacy identifiers on removed
+            # lines to update external source trees during the rename. Added and
+            # context lines are still checked.
+            continue
         if predicate(line):
             print(f"{path}:{line_number}:{line}")
             found = True
@@ -59,17 +64,39 @@ def parse_args() -> argparse.Namespace:
         metavar="PATTERN",
         help="skip repo-relative paths matching this glob; may be repeated",
     )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        metavar="PATH",
+        help="specific file paths to verify (e.g. as passed by pre-commit); defaults to all tracked files",
+    )
     return parser.parse_args()
+
+
+def resolve_selected_paths(raw_paths: list[Path], base_dir: Path, root: Path) -> list[Path] | None:
+    if not raw_paths:
+        return None
+    resolved = []
+    for raw_path in raw_paths:
+        absolute = raw_path if raw_path.is_absolute() else base_dir / raw_path
+        try:
+            resolved.append(absolute.resolve().relative_to(root))
+        except ValueError:
+            continue
+    return resolved
 
 
 def main() -> int:
     args = parse_args()
-    os.chdir(repo_root(args.repo_dir))
+    root = repo_root(args.repo_dir)
+    selected_paths = resolve_selected_paths(args.paths, Path.cwd(), root)
+    os.chdir(root)
     include_globs = tuple(args.include_glob)
     exclude_globs = tuple(args.exclude_glob)
     failed = False
 
-    paths = content_paths(include_globs, exclude_globs)
+    paths = content_paths(include_globs, exclude_globs, paths=selected_paths)
     product_matches = [print_matches(path, LEGACY_PRODUCT_PATTERN.search) for path in paths]
     if any(product_matches):
         print("Legacy product names remain in tracked file contents.", file=sys.stderr)
@@ -85,7 +112,7 @@ def main() -> int:
         print("Legacy acronym references remain in tracked file contents.", file=sys.stderr)
         failed = True
 
-    for path in git_file_set(include_globs, exclude_globs):
+    for path in git_file_set(include_globs, exclude_globs, paths=selected_paths):
         if not path.exists() and not path.is_symlink():
             continue
         path_string = path.as_posix()

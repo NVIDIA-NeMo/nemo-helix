@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Smoke-test the built `nmp-cpu-tasks` image.
+"""Smoke-test the built `nhx-cpu-tasks` image.
 
 Every job that declares `container = "cpu-tasks"` launches its task module in
 this image, and the failure mode when a plugin is missing from the `cpu-tasks`
@@ -133,12 +133,12 @@ def check_bundled_harness_clis() -> list[str]:
     """
     failures: list[str] = []
 
-    # Imported here, not at module scope: these packages arrive with
+    # Loaded here, not at module scope: these packages arrive with
     # nemo-agents-plugin, so their absence is a result to report rather than a
     # reason to abort before the other checks have run.
     try:
-        import claude_agent_sdk  # noqa: PLC0415
-        from codex_cli_bin import bundled_codex_path  # noqa: PLC0415
+        claude_agent_sdk = importlib.import_module("claude_agent_sdk")
+        codex_cli_bin = importlib.import_module("codex_cli_bin")
     except ImportError as exc:
         return [f"bundled harness CLI packages not importable: {exc!r}"]
 
@@ -146,8 +146,13 @@ def check_bundled_harness_clis() -> list[str]:
     # method that ignores `self`. Recomputing the path keeps this off a private
     # API; if the SDK relocates the binary, this check fails loudly, which is
     # what it is for.
-    claude_path = pathlib.Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    if not claude_agent_sdk.__file__:
+        return ["claude: package has no filesystem location"]
+    bundled_codex_path = getattr(codex_cli_bin, "bundled_codex_path", None)
+    if not callable(bundled_codex_path):
+        return ["codex: package does not expose bundled_codex_path"]
 
+    claude_path = pathlib.Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
     for name, path in {"claude": claude_path, "codex": bundled_codex_path()}.items():
         if not path:
             failures.append(f"{name}: no bundled binary resolved")

@@ -4,7 +4,7 @@
 [project]
 name = "nemo-insights-plugin"
 version = "0.1.0"
-description = "Agent telemetry analysis and persistent insights for NeMo Platform."
+description = "Agent telemetry analysis and persistent insights for NeMo Helix."
 requires-python = ">=3.12,<3.15"
 dependencies = [
   "fastapi>=0.115",
@@ -12,8 +12,8 @@ dependencies = [
   "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137",
   "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
   "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
-  "nemo-platform",
-  "nemo-platform-plugin",
+  "nemo-helix",
+  "nemo-helix-plugin",
   "nemo-relay>=0.7,<0.8",
   "nooa>=0.0.9",
   "opentelemetry-exporter-otlp>=1.42.1",

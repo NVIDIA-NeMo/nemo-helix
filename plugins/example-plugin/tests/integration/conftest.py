@@ -9,7 +9,7 @@ dependency chain. The default empty ``_igw_extra_services`` tuple
 applies — no services beyond IGW + Models are mounted.
 """
 
-from nmp.core.inference_gateway.testing.fixtures import (
+from nhx.core.inference_gateway.testing.fixtures import (
     _igw_app_context,
     _igw_extra_services,
     igw_plugin_harness,

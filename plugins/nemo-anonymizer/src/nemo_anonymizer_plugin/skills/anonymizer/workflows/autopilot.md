@@ -23,7 +23,7 @@ Source of truth for defaults: `docs/anonymizer/tutorials/index.mdx` and `docs/an
      - `gliner-pii-detector` → `nvidia/gliner-pii`
      - `gpt-oss-120b` → `openai/gpt-oss-120b`
      - `nemotron-30b-thinking` → `nvidia/nemotron-3-nano-30b-a3b`
-3. **Confirm the plugin service is mounted.** Run `nmp_base_url="${NMP_BASE_URL:-http://localhost:8080}"; curl -sf "${nmp_base_url%/}/apis/anonymizer/v2/workspaces/${NMP_WORKSPACE:-default}/entity-labels" | jq -r '.data[0] // empty'`. If nothing prints, tell the user to run `nemo services run` (no `--services` flag) — `nemo setup` does not mount this plugin — then continue.
+3. **Confirm the plugin service is mounted.** Run `nhx_base_url="${NHX_BASE_URL:-http://localhost:8080}"; curl -sf "${nhx_base_url%/}/apis/anonymizer/v2/workspaces/${NHX_WORKSPACE:-default}/entity-labels" | jq -r '.data[0] // empty'`. If nothing prints, tell the user to run `nemo services run` (no `--services` flag) — `nemo setup` does not mount this plugin — then continue.
 4. **Build** — Write a YAML preview spec following the Output Template in SKILL.md. Default filename: `<text_column>_preview_spec.yaml` (e.g. `biography_preview_spec.yaml`).
 5. **Preview** — Run `nemo anonymizer preview --spec-file <path> --workspace <ws>` with the preview spec.
 

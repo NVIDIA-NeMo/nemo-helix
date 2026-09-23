@@ -32,7 +32,7 @@ When `auth.enabled` is `false` (the default), all API requests are allowed witho
 
 ### Bootstrap Admin
 
-When authorization is enabled, a platform administrator can be configured. Setting **`admin_email`** tells platform seed which identity should receive the **PlatformAdmin** role. Use it to create the first workspaces and grant roles to other users. After bootstrap, manage access via workspaces and members as described in [Managing Access](/documentation/access-control/authorization/managing-access).
+When authorization is enabled, a platform administrator can be configured. Setting **`admin_email`** tells platform seed which identity should receive the **HelixAdmin** role. Use it to create the first workspaces and grant roles to other users. After bootstrap, manage access via workspaces and members as described in [Managing Access](/documentation/access-control/authorization/managing-access).
 
 ```yaml
 auth:
@@ -40,7 +40,7 @@ auth:
  admin_email: "your-admin@company.com"
 ```
 
-The binding is created by `platform-seed`, not by auth service startup alone. Helm deployments run the platform-seed Job by default. For source installs, set `platform.seed_on_startup: true`, export `NMP_SEED_ON_STARTUP=true` before `nemo services run`, or run `uv run python -m nmp.platform_seed` after services are healthy. If platform seed has not run, `admin_email` users can authenticate but still receive `403 Forbidden` because their PlatformAdmin binding does not exist.
+The binding is created by `platform-seed`, not by auth service startup alone. Helm deployments run the platform-seed Job by default. For source installs, set `platform.seed_on_startup: true`, export `NHX_SEED_ON_STARTUP=true` before `nemo services run`, or run `uv run python -m nhx.platform_seed` after services are healthy. If platform seed has not run, `admin_email` users can authenticate but still receive `403 Forbidden` because their HelixAdmin binding does not exist.
 
 Platform seed also creates the default wildcard workspace bindings: `Editor` on the default workspace, `Viewer` on `system`, and `WorkspaceCreator` on `system`. That last binding is what preserves open workspace creation by default. Remove or replace it if you want workspace creation restricted to designated users or groups.
 
@@ -71,22 +71,22 @@ Use external OPA when you already use OPA for other services or need a single po
 
 ## Environment Variables
 
-Configuration can be overridden with environment variables using the **`NMP_AUTH_`** prefix. Names are derived from the config keys in UPPER_SNAKE_CASE.
+Configuration can be overridden with environment variables using the **`NHX_AUTH_`** prefix. Names are derived from the config keys in UPPER_SNAKE_CASE.
 
 Examples:
 
 ```bash
-NMP_AUTH_ENABLED=true
-NMP_AUTH_POLICY_DECISION_POINT_BASE_URL=http://auth:8000
-NMP_AUTH_POLICY_DECISION_POINT_PROVIDER=embedded
-NMP_AUTH_ADMIN_EMAIL=admin@example.com
-NMP_AUTH_EMBEDDED_PDP_AUTO_BUILD_WASM=true
-NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE=/etc/nmp/workload-token/private-key.pem
+NHX_AUTH_ENABLED=true
+NHX_AUTH_POLICY_DECISION_POINT_BASE_URL=http://auth:8000
+NHX_AUTH_POLICY_DECISION_POINT_PROVIDER=embedded
+NHX_AUTH_ADMIN_EMAIL=admin@example.com
+NHX_AUTH_EMBEDDED_PDP_AUTO_BUILD_WASM=true
+NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE=/etc/nhx/workload-token/private-key.pem
 ```
 
-Nested auth keys use a double underscore after `NMP_AUTH_`: for example,
-`NMP_AUTH_OIDC__ISSUER`, `NMP_AUTH_OIDC__CLIENT_ID`, and
-`NMP_AUTH_ACCESS_KEYS__ENABLED`.
+Nested auth keys use a double underscore after `NHX_AUTH_`: for example,
+`NHX_AUTH_OIDC__ISSUER`, `NHX_AUTH_OIDC__CLIENT_ID`, and
+`NHX_AUTH_ACCESS_KEYS__ENABLED`.
 
 ## Scoped Access Keys
 
@@ -97,7 +97,7 @@ Users can list and revoke their own keys. Rotation is not implemented.
 
 Scoped Access Keys are an auth-service feature exposed under the auth CLI
 namespace (`nemo auth access-keys ...`) and the `/apis/auth/v2/access-keys` API routes.
-They are not a standalone NeMo Platform plugin.
+They are not a standalone NeMo Helix plugin.
 
 Scoped Access Keys are disabled by default. Enable them only when the auth
 service has a shared RSA signing key:
@@ -106,14 +106,14 @@ service has a shared RSA signing key:
 auth:
  enabled: true
  token_signing:
-   issuer: "https://nmp.company.com/apis/auth"
-   key_id: "nemo-platform-signing"
-   private_key_file: "/etc/nmp/workload-token/private-key.pem"
+   issuer: "https://nhx.company.com/apis/auth"
+   key_id: "nemo-helix-signing"
+   private_key_file: "/etc/nhx/workload-token/private-key.pem"
  access_keys:
    enabled: true
    issue_format: "jwt"
    accepted_formats: ["jwt"]
-   audience: "nemo-platform-access-key"
+   audience: "nemo-helix-access-key"
    default_expires_in_seconds: 2592000
    max_expires_in_seconds: 2592000
    rotation_grace_period_seconds: 172800
@@ -122,20 +122,20 @@ auth:
 Equivalent environment overrides:
 
 ```bash
-NMP_AUTH_TOKEN_SIGNING__ISSUER=https://nmp.company.com/apis/auth
-NMP_AUTH_TOKEN_SIGNING__KEY_ID=nemo-platform-signing
-NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE=/etc/nmp/workload-token/private-key.pem
-NMP_AUTH_ACCESS_KEYS__ENABLED=true
-NMP_AUTH_ACCESS_KEYS__ISSUE_FORMAT=jwt
-NMP_AUTH_ACCESS_KEYS__ACCEPTED_FORMATS=jwt
-NMP_AUTH_ACCESS_KEYS__AUDIENCE=nemo-platform-access-key
-NMP_AUTH_ACCESS_KEYS__DEFAULT_EXPIRES_IN_SECONDS=2592000
-NMP_AUTH_ACCESS_KEYS__MAX_EXPIRES_IN_SECONDS=2592000
-NMP_AUTH_ACCESS_KEYS__ROTATION_GRACE_PERIOD_SECONDS=172800
+NHX_AUTH_TOKEN_SIGNING__ISSUER=https://nhx.company.com/apis/auth
+NHX_AUTH_TOKEN_SIGNING__KEY_ID=nemo-helix-signing
+NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE=/etc/nhx/workload-token/private-key.pem
+NHX_AUTH_ACCESS_KEYS__ENABLED=true
+NHX_AUTH_ACCESS_KEYS__ISSUE_FORMAT=jwt
+NHX_AUTH_ACCESS_KEYS__ACCEPTED_FORMATS=jwt
+NHX_AUTH_ACCESS_KEYS__AUDIENCE=nemo-helix-access-key
+NHX_AUTH_ACCESS_KEYS__DEFAULT_EXPIRES_IN_SECONDS=2592000
+NHX_AUTH_ACCESS_KEYS__MAX_EXPIRES_IN_SECONDS=2592000
+NHX_AUTH_ACCESS_KEYS__ROTATION_GRACE_PERIOD_SECONDS=172800
 ```
 
 List-valued env vars for accepted Scoped Access Key formats are written as
-comma-separated values, for example `NMP_AUTH_ACCESS_KEYS__ACCEPTED_FORMATS=jwt`.
+comma-separated values, for example `NHX_AUTH_ACCESS_KEYS__ACCEPTED_FORMATS=jwt`.
 
 Service-level `AuthorizationMiddleware` accepts Scoped Access Key bearer tokens
 directly when `auth.access_keys.enabled=true`. When
@@ -184,16 +184,16 @@ overrides:
 ```yaml
 auth:
  token_signing:
-   issuer: "https://nmp.company.com/apis/auth"
-   key_id: "nemo-platform-signing"
-   private_key_file: "/etc/nmp/workload-token/private-key.pem"
+   issuer: "https://nhx.company.com/apis/auth"
+   key_id: "nemo-helix-signing"
+   private_key_file: "/etc/nhx/workload-token/private-key.pem"
  oidc:
    enabled: true
    token_endpoint: "https://idp.example.com/oauth/token"
    workload_token_exchange_enabled: true
-   workload_client_id: "nemo-platform-workload"
+   workload_client_id: "nemo-helix-workload"
    workload_token_endpoint: "https://idp.example.com/oauth/token"
-   workload_audience: "nemo-platform"
+   workload_audience: "nemo-helix"
    workload_scope: "openid email groups"
 ```
 
@@ -203,7 +203,7 @@ their JWT `kid`. To give workload tokens a distinct key identifier, set
 `auth.oidc.workload_token_private_key_file`; changing only the key ID is useful
 for debugging and rotation labeling, but still reuses the same RSA private key.
 
-When `NMP_WORKLOAD_IDENTITY_TOKEN_FILE` is present, the SDK reads the subject
+When `NHX_WORKLOAD_IDENTITY_TOKEN_FILE` is present, the SDK reads the subject
 token from that file and sends an RFC 8693 exchange request using
 `subject_token`, fixed JWT subject/access-token token types, optional `audience`,
 and optional `scope`. `workload_token_endpoint` is optional; when it is unset,
@@ -212,8 +212,8 @@ containers need different network-reachable IdP URLs.
 
 For Docker-backed job runtimes, `auth.oidc.workload_token_exchange_enabled`
 controls workload identity. When enabled, job steps with a delegation auth
-context receive a NeMo Platform opaque workload proof token at
-`NMP_WORKLOAD_IDENTITY_TOKEN_FILE`.
+context receive a NeMo Helix opaque workload proof token at
+`NHX_WORKLOAD_IDENTITY_TOKEN_FILE`.
 
 For Kubernetes-backed job runtimes, the jobs backend can project a Kubernetes
 service account token into each workload pod for token exchange. The projected

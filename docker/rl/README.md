@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo-RL training images (`nmp-rl-base`, `nmp-rl-training`)
+# NeMo-RL training images (`nhx-rl-base`, `nhx-rl-training`)
 
-GPU images for NeMo Platform's RL customization — **DPO** and **GRPO** — plus the
+GPU images for NeMo Helix's RL customization — **DPO** and **GRPO** — plus the
 **NeMo-Gym** environment runtime. A single training image serves both algorithms.
 
 The images are built **from source** on NVIDIA's `cuda-dl-base` (CUDA 13, Python
@@ -15,11 +15,11 @@ rediscovered.
 
 | Dockerfile | Image | Role |
 |---|---|---|
-| `Dockerfile.nmp-rl-base` | `nmp-rl-base` | Heavy base. Clones NeMo-RL (with submodules), warms the uv cache for the extras we need (`vllm`, `fsdp`, `modelopt`, `nemo_gym`), then **prefetches the per-worker Ray venvs**. All one-time CUDA compiles (mamba-ssm, causal-conv1d, deep_ep, deep_gemm) happen here. |
-| `Dockerfile.nmp-rl-training` | `nmp-rl-training` | Thin layer on the base. Adds the pure-Python platform glue editably; entrypoint runs `python -m nmp.rl.tasks.training` (Ray bootstrap → DPO). Also the Gym environment runtime. A `smoke-test` stage runs CPU-only import checks during the build. |
+| `Dockerfile.nhx-rl-base` | `nhx-rl-base` | Heavy base. Clones NeMo-RL (with submodules), warms the uv cache for the extras we need (`vllm`, `fsdp`, `modelopt`, `nemo_gym`), then **prefetches the per-worker Ray venvs**. All one-time CUDA compiles (mamba-ssm, causal-conv1d, deep_ep, deep_gemm) happen here. |
+| `Dockerfile.nhx-rl-training` | `nhx-rl-training` | Thin layer on the base. Adds the pure-Python platform glue editably; entrypoint runs `python -m nhx.rl.tasks.training` (Ray bootstrap → DPO). Also the Gym environment runtime. A `smoke-test` stage runs CPU-only import checks during the build. |
 
-`docker-bake.hcl` wires them: `nmp-rl-training`'s base context defaults to building
-`nmp-rl-base` as a dependency, unless `USE_PREBUILT_BASES` / `RL_BASE_CONTEXT` point
+`docker-bake.hcl` wires them: `nhx-rl-training`'s base context defaults to building
+`nhx-rl-base` as a dependency, unless `USE_PREBUILT_BASES` / `RL_BASE_CONTEXT` point
 at an already-built base image.
 
 ## How NeMo-RL runs: the base venv is not where training happens
@@ -31,7 +31,7 @@ surprising thing about the build follows from it.
 
 A NeMo-RL job is not one program. Ray splits it into:
 
-- **one driver** — the process started by the entrypoint (`python -m nmp.rl.tasks.training`).
+- **one driver** — the process started by the entrypoint (`python -m nhx.rl.tasks.training`).
   It reads config and orchestrates.
 - **many workers** — *separate operating-system processes*, usually on other nodes, each
   typically owning one GPU. Ray launches each one by literally running a `python` command
@@ -248,7 +248,7 @@ User environments therefore *do* add startup time, and cannot be prebaked. Two t
   pins `verifiers` by version so uv can select that vendored wheel instead of following
   a Git URL. `native-v1` vendors nothing and always needs egress.
 - Platform bootstrap for all three formats lives in
-  `nmp.rl.tasks.environment.bootstrap.bootstrap_environment_package` (validators +
+  `nhx.rl.tasks.environment.bootstrap.bootstrap_environment_package` (validators +
   offline wheel install). The Gym host / RL image entrypoint should call that —
   not upstream NeMo-RL format APIs.
 - Gym reuses a shared **uv cache** (`uv_cache_dir`) and skips venv creation when one
@@ -524,7 +524,7 @@ readable by the non-root user. Hence `UV_CACHE_DIR=/opt/uv_cache`:
 - **`/opt/uv_cache` must never be deleted** — pruning it breaks every venv that points into
   it. The prune step in the publish stage deliberately leaves it alone.
 
-**It does not warm runtime installs in the training image.** `Dockerfile.nmp-rl-training`
+**It does not warm runtime installs in the training image.** `Dockerfile.nhx-rl-training`
 repoints `UV_CACHE_DIR` at a writable per-user path, because `/opt/uv_cache` holds the code
 the trainer executes and must stay read-only (user-authored Gym environment code runs in
 this container). uv reads only `UV_CACHE_DIR` — there is no read-through to a second cache —
@@ -624,4 +624,4 @@ every import.
 | `UV_SYNC_MODE` | `--frozen` | Reproducible sync. Set to empty to relock if a bumped RL commit's lock has drifted. |
 | `NEMO_GYM_PREFETCH_CONFIGS` | *(empty — prefetch off)* | Space-separated Gym config paths whose environment venvs are baked into `/opt/gym_venvs`. Empty means every environment installs at runtime on first use. Set to `examples/nemo_gym/prefetch_super_all_envs.yaml` to bake NeMo-RL's curated set back in. |
 | `BUILD_UID` / `BUILD_GID` | `2000` / `2000` | Non-runtime owner for `/opt/uv_cache`, `/opt/nemo_rl_venv`, `/opt/nemo-rl`, and prefetched venvs. Build steps use `umask 022` so the configured runtime UID can read/traverse these trees without a late recursive chmod layer. |
-| `RUNTIME_UID` / `RUNTIME_GID` | `1000` / `1000` | Non-root identity for published `nmp-rl-base`. `RUNTIME_UID` owns the private vLLM copies; `/opt/ray_venvs` and `/opt/gym_venvs` are owned by root with `RUNTIME_GID` as the writable group. Keep `nmp-rl-training`'s `USER_UID` / `USER_GID` aligned if overriding the defaults. |
+| `RUNTIME_UID` / `RUNTIME_GID` | `1000` / `1000` | Non-root identity for published `nhx-rl-base`. `RUNTIME_UID` owns the private vLLM copies; `/opt/ray_venvs` and `/opt/gym_venvs` are owned by root with `RUNTIME_GID` as the writable group. Keep `nhx-rl-training`'s `USER_UID` / `USER_GID` aligned if overriding the defaults. |
