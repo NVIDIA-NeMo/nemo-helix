@@ -9,7 +9,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.files.metadata import FilesetMetadata
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, LocalStorageConfig, NGCStorageConfig
 from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput, ListFilesetFilesResponse
@@ -183,8 +182,8 @@ def mock_entity_client() -> AsyncMock:
 
 
 @pytest.fixture
-def _mock_files_client():
-    """Mock the FilesClient returned by client_from_platform in the permissions module."""
+def mock_files_client():
+    """Mock the Files client the service uses for fileset checks."""
     fileset_output = FilesetOutput(
         id="fileset-id-123",
         name="test-fileset",
@@ -198,39 +197,37 @@ def _mock_files_client():
         custom_fields={"key": "value"},
         metadata=FilesetMetadata(),
     )
-    mock_fc = AsyncMock()
-    mock_response = MagicMock()
-    mock_response.data.return_value = fileset_output
-    mock_fc.get_fileset.return_value = mock_response
-    with patch("nhx.core.models.api.permissions.client_from_platform", return_value=mock_fc):
-        yield mock_fc
+    files = AsyncMock()
+    fileset_response = MagicMock()
+    fileset_response.data.return_value = fileset_output
+    files.get_fileset.return_value = fileset_response
+    list_response = MagicMock()
+    list_response.data.return_value = ListFilesetFilesResponse(
+        data=[
+            FilesetFileOutput(
+                file_ref="file-ref-123",
+                file_url="file-url-123",
+                path="path-123",
+                size=123,
+                cache_status="cached",
+            )
+        ]
+    )
+    files.list_files.return_value = list_response
+    return files
 
 
 @pytest.fixture
-def model_entity_service(mock_entity_client, _mock_files_client):
-    """Create a ModelEntityService with mocked EntityClient."""
-    async_sdk = AsyncMock(spec=AsyncNeMoHelix)
-    async_sdk.files.list = AsyncMock(
-        return_value=ListFilesetFilesResponse(
-            data=[
-                FilesetFileOutput(
-                    file_ref="file-ref-123",
-                    file_url="file-url-123",
-                    path="path-123",
-                    size=123,
-                    cache_status="cached",
-                )
-            ]
-        )
-    )
-    return ModelEntityService(mock_entity_client, sdk=async_sdk)
+def model_entity_service(mock_entity_client, mock_files_client):
+    """Create a ModelEntityService with mocked EntityClient and Files client."""
+    return ModelEntityService(mock_entity_client, files=mock_files_client)
 
 
 @pytest.fixture
 def adapter_entity_service(model_entity_service):
     from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 
-    return AdapterEntityService(model_entity_service.entity_client, sdk=model_entity_service.sdk)
+    return AdapterEntityService(model_entity_service.entity_client, files=model_entity_service.files)
 
 
 @pytest.fixture
@@ -1251,7 +1248,7 @@ async def test_is_trusted_repo_id_direct_match(model_entity_service):
     # Act
     with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", ["nvidia/trusted-model"]):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is True
 
@@ -1265,7 +1262,7 @@ async def test_is_trusted_repo_id_regex_match(model_entity_service):
     # Act
     with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", [r"nvidia/.*"]):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is True
 
@@ -1279,7 +1276,7 @@ async def test_is_trusted_repo_id_no_match(model_entity_service):
     # Act
     with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", ["nvidia/only-this", r"meta-llama/.*"]):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is False
 
@@ -1305,7 +1302,7 @@ async def test_is_trusted_repo_id_non_huggingface_storage(model_entity_service):
     # Act
     with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "hf_allow_list", [r"nvidia/.*"]):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is False
 
@@ -1319,7 +1316,7 @@ async def test_is_trusted_repo_id_ngc_direct_match(model_entity_service):
     # Act
     with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "ngc_allow_list", ["nvidia/nemotron/nemotron-4-340b"]):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is True
 
@@ -1333,7 +1330,7 @@ async def test_is_trusted_repo_id_ngc_regex_match(model_entity_service):
     # Act
     with patch("nhx.core.models.api.service.model_entity_service.get_fileset_and_files_list", mock_get):
         with patch.object(config.trust_remote_code, "ngc_allow_list", [r"nvidia/.*/some-model"]):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is True
 
@@ -1349,7 +1346,7 @@ async def test_is_trusted_repo_id_ngc_no_match(model_entity_service):
         with patch.object(
             config.trust_remote_code, "ngc_allow_list", ["nvidia/only-this/only", r"nvidia/.*/ngc-model"]
         ):
-            result = await is_trusted_repo_id(model_entity_service.sdk, "default", "default/fileset")
+            result = await is_trusted_repo_id(model_entity_service.files, "default", "default/fileset")
     # Assert
     assert result is False
 

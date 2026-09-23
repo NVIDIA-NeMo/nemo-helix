@@ -3,17 +3,15 @@
 
 """Permission checks for dependent resources in Models API endpoints.
 
-Cross-service checks (secrets, filesets) use the per-request SDK to retrieve
-the resource. The SDK call goes through the HTTP stack and AuthZ middleware,
-so a 403 is raised automatically if the user lacks access.
+Cross-service checks (secrets, filesets) use the request-scoped typed clients
+to retrieve the resource. The call goes through the HTTP stack and AuthZ
+middleware, so a 403 is raised automatically if the user lacks access.
 
 Same-service checks (deployments, deployment configs, model entities) use
 AuthClient.has_permissions to check access without a round-trip HTTP call
 to our own API.
 """
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -23,14 +21,13 @@ from nhx.common.auth import AuthClient
 from nhx.common.entities.utils import parse_entity_ref
 
 
-async def check_secret_access(nhx_sdk: AsyncNeMoHelix, secret_name: str, workspace: str) -> None:
+async def check_secret_access(secrets: AsyncSecretsClient, secret_name: str, workspace: str) -> None:
     """Check that the current user can access the referenced secret.
 
     Raises:
         PermissionError: If the user cannot access the secret.
         ValueError: If the secret doesn't exist.
     """
-    secrets = client_from_platform(nhx_sdk, AsyncSecretsClient)
     try:
         await secrets.get_secret(name=secret_name, workspace=workspace)
     except ClientPermissionDeniedError:
@@ -39,7 +36,7 @@ async def check_secret_access(nhx_sdk: AsyncNeMoHelix, secret_name: str, workspa
         raise ValueError(f"Secret '{secret_name}' not found in workspace '{workspace}'") from None
 
 
-async def check_fileset_access(nhx_sdk: AsyncNeMoHelix, fileset: str, workspace: str) -> FilesetOutput:
+async def check_fileset_access(files: AsyncFilesClient, fileset: str, workspace: str) -> FilesetOutput:
     """Check that the current user can access the referenced fileset.
 
     Retrieves fileset metadata via the Files API; AuthZ middleware enforces
@@ -51,7 +48,6 @@ async def check_fileset_access(nhx_sdk: AsyncNeMoHelix, fileset: str, workspace:
     """
     _fs_ref = parse_entity_ref(fileset, default_workspace=workspace)
     fs_workspace, fs_name = _fs_ref.workspace, _fs_ref.name
-    files = client_from_platform(nhx_sdk, AsyncFilesClient)
     try:
         fs = (await files.get_fileset(workspace=fs_workspace, name=fs_name)).data()
         return fs
