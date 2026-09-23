@@ -93,7 +93,7 @@ async def enforce_delegated_workspace_access(workspace: str, permission: str) ->
         return
 
     if not await _caller_has_permission(auth_client, workspace, permission):
-        logger.info(
+        logger.warning(
             "Denying delegated inference request: on-behalf-of=%s lacks %s in workspace=%s (service=%s)",
             principal.on_behalf_of,
             permission,
@@ -131,7 +131,7 @@ async def enforce_model_ref_access(request_workspace: str, model_ref: ParsedEnti
     for workspace in model_ref_workspaces(model_ref):
         if await can_run_inference_in(request_workspace, workspace):
             continue
-        logger.info(
+        logger.warning(
             "Denying cross-workspace model access: request_workspace=%s model=%s/%s workspace=%s",
             request_workspace,
             model_ref.workspace,
