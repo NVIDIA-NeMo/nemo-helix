@@ -11,7 +11,7 @@ Only `switchyard.lib` and `switchyard.telemetry` are vendored. The CLI, server,
 and experimental subpackages from upstream are intentionally omitted — Platform
 only depends on `switchyard.lib.*` and `switchyard.telemetry`.
 
-This vendor directory is installed in editable mode by the `nemo-switchyard`
+This vendor directory is installed in editable mode by the `nemo-switchyard-plugin`
 plugin via a local-path `tool.uv.sources` entry. The plan is to replace this
 snapshot with a git submodule pinned to the same commit once the upstream repo
 is reachable from CI without per-developer SSH credentials.

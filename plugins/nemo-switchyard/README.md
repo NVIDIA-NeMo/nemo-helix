@@ -14,6 +14,10 @@ a protocol-agnostic request/response router for LLM backends.
 
 ## Installation
 
+The plugin distribution is named **`nemo-switchyard-plugin`** to avoid
+colliding with upstream PyPI `nemo-switchyard`. VirtualModels continue to use
+the **`nemo-switchyard`** middleware entry-point name.
+
 A snapshot of the Switchyard library is vendored at `plugins/nemo-switchyard/vendor/switchyard/`, so no separate Switchyard checkout, `PYTHONPATH` override, or `SWITCHYARD_PATH` env var is required. The plugin is installed by default through the root workspace's `enabled-plugins` group.
 
 ```bash
