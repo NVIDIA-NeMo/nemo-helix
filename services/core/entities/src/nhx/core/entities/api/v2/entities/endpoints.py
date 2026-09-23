@@ -35,12 +35,17 @@ from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
     bindings_cache_delete,
+    describe_workspaces,
     get_accessible_workspaces,
     raise_if_workspace_inaccessible,
     require_workspace_access,
 )
 from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
-from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.exceptions import (
+    EntityNotFoundError,
+    EntityVersionConflictError,
+    ForeignChildEntitiesError,
+)
 from nhx.core.entities.entities import Entity
 from nhx.core.entities.utils.filter import FilterDep
 from nhx.core.entities.utils.identifiers import generate_entity_name
@@ -577,6 +582,10 @@ async def update_entity_by_name(
     description=textwrap.dedent("""
         Delete an entity by its name.
 
+        Refused with 409 when the entity has child entities in other workspaces, naming
+        them: ``entities.parent`` cascades, so deleting would remove another workspace's
+        work. Remove those entities first.
+
         Example:
         ```
         DELETE /apis/entities/v2/workspaces/default/entities/customization_config/my-config
@@ -614,7 +623,18 @@ async def delete_entity_by_name(
             name=name,
             parent=parent,
             expected_db_version=expected_db_version,
+            refuse_children_outside=workspace,
         )
+    except ForeignChildEntitiesError as e:
+        foreign = describe_workspaces(e.workspaces, await get_accessible_workspaces(repository))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Entity '{name}' has child entities in other workspaces "
+                f"({foreign}). Deleting it would also delete them. "
+                f"Remove those entities first."
+            ),
+        ) from e
     except EntityVersionConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

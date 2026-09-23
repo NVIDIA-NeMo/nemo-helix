@@ -7,7 +7,7 @@ import threading
 
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -33,6 +33,10 @@ _JOB_TERMINAL_WAIT_POLL_SECONDS = 2.0
 
 class WorkspaceJobCleanupError(RuntimeError):
     """Raised when workspace cleanup cannot delete every job."""
+
+
+class WorkspaceModelCleanupError(RuntimeError):
+    """Raised when a model refuses deletion, so the workspace delete must not cascade over it."""
 
 
 def _job_status_value(status: object) -> HelixJobStatus | str:
@@ -262,6 +266,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                 finally:
                     self.emit_heartbeat()
 
+            refused: list[str] = []
             for model in models:
                 try:
                     logger.info(f"Deleting model: {model.name}")
@@ -269,13 +274,21 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                         name=model.name,
                         workspace=workspace.name,
                     )
+                except ConflictError as e:
+                    logger.warning(f"Model {model.name} refused deletion: {e.detail}")
+                    refused.append(model.name)
                 except Exception as e:
                     logger.warning(f"Failed to delete model {model.name}: {e}")
                 finally:
                     self.emit_heartbeat()
 
+            if refused:
+                raise WorkspaceModelCleanupError(
+                    f"Model(s) {', '.join(refused)} in workspace {workspace.name} refused deletion"
+                )
+
         except Exception as e:
-            logger.error(f"Failed to list models or adapters for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to clean up models or adapters for workspace {workspace.name}: {e}")
             raise
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_filesets")

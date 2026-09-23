@@ -195,6 +195,7 @@ class EntityRepositoryInterface(ABC):
         name: str,
         parent: Optional[str] = None,
         expected_db_version: Optional[int] = None,
+        refuse_children_outside: str | None = None,
         session: AsyncSession | None = None,
     ) -> int:
         """Delete an entity by name.
@@ -206,6 +207,7 @@ class EntityRepositoryInterface(ABC):
             parent: Optional parent entity ID (None for root entities)
             expected_db_version: Optional expected database version for optimistic locking. If provided,
                 delete only succeeds when the stored entity still has this version.
+            refuse_children_outside: Raise ForeignChildEntitiesError if a child lives outside this workspace.
 
         Returns:
             Number of deleted entities (0 or 1)

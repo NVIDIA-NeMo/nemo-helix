@@ -10,7 +10,11 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
-from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.exceptions import (
+    EntityNotFoundError,
+    EntityVersionConflictError,
+    ForeignChildEntitiesError,
+)
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
 from nhx.core.entities.entities import Entity
@@ -362,9 +366,10 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         name: str,
         parent: Optional[str] = None,
         expected_db_version: int | None = None,
+        refuse_children_outside: str | None = None,
         session: AsyncSession | None = None,
     ) -> int:
-        """Delete an entity by name."""
+        """Delete an entity by name, refusing with ForeignChildEntitiesError per *refuse_children_outside*."""
         async with self._get_session(session, for_write=True) as sess:
             query = select(DBEntity).where(
                 DBEntity.workspace == workspace,
@@ -376,10 +381,21 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             else:
                 query = query.where(DBEntity.parent == parent)
 
+            if refuse_children_outside is not None:
+                # Child inserts take FOR KEY SHARE on the parent, so this blocks them until the delete commits.
+                query = query.with_for_update()
+
             result = await sess.execute(query)
             existing_entity = result.scalar_one_or_none()
             if existing_entity is None:
                 return 0
+
+            if refuse_children_outside is not None:
+                child_workspaces_query = select(DBEntity.workspace).where(DBEntity.parent == existing_entity.id)
+                child_workspaces = (await sess.execute(child_workspaces_query.distinct())).scalars().all()
+                foreign = {w for w in child_workspaces if w and w != refuse_children_outside}
+                if foreign:
+                    raise ForeignChildEntitiesError(foreign)
 
             if expected_db_version is not None and existing_entity.db_version != expected_db_version:
                 raise EntityVersionConflictError(
