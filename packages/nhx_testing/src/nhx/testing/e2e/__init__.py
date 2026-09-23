@@ -11,7 +11,7 @@ Usage:
 
     # Docker backend (in-memory)
     with Docker() as backend:
-        sdk = backend.get_sdk(api_key="test-token")
+        client = backend.get_client()
         # Run tests...
 
     # Kubernetes backend (K3s cluster)
@@ -19,7 +19,7 @@ Usage:
         kubeconfig = backend.get_kubeconfig_path()
         # Deploy NeMo Helix via Helm, then:
         backend.set_base_url("http://localhost:8080")
-        sdk = backend.get_sdk()
+        client = backend.get_client()
         # Run tests...
 
 Config-driven approach:
@@ -43,7 +43,7 @@ from .config import (
     load_config,
 )
 from .docker import Docker
-from .jobs import cleanup_platform_job, wait_for_job_completion, wait_for_job_logs, wait_for_platform_job
+from .jobs import cleanup_platform_job, wait_for_job_logs, wait_for_platform_job
 from .kubernetes import Kubernetes
 
 __all__ = [
@@ -60,7 +60,6 @@ __all__ = [
     "infer_backend",
     "load_config",
     "cleanup_platform_job",
-    "wait_for_job_completion",
     "wait_for_job_logs",
     "wait_for_platform_job",
 ]
