@@ -90,6 +90,7 @@ export const StartPage: FC<StartPageProps> = ({
                           </Badge>
                         ) : undefined
                       }
+                      compact
                       labelKind={TILE_LABEL_KIND}
                       descriptionKind={TILE_DESCRIPTION_KIND}
                       showIndicator={false}
@@ -140,6 +141,7 @@ export const StartPage: FC<StartPageProps> = ({
                                   icon={
                                     <template.icon size={16} color={group.accent} aria-hidden />
                                   }
+                                  compact
                                   labelKind={TILE_LABEL_KIND}
                                   descriptionKind={TILE_DESCRIPTION_KIND}
                                   showIndicator={false}
