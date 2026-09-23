@@ -70,7 +70,7 @@ export const flagDefinitions = {
   dashboardSandboxEnabled: previewFlag('VITE_FF_DASHBOARD_SANDBOX_ENABLED', true),
   dataDesignerEnabled: previewFlag('VITE_FF_DATA_DESIGNER_ENABLED', true),
   datasetsEnabled: previewFlag('VITE_FF_DATASETS_ENABLED', true),
-  deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED'),
+  deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED', true),
   evaluatorBenchmarksEnabled: previewFlag('VITE_FF_EVALUATOR_BENCHMARKS_ENABLED', false),
   evaluatorEnabled: previewFlag('VITE_FF_EVALUATOR_ENABLED', true),
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),

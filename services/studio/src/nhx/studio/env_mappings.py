@@ -122,7 +122,7 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_DEPLOYMENTS_ENABLED",
         config_path="studio.feature_flags.deployments_enabled",
-        default="false",
+        default="true",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_EVALUATOR_BENCHMARKS_ENABLED",
