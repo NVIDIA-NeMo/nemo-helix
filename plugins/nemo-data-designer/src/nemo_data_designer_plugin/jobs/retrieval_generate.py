@@ -11,7 +11,7 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobCo
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
@@ -34,7 +34,7 @@ class RetrievalGenerateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:
         job_config = (
@@ -68,7 +68,7 @@ class RetrievalGenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> HelixJobSpec:
