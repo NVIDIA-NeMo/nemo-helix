@@ -20,7 +20,7 @@ from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.auth.models import Principal
 from nhx.common.config import AuthConfig
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
-from nhx.common.service.dependencies import get_entity_client, get_sdk_client
+from nhx.common.service.dependencies import get_entity_client, get_nemo_client
 from nhx.core.files.api.v2.otlp.endpoints import router
 from nhx.core.files.app.log_storage import LogEntry, LogStorage, dep_log_storage
 from nhx.core.files.entities import Fileset
@@ -67,10 +67,9 @@ def mock_storage():
 
 
 @pytest.fixture
-def mock_sdk():
-    """Create a mock SDK for testing."""
-    mock_sdk = AsyncMock()
-    return mock_sdk
+def mock_nemo_client():
+    """Create a mock platform client for testing."""
+    return AsyncMock()
 
 
 @pytest.fixture
@@ -88,7 +87,7 @@ def test_client(
     mock_log_storage,
     mock_fileset,
     mock_storage,
-    mock_sdk,
+    mock_nemo_client,
     override_auth_client,
 ):
     """Create a test client with mocked dependencies."""
@@ -101,8 +100,8 @@ def test_client(
     def override_log_storage():
         return mock_log_storage
 
-    def override_sdk_client():
-        return mock_sdk
+    def override_nemo_client():
+        return mock_nemo_client
 
     # Patch storage_impl_factory and resolve_storage_secrets before creating the app
     with (
@@ -119,7 +118,7 @@ def test_client(
         app.dependency_overrides[get_entity_client] = override_entity_client
         app.dependency_overrides[dep_log_storage] = override_log_storage
         app.dependency_overrides[get_auth_client] = lambda: override_auth_client
-        app.dependency_overrides[get_sdk_client] = override_sdk_client
+        app.dependency_overrides[get_nemo_client] = override_nemo_client
         app.include_router(router)
 
         with TestClient(app) as client:
@@ -636,7 +635,7 @@ async def test_upload_logs_processing_error(test_client, mock_log_storage):
 
 
 async def test_upload_fileset_not_found(
-    mock_entity_client, mock_log_storage, mock_storage, mock_sdk, override_auth_client
+    mock_entity_client, mock_log_storage, mock_storage, mock_nemo_client, override_auth_client
 ):
     """Test upload when fileset doesn't exist."""
     # Mock get to raise EntityNotFoundError (used by get_fileset helper)
@@ -648,8 +647,8 @@ async def test_upload_fileset_not_found(
     def override_log_storage():
         return mock_log_storage
 
-    def override_sdk_client():
-        return mock_sdk
+    def override_nemo_client():
+        return mock_nemo_client
 
     # Create a new test client with the mocked entity client
     with patch(
@@ -660,7 +659,7 @@ async def test_upload_fileset_not_found(
         app.dependency_overrides[get_entity_client] = override_entity_client
         app.dependency_overrides[dep_log_storage] = override_log_storage
         app.dependency_overrides[get_auth_client] = lambda: override_auth_client
-        app.dependency_overrides[get_sdk_client] = override_sdk_client
+        app.dependency_overrides[get_nemo_client] = override_nemo_client
         app.include_router(router)
 
         with TestClient(app) as client:

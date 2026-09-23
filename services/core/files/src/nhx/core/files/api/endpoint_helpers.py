@@ -9,10 +9,7 @@ from typing import AsyncIterator
 
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from nemo_helix import (
-    AsyncNeMoHelix,
-)
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -275,15 +272,16 @@ async def download_with_cache(
         yield chunk
 
 
-async def resolve_storage_secrets(storage: StorageConfig, workspace: str, sdk: AsyncNeMoHelix) -> dict[str, str]:
+async def resolve_storage_secrets(
+    storage: StorageConfig, workspace: str, secrets: AsyncSecretsClient
+) -> dict[str, str]:
     """Resolve all secret references in a storage config."""
-    secrets: dict[str, str] = {}
-    secrets_client = client_from_platform(sdk, AsyncSecretsClient)
+    resolved: dict[str, str] = {}
     for key, secret_ref in storage.get_secret_references().items():
         parsed = parse_entity_ref(secret_ref.root, workspace)
         try:
-            response = (await secrets_client.access_secret(name=parsed.name, workspace=parsed.workspace)).data()
-            secrets[key] = response.value
+            response = (await secrets.access_secret(name=parsed.name, workspace=parsed.workspace)).data()
+            resolved[key] = response.value
         except ClientNotFoundError:
             raise SecretNotFoundError(
                 f"Secret '{parsed.workspace}/{parsed.name}' not found",
@@ -292,16 +290,28 @@ async def resolve_storage_secrets(storage: StorageConfig, workspace: str, sdk: A
             raise SecretAccessDeniedError(
                 f"Access denied to secret '{parsed.workspace}/{parsed.name}'",
             )
-    return secrets
+    return resolved
 
 
-async def resolve_storage_secrets_for_user(
-    storage: StorageConfig,
-    workspace: str,
-    sdk: AsyncNeMoHelix,
-    auth_client: AuthClient,
-) -> dict[str, str]:
-    """Resolve storage secrets using delegated headers on request-scoped SDK."""
+# Principal headers a request-scoped client carries for the calling user.
+# ``with_headers`` merges, so each one is blanked before the service
+# principal's own headers are applied on top.
+_REQUEST_PRINCIPAL_HEADERS = (
+    "X-NHX-Principal-Id",
+    "X-NHX-Principal-Email",
+    "X-NHX-Principal-Groups",
+    "X-NHX-Actor-Account-Id",
+    "X-NHX-Actor-Aliases",
+    "X-NHX-Principal-On-Behalf-Of",
+    "X-NHX-Principal-On-Behalf-Of-Email",
+    "X-NHX-Principal-On-Behalf-Of-Groups",
+    "X-NHX-Subject-Account-Id",
+    "X-NHX-Subject-Aliases",
+)
+
+
+def delegated_secrets_client(client: AsyncNemoClient, auth_client: AuthClient) -> AsyncSecretsClient:
+    """Return a Secrets client authenticated as ``service:files`` on behalf of the current user."""
     effective_principal = auth_client.principal.effective_principal
     service_principal = Principal(
         id="service:files",
@@ -312,9 +322,20 @@ async def resolve_storage_secrets_for_user(
         on_behalf_of_account_id=effective_principal.account_id,
         on_behalf_of_authz_aliases=effective_principal.authz_aliases,
     )
-    headers = {**MARK_INTERNAL_REQUEST_HEADERS, **service_principal.get_headers()}
-    service_sdk = sdk.with_options(set_default_headers=headers)
-    return await resolve_storage_secrets(storage, workspace, service_sdk)
+    headers = {name: "" for name in _REQUEST_PRINCIPAL_HEADERS}
+    headers.update(MARK_INTERNAL_REQUEST_HEADERS)
+    headers.update(service_principal.get_headers())
+    return AsyncSecretsClient.from_client(client.with_headers(headers))
+
+
+async def resolve_storage_secrets_for_user(
+    storage: StorageConfig,
+    workspace: str,
+    client: AsyncNemoClient,
+    auth_client: AuthClient,
+) -> dict[str, str]:
+    """Resolve storage secrets as ``service:files`` acting on behalf of the current user."""
+    return await resolve_storage_secrets(storage, workspace, delegated_secrets_client(client, auth_client))
 
 
 async def get_cache_status_for_files(
