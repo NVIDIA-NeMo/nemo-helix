@@ -11,6 +11,7 @@ from nemo_deployments_plugin.references import deployment_config_names_referenci
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth import AuthContext as DeploymentAuthContext
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.deployments.client import AsyncDeploymentsClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.models.types import ModelDeployment, ModelDeploymentStatus
@@ -53,6 +54,7 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
     def __init__(self, nhx_sdk: AsyncNeMoHelix, config: dict[str, Any], huggingface_model_puller: str) -> None:
         self._backend_config: DeploymentsPluginConfig | None = None
         self._entities: NemoEntitiesClient | None = None
+        self._deployments: AsyncDeploymentsClient | None = None
         self._huggingface_model_puller = huggingface_model_puller
         super().__init__(nhx_sdk, config)
 
@@ -61,12 +63,23 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
 
     def shutdown(self) -> None:
         self._entities = None
+        self._deployments = None
 
     def _entity_client(self) -> NemoEntitiesClient:
         if self._entities is None:
             sdk = get_async_platform_sdk(as_service="models", internal=True)
             self._entities = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
         return self._entities
+
+    def _deployments_client(self) -> AsyncDeploymentsClient:
+        # Read-only consumer of the deployments-plugin HTTP API (the models service
+        # principal, same SDK seam as the entity client). Writes and mutating reads
+        # still go through the entity client until the plugin write API grows the
+        # verbs they need.
+        if self._deployments is None:
+            sdk = get_async_platform_sdk(as_service="models", internal=True)
+            self._deployments = client_from_platform(sdk, AsyncDeploymentsClient)
+        return self._deployments
 
     @property
     def _cfg(self) -> DeploymentsPluginConfig:
@@ -322,11 +335,13 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
 
         Discovers server-role DeploymentConfig entities stamped with models-controller
         ownership labels (deployments-plugin does not mirror labels onto Deployment).
+        The cross-workspace query (``workspace="-"``) relies on the models service
+        principal's cross-workspace list permission.
         """
-        result = await self._entity_client().list(DeploymentConfig, workspace="-")
+        response = await self._deployments_client().list_deployment_configs(workspace="-")
         names = {
             f"{config.labels[_DEPLOYMENT_WORKSPACE_LABEL]}/{config.labels[_DEPLOYMENT_NAME_LABEL]}"
-            for config in result.data
+            async for config in response.items()
             if config.labels.get(MODEL_MANAGED_BY_LABEL) == MODEL_MANAGED_BY_MODELS_CONTROLLER
             and config.labels.get(_MODELS_ROLE_LABEL) == "server"
             and _DEPLOYMENT_WORKSPACE_LABEL in config.labels
