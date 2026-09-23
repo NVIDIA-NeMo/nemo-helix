@@ -4,7 +4,7 @@
 import {
   OTHER_SECTION,
   SECTION_ACCENTS,
-  TEMPLATE_SECTIONS,
+  SECTION_ORDER,
 } from '@studio/components/CreateFilesetStart/constants';
 import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
@@ -12,7 +12,7 @@ import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 /** A template's tag names its section; tags naming none collect under "Other". */
 export const buildTemplateGroups = (): StartTemplateGroup[] => {
   const sections = new Map<string, StartTemplateGroup>(
-    [...TEMPLATE_SECTIONS, OTHER_SECTION].map((title) => [
+    ([...SECTION_ORDER, OTHER_SECTION] as const).map((title) => [
       title,
       { id: title.toLowerCase(), title, templates: [], accent: SECTION_ACCENTS[title] },
     ])

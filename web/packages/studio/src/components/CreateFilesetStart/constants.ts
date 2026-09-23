@@ -57,13 +57,18 @@ export const START_OPTIONS: StartOption[] = [
   },
 ];
 
-/** Section order. Tags outside this list fall into "Other". */
-export const TEMPLATE_SECTIONS = ['Evaluation', 'Fine-tuning'] as const;
+/** Sections in render order; a tag matching none of these falls into OTHER_SECTION, last. */
+export const SECTION_ORDER = ['Evaluation', 'Fine-tuning'] as const;
 export const OTHER_SECTION = 'Other';
 
-/** One accent per section. Tokens rather than the design's literals, for the light theme. */
-export const SECTION_ACCENTS: Record<string, string> = {
+export type SectionTitle = (typeof SECTION_ORDER)[number] | typeof OTHER_SECTION;
+
+/**
+ * One accent per section. Tokens rather than the design's literals, for the light theme.
+ * Keying by SectionTitle makes a renamed or unaccented section a type error.
+ */
+export const SECTION_ACCENTS: Record<SectionTitle, string> = {
   Evaluation: 'var(--text-color-accent-purple)',
   'Fine-tuning': 'var(--text-color-accent-yellow)',
-  [OTHER_SECTION]: 'var(--text-color-accent-teal)',
+  Other: 'var(--text-color-accent-teal)',
 };
