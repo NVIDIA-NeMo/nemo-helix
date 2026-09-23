@@ -637,6 +637,6 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
 
 
 @pytest.fixture
-def test_sdk(test_client: AsyncClient) -> AsyncNeMoHelix:
-    # Disable retries to prevent duplicate entity creation attempts on transient errors
-    return AsyncNeMoHelix(base_url=test_client.base_url, http_client=test_client, max_retries=0)
+def async_client(test_client: AsyncClient) -> AsyncNemoClient:
+    """Typed platform client sharing the test app transport."""
+    return AsyncNemoClient(base_url=str(test_client.base_url), http_client=test_client)

@@ -13,8 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
@@ -71,8 +70,8 @@ def expected_translated_executor_dump() -> Dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_create_job_using_sdk(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_create_job_using_sdk(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     job = (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -179,8 +178,8 @@ def test_step_name_validation(step_name: str, should_pass: bool):
 
 @pytest.mark.asyncio
 @pytest.mark.skip("This is an integration test that requires secrets service.")
-async def test_create_job_with_secrets(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_create_job_with_secrets(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     request = CreateHelixJobRequest(
         name="test-job",
         source="testing",
@@ -1016,8 +1015,8 @@ async def test_job_paging(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_job_result_crud(test_sdk: AsyncNeMoHelix, sample_platform_job_request: CreateHelixJobRequest):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_job_request: CreateHelixJobRequest):
+    jobs = AsyncJobsClient.from_client(async_client)
     sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     resp = (
         await jobs.create_job_result(
@@ -1061,7 +1060,8 @@ async def test_job_result_crud(test_sdk: AsyncNeMoHelix, sample_platform_job_req
 
 @pytest.mark.asyncio
 async def test_job_result_download(
-    test_sdk: AsyncNeMoHelix,
+    async_client: AsyncNemoClient,
+    test_client: AsyncClient,
     sample_platform_job_request: CreateHelixJobRequest,
     mock_result_manager,
     tmp_path: Path,
@@ -1075,7 +1075,7 @@ async def test_job_result_download(
     mock_result_manager._tmp_dir = tmp_dir
     mock_result_manager._path = tmp_file
 
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+    jobs = AsyncJobsClient.from_client(async_client)
     sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     result = (
         await jobs.create_job_result(
@@ -1099,7 +1099,7 @@ async def test_job_result_download(
     assert call_kwargs["job_name"] == sdk_job_resp.name
     assert call_kwargs["workspace"] == DEFAULT_WORKSPACE
     assert isinstance(call_kwargs["files_client"], AsyncFilesClient)
-    assert call_kwargs["files_client"]._http is test_sdk._client
+    assert call_kwargs["files_client"]._http is test_client
 
     # make sure we deleted the temp files on the server
     assert not tmp_dir.exists()
@@ -1133,7 +1133,7 @@ async def test_job_result_download(
 @pytest.mark.asyncio
 async def test_job_status_details_crud(
     test_client: AsyncClient,
-    test_sdk: AsyncNeMoHelix,
+    async_client: AsyncNemoClient,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     original_details = {"progress": 50, "metadata": {"key": "value"}}
@@ -1141,7 +1141,7 @@ async def test_job_status_details_crud(
     patch = {"progress": 75}
 
     # Create a job
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+    jobs = AsyncJobsClient.from_client(async_client)
     sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     job_name = sdk_job_resp.name  # API URLs use job name, not ID
 
@@ -1598,11 +1598,11 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
 @pytest.mark.asyncio
 async def test_job_status_timestamps(
     test_client: AsyncClient,
-    test_sdk: AsyncNeMoHelix,
+    async_client: AsyncNemoClient,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """Test that created_at and updated_at are present at job, step, and task levels in status response."""
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+    jobs = AsyncJobsClient.from_client(async_client)
     sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     job_name = sdk_job_resp.name
 
