@@ -5,8 +5,8 @@ import {
   OTHER_SECTION,
   SECTION_ACCENTS,
   TEMPLATE_SECTIONS,
-} from '@studio/components/DataDesignerStart/constants';
-import { FILESET_TEMPLATES } from '@studio/components/DataDesignerStart/templates';
+} from '@studio/components/CreateFilesetStart/constants';
+import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 
 /** A template's tag names its section; tags naming none collect under "Other". */

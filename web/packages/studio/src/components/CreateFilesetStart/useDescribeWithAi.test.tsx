@@ -6,7 +6,7 @@ import {
   ERROR_NO_TOOL_CALL,
   ERROR_PARSE_RESPONSE,
   useDescribeWithAi,
-} from '@studio/components/DataDesignerStart/useDescribeWithAi';
+} from '@studio/components/CreateFilesetStart/useDescribeWithAi';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 const mutateAsync = vi.fn();

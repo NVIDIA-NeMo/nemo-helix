@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { GeneratedConfigResult } from '@studio/components/DataDesignerStart/GeneratedConfigResult';
+import { GeneratedConfigResult } from '@studio/components/CreateFilesetStart/GeneratedConfigResult';
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import { render, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';

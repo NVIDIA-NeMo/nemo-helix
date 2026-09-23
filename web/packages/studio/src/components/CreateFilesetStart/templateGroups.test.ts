@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { OTHER_SECTION, TEMPLATE_SECTIONS } from '@studio/components/DataDesignerStart/constants';
-import { buildTemplateGroups } from '@studio/components/DataDesignerStart/templateGroups';
-import { FILESET_TEMPLATES } from '@studio/components/DataDesignerStart/templates';
+import { OTHER_SECTION, TEMPLATE_SECTIONS } from '@studio/components/CreateFilesetStart/constants';
+import { buildTemplateGroups } from '@studio/components/CreateFilesetStart/templateGroups';
+import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 
 describe('buildTemplateGroups', () => {
   it('puts a template in the section its tag names', () => {

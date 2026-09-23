@@ -4,7 +4,7 @@
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { Button, Flex, SegmentedControl, Tag, Text } from '@nvidia/foundations-react-core';
-import type { StartOptionTag } from '@studio/components/DataDesignerStart/types';
+import type { StartOptionTag } from '@studio/components/CreateFilesetStart/types';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
 import { CircleStop, FileJson, ListTree, Pencil, SplinePointer } from 'lucide-react';
 import { type FC, memo, useState } from 'react';

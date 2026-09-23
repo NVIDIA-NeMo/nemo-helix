@@ -4,7 +4,7 @@
 import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import { COLUMN_TYPE_GROUPS } from '@studio/components/AddColumnPalette/constants';
 import type { ColumnTypeOption } from '@studio/components/AddColumnPalette/types';
-import { FILESET_TEMPLATES } from '@studio/components/DataDesignerStart/templates';
+import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 import {
   type BuilderColumn,
   buildColumnsFromConfig,

@@ -3,7 +3,7 @@
 
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import type { ModelEntity, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
-import type { FilesetTemplate } from '@studio/components/DataDesignerStart/types';
+import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import { useJobBuilder } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';

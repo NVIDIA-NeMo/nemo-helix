@@ -3,7 +3,7 @@
 
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
 import type { AddColumnSelection } from '@studio/components/AddColumnPalette/types';
-import type { FilesetTemplate } from '@studio/components/DataDesignerStart/types';
+import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import {
   type BuilderColumn,
   buildColumnsFromTemplate,

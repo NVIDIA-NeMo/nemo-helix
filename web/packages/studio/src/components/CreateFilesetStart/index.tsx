@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { AiDraftStep } from '@studio/components/DataDesignerStart/AiDraftStep';
-import { START_OPTIONS, TEMPLATES_TAG } from '@studio/components/DataDesignerStart/constants';
-import { buildTemplateGroups } from '@studio/components/DataDesignerStart/templateGroups';
-import { FILESET_TEMPLATES } from '@studio/components/DataDesignerStart/templates';
-import type { DataDesignerStartProps } from '@studio/components/DataDesignerStart/types';
+import { AiDraftStep } from '@studio/components/CreateFilesetStart/AiDraftStep';
+import { START_OPTIONS, TEMPLATES_TAG } from '@studio/components/CreateFilesetStart/constants';
+import { buildTemplateGroups } from '@studio/components/CreateFilesetStart/templateGroups';
+import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
+import type { CreateFilesetStartProps } from '@studio/components/CreateFilesetStart/types';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { useMemo, useState, type FC } from 'react';
 
-export const DataDesignerStart: FC<DataDesignerStartProps> = ({ workspace, onContinue }) => {
+export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onContinue }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // "Describe with AI" is the only option that asks for anything else before the canvas.
   const [draftingWithAi, setDraftingWithAi] = useState(false);
