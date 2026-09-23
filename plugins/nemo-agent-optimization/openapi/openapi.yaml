@@ -1,0 +1,1055 @@
+openapi: 3.1.0
+info:
+  title: agent-optimization (plugin)
+  version: 0.0.0
+paths:
+  /apis/agent-optimization/v2/strategies:
+    get:
+      tags:
+      - Agent Optimization
+      summary: List installed optimization strategies
+      description: 'Every installed strategy, sorted by the name ``--strategy`` takes.
+
+
+        Each entry is the object its own plugin declared, forwarded as-is: the
+
+        listing describes strategies, and only the plugin shipping one knows
+
+        what it optimizes.'
+      operationId: list_strategies_apis_agent_optimization_v2_strategies_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizationStrategyList'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy:
+    post:
+      tags:
+      - Agent Optimization
+      summary: Create Job
+      operationId: create_job_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunStrategyJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStrategyJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Optimization
+      summary: List Jobs
+      operationId: list_jobs_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/RunStrategyJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/RunStrategyJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStrategyJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{job}/results/{name}:
+    get:
+      tags:
+      - Agent Optimization
+      summary: Get Job Result
+      operationId: get_job_result_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{job}/results/{name}/download:
+    get:
+      tags:
+      - Agent Optimization
+      summary: Download Job Result
+      operationId: download_job_result_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{name}:
+    get:
+      tags:
+      - Agent Optimization
+      summary: Get Job
+      operationId: get_job_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStrategyJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Optimization
+      summary: Delete Job
+      operationId: delete_job_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{name}/cancel:
+    post:
+      tags:
+      - Agent Optimization
+      summary: Cancel Job
+      operationId: cancel_job_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStrategyJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{name}/logs:
+    get:
+      tags:
+      - Agent Optimization
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{name}/results:
+    get:
+      tags:
+      - Agent Optimization
+      summary: List Job Results
+      operationId: list_job_results_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-optimization/v2/workspaces/{workspace}/jobs/run-strategy/{name}/status:
+    get:
+      tags:
+      - Agent Optimization
+      summary: Get Job Status
+      operationId: get_job_status_apis_agent_optimization_v2_workspaces__workspace__jobs_run_strategy__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    DatetimeFilter:
+      additionalProperties: false
+      properties:
+        $gte:
+          description: Filter for results greater than or equal to this datetime.
+          title: $Gte
+          format: date-time
+          type: string
+        $lte:
+          description: Filter for results less than or equal to this datetime.
+          title: $Lte
+          format: date-time
+          type: string
+      title: DatetimeFilter
+      type: object
+    FileStorageType:
+      type: string
+      enum:
+      - fileset
+      title: FileStorageType
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
+    OptimizationStrategy:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Value to pass as 'strategy' when submitting a run.
+        description:
+          type: string
+          title: Description
+          description: What this strategy optimizes, in the words of the plugin that
+            ships it.
+          default: ''
+      type: object
+      required:
+      - name
+      title: OptimizationStrategy
+      description: 'One installed strategy, as ``--strategy`` accepts it.
+
+
+        Also the declaration a strategy job makes: it is the type of the
+
+        ``nemo_agent_optimization_strategy`` class variable, so the name users pass
+
+        and the sentence explaining it are written once, by the plugin that owns the
+
+        strategy, and reach this listing unchanged.'
+    OptimizationStrategyList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/OptimizationStrategy'
+          type: array
+          title: Data
+          description: Installed strategies, sorted by name.
+      type: object
+      title: OptimizationStrategyList
+      description: 'Every strategy installed on this platform.
+
+
+        Unpaginated on purpose: the list is whatever plugins the deployment installed,
+
+        so it is bounded by the install and does not grow with usage.'
+    PaginationData:
+      properties:
+        page:
+          type: integer
+          title: Page
+          description: The current page number.
+        page_size:
+          type: integer
+          title: Page Size
+          description: The page size used for the query.
+        current_page_size:
+          type: integer
+          title: Current Page Size
+          description: The size for the current page.
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: The total number of pages.
+        total_results:
+          type: integer
+          title: Total Results
+          description: The total number of results.
+      type: object
+      required:
+      - page
+      - page_size
+      - current_page_size
+      - total_pages
+      - total_results
+      title: PaginationData
+    RunStrategyJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/RunStrategySpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - name
+      - spec
+      title: RunStrategyJob
+    RunStrategyJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/RunStrategySubmitSpec'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: RunStrategyJobRequest
+    RunStrategyJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: RunStrategyJobsListFilter
+      type: object
+    RunStrategyJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/RunStrategyJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: RunStrategyJobsPage
+    RunStrategyJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: RunStrategyJobsSortField
+    RunStrategySpec:
+      properties:
+        strategy:
+          type: string
+          minLength: 1
+          title: Strategy
+          description: Installed optimization strategy to run, e.g. 'nat'. List what
+            this platform has with `nemo agents optimize list-strategies`.
+        optimize_config:
+          type: string
+          minLength: 1
+          title: Optimize Config
+          description: "Location of the strategy's configuration YAML.  With optimize_config_fileset\
+            \ set \u2014 required for remote submission \u2014 this is a path relative\
+            \ to the fileset root.  Without it (programmatic local runs only) it is\
+            \ an absolute path on the host running the job."
+        optimize_config_fileset:
+          title: Optimize Config Fileset
+          description: 'Fileset holding the optimization bundle: the config named
+            by optimize_config plus every asset it references.  Stage one with `nemo
+            agents optimize prepare-fileset`.  Required for remote submissions, where
+            the job has no access to the client''s filesystem.'
+          type: string
+        agent:
+          title: Agent
+          description: Platform agent to optimize ('name' or 'workspace/name'). Strategies
+            that can take the agent under test from the config itself may leave this
+            unset.
+          type: string
+          minLength: 1
+        output:
+          title: Output
+          description: "Where the strategy should publish its artifacts once the run\
+            \ succeeds \u2014 either a local directory (path-shaped: starts with '/',\
+            \ './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
+            \  Filesets are created on demand if missing."
+          type: string
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace for the agent, the bundle fileset, and any entity
+            the strategy resolves.
+          default: default
+      type: object
+      required:
+      - strategy
+      - optimize_config
+      title: RunStrategySpec
+      description: "Canonical stored spec \u2014 the submitted fields plus the resolved\
+        \ workspace."
+    RunStrategySubmitSpec:
+      properties:
+        strategy:
+          type: string
+          minLength: 1
+          title: Strategy
+          description: Installed optimization strategy to run, e.g. 'nat'. List what
+            this platform has with `nemo agents optimize list-strategies`.
+        optimize_config:
+          type: string
+          minLength: 1
+          title: Optimize Config
+          description: "Location of the strategy's configuration YAML.  With optimize_config_fileset\
+            \ set \u2014 required for remote submission \u2014 this is a path relative\
+            \ to the fileset root.  Without it (programmatic local runs only) it is\
+            \ an absolute path on the host running the job."
+        optimize_config_fileset:
+          title: Optimize Config Fileset
+          description: 'Fileset holding the optimization bundle: the config named
+            by optimize_config plus every asset it references.  Stage one with `nemo
+            agents optimize prepare-fileset`.  Required for remote submissions, where
+            the job has no access to the client''s filesystem.'
+          type: string
+        agent:
+          title: Agent
+          description: Platform agent to optimize ('name' or 'workspace/name'). Strategies
+            that can take the agent under test from the config itself may leave this
+            unset.
+          type: string
+          minLength: 1
+        output:
+          title: Output
+          description: "Where the strategy should publish its artifacts once the run\
+            \ succeeds \u2014 either a local directory (path-shaped: starts with '/',\
+            \ './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
+            \  Filesets are created on demand if missing."
+          type: string
+      type: object
+      required:
+      - strategy
+      - optimize_config
+      title: RunStrategySubmitSpec
+      description: Client-submitted fields; ``workspace`` is added server-side.
+    StringFilter:
+      additionalProperties: false
+      properties:
+        $eq:
+          description: Filter for results equal to this value.
+          title: $Eq
+          type: string
+        $like:
+          description: Filter for results matching this pattern.
+          title: $Like
+          type: string
+        $in:
+          description: Filter for results in this list of values.
+          title: $In
+          items:
+            type: string
+          type: array
+        $nin:
+          description: Filter for results not in this list of values.
+          title: $Nin
+          items:
+            type: string
+          type: array
+      title: StringFilter
+      type: object
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+          additionalProperties: true
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

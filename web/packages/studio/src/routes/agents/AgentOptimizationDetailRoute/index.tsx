@@ -9,7 +9,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import { useAgentsGetOptimizeJob } from '@nemo/sdk/generated/agents/agents';
+import { useAgentOptimizationGetRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, PageHeader, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
@@ -36,7 +36,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
     data: job,
     isLoading: isLoadingJob,
     error: jobError,
-  } = useAgentsGetOptimizeJob(workspace, jobName, {
+  } = useAgentOptimizationGetRunStrategyJob(workspace, jobName, {
     query: {
       enabled: !!workspace && !!jobName,
       refetchInterval: (query) =>

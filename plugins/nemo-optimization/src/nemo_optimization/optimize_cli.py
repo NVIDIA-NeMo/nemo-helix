@@ -10,13 +10,15 @@ implicit upload inside the remote submission so the expensive, stateful half (va
 create a fileset, push bytes) stays explicit and re-runnable, and so a bundle can be staged once
 and submitted many times.
 
-Lives in the agents plugin because agents owns the ``optimize`` CLI surface and the fileset
-helpers; the validation itself is library code in :mod:`nemo_optimization.bundle`.
+Lives with this plugin for now rather than with the generic ``optimize`` group: the bundle it validates
+is a NAT optimize bundle, so the command is only meaningful where this plugin is installed. Future work
+will unify the bundle across all optimization plugins. It reaches the shared group by registering
+:func:`register_prepare_fileset_command` under the ``nemo.cli.agents.optimize`` entry-point group,
+which ``nemo agents optimize`` scans as it assembles itself.
 """
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
@@ -31,17 +33,15 @@ from nemo_helix_plugin.cli_options import workspace_help
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.client.client import NemoClient
 
-logger = logging.getLogger(__name__)
-
 PREPARE_FILESET_COMMAND = "prepare-fileset"
 
 
 def register_prepare_fileset_command(group: typer.Typer) -> None:
-    """Add ``prepare-fileset`` to the generated ``optimize`` job command."""
+    """Add ``prepare-fileset`` to the shared ``nemo agents optimize`` command group."""
 
     @group.command(
         name=PREPARE_FILESET_COMMAND,
-        help="Validate an optimize bundle and upload it to a fileset for `optimize`.",
+        help="Validate a NAT optimize bundle and upload it to a fileset for `optimize run-strategy`.",
     )
     def prepare_fileset(
         typer_ctx: typer.Context,
@@ -60,7 +60,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             typer.Option(
                 "--optimize-config",
                 help="Optimize YAML, as a path relative to --source. This is the value to pass to "
-                "`optimize --optimize-config`.",
+                "`optimize run-strategy --optimize-config`.",
             ),
         ],
         fileset: Annotated[
@@ -126,7 +126,8 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         typer.echo(f"Staged {source}/ to fileset {ws}/{name}.\n")
         typer.echo("Submit the study with:\n")
         typer.echo(
-            f"  nemo agents optimize \\\n"
+            f"  nemo agents optimize run-strategy \\\n"
+            f"    --strategy nat \\\n"
             f"    --optimize-config-fileset {ws}/{name} \\\n"
             f"    --optimize-config {optimize_config} \\\n"
             + (f"    --agent {agent} \\\n" if agent else "")

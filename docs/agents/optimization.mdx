@@ -24,7 +24,7 @@ evaluation result before promotion.
 | ------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Model optimization  | An agent uses a single frontier model where a smaller model or route split may preserve quality at lower cost | Suggests a model swap or Switchyard random-routing virtual model                                            |
 | Skill optimization  | The agent uses skills and has an evaluation suite                                                             | Suggests running `nemo agents optimize-skills` to improve skill files and keep changes that pass evaluation |
-| Prompt optimization | The agent has an optimization config and baseline dataset                                                     | Suggests staging with `nemo agents optimize prepare-fileset`, then running `nemo agents optimize` for Fabric-backed tuning |
+| Prompt optimization | The agent has an optimization config and baseline dataset                                                     | Suggests staging with `nemo agents optimize prepare-fileset`, then running `nemo agents optimize run-strategy` for Fabric-backed tuning |
 | New model scan      | Difference between the current model list and the previous optimizer snapshot                                 | Suggests evaluating or auditing newly available models                                                      |
 
 Optimizer state is stored in the `nemo-agent-optimizer` fileset:
@@ -277,9 +277,12 @@ nemo files list nemo-agent-telemetry
 
 ## Run Prompt and Parameter Tuning
 
-The `nemo agents optimize` command submits Fabric-backed numeric
-optimization through `agents.optimize` (implementation in
-`nemo-optimization`). Input must be a Fabric-native agent package
+The `nemo agents optimize run-strategy` command submits Fabric-backed numeric
+optimization. `nemo agents optimize` is a shared command group, one per
+installed optimization strategy; `--strategy nat` selects the Fabric-backed
+numeric study implemented in `nemo-optimization`. Run
+`nemo agents optimize list-strategies` to see what this environment has.
+Input must be a Fabric-native agent package
 (`schema_version: fabric.agent/v1alpha1`). The golden-path harness is
 Hermes (`nvidia.fabric.hermes`); see
 `plugins/nemo-optimization/examples/hermes-optimize/` (install steps live in
@@ -312,7 +315,8 @@ nemo agents optimize prepare-fileset \
   --optimize-config optimize-chatonly.yaml \
   --fileset hermes-optimize-chatonly \
   --workspace default
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -325,7 +329,7 @@ Ask your coding agent:
 
 > Run prompt tuning on my deployed agent against this optimization config.
 
-The `agents-optimize` skill suggests `nemo agents optimize` when the agent
+The `agents-optimize` skill suggests `nemo agents optimize run-strategy` when the agent
 has an optimization config and a baseline dataset. Verify it is
 installed:
 
@@ -337,7 +341,7 @@ What it does under the hood:
 
 - Confirms the agent has a Fabric-native optimization YAML.
 - Stages the optimize bundle with `nemo agents optimize prepare-fileset`,
-  then submits it with `nemo agents optimize`.
+  then submits it with `nemo agents optimize run-strategy --strategy nat`.
 - Compares results against the evaluation baseline and surfaces deltas
   for review.
 
@@ -347,14 +351,15 @@ What it does under the hood:
 ```python
 import os
 
-from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 
 result = NemoJobScheduler().submit_remote(
-    OptimizeJob,
+    RunStrategyJob,
     {
+        "strategy": "nat",
         "optimize_config": "optimize-chatonly.yaml",
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
         "workspace": WORKSPACE,
@@ -392,7 +397,8 @@ nemo agents optimize prepare-fileset \
   --optimize-config optimize-mcp.yaml \
   --fileset hermes-optimize-mcp \
   --workspace default
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default
@@ -403,16 +409,16 @@ nemo agents optimize \
 
 ```python
 import os
-from pathlib import Path
 
-from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 
 result = NemoJobScheduler().submit_remote(
-    OptimizeJob,
+    RunStrategyJob,
     {
+        "strategy": "nat",
         "optimize_config": "optimize-mcp.yaml",
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
         "workspace": WORKSPACE,
@@ -439,7 +445,7 @@ Fabric agent package in `--optimize-config`.
 
 ## Run a Study on the Platform
 
-`nemo agents optimize` hands the study to the platform's Jobs service, which
+`nemo agents optimize run-strategy` hands the study to the platform's Jobs service, which
 runs it on the platform host or cluster and therefore **cannot read your
 filesystem**. The command accepts no host paths: it takes a fileset holding the
 whole optimize bundle, plus a config path relative to that fileset's root.
@@ -455,7 +461,7 @@ nemo agents optimize prepare-fileset \
 ```
 
 `prepare-fileset` validates before it uploads, and prints the matching
-`nemo agents optimize` command on success. It checks that:
+`nemo agents optimize run-strategy` command on success. It checks that:
 
 - the YAML parses and enables an optimizer with a non-empty search space;
 - there is an Agent under Test — either an inline
@@ -476,7 +482,8 @@ the bundle before staging.
 ### 2. Run
 
 ```bash
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -489,13 +496,16 @@ trials dataframe, ATIF evidence) somewhere addressable when it finishes.
 
 ### Where the study runs
 
-`OptimizeJob` picks its executor from the execution profiles the platform
-actually registered, for the requested profile (currently always `default`):
+`run-strategy` does no optimization itself: it resolves `--strategy` to the
+installed strategy job and delegates `compile` to it, so the executor and entry
+point below are the `nat` strategy's own. That job picks its executor from the
+execution profiles the platform actually registered, for the requested profile
+(currently always `default`):
 
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
 | `subprocess` | Host subprocess running `python -m nemo_optimization.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
-| `cpu` (docker or `kubernetes_job`) | The `nhx-tasks` image, same entry point | The task image must carry those dependencies; `nemo-optimization-plugin` is in the `cpu-tasks` dependency group for this reason |
+| `cpu` (docker or `kubernetes_job`) | The `nhx-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin` and `nemo-optimization-plugin` are in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
 that often need the host's Docker daemon and harness adapters. If neither is

@@ -9,8 +9,11 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useAgentsListOptimizeJobs } from '@nemo/sdk/generated/agents/agents';
-import type { OptimizeJob, OptimizeJobsListFilter } from '@nemo/sdk/generated/agents/schema';
+import { useAgentOptimizationListRunStrategyJobs } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import type {
+  RunStrategyJob,
+  RunStrategyJobsListFilter,
+} from '@nemo/sdk/generated/agent-optimization/schema';
 import { Banner, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
@@ -20,7 +23,7 @@ import { type ComponentProps, type FC, useCallback } from 'react';
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_STATUSES = new Set(['completed', 'error', 'cancelled']);
 
-type OptimizeJobsFilterInput = WithFilterOperators<Omit<OptimizeJobsListFilter, 'spec'>> & {
+type OptimizeJobsFilterInput = WithFilterOperators<Omit<RunStrategyJobsListFilter, 'spec'>> & {
   'spec.agent'?: FilterOperators<string>;
 };
 
@@ -31,12 +34,12 @@ const agentJobsFilter = (
   workspace: string,
   agent: string,
   search: string
-): OptimizeJobsListFilter => {
+): RunStrategyJobsListFilter => {
   const filter: OptimizeJobsFilterInput = {
     'spec.agent': { $in: [agent, `${workspace}/${agent}`] },
   };
   if (search) filter.name = { $like: `%${search}%` };
-  return JSON.stringify(filter) as unknown as OptimizeJobsListFilter;
+  return JSON.stringify(filter) as unknown as RunStrategyJobsListFilter;
 };
 
 interface OptimizeJobsTableProps {
@@ -44,9 +47,9 @@ interface OptimizeJobsTableProps {
 }
 
 /**
- * Numeric HPO studies (`agents.optimize`) for one agent.
+ * Optimization studies (`agent-optimization.run-strategy`) for one agent.
  *
- * Filtering, search and paging all run on the server: `OptimizeJobsListFilter` accepts a path into
+ * Filtering, search and paging all run on the server: `RunStrategyJobsListFilter` accepts a path into
  * the job's spec, so `spec.agent` scopes the list to this agent (see {@link agentJobsFilter}).
  *
  * One backend gap still shapes the columns: the optimize job never writes `status_details`, and
@@ -64,7 +67,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
   const searchText = dataViewState.debouncedSearchBar.trim();
   const { pageIndex, pageSize } = dataViewState.pagination.state;
 
-  const { data, isPending, error } = useAgentsListOptimizeJobs(
+  const { data, isPending, error } = useAgentOptimizationListRunStrategyJobs(
     workspace,
     {
       page: pageIndex + 1,
@@ -88,7 +91,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
 
   const resetFilters = useCallback(() => dataViewState.resetFilters(), [dataViewState]);
 
-  const makeColumns: ComponentProps<typeof StudioDataView<OptimizeJob>>['makeColumns'] = (
+  const makeColumns: ComponentProps<typeof StudioDataView<RunStrategyJob>>['makeColumns'] = (
     { accessor },
     { rowActionsColumn }
   ) => [
@@ -129,7 +132,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
         </Banner>
       )}
 
-      <StudioDataView<OptimizeJob>
+      <StudioDataView<RunStrategyJob>
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}

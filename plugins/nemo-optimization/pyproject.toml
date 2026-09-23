@@ -7,6 +7,12 @@ description = "NeMo optimization library — Optuna numeric HPO and Agents optim
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+    # The router plugin owns the strategy contract: `OptimizationStrategy`, the type of the
+    # class variable OptimizeJob declares itself with. Depending on the dispatcher is the
+    # allowed direction — the reverse edge, the router naming a strategy, is what discovery
+    # exists to avoid.
+    "nemo-agent-optimization-plugin",
+    "nemo-agents-plugin",
     "nemo-helix-plugin",
     "nemo-helix",
     "nemo-evaluator-sdk",
@@ -20,6 +26,21 @@ dependencies = [
 ]
 version = "0.0.0"
 
+# Discovered by `nemo agents optimize` as the `nat` strategy, via the
+# `nemo_agent_optimization_strategy` class variable on OptimizeJob. The key sits under the
+# dispatcher's `agent-optimization` plugin namespace rather than minting a new one: plugin
+# allowlists and `nemo plugins list` group `nemo.jobs` entries by that prefix, so a deployment
+# that allows the router also gets its strategies. Nothing mounts the key itself — the
+# agent-optimization service adds routes explicitly and has no `nemo.cli` group — so the study
+# stays discoverable, not separately submittable; it runs as a step of the router job's record.
+[project.entry-points."nemo.jobs"]
+"agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+
+# Hangs `prepare-fileset` off the shared `nemo agents optimize` group. The value is a plain
+# function taking that group; joining this group is independent of the strategy job above.
+[project.entry-points."nemo.cli.agents.optimize"]
+prepare-fileset = "nemo_optimization.optimize_cli:register_prepare_fileset_command"
+
 [project.entry-points."nemo.optimization.backends"]
 optuna = "nemo_optimization.backends.optuna.backend:OptunaBackend"
 ga = "nemo_optimization.backends.ga.backend:GaBackend"
@@ -32,6 +53,8 @@ build-backend = "hatchling.build"
 packages = ["src/nemo_optimization"]
 
 [tool.uv.sources]
+nemo-agent-optimization-plugin = { workspace = true }
+nemo-agents-plugin = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nemo-helix = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
