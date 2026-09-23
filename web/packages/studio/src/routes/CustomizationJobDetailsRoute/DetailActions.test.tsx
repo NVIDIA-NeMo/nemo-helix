@@ -35,7 +35,7 @@ describe('DetailActions', () => {
     );
     expect(screen.getByRole('menuitem', { name: 'Cancel Job' })).toBeEnabled();
   });
-  it('should render evaluate button when status is launchable', () => {
+  it('should not render an evaluate button even when status is launchable', () => {
     render(
       <TestProviders>
         <DetailActions
@@ -45,7 +45,7 @@ describe('DetailActions', () => {
         />
       </TestProviders>
     );
-    expect(screen.getByRole('button', { name: 'Evaluate' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Evaluate' })).not.toBeInTheDocument();
   });
   it('should render loading button when mutation is pending', async () => {
     // Override the default handler with an infinite delay to capture the loading state
