@@ -607,19 +607,12 @@ class TestS3DefaultStorageConfig:
             )
 
             # List files
-            files_response = client_with_s3_default.files.list(
-                fileset=fileset.name,
-                workspace=fileset.workspace,
-            )
+            files_response = files.list_files(name=fileset.name, workspace=fileset.workspace).data().data
             assert len(files_response) == 1
             assert files_response[0].path == "test.txt"
 
             # Download and verify content
-            downloaded = client_with_s3_default.files.download_content(
-                remote_path="test.txt",
-                fileset=fileset.name,
-                workspace=fileset.workspace,
-            )
+            downloaded = files.download_file(name=fileset.name, workspace=fileset.workspace, path="test.txt").read()
             assert downloaded == test_content
         finally:
             files.delete_fileset(name=name, workspace=DEFAULT_WORKSPACE)
@@ -662,16 +655,12 @@ class TestS3DefaultStorageConfig:
             )
 
             # Verify isolation
-            content1 = client_with_s3_default.files.download_content(
-                remote_path="shared-name.txt",
-                fileset=fileset1.name,
-                workspace=fileset1.workspace,
-            )
-            content2 = client_with_s3_default.files.download_content(
-                remote_path="shared-name.txt",
-                fileset=fileset2.name,
-                workspace=fileset2.workspace,
-            )
+            content1 = files.download_file(
+                name=fileset1.name, workspace=fileset1.workspace, path="shared-name.txt"
+            ).read()
+            content2 = files.download_file(
+                name=fileset2.name, workspace=fileset2.workspace, path="shared-name.txt"
+            ).read()
 
             assert content1 == b"content for fileset 1"
             assert content2 == b"content for fileset 2"
@@ -706,10 +695,7 @@ class TestS3DefaultStorageConfig:
 
         try:
             # List files to verify connection works
-            files = client_with_s3_default.files.list(
-                fileset=fileset.name,
-                workspace=fileset.workspace,
-            )
+            files = files_client.list_files(name=fileset.name, workspace=fileset.workspace).data().data
             assert len(files) > 0, "Expected files in the HuggingFace repo"
 
             # Find config.json (typically small and always present in model repos)
@@ -719,11 +705,9 @@ class TestS3DefaultStorageConfig:
             )
 
             # Download the file - this exercises preflight validation
-            content = client_with_s3_default.files.download_content(
-                remote_path=config_file.path,
-                fileset=fileset.name,
-                workspace=fileset.workspace,
-            )
+            content = files_client.download_file(
+                name=fileset.name, workspace=fileset.workspace, path=config_file.path
+            ).read()
 
             assert len(content) > 0, "Downloaded content should not be empty"
 
