@@ -206,108 +206,29 @@ if prepare_status != "completed":
 
 Stage 1 writes `training.jsonl` and `eval_beir/` under its job result as `workspace/fileset#path`.
 
-Automodel `dataset.training` and `retrieve-eval` `dataset` resolve that path fragment, so you can pass the Stage 1 `artifacts` URL through unchanged. Stage 1 unique-keys `eval_beir/qrels/test.tsv` before writing it. The BEIR loader still rejects duplicate `(query-id, corpus-id)` rows if an older dump still has them.
+Automodel `dataset.training` and `retrieve-eval` `dataset` resolve that path fragment, so you can pass the Stage 1 `artifacts` URL through unchanged. Stage 1 unique-keys `eval_beir/qrels/test.tsv` before writing it.
 
-Copy `training.jsonl` and `eval_beir/` to the root of a dataset fileset only if you want a fileset whose root already has both artifacts, or if you are uploading a dump that still has duplicate qrels. The next cell is that optional copy and unique-key.
+Freeze that fileset and reuse it for every run. Scoring two runs on different splits measures data variance rather than model quality.
 
-Freeze the resulting fileset and reuse it for every run. Scoring two runs on different splits measures data variance rather than model quality.
-
-Equivalent CLI, where `RESULT_PATH` is the path fragment of the `artifacts` result's `artifact_url`:
+Equivalent CLI: take `artifact_url` from the `artifacts` result.
 
 ```bash
-PREPARE_JOB=<prepare-job-name>
-RESULT_PATH=results/<attempt-id>/artifacts
-
-nemo jobs results list "$PREPARE_JOB" --workspace default --output json
-
-nemo files download "job-fileset-$PREPARE_JOB" --workspace default \
-  --remote-path "$RESULT_PATH/training.jsonl" \
-  -o ./artifacts/training.jsonl
-
-nemo files download "job-fileset-$PREPARE_JOB" --workspace default \
-  --remote-path "$RESULT_PATH/eval_beir" \
-  -o ./artifacts/
-
-nemo files filesets create nvdocs-embed-artifacts --workspace default \
-  --purpose dataset --exist-ok
-
-nemo files upload ./artifacts/ nvdocs-embed-artifacts --workspace default
-nemo files list nvdocs-embed-artifacts --workspace default
+nemo jobs results list <prepare-job-name> --workspace default --output json
 ```
 
-Unique-key `./artifacts/eval_beir/qrels/test.tsv` before the upload; the cell below does it inline.
+The next cell stores that URL as `TRAINING_REF`.
 
 ```python
-import csv
-import tempfile
-from pathlib import Path
-
 results = client.jobs.results.list(prepare_job.name, workspace="default").data
 artifacts = next(row for row in results if row.name == "artifacts")
-ARTIFACTS_REF = artifacts.artifact_url
-print("Stage 1 artifacts:", ARTIFACTS_REF)
-
-TRAINING_FILESET = "nvdocs-embed-artifacts"
-fileset_ref, _, remote_prefix = ARTIFACTS_REF.partition("#")
-job_fileset = fileset_ref.split("/", 1)[-1]
-local_dir = Path(tempfile.mkdtemp(prefix="nvdocs-artifacts-"))
-
-client.files.download(
-    remote_path=f"{remote_prefix}/training.jsonl",
-    local_path=str(local_dir / "training.jsonl"),
-    fileset=job_fileset,
-    workspace="default",
-)
-# eval_beir arrives under local_dir; a destination already named eval_beir nests as eval_beir/eval_beir
-client.files.download(
-    remote_path=f"{remote_prefix}/eval_beir",
-    local_path=str(local_dir),
-    fileset=job_fileset,
-    workspace="default",
-)
-if not (local_dir / "eval_beir" / "corpus.jsonl").is_file():
-    raise RuntimeError(f"eval_beir/corpus.jsonl missing under {local_dir}")
-
-# the BEIR loader rejects duplicate judgments
-qrels_path = local_dir / "eval_beir" / "qrels" / "test.tsv"
-with qrels_path.open(encoding="utf-8", newline="") as stream:
-    reader = csv.DictReader(stream, delimiter="\t")
-    header = reader.fieldnames
-    seen: set[tuple[str, str]] = set()
-    kept: list[dict[str, str]] = []
-    for row in reader:
-        key = (row["query-id"], row["corpus-id"])
-        if key not in seen:
-            seen.add(key)
-            kept.append(row)
-with qrels_path.open("w", encoding="utf-8", newline="") as stream:
-    writer = csv.DictWriter(stream, fieldnames=header, delimiter="\t", lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(kept)
-print(f"qrels judgments: {len(kept)}")
-
-try:
-    client.files.filesets.create(
-        workspace="default",
-        name=TRAINING_FILESET,
-        purpose="dataset",
-        description="NVDocs mined retrieval artifacts",
-    )
-except ConflictError:
-    pass
-client.files.upload(
-    local_path=f"{local_dir}/",
-    remote_path="",
-    fileset=TRAINING_FILESET,
-    workspace="default",
-)
-TRAINING_REF = f"default/{TRAINING_FILESET}"
+TRAINING_REF = artifacts.artifact_url
 print("dataset.training and retrieve-eval dataset:", TRAINING_REF)
+
 ```
 
 ## 4. Stage 2: Automodel `bi_encoder`
 
-`model` and `dataset.training` are independent inputs. The entity supplies the encoder weights; the fileset supplies the contrastive rows, with `training.jsonl` at its root. To train on an existing triplet dataset instead, build that fileset in [Train on SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) and point `dataset.training` at it — SPECTER carries no `eval_beir`, so keep the NVDocs artifacts fileset for Stage 4.
+`model` and `dataset.training` are independent inputs. The entity supplies the encoder weights; the fileset supplies the contrastive rows. Automodel discovers `training.jsonl` in that fileset, including under a `#path` fragment. To train on an existing triplet dataset instead, build that fileset in [Train on SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) and point `dataset.training` at it — SPECTER carries no `eval_beir`, so keep the NVDocs Stage 1 artifacts URL for Stage 4.
 
 The NVDocs artifacts fileset has no validation JSONL. `schedule.validation_split: 0.1` therefore creates a deterministic 10% holdout from `training.jsonl`; that holdout produces validation loss and selects the best checkpoint. It does not modify or replace the frozen `eval_beir/` data used in Stage 4. Validation data is optional: when a `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` file is present in the training fileset, Automodel uses it instead of creating the holdout.
 
@@ -329,7 +250,7 @@ Equivalent CLI:
 ```bash
 nemo customization automodel.jobs submit --workspace default --name embed-nvdocs --spec '{
   "model": "default/nemotron-3-embed-1b",
-  "dataset": {"training": "default/nvdocs-embed-artifacts"},
+  "dataset": {"training": "<stage-1-artifacts-url>"},
   "training": {
     "training_type": "sft",
     "recipe": "bi_encoder",
@@ -527,7 +448,7 @@ Equivalent CLI:
 
 ```bash
 nemo evaluator retrieve-eval submit --workspace default --spec '{
-  "dataset": "default/nvdocs-embed-artifacts",
+  "dataset": "<stage-1-artifacts-url>",
   "target": "default/nemotron-3-embed-1b-tuned",
   "baseline": "default/nemotron-3-embed-1b",
   "k": [1, 5, 10, 100]
