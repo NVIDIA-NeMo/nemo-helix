@@ -10,7 +10,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.client.errors import NemoTransportError
+from nemo_platform_plugin.client.errors import ConflictError, NemoTransportError
 from nmp.common.api.common import Page, PaginationData
 from nmp.common.auth import AuthClient, Principal, get_auth_client
 from nmp.common.entities.client import EntityConflictError, EntityValidationError
@@ -522,6 +522,21 @@ def test_delete_model_conflict_returns_409(client, mock_model_entity_service):
     response = client.delete("/apis/models/v2/workspaces/default/models/my-model")
 
     assert response.status_code == 409
+
+
+def test_delete_model_with_adapters_in_other_workspaces_returns_the_entity_store_reason(
+    client, mock_model_entity_service
+):
+    reason = "Entity 'llama' has child entities in other workspaces (team-a). Remove those entities first."
+    store_error = ConflictError(httpx.Response(409, json={"detail": reason}))
+    conflict = EntityConflictError(str(store_error))
+    conflict.__cause__ = store_error
+    mock_model_entity_service.delete_model_entity.side_effect = conflict
+
+    response = client.delete("/apis/models/v2/workspaces/default/models/llama")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == reason
 
 
 def test_delete_model_adapter_conflict_returns_409(client, mock_adapter_entity_service):

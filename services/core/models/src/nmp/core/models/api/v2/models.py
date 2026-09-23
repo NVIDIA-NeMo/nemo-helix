@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoClientError
+from nemo_platform_plugin.client.errors import NemoClientError, NemoHTTPError
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -359,8 +359,7 @@ async def update_model(
     logger.info(f"Updating model entity: {workspace}/{model_name}")
 
     try:
-        # Get existing model. local_only: an update must never reach a model shared in from
-        # the global workspace, which the caller may be able to read but not write.
+        # local_only: the caller may be able to read a shared model but not write it.
         model: Model = await service.entity_client.get(Model, workspace=workspace, name=name, local_only=True)
     except EntityNotFoundError:
         logger.warning(f"Model entity not found for update: {workspace}/{name}")
@@ -462,9 +461,11 @@ async def delete_model(
     except HTTPException:
         raise
     except EntityConflictError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
-        ) from e
+        store_error = e.__cause__
+        detail = (
+            store_error.detail if isinstance(store_error, NemoHTTPError) else "Concurrent modification - please retry."
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from e
     except Exception:
         logger.exception("Failed to delete model entity")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
