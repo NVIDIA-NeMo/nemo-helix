@@ -16,7 +16,7 @@ from nemo_helix_plugin.controller import NemoController
 
 class MyController(NemoController):
     name: ClassVar[str] = "my-plugin"           # REQUIRED — matches entry-point key
-    dependencies: ClassVar[list[str]] = ["entities"]  # platform services to wait for
+    dependencies: ClassVar[list[str]] = ["entities"]  # Helix services to wait for
 
     # Must implement:
     async def list_objects(self) -> list: ...    # return objects to reconcile this cycle

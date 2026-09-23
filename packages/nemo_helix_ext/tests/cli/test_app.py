@@ -95,7 +95,7 @@ def test_generated_list_validates_stream_output_before_client_setup():
         ([], "Command-line interface for NeMo Helix."),
         (["agent"], "Commands for AI agent context and capability discovery."),
         (["skills"], "Install AI agent skill files for Nemo."),
-        (["services"], "Run platform services locally."),
+        (["services"], "Run Helix services locally."),
     ],
 )
 def test_no_arg_help_exits_successfully(argv: list[str], expected_text: str):
@@ -417,7 +417,7 @@ def test_lazy_api_group_help_loads_on_demand():
             "nemo_helix_ext.cli.commands.quickstart.cli",
             "Quickstart commands for managing the NeMo Helix container",
         ),
-        (["services", "--help"], "nemo_helix_ext.cli.commands.services.cli", "Run platform services locally"),
+        (["services", "--help"], "nemo_helix_ext.cli.commands.services.cli", "Run Helix services locally"),
         (
             ["cluster-info", "--help"],
             "nemo_helix_ext.cli.commands.quickstart.cli",

@@ -28,7 +28,7 @@ Build NeMo Helix plugins in Python.
 pip install nemo-helix-plugin
 ```
 
-To run a local NeMo Helix that loads and serves your plugin while you develop, use Python 3.12–3.14 and install [`nemo-helix`](https://pypi.org/project/nemo-helix/) too — it ships the platform services, the `nemo` CLI, and the runtime that wires entity-client injection into your plugin's FastAPI app:
+To run a local NeMo Helix that loads and serves your plugin while you develop, use Python 3.12–3.14 and install [`nemo-helix`](https://pypi.org/project/nemo-helix/) too — it ships the Helix services, the `nemo` CLI, and the runtime that wires entity-client injection into your plugin's FastAPI app:
 
 ```bash
 pip install "nemo-helix[all]"
