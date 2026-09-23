@@ -8,8 +8,8 @@ without importing the module that composes them into DTOs — the definitions ar
 ``schemas``, so they cannot import from it.
 
 What counts as a ``workspace/name`` reference is **not** decided here: the shape
-(:data:`~nemo_platform_plugin.refs.ENTITY_REF_PATTERN`) and the parser
-(:func:`~nemo_platform_plugin.refs.parse_entity_ref`) are the platform's, shared with every other
+(:data:`~nemo_helix_plugin.refs.ENTITY_REF_PATTERN`) and the parser
+(:func:`~nemo_helix_plugin.refs.parse_entity_ref`) are the platform's, shared with every other
 plugin. This module only adds what is specific to a *revisioned* evaluator entity — the ``#fragment``
 that selects a revision.
 
@@ -27,7 +27,7 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
     MetricMetadata,
 )
 from nemo_evaluator_sdk.values.common import SecretRef
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN, parse_entity_ref
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator
 
 
@@ -141,7 +141,7 @@ LATEST_TAG = "latest"
 def parse_subentity_ref(root: str, default_workspace: str) -> tuple[str, str, str]:
     """Split a reference into ``(workspace, name, fragment)``.
 
-    The ``workspace/name`` split is delegated to the platform's :func:`~nemo_platform_plugin.refs.
+    The ``workspace/name`` split is delegated to the platform's :func:`~nemo_helix_plugin.refs.
     parse_entity_ref`; this only adds the revision fragment on top, so evaluator refs and every other
     plugin's refs agree on what a ``workspace/name`` is. Callers that don't care about revisions
     discard the third element — that, rather than a second parser, is how a pinned ref is read

@@ -6,13 +6,13 @@ title: "Run a Custom NeMo Gym Environment"
 description: "Package a custom NeMo Gym environment as a FileSet and run it as a sandboxed agent-evaluate job."
 ---
 
-A custom Gym environment runs from a NeMo Platform FileSet rather than from the components bundled
+A custom Gym environment runs from a NeMo Helix FileSet rather than from the components bundled
 in the Gym task image. Evaluator stages the FileSet onto job storage, mounts it read-only in an
 OpenSandbox Gym host, and returns the rollouts through the normal agent-evaluation result bundle.
 
 ## Prerequisites
 
-- A running NeMo Platform with the Evaluator plugin.
+- A running NeMo Helix with the Evaluator plugin.
 - An OpenSandbox-capable Kubernetes deployment configured for sandboxed Gym. See
   [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration).
 - A taskset built from Gym rows as described in
@@ -114,7 +114,7 @@ target:
   num_repeats: 1
   concurrency: 1
   hydra_params:
-    policy_base_url: http://nemo-platform-api.default.svc.cluster.local:8080/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1
+    policy_base_url: http://nemo-helix-api.default.svc.cluster.local:8080/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1
     policy_api_key: not-used
     policy_model_name: my-model
 max_concurrent_tasks: 1
@@ -152,7 +152,7 @@ environment variables.
 <Tab title="CLI">
 
 ```bash
-nemo evaluator agent-evaluate submit \
+nemo evaluator agent-evaluate \
   --spec-file gym-custom-environment.yaml \
   --workspace default \
   --profile default
@@ -172,9 +172,9 @@ from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 
 runner = GymAgentTaskRunner(
     config=GymRuntimeConfig(
@@ -204,9 +204,9 @@ part of the runner.
 Evaluator compiles two ordered steps:
 
 1. `stage-environment` downloads the FileSet onto job-scoped persistent storage.
-2. `agent-evaluate` provisions `nmp-gym-host`, collects rollouts, scores them, and destroys the host.
+2. `agent-evaluate` provisions `nhx-gym-host`, collects rollouts, scores them, and destroys the host.
 
-Both platform steps use `nmp-cpu-tasks`; Gym and Ray run in the separate sandbox host.
+Both platform steps use `nhx-tasks`; Gym and Ray run in the separate sandbox host.
 
 ## 5. Read the results
 

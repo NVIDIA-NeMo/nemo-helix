@@ -24,7 +24,8 @@ import { BackendSelectionSection } from '@studio/components/NewCustomizationForm
 import {
   baseDeploymentDefaults,
   baseDeploymentName,
-  DEFAULT_DEPLOY_BASE_MODEL,
+  DEPLOY_BY_DEFAULT,
+  outputDeploymentDefaults,
 } from '@studio/components/NewCustomizationForm/baseDeploymentForm';
 import { ComputeResourcesSection } from '@studio/components/NewCustomizationForm/ComputeResourcesSection';
 import { DeploymentSection } from '@studio/components/NewCustomizationForm/DeploymentSection';
@@ -34,6 +35,7 @@ import { GrpoParametersSection } from '@studio/components/NewCustomizationForm/G
 import { IntegrationsSection } from '@studio/components/NewCustomizationForm/IntegrationsSection';
 import { LoraParametersSection } from '@studio/components/NewCustomizationForm/LoraParametersSection';
 import { ModelSelectionSection } from '@studio/components/NewCustomizationForm/ModelSelectionSection';
+import { OutputDeploymentSection } from '@studio/components/NewCustomizationForm/OutputDeploymentSection';
 import { RewardEnvironmentSection } from '@studio/components/NewCustomizationForm/RewardEnvironmentSection';
 import { TrainingMethodSection } from '@studio/components/NewCustomizationForm/TrainingMethodSection';
 import {
@@ -45,7 +47,10 @@ import {
   createDeploymentWizardSchema,
   type WizardFormValues,
 } from '@studio/routes/NewDeploymentRoute/schema';
-import { ensureWorkspaceDeploymentConfig } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
+import {
+  ensureUnboundDeploymentConfig,
+  ensureWorkspaceDeploymentConfig,
+} from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
   FORM_DEFAULTS,
@@ -145,7 +150,11 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const errorBannerRef = useRef<HTMLDivElement>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [deployStage, setDeployStage] = useState<string | null>(null);
-  const [deployBaseModel, setDeployBaseModel] = useState(DEFAULT_DEPLOY_BASE_MODEL);
+  // Two pieces of state rather than one, despite the shared default: the sections
+  // ask about different targets, so an opt-out for one should not silently carry
+  // over when the training method changes and back.
+  const [deployBaseModel, setDeployBaseModel] = useState(DEPLOY_BY_DEFAULT);
+  const [deployOutputModel, setDeployOutputModel] = useState(DEPLOY_BY_DEFAULT);
 
   const defaultValues = useMemo<CustomizationFormFields>(() => {
     if (initialValues) return initialValues;
@@ -214,24 +223,47 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     control: form.control,
     name: MODEL_FIELD_BY_BACKEND[backend],
   }) as string | undefined;
+  const outputName = useWatch({ control: form.control, name: 'outputName' });
 
   const readiness = useBaseModelDeploymentReadiness(baseModelRef, { enabled: isAdapterRun });
-  const needsBaseDeployment = isAdapterRun && CREATE_DEPLOYMENT_STATES.includes(readiness.state);
+
+  // Whether there is a deployment left to create at all. Only the adapter flow can
+  // answer "no": its target is the base model, which may already be serving LoRA — or
+  // may have failed to resolve at all, which is why this is an allowlist rather than
+  // `!== 'serving-lora'`. A full-weight run targets a model that does not exist yet,
+  // so nothing can be serving it and nothing had to be looked up — the same reason
+  // `launch_model` guards its existing-deployment check with `is_lora`.
+  const needsDeployment = isAdapterRun ? CREATE_DEPLOYMENT_STATES.includes(readiness.state) : true;
+  const deployRequested = isAdapterRun ? deployBaseModel : deployOutputModel;
 
   // Separate form: these fields drive their own API calls and are not part of any
   // job payload. Typed exactly `WizardFormValues` so the wizard's field components
   // take its `control` unchanged — see baseDeploymentForm.ts.
+  //
+  // One form rather than two, because the two sections are mutually exclusive —
+  // a run either emits an adapter or it does not. The effect below repoints it.
   const deployForm = useForm<WizardFormValues>({
     resolver: zodResolver(createDeploymentWizardSchema),
-    defaultValues: baseDeploymentDefaults(),
+    defaultValues: isAdapterRun ? baseDeploymentDefaults() : outputDeploymentDefaults(workspace),
     mode: 'onChange',
   });
 
-  // Keep the nested form pointed at whatever base model is currently picked.
+  // Keep the nested form pointed at whichever model this run's deployment serves:
+  // the base model for an adapter, the run's own output otherwise.
   useEffect(() => {
-    deployForm.setValue('modelRef', (baseModelRef ?? '') as WizardFormValues['modelRef']);
-    deployForm.setValue('name', baseDeploymentName(baseModelRef));
-  }, [baseModelRef, deployForm]);
+    const target = isAdapterRun
+      ? (baseModelRef ?? '')
+      : outputName
+        ? `${workspace}/${outputName}`
+        : '';
+    deployForm.setValue('modelRef', target as WizardFormValues['modelRef']);
+    deployForm.setValue('name', baseDeploymentName(isAdapterRun ? baseModelRef : outputName));
+    // Re-asserted rather than set once: the adapter flow hides this switch because
+    // a LoRA-disabled base refuses the adapter, but the output flow leaves it live,
+    // so switching from one to the other could otherwise carry a `false` into a
+    // deployment whose whole purpose is to serve the adapter.
+    if (isAdapterRun) deployForm.setValue('loraEnabled', true);
+  }, [isAdapterRun, baseModelRef, outputName, workspace, deployForm]);
 
   const { mutateAsync: createAutomodel, isPending: isPendingAutomodel } =
     useCustomizationCreateAutomodelJob({
@@ -302,11 +334,17 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     // milliseconds and the job is never submitted. Inline params are validated by
     // the job, after training.
     //
-    // Skipping is allowed: the user may already have a serving plan of their own.
-    // The section warns that the adapter will not be servable until the base model
-    // is deployed, and the Deployments page can do that at any time afterwards.
+    // The two flows differ in whether the config can name a model at all. An adapter
+    // is served by a deployment of its *base*, which exists now, so that config names
+    // it — and is reused by every later adapter trained against the same base. A
+    // full-weight run's output does not exist until the job finishes, so its config is
+    // created **unbound**: engine and executor only, no model. The model_entity task
+    // binds it to the trained model at deploy time.
+    //
+    // Skipping is allowed either way: the user may have a serving plan of their own,
+    // and the Deployments page can deploy either target at any time afterwards.
     let deploymentConfig: string | undefined;
-    if (needsBaseDeployment && deployBaseModel) {
+    if (needsDeployment && deployRequested) {
       const valid = await deployForm.trigger();
       if (!valid) {
         const messages = Object.values(deployForm.formState.errors)
@@ -320,17 +358,18 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
       const values = deployForm.getValues();
       const configName = configNameFromWizardBaseName(values.name.trim());
       try {
-        const { config, reused } = await ensureWorkspaceDeploymentConfig(
-          workspace,
-          values,
-          configName,
-          (message) => setDeployStage(message)
+        const ensure = isAdapterRun
+          ? ensureWorkspaceDeploymentConfig
+          : ensureUnboundDeploymentConfig;
+        const { config, reused } = await ensure(workspace, values, configName, (message) =>
+          setDeployStage(message)
         );
-        // Adopting an existing config is the intended outcome — one LoRA-enabled
-        // deployment of a base serves every adapter trained against it. But it was
-        // created by an earlier run and may not match what was just filled in, so
-        // say so rather than let the form imply these settings were used. A toast
-        // because `onSuccess` navigates away the moment the job is created.
+        // Adopting an existing config is the intended outcome for the adapter flow —
+        // one LoRA-enabled deployment of a base serves every adapter trained against
+        // it — and a tolerable one for a reused output name. Either way it was created
+        // by an earlier run and may not match what was just filled in, so say so rather
+        // than let the form imply these settings were used. A toast because `onSuccess`
+        // navigates away the moment the job is created.
         if (reused) {
           toast.info(
             `Reused the existing deployment configuration "${configName}" ` +
@@ -343,7 +382,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
         setValidationErrors([
           getErrorMessage(
             e as Error,
-            'Failed to create the base model deployment configuration. The job was not started.'
+            'Failed to create the deployment configuration. The job was not started.'
           ),
         ]);
         return;
@@ -433,7 +472,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                   slotFooter={
                     <Flex className="w-full items-center justify-end gap-2">
                       {deployStage ? (
-                        <Text kind="body/regular/sm" color="secondary" className="mr-auto">
+                        <Text kind="body/regular/sm" className="mr-auto text-secondary">
                           {deployStage}
                         </Text>
                       ) : null}
@@ -489,18 +528,28 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                     <IntegrationsSection backend={backend} />
                     <Divider />
                     <ComputeResourcesSection />
-                    {isAdapterRun && (
-                      <>
-                        <Divider />
-                        <DeploymentSection
-                          readiness={readiness}
-                          control={deployForm.control}
-                          errors={deployForm.formState.errors}
-                          baseModelRef={baseModelRef ?? ''}
-                          deployBaseModel={deployBaseModel}
-                          onDeployBaseModelChange={setDeployBaseModel}
-                        />
-                      </>
+                    <Divider />
+                    {/* Every run produces something servable, so the section is always
+                        offered — what differs is the target. An adapter is served by a
+                        deployment of its base model; anything else is served by a
+                        deployment of the model the run itself emits. */}
+                    {isAdapterRun ? (
+                      <DeploymentSection
+                        readiness={readiness}
+                        control={deployForm.control}
+                        errors={deployForm.formState.errors}
+                        baseModelRef={baseModelRef ?? ''}
+                        deployBaseModel={deployBaseModel}
+                        onDeployBaseModelChange={setDeployBaseModel}
+                      />
+                    ) : (
+                      <OutputDeploymentSection
+                        control={deployForm.control}
+                        errors={deployForm.formState.errors}
+                        outputName={outputName ?? ''}
+                        deployOutputModel={deployOutputModel}
+                        onDeployOutputModelChange={setDeployOutputModel}
+                      />
                     )}
                     {validationErrors.length > 0 && (
                       <Banner kind="inline" ref={errorBannerRef} status="error">

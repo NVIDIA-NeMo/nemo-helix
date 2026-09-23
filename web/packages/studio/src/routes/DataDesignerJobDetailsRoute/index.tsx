@@ -4,7 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import {
   Banner,
   Button,
@@ -56,7 +56,7 @@ export const DataDesignerJobDetailsRoute: FC = () => {
 
   const defaultTabRef = useRef<JobDetailsTab | undefined>(undefined);
   if (!defaultTabRef.current && job?.status) {
-    defaultTabRef.current = PlatformJobTerminalStatuses.includes(job.status) ? 'profile' : 'logs';
+    defaultTabRef.current = HelixJobTerminalStatuses.includes(job.status) ? 'profile' : 'logs';
   }
   const activeTab = selectedTab ?? defaultTabRef.current ?? 'profile';
 

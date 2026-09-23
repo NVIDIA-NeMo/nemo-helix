@@ -14,7 +14,7 @@ wheel.
   not installed in the plugin wheel.
 - Install AWS CLI 2.33.0 or newer and configure the CSS S3 credentials described in
   [State bundles](#state-bundles).
-- Start a local NeMo Platform at `http://localhost:8080` before using pinned
+- Start a local NeMo Helix at `http://localhost:8080` before using pinned
   analysis, restore, roundtrip, or guarded publish commands.
 
 ## Quickstart
@@ -262,7 +262,7 @@ The `[tau2-airline]`, `[tau2-retail]`, and `[tau2-telecom]` stanzas then need
   (`<repo>/data`) are derived from it (`tau2_bin`/`tau2_data_dir` override if needed).
 - `agent_llm`/`user_llm` — models your proxy key serves (`GET {OPENAI_API_BASE}/v1/models`);
   default `openai/nvidia/nvidia/nemotron-3-super-v3`.
-- `base_url` — a reachable NeMo Platform (default `http://localhost:8080`).
+- `base_url` — a reachable NeMo Helix (default `http://localhost:8080`).
 
 With `evaluation/.env` holding the required credentials, run:
 

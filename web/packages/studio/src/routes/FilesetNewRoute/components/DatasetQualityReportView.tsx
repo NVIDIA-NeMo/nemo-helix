@@ -12,7 +12,7 @@ interface DatasetQualityReportViewProps {
 
 export const DatasetQualityReportView: FC<DatasetQualityReportViewProps> = ({ report }) => {
   const partialScanNote = report.scannedLines < report.totalLines && (
-    <Text kind="body/regular/sm" color="secondary">
+    <Text className="text-secondary" kind="body/regular/sm">
       Scanned first {report.scannedLines.toLocaleString()} of {report.totalLines.toLocaleString()}{' '}
       lines.
     </Text>
@@ -43,7 +43,7 @@ export const DatasetQualityReportView: FC<DatasetQualityReportViewProps> = ({ re
           <Stack gap="density-xs">
             <Text kind="body/regular/sm">{issue.message}</Text>
             {issue.affectedLines && issue.affectedLines.length > 0 && (
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 {'Line' + (issue.affectedLines.length > 1 ? 's' : '') + ': '}
                 {issue.affectedLines.join(', ')}
                 {issue.count && issue.count > issue.affectedLines.length

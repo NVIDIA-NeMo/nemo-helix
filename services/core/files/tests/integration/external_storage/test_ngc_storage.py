@@ -22,14 +22,14 @@ from typing import Iterator
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.core.files.app.backends.base import StorageImpl
-from nmp.core.files.app.streaming import download_url_streaming
-from nmp.core.files.testing.utils import create_fileset
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nhx.core.files.app.backends.base import StorageImpl
+from nhx.core.files.app.streaming import download_url_streaming
+from nhx.core.files.testing.utils import create_fileset
 from pydantic import SecretStr
 
 # Skip all tests in this module if NGC_API_KEY is not set
@@ -45,7 +45,7 @@ NGC_TEST_VERSION = "25.12"
 
 
 @pytest.fixture
-def ngc_api_key_secret(sdk: NeMoPlatform) -> Iterator[str]:
+def ngc_api_key_secret(sdk: NeMoHelix) -> Iterator[str]:
     """Create a temporary secret for NGC API key and clean up after use."""
     api_key = os.environ.get("NGC_API_KEY")
     if not api_key:
@@ -53,7 +53,7 @@ def ngc_api_key_secret(sdk: NeMoPlatform) -> Iterator[str]:
     secret_name = f"ngc-api-key-{uuid.uuid4().hex[:8]}"
     secrets = client_from_platform(sdk, SecretsClient)
     secrets.create_secret(
-        body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
+        body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
         workspace=DEFAULT_WORKSPACE,
     )
     try:
@@ -65,7 +65,7 @@ def ngc_api_key_secret(sdk: NeMoPlatform) -> Iterator[str]:
 class TestNGCVersionResolution:
     """Test that mutable versions are resolved to immutable version IDs."""
 
-    def test_fileset_resolves_latest_to_version_id(self, sdk: NeMoPlatform, ngc_api_key_secret: str):
+    def test_fileset_resolves_latest_to_version_id(self, sdk: NeMoHelix, ngc_api_key_secret: str):
         """Test that creating a fileset without version resolves to the latest version ID.
 
         This verifies the fix for cache staleness: when a user creates a fileset
@@ -103,7 +103,7 @@ class TestNGCVersionResolution:
             # original_version should be None (user requested "latest")
             assert storage.original_version is None, f"original_version should be None, got: {storage.original_version}"
 
-    def test_fileset_with_explicit_version_preserves_both(self, sdk: NeMoPlatform, ngc_api_key_secret: str):
+    def test_fileset_with_explicit_version_preserves_both(self, sdk: NeMoHelix, ngc_api_key_secret: str):
         """Test that creating a fileset with an explicit version preserves it correctly."""
         name = f"ngc-test-{uuid.uuid4().hex[:8]}"
 
@@ -135,7 +135,7 @@ class TestNGCVersionResolution:
 class TestNGCStorageBackend:
     """Test NGC storage backend with real NGC resources."""
 
-    def test_list_files_from_ngc_resource(self, sdk: NeMoPlatform, ngc_api_key_secret: str):
+    def test_list_files_from_ngc_resource(self, sdk: NeMoHelix, ngc_api_key_secret: str):
         """Test listing files from an NGC resource."""
         name = f"ngc-test-{uuid.uuid4().hex[:8]}"
 
@@ -166,7 +166,7 @@ class TestNGCStorageBackend:
                 assert file_info.size is not None
                 assert file_info.size >= 0
 
-    def test_download_file_from_ngc_resource(self, sdk: NeMoPlatform, ngc_api_key_secret: str):
+    def test_download_file_from_ngc_resource(self, sdk: NeMoHelix, ngc_api_key_secret: str):
         """Test downloading a file from an NGC resource."""
         name = f"ngc-test-{uuid.uuid4().hex[:8]}"
 
@@ -201,7 +201,7 @@ class TestNGCStorageBackend:
 
             assert len(content) == test_file.size
 
-    def test_download_with_range_request(self, sdk: NeMoPlatform, ngc_api_key_secret: str):
+    def test_download_with_range_request(self, sdk: NeMoHelix, ngc_api_key_secret: str):
         """Test partial download using HTTP Range header."""
         name = f"ngc-test-{uuid.uuid4().hex[:8]}"
 
@@ -247,7 +247,7 @@ class TestNGCCaching:
 
     def test_cache_path_uses_resolved_version_not_latest(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         ngc_api_key_secret: str,
         cache_storage_impl: StorageImpl,
     ):
@@ -311,7 +311,7 @@ class TestNGCCaching:
 
     def test_second_download_uses_cache(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         ngc_api_key_secret: str,
         cache_storage_impl: StorageImpl,
         mocker,
@@ -323,7 +323,7 @@ class TestNGCCaching:
         # Spy on the source download function to verify it's only called on cache miss
         # Must patch where it's imported/used, not where it's defined
         download_spy = mocker.patch(
-            "nmp.core.files.app.backends.ngc.download_url_streaming",
+            "nhx.core.files.app.backends.ngc.download_url_streaming",
             wraps=download_url_streaming,
         )
 
@@ -389,7 +389,7 @@ class TestNGCCaching:
 
     def test_different_files_cached_separately(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         ngc_api_key_secret: str,
         cache_storage_impl: StorageImpl,
     ):
@@ -460,7 +460,7 @@ class TestNGCCaching:
 
     def test_byte_range_requests_bypass_cache(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         ngc_api_key_secret: str,
         cache_storage_impl: StorageImpl,
     ):
@@ -589,7 +589,7 @@ class TestNGCPublicTargets:
     """
 
     @pytest.mark.parametrize("catalog_url", NGC_PUBLIC_TARGETS_FOR_INTEGRATION)
-    def test_list_files_public_ngc_target(self, sdk: NeMoPlatform, ngc_api_key_secret: str, catalog_url: str):
+    def test_list_files_public_ngc_target(self, sdk: NeMoHelix, ngc_api_key_secret: str, catalog_url: str):
         """List files from a public NGC resource or model using a catalog URL."""
         org, team, target_name, version, target_type = _parse_ngc_catalog_url(catalog_url)
         fileset_name = f"ngc-pub-{uuid.uuid4().hex[:8]}"

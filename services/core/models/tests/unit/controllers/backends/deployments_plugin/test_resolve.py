@@ -4,8 +4,8 @@
 from unittest.mock import patch
 from urllib.parse import urlunsplit
 
-from nmp.common.config import Runtime
-from nmp.core.models.controllers.backends.deployments_plugin.resolve import rewrite_loopback_for_docker_container
+from nhx.common.config import Runtime
+from nhx.core.models.controllers.backends.deployments_plugin.resolve import rewrite_loopback_for_docker_container
 
 
 def test_rewrites_loopback_url_for_docker_with_configured_address() -> None:
@@ -54,7 +54,7 @@ def test_preserves_loopback_url_for_kubernetes() -> None:
 
 def test_uses_detected_loopback_override_when_config_is_unset() -> None:
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.resolve.determine_loopback_override",
+        "nhx.core.models.controllers.backends.deployments_plugin.resolve.determine_loopback_override",
         return_value="nemo-gateway",
     ):
         result = rewrite_loopback_for_docker_container(
@@ -68,7 +68,7 @@ def test_uses_detected_loopback_override_when_config_is_unset() -> None:
 
 def test_falls_back_to_host_docker_internal_for_docker_loopback() -> None:
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.resolve.determine_loopback_override",
+        "nhx.core.models.controllers.backends.deployments_plugin.resolve.determine_loopback_override",
         return_value=None,
     ):
         result = rewrite_loopback_for_docker_container(

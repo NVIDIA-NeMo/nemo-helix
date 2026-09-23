@@ -10,7 +10,7 @@
 #   ./apply.sh && ./smoke.sh
 set -euo pipefail
 
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 PORT="${PORT:-18080}"
 BASE="http://127.0.0.1:$PORT/apis/scaled-evals"
 WORK="$(mktemp -d)"

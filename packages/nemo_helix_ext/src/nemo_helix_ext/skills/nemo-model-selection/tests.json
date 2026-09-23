@@ -1,0 +1,125 @@
+{
+  "skill": "nemo-model-selection",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use the nemo-model-selection skill to help me pick a model for my new agent.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Invoke nemo-model-selection for the support triage agent.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run nemo-model-selection. I'm not sure which model to put in the Ethos.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Which model should I use for an agent that calls three or four MCP tools per turn?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I'm building a NeMo agent but I don't know what LLM to put in the YAML.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Help me pick a model. The agent reads long PDFs and answers questions from them.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "What model should I use if I'm self-hosting on a single 24GB GPU?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "The agent does triage, three tools, cloud deploy. What model do I put in agent.yaml?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I went through agent design but skipped past the model question. Let's settle that now.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Spec is done except for the model. It's a code-review agent that reads PRs and suggests fixes.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I want to use bedrock/claude-3-5-sonnet for my agent. Does it fit a tool-heavy workflow?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I have a custom fine-tune of Qwen3-30B I want to use. Walk me through whether it's appropriate.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Platform is configured with OpenAI as the provider. Which gpt model should the agent use?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Which model should go in models.default for this Platform agent.yaml?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Should this Hermes harness override the agent's default model or reuse it?",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Codex is my selected harness and I want to use an NVIDIA model through Platform IGW. Verify that the exact model route supports the Responses API before recommending it.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "The Codex candidate failed its valid Responses API compatibility request. Exclude that combination and test the next candidate before recommending it.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I've already picked gpt-4o-mini. Tell me what I'm trading off vs alternatives.",
+      "expected_skill": "nemo-model-selection"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Validate the completed agent.yaml and finish its harness configuration.",
+      "expected_skill_not": "nemo-model-selection"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "I want to build a NeMo agent but I haven't thought through what it needs to do yet.",
+      "expected_skill_not": "nemo-model-selection"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Implement the support agent we just designed.",
+      "expected_skill_not": "nemo-model-selection"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Deploy the agent now that the Ethos is signed off.",
+      "expected_skill_not": "nemo-model-selection"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Which embedding model should I use for my RAG pipeline?",
+      "expected_skill_not": "nemo-model-selection"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Compare Claude and GPT-4 for general chatbot use.",
+      "expected_skill_not": "nemo-model-selection"
+    }
+  ]
+}

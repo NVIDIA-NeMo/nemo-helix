@@ -5,7 +5,7 @@ Read this file for agentic task-driven evaluation, direct SDK runners, platform
 
 ## Choose standalone SDK or platform job
 
-Use `AgentEvaluator` for lightweight in-process evaluation that does not require a running nemo-platform:
+Use `AgentEvaluator` for lightweight in-process evaluation that does not require a running nemo-helix:
 
 ```python
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
@@ -39,7 +39,7 @@ Submit the plugin job when platform execution is required:
 
 ```bash
 nemo evaluator agent-evaluate explain
-nemo evaluator agent-evaluate submit \
+nemo evaluator agent-evaluate \
   --spec-file skills/nemo-evaluator-plugin/assets/specs/fabric_agent_eval.json
 ```
 
@@ -137,7 +137,7 @@ survives into taskset-driven runs; inline tasks are for one-off submissions.
 
 Set `views` on a task to roll two or more of its metric outputs into one named,
 reported score. See
-[Score by Component](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/score-by-component).
+[Score by Component](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/score-by-component).
 
 ## Choose a platform target
 
@@ -176,7 +176,7 @@ Use `discover_gym_tasks` to turn Gym JSONL rows into task definitions and attach
 `GymRewardMetric` to score each rollout's reward. A standalone
 `GymAgentTaskRunner` requires `agent`, `agent_config`, and `resources_server`.
 
-For a durable job that uses components already installed in `nmp-gym-tasks`,
+For a durable job that uses components already installed in `nhx-gym-tasks`,
 submit the validated live runner as shown above or build a `GymRunnerTarget`:
 
 ```python
@@ -194,9 +194,9 @@ target = GymRunnerTarget(
 The caller chooses between a local SDK run and a durable platform job. A local
 run executes Evaluator and the `gym` subprocesses on the caller's machine. For
 a platform job, sandbox placement is an operator decision: sandbox-enabled
-deployments run Gym in a separate `nmp-gym-host`; deployments without
+deployments run Gym in a separate `nhx-gym-host`; deployments without
 OpenSandbox can run trusted, built-in Gym components together with Evaluator in
-`nmp-gym-tasks`. The latter is the colocated compatibility path, not a separate
+`nhx-gym-tasks`. The latter is the colocated compatibility path, not a separate
 submission interface.
 
 A custom environment supplies Gym component configuration, code, and
@@ -209,7 +209,7 @@ FileSet-backed environments require sandboxed platform execution. Evaluator
 compiles them into two ordered Jobs steps:
 
 1. `stage-environment` downloads the FileSet onto job-scoped shared storage.
-2. `agent-evaluate` provisions `nmp-gym-host` with the environment mounted
+2. `agent-evaluate` provisions `nhx-gym-host` with the environment mounted
    read-only, collects and scores rollouts, then destroys the host.
 
 ```python
@@ -278,11 +278,12 @@ A standalone run returns an `AgentEvalResult`:
   metric outputs, status, and diagnostics.
 - `result.trials` contains each agent output, its evidence, and its
   `completed`, `partial`, or `failed` status.
-- `result.run_id` identifies the run; `result.benchmark` contains its grouping
-  metadata.
+- `result.run_id` identifies the run; `result.metadata` contains its run
+  provenance — labels, target identity, timings, and SDK version.
 
-When standalone `AgentEvalRunConfig.output_dir` is set, the same information is
-written as a run bundle:
+Call `result.persist()` to write the same information as a run bundle. It
+defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
+`output_dir=` to choose another location:
 
 | File | Contents |
 | --- | --- |
@@ -291,7 +292,7 @@ written as a run bundle:
 | `trials.jsonl` | Trial outputs, evidence, metadata, and status |
 | `tasks.jsonl` | Tasks included in the run |
 | `run.json` | Run ID and artifact manifest |
-| `benchmark.json` | Benchmark-grouping metadata |
+| `metadata.json` | Run provenance — labels, target identity, timings, and SDK version |
 | `report.html` | Browsable dashboard when dashboard generation is enabled |
 
 Use the in-memory result for programmatic follow-up and the bundle for

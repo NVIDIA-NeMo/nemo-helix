@@ -4,9 +4,9 @@
 """Tests for :class:`~nemo_example_plugin.jobs.say_hello.SayHelloJob`.
 
 Pin the end-to-end job behavior: running with an explicit
-:class:`~nemo_platform_plugin.job_context.JobContext` writes the greeting to
+:class:`~nemo_helix_plugin.job_context.JobContext` writes the greeting to
 ``ctx.storage.persistent`` and registers it via
-:class:`~nemo_platform_plugin.job_results.LocalJobResults` with a ``file://`` URL.
+:class:`~nemo_helix_plugin.job_results.LocalJobResults` with a ``file://`` URL.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from nemo_example_plugin.jobs.say_hello import (
     DEFAULT_RESULT_NAME,
     SayHelloJob,
 )
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 
 
 def _job_context(tmp_path: Path) -> JobContext:

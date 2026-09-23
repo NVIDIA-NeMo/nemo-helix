@@ -1071,7 +1071,7 @@ def scoped_harbor_agent_import(
     ``job_name`` therefore leaves the stamp valid but changes this string, and Harbor
     declines to resume; :func:`_build_native_job` absorbs that into a clean re-run.
     The results stay correct — it costs one repeated job. Callers that rebuild agents
-    under changing directory names (the Experimentalist does) are unaffected, because
+    under changing directory names are unaffected, because
     the agent name feeds their ``job_name`` too, so a rename lands in a different job
     dir with nothing to resume.
 
@@ -1080,8 +1080,7 @@ def scoped_harbor_agent_import(
     spelling instead lets the two disagree: a symlink keeps its own name while
     resolving elsewhere, so flipping it at a fixed ``job_name`` would reuse one job
     dir for two different agents, caught only by Harbor's refusal rather than by
-    design. The Experimentalist resolves first for exactly this reason
-    (``resolve_harbor_run_inputs``).
+    design. Callers should resolve the directory first for this reason.
 
     Only ``agent_dir`` (not ``sys.path``) is made importable, so a loose wrapper
     must be self-contained: a single module, or one that reaches siblings via

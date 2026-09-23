@@ -5,7 +5,7 @@
 #
 # Adapted from OpenShell's deploy/docker/gateway.toml, with one deliberate
 # change: the gateway is pinned to :17670 (OpenShell's documented docker
-# default) instead of :8080, because the NeMo platform owns :8080 and running
+# default) instead of :8080, because the NeMo Helix owns :8080 and running
 # the gateway there collides with it. Mounted read-only into the gateway
 # container by docker-compose.yml and loaded via OPENSHELL_GATEWAY_CONFIG.
 

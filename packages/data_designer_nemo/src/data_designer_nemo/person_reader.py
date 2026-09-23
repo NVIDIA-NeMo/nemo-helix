@@ -7,17 +7,17 @@ from data_designer_nemo.filesystem import make_filesystem
 from data_designer_nemo.nemotron_personas import (
     get_locale_fileset_file_ref,
 )
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.adapter import SyncHelixClient
 
 
 class FilesetsPersonReader(PersonReader):
     """Provides DuckDB access to Nemotron personas datasets via filesets.
 
-    DuckDB calls into the SDK fileset filesystem synchronously, so this reader
-    only accepts a sync :class:`NeMoPlatform`.
+    DuckDB calls into the fileset filesystem synchronously, so this reader
+    only accepts a sync :class:`NemoClient`.
     """
 
-    def __init__(self, sdk: NeMoPlatform):
+    def __init__(self, sdk: SyncHelixClient):
         self._sdk = sdk
 
     def create_duckdb_connection(self) -> duckdb.DuckDBPyConnection:

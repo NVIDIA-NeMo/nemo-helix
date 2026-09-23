@@ -11,7 +11,7 @@ Prefer `"person"` — it provides census-grounded demographics and optional pers
 
 ## Locale availability
 
-Person sampling reads locale data from a NeMo Platform fileset named `system/nemotron-personas-dataset-<locale>` (lowercased locale). Nothing is downloaded to your machine, and the `installed` column in `nemo data-designer agent context` output describes a local library path that platform execution does not use — ignore it.
+Person sampling reads locale data from a NeMo Helix fileset named `system/nemotron-personas-dataset-<locale>` (lowercased locale). Nothing is downloaded to your machine, and the `installed` column in `nemo data-designer agent context` output describes a local library path that platform execution does not use — ignore it.
 
 Supported locales: `en_IN`, `en_SG`, `en_US`, `fr_FR`, `hi_Deva_IN`, `hi_Latn_IN`, `ja_JP`, `ko_KR`, `pt_BR`.
 

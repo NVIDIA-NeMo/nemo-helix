@@ -20,26 +20,26 @@ from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
 import yaml
-from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient, client_from_platform
-from nemo_platform_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     ExecutorSpec,
-    PlatformJobSpec,
+    HelixJobSpec,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.refs import (
+from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN,
     FilesetRef,
     LocalDir,
@@ -62,7 +62,7 @@ OPTIMIZE_COMMAND = [OPTIMIZE_TASK_MODULE]
 
 #: Image for the cpu (docker / kubernetes_job) fallback.  ``nemo-optimization-plugin`` is part of
 #: the ``cpu-tasks`` dependency group so ``python -m nemo_optimization.tasks.optimize`` imports there.
-OPTIMIZE_TASK_IMAGE = "nmp-cpu-tasks"
+OPTIMIZE_TASK_IMAGE = "nhx-tasks"
 
 
 class OptimizeJob(NemoJob):
@@ -83,7 +83,7 @@ class OptimizeJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncPlatformClient,
+        async_sdk: AsyncHelixClient,
         is_local: bool,
     ) -> OptimizeSpec:
         del entity_client, async_sdk
@@ -99,15 +99,15 @@ class OptimizeJob(NemoJob):
         spec: OptimizeSpec,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncPlatformClient,
+        async_sdk: AsyncHelixClient,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        from nemo_platform_plugin.jobs.api_factory import (
+    ) -> HelixJobSpec:
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
-            PlatformJobStep,
+            HelixJobStep,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
@@ -115,14 +115,14 @@ class OptimizeJob(NemoJob):
         # ``compile`` is the remote submission path only, so requiring the
         # fileset here keeps platform execution remote-safe.
         if spec.optimize_config_fileset is None:
-            raise PlatformJobCompilationError(FILESET_REQUIRED)
+            raise HelixJobCompilationError(FILESET_REQUIRED)
 
         spec_dict = spec.model_dump(mode="json")
         spec_dict["workspace"] = workspace
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="optimize",
                     executor=await _resolve_executor(profile=profile or "default", async_sdk=async_sdk),
                     config=spec_dict,
@@ -136,7 +136,7 @@ class OptimizeJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: SyncPlatformClient | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: SyncHelixClient | None = None) -> dict:
         spec = OptimizeSpec.model_validate(config)
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
@@ -168,15 +168,15 @@ class OptimizeJob(NemoJob):
         return result if published is None else {**result, "output": published}
 
 
-def _profiles_unavailable(profile: str) -> PlatformJobDependencyUnavailableError:
+def _profiles_unavailable(profile: str) -> HelixJobDependencyUnavailableError:
     """A retryable failure while resolving the backend for *profile*."""
-    return PlatformJobDependencyUnavailableError(
+    return HelixJobDependencyUnavailableError(
         f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
         "unavailable.  Retry the submission."
     )
 
 
-async def _resolve_executor(*, profile: str, async_sdk: AsyncPlatformClient) -> ExecutorSpec:
+async def _resolve_executor(*, profile: str, async_sdk: AsyncHelixClient) -> ExecutorSpec:
     """Pick the executor for *profile* from the backends the platform actually registered.
 
     Optimize prefers ``subprocess``: a study drives Fabric trials that may need the host's
@@ -212,7 +212,7 @@ async def _resolve_executor(*, profile: str, async_sdk: AsyncPlatformClient) -> 
         )
 
     available = sorted({f"{candidate.provider}/{candidate.profile}" for candidate in profiles})
-    raise PlatformJobCompilationError(
+    raise HelixJobCompilationError(
         f"No 'subprocess' or 'cpu' execution profile named {profile!r} is registered, so the "
         f"optimize step has nowhere to run.  Available profiles: {available or ['<none>']}."
     )
@@ -223,7 +223,7 @@ def _staged_bundle(
     spec: OptimizeSpec,
     *,
     ctx: JobContext,
-    sdk: SyncPlatformClient | None,
+    sdk: SyncHelixClient | None,
 ) -> Iterator[tuple[Path, Path | None]]:
     """Yield ``(optimize config path, bundle root)`` for the run.
 
@@ -297,7 +297,7 @@ def _staged_dataset(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: SyncPlatformClient | None,
+    sdk: SyncHelixClient | None,
 ) -> Iterator[dict[str, Any]]:
     """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
 
@@ -359,7 +359,7 @@ def _publish_results(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: SyncPlatformClient | None,
+    sdk: SyncHelixClient | None,
 ) -> dict[str, str] | None:
     """Copy the study's artifacts to *output*, returning a pointer for the job result.
 
@@ -403,8 +403,8 @@ def _publish_results(
     ws, name = split_fileset_ref(FilesetRef(output), workspace)
     if sdk is None:
         raise LocalRunError(
-            f"Publishing optimize results to fileset '{ws}/{name}' requires a 'sdk: NeMoPlatform', "
-            "but no platform SDK was available. Set NMP_BASE_URL or use a local output directory instead."
+            f"Publishing optimize results to fileset '{ws}/{name}' requires a 'sdk: NeMoHelix', "
+            "but no platform SDK was available. Set NHX_BASE_URL or use a local output directory instead."
         )
     upload_to_fileset(artifacts, fileset=name, workspace=ws, sdk=sdk)
     logger.info("Published optimize results from %s to fileset %s/%s", artifacts, ws, name)

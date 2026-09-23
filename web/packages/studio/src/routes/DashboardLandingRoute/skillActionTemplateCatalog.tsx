@@ -9,7 +9,6 @@ import {
   GitBranch,
   Hammer,
   KeyRound,
-  Search,
   SearchCheck,
   ShieldCheck,
   Sliders,
@@ -62,7 +61,7 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Run a security audit',
     description: 'Scan an agent target for vulnerabilities and risky behavior.',
     prompt:
-      'Use the auditor skill to configure and run a security audit for a NeMo Platform agent target.',
+      'Use the auditor skill to configure and run a security audit for a NeMo Helix agent target.',
     icon: <SearchCheck size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
@@ -84,9 +83,9 @@ export const SKILL_ACTION_TEMPLATES = {
   },
   'nemo-build-agent': {
     title: 'Build an agent',
-    description: 'Scaffold and deploy a NAT workflow from an agent Ethos.',
+    description: 'Build and deploy a LangChain Deep Agent through Fabric.',
     prompt:
-      'Use the nemo-build-agent skill to scaffold and deploy a NeMo agent from an existing Ethos. Inspect the workspace first and ask for the target Ethos if needed.',
+      'Use the nemo-build-agent skill to build and deploy a NeMo agent from confirmed requirements. Inspect the workspace first and clarify any missing requirements.',
     icon: <Hammer size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
@@ -130,14 +129,6 @@ export const SKILL_ACTION_TEMPLATES = {
     icon: <BarChart3 size={18} />,
     requiredFeatureFlags: ['evaluatorEnabled'],
   },
-  'nemo-explore': {
-    title: 'Explore an agent idea',
-    description: 'Capture the job, audience, tools, model, and constraints.',
-    prompt:
-      'Use the nemo-explore skill to guide an agent design conversation and capture the important decisions before writing a spec.',
-    icon: <Search size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
-  },
   'nemo-files': {
     title: 'Manage filesets',
     description: 'Upload, download, and inspect datasets or JSONL artifacts.',
@@ -150,7 +141,7 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Check fine-tuning status',
     description: 'Confirm what fine-tuning path is currently available.',
     prompt:
-      'Use the nemo-fine-tune skill to explain the current fine-tuning status for NeMo Platform and avoid unsupported training paths.',
+      'Use the nemo-fine-tune skill to explain the current fine-tuning status for NeMo Helix and avoid unsupported training paths.',
     icon: <Gauge size={18} />,
     requiredFeatureFlags: ['customizerEnabled'],
   },
@@ -166,7 +157,7 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Choose a model',
     description: 'Compare model options for an agent or workflow.',
     prompt:
-      'Use the nemo-model-selection skill to compare model options for a NeMo Platform agent or workflow and recommend a starting point.',
+      'Use the nemo-model-selection skill to compare model options for a NeMo Helix agent or workflow and recommend a starting point.',
     icon: <SearchCheck size={18} />,
     requiredFeatureFlags: ['baseModelsEnabled'],
   },
@@ -182,23 +173,15 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Pick the right NeMo skill',
     description: 'Route a broad task to the right specialized workflow.',
     prompt:
-      'Use the nemo-skill-selection skill to route this NeMo Platform task to the right specialized skill before taking action.',
+      'Use the nemo-skill-selection skill to route this NeMo Helix task to the right specialized skill before taking action.',
     icon: <GitBranch size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
-  },
-  'nemo-ethos': {
-    title: 'Write an agent Ethos',
-    description: 'Turn exploration notes into a durable agent contract.',
-    prompt:
-      'Use the nemo-ethos skill to turn the current agent design notes into a durable NeMo Platform agent Ethos.',
-    icon: <Hammer size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-status': {
     title: 'Check platform status',
     description: 'Summarize health, providers, deployed agents, and available models.',
     prompt:
-      'Use the nemo-status skill to check NeMo Platform health, deployed agents, providers, and available models.',
+      'Use the nemo-status skill to check NeMo Helix health, deployed agents, providers, and available models.',
     icon: <Terminal size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
@@ -206,7 +189,7 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Shut down platform',
     description: 'Choose a safe stop or cleanup path for local services.',
     prompt:
-      'Use the nemo-teardown skill to guide a safe NeMo Platform shutdown or cleanup. Confirm before any destructive action.',
+      'Use the nemo-teardown skill to guide a safe NeMo Helix shutdown or cleanup. Confirm before any destructive action.',
     icon: <Terminal size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
@@ -214,7 +197,7 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Try a deployed agent',
     description: 'Send a query to an agent or fall back to model chat.',
     prompt:
-      'Use the nemo-try-agent skill to send a query to a deployed NeMo Platform agent, announcing the routing decision before sending.',
+      'Use the nemo-try-agent skill to send a query to a deployed NeMo Helix agent, announcing the routing decision before sending.',
     icon: <Terminal size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },
@@ -222,7 +205,7 @@ export const SKILL_ACTION_TEMPLATES = {
     title: 'Generate safety data',
     description: 'Create safety-focused synthetic data with Safe Synthesizer.',
     prompt:
-      'Use the safe-synthesizer skill to create safety-focused synthetic data for a NeMo Platform workflow.',
+      'Use the safe-synthesizer skill to create safety-focused synthetic data for a NeMo Helix workflow.',
     icon: <Sparkles size={18} />,
     requiredFeatureFlags: ['safeSynthesizerEnabled'],
   },

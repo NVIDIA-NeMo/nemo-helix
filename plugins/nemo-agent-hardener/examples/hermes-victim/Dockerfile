@@ -28,7 +28,7 @@ WORKDIR /workspace
 # victim image, built to be attacked inside a sandbox, never shipped or served to anyone.
 RUN python -m venv /workspace/.venv \
  && /workspace/.venv/bin/pip install --no-cache-dir \
-      "nemo-platform[nemo-agents-plugin]" \
+      "nemo-helix[nemo-agents-plugin]" \
       "nemo-fabric" \
       "nemo-fabric-adapters-hermes" \
       "hermes-agent" \

@@ -11,7 +11,7 @@ datetime comparisons work correctly for both storage and query filtering.
 from datetime import timedelta
 
 import pytest
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
 
 
 @pytest.mark.asyncio
@@ -149,7 +149,7 @@ class TestTimestampFiltering:
         self, entity_repo: SQLAlchemyEntityRepository, setup_workspaces
     ):
         """$gte with a past date should include all entities."""
-        from nmp.common.api.filter import ComparisonOperation, FilterOperator
+        from nhx.common.api.filter import ComparisonOperation, FilterOperator
 
         for i in range(3):
             await entity_repo.create_entity(workspace="workspace-1", entity_type="config", name=f"e-{i}", data={})
@@ -166,7 +166,7 @@ class TestTimestampFiltering:
         self, entity_repo: SQLAlchemyEntityRepository, setup_workspaces
     ):
         """$lt with a future date should include all entities."""
-        from nmp.common.api.filter import ComparisonOperation, FilterOperator
+        from nhx.common.api.filter import ComparisonOperation, FilterOperator
 
         for i in range(3):
             await entity_repo.create_entity(workspace="workspace-1", entity_type="config", name=f"e-{i}", data={})
@@ -183,7 +183,7 @@ class TestTimestampFiltering:
         self, entity_repo: SQLAlchemyEntityRepository, setup_workspaces
     ):
         """$lt with a past date should exclude all entities."""
-        from nmp.common.api.filter import ComparisonOperation, FilterOperator
+        from nhx.common.api.filter import ComparisonOperation, FilterOperator
 
         await entity_repo.create_entity(workspace="workspace-1", entity_type="config", name="e-1", data={})
 
@@ -197,7 +197,7 @@ class TestTimestampFiltering:
 
     async def test_range_filter_brackets_all_entities(self, entity_repo: SQLAlchemyEntityRepository, setup_workspaces):
         """A date range from past to future should include all entities."""
-        from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+        from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 
         for i in range(3):
             await entity_repo.create_entity(workspace="workspace-1", entity_type="config", name=f"e-{i}", data={})
@@ -223,7 +223,7 @@ class TestTimestampFiltering:
         then use it to partition entities. Tests that the bind_processor format
         matches the stored format for correct comparison.
         """
-        from nmp.common.api.filter import ComparisonOperation, FilterOperator
+        from nhx.common.api.filter import ComparisonOperation, FilterOperator
 
         e1 = await entity_repo.create_entity(workspace="workspace-1", entity_type="config", name="before", data={})
 
@@ -249,7 +249,7 @@ class TestTimestampFiltering:
         whose updated_at is strictly greater than the second entity's updated_at.
         Only the first (re-updated) entity should match.
         """
-        from nmp.common.api.filter import ComparisonOperation, FilterOperator
+        from nhx.common.api.filter import ComparisonOperation, FilterOperator
 
         e1 = await entity_repo.create_entity(
             workspace="workspace-1", entity_type="config", name="will-update", data={"v": 1}

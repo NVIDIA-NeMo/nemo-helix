@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Async job polling aligned with ``nmp.testing.e2e.jobs.poll_until_terminal``.
+"""Async job polling aligned with ``nhx.testing.e2e.jobs.poll_until_terminal``.
 
-The E2E helper lives in ``nmp_testing``; the evaluator SDK cannot depend on that
+The E2E helper lives in ``nhx_testing``; the evaluator SDK cannot depend on that
 package at runtime, so this module mirrors its timeout semantics (pending time
 excluded from the job timeout, separate image-pull cap).
 """

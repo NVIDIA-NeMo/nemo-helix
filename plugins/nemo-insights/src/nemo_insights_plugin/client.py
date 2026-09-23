@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.method import method
 from nemo_insights_plugin import endpoints
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.client.method import method
 
 
 class _InsightsMethods:
@@ -30,10 +30,6 @@ class _InsightsMethods:
     create_analysis_run = method(endpoints.create_analysis_run)
     list_analysis_runs = method(endpoints.list_analysis_runs)
     get_analysis_run = method(endpoints.get_analysis_run)
-
-    create_analysis_job = method(endpoints.create_analysis_job)
-    list_analysis_jobs = method(endpoints.list_analysis_jobs)
-    get_analysis_job = method(endpoints.get_analysis_job)
 
 
 class InsightsClient(_InsightsMethods, NemoClient):

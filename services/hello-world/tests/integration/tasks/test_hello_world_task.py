@@ -4,9 +4,9 @@
 """Integration tests for the hello-world task."""
 
 import pytest
-from nmp.core.files.service import FilesService
-from nmp.hello_world.tasks import hello_world
-from nmp.testing import task_harness
+from nhx.core.files.service import FilesService
+from nhx.hello_world.tasks import hello_world
+from nhx.testing import task_harness
 
 
 class TestHelloWorldTask:

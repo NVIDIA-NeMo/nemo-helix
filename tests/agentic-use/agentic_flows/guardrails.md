@@ -37,7 +37,7 @@ The Guardrails service provides runtime safety controls for model inputs and out
 - Prompt injection detection
 
 **Prerequisites**:
-- NeMo Platform with guardrails enabled
+- NeMo Helix with guardrails enabled
 - Model accessible via IGW
 - Default guardrails configuration
 
@@ -69,7 +69,7 @@ The Guardrails service provides runtime safety controls for model inputs and out
 - Custom response templates
 
 **Prerequisites**:
-- NeMo Platform with guardrails enabled
+- NeMo Helix with guardrails enabled
 - Understanding of guardrails configuration schema
 
 **Success Criteria**:

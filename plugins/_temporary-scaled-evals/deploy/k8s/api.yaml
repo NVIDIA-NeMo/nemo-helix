@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# The NeMo Platform API serving the scaled-evals plugin and the core services
+# The NeMo Helix API serving the scaled-evals plugin and the core services
 # needed by its Platform Jobs controller.
 apiVersion: apps/v1
 kind: Deployment
@@ -38,7 +38,7 @@ spec:
                 name: scaled-evals-env
           env:
             # `nemo services run` takes a flock under $XDG_STATE_HOME, which
-            # defaults to ~/.local/state/nmp. runAsUser below has no passwd
+            # defaults to ~/.local/state/nhx. runAsUser below has no passwd
             # entry, so the kubelet hands it HOME=/, and the runner dies on
             # mkdir before it serves anything. /tmp is 1777, so this holds for
             # whatever uid we run as.

@@ -9,9 +9,9 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from nemo_platform_plugin.entities import EntityBase, ListResponse, PaginationInfo
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.filter_ops import LogicalOperation
+from nemo_helix_plugin.entities import EntityBase, ListResponse, PaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.filter_ops import LogicalOperation
 
 
 def matches_filter(entity, operation) -> bool:

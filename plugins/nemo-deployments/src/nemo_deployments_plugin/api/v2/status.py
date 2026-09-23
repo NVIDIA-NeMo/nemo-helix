@@ -11,8 +11,8 @@ from nemo_deployments_plugin.api.v2.dependencies import get_entity_client, requi
 from nemo_deployments_plugin.authz import scope
 from nemo_deployments_plugin.entities import Deployment, Volume
 from nemo_deployments_plugin.schema import UpdateDeploymentStatusRequest, UpdateVolumeStatusRequest
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 
 router = APIRouter()
 

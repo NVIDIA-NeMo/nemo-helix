@@ -5,7 +5,7 @@
 
 The routing decision happens in this request processor, decoupled from
 backend ownership. Standalone deployments can use this processor with
-their own backend; NeMo Platform IGW hosts use it with their backends.
+their own backend; NeMo Helix IGW hosts use it with their backends.
 
 This processor is the IGW counterpart of
 :meth:`RandomRoutingLLMBackend._pick_tier` plus the request-mutation

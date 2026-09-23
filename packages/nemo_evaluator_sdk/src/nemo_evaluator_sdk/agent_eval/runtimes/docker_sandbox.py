@@ -68,11 +68,11 @@ def _load_agents_sdk() -> SandboxSDK:
         from docker import from_env as docker_from_env
     except ImportError as exc:
         # Audience split is in the error text: SDK extras are not propagated into the
-        # vendored nemo_platform.beta.evaluator mirror.
+        # vendored nemo_helix.beta.evaluator mirror.
         raise RuntimeError(
             "DockerSandboxAgentRuntime requires the openai-agents[docker] Python packages. "
             "Standalone SDK: pip install 'nemo-evaluator-sdk[agent-runtimes]'. "
-            "Vendored nemo-platform.beta.evaluator (no SDK extras): "
+            "Vendored nemo-helix.beta.evaluator (no SDK extras): "
             "pip install 'openai-agents[docker]'"
         ) from exc
 

@@ -531,6 +531,11 @@ export const formToRlCreate = (
         execution_profile: dpo.execution_profile || undefined,
       },
       output: { name: f.outputName || undefined },
+      // Both arms of this builder take the same `deploymentConfig`. DPO is always
+      // full-weight, so the form offers the output-model deployment for it and creates
+      // the config -- dropping the name here left that config orphaned and the trained
+      // model unserved.
+      deployment_config: deploymentConfig,
     },
   };
 };

@@ -28,7 +28,7 @@ Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
 ### 1. Install the agents CLI
 
-From the **`nemo-platform` repo root**:
+From the **`nemo-helix` repo root**:
 
 ```bash
 uv sync --package nemo-agents-plugin
@@ -59,12 +59,12 @@ models (`GET /v1/models`).
 ### 4. Shell env used by every example
 
 ```bash
-export REPO_ROOT="/path/to/nemo-platform"
+export REPO_ROOT="/path/to/nemo-helix"
 export BUNDLE="$REPO_ROOT/plugins/nemo-optimization/examples/hermes-optimize"
 
-export NMP_BASE_URL="${NMP_BASE_URL:-http://localhost:8080}"
+export NHX_BASE_URL="${NHX_BASE_URL:-http://localhost:8080}"
 # Optional alias used by some CLI paths:
-export NEMO_BASE_URL="${NEMO_BASE_URL:-$NMP_BASE_URL}"
+export NEMO_BASE_URL="${NEMO_BASE_URL:-$NHX_BASE_URL}"
 
 # Point Fabric at the platform venv so Hermes adapters resolve. Without this,
 # Fabric may pick a system Python and fail with
@@ -114,7 +114,7 @@ Python submission of the staged fileset:
 import os
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 print(
@@ -125,7 +125,7 @@ print(
             "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
             "workspace": WORKSPACE,
         },
-        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+        base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
     )
 )
@@ -154,7 +154,7 @@ source "$REPO_ROOT/.venv/bin/activate"
 #   model: <your-igw-model-id>
 #   base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
 #   api_key_env: NEMO_AGENTS_IGW_API_KEY
-# (Replace host/model with your NMP_BASE_URL and IGW model id; values are
+# (Replace host/model with your NHX_BASE_URL and IGW model id; values are
 # stored as-is at create time — no ${...} expansion for this path.)
 # Defaults in agent.yaml use inference-api (same as optimize-chatonly.yaml).
 
@@ -263,7 +263,7 @@ read them back from.
 **Where the study runs:** optimize compiles to the `subprocess` execution
 profile when the platform registers one, and otherwise to the `cpu` profile
 (docker or `kubernetes_job`, whichever the deployment registered) using the
-`nmp-cpu-tasks` image. Either way the fileset is the only input, so both
+`nhx-tasks` image. Either way the fileset is the only input, so both
 backends see the same tree. See
 [Operator notes](../../../../docs/agents/optimization.mdx) for what each backend
 needs installed.
@@ -381,7 +381,7 @@ Python submission of the staged fileset:
 import os
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 print(
@@ -392,7 +392,7 @@ print(
             "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
             "workspace": WORKSPACE,
         },
-        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+        base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
     )
 )

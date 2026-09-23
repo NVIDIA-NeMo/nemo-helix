@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MOCKS_DIR } from '@e2e-tests/utils/constants';
-import { PLATFORM_BASE_URL, NMP_BASE_URL } from '@e2e-tests/utils/environment';
+import { PLATFORM_BASE_URL, NHX_BASE_URL } from '@e2e-tests/utils/environment';
 import { APIRequestContext } from '@playwright/test';
 import crypto from 'crypto';
 import fs from 'fs/promises';
@@ -40,7 +40,7 @@ export class DatasetsAPI {
     const repoUrl = `hf://${createRepoResponseData.url}`;
 
     // Create dataset in Entity Store
-    const createDatasetResponse = await this.request.post(`${NMP_BASE_URL}/v1/datasets`, {
+    const createDatasetResponse = await this.request.post(`${NHX_BASE_URL}/v1/datasets`, {
       data: {
         description,
         files_url: repoUrl,
@@ -55,7 +55,7 @@ export class DatasetsAPI {
 
   async deleteDataset(name: string, namespace: string) {
     // Delete dataset in Entity Store
-    await this.request.delete(`${NMP_BASE_URL}/v1/datasets/${namespace}/${name}`);
+    await this.request.delete(`${NHX_BASE_URL}/v1/datasets/${namespace}/${name}`);
     // Delete repo via Data Store
     await this.request.delete(`${PLATFORM_BASE_URL}/v1/hf/api/repos/delete`, {
       data: {

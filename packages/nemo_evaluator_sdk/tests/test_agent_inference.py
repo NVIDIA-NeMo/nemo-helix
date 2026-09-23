@@ -611,12 +611,12 @@ class TestGenericAgentExecutor:
             await _make_generic_agent_request(
                 agent,
                 {"prompt": "hi"},
-                default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+                default_headers={"X-NHX-Principal-Id": "service:evaluator"},
             )
 
         assert mock_client_instance.post.await_args is not None
         assert mock_client_instance.post.await_args.kwargs["headers"] == {
-            "X-NMP-Principal-Id": "service:evaluator",
+            "X-NHX-Principal-Id": "service:evaluator",
             "Content-Type": "application/json",
         }
 
@@ -1497,12 +1497,12 @@ class TestNATAgentExecutor:
             await _make_nat_agent_request(
                 agent,
                 {"prompt": "hi"},
-                default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+                default_headers={"X-NHX-Principal-Id": "service:evaluator"},
             )
 
         assert mock_client_instance.stream.call_args is not None
         assert mock_client_instance.stream.call_args.kwargs["headers"] == {
-            "X-NMP-Principal-Id": "service:evaluator",
+            "X-NHX-Principal-Id": "service:evaluator",
             "Content-Type": "application/json",
         }
 

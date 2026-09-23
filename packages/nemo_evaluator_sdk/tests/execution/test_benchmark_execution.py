@@ -408,7 +408,7 @@ class TestEvaluateBenchmarkOnline:
             side_effect=_fake_agent_sample,
         )
         metric = _ScriptedMetric("a", lambda item, sample: 1.0)
-        headers = {"X-NMP-Principal-Id": "service:evaluator"}
+        headers = {"X-NHX-Principal-Id": "service:evaluator"}
 
         await evaluate_benchmark(
             metrics=[("a", metric)],

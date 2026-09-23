@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 class _OpenAIStreamingChunkBase(BaseModel):
     """Base for local OpenAI-shaped streaming models.
 
-    These mirror ``nemo_platform.types.guardrail.chat`` streaming types without
+    These mirror ``nemo_helix.types.guardrail.chat`` streaming types without
     depending on that package surface; replace with shared types when available.
     """
 

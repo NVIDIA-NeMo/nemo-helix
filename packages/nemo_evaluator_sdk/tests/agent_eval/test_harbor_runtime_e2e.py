@@ -129,7 +129,7 @@ async def test_harbor_resumes_a_partial_job_with_a_custom_agent_dir(tmp_path: Pa
         pytest.skip("Docker daemon is required to run a Harbor job")
 
     # A loose wrapper file next to the dataset — the shape `agent_dir` exists for,
-    # and the shape the Experimentalist always uses.
+    # and the supported explicit-agent shape.
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     (agent_dir / "harbor_wrapper.py").write_text(_RESUME_PROBE_AGENT, encoding="utf-8")

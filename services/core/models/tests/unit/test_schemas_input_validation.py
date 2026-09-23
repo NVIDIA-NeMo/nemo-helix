@@ -10,8 +10,8 @@ Model request bodies reject malformed input rather than letting it through:
 """
 
 import pytest
-from nmp.common.entities import constants
-from nmp.core.models.schemas import (
+from nhx.common.entities import constants
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,

@@ -23,9 +23,9 @@ from pathlib import Path
 
 from filesets import FilesetFileSystem
 from nemo_agents_plugin.container.template import DOCKERIGNORE_TEMPLATE
-from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def _is_absolute_member(name: str) -> bool:
     return name.startswith(("/", "\\")) or (len(name) >= 2 and name[1] == ":")
 
 
-def download_fileset(sdk: SyncPlatformClient, ref: str, dest: Path) -> Path:
+def download_fileset(sdk: SyncHelixClient, ref: str, dest: Path) -> Path:
     """Download an entire fileset (all files) into *dest* using the sync platform SDK.
 
     Whole-fileset download only — Agent Hardener stores the project as one zip, so there is no
@@ -59,7 +59,7 @@ def download_fileset(sdk: SyncPlatformClient, ref: str, dest: Path) -> Path:
     return dest
 
 
-def upload_file_to_fileset(sdk: SyncPlatformClient, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
+def upload_file_to_fileset(sdk: SyncHelixClient, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
     """Upload a single file into a freshly-created fileset and return its ``workspace/name`` ref.
 
     Used to persist a war-game's produced garak hitlog so a later run can replay it: platform
@@ -92,7 +92,7 @@ def _is_excluded(relative_path: Path) -> bool:
     return False
 
 
-def delete_fileset(sdk: SyncPlatformClient, ref: str) -> None:
+def delete_fileset(sdk: SyncHelixClient, ref: str) -> None:
     """Delete a fileset by ``workspace/name`` ref; never raises.
 
     Called when a manifest is deleted so its victim bundle doesn't outlive it. Best-effort by
@@ -129,7 +129,7 @@ def _git_listed_files(root: Path) -> list[Path] | None:
     return [root / name for name in proc.stdout.decode(errors="replace").split("\0") if name]
 
 
-def upload_project_dir(sdk: SyncPlatformClient, project_dir: Path, *, workspace: str) -> str:
+def upload_project_dir(sdk: SyncHelixClient, project_dir: Path, *, workspace: str) -> str:
     """Zip a local NAT project and upload it as a fileset; return its ``workspace/name`` ref.
 
     The counterpart to :func:`download_and_extract_project`: the manifest API and the war-game both
@@ -194,7 +194,7 @@ def extract_zip_safely(zip_path: Path, dest: Path) -> Path:
     return dest
 
 
-def download_and_extract_project(sdk: SyncPlatformClient, ref: str, workdir: Path) -> Path:
+def download_and_extract_project(sdk: SyncHelixClient, ref: str, workdir: Path) -> Path:
     """Download the project fileset into *workdir*, expand its zip, and return the project root.
 
     Collapses a single wrapping top-level directory (the common ``repo-name/…`` zip layout) so the

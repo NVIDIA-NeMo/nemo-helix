@@ -1,4 +1,4 @@
 # Placeholder so the empty fastembed cache build context exists on checkout.
 # Git cannot track empty directories; docker-bake.hcl's FASTEMBED_CACHE_CONTEXT
-# default (docker/fastembed-cache-empty) is COPYed by Dockerfile.nmp-api, so a
+# default (docker/fastembed-cache-empty) is COPYed by Dockerfile.nhx-api, so a
 # missing dir breaks default/local 'make docker-build'. CI overrides the var.

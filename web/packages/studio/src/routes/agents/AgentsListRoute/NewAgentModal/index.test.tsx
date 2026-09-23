@@ -71,7 +71,7 @@ interface Scenario {
   agentExists?: boolean;
 }
 
-const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario = {}) => {
+const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}) => {
   const uploaded: string[] = [];
   const created: { name?: string }[] = [];
   const filesets: { storage?: unknown }[] = [];
@@ -157,7 +157,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
   it('copies the integration prompt, left open for the name nothing has assigned yet', async () => {
     // `userEvent.setup()` stubs `navigator.clipboard`, so the prompt is readable back from it.
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -175,7 +175,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
   });
 
   it('offers Close rather than Create, since the prompt has nothing to submit', async () => {
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -189,7 +189,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
 
   it('leaves an upload failure behind when the user switches back to the prompt', async () => {
     const user = userEvent.setup();
-    mockPlatform({ filesetExists: true, agentExists: true });
+    mockHelix({ filesetExists: true, agentExists: true });
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -209,7 +209,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
 
 describe('NewAgentModal upload tab', () => {
   it('opens on upload, the primary way to create an agent', async () => {
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -223,7 +223,7 @@ describe('NewAgentModal upload tab', () => {
 
   it('uploads the picked directory, then creates the agent', async () => {
     const user = userEvent.setup();
-    const { uploaded, created } = mockPlatform();
+    const { uploaded, created } = mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -240,7 +240,7 @@ describe('NewAgentModal upload tab', () => {
 
   it('uploads individually picked files, with no directory to hold them', async () => {
     const user = userEvent.setup();
-    const { uploaded, created } = mockPlatform();
+    const { uploaded, created } = mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -259,7 +259,7 @@ describe('NewAgentModal upload tab', () => {
 
   it('uploads agent.yaml on its own', async () => {
     const user = userEvent.setup();
-    const { uploaded, created } = mockPlatform();
+    const { uploaded, created } = mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -276,7 +276,7 @@ describe('NewAgentModal upload tab', () => {
 
   it('shows why an owned name is refused instead of a generic failure', async () => {
     const user = userEvent.setup();
-    const { created } = mockPlatform({ filesetExists: true, agentExists: true });
+    const { created } = mockHelix({ filesetExists: true, agentExists: true });
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -293,7 +293,7 @@ describe('NewAgentModal upload tab', () => {
 
   it('offers to replace an orphaned fileset, and replaces it on the next submit', async () => {
     const user = userEvent.setup();
-    const { created } = mockPlatform({ filesetExists: true });
+    const { created } = mockHelix({ filesetExists: true });
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -311,7 +311,7 @@ describe('NewAgentModal upload tab', () => {
   });
 
   it('rejects a directory with no agent.yaml at the top level', async () => {
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -323,7 +323,7 @@ describe('NewAgentModal upload tab', () => {
   });
 
   it('ignores a slower selection that a newer one replaced', async () => {
-    mockPlatform();
+    mockHelix();
     const gate = deferredFile(
       'slow-agent/agent.yaml',
       'config_format: nemo-agents-spec-v1\nname: slow\n'
@@ -344,7 +344,7 @@ describe('NewAgentModal upload tab', () => {
   });
 
   it('cannot submit the previous directory while a new one is validated', async () => {
-    mockPlatform();
+    mockHelix();
     const gate = deferredFile(
       'slow-agent/agent.yaml',
       'config_format: nemo-agents-spec-v1\nname: slow\n'
@@ -370,7 +370,7 @@ describe('NewAgentModal upload tab', () => {
 
   it('clears the previous failure when a new directory is picked', async () => {
     const user = userEvent.setup();
-    mockPlatform({ filesetExists: true, agentExists: true });
+    mockHelix({ filesetExists: true, agentExists: true });
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -388,7 +388,7 @@ describe('NewAgentModal upload tab', () => {
   });
 
   it('rejects a directory holding a file that is not text', async () => {
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -403,7 +403,7 @@ describe('NewAgentModal upload tab', () => {
 
 describe('NewAgentModal oversized pick', () => {
   it('rejects a directory far larger than an agent, naming the count', async () => {
-    mockPlatform();
+    mockHelix();
     renderModal();
     const dialog = await screen.findByRole('dialog');
     await openUploadTab(dialog);
@@ -430,7 +430,7 @@ describe('NewAgentModal GitHub import', () => {
 
   it('does not let a typed repository submit from the upload tab', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -447,7 +447,7 @@ describe('NewAgentModal GitHub import', () => {
 
   it('backs the spec fileset with the repository instead of uploading files', async () => {
     const user = userEvent.setup();
-    const { uploaded, created, filesets } = mockPlatform();
+    const { uploaded, created, filesets } = mockHelix();
     server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
 
     renderModal();
@@ -470,7 +470,7 @@ describe('NewAgentModal GitHub import', () => {
 
   it('leaves the repository import for the new agent, not sitting on the open modal', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
 
     renderModal();
@@ -486,7 +486,7 @@ describe('NewAgentModal GitHub import', () => {
 
   it('names the agent after the repository so the fileset name is settled up front', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
 
     renderModal();
@@ -499,7 +499,7 @@ describe('NewAgentModal GitHub import', () => {
 
   it('says why a repository it cannot read is not accepted, once the field is left', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -519,7 +519,7 @@ describe('NewAgentModal GitHub import', () => {
 
   it('rolls the fileset back when the repository has no agent.yaml', async () => {
     const user = userEvent.setup();
-    const { created, deleted } = mockPlatform();
+    const { created, deleted } = mockHelix();
     server.use(
       http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 }))
     );
@@ -567,7 +567,7 @@ describe('NewAgentModal folder drop', () => {
 
   it('accepts a dropped folder, walking it into nested paths', async () => {
     const user = userEvent.setup();
-    const { uploaded, created } = mockPlatform();
+    const { uploaded, created } = mockHelix();
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
@@ -621,7 +621,7 @@ describe('NewAgentModal imported traces tab', () => {
 
   it('offers each distinct agent seen in the traces', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     mockTraces(['billing-agent', 'billing-agent', 'research-agent', undefined]);
 
     renderModal();
@@ -637,7 +637,7 @@ describe('NewAgentModal imported traces tab', () => {
 
   it('leaves out agents that are registered already', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     mockTraces(['billing-agent', 'research-agent'], ['research-agent']);
 
     renderModal();
@@ -651,7 +651,7 @@ describe('NewAgentModal imported traces tab', () => {
 
   it('shows the import prompt when no unregistered agent is left to offer', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     mockTraces(['research-agent'], ['research-agent']);
 
     renderModal();
@@ -665,7 +665,7 @@ describe('NewAgentModal imported traces tab', () => {
 
   it('leaves out a name whose registration could not be checked', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     mockTraces(['billing-agent', 'research-agent']);
     server.use(
       http.get('*/apis/agents/v2/workspaces/:workspace/agents/:name', ({ params }) =>
@@ -687,7 +687,7 @@ describe('NewAgentModal imported traces tab', () => {
 
   it('drops a failed create once another agent is chosen', async () => {
     const user = userEvent.setup();
-    mockPlatform();
+    mockHelix();
     mockTraces(['billing-agent', 'research-agent']);
     server.use(http.post(AGENTS_URL, () => HttpResponse.json({ detail: 'nope' }, { status: 500 })));
 
@@ -708,7 +708,7 @@ describe('NewAgentModal imported traces tab', () => {
 
   it('creates the chosen agent and cannot submit before one is chosen', async () => {
     const user = userEvent.setup();
-    const { created } = mockPlatform();
+    const { created } = mockHelix();
     mockTraces(['billing-agent']);
 
     renderModal();

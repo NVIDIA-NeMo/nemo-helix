@@ -2,30 +2,30 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Safe Synthesizer NeMo Platform SDK Resources"
+title: "Safe Synthesizer NeMo Helix SDK Resources"
 description: ""
 ---
-<a id="safe-synthesizer-nmp-sdk-resources"></a>
+<a id="safe-synthesizer-nhx-sdk-resources"></a>
 
-The `nemo_safe_synthesizer_plugin.sdk` module provides NeMo Platform-specific helpers for creating and monitoring NeMo Safe Synthesizer jobs. Use these objects when you want to create jobs through the platform Jobs service and retrieve platform-managed results.
+The `nemo_safe_synthesizer_plugin.sdk` module provides NeMo Helix-specific helpers for creating and monitoring NeMo Safe Synthesizer jobs. Use these objects when you want to create jobs through the platform Jobs service and retrieve platform-managed results.
 
 ## SafeSynthesizerResource
 
-`SafeSynthesizerResource` is the entry point mounted on a `NeMoPlatform` client:
+`SafeSynthesizerResource` is the entry point mounted on a `NeMoHelix` client:
 
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 safe_synthesizer = client.safe_synthesizer
 ```
 
-An async variant with the same namespace is available as `AsyncNeMoPlatform.safe_synthesizer`.
+An async variant with the same namespace is available as `AsyncNeMoHelix.safe_synthesizer`.
 
 ## SafeSynthesizerJobsResource
 

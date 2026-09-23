@@ -8,17 +8,17 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-from nmp.common.entities.client import EntityClient, EntityNotFoundError
-from nmp.intake.entities.experiments import Experiment as Evaluation
-from nmp.intake.experiments.read_service import (
+from nhx.common.entities.client import EntityClient, EntityNotFoundError
+from nhx.intake.entities.experiments import Experiment as Evaluation
+from nhx.intake.experiments.read_service import (
     EvaluationNotFoundError,
     EvaluationReadLimitExceededError,
     EvaluationReadService,
     EvaluationTelemetryUnavailableError,
 )
-from nmp.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
-from nmp.intake.repository.evaluation_session import EvaluationSessionPage, EvaluationSessionRepository
-from nmp.intake.spans.domain import IntakeResponseMode, SpanStatus
+from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
+from nhx.intake.repository.evaluation_session import EvaluationSessionPage, EvaluationSessionRepository
+from nhx.intake.spans.domain import IntakeResponseMode, SpanStatus
 
 
 class _RollupRepository(EvaluationRollupRepository):

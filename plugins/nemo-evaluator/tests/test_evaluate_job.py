@@ -57,15 +57,15 @@ from nemo_evaluator_sdk.values import (
 )
 from nemo_evaluator_sdk.values.models import ModelRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.commands import add_job_commands
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.spec import PlatformJobSpec
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.commands import add_job_commands
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -97,7 +97,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _assert_metric_step_entrypoint(job_spec: PlatformJobSpec) -> None:
+def _assert_metric_step_entrypoint(job_spec: HelixJobSpec) -> None:
     step = job_spec.steps[0]
     container = cast(Any, step.executor).container
     assert container.entrypoint == ["python", "-m"]
@@ -220,8 +220,8 @@ register_metric_bundle_kind(
 )
 
 
-def _generated_async_sdk() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(
+def _generated_async_sdk() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(
         base_url="http://platform.test",
         workspace="default",
         http_client=AsyncMock(spec=httpx.AsyncClient),
@@ -326,7 +326,7 @@ async def test_checked_in_example_spec_transforms_and_compiles(spec_path: Path) 
 
     assert "metric" not in payload
     assert len(spec.metrics) >= 1
-    assert PlatformJobSpec.model_validate(compiled).steps[0].config is not None
+    assert HelixJobSpec.model_validate(compiled).steps[0].config is not None
 
 
 def test_evaluate_job_runs_inline_exact_match_metric(tmp_path: Path) -> None:
@@ -587,7 +587,7 @@ async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
         job_name=None,
         async_sdk=_generated_async_sdk(),
     )
-    job_spec = PlatformJobSpec.model_validate(compiled)
+    job_spec = HelixJobSpec.model_validate(compiled)
     assert len(job_spec.steps) == 1
     step = job_spec.steps[0]
     assert step.name == "evaluate"
@@ -640,7 +640,7 @@ async def test_evaluate_job_to_spec_resolves_bundled_metric_model_refs_before_co
         async_sdk=_generated_async_sdk(),
     )
 
-    job_spec = PlatformJobSpec.model_validate(compiled)
+    job_spec = HelixJobSpec.model_validate(compiled)
     config = cast(dict[str, Any], job_spec.steps[0].config)
     metric_bundle = MetricBundle.model_validate(config["metrics"][0])
     metric = unbundle_metric(metric_bundle)
@@ -702,7 +702,7 @@ async def test_evaluate_job_compile_produces_online_model_job() -> None:
         async_sdk=_generated_async_sdk(),
     )
 
-    job_spec = PlatformJobSpec.model_validate(compiled)
+    job_spec = HelixJobSpec.model_validate(compiled)
     step = job_spec.steps[0]
     config = cast(dict[str, Any], step.config)
     _assert_metric_step_entrypoint(job_spec)
@@ -729,7 +729,7 @@ async def test_evaluate_job_compile_normalizes_generic_online_model_params() -> 
         async_sdk=_generated_async_sdk(),
     )
 
-    job_spec = PlatformJobSpec.model_validate(compiled)
+    job_spec = HelixJobSpec.model_validate(compiled)
     config = cast(dict[str, Any], job_spec.steps[0].config)
     assert isinstance(spec.params, RunConfigOnlineModel)
     assert config["params"]["parallelism"] == 3
@@ -759,7 +759,7 @@ async def test_evaluate_job_compile_produces_online_agent_job() -> None:
         async_sdk=_generated_async_sdk(),
     )
 
-    job_spec = PlatformJobSpec.model_validate(compiled)
+    job_spec = HelixJobSpec.model_validate(compiled)
     step = job_spec.steps[0]
     config = cast(dict[str, Any], step.config)
     _assert_metric_step_entrypoint(job_spec)
@@ -809,7 +809,7 @@ async def test_evaluate_job_compile_injects_metric_and_target_secrets() -> None:
         async_sdk=_generated_async_sdk(),
     )
 
-    step = PlatformJobSpec.model_validate(compiled).steps[0]
+    step = HelixJobSpec.model_validate(compiled).steps[0]
     secrets = {env.name: env.from_secret.name for env in step.environment or [] if env.from_secret}
     assert secrets == {"NVIDIA_BUILD_API_KEY": "NVIDIA_BUILD_API_KEY"}
 
@@ -975,7 +975,7 @@ class TestEvaluateJobCompile:
             async_sdk=_generated_async_sdk(),
         )
 
-        job_spec = PlatformJobSpec.model_validate(compiled)
+        job_spec = HelixJobSpec.model_validate(compiled)
         step = job_spec.steps[0]
         config = cast(dict[str, Any], step.config)
         assert config["metrics"][0]["bundle_kind"] == "metric-bundle"
@@ -1002,7 +1002,7 @@ class TestEvaluateJobCompile:
             async_sdk=_generated_async_sdk(),
         )
 
-        config = cast(dict[str, Any], PlatformJobSpec.model_validate(compiled).steps[0].config)
+        config = cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)
         assert [metric["metric_type"] for metric in config["metrics"]] == ["exact-match", "f1"]
 
     @pytest.mark.parametrize(
@@ -1092,7 +1092,7 @@ class TestEvaluateJobCompile:
             async_sdk=_generated_async_sdk(),
         )
 
-        job_spec = PlatformJobSpec.model_validate(compiled)
+        job_spec = HelixJobSpec.model_validate(compiled)
         assert [step.name for step in job_spec.steps] == ["evaluate"]
         config = cast(dict[str, Any], job_spec.steps[0].config)
         assert config["dataset"] == dataset.root
@@ -1358,7 +1358,7 @@ class TestEvaluateTask:
     """Coverage for the compiled container task entrypoint."""
 
     def test_main_dispatches_evaluate_job_with_task_sdk(self, mocker: MockerFixture) -> None:
-        sdk = NeMoPlatform(base_url="http://platform.test", workspace="default")
+        sdk = NeMoHelix(base_url="http://platform.test", workspace="default")
         async_client = AsyncNemoClient(
             base_url="http://platform.test", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
         )

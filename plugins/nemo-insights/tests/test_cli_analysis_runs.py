@@ -13,11 +13,11 @@ from typing import Any
 
 import pytest
 import typer
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_insights_plugin import cli
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse
 from nemo_insights_plugin.sdk_resources.analysis_runs import AnalysisRunTimeoutError
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 from typer.testing import CliRunner
 
 runner = CliRunner()

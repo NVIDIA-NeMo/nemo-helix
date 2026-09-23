@@ -1,28 +1,28 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: Setup Kind cluster with NeMo Platform
+name: Setup Kind cluster with NeMo Helix
 description: >
   Creates a Kind cluster, installs tooling (kind, kubectl, Helm, uv),
-  optionally deploys NeMo Platform via Helm, and waits for the API to become
+  optionally deploys NeMo Helix via Helm, and waits for the API to become
   healthy.
 
 inputs:
   kind-cluster-name:
     description: Kind cluster name
     required: true
-  install-nemo-platform:
-    description: Deploy NeMo Platform into the Kind cluster
+  install-nemo-helix:
+    description: Deploy NeMo Helix into the Kind cluster
     required: false
     default: "true"
   kube-namespace:
-    description: Kubernetes namespace for NeMo Platform
+    description: Kubernetes namespace for NeMo Helix
     required: false
-    default: nemo-platform
+    default: nemo-helix
   kube-gateway-name:
     description: Gateway resource name
     required: false
-    default: nmp-e2e-gateway
+    default: nhx-e2e-gateway
   image-registry:
     description: Container image registry
     required: true
@@ -46,7 +46,7 @@ inputs:
     required: false
     default: "true"
   wait-for-api:
-    description: Wait for the Gateway-routed API endpoint after installing NeMo Platform
+    description: Wait for the Gateway-routed API endpoint after installing NeMo Helix
     required: false
     default: "true"
   kind-image-pull-token:
@@ -159,32 +159,32 @@ runs:
         kubectl -n "${NAMESPACE}" get gateway "${KUBE_GATEWAY_NAME}"
 
     - name: Pre-pull GHCR images into kind
-      if: ${{ inputs['install-nemo-platform'] == 'true' }}
+      if: ${{ inputs['install-nemo-helix'] == 'true' }}
       shell: bash
       env:
         KIND_IMAGE_PULL_TOKEN: ${{ inputs['kind-image-pull-token'] }}
         KIND_IMAGE_PULL_USER: ${{ inputs['kind-image-pull-user'] }}
-        NMP_E2E_REGISTRY: ${{ inputs['image-registry'] }}
-        NMP_E2E_TAG: ${{ inputs['image-tag'] }}
+        NHX_E2E_REGISTRY: ${{ inputs['image-registry'] }}
+        NHX_E2E_TAG: ${{ inputs['image-tag'] }}
         # CPU generic HTTP smoke image; tag must match e2e/test_models_deployments_plugin.py.
         GENERIC_HTTP_IMAGE: docker.io/library/python
         GENERIC_HTTP_TAG: 3.12-alpine
       run: |
         e2e/k8s/scripts/prepull_kind_images.sh \
-          "${NMP_E2E_REGISTRY}/nmp-api:${NMP_E2E_TAG}" \
-          "${NMP_E2E_REGISTRY}/nmp-cpu-tasks:${NMP_E2E_TAG}" \
+          "${NHX_E2E_REGISTRY}/nhx-api:${NHX_E2E_TAG}" \
+          "${NHX_E2E_REGISTRY}/nhx-tasks:${NHX_E2E_TAG}" \
           "${GENERIC_HTTP_IMAGE}:${GENERIC_HTTP_TAG}"
 
-    - name: Install NeMo Platform
-      if: ${{ inputs['install-nemo-platform'] == 'true' }}
+    - name: Install NeMo Helix
+      if: ${{ inputs['install-nemo-helix'] == 'true' }}
       shell: bash
       env:
         NAMESPACE: ${{ inputs['kube-namespace'] }}
-        NMP_E2E_REGISTRY: ${{ inputs['image-registry'] }}
-        NMP_E2E_TAG: ${{ inputs['image-tag'] }}
+        NHX_E2E_REGISTRY: ${{ inputs['image-registry'] }}
+        NHX_E2E_TAG: ${{ inputs['image-tag'] }}
         HELM_VALUES: ${{ inputs['helm-values'] }}
         HELM_EXTRA_ARGS: ${{ inputs['helm-extra-args'] }}
-        REQUIRE_NMP_E2E_IMAGES: "true"
+        REQUIRE_NHX_E2E_IMAGES: "true"
         POSTGRES_IMAGE: docker.io/library/postgres
         BUSYBOX_IMAGE: docker.io/library/busybox:stable
         GITHUB_TOKEN: ${{ inputs['kind-image-pull-token'] }}
@@ -192,18 +192,18 @@ runs:
         if ! e2e/k8s/scripts/install_helm_e2e.sh; then
           echo "--- helm list -A ---"
           helm list -A || true
-          echo "--- helm status ${NAMESPACE}/nemo-platform ---"
-          helm status -n "${NAMESPACE}" nemo-platform || true
+          echo "--- helm status ${NAMESPACE}/nemo-helix ---"
+          helm status -n "${NAMESPACE}" nemo-helix || true
           echo "--- kubectl get all -n ${NAMESPACE} ---"
           kubectl get all -n "${NAMESPACE}" || true
           exit 1
         fi
 
     - name: Wait for API
-      if: ${{ inputs['install-nemo-platform'] == 'true' && inputs['wait-for-api'] == 'true' }}
+      if: ${{ inputs['install-nemo-helix'] == 'true' && inputs['wait-for-api'] == 'true' }}
       shell: bash
       env:
-        NMP_E2E_CLUSTER_URL: ${{ env.NMP_E2E_CLUSTER_URL }}
+        NHX_E2E_CLUSTER_URL: ${{ env.NHX_E2E_CLUSTER_URL }}
       run: |
-        test -n "${NMP_E2E_CLUSTER_URL}"
-        e2e/k8s/scripts/wait_for_api.sh "${NMP_E2E_CLUSTER_URL}/cluster-info" 120
+        test -n "${NHX_E2E_CLUSTER_URL}"
+        e2e/k8s/scripts/wait_for_api.sh "${NHX_E2E_CLUSTER_URL}/cluster-info" 120

@@ -225,7 +225,7 @@ export const WithData: Story = {
 
 /**
  * One row per Status badge. Several of these states cannot be produced by real
- * data on demand -- Not served needs a base redeployed with LoRA disabled, and
+ * data on demand -- Not active needs a base redeployed with LoRA disabled, and
  * Unknown needs a provider request to fail -- so this story is the only place they
  * can be reviewed side by side.
  *
@@ -251,7 +251,7 @@ const LORA_HOST = 'lora-host-model';
 
 const statusModels: ModelEntity[] = [
   statusModel('ready-deployment'),
-  // Parent reads Deployed; its two adapters read Served and Not served.
+  // Parent reads Deployed; its two adapters read Active and Not active.
   statusModel(LORA_HOST, {
     base_model: undefined,
     finetuning_type: undefined,
@@ -378,8 +378,8 @@ const statusDeploymentsByName: Record<string, ModelDeployment> = {
  * | --------------------- | ------------ |
  * | ready-deployment      | Deployed     |
  * | lora-host-model       | Deployed     |
- * |   adapter-loaded      | Served       |
- * |   adapter-not-loaded  | Not served   |
+ * |   adapter-loaded      | Active       |
+ * |   adapter-not-loaded  | Not active   |
  * | pending-deployment    | Deploying    |
  * | created-deployment    | Deploying    |
  * | error-deployment      | Failed       |

@@ -97,11 +97,11 @@ def test_get_events_falls_back_to_fileset_when_local_missing(tmp_path: Path) -> 
 
     missing_path = tmp_path / "missing" / "my-run.jsonl"
 
-    mock_sdk = MagicMock()
+    mock_platform = MagicMock()
     # Shaped like the real entity-store record: get_entity_by_name returns a generic Entity whose
     # domain fields live under `.data` (a bare MagicMock would falsely expose `.events_fileset`).
     mock_run = SimpleNamespace(name="my-run", data={"events_fileset": "default/my-events-fs"})
-    mock_sdk.entities.get_entity_by_name.return_value = mock_run
+    mock_platform.entities.get_entity_by_name.return_value = mock_run
 
     def fake_download(sdk, ref, dest):
         # download_fileset preserves the member basename, so the run-named file lands in `dest`.
@@ -112,7 +112,7 @@ def test_get_events_falls_back_to_fileset_when_local_missing(tmp_path: Path) -> 
     with (
         patch.object(events, "hub", events.EventHub()),
         patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=missing_path),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_sdk", return_value=mock_sdk),
+        patch("nemo_agent_hardener_plugin.api.v2.events._get_sdk", return_value=mock_platform),
         patch("nemo_agent_hardener_plugin.api.v2.events.download_fileset", side_effect=fake_download),
     ):
         app = FastAPI()
@@ -130,14 +130,14 @@ def test_get_events_returns_empty_when_no_local_and_no_fileset(tmp_path: Path) -
     """When local file is missing and no fileset ref exists, return empty list."""
     missing_path = tmp_path / "missing" / "events.jsonl"
 
-    mock_sdk = MagicMock()
+    mock_platform = MagicMock()
     mock_run = SimpleNamespace(name="my-run", data={"events_fileset": ""})
-    mock_sdk.entities.get_entity_by_name.return_value = mock_run
+    mock_platform.entities.get_entity_by_name.return_value = mock_run
 
     with (
         patch.object(events, "hub", events.EventHub()),
         patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=missing_path),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_sdk", return_value=mock_sdk),
+        patch("nemo_agent_hardener_plugin.api.v2.events._get_sdk", return_value=mock_platform),
     ):
         app = FastAPI()
         app.include_router(events.router, prefix="/v2/workspaces/{workspace}")

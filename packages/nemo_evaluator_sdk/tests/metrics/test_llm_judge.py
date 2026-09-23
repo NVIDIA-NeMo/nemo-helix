@@ -424,7 +424,7 @@ def test_json_parser_no_structured_output():
 
 def _is_structured_output_probe(request: dict) -> bool:
     """Identify a preflight structured-output probe by its marker schema."""
-    return "__nmp_probe_score" in json.dumps(request)
+    return "__nhx_probe_score" in json.dumps(request)
 
 
 class TestLLMJudgeMetric:
@@ -773,7 +773,7 @@ class TestLLMJudgeMetric:
             request = kwargs.get("request", args[1])
             if _is_structured_output_probe(request):
                 # Preflight probes share this inference_fn; they are not scoring requests.
-                return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
             captured_requests.append(deepcopy(request))
             if len(captured_requests) == 1:
                 raise error
@@ -844,7 +844,7 @@ class TestLLMJudgeMetric:
             request = kwargs.get("request", args[1])
             if _is_structured_output_probe(request):
                 # Preflight probes share this inference_fn; they are not scoring requests.
-                return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
             captured_requests.append(deepcopy(request))
             if len(captured_requests) == 1:
                 raise error
@@ -872,7 +872,7 @@ class TestLLMJudgeMetric:
     async def test_preflight_selects_structured_output_mode_for_nim(self, mocker: MockerFixture):
         metric = LLMJudgeMetric(
             model=_make_model()
-            .with_default_headers({"X-NMP-Principal-Id": "service:evaluator"})
+            .with_default_headers({"X-NHX-Principal-Id": "service:evaluator"})
             .model_copy(update={"format": ModelFormat.NVIDIA_NIM}),
             scores=[_make_metric_score()],
         )
@@ -885,7 +885,7 @@ class TestLLMJudgeMetric:
         await metric.preflight()
 
         detect.assert_awaited_once()
-        assert detect.await_args.kwargs["model"].default_headers == {"X-NMP-Principal-Id": "service:evaluator"}
+        assert detect.await_args.kwargs["model"].default_headers == {"X-NHX-Principal-Id": "service:evaluator"}
         structured_hook = next(hook for hook in metric._preprocess_hooks if hasattr(hook, "mode"))
         assert structured_hook.mode == StructuredOutputMode.ROOT_GUIDED_JSON
 
@@ -1564,7 +1564,7 @@ async def test_compute_scores_probes_the_endpoint_when_called_directly(mocker: M
         if _is_structured_output_probe(request):
             # Endpoint honours only nvext.guided_json.
             if "nvext" in request.get("extra_body", {}):
-                return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
             return {"choices": [{"message": {"content": "prose, not json"}}]}
         return {"choices": [{"message": {"content": '{"helpfulness": 3}'}}]}
 
@@ -1606,7 +1606,7 @@ async def test_concurrent_direct_compute_scores_probe_the_endpoint_once():
         if _is_structured_output_probe(request):
             probes.append(request)
             await asyncio.sleep(0.01)  # widen the stampede window
-            return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+            return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
         return {"choices": [{"message": {"content": '{"helpfulness": 3}'}}]}
 
     metric.set_inference_fn(inference_fn)

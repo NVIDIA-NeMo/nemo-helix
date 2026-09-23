@@ -4,13 +4,13 @@
 """HTTP shim that satisfies AIPerf's pre-check and proxies chat completions.
 
 AIPerf's ``_check_service`` issues ``GET urljoin(base_url, "/v1/models")`` and
-expects a 200, but NMP doesn't serve ``/v1/models`` at the IGW workspace root
+expects a 200, but NHX doesn't serve ``/v1/models`` at the IGW workspace root
 the way OpenAI does, and upstream AIPerf doesn't expose a knob to override the
-probe path. To unblock the benchmark without patching AIPerf or NMP, we run
+probe path. To unblock the benchmark without patching AIPerf or NHX, we run
 this tiny shim on a separate port:
 
 - ``GET /v1/models``  -> ``200 {"object":"list","data":[]}``
-- ``POST /v1/chat/completions`` -> reverse-proxy to NMP IGW
+- ``POST /v1/chat/completions`` -> reverse-proxy to NHX IGW
 - ``GET /__shim/health`` -> ``200 {"status":"ok"}``
 - Any other path -> 404
 
@@ -33,7 +33,7 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     AIPERF_SHIM_HOST,
     AIPERF_SHIM_PORT,
     IGW_CHAT_PATH,
-    NMP_BASE_URL,
+    NHX_BASE_URL,
 )
 
 log = logging.getLogger("nemo_guardrails_plugin.benchmarks.shim")
@@ -47,7 +47,7 @@ class _ShimHandler(BaseHTTPRequestHandler):
     """Minimal handler that routes the two paths AIPerf actually touches."""
 
     # Allow override via class attr so tests can swap in a mock httpx client.
-    upstream_url: str = f"{NMP_BASE_URL}{IGW_CHAT_PATH}"
+    upstream_url: str = f"{NHX_BASE_URL}{IGW_CHAT_PATH}"
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         log.debug("shim: " + format, *args)

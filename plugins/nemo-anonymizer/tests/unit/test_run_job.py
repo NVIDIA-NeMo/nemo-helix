@@ -18,6 +18,8 @@ from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
 from anonymizer.engine.replace.strategies import ReplacementApplication
 from data_designer.engine.model_provider import ModelProvider as NDDModelProvider
 from data_designer.engine.model_provider import ModelProviderRegistry
+from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
+from data_designer.engine.observability import runtime_correlation_provider
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_anonymizer_plugin.app import context as context_module
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
@@ -26,10 +28,11 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, Anonymizer
 from nemo_anonymizer_plugin.jobs import run as run_module
 from nemo_anonymizer_plugin.jobs.run import RunJob
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def _make_job_context(tmp_path: Path, *, workspace: str = "team-a") -> JobContext:
@@ -59,14 +62,14 @@ def _restore_task_loggers(snapshot: dict[str, tuple[list[logging.Handler], int, 
         logger.propagate = propagate
 
 
-def _make_async_sdk() -> AsyncNeMoPlatform:
-    return AsyncMock(spec=AsyncNeMoPlatform)
+def _make_async_sdk() -> AsyncNemoClient:
+    return AsyncMock(spec=AsyncNemoClient)
 
 
 async def _to_run_spec(
     request: AnonymizerRequest,
     *,
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNemoClient,
 ) -> AnonymizerStepConfig:
     return await RunJob.to_spec(
         request,
@@ -88,7 +91,7 @@ async def test_run_job_rejects_selected_models_without_model_configs(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="selected_models requires model_configs"):
+    with pytest.raises(HelixJobCompilationError, match="selected_models requires model_configs"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -108,7 +111,7 @@ async def test_run_job_wraps_shared_provider_config_errors(
         AsyncMock(side_effect=NDDInvalidConfigError("bad provider")),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="bad provider"):
+    with pytest.raises(HelixJobCompilationError, match="bad provider"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -122,7 +125,7 @@ async def test_run_submit_requires_model_configs(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="model_configs are required"):
+    with pytest.raises(HelixJobCompilationError, match="model_configs are required"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -173,7 +176,7 @@ async def test_run_serialized_step_config_can_be_revalidated(
     assert RunJob().run(
         step_config.model_dump(),
         ctx=ctx,
-        sdk=Mock(spec=NeMoPlatform),
+        sdk=Mock(spec=NemoClient),
     ) == {"exit_code": 0}
 
 
@@ -220,6 +223,15 @@ def test_run_step_config_uses_ctx_results(
         def run(self, *, config: AnonymizerConfig, data: object) -> FakeResult:
             captured["config"] = config
             captured["data"] = data
+            emit_token_usage_event(
+                TokenUsageEvent(
+                    model_alias="detector",
+                    model_name="test/model",
+                    input_tokens=13,
+                    output_tokens=5,
+                    correlation=runtime_correlation_provider.current(),
+                )
+            )
             return FakeResult()
 
     step_config = AnonymizerStepConfig(
@@ -240,7 +252,7 @@ def test_run_step_config_uses_ctx_results(
             task_run_module.run_step_config(
                 step_config,
                 ctx=ctx,
-                sdk=Mock(spec=NeMoPlatform),
+                sdk=Mock(spec=NemoClient),
             )
             == 0
         )
@@ -256,6 +268,10 @@ def test_run_step_config_uses_ctx_results(
     assert (saved_artifacts_dir / "dataset.parquet").read_text() == "dataset"
     assert captured["dataset_index"] is False
     assert captured["trace_index"] is False
+    assert isinstance(ctx.usage, LocalJobUsageReporter)
+    assert ctx.usage.latest is not None
+    assert ctx.usage.latest.input_tokens == 13
+    assert ctx.usage.latest.output_tokens == 5
 
 
 def test_run_step_config_remote_requires_sdk(tmp_path: Path) -> None:
@@ -294,7 +310,7 @@ def test_run_step_config_requires_resolved_model_configs(
     logging_snapshot = _snapshot_task_loggers()
 
     try:
-        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoPlatform)) == 1
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 1
     finally:
         _restore_task_loggers(logging_snapshot)
     anonymizer.assert_not_called()
@@ -314,7 +330,7 @@ async def test_run_submit_rejects_local_file(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="local path"):
+    with pytest.raises(HelixJobCompilationError, match="local path"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -375,7 +391,7 @@ def test_run_step_config_writes_trace_with_roundtrippable_skipped_span_label_cou
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
     try:
-        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoPlatform)) == 0
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 0
     finally:
         _restore_task_loggers(logging_snapshot)
 

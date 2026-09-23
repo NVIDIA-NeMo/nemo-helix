@@ -1,0 +1,135 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# nhx-customizer-tasks - shared CPU task image for customization backends.
+#
+# Hosts file_io / model_entity (nhx.customization_common.tasks.*), model_spec
+# analysis (nhx.core.models.tasks.model_spec), and the LoRA adapter sidecar.
+# Built on NGC PyTorch 26.07 + transformers/accelerate + Nemotron wheels
+# (mamba-ssm, causal-conv1d) + platform glue + nhx-models.
+
+ARG SMOKE_MARKER=smoke_nhx_customizer_tasks
+ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.07-py3
+
+FROM ${PYTORCH_BASE} AS base
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-python-sdists.py \
+    /usr/local/bin/
+ENV PATH="/bin:${PATH}"
+
+RUN dpkg-query -W -f='${binary:Package}\t${Version}\n' > /tmp/base-dpkg-packages.txt
+
+ENV VIRTUAL_ENV=/opt/venv \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    OTEL_PYTHON_EXCLUDED_URLS="health"
+ENV PATH="/opt/venv/bin:/root/.local/bin:${PATH}"
+
+RUN uv venv ${UV_PROJECT_ENVIRONMENT} --system-site-packages
+
+FROM base AS runtime
+
+ARG USERNAME=ubuntu
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+COPY --from=platform-workspace / /app
+WORKDIR /app
+
+RUN mkdir -p /home/${USERNAME}/.cache && \
+    chown -R ${USER_UID}:${USER_GID} /home/${USERNAME} /app/services/core/models
+
+# HF stack for model_spec + Nemotron configs. preserve_base_torch.txt blocks uv from
+# pulling PyPI torch (same idea as Automodel update_pyproject_pytorch.sh /
+# docker/common/uv-pytorch.toml). TRANSFORMERS_VERSION matches Automodel r0.5.0 pin.
+ARG TRANSFORMERS_VERSION=5.8.1
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /app/docker/customizer/preserve_base_torch.txt \
+    "transformers==${TRANSFORMERS_VERSION}" \
+    "accelerate>=1.0.0"
+
+# Nemotron/Mamba CUDA wheels — compiled against NGC 26.07 torch; install --no-deps
+# after the HF stack so a PyPI torch never lands in the venv first.
+RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,readonly \
+    --mount=from=mamba-ssm-wheel-src,target=/tmp/mamba-ssm-wheel-src,readonly \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache-dir --no-deps \
+    /tmp/causal-conv1d-wheel-src/wheels/cu13.3/causal_conv1d-*cp312*.whl \
+    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl
+
+# Platform glue — no_override_requirements.txt keeps uv from clobbering NGC torch
+# or re-resolving the HF stack (same pattern as nhx-automodel-training).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /app/docker/customizer/no_override_requirements.txt \
+    -e /app/sdk/python/nemo-helix \
+    -e /app/packages/filesets \
+    -e /app/packages/models \
+    -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nhx_common \
+    -e /app/packages/nhx_customization_common \
+    -e /app/services/core/models
+
+# Pin scanner-tracked runtime packages into /opt/venv before removing stale
+# NGC system-site copies inherited from nvcr.io/nvidia/pytorch:26.07-py3.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --reinstall-package wandb \
+    --overrides /app/docker/customizer/preserve_base_torch.txt \
+    "aiohttp>=3.14.1,<4" \
+    "grpcio>=1.81.1,<2" \
+    "jupyter-server>=2.20.0,<3" \
+    "mistune>=3.3.3,<4" \
+    "pillow>=12.3.0,<13" \
+    "soupsieve>=2.8.4,<3" \
+    "tornado>=6.5.7,<7" \
+    "urllib3>=2.7.0,<3" \
+    "GitPython>=3.1.60,<4" \
+    "wandb>=0.29.0"
+
+# CVE cleanup for unused/stale packages from the NGC base image. The task entry
+# points import from /opt/venv; scanners still report the shadowed system copies.
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --only-upgrade openssl libssl3t64 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/tmp/common-file-removals.txt,readonly \
+    --mount=type=bind,source=docker/removals/files/base/nhx-customizer-tasks.txt,target=/tmp/image-file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/common-file-removals.txt /tmp/image-file-removals.txt
+
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN bash /usr/local/bin/collect-apt-sources.sh \
+    /usr/share/nemo-helix/source-distributions/nhx-customizer-tasks/apt \
+    --changed-from /tmp/base-dpkg-packages.txt
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python /usr/local/bin/collect-python-sdists.py \
+        --python ${VIRTUAL_ENV}/bin/python \
+        --output /usr/share/nemo-helix/source-distributions/nhx-customizer-tasks \
+        --label app-venv
+
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-m", "nhx.customization_common.tasks.file_io", "--help"]
+
+USER ${USER_UID}:${USER_GID}
+
+FROM runtime AS smoke-test
+ARG SMOKE_MARKER
+USER 0
+COPY tests/smoke_gpu/ /smoke_test/
+RUN --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/smoke_test/removals/files/base/pytorch-ngc-common.txt,readonly \
+    --mount=type=bind,source=docker/removals/files/base/nhx-customizer-tasks.txt,target=/smoke_test/removals/files/base/nhx-customizer-tasks.txt,readonly \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --reinstall pytest && \
+    ${VIRTUAL_ENV}/bin/pytest /smoke_test/ -m ${SMOKE_MARKER} -v
+
+FROM runtime

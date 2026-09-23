@@ -30,12 +30,12 @@ from nemo_evaluator.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_evaluator.shared.metric_bundles.bundles import BundledMetricOutputSpec
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.entities import EntityBase
+from nemo_helix_plugin.entities import EntityBase
 from pydantic import BaseModel, Field
 
-# Constants are intentionally local: nmp_common's entity constants are not
+# Constants are intentionally local: nhx_common's entity constants are not
 # re-exported to plugins. Keep these aligned with
-# ``nmp.common.entities.constants``.
+# ``nhx.common.entities.constants``.
 MAX_NAME_LENGTH = 255
 MAX_DESCRIPTION_LENGTH = 1000
 NAME_PATTERN = r"^[\w\-\.]+$"

@@ -118,11 +118,11 @@ def _resolve_version() -> str:
     """Report the version of whichever distribution actually shipped this code.
 
     ``nemo-evaluator-sdk`` is not published on its own — this package is also vendored into the
-    ``nemo-platform`` wheel as ``nemo_platform.beta.evaluator``. There the SDK distribution does
+    ``nemo-helix`` wheel as ``nemo_helix.beta.evaluator``. There the SDK distribution does
     not exist, so resolving only that name reported ``"0.0.0"`` unconditionally and any telemetry
     or support log that read it got a useless constant.
     """
-    for distribution in ("nemo-evaluator-sdk", "nemo-platform"):
+    for distribution in ("nemo-evaluator-sdk", "nemo-helix"):
         try:
             return _package_version(distribution)
         except _PackageNotFoundError:
@@ -133,7 +133,7 @@ def _resolve_version() -> str:
 version = _resolve_version()
 
 # Re-exported name -> the submodule that defines it, relative to this package. Relative on
-# purpose: the vendoring tool mirrors this file into nemo_platform.beta.evaluator by rewriting
+# purpose: the vendoring tool mirrors this file into nemo_helix.beta.evaluator by rewriting
 # module paths, and a relative name has nothing to rewrite, so the mirror is correct by
 # construction. Mirrors the TYPE_CHECKING block above, in the same order.
 _LAZY_ATTRS: dict[str, str] = {

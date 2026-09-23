@@ -49,10 +49,10 @@ from nemo_agents_plugin.runner.backend import DeploymentInfo, LocalLog, LogLocat
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
 from nemo_agents_plugin.utils import get_base_url
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
 # Match characters not safe for filesystem paths.  Deployment names are
 # normally URL-safe identifiers, but we sanitise defensively to ensure we
@@ -82,7 +82,7 @@ def _resolve_nat_bin() -> str:
        container (which prepends ``/app/.venv/bin`` to ``PATH``), and any
        setup where the user has ``nat`` on their shell ``PATH``.
     2. Sibling of ``sys.executable`` — covers ``uv tool install
-       nemo-platform``, where the tool venv's ``bin/`` is **not** prepended
+       nemo-helix``, where the tool venv's ``bin/`` is **not** prepended
        to ``PATH`` (uv only symlinks the declared ``[project.scripts]`` into
        ``~/.local/bin``; the rest of the tool venv stays off ``PATH``).
        ``nat`` is co-installed with ``nemo`` in that same venv, so picking
@@ -117,13 +117,13 @@ def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_d
     so the platform's own base URL reaches it as-is: there is no container
     network to rebase onto and no auth-proxy sidecar to route through.
 
-    No ``header_env`` either. The sidecar is what stamps identity for a container
-    deployment, and a job names environment variables instead
-    (``jobs/execute.py``'s ``_configure_intake_telemetry``) because it has no
-    sidecar. Subprocess has none, but it is already an auth-disabled shape: the
-    child carries only the placeholder gateway credential, so with platform auth
-    on, its inference calls fail well before its telemetry does. Wiring identity
-    here alone would half-fix a configuration nothing else supports.
+    No identity either. A container deployment gets it from the sidecar and a
+    job from the in-process proxy it runs for the same purpose
+    (``jobs/gateway_proxy.py``). Subprocess has neither, but it is already an
+    auth-disabled shape: the child carries only the placeholder gateway
+    credential, so with platform auth on, its inference calls fail well before
+    its telemetry does. Wiring identity here alone would half-fix a
+    configuration nothing else supports.
 
     Imported lazily for the same reason as :func:`validate_platform_agent_config`:
     ``intake_export`` imports Fabric at module scope, and NAT deployments must
@@ -207,7 +207,7 @@ class InMemoryRunnerBackend(RunnerBackend):
     def output_base_dir(self) -> Path:
         """Backend artifact root: ``workspace_dir`` itself (configs/logs live in ``system/``).
 
-        Defaults to ``nmp_user_data_dir() / "agents"`` (e.g.
+        Defaults to ``nhx_user_data_dir() / "agents"`` (e.g.
         ``~/.local/share/nemo/agents``) so artifacts persist across reboots
         and live in a documented, user-accessible location instead of inside
         the plugin source tree.
@@ -253,7 +253,7 @@ class InMemoryRunnerBackend(RunnerBackend):
                 return candidate
         raise RuntimeError(
             f"No free port available in range [{start}, {end}]. "
-            "Consider adjusting NMP_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
+            "Consider adjusting NHX_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
         )
 
     @staticmethod

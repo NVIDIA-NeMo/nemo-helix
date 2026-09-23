@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, call
 
 import pandas as pd
 import pytest
-from nemo_platform_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
 
 
 def _resp(data):
@@ -67,7 +67,10 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
 
     result = SimpleNamespace(
         synthetic_data=pd.DataFrame({"value": [1]}),
-        summary=SimpleNamespace(model_dump=lambda: {"row_count": 1}),
+        summary=SimpleNamespace(
+            num_completion_tokens=37,
+            model_dump=lambda: {"row_count": 1, "num_completion_tokens": 37},
+        ),
         evaluation_report_html=None,
     )
 
@@ -84,9 +87,14 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     file_manager.upload.assert_has_calls([call(adapter_path, "results/attempt-123/adapter")], any_order=True)
 
     jobs_client.get_job.assert_called_once_with(name="safe-synth-job", workspace="test-workspace")
+    jobs_client.update_status_details.assert_called_once_with(
+        "safe-synth-job",
+        workspace="test-workspace",
+        body={"output_tokens": 37},
+    )
 
     # create_job_result is called once per result; assert the adapter call, checking the
-    # artifact fields on the PlatformJobResultCreateRequest body object (which replaced the
+    # artifact fields on the HelixJobResultCreateRequest body object (which replaced the
     # flat artifact_url/artifact_storage_type kwargs of the old Stainless call).
     adapter_calls = [c for c in jobs_client.create_job_result.call_args_list if c.kwargs.get("name") == "adapter"]
     assert len(adapter_calls) == 1

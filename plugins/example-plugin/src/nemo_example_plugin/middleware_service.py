@@ -11,9 +11,9 @@ create and manage those entities.  This module shows the full pattern.
 Key points:
 
 - The config entity class (:class:`~nemo_example_plugin.middleware_config.ExampleMiddlewareConfig`)
-  is a :class:`~nemo_platform_plugin.entity.NemoEntity` subclass and is stored in the
-  NeMo Platform entity store under ``entity_type="example_middleware_config"``.
-- The CRUD endpoints follow the NeMo Platform workspace-scoped resource pattern and
+  is a :class:`~nemo_helix_plugin.entity.NemoEntity` subclass and is stored in the
+  NeMo Helix entity store under ``entity_type="example_middleware_config"``.
+- The CRUD endpoints follow the NeMo Helix workspace-scoped resource pattern and
   live under ``/apis/example/v2/workspaces/{workspace}/middleware-configs``.
 - Creating or updating a config entity does **not** require editing any
   VirtualModel — IGW picks up the change automatically on the next polling
@@ -28,8 +28,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_example_plugin._perms import ExampleMiddlewareConfigPerms
 from nemo_example_plugin.authz import scope
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -72,10 +72,10 @@ def _get_entity_client() -> NemoEntitiesClient:
 
     In production use::
 
-        from nemo_platform.resources.entities import get_entity_client
+        from nemo_helix_plugin.entity_client import get_entity_client
         entity_client: Annotated[NemoEntitiesClient, Depends(get_entity_client)]
     """
-    raise NotImplementedError("inject via nemo_platform.resources.entities.get_entity_client")
+    raise NotImplementedError("inject via nemo_helix_plugin.entity_client.get_entity_client")
 
 
 def build_middleware_config_router() -> APIRouter:

@@ -59,7 +59,7 @@ nemo services run
 In another terminal:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 cd plugins/nemo-agents
 
 printf '%s' "$NVIDIA_API_KEY" | nemo secrets create ngc-api-key --from-file -
@@ -154,10 +154,10 @@ What it does under the hood:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -236,13 +236,13 @@ import yaml
 from pathlib import Path
 
 from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 spec = yaml.safe_load(Path(".agent-improver.yml").read_text())
 result = NemoJobScheduler().submit_remote(
     OptimizeSkillsJob,
     spec,
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 print(result)
@@ -348,7 +348,7 @@ What it does under the hood:
 import os
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 
@@ -359,7 +359,7 @@ result = NemoJobScheduler().submit_remote(
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
         "workspace": WORKSPACE,
     },
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 print(result)
@@ -406,7 +406,7 @@ import os
 from pathlib import Path
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 
@@ -417,7 +417,7 @@ result = NemoJobScheduler().submit_remote(
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
         "workspace": WORKSPACE,
     },
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
 print(result)
@@ -495,7 +495,7 @@ actually registered, for the requested profile (currently always `default`):
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
 | `subprocess` | Host subprocess running `python -m nemo_optimization.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
-| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-optimization-plugin` is in the `cpu-tasks` dependency group for this reason |
+| `cpu` (docker or `kubernetes_job`) | The `nhx-tasks` image, same entry point | The task image must carry those dependencies; `nemo-optimization-plugin` is in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
 that often need the host's Docker daemon and harness adapters. If neither is

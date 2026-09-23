@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Framework-agnostic capability model for the NeMo Platform API.
+ * Framework-agnostic capability model for the NeMo Helix API.
  *
  * A "capability" is a single API operation (one path + method) described in a
  * way an LLM agent can discover and invoke through tool use. The metadata in

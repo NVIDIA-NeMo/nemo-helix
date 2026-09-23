@@ -15,13 +15,13 @@ verifying end-to-end behavior:
 from __future__ import annotations
 
 import pytest
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     InferenceMiddlewareContext,
     InferenceRequest,
     InferenceResponse,
 )
-from nemo_platform_plugin.inference_middleware_models import (
+from nemo_helix_plugin.inference_middleware_models import (
     MiddlewareCall,
     VirtualModel,
     VirtualModelInferenceConfig,
@@ -131,7 +131,7 @@ class TestSwitchyardRandomRoutingIntegration:
         middleware_ctx: InferenceMiddlewareContext,
     ) -> None:
         """typed_body=None is a contract violation — raises InferenceMiddlewareError 500."""
-        from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+        from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
         await middleware.on_virtual_model_upserted(virtual_model)
 

@@ -4,21 +4,23 @@
 [project]
 name = "nemo-insights-plugin"
 version = "0.1.0"
-description = "Agent telemetry analysis and persistent insights for NeMo Platform."
-requires-python = ">=3.12,<3.14"
+description = "Agent telemetry analysis and persistent insights for NeMo Helix."
+requires-python = ">=3.12,<3.15"
 dependencies = [
   "fastapi>=0.115",
   "httpx",
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137",
   "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
   "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
-  "nemo-platform",
-  "nemo-platform-plugin",
+  "nemo-helix",
+  "nemo-helix-plugin",
   "nemo-relay>=0.7,<0.8",
   "nooa>=0.0.9",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",
   "pydantic>=2.12.0",
   "pyyaml>=6.0.3",
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
   "typer>=0.20.0",
   "tzdata==2026.2",
 ]
@@ -34,9 +36,6 @@ insights = "nemo_insights_plugin.service:InsightsService"
 
 [project.entry-points."nemo.controllers"]
 insights-analysis = "nemo_insights_plugin.controller:InsightsAnalysisController"
-
-[project.entry-points."nemo.jobs"]
-"insights.analyze-job" = "nemo_insights_plugin.jobs.analyze:AnalyzeJob"
 
 [project.entry-points."nemo.agents.execute_extensions"]
 "insights.analysis" = "nemo_insights_plugin.execute_extensions:InsightsAnalysisExtension"
@@ -55,6 +54,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nemo_insights_plugin"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel.shared-data]
 "insights-analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json"

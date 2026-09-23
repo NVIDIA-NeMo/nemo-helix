@@ -57,16 +57,16 @@ from nemo_agent_hardener_plugin.model_config import (
     WarGameModels,
 )
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     EnvironmentVariable,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ class AgentHardenerRunJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Single subprocess step running the war-game on the host where `nemo agent-hardener setup` provisioned it.
 
         Subprocess (not container) executor: the war-game shells out to agent-hardener's CLI + garak venv and
@@ -215,9 +215,9 @@ class AgentHardenerRunJob(NemoJob):
             value = os.environ.get(name)
             if value:
                 environment.append(EnvironmentVariable(name=name, value=value))
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="war-game",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",

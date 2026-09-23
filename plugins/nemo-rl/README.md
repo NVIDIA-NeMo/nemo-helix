@@ -3,12 +3,12 @@
 
 # nemo-rl-plugin
 
-NeMo-RL customization contributor for the NeMo Platform. Adds **DPO** and **GRPO**
+NeMo-RL customization contributor for the NeMo Helix. Adds **DPO** and **GRPO**
 training on a Ray cluster (via [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)
 v0.6.0) as the `rl` backend under `/apis/customization`.
 
 Thin contributor layer only — the heavy compile glue and container tasks live in
-[`services/rl`](../../services/rl) (`nmp-rl`).
+[`services/rl`](../../services/rl) (`nhx-rl`).
 
 ## Surfaces
 
@@ -22,16 +22,16 @@ Thin contributor layer only — the heavy compile glue and container tasks live 
 - **Remote Kubernetes only** — gated via `require_distributed_runtime`. There is
   no local Docker fallback (unlike automodel/unsloth).
 - **Single-node multi-GPU and multi-node** both supported (`parallelism.num_nodes`).
-  Multi-node requires `NMP_RL_MULTINODE_SHARED_STORAGE_PATH`.
+  Multi-node requires `NHX_RL_MULTINODE_SHARED_STORAGE_PATH`.
 - **DPO is full-weight** (no PEFT).
 - **GRPO** trains against a NeMo Gym environment supplied as an environment FileSet
   using any environment you author, in any of the three packaging formats described
   in Environments section below.
 - **GRPO sandboxed mode** defaults from platform config (`sandboxed_gym_default=true`).
   Compile fails closed when OpenSandbox is unavailable (set
-  `NMP_PLATFORM_SANDBOX_CLUSTER_CAPABLE=true` once installed) or when
-  `NMP_RL_JOB_STORAGE_PVC_CLAIM` is unset — the Gym sandbox re-mounts that claim to
-  read the downloaded environment and dataset. Set `NMP_RL_SANDBOXED_GYM_DEFAULT=false`
+  `NHX_PLATFORM_SANDBOX_CLUSTER_CAPABLE=true` once installed) or when
+  `NHX_RL_JOB_STORAGE_PVC_CLAIM` is unset — the Gym sandbox re-mounts that claim to
+  read the downloaded environment and dataset. Set `NHX_RL_SANDBOXED_GYM_DEFAULT=false`
   for trusted dev smoke tests only.
 - **`training.type` is required** in submitted JSON (union discriminator); it does not
   default to `dpo`.
@@ -89,7 +89,7 @@ rollouts) and a **dataset** (the Gym JSONL rows fed through it). See
    interpreter runs it, and a `uv sync` of the repo `.venv` prunes both back out.
 
    ```bash
-   UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl --extra conversion
+   UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra conversion
    .venv-conversion/bin/pi-to-gym-conversion --hub-id primeintellect/ascii-tree --out-dir ./ascii-tree-pkg
    ```
 
@@ -145,15 +145,15 @@ resolved closure per environment; vendoring several versions of the same distrib
 leaves the resolver to pick, and the job warns about it.
 
 `adapter.agent` is checked against an allowlist of harnesses built into the training
-image (`services/rl/src/nmp/rl/tasks/environment/allowlist.py`), since the manifest
+image (`services/rl/src/nhx/rl/tasks/environment/allowlist.py`), since the manifest
 selects code that already exists in the image rather than shipping it.
 
 ## Compiled job (4 steps)
 
-`submit` → `RlJobInput` → transform → `RlJobOutput` → compiled `PlatformJobSpec`:
+`submit` → `RlJobInput` → transform → `RlJobOutput` → compiled `HelixJobSpec`:
 
-1. **download** — model fileset + dataset (+ environment for GRPO) → PVC (CPU, `nmp-customizer-tasks`)
-2. **dpo-training** / **grpo-training** — Ray step (GPU, `nmp-rl-training`); single-node `gpu` or
+1. **download** — model fileset + dataset (+ environment for GRPO) → PVC (CPU, `nhx-customizer-tasks`)
+2. **dpo-training** / **grpo-training** — Ray step (GPU, `nhx-rl-training`); single-node `gpu` or
    multi-node `gpu_distributed` executor, selected by `parallelism.num_nodes`
 3. **upload** — trained checkpoint → output fileset (CPU)
 4. **model-entity** — register the full-weight output `ModelEntity`
@@ -166,6 +166,6 @@ selects code that already exists in the image rather than shipping it.
 - **GRPO environment packages:** [`docs/customizer/tutorials/grpo-environment-packages.mdx`](../../docs/customizer/tutorials/grpo-environment-packages.mdx) (`native-v1` / `wheels-v1` / `adapter-wheels-v1`).
 - **GRPO job + cluster:** [`docs/customizer/grpo-training.mdx`](../../docs/customizer/grpo-training.mdx).
 - **GPU e2e smoke test:** [`scripts/gpu-dpo-smoke/`](../../scripts/gpu-dpo-smoke).
-- **Images:** [`docker/rl/Dockerfile.nmp-rl-base`](../../docker/rl/Dockerfile.nmp-rl-base),
-  [`docker/rl/Dockerfile.nmp-rl-training`](../../docker/rl/Dockerfile.nmp-rl-training),
-  `docker/Dockerfile.nmp-customizer-tasks`.
+- **Images:** [`docker/rl/Dockerfile.nhx-rl-base`](../../docker/rl/Dockerfile.nhx-rl-base),
+  [`docker/rl/Dockerfile.nhx-rl-training`](../../docker/rl/Dockerfile.nhx-rl-training),
+  `docker/Dockerfile.nhx-customizer-tasks`.

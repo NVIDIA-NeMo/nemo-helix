@@ -156,7 +156,7 @@ test.describe('Agent Evaluation', () => {
       await waitForLongOperation(page);
 
       await page.getByRole('button', { name: 'New Agent' }).click();
-      const modal = page.getByRole('dialog', { name: 'Instrument an agent with NeMo Platform' });
+      const modal = page.getByRole('dialog', { name: 'Instrument an agent with NeMo Helix' });
       await expect(modal).toBeVisible();
 
       await modal.getByRole('tab', { name: 'Upload agent' }).click();

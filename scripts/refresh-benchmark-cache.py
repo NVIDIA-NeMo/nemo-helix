@@ -188,7 +188,7 @@ ARENA_ELO_SLEEP_S = 0.5  # baseline polite delay; _fetch_text retries with backo
 HTTP_429_BACKOFF_S = (30.0, 60.0, 120.0)  # backoff schedule per 429 retry
 
 DEFAULT_CACHE_PATH = Path(
-    "packages/nemo_platform_ext/src/nemo_platform_ext/skills/nemo-model-selection/references/benchmark_cache.json"
+    "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-model-selection/references/benchmark_cache.json"
 )
 
 # ---------------------------------------------------------------------------
@@ -692,7 +692,7 @@ def _fetch_text(url: str, timeout: int = 15) -> str:
     interval and retry — up to len(HTTP_429_BACKOFF_S) attempts. Other HTTP
     errors propagate immediately.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "nemo-platform-benchmark-refresh/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "nemo-helix-benchmark-refresh/1.0"})
     last_exc: Exception | None = None
     for attempt in range(len(HTTP_429_BACKOFF_S) + 1):
         try:

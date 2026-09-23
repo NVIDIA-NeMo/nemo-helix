@@ -19,7 +19,7 @@ PVC, or egress policy.
   It configures the server connection, credentials, and top-level platform sandbox capability.
 - A Kubernetes or Volcano Jobs execution profile with a shared job-storage PVC. The claim should
   support `ReadWriteMany` when Jobs and OpenSandbox pods can run on different nodes.
-- Published `nmp-cpu-tasks` and `nmp-gym-host` images for the platform release.
+- Published `nhx-tasks` and `nhx-gym-host` images for the platform release.
 - An allowlisted model endpoint reachable from the Gym host.
 
 ## Execution topology
@@ -27,19 +27,19 @@ PVC, or egress policy.
 For a built-in environment, sandboxed execution runs one platform step:
 
 ```text
-agent-evaluate (nmp-cpu-tasks)
+agent-evaluate (nhx-tasks)
   → OpenSandbox
-  → nmp-gym-host
+  → nhx-gym-host
 ```
 
 For a custom environment FileSet, Evaluator runs two platform steps:
 
 ```text
-stage-environment (nmp-cpu-tasks)
+stage-environment (nhx-tasks)
   → shared job PVC
-  → agent-evaluate (nmp-cpu-tasks)
+  → agent-evaluate (nhx-tasks)
   → OpenSandbox
-  → nmp-gym-host
+  → nhx-gym-host
 ```
 
 The Gym host mounts the environment read-only and a separate workspace path read-write.
@@ -55,10 +55,10 @@ platformConfig:
     sandboxed_gym_default: true
     sandbox_cluster_capable: true
     sandbox_host_provider: opensandbox
-    sandbox_runtime_image: nvcr.io/nvidia/nemo-platform/nmp-gym-host:<release-tag>
-    sandbox_job_storage_pvc_claim: nemo-platform-core-storage
+    sandbox_runtime_image: nvcr.io/nvidia/nemo-helix/nhx-gym-host:<release-tag>
+    sandbox_job_storage_pvc_claim: nemo-helix-core-storage
     sandbox_policy_base_urls:
-      - http://nemo-platform-api.<namespace>.svc.cluster.local:8080
+      - http://nemo-helix-api.<namespace>.svc.cluster.local:8080
     sandbox_resources:
       cpu: "2"
       memory: 8Gi
@@ -83,7 +83,7 @@ another.
 |---|---|---|
 | `sandboxed_gym_default` | `false` | Run Gym targets in a separate host. Custom environment FileSets require `true`. |
 | `sandbox_cluster_capable` | `false` | Confirm that this Evaluator deployment can provision sandbox hosts. |
-| `sandbox_runtime_image` | unset | Fully qualified `nmp-gym-host` image containing NeMo Gym and the host runtime. |
+| `sandbox_runtime_image` | unset | Fully qualified `nhx-gym-host` image containing NeMo Gym and the host runtime. |
 | `sandbox_job_storage_pvc_claim` | unset | Shared claim used for staged environments and Gym workspaces. |
 | `sandbox_host_provider` | `opensandbox` | Host provider. `docker` is for local debugging and is not an isolation boundary. |
 | `sandbox_host_provider_options` | `{}` | Provider-specific connection options. Helm supplies the OpenSandbox protocol separately. |
@@ -108,7 +108,7 @@ Use `sandbox_policy_base_urls` for model and inference endpoints:
 platformConfig:
   evaluator:
     sandbox_policy_base_urls:
-      - http://nemo-platform-api.nemo-platform.svc.cluster.local:8080
+      - http://nemo-helix-api.nemo-helix.svc.cluster.local:8080
       - https://inference-api.nvidia.com/v1
 ```
 
@@ -129,7 +129,7 @@ widening its own network access.
 OpenSandbox credentials remain in the trusted Evaluator task. The Gym host receives only per-run
 tokens and the environment variables required by its selected Gym components.
 
-For a job-specific model credential, create a NeMo Platform secret and reference it through
+For a job-specific model credential, create a NeMo Helix secret and reference it through
 `GymRunnerTarget.env_secrets`:
 
 ```yaml
@@ -146,7 +146,7 @@ credential-shaped `env_vars` for sandboxed jobs because environment code can rea
 ## Local Docker provider
 
 Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.
-It runs the same `nmp-gym-host` image but does not enforce the OpenSandbox egress policy and is not
+It runs the same `nhx-gym-host` image but does not enforce the OpenSandbox egress policy and is not
 an isolation boundary.
 
 The `memory` episode backend is also local-only. It requires both:
@@ -165,7 +165,7 @@ Before accepting custom environment jobs, verify:
 
 1. OpenSandbox is ready and reachable over the configured in-cluster protocol.
 2. The selected Jobs profile uses Kubernetes or Volcano and mounts the configured PVC.
-3. `nmp-cpu-tasks` and `nmp-gym-host` can be pulled by pods in the platform namespace.
+3. `nhx-tasks` and `nhx-gym-host` can be pulled by pods in the platform namespace.
 4. The Gym host can reach each configured model URL but cannot reach an unlisted destination.
 5. A completed and a failed run both destroy their Gym hosts.
 

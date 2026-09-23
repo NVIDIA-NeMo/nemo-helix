@@ -79,8 +79,8 @@ def _credential_env_from_plaintext_rows(
                 env.setdefault("ANTHROPIC_BASE_URL", settings.nvidia_anthropic_base_url)
             elif provider == "nvidia":
                 env.setdefault("POLICY_BASE_URL", settings.nvidia_inference_base_url)
-        elif provider == "nmp":
-            env["NMP_INTAKE_CREDENTIAL_YAML"] = plaintext
+        elif provider == "nhx":
+            env["NHX_INTAKE_CREDENTIAL_YAML"] = plaintext
         elif provider == "openshift":
             # A user's OpenShift bearer token. NOT a runtime env var for the
             # agent — sandbox_k8s extracts it to write a per-eval kubeconfig and

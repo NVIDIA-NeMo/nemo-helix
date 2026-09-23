@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
+import yaml
 from click.exceptions import Exit as ClickExit
 from nemo_agents_plugin.container.errors import AgentConfigValidationError, ManagedFileConflictError
 
@@ -61,7 +62,14 @@ def project_dir(tmp_path: Path) -> tuple[Path, Path]:
 @pytest.fixture()
 def fabric_agent_config(tmp_path: Path) -> Path:
     config = tmp_path / "agent.yaml"
-    config.write_text("config_format: nemo-agents-spec-v1\nname: fabric-agent\n")
+    config.write_text(
+        "config_format: nemo-agents-spec-v1\n"
+        "name: fabric-agent\n"
+        "default_harness: deepagents\n"
+        "harnesses:\n"
+        "  deepagents:\n"
+        "    kind: deepagents\n"
+    )
     return config
 
 
@@ -220,7 +228,7 @@ class TestRenderNatDockerfile:
 
     @staticmethod
     def _fake_profile():
-        from nemo_platform_plugin.sandbox import SandboxImageProfile, SandboxUser
+        from nemo_helix_plugin.sandbox import SandboxImageProfile, SandboxUser
 
         return SandboxImageProfile(
             name="openshell",
@@ -398,23 +406,12 @@ class TestFabricDockerfileTemplate:
         params = FabricRenderParams(contract_version="1.2.3", **overrides)
         return _jinja_env().from_string(FABRIC_DOCKERFILE_TEMPLATE).render(**asdict(params))
 
-    def test_installs_matching_relay_cli_and_python_binding(self) -> None:
-        from nemo_agents_plugin.container.template import (
-            PINNED_NEMO_RELAY_CLI_VERSION,
-            PINNED_NEMO_RELAY_INSTALLER_COMMIT,
-            PINNED_NEMO_RELAY_INSTALLER_SHA256,
-        )
+    def test_harness_extra_owns_its_relay_dependencies(self) -> None:
+        result = self._render(platform_extra="nemo-agents-plugin-codex")
 
-        result = self._render()
-
-        assert f"NVIDIA/NeMo-Relay/{PINNED_NEMO_RELAY_INSTALLER_COMMIT}/install.sh" in result
-        assert f'echo "{PINNED_NEMO_RELAY_INSTALLER_SHA256}  /tmp/install-nemo-relay.sh"' in result
-        assert result.index("sha256sum -c -") < result.index("NEMO_RELAY_VERSION=")
-        assert f"NEMO_RELAY_VERSION={PINNED_NEMO_RELAY_CLI_VERSION}" in result
-        assert f'"nemo-relay=={PINNED_NEMO_RELAY_CLI_VERSION}"' in result
-        assert "--install-dir /usr/local/bin" in result
-        assert "nemo-relay --version" in result
-        assert "ARG NEMO_RELAY" not in result
+        assert '"nemo-helix[nemo-agents-plugin-codex]==1.2.3"' in result
+        assert "install-nemo-relay.sh" not in result
+        assert '"nemo-relay==' not in result
 
     def test_preserves_agent_bundle_and_config_path(self) -> None:
         result = self._render(config_file_path="/workspace/configs/agent.yaml")
@@ -446,11 +443,29 @@ class TestRenderFabricDockerfile:
         install_line = next(line for line in result.splitlines() if "uv pip install" in line)
         assert "--no-sources" in install_line
         assert "--prerelease=allow" in install_line
-        assert f'"nemo-platform[nemo-agents-plugin]=={get_contract_version()}"' in install_line
+        assert f'"nemo-helix[nemo-agents-plugin-deepagents]=={get_contract_version()}"' in install_line
         assert '" .' not in install_line
         assert "ENV AGENT_CONFIG_PATH=/workspace/agent.yaml" in result
         assert "NAT_VERSION" not in result
         assert "ghcr.io/astral-sh/uv:0.9.14" in result
+
+    def test_non_string_default_harness_uses_base_plugin(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: fabric-agent\n"
+            "default_harness:\n"
+            "  name: deepagents\n"
+            "harnesses:\n"
+            "  deepagents:\n"
+            "    kind: deepagents\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
 
     def test_renders_platform_agent_oci_labels(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.metadata import extract_agent_metadata
@@ -477,20 +492,25 @@ class TestRenderFabricDockerfile:
         assert 'org.opencontainers.image.authors="Agent Author"' in result
         assert 'org.opencontainers.image.description="Researches technical topics"' in result
         assert f'com.nemo.agent.id="{metadata["agent_id"]}"' in result
-        assert 'com.nemo.agent.framework="nemo_platform_agent"' in result
+        assert 'com.nemo.agent.framework="nemo_helix_agent"' in result
         assert f'com.nemo.agent.contract-version="{get_contract_version()}"' in result
 
     def test_project_mode_preserves_relative_config_path(self, tmp_path: Path) -> None:
-        from nemo_agents_plugin.container.template import (
-            PINNED_NEMO_RELAY_CLI_VERSION,
-            get_contract_version,
-            render_fabric_dockerfile,
-        )
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
 
         configs = tmp_path / "configs"
         configs.mkdir()
         agent_config = configs / "agent.yaml"
-        agent_config.write_text("config_format: nemo-agents-spec-v1\nname: fabric-agent\n")
+        agent_config.write_text(
+            yaml.safe_dump(
+                {
+                    "config_format": "nemo-agents-spec-v1",
+                    "name": "fabric-agent",
+                    "default_harness": "codex",
+                    "harnesses": {"codex": {"kind": "codex"}},
+                }
+            )
+        )
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text('[project]\nname = "fabric-agent"\nversion = "1.0.0"\n')
 
@@ -499,9 +519,66 @@ class TestRenderFabricDockerfile:
         install_line = next(line for line in result.splitlines() if "uv pip install" in line)
         assert "--no-sources" in install_line
         assert "--prerelease=allow" in install_line
-        assert f'"nemo-platform[nemo-agents-plugin]=={get_contract_version()}"' in install_line
-        assert f'"nemo-relay=={PINNED_NEMO_RELAY_CLI_VERSION}" .' in result
+        assert f'"nemo-helix[nemo-agents-plugin-codex]=={get_contract_version()}"' in install_line
+        assert '"nemo-relay==' not in result
         assert "ENV AGENT_CONFIG_PATH=/workspace/configs/agent.yaml" in result
+
+    @pytest.mark.parametrize(
+        ("kind", "extra"),
+        [
+            ("claude", "nemo-agents-plugin-claude"),
+            ("nvidia.fabric.codex", "nemo-agents-plugin-codex"),
+            ("nvidia.fabric.langchain.deepagents", "nemo-agents-plugin-deepagents"),
+        ],
+    )
+    def test_installs_only_the_default_harness(self, tmp_path: Path, kind: str, extra: str) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: fabric-agent\n"
+            "default_harness: selected\n"
+            "harnesses:\n"
+            f"  selected:\n    kind: {kind}\n"
+            "  unused:\n    kind: claude\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        assert f'"nemo-helix[{extra}]=={get_contract_version()}"' in result
+        if extra != "nemo-agents-plugin-claude":
+            assert "nemo-agents-plugin-claude]==" not in result
+
+    def test_hermes_uses_an_isolated_pinned_environment(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import (
+            PINNED_HERMES_COMMIT,
+            get_contract_version,
+            render_fabric_dockerfile,
+        )
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: hermes-agent\n"
+            "default_harness: hermes\n"
+            "harnesses:\n"
+            "  hermes:\n"
+            "    kind: nvidia.fabric.hermes\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
+        assert "apt-get install -y --no-install-recommends g++ gcc ca-certificates curl git" in result
+        assert "uv venv --python 3.12 /opt/hermes-venv" in result
+        assert 'm.version("nemo-fabric")' in result
+        assert '"nemo-fabric[relay]==${FABRIC_VERSION}"' in result
+        assert '"nemo-fabric-adapters-hermes==${FABRIC_VERSION}"' in result
+        assert f"git -C /opt/hermes-agent fetch --depth 1 origin {PINNED_HERMES_COMMIT}" in result
+        assert "--editable /opt/hermes-agent" in result
+        assert "uv pip check --python /opt/hermes-venv/bin/python" in result
+        assert "ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python" in result
 
     def test_unresolved_contract_version_is_rejected(
         self,
@@ -512,7 +589,7 @@ class TestRenderFabricDockerfile:
 
         monkeypatch.setattr(template, "get_contract_version", lambda: "0.0.0")
 
-        with pytest.raises(ValueError, match="Unable to resolve the installed nemo-platform contract version"):
+        with pytest.raises(ValueError, match="Unable to resolve the installed nemo-helix contract version"):
             template.render_fabric_dockerfile(fabric_agent_config)
 
     def test_custom_template_uses_fabric_context(self, tmp_path: Path, fabric_agent_config: Path) -> None:
@@ -564,7 +641,7 @@ class TestRenderFabricDockerfile:
 
     def test_allow_root_and_sandbox_profile(self, fabric_agent_config: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
-        from nemo_platform_plugin.sandbox import SandboxImageProfile, SandboxUser
+        from nemo_helix_plugin.sandbox import SandboxImageProfile, SandboxUser
 
         profile = SandboxImageProfile(
             name="openshell",
@@ -690,7 +767,7 @@ class TestExtractAgentMetadata:
         meta = extract_agent_metadata(fabric_agent_config, agent_author="x")
 
         assert meta["agent_name"] == "fabric-agent"
-        assert meta["agent_framework"] == "nemo_platform_agent"
+        assert meta["agent_framework"] == "nemo_helix_agent"
 
     def test_pyproject_name_overrides_fabric_config_name(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.metadata import extract_agent_metadata
@@ -741,7 +818,7 @@ class TestExtractAgentMetadata:
         config = tmp_path / "agent.yaml"
         config.write_text("config_format: nemo-agents-spec-v1\nname: research-assistant\n")
         baseline = {
-            "agent_framework": "nemo_platform_agent",
+            "agent_framework": "nemo_helix_agent",
             "contract_version": "1.0.0",
             "nemo_relay_cli_version": "0.6.0",
         }
@@ -935,8 +1012,8 @@ class TestExtractAgentMetadata:
             gl_token_only: f"https://{gl_host}/org/repo.git",
             gh_basic: f"https://{gh_host}/org/repo.git",
             f"https://{gh_host}/org/repo.git": f"https://{gh_host}/org/repo.git",
-            f"git@{gl_host}:aire/microservices/nmp.git": f"git@{gl_host}:aire/microservices/nmp.git",
-            f"ssh://git@{gl_host}:12051/aire/microservices/nmp.git": f"ssh://git@{gl_host}:12051/aire/microservices/nmp.git",
+            f"git@{gl_host}:aire/microservices/nhx.git": f"git@{gl_host}:aire/microservices/nhx.git",
+            f"ssh://git@{gl_host}:12051/aire/microservices/nhx.git": f"ssh://git@{gl_host}:12051/aire/microservices/nhx.git",
             "": "",
         }
         for raw, expected in cases.items():
@@ -1831,7 +1908,14 @@ class TestPackageCommand:
         configs = tmp_path / "configs"
         configs.mkdir()
         agent_config = configs / "agent.yaml"
-        agent_config.write_text("config_format: nemo-agents-spec-v1\nname: fabric-agent\n")
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: fabric-agent\n"
+            "default_harness: codex\n"
+            "harnesses:\n"
+            "  codex:\n"
+            "    kind: codex\n"
+        )
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text('[project]\nname = "fabric-agent"\nversion = "1.0.0"\n')
 
@@ -1852,9 +1936,8 @@ class TestPackageCommand:
         assert output.exists()
         rendered = output.read_text()
         assert "ENV AGENT_CONFIG_PATH=/workspace/configs/agent.yaml" in rendered
-        from nemo_agents_plugin.container.template import PINNED_NEMO_RELAY_CLI_VERSION
-
-        assert f'"nemo-relay=={PINNED_NEMO_RELAY_CLI_VERSION}" .' in rendered
+        assert '"nemo-helix[nemo-agents-plugin-codex]==' in rendered
+        assert '"nemo-relay==' not in rendered
         assert not (configs / "Dockerfile").exists()
 
     def test_no_build_project_mode_writes_dockerfile_next_to_pyproject(
@@ -2667,7 +2750,7 @@ class TestInstallableContractVersion:
             require_installable_contract_version,
         )
 
-        with pytest.raises(ValueError, match="Unable to resolve the installed nemo-platform contract version"):
+        with pytest.raises(ValueError, match="Unable to resolve the installed nemo-helix contract version"):
             require_installable_contract_version(UNRESOLVED_CONTRACT_VERSION)
 
     @pytest.mark.parametrize("value", ["1", "true", "YES"])
@@ -2692,7 +2775,7 @@ class TestInstallableContractVersion:
 
         monkeypatch.setenv("NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION", "1")
 
-        with pytest.raises(ValueError, match="Unable to resolve the installed nemo-platform contract version"):
+        with pytest.raises(ValueError, match="Unable to resolve the installed nemo-helix contract version"):
             require_installable_contract_version(UNRESOLVED_CONTRACT_VERSION)
 
     def test_custom_template_may_use_an_unpublished_version(self) -> None:
@@ -2743,10 +2826,10 @@ class TestFabricWheelInstall:
     def test_render_installs_the_wheel_instead_of_the_pin(self, fabric_agent_config: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
 
-        result = render_fabric_dockerfile(fabric_agent_config, wheel_filename="nemo_platform-0.4.0-py3-none-any.whl")
+        result = render_fabric_dockerfile(fabric_agent_config, wheel_filename="nemo_helix-0.4.0-py3-none-any.whl")
 
-        assert '"/workspace/nemo_platform-0.4.0-py3-none-any.whl[nemo-agents-plugin]"' in result
-        assert "nemo-platform[nemo-agents-plugin]==" not in result
+        assert '"/workspace/nemo_helix-0.4.0-py3-none-any.whl[nemo-agents-plugin-deepagents]"' in result
+        assert "nemo-helix[nemo-agents-plugin-deepagents]==" not in result
 
     def test_a_wheel_lifts_the_unpublished_version_guard(
         self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
@@ -2773,7 +2856,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"not really a wheel")
         context = fabric_agent_config.parent
         staged_during_build: dict[str, bool] = {}
@@ -2807,7 +2890,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         monkeypatch.setenv(WHEEL_ENV, str(wheel))
         context = fabric_agent_config.parent
@@ -2828,8 +2911,8 @@ class TestFabricWheelInstall:
 
         dist = tmp_path / "dist"
         dist.mkdir()
-        older = dist / "nemo_platform-0.4.0.post1-py3-none-any.whl"
-        newer = dist / "nemo_platform-0.4.0.post2-py3-none-any.whl"
+        older = dist / "nemo_helix-0.4.0.post1-py3-none-any.whl"
+        newer = dist / "nemo_helix-0.4.0.post2-py3-none-any.whl"
         older.write_bytes(b"old")
         newer.write_bytes(b"new")
         os.utime(older, (1, 1))
@@ -2853,7 +2936,7 @@ class TestFabricWheelInstall:
 
         dist = tmp_path / "dist"
         dist.mkdir()
-        ours = dist / "nemo_platform-0.4.0-py3-none-any.whl"
+        ours = dist / "nemo_helix-0.4.0-py3-none-any.whl"
         theirs = dist / "nemo_evaluator-9.9.9-py3-none-any.whl"
         ours.write_bytes(b"ours")
         theirs.write_bytes(b"theirs")
@@ -2885,8 +2968,8 @@ class TestFabricWheelInstall:
         with pytest.raises(ValueError) as raised:
             builder.build_fabric_agent_image(fabric_agent_config, skip_validation=True, agent_author="x")
 
-        assert "no nemo-platform wheels" in str(raised.value)
-        assert "uv build --package nemo-platform" in str(raised.value)
+        assert "no nemo-helix wheels" in str(raised.value)
+        assert "uv build --package nemo-helix" in str(raised.value)
 
     @patch("nemo_agents_plugin.container.builder.docker_build")
     def test_an_existing_path_named_latest_is_not_treated_as_the_sentinel(
@@ -2925,7 +3008,7 @@ class TestFabricWheelInstall:
         monkeypatch.setattr(builder, "_source_checkout_dist_dir", lambda: dist)
         monkeypatch.setenv(WHEEL_ENV, WHEEL_LATEST)
 
-        with pytest.raises(ValueError, match="uv build --package nemo-platform"):
+        with pytest.raises(ValueError, match="uv build --package nemo-helix"):
             builder.build_fabric_agent_image(fabric_agent_config, skip_validation=True, agent_author="x")
 
     @patch("nemo_agents_plugin.container.builder.docker_build")
@@ -2983,7 +3066,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         collision = fabric_agent_config.parent / wheel.name
 
@@ -3017,7 +3100,7 @@ class TestFabricWheelInstall:
         monkeypatch.setattr(template, "get_contract_version", lambda: "9.9.9.dev0+hostonly")
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0.post176.dev0+abc123-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0.post176.dev0+abc123-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
 
         assert builder.wheel_contract_version(wheel) == "0.4.0.post176.dev0+abc123"
@@ -3050,7 +3133,7 @@ class TestFabricWheelInstall:
     ) -> None:
         from nemo_agents_plugin.container.builder import build_fabric_agent_image
 
-        wheel_name = "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel_name = "nemo_helix-0.4.0-py3-none-any.whl"
         first_source = tmp_path / "first"
         first_source.mkdir()
         first_wheel = first_source / wheel_name
@@ -3081,7 +3164,7 @@ class TestFabricWheelInstall:
         monkeypatch.setattr(template, "get_contract_version", lambda: "9.9.9")
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0.post176.dev0+abc123-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0.post176.dev0+abc123-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         dockerfile = tmp_path / "Dockerfile"
         dockerfile.write_text("FROM scratch\n")
@@ -3117,7 +3200,7 @@ class TestFabricWheelInstall:
         with pytest.raises(ValueError):
             wheel_contract_version(tmp_path / filename)
 
-    @pytest.mark.parametrize("rule", ["*.whl", "/*.whl", "**/*.whl", "nemo_platform-*.whl"])
+    @pytest.mark.parametrize("rule", ["*.whl", "/*.whl", "**/*.whl", "nemo_helix-*.whl"])
     def test_a_user_rule_cannot_exclude_the_staged_wheel(
         self, fabric_agent_config: Path, tmp_path: Path, rule: str
     ) -> None:
@@ -3129,7 +3212,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         context = fabric_agent_config.parent
         (context / ".dockerignore").write_text(f"# user owned\n{rule}\n")
@@ -3209,7 +3292,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         context = fabric_agent_config.parent
         scoped = context / "Dockerfile.generated.dockerignore"
@@ -3230,7 +3313,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         context = fabric_agent_config.parent
         scoped = context / "Dockerfile.generated.dockerignore"
@@ -3253,7 +3336,7 @@ class TestFabricWheelInstall:
 
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_platform-0.4.0-py3-none-any.whl"
+        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
         wheel.write_bytes(b"wheel")
         collision = fabric_agent_config.parent / wheel.name
         collision.write_text("USER OWNED")

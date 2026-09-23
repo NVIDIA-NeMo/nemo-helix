@@ -31,14 +31,14 @@ from data_designer_nemo.errors import NDDError
 from data_designer_nemo.runnable import resolve_runnable_config
 from data_designer_nemo.sdk_translation import sync_to_async_sdk
 from nemo_data_designer_plugin._data_designer import create_data_designer
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 
 EngineCall = Callable[[DataDesigner, dd.DataDesignerConfigBuilder], None]
 
 # Given the sync SDK (if any), the workspace, and the filesystem roots the
 # validation pass cleared, produce the context to run the engine against —
 # or ``None`` to skip the engine entirely.
-EngineContextFactory = Callable[[NeMoPlatform | None, str, set[str]], DataDesignerEngineContext | None]
+EngineContextFactory = Callable[[NeMoHelix | None, str, set[str]], DataDesignerEngineContext | None]
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,8 @@ class EnginePassResult:
 async def run_engine_pass(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoPlatform | None = None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    sdk: NeMoHelix | None = None,
+    async_sdk: AsyncNeMoHelix | None = None,
     workspace: str,
     engine_call: EngineCall,
     engine_errors: tuple[type[Exception], ...],
@@ -79,9 +79,9 @@ async def run_engine_pass(
 
     Args:
         config_builder: The Data Designer config to inspect.
-        sdk: Sync NeMoPlatform SDK. Required for the engine pass, and used to
+        sdk: Sync NeMoHelix SDK. Required for the engine pass, and used to
             derive ``async_sdk`` when one is not supplied.
-        async_sdk: Async NeMoPlatform SDK. Built from ``sdk`` when omitted.
+        async_sdk: Async NeMoHelix SDK. Built from ``sdk`` when omitted.
         workspace: Workspace used to resolve provider references and seed
             sources. Pass ``"default"`` if you have no better value.
         engine_call: Invoked as ``engine_call(data_designer, config_builder)``
@@ -132,7 +132,7 @@ async def run_engine_pass(
 
 
 def _execution_context_factory(
-    sdk: NeMoPlatform | None,
+    sdk: NeMoHelix | None,
     workspace: str,
     validated_roots: set[str],
 ) -> DataDesignerEngineContext | None:

@@ -1,0 +1,132 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Train on SPECTER or Triplet JSONL"
+description: ""
+---
+
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-triplet-dataset.ipynb)
+
+Register an existing embedding dataset as a platform fileset so Stage 2 Automodel can train on it. This replaces the NVDocs data, not the Nemotron 3 Embed model entity.
+
+The default recipe is [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job), which mines hard negatives from NVDocs. SPECTER negatives are papers that the positive does not cite, not passages mined for proximity to the positive, so expect a smaller nDCG gain. SPECTER carries no retrieval evaluation split (`eval_beir`): keep a frozen NVDocs `eval_beir` fileset for Stage 4, or skip retrieval evaluation. The `validation.jsonl` created below is only for validation loss and checkpoint selection during training.
+
+## What this notebook registers
+
+| Automodel field | Source |
+| --- | --- |
+| `dataset.training` | The fileset created here, holding `training.jsonl` and optional `validation.jsonl` |
+| `model` | `default/nemotron-3-embed-1b` from the embedding tutorial |
+
+Rows use the triplet schema described in [dataset format](/documentation/customizer-reference/models/dataset-format):
+
+```json
+{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}
+```
+
+`neg_doc` is a non-empty JSON list. The cells below convert SPECTER locally and upload the result. At the fileset root, Automodel discovers `train*.jsonl` or `training*.jsonl` as training data and `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` as optional validation data. If no validation file is present, Automodel creates a deterministic holdout from the training rows using `schedule.validation_split`, which defaults to 10%.
+
+Equivalent CLI for the upload, once the files exist on disk:
+
+```bash
+nemo files filesets create specter-embedding-dataset --workspace default --purpose dataset --exist-ok \
+  --description "SPECTER triplets as query/pos_doc/neg_doc JSONL"
+nemo files upload /tmp/specter-embedding-dataset/ specter-embedding-dataset --workspace default
+nemo files list specter-embedding-dataset --workspace default
+```
+
+```python
+import json
+import os
+from pathlib import Path
+from datasets import load_dataset
+from nemo_helix import NeMoHelix, ConflictError
+
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+
+DATASET_SIZE = int(os.environ.get("SPECTER_ROWS", "3000"))
+VALIDATION_SPLIT = 0.05
+SEED = 42
+DATASET_PATH = Path("/tmp/specter-embedding-dataset")
+DATASET_NAME = os.environ.get("SPECTER_FILESET", "specter-embedding-dataset")
+os.makedirs(DATASET_PATH, exist_ok=True)
+
+print("Downloading SPECTER...")
+data = load_dataset("embedding-data/SPECTER")["train"].shuffle(seed=SEED).select(range(DATASET_SIZE))
+splits = data.train_test_split(test_size=VALIDATION_SPLIT, seed=SEED)
+
+for name, dataset in [("training", splits["train"]), ("validation", splits["test"])]:
+    out = DATASET_PATH / f"{name}.jsonl"
+    with out.open("w") as f:
+        for row in dataset:
+            triplet = {
+                "query": row["set"][0],
+                "pos_doc": row["set"][1],
+                "neg_doc": [row["set"][2]],
+            }
+            if not triplet["neg_doc"][0]:
+                raise ValueError("empty negative")
+            f.write(json.dumps(triplet) + "\n")
+    print(name, out, "rows", len(dataset))
+
+```
+
+```python
+try:
+    client.files.filesets.create(
+        workspace="default",
+        name=DATASET_NAME,
+        purpose="dataset",
+        description="SPECTER triplets as query/pos_doc/neg_doc JSONL",
+    )
+    print("Created fileset", DATASET_NAME)
+except ConflictError:
+    print("Fileset exists", DATASET_NAME)
+
+client.files.upload(
+    local_path=f"{DATASET_PATH}/",
+    remote_path="",
+    fileset=DATASET_NAME,
+    workspace="default",
+)
+print("Uploaded:")
+print(json.dumps([f.model_dump() for f in client.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print("dataset.training =", f"default/{DATASET_NAME}")
+print("Set that on the Automodel job in the embedding tutorial. model remains default/nemotron-3-embed-1b.")
+
+```
+
+## Return to Stage 2
+
+In [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job), keep `model="default/nemotron-3-embed-1b"` and set:
+
+```python
+dataset={"training": "default/specter-embedding-dataset"}
+```
+
+Equivalent CLI:
+
+```bash
+nemo customization automodel.jobs submit --workspace default --name embed-specter \
+  --model default/nemotron-3-embed-1b \
+  --dataset.training default/specter-embedding-dataset \
+  --spec '{
+  "training": {
+    "training_type": "sft",
+    "recipe": "bi_encoder",
+    "finetuning_type": "all_weights",
+    "max_seq_length": 512,
+    "retrieval": {"query_max_length": 512, "passage_max_length": 512, "train_n_passages": 2, "export": {"primary": "hf"}}
+  },
+  "schedule": {"epochs": 2},
+  "batch": {"global_batch_size": 128, "micro_batch_size": 4},
+  "optimizer": {"learning_rate": 1e-5, "warmup_steps": 5, "weight_decay": 0.01},
+  "parallelism": {"num_gpus_per_node": 1},
+  "output": {"name": "nemotron-3-embed-1b-specter"}
+}'
+```
+
+Each SPECTER row carries one negative, so `train_n_passages` is 2 rather than the 5 used with mined NVDocs negatives. `dataset.training` points at the whole fileset, so Automodel reads both `training.jsonl` and the optional `validation.jsonl`; no separate dataset reference is needed. Automodel reads data from a fileset, not from a local path or a Hugging Face dataset URI.
+
+For Stage 4, pass the NVDocs `eval_beir` artifacts fileset to `retrieve-eval`.

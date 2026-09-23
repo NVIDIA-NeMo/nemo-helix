@@ -12,21 +12,21 @@ HuggingFace storage backends.
 
 import httpx
 from huggingface_hub import HfApi, hf_hub_download, hf_hub_url, snapshot_download
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import FilesetOutput
-from nmp.core.files.testing.utils import create_fileset
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import FilesetOutput
+from nhx.core.files.testing.utils import create_fileset
 
 
 class TestHuggingFaceClientLibrary:
     """Test HuggingFace Hub client library compatibility with the files service."""
 
-    def test_hf_hub_download_nested_files(self, sdk: NeMoPlatform, fileset: FilesetOutput, tmp_path, hf_asgi_client):
+    def test_hf_hub_download_nested_files(self, sdk: NeMoHelix, fileset: FilesetOutput, tmp_path, hf_asgi_client):
         """Test downloading nested files using huggingface_hub client.
 
         This test:
-        1. Uploads a nested directory structure using the NeMo Platform SDK
+        1. Uploads a nested directory structure using the NeMo Helix SDK
         2. Downloads all files using huggingface_hub's snapshot_download
         3. Verifies all files match the originals
         """
@@ -70,7 +70,7 @@ class TestHuggingFaceClientLibrary:
             assert downloaded_file.exists(), f"File {path} was not downloaded"
             assert downloaded_file.read_bytes() == expected_content, f"Content mismatch for {path}"
 
-    def test_hf_hub_download_single_file(self, sdk: NeMoPlatform, fileset: FilesetOutput, tmp_path, hf_asgi_client):
+    def test_hf_hub_download_single_file(self, sdk: NeMoHelix, fileset: FilesetOutput, tmp_path, hf_asgi_client):
         """Test downloading a single file using hf_hub_download."""
         test_content = b"This is a test file for single download"
         test_path = "single_file.txt"
@@ -97,7 +97,7 @@ class TestHuggingFaceClientLibrary:
         with open(local_path, "rb") as f:
             assert f.read() == test_content
 
-    def test_hf_api_list_repo_files(self, sdk: NeMoPlatform, fileset: FilesetOutput, hf_asgi_client):
+    def test_hf_api_list_repo_files(self, sdk: NeMoHelix, fileset: FilesetOutput, hf_asgi_client):
         """Test listing repository files using HfApi."""
         test_files = {
             "file1.txt": b"content1",
@@ -124,7 +124,7 @@ class TestHuggingFaceClientLibrary:
         listed_files = {sibling.rfilename for sibling in repo_info.siblings}
         assert listed_files == set(test_files.keys())
 
-    def test_hf_hub_url_generates_valid_download_url(self, sdk: NeMoPlatform, fileset: FilesetOutput):
+    def test_hf_hub_url_generates_valid_download_url(self, sdk: NeMoHelix, fileset: FilesetOutput):
         """Test that hf_hub_url generates a valid URL for file download.
 
         This test verifies that:
@@ -165,7 +165,7 @@ class TestHuggingFaceClientLibrary:
 class TestHfFileDownload:
     """Tests for /v2/hf/{workspace}/{name}/resolve/... endpoints."""
 
-    def test_head_file_returns_metadata(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_head_file_returns_metadata(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test HEAD request returns correct headers."""
         with create_fileset(sdk) as fileset:
             content = b"test content"
@@ -187,7 +187,7 @@ class TestHfFileDownload:
             assert "ETag" in response.headers
             assert response.headers["Accept-Ranges"] == "bytes"
 
-    def test_revision_is_ignored(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_revision_is_ignored(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test that revision parameter is ignored (we don't version filesets)."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(
@@ -209,7 +209,7 @@ class TestHfFileDownload:
                 )
                 assert response.status_code == 200
 
-    def test_range_request(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_range_request(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test Range header is respected."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(
@@ -227,7 +227,7 @@ class TestHfFileDownload:
             assert response.status_code == 206
             assert response.content == b"01234"
 
-    def test_file_not_found(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_file_not_found(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test 404 for missing file."""
         with create_fileset(sdk) as fileset:
             response = client.get(
@@ -244,7 +244,7 @@ class TestHfFileDownload:
         )
         assert response.status_code == 404
 
-    def test_service_principal_bearer_token(self, sdk: NeMoPlatform, client: httpx.Client):
+    def test_service_principal_bearer_token(self, sdk: NeMoHelix, client: httpx.Client):
         """Test that service principal Bearer tokens work for HF endpoints.
 
         This verifies the HF_TOKEN=service:<name> authentication flow works,
@@ -271,7 +271,7 @@ class TestHfFileDownload:
 class TestHfRepoInfo:
     """Tests for /v2/hf/api/models/... endpoints."""
 
-    def test_get_repo_info_at_revision(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_get_repo_info_at_revision(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test getting repository info with explicit revision."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(
@@ -295,7 +295,7 @@ class TestHfRepoInfo:
             assert len(data["siblings"]) == 1
             assert data["siblings"][0]["rfilename"] == "file.txt"
 
-    def test_get_tree(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_get_tree(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test getting file tree."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(
@@ -317,7 +317,7 @@ class TestHfRepoInfo:
             assert data[0]["type"] == "file"
             assert "oid" in data[0]
 
-    def test_paths_info(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_paths_info(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test paths-info endpoint."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(
@@ -343,7 +343,7 @@ class TestHfRepoInfo:
 class TestCommitHashConsistency:
     """Tests for commit hash and ETag stability."""
 
-    def test_commit_hash_stable_for_same_fileset(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_commit_hash_stable_for_same_fileset(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test same fileset returns same commit hash."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(
@@ -364,7 +364,7 @@ class TestCommitHashConsistency:
 
             assert response1.headers["X-Repo-Commit"] == response2.headers["X-Repo-Commit"]
 
-    def test_etag_stable_for_same_file(self, sdk: NeMoPlatform, client: httpx.Client, hf_auth_headers):
+    def test_etag_stable_for_same_file(self, sdk: NeMoHelix, client: httpx.Client, hf_auth_headers):
         """Test same file returns same ETag."""
         with create_fileset(sdk) as fileset:
             client_from_platform(sdk, FilesClient).upload_file(

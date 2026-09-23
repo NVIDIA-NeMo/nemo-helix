@@ -5,12 +5,12 @@
 
 This module defines the ref types that are unique to agent jobs:
 :class:`AgentRef` and the :data:`AgentTarget` union it forms with
-:class:`~nemo_platform_plugin.refs.EndpointURL`.  The generic ref machinery
-(:class:`~nemo_platform_plugin.refs.StrRef`, :class:`~nemo_platform_plugin.refs.EndpointURL`,
-:class:`~nemo_platform_plugin.refs.LocalDir`, :class:`~nemo_platform_plugin.refs.FilesetRef`,
-:data:`~nemo_platform_plugin.refs.OutputTarget`,
-:func:`~nemo_platform_plugin.refs.classify_output_target`) lives in
-:mod:`nemo_platform_plugin.refs` so other plugins can reuse the same convention.
+:class:`~nemo_helix_plugin.refs.EndpointURL`.  The generic ref machinery
+(:class:`~nemo_helix_plugin.refs.StrRef`, :class:`~nemo_helix_plugin.refs.EndpointURL`,
+:class:`~nemo_helix_plugin.refs.LocalDir`, :class:`~nemo_helix_plugin.refs.FilesetRef`,
+:data:`~nemo_helix_plugin.refs.OutputTarget`,
+:func:`~nemo_helix_plugin.refs.classify_output_target`) lives in
+:mod:`nemo_helix_plugin.refs` so other plugins can reuse the same convention.
 
 Both names from the generic module are re-exported here for a single
 import surface at call sites that touch agent specs (the
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Union
 
-from nemo_platform_plugin.refs import (
+from nemo_helix_plugin.refs import (
     EndpointURL,
     FilesetRef,
     LocalDir,
@@ -59,8 +59,8 @@ def classify_agent_target(value: str) -> type[StrRef]:
 
     Dispatch is purely shape-based: the presence of ``"://"`` is the
     canonical "this is a URL" marker (matches what
-    :func:`nemo_platform_ext.refs.parser.classify_input` does for the
-    EXTERNAL_URL bucket).  Anything else is treated as a NeMo Platform agent
+    :func:`nemo_helix_ext.refs.parser.classify_input` does for the
+    EXTERNAL_URL bucket).  Anything else is treated as a NeMo Helix agent
     reference.
 
     Returns the concrete subclass — callers can either compare against

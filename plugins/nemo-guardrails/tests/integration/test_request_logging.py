@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_DATA_MESSAGE_ROLE
-from nmp.core.inference_gateway.testing.harness import IGWPluginHarness
-from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
+from nhx.core.inference_gateway.testing.harness import IGWPluginHarness
+from nhx.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,

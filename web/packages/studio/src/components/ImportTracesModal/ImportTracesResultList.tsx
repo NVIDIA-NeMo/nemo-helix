@@ -26,7 +26,7 @@ const ResultRow: FC<RowProps> = ({ slotIcon, title, message }) => (
         {title}
       </Text>
       {message && (
-        <Text kind="body/regular/xs" color="secondary" className="break-words">
+        <Text kind="body/regular/xs" className="break-words text-secondary">
           {message}
         </Text>
       )}

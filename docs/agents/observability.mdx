@@ -8,7 +8,7 @@ description: "Ingest, store, and query agent telemetry with NeMo Intake, includi
 
 <a id="agents-observability"></a>
 
-Observability on NeMo Platform is provided by **NeMo Intake**, the trace ingestion and query service
+Observability on NeMo Helix is provided by **NeMo Intake**, the trace ingestion and query service
 for agent telemetry, and optionally by [NeMo Studio](/documentation/studio), the web user interface
 (UI) for browsing
 that telemetry. Observability helps humans and agents understand what happened in an agent system:
@@ -26,13 +26,13 @@ diagnose failures from traces, in a production system or in offline evaluation f
 ### Requirements
 
 - A reachable ClickHouse database.
-- A NeMo Platform environment with the `intake` service running.
+- A NeMo Helix environment with the `intake` service running.
 - A telemetry source, such as an OpenTelemetry or OpenInference exporter, NeMo Agent Toolkit (NAT),
   NeMo Flow, NeMo Evaluator runs, captured OpenAI-compatible chat-completion payloads, or Agent
   Trajectory Interchange Format (ATIF) trajectories.
 - Optional: [NeMo Studio](/documentation/studio) for the UI review flow.
 
-You do not need to deploy your agents on NeMo Platform. To start, run the platform, post one
+You do not need to deploy your agents on NeMo Helix. To start, run the platform, post one
 representative interaction, and confirm that it appears.
 
 ## How It Works
@@ -95,26 +95,26 @@ error. A practical test: the trace can answer _where did the system go wrong, an
 
 ### Setup
 
-The examples assume a running NeMo Platform reachable at `$NMP_BASE_URL`. Point at whatever you have,
+The examples assume a running NeMo Helix reachable at `$NHX_BASE_URL`. Point at whatever you have,
 whether a deployed platform or a local one from `nemo setup` or `nemo quickstart up`:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 export WORKSPACE=default
-export NMP_STUDIO_URL="$NMP_BASE_URL/studio"
-export NMP_ACCESS_TOKEN="$(nemo auth token)"
+export NHX_STUDIO_URL="$NHX_BASE_URL/studio"
+export NHX_ACCESS_TOKEN="$(nemo auth token)"
 ```
 
-Set `NMP_STUDIO_URL` explicitly if Studio uses a different origin or path.
+Set `NHX_STUDIO_URL` explicitly if Studio uses a different origin or path.
 The examples use bearer-token authentication and stop on HTTP errors. For a local development
 deployment with authentication disabled, omit the `Authorization` header and the
-`NMP_ACCESS_TOKEN` command. Also omit `OTEL_EXPORTER_OTLP_HEADERS` from the OTLP example.
+`NHX_ACCESS_TOKEN` command. Also omit `OTEL_EXPORTER_OTLP_HEADERS` from the OTLP example.
 
 <Accordion title="Running from source (local development)">
 
 If you are bringing the pieces up yourself from a repository checkout, make sure Docker Desktop or
 the Docker daemon is running, then start the backend. Intake automatically provisions and reuses a
-local ClickHouse container for the resolved NeMo data directory unless `NMP_INTAKE_CLICKHOUSE_URL`
+local ClickHouse container for the resolved NeMo data directory unless `NHX_INTAKE_CLICKHOUSE_URL`
 explicitly points to an external instance.
 
 1. **Backend services**: `intake` plus its `auth` (access checks) and `entities` (entity store)
@@ -139,8 +139,8 @@ Confirm the Intake read path can reach ClickHouse:
 
 ```bash
 curl --fail-with-body -i \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?page=1&page_size=1"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?page=1&page_size=1"
 ```
 
 A `200` response with an empty list is healthy. A `503` response means the Intake service is running
@@ -154,8 +154,8 @@ OpenTelemetry exporter:
 ```bash
 export SESSION_ID="demo-session-001"
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/chat-completions" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/chat-completions" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "session_id": "'"$SESSION_ID"'",
@@ -181,11 +181,11 @@ Read the span back from Intake:
 
 ```bash
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[session_id]=$SESSION_ID&page=1&page_size=10"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[session_id]=$SESSION_ID&page=1&page_size=10"
 ```
 
-Then open `$NMP_STUDIO_URL/workspaces/$WORKSPACE/intake/traces`.
+Then open `$NHX_STUDIO_URL/workspaces/$WORKSPACE/intake/traces`.
 
 A successful result has the following characteristics:
 
@@ -205,9 +205,9 @@ feedback, and evaluator results. The remaining documentation uses this vocabular
 Use OTLP when your framework or collector already emits OpenTelemetry traces:
 
 ```bash
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/otlp/v1/traces"
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/otlp/v1/traces"
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$NMP_ACCESS_TOKEN"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$NHX_ACCESS_TOKEN"
 ```
 
 Then run the instrumented agent. Intake maps OpenInference and OpenTelemetry generative AI semantic
@@ -220,8 +220,8 @@ metadata, or final metrics:
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/atif" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/atif" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary @trajectory.json
 ```
@@ -238,8 +238,8 @@ Use annotations to attach review signal after a trace lands:
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/annotations" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/annotations" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "kind": "feedback", "session_id": "'"$SESSION_ID"'", "value": "negative" }'
 ```
@@ -282,8 +282,8 @@ For example, a numeric score:
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluator-results" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluator-results" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "span_id": "<span-id>",
@@ -299,11 +299,11 @@ value range:
 
 ```bash
 curl --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans/<span-id>/evaluator-results"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans/<span-id>/evaluator-results"
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluator-results?filter[name]=faithfulness/v1&filter[value][\$gte]=0.8"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluator-results?filter[name]=faithfulness/v1&filter[value][\$gte]=0.8"
 ```
 
 ### Find Recurring Failures
@@ -312,11 +312,11 @@ Query traces or spans with filters, then group spans by session or trace to find
 
 ```bash
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[status]=error&page=1&page_size=20"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[status]=error&page=1&page_size=20"
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans/groups?by=session_id&filter[status]=error"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans/groups?by=session_id&filter[status]=error"
 ```
 
 In Studio, start from the trace list, filter to negative feedback or error status, then open trace
@@ -337,7 +337,7 @@ side. Refer to [Experiments](/documentation/evaluate-models/experiments), or use
 - Page size is capped at 1,000 records.
 - Span data and trace-index data expire after 90 days.
 
-Raise the OTLP body cap with `NMP_INTAKE_OTLP_MAX_BODY_BYTES` when larger batches are required. For
+Raise the OTLP body cap with `NHX_INTAKE_OTLP_MAX_BODY_BYTES` when larger batches are required. For
 high-volume producers, prefer smaller export batches over very large single requests.
 
 ### Security and Access Control

@@ -8,7 +8,7 @@ processors, backend, translator — keyed off a typed
 :class:`PassthroughConfig`. The factory exposes four granular
 part-builders so consumers only pay for what they use:
 
-* NeMo Platform IGW supplies its own backend and only calls
+* NeMo Helix IGW supplies its own backend and only calls
   :meth:`build_request_pipeline` / :meth:`build_response_pipeline`. The
   OpenAI SDK is never imported on this path; tier config on the config is
   inert.
@@ -63,13 +63,13 @@ class PassthroughConfig(BaseModel):
         tier: Backend tier configuration (model, api_key, base_url, timeout,
             tuning). The ``backend_format`` must be OPENAI; Anthropic-native
             upstreams would be a separate factory. **Inert** when the host
-            calls only the pipeline part-builders (NeMo Platform IGW path).
+            calls only the pipeline part-builders (NeMo Helix IGW path).
         enable_stats: When ``True``, the factory wires a
             :class:`StatsRequestProcessor` + :class:`StatsResponseProcessor`
             pair sharing one :class:`StatsAccumulator`, **and** wraps the
             backend in :class:`StatsLLMBackend` so backend-call counters
             and ``routing_overhead_ms`` are recorded. Default ``False``
-            so config-driven hosts (NeMo Platform IGW today) don't double-count
+            so config-driven hosts (NeMo Helix IGW today) don't double-count
             with their own observability stack.
     """
 

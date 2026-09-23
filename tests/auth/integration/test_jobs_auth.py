@@ -13,24 +13,24 @@ from contextlib import ExitStack
 from uuid import uuid4
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.auth.helpers import generate_unsigned_jwt
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix import NeMoHelix
+from nemo_helix_ext.auth.helpers import generate_unsigned_jwt
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
 )
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nmp.common.entities import ALL_WORKSPACES
-from nmp.core.jobs.controllers.diagnostics import collect_job_diagnostics
-from nmp.testing import TEST_ADMIN_EMAIL, grant_workspace_role, short_unique_name, unique_email
-from nmp.testing.e2e import wait_for_platform_job
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nhx.common.entities import ALL_WORKSPACES
+from nhx.core.jobs.controllers.diagnostics import collect_job_diagnostics
+from nhx.testing import TEST_ADMIN_EMAIL, grant_workspace_role, short_unique_name, unique_email
+from nhx.testing.e2e import wait_for_platform_job
 
 from tests.auth.integration.jobs_auth_helpers import job_exists_in_pages, managed_admin_workspace
 
@@ -44,12 +44,12 @@ pytestmark = [
 
 
 def _as_bearer_user(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     email: str,
     *,
     principal_id: str | None = None,
     groups: list[str] | None = None,
-) -> NeMoPlatform:
+) -> NeMoHelix:
     token = generate_unsigned_jwt(
         principal_id=principal_id or email,
         email=email,
@@ -64,7 +64,7 @@ def _oidc_subject() -> str:
 
 
 def _log_auth_job_diagnostics(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     *,
     workspace: str,
     job_name: str,
@@ -89,7 +89,7 @@ def _log_auth_job_diagnostics(
     )
 
 
-def test_job_principal_propagation(services_pool_sdk: NeMoPlatform):
+def test_job_principal_propagation(services_pool_sdk: NeMoHelix):
     admin_sdk = _as_bearer_user(services_pool_sdk, TEST_ADMIN_EMAIL, groups=["admin"])
     user_email = unique_email("job-creator")
     workspace_name = short_unique_name("job-auth-test")
@@ -102,18 +102,18 @@ def test_job_principal_propagation(services_pool_sdk: NeMoPlatform):
             client_from_platform(user_sdk, JobsClient)
             .create_job(
                 workspace=workspace_name,
-                body=CreatePlatformJobRequest(
+                body=CreateHelixJobRequest(
                     source=JOB_SOURCE,
                     spec={"test": "auth-propagation"},
-                    platform_spec=PlatformJobSpec(
+                    platform_spec=HelixJobSpec(
                         steps=[
-                            PlatformJobStep(
+                            HelixJobStep(
                                 name="auth-test-step",
                                 executor=CPUExecutionProviderSpec(
                                     provider="cpu",
                                     container=ContainerSpec(
-                                        entrypoint=["nemo-platform"],
-                                        command=["run", "task", "--task", "nmp.hello_world.tasks.hello_world"],
+                                        entrypoint=["nemo-helix"],
+                                        command=["run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
                                     ),
                                 ),
                                 environment=[EnvironmentVariable(name="BUSY_LOOP_DURATION_SECONDS", value="0")],
@@ -142,7 +142,7 @@ def test_job_principal_propagation(services_pool_sdk: NeMoPlatform):
         assert file_content == b"auth propagation test"
 
 
-def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoPlatform):
+def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
     admin_sdk = _as_bearer_user(services_pool_sdk, TEST_ADMIN_EMAIL, groups=["admin"])
     owner_email = unique_email("owner")
     other_email = unique_email("other")
@@ -167,18 +167,18 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoPlatfor
             client_from_platform(other_sdk, JobsClient)
             .create_job(
                 workspace=runner_workspace,
-                body=CreatePlatformJobRequest(
+                body=CreateHelixJobRequest(
                     source=JOB_SOURCE,
                     spec={"test": "auth-denial"},
-                    platform_spec=PlatformJobSpec(
+                    platform_spec=HelixJobSpec(
                         steps=[
-                            PlatformJobStep(
+                            HelixJobStep(
                                 name="access-test-step",
                                 executor=CPUExecutionProviderSpec(
                                     provider="cpu",
                                     container=ContainerSpec(
-                                        entrypoint=["nemo-platform"],
-                                        command=["run", "task", "--task", "nmp.hello_world.tasks.access_fileset"],
+                                        entrypoint=["nemo-helix"],
+                                        command=["run", "task", "--task", "nhx.hello_world.tasks.access_fileset"],
                                     ),
                                 ),
                                 config={
@@ -231,7 +231,7 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoPlatfor
         assert "403" in task.error_stack and "Forbidden" in task.error_stack
 
 
-def test_job_admin_can_list_jobs_in_all_workspaces(services_pool_sdk: NeMoPlatform):
+def test_job_admin_can_list_jobs_in_all_workspaces(services_pool_sdk: NeMoHelix):
     admin_sdk = _as_bearer_user(services_pool_sdk, TEST_ADMIN_EMAIL, groups=["admin"])
     user_email = unique_email("member")
     workspace_name = short_unique_name("admin-list-jobs")
@@ -244,12 +244,12 @@ def test_job_admin_can_list_jobs_in_all_workspaces(services_pool_sdk: NeMoPlatfo
             client_from_platform(user_sdk, JobsClient)
             .create_job(
                 workspace=workspace_name,
-                body=CreatePlatformJobRequest(
+                body=CreateHelixJobRequest(
                     source=JOB_SOURCE,
                     spec={"test": "admin-list"},
-                    platform_spec=PlatformJobSpec(
+                    platform_spec=HelixJobSpec(
                         steps=[
-                            PlatformJobStep(
+                            HelixJobStep(
                                 name="admin-list-step",
                                 executor=CPUExecutionProviderSpec(
                                     provider="cpu",

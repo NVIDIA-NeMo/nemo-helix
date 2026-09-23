@@ -542,6 +542,8 @@ def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
 
     worker = Dispatcher(connect=connect)
     for method in (
+        # Drained first now that Platform Jobs is the default execution path.
+        "claim_next_execution_cleanup",
         "claim_next_switchyard_teardown",
         "claim_next_switchyard_campaign_cleanup",
         "claim_next_switchyard_campaign_finalization",

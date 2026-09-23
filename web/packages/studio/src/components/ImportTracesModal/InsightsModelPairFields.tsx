@@ -29,7 +29,7 @@ const errorFor = (value: string): string | undefined =>
     : undefined;
 
 /**
- * Shows the default/fast pair the analyze-job will use, prefilled from the agent's stored
+ * Shows the default/fast pair the analysis run will use, prefilled from the agent's stored
  * AnalysisConfig, and lets either half be replaced for this run without editing the stored config.
  */
 export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
@@ -42,7 +42,7 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   onFastModelChange,
 }) => (
   <Stack gap="density-md">
-    <Text kind="body/regular/xs" color="secondary">
+    <Text className="text-secondary" kind="body/regular/xs">
       {unresolved
         ? 'The stored model pair could not be read, so both models are required for this run.'
         : agent

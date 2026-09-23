@@ -11,7 +11,7 @@ one `AgentEvaluator` call.
 
 ## Prerequisites, seams & caveats
 
-- **Not zero-dependency**: Python ≥ 3.12, Docker, and a NeMo Platform source checkout
+- **Not zero-dependency**: Python ≥ 3.12, Docker, and a NeMo Helix source checkout
   (see [SETUP.md](../../../../SETUP.md) for toolchain prerequisites). The SDK is not
   published as a standalone PyPI package. From the repository root, install Harbor with
   `uv sync --frozen --package nemo-evaluator-sdk --extra harbor`. Harbor native runtime is early-access.

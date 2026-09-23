@@ -15,10 +15,10 @@ import logging
 import signal
 from types import FrameType
 
-from nemo_platform_plugin.client_provider import get_async_task_nemo_client, get_task_nemo_client
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, run_task_with_async_client, run_task_with_client
+from nemo_helix_plugin.client_provider import get_async_task_nemo_client, get_task_nemo_client
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, run_task_with_async_client, run_task_with_client
 
 logger = logging.getLogger(__name__)
 

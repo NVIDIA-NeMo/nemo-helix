@@ -4,10 +4,10 @@
 """Fixtures for auditor plugin e2e tests."""
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 
 @pytest.fixture
-def auditor_url(sdk: NeMoPlatform) -> str:
+def auditor_url(sdk: NeMoHelix) -> str:
     """Root URL for raw httpx calls to the auditor plugin (filter/sort params not in SDK)."""
     return str(sdk.base_url).rstrip("/") + "/apis/auditor"

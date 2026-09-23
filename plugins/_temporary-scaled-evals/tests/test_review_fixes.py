@@ -363,7 +363,7 @@ def test_expired_runtime_claim_and_worker_namespace_are_portable() -> None:
     workers = (Path(__file__).parents[1] / "deploy/k8s/workers.yaml").read_text()
     assert 'namespace="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"' in workers
     assert "namespace: ${namespace}" in workers
-    assert "namespace: nemo-platform-scaled-evals" not in workers
+    assert "namespace: nemo-helix-scaled-evals" not in workers
 
 
 def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

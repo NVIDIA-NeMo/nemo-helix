@@ -1577,6 +1577,21 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
+def _kubeconfig_flag(recorded_path: object) -> list[str]:
+    """Return the ``--kubeconfig`` flag for a cleanup, or nothing if it cannot apply.
+
+    The recorded path is captured when the sandbox launches. Under Platform Jobs
+    that happens inside a Job pod whose ``$HOME`` differs from the dispatch
+    worker that later drains the cleanup, so the path can name a file that only
+    ever existed on another pod's filesystem. Passing it anyway fails every
+    kubectl call and wedges the evaluation. Falling back to no flag lets kubectl
+    resolve through the cleanup process's own ``KUBECONFIG``.
+    """
+    if recorded_path and Path(str(recorded_path)).exists():
+        return ["--kubeconfig", str(recorded_path)]
+    return []
+
+
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     """Delete and verify per-evaluation Sandbox resources.
 
@@ -1608,8 +1623,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    if kubeconfig_path:
-        base.extend(["--kubeconfig", str(kubeconfig_path)])
+    base.extend(_kubeconfig_flag(kubeconfig_path))
     if context:
         base.extend(["--context", str(context)])
     if cleanup_metadata.get("verify_ssl") is False:
@@ -1788,8 +1802,7 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    if cleanup.get("kubeconfig_path"):
-        base.extend(["--kubeconfig", str(cleanup["kubeconfig_path"])])
+    base.extend(_kubeconfig_flag(cleanup.get("kubeconfig_path")))
     if cleanup.get("context"):
         base.extend(["--context", str(cleanup["context"])])
     if cleanup.get("verify_ssl") is False:

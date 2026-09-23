@@ -4,8 +4,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_platform_plugin.models.client import ModelsClient
-from nmp.guardrails.app.utils.config_utils import (
+from nemo_helix_plugin.models.client import ModelsClient
+from nhx.guardrails.app.utils.config_utils import (
     _load_and_execute_py_config,
     configure_rails_config,
     enrich_config_with_data,
@@ -13,14 +13,14 @@ from nmp.guardrails.app.utils.config_utils import (
     get_path_to_py_configs,
     invalidate_and_reload_config_cache,
 )
-from nmp.guardrails.config import settings
-from nmp.guardrails.entities import GuardrailConfig
-from nmp.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.config import settings
+from nhx.guardrails.entities import GuardrailConfig
+from nhx.guardrails.entities.values._private import Model, RailsConfig
 
 
-@patch("nmp.guardrails.app.utils.config_utils.importlib.util.spec_from_file_location")
-@patch("nmp.guardrails.app.utils.config_utils.importlib.util.module_from_spec")
-@patch("nmp.guardrails.app.utils.config_utils.fsspec.open")
+@patch("nhx.guardrails.app.utils.config_utils.importlib.util.spec_from_file_location")
+@patch("nhx.guardrails.app.utils.config_utils.importlib.util.module_from_spec")
+@patch("nhx.guardrails.app.utils.config_utils.fsspec.open")
 def test_load_and_execute_py_config(mock_open, mock_module_from_spec, mock_spec_from_file_location):
     mock_spec = MagicMock()
     mock_loader = MagicMock()
@@ -37,8 +37,8 @@ def test_load_and_execute_py_config(mock_open, mock_module_from_spec, mock_spec_
     mock_loader.exec_module.assert_called_once_with(mock_module)
 
 
-@patch("nmp.guardrails.app.utils.config_utils.fsspec.core.url_to_fs")
-@patch("nmp.guardrails.app.utils.config_utils._load_and_execute_py_config")
+@patch("nhx.guardrails.app.utils.config_utils.fsspec.core.url_to_fs")
+@patch("nhx.guardrails.app.utils.config_utils._load_and_execute_py_config")
 def test_invalidate_and_reload_config_cache(mock_load_and_execute_py_config, mock_url_to_fs):
     mock_fs = MagicMock()
     mock_url_to_fs.return_value = (mock_fs, None)
@@ -58,7 +58,7 @@ def test_invalidate_and_reload_config_cache(mock_load_and_execute_py_config, moc
     mock_load_and_execute_py_config.assert_called_once_with("test_config.py")
 
 
-@patch("nmp.guardrails.app.utils.config_utils.fsspec.core.url_to_fs")
+@patch("nhx.guardrails.app.utils.config_utils.fsspec.core.url_to_fs")
 def test_get_path_to_py_configs_directory(mock_url_to_fs):
     mock_fs = MagicMock()
     mock_fs.isdir.return_value = True
@@ -69,7 +69,7 @@ def test_get_path_to_py_configs_directory(mock_url_to_fs):
     assert result == ["path/to/config.py"]
 
 
-@patch("nmp.guardrails.app.utils.config_utils.fsspec.core.url_to_fs")
+@patch("nhx.guardrails.app.utils.config_utils.fsspec.core.url_to_fs")
 def test_get_path_to_py_configs_not_directory(mock_url_to_fs):
     mock_fs = MagicMock()
     mock_fs.isdir.return_value = False
@@ -165,8 +165,8 @@ class TestConfigureRailsConfig:
     @pytest.fixture
     def mock_platform_sdk(self):
         with (
-            patch("nmp.guardrails.app.utils.model_routing.get_platform_sdk") as get_sdk,
-            patch("nmp.guardrails.app.utils.model_routing.client_from_platform") as make_client,
+            patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk") as get_sdk,
+            patch("nhx.guardrails.app.utils.model_routing.client_from_platform") as make_client,
         ):
             sdk = MagicMock()
             models = MagicMock()

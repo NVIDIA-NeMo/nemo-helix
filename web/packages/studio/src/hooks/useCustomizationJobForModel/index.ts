@@ -4,8 +4,8 @@
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   ModelEntity,
-  PlatformJobListSortField,
-  PlatformJobsListFilter,
+  HelixJobListSortField,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
 
@@ -32,11 +32,11 @@ export const useCustomizationJobForModel = (
     {
       page: 1,
       page_size: 1,
-      sort: '-created_at' as PlatformJobListSortField,
+      sort: '-created_at' as HelixJobListSortField,
       filter: {
         source: JOB_SOURCE.CUSTOMIZATION,
         'spec.output.name': modelName,
-      } as unknown as PlatformJobsListFilter,
+      } as unknown as HelixJobsListFilter,
     },
     { query: { enabled, staleTime: 5 * 60 * 1000 } }
   );

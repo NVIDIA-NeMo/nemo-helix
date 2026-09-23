@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Test that topologySpreadConstraints are correctly templated for API and core controller deployments.
-# CI validates by running: helm template nemo-platform . -f ci/12-topology-spread-constraints.yaml
+# CI validates by running: helm template nemo-helix . -f ci/12-topology-spread-constraints.yaml
 # The rendered output must include topologySpreadConstraints in both deployment pod specs.
 
 api:
@@ -12,7 +12,7 @@ api:
       whenUnsatisfiable: DoNotSchedule
       labelSelector:
         matchLabels:
-          app.kubernetes.io/component: nmp-api
+          app.kubernetes.io/component: nhx-api
 
 core:
   controller:
@@ -22,4 +22,4 @@ core:
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
           matchLabels:
-            app.kubernetes.io/component: nmp-core-controller
+            app.kubernetes.io/component: nhx-core-controller

@@ -61,7 +61,7 @@ export const HistorySessionButton = ({
               <Text kind="body/regular/sm" className="min-w-0 flex-1 line-clamp-2">
                 {sessionTitle}
               </Text>
-              <Text kind="body/regular/sm" color="secondary" className="shrink-0 whitespace-nowrap">
+              <Text kind="body/regular/sm" className="shrink-0 whitespace-nowrap text-secondary">
                 {getCompactRelativeTime(session.mtime)}
               </Text>
             </Flex>

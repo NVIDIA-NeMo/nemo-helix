@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="eval-metrics-similarity"></a>
 
-NeMo Platform offers [built-in metrics](/documentation/evaluate-models/metrics) that can be configured to evaluate on your custom data. Similarity metrics compare generated or precomputed text against references, labels, or numeric/string expectations. They support Jinja templates so you can map your dataset columns to the values each metric evaluates.
+NeMo Helix offers [built-in metrics](/documentation/evaluate-models/metrics) that can be configured to evaluate on your custom data. Similarity metrics compare generated or precomputed text against references, labels, or numeric/string expectations. They support Jinja templates so you can map your dataset columns to the values each metric evaluates.
 
 Template functionality provides maximum flexibility for evaluating your models on proprietary, domain-specific, or novel tasks. You can bring your own datasets, define your own prompts and templates using [Jinja](https://github.com/pallets/jinja), and select the metrics that matter most for your use case. This approach is ideal when:
 
@@ -22,10 +22,10 @@ Template functionality provides maximum flexibility for evaluating your models o
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = sdk.evaluator  # this object is an Evaluator resource

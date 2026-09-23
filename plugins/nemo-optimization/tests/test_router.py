@@ -6,9 +6,9 @@ from __future__ import annotations
 import json
 
 import pytest
+from nemo_helix_plugin.job_context import JobContext
 from nemo_optimization.backends.ga.backend import GaBackendError
 from nemo_optimization.router import OptimizeRouter, OptimizeRouterError
-from nemo_platform_plugin.job_context import JobContext
 
 
 def test_dispatch_routes_numeric_to_optuna_study(ctx: JobContext) -> None:

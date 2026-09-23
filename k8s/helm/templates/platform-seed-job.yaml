@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "nemo-platform.fullname" . }}-platform-seed
+  name: {{ include "nemo-helix.fullname" . }}-platform-seed
   labels:
     app.kubernetes.io/component: platform-seed
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   annotations:
     # Run after install and upgrade so seeding runs on fresh installs and can be re-triggered on no-op upgrade.
     helm.sh/hook: post-install,post-upgrade
@@ -26,7 +26,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: platform-seed
-        {{- include "nemo-platform.selectorLabels" . | nindent 8 }}
+        {{- include "nemo-helix.selectorLabels" . | nindent 8 }}
         {{- with .Values.platformSeedJob.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -36,55 +36,55 @@ spec:
       imagePullSecrets:
 {{- $imagePullSecrets | nindent 8 }}
 {{- end }}
-      serviceAccountName: {{ include "nmp-api.apiServiceAccountName" . }}
+      serviceAccountName: {{ include "nhx-api.apiServiceAccountName" . }}
       securityContext:
         {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.platformSeedJob.podSecurityContext) | nindent 8 }}
       containers:
         - name: platform-seed
           securityContext:
             {{- include "nemo-common.securityContext" (dict "global" .Values.securityContext "local" .Values.platformSeedJob.securityContext) | nindent 12 }}
-          image: {{ include "nmp-api.image" . | quote }}
+          image: {{ include "nhx-api.image" . | quote }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           command:
-            - nemo-platform
+            - nemo-helix
           args:
             - run
             - task
             - --task
-            - nmp.platform_seed
-          {{- if not (include "nemo-platform.defaultEncryptionKeyExistingSecretName" .) }}
+            - nhx.platform_seed
+          {{- if not (include "nemo-helix.defaultEncryptionKeyExistingSecretName" .) }}
           envFrom:
             - secretRef:
-                name: {{ include "nemo-platform.apiEnvSecretName" . }}
+                name: {{ include "nemo-helix.apiEnvSecretName" . }}
           {{- end }}
           env:
-            {{- if include "nemo-platform.defaultEncryptionKeyExistingSecretName" . }}
-            - name: {{ include "nemo-platform.defaultEncryptionKeyEnvName" . }}
+            {{- if include "nemo-helix.defaultEncryptionKeyExistingSecretName" . }}
+            - name: {{ include "nemo-helix.defaultEncryptionKeyEnvName" . }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "nemo-platform.defaultEncryptionKeyExistingSecretName" . | quote }}
-                  key: {{ include "nemo-platform.defaultEncryptionKeySecretKey" . | quote }}
+                  name: {{ include "nemo-helix.defaultEncryptionKeyExistingSecretName" . | quote }}
+                  key: {{ include "nemo-helix.defaultEncryptionKeySecretKey" . | quote }}
             {{- end }}
-            - name: NMP_CONFIG_FILE_PATH
-              value: /etc/nmp/config.yaml
-            - name: NMP_BASE_URL
-              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}
+            - name: NHX_CONFIG_FILE_PATH
+              value: /etc/nhx/config.yaml
+            - name: NHX_BASE_URL
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
             - name: OTEL_SERVICE_NAME
-              value: {{ include "nemo-platform.fullname" . }}-platform-seed
-            {{ include "nemo-platform.env" . | nindent 12 | trim }}
+              value: {{ include "nemo-helix.fullname" . }}-platform-seed
+            {{ include "nemo-helix.env" . | nindent 12 | trim }}
             {{- with .Values.platformSeedJob.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /etc/nmp/config.yaml
+              mountPath: /etc/nhx/config.yaml
               subPath: config.yaml
           resources:
             {{- toYaml .Values.platformSeedJob.resources | nindent 12 }}
       volumes:
         - name: config
           configMap:
-            name: {{ include "nemo-platform.platform-configmap" . }}
+            name: {{ include "nemo-helix.platform-configmap" . }}
       {{- with .Values.platformSeedJob.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

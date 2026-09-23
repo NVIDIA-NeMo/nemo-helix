@@ -45,13 +45,13 @@ from nemo_evaluator_sdk.values import (
 )
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.client.adapter import AsyncPlatformClient
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.entities import EntityClient
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -228,10 +228,10 @@ class _EvaluateJobBase(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncPlatformClient | None,
+        async_sdk: AsyncHelixClient | None,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile canonical spec to a plugin-native evaluator job."""
         del workspace, entity_client, job_name, async_sdk, options
         from nemo_evaluator.jobs.compiler import compile_evaluate_job
@@ -283,7 +283,7 @@ class _EvaluateJobBase(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncPlatformClient | None,
+        async_sdk: AsyncHelixClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve submitter-facing model and metric references into the canonical evaluation spec."""

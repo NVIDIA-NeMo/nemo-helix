@@ -14,10 +14,10 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPreviewSpec
 from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.frames import Done, Error
 from pydantic import BaseModel
 
 
@@ -37,8 +37,8 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
         self,
         spec: RetrievalPreviewSpec,
         ctx: FunctionContext,
-        sdk: NeMoPlatform,
-        async_sdk: AsyncNeMoPlatform,
+        sdk: NeMoHelix,
+        async_sdk: AsyncNeMoHelix,
         is_local: bool = False,
     ) -> AsyncIterator[BaseModel]:
         job = spec.generate
@@ -87,6 +87,10 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                     sentences_per_chunk=job.sentences_per_chunk,
                     num_sections=job.num_sections,
                     num_files=job.num_files,
+                    multi_doc=job.multi_doc,
+                    bundle_size=job.bundle_size,
+                    bundle_strategy=job.bundle_strategy,
+                    max_docs_per_bundle=job.max_docs_per_bundle,
                     max_artifacts_per_type=job.max_artifacts_per_type,
                     num_pairs=job.num_pairs,
                     query_counts=job.query_counts,
@@ -95,6 +99,7 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                     reasoning_counts=job.reasoning_counts,
                     min_complexity=job.min_complexity,
                     similarity_threshold=job.similarity_threshold,
+                    max_parallel_requests_for_gen=job.max_parallel_requests_for_gen,
                     buffer_size=job.buffer_size,
                     resume=job.resume,
                     num_records=spec.num_records,

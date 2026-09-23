@@ -55,7 +55,7 @@ func TestSubjectTokenTypeForExchange(t *testing.T) {
 	if got := subjectTokenTypeForExchange("subject-token"); got != jwtTokenType {
 		t.Fatalf("expected JWT subject token type, got %q", got)
 	}
-	if got := subjectTokenTypeForExchange("nmp_obo_v1.delegation.secret"); got != dockerOpaqueWorkloadProofTokenType {
+	if got := subjectTokenTypeForExchange("nhx_obo_v1.delegation.secret"); got != dockerOpaqueWorkloadProofTokenType {
 		t.Fatalf("expected Docker opaque subject token type, got %q", got)
 	}
 }
@@ -73,7 +73,7 @@ func TestGetOTLPLogWorkloadAuthHeadersReturnsAuthorizationWithoutMutatingEnv(t *
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(
 				w,
-				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-platform-workload","workload_token_endpoint":%q,"workload_audience":"nemo-platform","workload_scope":"openid email groups"}}`,
+				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q,"workload_audience":"nemo-helix","workload_scope":"openid email groups"}}`,
 				serverURL+"/apis/auth/token",
 			)
 		case "/apis/auth/token":
@@ -85,11 +85,11 @@ func TestGetOTLPLogWorkloadAuthHeadersReturnsAuthorizationWithoutMutatingEnv(t *
 			}
 			expectedForm := url.Values{
 				"grant_type":           {tokenExchangeGrantType},
-				"client_id":            {"nemo-platform-workload"},
+				"client_id":            {"nemo-helix-workload"},
 				"subject_token":        {"subject-token"},
 				"subject_token_type":   {jwtTokenType},
 				"requested_token_type": {accessTokenType},
-				"audience":             {"nemo-platform"},
+				"audience":             {"nemo-helix"},
 				"scope":                {"openid email groups"},
 			}
 			expectedEncodedForm := expectedForm.Encode()
@@ -112,9 +112,9 @@ func TestGetOTLPLogWorkloadAuthHeadersReturnsAuthorizationWithoutMutatingEnv(t *
 	defer server.Close()
 	serverURL = server.URL
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
-	t.Setenv(otelExporterOTLPLogsHeadersEnv, "X-NMP-Principal-Id=nemo-user")
+	t.Setenv(otelExporterOTLPLogsHeadersEnv, "X-NHX-Principal-Id=nemo-user")
 
 	headers, err := getOTLPLogWorkloadAuthHeaders(context.Background())
 	if err != nil {
@@ -124,13 +124,13 @@ func TestGetOTLPLogWorkloadAuthHeadersReturnsAuthorizationWithoutMutatingEnv(t *
 	if got := headers["Authorization"]; got != "Bearer access.token.value" {
 		t.Fatalf("expected returned bearer header, got %q", got)
 	}
-	if got := os.Getenv(otelExporterOTLPLogsHeadersEnv); got != "X-NMP-Principal-Id=nemo-user" {
+	if got := os.Getenv(otelExporterOTLPLogsHeadersEnv); got != "X-NHX-Principal-Id=nemo-user" {
 		t.Fatalf("expected OTEL headers env to remain untouched, got %s", got)
 	}
 }
 
 func TestGetOTLPLogWorkloadAuthHeadersNoopsWithoutTokenFile(t *testing.T) {
-	t.Setenv(otelExporterOTLPLogsHeadersEnv, "X-NMP-Principal-Id=nemo-user")
+	t.Setenv(otelExporterOTLPLogsHeadersEnv, "X-NHX-Principal-Id=nemo-user")
 
 	headers, err := getOTLPLogWorkloadAuthHeaders(context.Background())
 	if err != nil {
@@ -140,7 +140,7 @@ func TestGetOTLPLogWorkloadAuthHeadersNoopsWithoutTokenFile(t *testing.T) {
 		t.Fatalf("expected no auth headers without workload token file, got %v", headers)
 	}
 
-	if headers := os.Getenv(otelExporterOTLPLogsHeadersEnv); headers != "X-NMP-Principal-Id=nemo-user" {
+	if headers := os.Getenv(otelExporterOTLPLogsHeadersEnv); headers != "X-NHX-Principal-Id=nemo-user" {
 		t.Fatalf("expected headers to be unchanged, got %s", headers)
 	}
 }
@@ -165,7 +165,7 @@ func TestNewLogExporterCachesWorkloadAuthAcrossExports(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(
 				w,
-				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-platform-workload","workload_token_endpoint":%q}}`,
+				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q}}`,
 				serverURL+"/apis/auth/token",
 			)
 		case "/apis/auth/token":
@@ -180,7 +180,7 @@ func TestNewLogExporterCachesWorkloadAuthAcrossExports(t *testing.T) {
 			mu.Lock()
 			exportAuthHeaders = append(exportAuthHeaders, r.Header.Get("Authorization"))
 			exportThirdPartyHeaders = append(exportThirdPartyHeaders, r.Header.Get("X-Third-Party"))
-			exportPrincipalHeaders = append(exportPrincipalHeaders, r.Header.Get("X-NMP-Principal-Id"))
+			exportPrincipalHeaders = append(exportPrincipalHeaders, r.Header.Get("X-NHX-Principal-Id"))
 			mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -190,10 +190,10 @@ func TestNewLogExporterCachesWorkloadAuthAcrossExports(t *testing.T) {
 	defer server.Close()
 	serverURL = server.URL
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 	t.Setenv(launcherOTLPLogsEndpointEnv, server.URL+"/v1/logs")
-	t.Setenv("NMP_JOB_LAUNCHER_OTLP_LOGS_HEADERS", "X-NMP-Principal-Id=nemo-user")
+	t.Setenv("NHX_JOB_LAUNCHER_OTLP_LOGS_HEADERS", "X-NHX-Principal-Id=nemo-user")
 	t.Setenv(otelExporterOTLPLogsHeadersEnv, "Authorization=Bearer%20third-party,X-Third-Party=external")
 
 	exporter, err := newLogExporter(context.Background())
@@ -260,7 +260,7 @@ func TestNewLogExporterFailsWhenWorkloadExchangeDisabledWithTokenFile(t *testing
 	}))
 	defer server.Close()
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 	t.Setenv(launcherOTLPLogsEndpointEnv, server.URL+"/v1/logs")
 
@@ -294,7 +294,7 @@ func TestNewLogExporterDoesNotLogAuthMechanismWhenWorkloadTokenExchangeFails(t *
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(
 				w,
-				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-platform-workload","workload_token_endpoint":%q}}`,
+				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q}}`,
 				serverURL+"/apis/auth/token",
 			)
 		case "/apis/auth/token":
@@ -306,7 +306,7 @@ func TestNewLogExporterDoesNotLogAuthMechanismWhenWorkloadTokenExchangeFails(t *
 	defer server.Close()
 	serverURL = server.URL
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 	t.Setenv(launcherOTLPLogsEndpointEnv, server.URL+"/v1/logs")
 
@@ -342,7 +342,7 @@ func TestNewLogExporterUsesServiceIdentityPrincipalHeadersWithoutWorkloadTokenFi
 
 	t.Setenv(launcherOTLPLogsEndpointEnv, server.URL+"/v1/logs")
 	t.Setenv(workloadIdentityTokenFileEnv, "")
-	t.Setenv("NMP_JOB_LAUNCHER_OTLP_LOGS_HEADERS", "X-NMP-Principal-Id=32ac8159-42b0-43b0-b0d3-bb891c859c92,X-NMP-Principal-Email=rsadler%40nvidia.com")
+	t.Setenv("NHX_JOB_LAUNCHER_OTLP_LOGS_HEADERS", "X-NHX-Principal-Id=32ac8159-42b0-43b0-b0d3-bb891c859c92,X-NHX-Principal-Email=rsadler%40nvidia.com")
 	t.Setenv(otelExporterOTLPLogsHeadersEnv, "Authorization=Bearer%20third-party,X-Third-Party=external")
 
 	exporter, err := newLogExporter(context.Background())
@@ -372,8 +372,8 @@ func TestNewLogExporterUsesServiceIdentityPrincipalHeadersWithoutWorkloadTokenFi
 	if got := exportHeaders.Get("X-Third-Party"); got != "" {
 		t.Fatalf("expected user OTEL headers to stay off platform log exports, got X-Third-Party=%q", got)
 	}
-	if got := exportHeaders.Get("X-NMP-Principal-Id"); got != serviceJobsPrincipal {
-		t.Fatalf("expected service identity principal header without workload token file, got X-NMP-Principal-Id=%q", got)
+	if got := exportHeaders.Get("X-NHX-Principal-Id"); got != serviceJobsPrincipal {
+		t.Fatalf("expected service identity principal header without workload token file, got X-NHX-Principal-Id=%q", got)
 	}
 	if got := os.Getenv(otelExporterOTLPLogsHeadersEnv); got != "Authorization=Bearer%20third-party,X-Third-Party=external" {
 		t.Fatalf("expected OTEL headers env to remain untouched, got %q", got)
@@ -397,7 +397,7 @@ func TestWorkloadAuthTokenSourceRefreshesNearExpiry(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(
 				w,
-				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-platform-workload","workload_token_endpoint":%q}}`,
+				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q}}`,
 				serverURL+"/apis/auth/token",
 			)
 		case "/apis/auth/token":
@@ -418,7 +418,7 @@ func TestWorkloadAuthTokenSourceRefreshesNearExpiry(t *testing.T) {
 	defer server.Close()
 	serverURL = server.URL
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 
 	source, err := newOTLPLogWorkloadAuthTokenSource(context.Background())
@@ -480,7 +480,7 @@ func TestWorkloadAuthTokenSourceSynchronizesConcurrentRefresh(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(
 				w,
-				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-platform-workload","workload_token_endpoint":%q}}`,
+				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q}}`,
 				serverURL+"/apis/auth/token",
 			)
 		case "/apis/auth/token":
@@ -496,7 +496,7 @@ func TestWorkloadAuthTokenSourceSynchronizesConcurrentRefresh(t *testing.T) {
 	defer server.Close()
 	serverURL = server.URL
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 
 	source, err := newOTLPLogWorkloadAuthTokenSource(context.Background())
@@ -554,7 +554,7 @@ func TestNewLogExporterPropagatesInitialWorkloadAuthFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	t.Setenv(nmpBaseURLEnv, server.URL)
+	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 	t.Setenv(launcherOTLPLogsEndpointEnv, server.URL+"/v1/logs")
 

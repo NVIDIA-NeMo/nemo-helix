@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evaluate an agent on Harvey Labs' Legal Agent Benchmark (LAB) the NeMo Platform way.
+"""Evaluate an agent on Harvey Labs' Legal Agent Benchmark (LAB) the NeMo Helix way.
 
 Native `AgentEvalTask`s (built from LAB's public data) run through NeMo Fabric, and LAB's rubric is
 scored by `LabRubricMetric`, which calls **LAB's own `evaluation/score_rubric`** over the trial's
@@ -20,10 +20,12 @@ Runner choices:
   prebuilt image that includes the document toolchain (image *building* is your concern); without it,
   the stock Fabric image is used and the skills' scripts will fail for lack of tooling.
 
-The judge is LAB's `Judge(model=--judge-model)`, which runs in **this (eval) process** and reads its
-credential from the environment (for an OpenAI-compatible endpoint: `OPENAI_API_KEY` +
-`OPENAI_BASE_URL`). LAB's extraction stack (pandoc, libreoffice, python-docx, python-redlines, pandas,
-openpyxl, pdfplumber, markitdown) must also be available in this process.
+The judge runs in **this (eval) process** and defaults to NVIDIA's OpenAI-compatible endpoint, reading
+its key from `--judge-api-key-env` (`NVIDIA_API_KEY`). `--judge-model`, `--judge-base-url` and
+`--judge-api-key-env` have to stay consistent: clearing `--judge-base-url` falls back to LAB's native
+`Judge`, which routes by name prefix and only reaches OpenAI. LAB's extraction stack (pandoc,
+libreoffice, python-docx, python-redlines, pandas, openpyxl, pdfplumber, markitdown) must also be
+available in this process.
 
 Run from the repository root (codex agent on OpenAI via a ~/.codex login; judge on an OpenAI-compatible
 endpoint such as NVIDIA). codex is the default harness because it is the only one whose shell tool runs
@@ -32,7 +34,7 @@ LAB's skill scripts under Fabric, and it is configured closed-book (no web searc
     NVIDIA_API_KEY=... \\
     .venv/bin/python -m packages.nemo_evaluator_sdk.examples.legal_agent_bench_fabric.run_legal_agent_bench_fabric \\
         --runtime host --harness codex-cli --model gpt-5.5 \\
-        --judge-model openai/gpt-oss-120b \\
+        --judge-model nvidia/nemotron-3-super-120b-a12b \\
         --judge-base-url https://integrate.api.nvidia.com/v1 --judge-api-key-env NVIDIA_API_KEY \\
         --limit 3
 """
@@ -42,7 +44,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
@@ -167,14 +168,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--image", default=None, help="Container runtime: a prebuilt sandbox image with LAB's doc toolchain."
     )
-    p.add_argument("--judge-model", default="openai/gpt-oss-120b", help="Judge model name.")
+    p.add_argument("--judge-model", default="nvidia/nemotron-3-super-120b-a12b", help="Judge model name.")
     p.add_argument(
         "--judge-base-url",
-        default=os.environ.get("OPENAI_BASE_URL"),
-        help="OpenAI-compatible judge endpoint (defaults to $OPENAI_BASE_URL). When set, grade via a "
-        "chat.completions adapter using LAB's exact prompt; else use LAB's native prefix-routed Judge.",
+        default="https://integrate.api.nvidia.com/v1",
+        help="OpenAI-compatible judge endpoint. Grades via a chat.completions adapter using LAB's exact "
+        "prompt. Must stay consistent with --judge-model: pass an empty string to fall back to LAB's "
+        "native Judge, which routes by name prefix and only reaches OpenAI.",
     )
-    p.add_argument("--judge-api-key-env", default="OPENAI_API_KEY", help="Env var holding the judge endpoint key.")
+    p.add_argument("--judge-api-key-env", default="NVIDIA_API_KEY", help="Env var holding the judge endpoint key.")
     p.add_argument(
         "--no-trajectory",
         action="store_true",

@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
-from nmp.common.auth.client import AuthClient
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig
-from nmp.core.secrets.api.v2.admin.endpoints import require_rotate_encryption_keys_caller
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
+from nhx.core.secrets.api.v2.admin.endpoints import require_rotate_encryption_keys_caller
 
 
 @pytest.fixture

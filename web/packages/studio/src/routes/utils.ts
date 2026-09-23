@@ -8,7 +8,7 @@ import {
   BASE_MODELS_ENABLED,
   ASSISTANT_STUDIO_ENABLED,
   CUSTOMIZER_ENABLED,
-  DASHBOARD_ENABLED,
+  DASHBOARD_ROUTE_ENABLED,
   DATA_DESIGNER_ENABLED,
   DATASETS_ENABLED,
   DEPLOYMENTS_ENABLED,
@@ -46,7 +46,7 @@ export const gateCustomizationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(CUSTOMIZER_ENABLED, routes);
 
 export const gateDashboardRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED, routes);
+  gateRoutes(DASHBOARD_ROUTE_ENABLED, routes);
 
 export const gateDatasetsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(DATASETS_ENABLED, routes);
@@ -138,7 +138,7 @@ export const getWorkspaceIndexRoute = (workspace: string) => {
 };
 
 export const getWorkspaceDetailsDefaultRoute = (workspace: string) => {
-  if (DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED) return getWorkspaceDashboardRoute(workspace);
+  if (DASHBOARD_ROUTE_ENABLED) return getWorkspaceDashboardRoute(workspace);
   if (AGENTS_ENABLED) return getAgentsListRoute(workspace);
   if (BASE_MODELS_ENABLED) return getWorkspaceBaseModelsRoute(workspace);
   if (JOBS_ENABLED) return getWorkspaceJobsRoute(workspace);

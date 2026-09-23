@@ -4,11 +4,11 @@
 
 """NAT-based task runner for agentic-use evals.
 
-Replaces ``harbor run`` as the orchestrator for the NeMo Platform agentic benchmark tasks.
+Replaces ``harbor run`` as the orchestrator for the NeMo Helix agentic benchmark tasks.
 The runner mirrors Harbor's three-phase execution model:
 
   1. BUILD  – Build the Docker image from each task's ``environment/Dockerfile``
-               (which inherits from ``nmp-agentic-base:latest``).
+               (which inherits from ``nhx-agentic-base:latest``).
   2. AGENT  – Run the task instruction via one of several backends:
                - ``aut`` (default): invoke a deployed platform agent-under-test
                  using ``nemo agents invoke``.
@@ -22,7 +22,7 @@ The runner mirrors Harbor's three-phase execution model:
 Usage
 -----
     # Build the base image once:
-    docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+    docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
     # Run a single task:
     python tests/agentic-use/nat_runner.py workspace-basic-mcp
@@ -55,7 +55,7 @@ Optional environment variables
                      Used by seed_providers.py to create the inference
                      provider secret. If unset, the nvidia-inference-api
                      provider is skipped during seeding.
-    NMP_BASE_URL     URL of the NeMo Platform API inside the container.
+    NHX_BASE_URL     URL of the NeMo Helix API inside the container.
                      Defaults to http://localhost:8080.
     NAT_AGENT_MODEL  Optional candidate-agent model for any backend.
     ANTHROPIC_BASE_URL  Anthropic-compatible endpoint for ``claude-code``.
@@ -93,10 +93,10 @@ NAT_TRACE_EXPORT_SCRIPT_CONTAINER_PATH = "/app/tests/agentic-use/scripts/nat_tra
 
 DEFAULT_TIMEOUT = int(os.environ.get("NAT_TIMEOUT", "600"))
 DEFAULT_JOBS_DIR = REPO_ROOT / "nat-jobs"
-DEFAULT_LOCAL_NMP_BASE_URL = "http://localhost:8080"
+DEFAULT_LOCAL_NHX_BASE_URL = "http://localhost:8080"
 DEFAULT_AUT_AGENT_CONFIG: str | None = None
 FILES_STORAGE_CONFIG = '{"type":"local","path":"/data/files_storage"}'
-PLATFORM_CONFIG_PATH = "/app/packages/nmp_platform/config/local.yaml"
+PLATFORM_CONFIG_PATH = "/app/packages/nhx_platform/config/local.yaml"
 DOCKER_SOCKET_HOST_PATH = Path("/var/run/docker.sock")
 DOCKER_SOCKET_CONTAINER_PATH = "/var/run/docker.sock"
 PLACEHOLDER_SECRET_VALUES = {"null", "none"}
@@ -382,9 +382,9 @@ def _capture_image_digest(image_tag: str) -> str | None:
 #
 # When the runner is invoked with ``--commit <ref>``, the source tree used for
 # the run (task definitions, verifiers, AUT config, framework code) is pinned
-# to that commit via a git worktree. The ``nmp-agentic-base`` image is rebuilt
+# to that commit via a git worktree. The ``nhx-agentic-base`` image is rebuilt
 # from that worktree (tagged both ``:<short-sha>`` and ``:latest`` so per-task
-# Dockerfiles' ``FROM nmp-agentic-base:latest`` line picks up the pinned base)
+# Dockerfiles' ``FROM nhx-agentic-base:latest`` line picks up the pinned base)
 # and then ``nat_runner.py`` re-execs from the pinned worktree path so that
 # ``Path(__file__).parents[2]`` resolves to the pinned tree for the rest of
 # the run.
@@ -433,12 +433,12 @@ def _ensure_pinned_worktree(sha: str, worktree_dir: Path, *, repo_root: Path) ->
 
 
 def _build_pinned_agentic_base(worktree_dir: Path, short_sha: str) -> str:
-    """Build ``nmp-agentic-base:<short_sha>`` from the pinned worktree.
+    """Build ``nhx-agentic-base:<short_sha>`` from the pinned worktree.
 
     Idempotent: if the image already exists locally we skip the (expensive)
     rebuild and just retag ``:latest`` so per-task Dockerfiles inherit it.
     """
-    pinned_tag = f"nmp-agentic-base:{short_sha}"
+    pinned_tag = f"nhx-agentic-base:{short_sha}"
     dockerfile = worktree_dir / "Dockerfile.agentic-base"
     if not dockerfile.exists():
         raise FileNotFoundError(f"Pinned worktree is missing {dockerfile}; cannot build agentic base image.")
@@ -454,15 +454,15 @@ def _build_pinned_agentic_base(worktree_dir: Path, short_sha: str) -> str:
                 "-t",
                 pinned_tag,
                 "-t",
-                "nmp-agentic-base:latest",
+                "nhx-agentic-base:latest",
                 str(worktree_dir),
             ]
         )
     else:
         print(f"[nat_runner] Reusing existing pinned agentic base image {pinned_tag}.")
         # Make sure :latest still points at the pinned digest so task images
-        # (FROM nmp-agentic-base:latest) inherit from the pinned base.
-        _run(["docker", "tag", pinned_tag, "nmp-agentic-base:latest"], check=False)
+        # (FROM nhx-agentic-base:latest) inherit from the pinned base.
+        _run(["docker", "tag", pinned_tag, "nhx-agentic-base:latest"], check=False)
     return pinned_tag
 
 
@@ -576,7 +576,7 @@ def _build_aut_agent_cmd(instruction_container: str) -> list[str]:
     4. Deploying the AUT, waiting for ``/health`` readiness, and invoking the
        task instruction through an artifact-capture helper that prefers NAT's
        ``/generate/atif`` endpoint and falls back to legacy generate routes.
-    5. Collecting diagnostics (deployment list/get, NeMo Platform API logs, NAT
+    5. Collecting diagnostics (deployment list/get, NeMo Helix API logs, NAT
        subprocess logs) into ``/logs/agent/`` on failure.
 
     Provider seeding is handled by ``seed_providers.py`` via a declarative
@@ -618,7 +618,7 @@ def _build_aut_agent_cmd(instruction_container: str) -> list[str]:
             if [ "${{AUT_SEED_PROVIDERS:-1}}" = "1" ]; then
               /app/.venv/bin/python /app/tests/agentic-use/seed_providers.py \
                 --manifest /app/tests/agentic-use/providers.yaml \
-                --base-url "${{NMP_BASE_URL:-http://localhost:8080}}" \
+                --base-url "${{NHX_BASE_URL:-http://localhost:8080}}" \
                 2>&1 | tee /tmp/aut_provider_seed.log
             fi
             collect_aut_diagnostics() {{
@@ -642,10 +642,10 @@ def _build_aut_agent_cmd(instruction_container: str) -> list[str]:
               cp /tmp/aut_undeploy.log /logs/agent/aut_undeploy.log 2>/dev/null || true
               cp /tmp/aut_undeploy_before_recreate.log /logs/agent/aut_undeploy_before_recreate.log 2>/dev/null || true
               cp /tmp/aut_delete_before_recreate.log /logs/agent/aut_delete_before_recreate.log 2>/dev/null || true
-              cp /tmp/nmp-api.log /logs/agent/nmp-api.log 2>/dev/null || true
+              cp /tmp/nhx-api.log /logs/agent/nhx-api.log 2>/dev/null || true
               # Collect agent subprocess logs.  The runtime artifact layout
               # moved out of the plugin source tree (<plugin>/.tmp/system/)
-              # into nmp_user_data_dir()/agents/system/, with deterministic
+              # into nhx_user_data_dir()/agents/system/, with deterministic
               # per-deployment filenames.  Use `nemo agents logs --path` so
               # this script doesn't have to keep its own copy of the layout
               # convention.  ``|| true`` on the pipeline because we run under
@@ -870,7 +870,7 @@ def run_agent_phase(
     nvidia_api_key: str,
     anthropic_api_key: str,
     anthropic_base_url: str,
-    nmp_base_url: str,
+    nhx_base_url: str,
     agent_model: str | None,
     agent_params: dict[str, Any],
     codex_auth_json: Path | None,
@@ -942,12 +942,12 @@ def run_agent_phase(
 
     # Build the environment passed into the container
     env: dict[str, str] = {
-        "NMP_BASE_URL": nmp_base_url,
+        "NHX_BASE_URL": nhx_base_url,
         "AGENTIC_USE_WORKSPACE_DIR": "/app/workspace",
         "DATABASE_DIALECT": "sqlite",
-        "DATABASE_PATH": "/data/nmp-platform.db",
-        "NMP_FILES_DEFAULT_STORAGE_CONFIG": FILES_STORAGE_CONFIG,
-        "NMP_CONFIG_FILE_PATH": PLATFORM_CONFIG_PATH,
+        "DATABASE_PATH": "/data/nhx-platform.db",
+        "NHX_FILES_DEFAULT_STORAGE_CONFIG": FILES_STORAGE_CONFIG,
+        "NHX_CONFIG_FILE_PATH": PLATFORM_CONFIG_PATH,
         "NEMO_AGENTS_GATEWAY_READ_TIMEOUT": str(timeout),
         "NEMO_AGENTS_INVOKE_TIMEOUT": str(timeout),
         "AUT_INVOKE_HTTP_TIMEOUT": str(timeout),
@@ -1000,7 +1000,7 @@ def run_agent_phase(
                 aut_config_path,
                 agent_log_dir,
                 nat_model=agent_model,
-                nmp_base_url=nmp_base_url,
+                nhx_base_url=nhx_base_url,
             )
             env["AUT_AGENT_CONFIG"] = aut_config_container
         else:
@@ -1019,7 +1019,7 @@ def run_agent_phase(
         workflow_host = _prepare_workflow_for_runtime(
             workflow_path,
             agent_log_dir,
-            nmp_base_url,
+            nhx_base_url,
             nat_model=agent_model,
         )
         workflow_container = "/tmp/nat_workflow.yml"
@@ -1057,7 +1057,7 @@ def run_agent_phase(
         agent_cmd,
         env=env,
         mounts=mounts + [(str(state_dir), "/data")],
-        timeout=timeout + 120,  # extra buffer for NeMo Platform startup
+        timeout=timeout + 120,  # extra buffer for NeMo Helix startup
     )
 
     # Save agent log. ``_docker_run`` does not capture stdout (logs stream to
@@ -1082,7 +1082,7 @@ def run_agent_phase(
 def _prepare_workflow_for_runtime(
     workflow_path: Path,
     output_dir: Path,
-    nmp_base_url: str,
+    nhx_base_url: str,
     *,
     nat_model: str | None = None,
 ) -> Path:
@@ -1094,7 +1094,7 @@ def _prepare_workflow_for_runtime(
     """
     text = workflow_path.read_text()
     # Ensure MCP server URL follows runner's effective base URL.
-    text = text.replace("http://localhost:8080", nmp_base_url)
+    text = text.replace("http://localhost:8080", nhx_base_url)
     if nat_model:
         text = text.replace(
             "model_name: nvidia/llama-3.1-nemotron-70b-instruct",
@@ -1139,7 +1139,7 @@ def _prepare_aut_config_for_runtime(
     output_dir: Path,
     *,
     nat_model: str | None = None,
-    nmp_base_url: str = DEFAULT_LOCAL_NMP_BASE_URL,
+    nhx_base_url: str = DEFAULT_LOCAL_NHX_BASE_URL,
     workspace: str = "default",
 ) -> Path:
     """Prepare AUT config for IGW-routed container runtime.
@@ -1168,7 +1168,7 @@ def _prepare_aut_config_for_runtime(
                 break
 
     config = inject_default_model(config)
-    config = inject_gateway_url(config, workspace, base_url=nmp_base_url)
+    config = inject_gateway_url(config, workspace, base_url=nhx_base_url)
 
     rewritten = output_dir / "aut.runtime.yml"
     with rewritten.open("w") as f:
@@ -1509,7 +1509,7 @@ def run_verify_phase(
     image: str,
     output_dir: Path,
     *,
-    nmp_base_url: str,
+    nhx_base_url: str,
     smoke_workspace: str | None = None,
     state_dir: Path,
     workspace_dir: Path,
@@ -1566,7 +1566,7 @@ def run_verify_phase(
         image,
         verify_cmd,
         env={
-            "NMP_BASE_URL": nmp_base_url,
+            "NHX_BASE_URL": nhx_base_url,
             "NAT_AGENT": "1",
             "NAT_AGENT_BACKEND": agent_backend,
             "NAT_AGENT_MODEL": agent_model,
@@ -1574,9 +1574,9 @@ def run_verify_phase(
             "AGENTIC_USE_WORKSPACE_DIR": "/app/workspace",
             "SMOKE_WORKSPACE": smoke_workspace or "",
             "DATABASE_DIALECT": "sqlite",
-            "DATABASE_PATH": "/data/nmp-platform.db",
-            "NMP_FILES_DEFAULT_STORAGE_CONFIG": FILES_STORAGE_CONFIG,
-            "NMP_CONFIG_FILE_PATH": PLATFORM_CONFIG_PATH,
+            "DATABASE_PATH": "/data/nhx-platform.db",
+            "NHX_FILES_DEFAULT_STORAGE_CONFIG": FILES_STORAGE_CONFIG,
+            "NHX_CONFIG_FILE_PATH": PLATFORM_CONFIG_PATH,
             **({"DOCKER_HOST": f"unix://{DOCKER_SOCKET_CONTAINER_PATH}"} if DOCKER_SOCKET_HOST_PATH.exists() else {}),
         },
         mounts=[
@@ -1624,7 +1624,7 @@ def run_task(
     nvidia_api_key: str,
     anthropic_api_key: str,
     anthropic_base_url: str,
-    nmp_base_url: str,
+    nhx_base_url: str,
     agent_model: str | None,
     agent_params: dict[str, Any] | None,
     codex_auth_json: Path | None,
@@ -1654,7 +1654,7 @@ def run_task(
     workspace_dir = output_dir / "workspace"
     _ensure_container_writable_dir(workspace_dir)
 
-    image_tag = f"nmp-nat-{task_name}:latest"
+    image_tag = f"nhx-nat-{task_name}:latest"
 
     result: dict = {
         "task": task_name,
@@ -1749,7 +1749,7 @@ def run_task(
                 nvidia_api_key=nvidia_api_key,
                 anthropic_api_key=anthropic_api_key,
                 anthropic_base_url=anthropic_base_url,
-                nmp_base_url=nmp_base_url,
+                nhx_base_url=nhx_base_url,
                 agent_model=agent_model,
                 agent_params=agent_params or {},
                 codex_auth_json=codex_auth_json,
@@ -1815,7 +1815,7 @@ def run_task(
             task_dir,
             image_tag,
             output_dir,
-            nmp_base_url=nmp_base_url,
+            nhx_base_url=nhx_base_url,
             smoke_workspace=smoke_workspace,
             state_dir=state_dir,
             workspace_dir=workspace_dir,
@@ -1931,7 +1931,7 @@ def _read_manifest(manifest_path: Path) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="NAT-based runner for NeMo Platform agentic-use eval tasks (replaces harbor run)",
+        description="NAT-based runner for NeMo Helix agentic-use eval tasks (replaces harbor run)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
@@ -1947,7 +1947,7 @@ def main() -> int:
               # Skip build only if task image already exists locally
               python tests/agentic-use/nat_runner.py --skip-build workspace-basic-mcp
 
-              # Skip both build and agent (only run verifier against an already-running NeMo Platform)
+              # Skip both build and agent (only run verifier against an already-running NeMo Helix)
               python tests/agentic-use/nat_runner.py --skip-build --skip-agent workspace-basic-mcp
         """),
     )
@@ -1967,7 +1967,7 @@ def main() -> int:
         "--skip-build",
         action="store_true",
         help="Skip Docker build phase and use existing prebuilt task image "
-        "(nmp-nat-<task>:latest). Fails if task image is missing.",
+        "(nhx-nat-<task>:latest). Fails if task image is missing.",
     )
     parser.add_argument(
         "--skip-agent",
@@ -1992,9 +1992,9 @@ def main() -> int:
         help=f"Agent timeout in seconds (default: {DEFAULT_TIMEOUT})",
     )
     parser.add_argument(
-        "--nmp-base-url",
-        default=DEFAULT_LOCAL_NMP_BASE_URL,
-        help="NeMo Platform API base URL inside the container (default: http://localhost:8080).",
+        "--nhx-base-url",
+        default=DEFAULT_LOCAL_NHX_BASE_URL,
+        help="NeMo Helix API base URL inside the container (default: http://localhost:8080).",
     )
     parser.add_argument(
         "--list",
@@ -2082,7 +2082,7 @@ def main() -> int:
         default=os.environ.get("NAT_COMMIT"),
         help="Pin the run to a specific commit (any ref understood by `git rev-parse` "
         "is accepted: full sha, short sha, branch, tag). When given, the runner sets up "
-        "(or reuses) a git worktree at that commit, rebuilds the nmp-agentic-base image "
+        "(or reuses) a git worktree at that commit, rebuilds the nhx-agentic-base image "
         "from it, and re-execs itself from the pinned worktree so all source files "
         "(task definitions, verifiers, framework code) come from that commit.",
     )
@@ -2260,13 +2260,13 @@ def main() -> int:
     elif args.agent_backend in {"codex", "cursor-agent"}:
         backend_suffix = f" (model={args.agent_model or 'default'})"
     print(f"[nat_runner] Agent backend: {args.agent_backend}{backend_suffix}")
-    env_nmp_base_url = os.environ.get("NMP_BASE_URL")
-    if env_nmp_base_url and env_nmp_base_url != args.nmp_base_url:
+    env_nhx_base_url = os.environ.get("NHX_BASE_URL")
+    if env_nhx_base_url and env_nhx_base_url != args.nhx_base_url:
         print(
-            "[nat_runner] NOTE: Ignoring NMP_BASE_URL from environment "
-            f"({env_nmp_base_url!r}); using --nmp-base-url={args.nmp_base_url!r}."
+            "[nat_runner] NOTE: Ignoring NHX_BASE_URL from environment "
+            f"({env_nhx_base_url!r}); using --nhx-base-url={args.nhx_base_url!r}."
         )
-    print(f"[nat_runner] Effective NeMo Platform base URL: {args.nmp_base_url}")
+    print(f"[nat_runner] Effective NeMo Helix base URL: {args.nhx_base_url}")
     if args.agent_backend == "aut":
         print(f"[nat_runner] Effective AUT config: {args.aut_agent_config}")
     if args.smoke_workspace:
@@ -2277,7 +2277,7 @@ def main() -> int:
     # rebuilt mid-batch.
     provenance = _capture_repo_provenance()
     provenance["routing_mode"] = "igw"
-    provenance["agentic_base_image_digest"] = _capture_image_digest("nmp-agentic-base:latest")
+    provenance["agentic_base_image_digest"] = _capture_image_digest("nhx-agentic-base:latest")
     pinned_sha = os.environ.get(_PINNED_GUARD_ENV)
     pinned_ref = os.environ.get(_PINNED_REF_ENV)
     pinned_image_tag = os.environ.get("NAT_PINNED_IMAGE_TAG")
@@ -2320,7 +2320,7 @@ def main() -> int:
                 nvidia_api_key=nvidia_api_key,
                 anthropic_api_key=anthropic_api_key,
                 anthropic_base_url=args.anthropic_base_url,
-                nmp_base_url=args.nmp_base_url,
+                nhx_base_url=args.nhx_base_url,
                 agent_model=args.agent_model,
                 agent_params=candidate_params,
                 codex_auth_json=args.codex_auth_json,

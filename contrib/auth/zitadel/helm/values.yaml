@@ -5,15 +5,15 @@ workloadTokenSigningKey:
   create: true
   secretName: &workloadTokenSigningKeySecretName nemo-workload-token-signing-key
   key: private-key.pem
-  mountPath: &workloadTokenSigningKeyMountPath /etc/nmp/workload-token
+  mountPath: &workloadTokenSigningKeyMountPath /etc/nhx/workload-token
   privateKeyPem: ""
 
 workloadTokenTls:
   create: true
-  secretName: &workloadTokenTlsSecretName nemo-platform-envoy-tls
-  mountPath: &workloadTokenTlsMountPath /etc/nmp/workload-token-tls
-  caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nmp/workload-token-ca
-  caBundleFile: &workloadTokenTlsCaBundleFile /etc/nmp/workload-token-ca/ca.crt
+  secretName: &workloadTokenTlsSecretName nemo-helix-envoy-tls
+  mountPath: &workloadTokenTlsMountPath /etc/nhx/workload-token-tls
+  caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nhx/workload-token-ca
+  caBundleFile: &workloadTokenTlsCaBundleFile /etc/nhx/workload-token-ca/ca.crt
   durationDays: 3650
   ipAddresses:
     - 127.0.0.1
@@ -35,14 +35,14 @@ zitadelSecrets:
     userPasswordKey: &zitadelPostgresqlUserPasswordKey password
     dsnKey: &zitadelPostgresqlDsnKey dsn
 
-nemoPlatformSecrets:
+nemoHelixSecrets:
   ngc:
     create: true
-    secretName: &nemoPlatformNgcSecretName nemo-platform-ngc-api
+    secretName: &nemoHelixNgcSecretName nemo-helix-ngc-api
     key: NGC_API_KEY
   postgresql:
     create: true
-    secretName: &nemoPlatformPostgresqlSecretName nemo-platform-postgres
+    secretName: &nemoHelixPostgresqlSecretName nemo-helix-postgres
     passwordKey: password
 
 zitadelDemo:
@@ -51,7 +51,7 @@ zitadelDemo:
   actionName: nemoGroups
   setupMachine:
     userId: nemo-setup
-    name: NeMo Platform Setup
+    name: NeMo Helix Setup
   workloadMachine:
     userId: svc-nemo
     name: NeMo Workload Provider
@@ -70,10 +70,10 @@ zitadelSeedJob:
   stateSecretName: &zitadelSeedStateSecretName nemo-zitadel-seed-state
   patSecretName: iam-admin-pat
   patSecretKey: pat
-  nemoConfigMapName: nemo-platform-config
+  nemoConfigMapName: nemo-helix-config
   nemoDeployments:
-    - nemo-platform-api
-    - nemo-platform-core-controller
+    - nemo-helix-api
+    - nemo-helix-core-controller
   waitTimeoutSeconds: 600
   activeDeadlineSeconds: 900
   backoffLimit: 6
@@ -159,9 +159,9 @@ zitadel:
       persistence:
         enabled: false
 
-nemo-platform:
-  fullnameOverride: nemo-platform
-  existingSecret: *nemoPlatformNgcSecretName
+nemo-helix:
+  fullnameOverride: nemo-helix
+  existingSecret: *nemoHelixNgcSecretName
   ngcAPIKey: ""
   zitadelPublicGateway:
     scheme: https
@@ -175,12 +175,12 @@ nemo-platform:
   postgresql:
     enabled: true
     auth:
-      existingSecret: *nemoPlatformPostgresqlSecretName
+      existingSecret: *nemoHelixPostgresqlSecretName
   clickhouse:
     enabled: false
   externalClickhouse:
     host: unused-clickhouse
-    existingSecret: nemo-platform-postgres
+    existingSecret: nemo-helix-postgres
     existingSecretPasswordKey: password
   core:
     controller:
@@ -193,8 +193,8 @@ nemo-platform:
         - entities
         - deployments
       env:
-        NMP_PLATFORM_URL: "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
-        NMP_AUTH_URL: "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+        NHX_PLATFORM_URL: "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+        NHX_AUTH_URL: "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
     storage:
       accessModes:
         - ReadWriteOnce
@@ -215,8 +215,8 @@ nemo-platform:
       - entities
       - deployments
     env:
-      NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nmp/workload-token/private-key.pem"
-      NMP_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET:
+      NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nhx/workload-token/private-key.pem"
+      NHX_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET:
         valueFrom:
           secretKeyRef:
             name: *zitadelSeedStateSecretName
@@ -283,7 +283,7 @@ nemo-platform:
           secretName: *workloadTokenTlsSecretName
     timeouts:
       upstreamIdle: "4s"
-    configOverride: '{{ include "nemo-platform-zitadel.envoyConfig" . }}'
+    configOverride: '{{ include "nemo-helix-zitadel.envoyConfig" . }}'
   platformConfig:
     auth:
       enabled: true
@@ -294,31 +294,31 @@ nemo-platform:
       bundle_cache_seconds: 15
       admin_email: "admin@example.com"
       token_signing:
-        issuer: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth'
-        key_id: "nemo-platform-signing"
-        private_key_file: "/etc/nmp/workload-token/private-key.pem"
+        issuer: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth'
+        key_id: "nemo-helix-signing"
+        private_key_file: "/etc/nhx/workload-token/private-key.pem"
       access_keys:
         enabled: false
       oidc:
         enabled: true
-        issuer: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}'
+        issuer: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}'
         additional_issuers:
-          - '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "zitadel" "scheme" "http" "port" 8080) }}'
+          - '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "zitadel" "scheme" "http" "port" 8080) }}'
         client_id: "__ZITADEL_NEMO_CLIENT_ID__"
-        token_endpoint: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
-        device_authorization_endpoint: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}/oauth/v2/device_authorization'
-        jwks_uri: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/keys'
+        token_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
+        device_authorization_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/device_authorization'
+        jwks_uri: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/keys'
         introspect_opaque_tokens: true
-        introspection_endpoint: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/introspect'
+        introspection_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/introspect'
         introspection_client_id: "__ZITADEL_INTROSPECTION_CLIENT_ID__"
-        introspection_client_secret_env_var: "NMP_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET"
+        introspection_client_secret_env_var: "NHX_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET"
         resolve_opaque_tokens_via_userinfo: false
-        userinfo_endpoint: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}/oidc/v1/userinfo'
+        userinfo_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oidc/v1/userinfo'
         workload_token_exchange_enabled: true
-        workload_client_id: "nemo-platform-workload"
-        workload_audience: "nemo-platform"
+        workload_client_id: "nemo-helix-workload"
+        workload_audience: "nemo-helix"
         workload_scope: "openid email groups"
-        workload_token_endpoint: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
+        workload_token_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
         workload_kubernetes_token_review_enabled: true
         subject_claim: "sub"
         email_claim: "email"
@@ -347,7 +347,7 @@ nemo-platform:
           profile: workload
           backend: kubernetes_job
           config:
-            launcher_image: '{{ include "nmp-core.image" . }}'
+            launcher_image: '{{ include "nhx-core.image" . }}'
             env:
               SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
               REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
@@ -364,7 +364,7 @@ nemo-platform:
                   mount_path: *workloadTokenTlsCaBundleMountPath
                   read_only: true
             workload_identity:
-              token_audience: "nemo-platform-workload"
+              token_audience: "nemo-helix-workload"
               token_expiration_seconds: 600
     models:
       controller:
@@ -373,12 +373,12 @@ nemo-platform:
             enabled: true
 
 integration:
-  nemoPlatform:
+  nemoHelix:
     apiServiceAccountName: nemo
-    apiServiceName: nemo-platform-api
+    apiServiceName: nemo-helix-api
     apiServicePort: 8080
-    coreControllerDeploymentName: nemo-platform-core-controller
-    envoyServiceName: nemo-platform-envoy
+    coreControllerDeploymentName: nemo-helix-core-controller
+    envoyServiceName: nemo-helix-envoy
     envoyServicePort: 8080
   zitadel:
     serviceName: *zitadelServiceName

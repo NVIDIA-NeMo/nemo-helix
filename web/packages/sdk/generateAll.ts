@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Generates types for all OpenAPI specs in the NeMo Platform repository.
+ * Generates types for all OpenAPI specs in the NeMo Helix repository.
  *
  * The generated tree under `./generated/` is gitignored. To keep `pnpm install`
  * cheap, this script writes a content-hash sentinel after a successful run and

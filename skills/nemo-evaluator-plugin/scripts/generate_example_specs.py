@@ -184,7 +184,7 @@ def build_gym_agent_eval_spec() -> dict[str, Any]:
             "num_repeats": 1,
             "concurrency": 1,
             "hydra_params": {
-                "policy_base_url": "http://nemo-platform-api.default.svc.cluster.local:8080/"
+                "policy_base_url": "http://nemo-helix-api.default.svc.cluster.local:8080/"
                 "apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1",
                 "policy_api_key": "not-used",
                 "policy_model_name": "my-model",

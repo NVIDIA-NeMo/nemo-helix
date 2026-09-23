@@ -114,8 +114,8 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
   list is current. Published packages (`class-variance-authority`,
   `@assistant-ui/react` once the chat surface lands) are plain type-only
   devDependencies. Only `@nemo/sdk/generated/platform/schema` needs a local stub,
-  because it is unpublished; it contributes `PlatformJobLog` and
-  `PlatformJobStatus`, reached solely through `LogViewer` and the job-status
+  because it is unpublished; it contributes `HelixJobLog` and
+  `HelixJobStatus`, reached solely through `LogViewer` and the job-status
   constants, so a dozen structural lines cover it.
 - **Regenerate with `pnpm --filter @nemo/common types:plugin` when you change
   `plugin.ts`.** The `web-plugin-types` CI job regenerates and fails on a diff,

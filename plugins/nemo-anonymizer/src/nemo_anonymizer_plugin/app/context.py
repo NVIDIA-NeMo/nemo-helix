@@ -8,7 +8,6 @@ from __future__ import annotations
 import data_designer.config as dd
 from data_designer.config.models import ModelProvider as DDModelProvider
 from data_designer_nemo.model_provider import make_model_provider_registry
-from data_designer_nemo.sdk_translation import sync_to_async_sdk
 from nemo_anonymizer_plugin.app.errors import AnonymizerInvalidConfigError
 from nemo_anonymizer_plugin.app.input import (
     AnonymizerInputSpec,
@@ -16,20 +15,20 @@ from nemo_anonymizer_plugin.app.input import (
     prepare_anonymizer_input_async,
     validate_anonymizer_input_source,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 
 
 def require_model_configs_for_execution(model_configs: list[dd.ModelConfig] | None) -> list[dd.ModelConfig]:
     if not model_configs:
         raise AnonymizerInvalidConfigError(
-            "model_configs are required for anonymizer execution so requests route through NeMo Platform "
+            "model_configs are required for anonymizer execution so requests route through NeMo Helix "
             "Inference Gateway instead of Anonymizer library defaults."
         )
     return model_configs
 
 
 class AnonymizerContext:
-    def __init__(self, sdk: AsyncNeMoPlatform | NeMoPlatform, workspace: str):
+    def __init__(self, sdk: AsyncHelixClient, workspace: str):
         self._sdk = sdk
         self._workspace = workspace
 
@@ -37,10 +36,9 @@ class AnonymizerContext:
         self,
         model_configs: list[dd.ModelConfig],
     ) -> list[DDModelProvider] | None:
-        async_sdk = sync_to_async_sdk(self._sdk) if isinstance(self._sdk, NeMoPlatform) else self._sdk
         registry = await make_model_provider_registry(
             model_configs,
-            sdk=async_sdk,
+            sdk=self._sdk,
             default_workspace=self._workspace,
         )
         if registry is None:
@@ -60,7 +58,7 @@ class AnonymizerContext:
 
 
 def create_anonymizer_context(
-    sdk: AsyncNeMoPlatform | NeMoPlatform,
+    sdk: AsyncHelixClient,
     workspace: str,
 ) -> AnonymizerContext:
     return AnonymizerContext(sdk, workspace)

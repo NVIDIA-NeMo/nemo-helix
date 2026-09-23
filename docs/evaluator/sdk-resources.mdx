@@ -2,27 +2,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Evaluator NeMo Platform SDK Resources"
+title: "Evaluator NeMo Helix SDK Resources"
 description: ""
 ---
-<a id="evaluator-nmp-sdk-resources"></a>
+<a id="evaluator-nhx-sdk-resources"></a>
 
 The `nemo_evaluator_sdk` package provides context-agnostic objects for defining metrics, datasets, evaluation configuration, and result handling.
-When you want to execute those evaluations through the NeMo Platform Evaluator plugin, use the Evaluator SDK resource mounted on the `nemo_platform` SDK.
-This page explains the NeMo Platform-specific objects used to submit durable platform jobs and retrieve evaluator job results.
+When you want to execute those evaluations through the NeMo Helix Evaluator plugin, use the Evaluator SDK resource mounted on the `nemo_helix` SDK.
+This page explains the NeMo Helix-specific objects used to submit durable platform jobs and retrieve evaluator job results.
 
 ## Evaluator
 
-The `Evaluator` resource is the sync SDK object for working with the Evaluator plugin on NeMo Platform.
-It is accessed directly from a `NeMoPlatform` instance:
+The `Evaluator` resource is the sync SDK object for working with the Evaluator plugin on NeMo Helix.
+It is accessed directly from a `NeMoHelix` instance:
 
 ```python
 import os
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
@@ -68,16 +68,16 @@ print(result.aggregate_scores)
 
 ## AsyncEvaluator
 
-The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `AsyncNeMoPlatform`.
+The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `AsyncNeMoHelix`.
 Async methods must be awaited:
 
 ```python
 import os
 from nemo_evaluator.sdk import AsyncEvaluator
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-client = AsyncNeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = AsyncNeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: AsyncEvaluator = client.evaluator

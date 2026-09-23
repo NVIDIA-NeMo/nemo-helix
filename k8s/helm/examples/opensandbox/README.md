@@ -3,7 +3,7 @@
 
 # OpenSandbox example overlays
 
-The NeMo Platform Helm chart does **not** install OpenSandbox. These files are
+The NeMo Helix Helm chart does **not** install OpenSandbox. These files are
 values and BatchSandbox templates for the upstream OpenSandbox charts. Point
 jobs at **one** already-installed server.
 
@@ -17,16 +17,16 @@ sandbox pods must be isolated from the host kernel. The documented example is
 Kata QEMU because it runs each sandbox in a VM with its own guest kernel; other
 isolated runtimes may work but have not been tested.
 
-Full procedure: [OpenSandbox](https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox)
-and [OpenSandbox with Kata](https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata)
-in the NeMo Platform documentation. `helm show readme` of this chart points at
+Full procedure: [OpenSandbox](https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox)
+and [OpenSandbox with Kata](https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata)
+in the NeMo Helix documentation. `helm show readme` of this chart points at
 those pages.
 
 ## Prerequisites
 
 - A local [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) checkout with Helm charts under `kubernetes/charts/`, or a published chart tarball
 - `kubectl` access to the cluster
-- The NeMo Platform Helm release namespace (jobs run here; it is also `[kubernetes] namespace` in the server values)
+- The NeMo Helix Helm release namespace (jobs run here; it is also `[kubernetes] namespace` in the server values)
 
 ## Namespace rule
 
@@ -53,16 +53,16 @@ Replace `REPLACE_WITH_RELEASE_NAMESPACE` in the server values before install.
 ## Install (shared-kernel)
 
 ```bash
-export NMP_NAMESPACE=nemo-platform          # must match the platform job namespace
+export NHX_NAMESPACE=nemo-helix          # must match the platform job namespace
 export OPENSANDBOX_DIR=/path/to/OpenSandbox
 export EXAMPLES=k8s/helm/examples/opensandbox
 
 # Replace the placeholder in the server values
-sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NMP_NAMESPACE}/g" \
+sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NHX_NAMESPACE}/g" \
   "${EXAMPLES}/opensandbox-server.yaml"
 
 kubectl create namespace opensandbox-system --dry-run=client -o yaml | kubectl apply -f -
-kubectl create namespace "${NMP_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "${NHX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl apply -f "${EXAMPLES}/batchsandbox-template.yaml"
 
@@ -73,13 +73,13 @@ kubectl create secret generic opensandbox-server-api-key \
 # Copy the same key into the job namespace (jobs use secretKeyRef)
 kubectl get secret opensandbox-server-api-key -n opensandbox-system -o json \
   | jq 'del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.namespace)' \
-  | kubectl apply -n "${NMP_NAMESPACE}" -f -
+  | kubectl apply -n "${NHX_NAMESPACE}" -f -
 
 # Image pull: templates hard-code imagePullSecrets.name: nvcrimagepullsecret.
 # That Secret must exist in the job namespace. If yours has a different name,
 # edit imagePullSecrets in batchsandbox-template.yaml (and the Kata template)
 # before applying.
-kubectl get secret nvcrimagepullsecret -n "${NMP_NAMESPACE}"
+kubectl get secret nvcrimagepullsecret -n "${NHX_NAMESPACE}"
 
 helm upgrade --install opensandbox-controller \
   "${OPENSANDBOX_DIR}/kubernetes/charts/opensandbox-controller" \
@@ -115,7 +115,7 @@ controller install plus `-f opensandbox-server-kata-qemu.yaml`. Override
 ## Verify
 
 ```bash
-export OPEN_SANDBOX_WORKLOAD_NS="${NMP_NAMESPACE}"
+export OPEN_SANDBOX_WORKLOAD_NS="${NHX_NAMESPACE}"
 ./k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 # or, after installing the Kata server:
 ./k8s/helm/examples/opensandbox/verify/kata-qemu.sh

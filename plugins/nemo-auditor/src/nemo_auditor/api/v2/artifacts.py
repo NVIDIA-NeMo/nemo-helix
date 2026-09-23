@@ -20,14 +20,14 @@ import anyio.to_thread
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from nemo_auditor.authz import scope
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.dependencies import get_sdk_client
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.result_manager import async_result_manager_factory
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.result_manager import async_result_manager_factory
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ async def download_audit_artifacts(
     workspace: str,
     job: str,
     background_tasks: BackgroundTasks,
-    sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
 ) -> FileResponse:
     """Stream an aggregate tar.gz of all garak report artifacts for an audit job."""
     jobs_client = client_from_platform(sdk, AsyncJobsClient)

@@ -36,7 +36,7 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({ hasModels }) => {
           <ParticleSwirl />
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             <Text kind="display/sm">{headline}</Text>
-            <Text kind="body/regular/md" color="secondary">
+            <Text className="text-secondary" kind="body/regular/md">
               {subhead}
             </Text>
           </div>

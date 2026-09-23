@@ -9,8 +9,7 @@ description: >-
   across many sessions, clusters similar failures, then files every finding as a
   titled Insight carrying the trace IDs that evidence the problem. Answers why
   an agent keeps failing, where it gets things wrong, and the recurring
-  problems hiding in production traces. Produces the Insight that the
-  Experimentalist later acts on.
+  problems hiding in production traces.
 triggers:
   - nemo-analyst
   - analyze my agent's traces
@@ -20,13 +19,11 @@ triggers:
   - run the analyst
   - my agent keeps getting things wrong
 not-for:
-  - nemo-experimentalist (use to act on an Insight and change the agent; this skill produces the Insight it consumes)
   - nemo-intake (use to instrument an agent, ingest telemetry, or query raw spans; this skill interprets telemetry that already landed)
   - nemo-experiments-upload (use to upload traces and evaluation results into Intake; this skill reads them back out)
-  - nemo-explore (use to design an agent that does not exist yet; this skill needs a running agent with traces)
   - nemo-evaluator (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
-  nemo-platform >= 0.1.0; requires the Insights plugin, a reachable platform
+  nemo-helix >= 0.1.0; requires the Insights plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call
   on the Analyst's behalf. No Docker or datasets needed.
 maturity: beta
@@ -65,11 +62,10 @@ worth more than ten vague ones, so a run that files nothing is a valid outcome.
 The Analyst reads telemetry; it cannot create it. Confirm all three:
 
 - The target agent already has traces in Intake. No traces means no Insights.
-- The platform is reachable at `NMP_BASE_URL`.
+- The platform is reachable at `NHX_BASE_URL`.
 - The Analyst has a model to run on. It is an LLM agent itself, and how that is
   configured is changing, so let pre-flight tell you whether it is satisfied —
-  it names what is missing and how to set it. Don't reach for the
-  Experimentalist's configuration; that is a different contract.
+  it names what is missing and how to set it.
 
 An `ETHOS.md` file is optional. It gives the Analyst the agent's intent,
 constraints, and success criteria. Code and traces don't contain that context.
@@ -106,8 +102,7 @@ nemo agents analyst run
 ```
 
 The profile is discovered by walking up from the current directory. Only those
-three fields are read from it; other keys belong to the Experimentalist and are
-ignored.
+three fields are read from it; other keys are ignored.
 
 ## Where Insights are stored
 
@@ -119,8 +114,7 @@ on each run; a mirror that cannot be written warns rather than failing the run.
 nemo agents analyst run --agent <agent-name> --insights-file-output .nemo-optimizer/insights.yaml
 ```
 
-That path is what the Experimentalist reads by default, so it is the
-conventional choice when handing off locally.
+The local mirror can be used to review or export findings.
 
 ## Verify
 
@@ -133,7 +127,7 @@ clear title, an actionable description, and non-empty `trace_refs`. Listing by
 
 ```bash
 curl --fail-with-body \
-  "$NMP_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
+  "$NHX_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
 ```
 
 On an authenticated platform pass the token through curl's config, not argv
@@ -153,15 +147,3 @@ select, and `agent_name` is carried on agent-level spans, not on their model and
 tool children. Volume: too few traces looks the same as a healthy agent. And
 telemetry that captures only the shape of a run, spans without the inputs and
 outputs, leaves nothing to judge however many spans there are.
-
-## Hand off
-
-Once an Insight exists, the Experimentalist acts on it:
-
-```bash
-nemo agents experimentalist run
-```
-
-For the full data model, the Analyst's tool set, periodic analysis via
-`nemo insights analysis enable`, and the rest of the loop, see
-[Insight-Driven Optimization](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/docs/agents/insight-driven-optimization.mdx).

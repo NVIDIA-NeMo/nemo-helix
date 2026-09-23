@@ -4,7 +4,7 @@
 """Tests for ``nemo data-designer create`` output rendering.
 
 The job submit path is non-streaming: the framework's single-value driver
-calls ``on_frame`` exactly once with the decoded ``PlatformJobResponse``.
+calls ``on_frame`` exactly once with the decoded ``HelixJobResponse``.
 These tests drive ``CreateRenderer`` through that lifecycle directly.
 """
 
@@ -17,7 +17,7 @@ from typing import Any
 import nemo_data_designer_plugin.cli.renderers as renderers_mod
 import pytest
 from nemo_data_designer_plugin.cli.renderers import CreateRenderer
-from nemo_platform_plugin.cli_renderer import RendererContext
+from nemo_helix_plugin.cli_renderer import RendererContext
 from rich.console import Console
 
 

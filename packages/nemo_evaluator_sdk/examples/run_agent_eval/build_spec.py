@@ -13,7 +13,7 @@ Resolves a task's ``environment.yaml`` (or a Dockerfile escape hatch) into a
 Spec shape (``environment.yaml`` in the task dir)::
 
     environment:
-      image: nemo-platform-agentic-base:2026.06
+      image: nemo-helix-agentic-base:2026.06
       profile: evaluator-platform
       dependencies:
         python: [pytest, nemo-evaluator-sdk]

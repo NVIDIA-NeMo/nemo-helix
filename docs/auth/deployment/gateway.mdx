@@ -5,17 +5,17 @@
 title: "Gateway Integration"
 description: ""
 ---
-In production, a gateway (reverse proxy, ingress controller, or service mesh) often sits in front of the NeMo Platform. This page explains the recommended enforced gateway path for bearer-token authentication, what headers the gateway must set, and which paths skip authorization.
+In production, a gateway (reverse proxy, ingress controller, or service mesh) often sits in front of the NeMo Helix. This page explains the recommended enforced gateway path for bearer-token authentication, what headers the gateway must set, and which paths skip authorization.
 
 For the security architecture, see [Security Model](/documentation/access-control/security-model).
 
 ## Overview
 
-NeMo Platform services trust identity headers only after a bearer token has been validated. In gateway deployments, the recommended path is:
+NeMo Helix services trust identity headers only after a bearer token has been validated. In gateway deployments, the recommended path is:
 
 1. The gateway calls `/apis/auth/authenticate` before forwarding protected API requests.
-2. The auth service validates the bearer token and returns trusted `X-NMP-Principal-*` and `X-NMP-Scopes` headers.
-3. The gateway forwards those trusted headers to NeMo Platform services.
+2. The auth service validates the bearer token and returns trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers.
+3. The gateway forwards those trusted headers to NeMo Helix services.
 4. Services run their normal PDP authorization checks using the trusted principal and scopes.
 
 This callout can validate any bearer token accepted by the auth service: OIDC access tokens when `auth.oidc.enabled=true`, Scoped Access Keys when `auth.access_keys.enabled=true`, and workload tokens when workload identity is enabled.
@@ -24,7 +24,7 @@ If gateway enforcement is not required, the gateway can forward bearer tokens un
 
 ## Gateway Bearer-Auth Callout
 
-To use gateway bearer-auth callout, configure your gateway to call the NeMo Platform auth service with the original `Authorization` header. On success, forward only the trusted headers returned by the auth service. This keeps token validation and NeMo claim mapping inside the auth service instead of duplicating them in static gateway JWT config.
+To use gateway bearer-auth callout, configure your gateway to call the NeMo Helix auth service with the original `Authorization` header. On success, forward only the trusted headers returned by the auth service. This keeps token validation and NeMo claim mapping inside the auth service instead of duplicating them in static gateway JWT config.
 
 <Note>
 
@@ -34,10 +34,10 @@ For IdP-issued tokens, enforce your IdP's revocation policy before setting NeMo 
 
 <Warning>
 
-**Security Requirement**: Your ingress/gateway **must** strip the following headers from all incoming external requests before forwarding to NeMo Platform:
+**Security Requirement**: Your ingress/gateway **must** strip the following headers from all incoming external requests before forwarding to NeMo Helix:
 
-- `X-NMP-Principal-Id`, `X-NMP-Principal-Email`, `X-NMP-Principal-Groups`, `X-NMP-Principal-On-Behalf-Of`
-- `X-NMP-Scopes`
+- `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`
+- `X-NHX-Scopes`
 
 If external clients can set these headers, they can forge any identity or bypass authorization entirely. The gateway should also block external access to `/internal/*` paths (used for service-to-service communication).
 
@@ -49,10 +49,10 @@ When the gateway has authenticated the bearer token, it must forward:
 
 | Header | Description |
 |--------|-------------|
-| `X-NMP-Principal-Id` | Principal identifier (e.g., user ID or email). Required. |
-| `X-NMP-Principal-Email` | User email (optional but recommended). |
-| `X-NMP-Principal-Groups` | Comma-separated group names (optional). |
-| `X-NMP-Scopes` | Space-separated token scopes (optional). |
+| `X-NHX-Principal-Id` | Principal identifier (e.g., user ID or email). Required. |
+| `X-NHX-Principal-Email` | User email (optional but recommended). |
+| `X-NHX-Principal-Groups` | Comma-separated group names (optional). |
+| `X-NHX-Scopes` | Space-separated token scopes (optional). |
 
 Header names are case-insensitive; services normalize them.
 
@@ -93,10 +93,10 @@ http_filters:
         authorization_response:
           allowed_upstream_headers:
             patterns:
-              - exact: x-nmp-principal-id
-              - exact: x-nmp-principal-email
-              - exact: x-nmp-principal-groups
-              - exact: x-nmp-scopes
+              - exact: x-nhx-principal-id
+              - exact: x-nhx-principal-email
+              - exact: x-nhx-principal-groups
+              - exact: x-nhx-scopes
   - name: envoy.filters.http.router
     typed_config:
       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -107,7 +107,7 @@ Envoy HTTP `ext_authz` callouts preserve the original request method and build t
 </Accordion>
 ### Header Stripping
 
-Configure your gateway to remove NeMo Platform auth headers from incoming external requests. This prevents clients from forging identities.
+Configure your gateway to remove NeMo Helix auth headers from incoming external requests. This prevents clients from forging identities.
 
 <Accordion title="Envoy header stripping">
 
@@ -116,17 +116,17 @@ Add `request_headers_to_remove` to your route configuration:
 ```yaml
 route_config:
   virtual_hosts:
-    - name: nmp_service
+    - name: nhx_service
       domains: ["*"]
       request_headers_to_remove:
-        - "x-nmp-principal-id"
-        - "x-nmp-principal-email"
-        - "x-nmp-principal-groups"
-        - "x-nmp-principal-on-behalf-of"
-        - "x-nmp-scopes"
+        - "x-nhx-principal-id"
+        - "x-nhx-principal-email"
+        - "x-nhx-principal-groups"
+        - "x-nhx-principal-on-behalf-of"
+        - "x-nhx-scopes"
       routes:
         - match: { prefix: "/" }
-          route: { cluster: nmp_backend }
+          route: { cluster: nhx_backend }
 ```
 
 </Accordion>
@@ -134,8 +134,8 @@ route_config:
 
 After configuring gateway bearer-auth callout, verify:
 
-1. **Headers are set correctly** — Make a request through the gateway and check that `X-NMP-Principal-Id` and `X-NMP-Scopes` are present on the service side when the token contains scopes.
-2. **Headers are stripped from external requests** — Try sending `X-NMP-Principal-Id` or `X-NMP-Scopes` from outside; verify they are stripped by the gateway.
+1. **Headers are set correctly** — Make a request through the gateway and check that `X-NHX-Principal-Id` and `X-NHX-Scopes` are present on the service side when the token contains scopes.
+2. **Headers are stripped from external requests** — Try sending `X-NHX-Principal-Id` or `X-NHX-Scopes` from outside; verify they are stripped by the gateway.
 
 ## Related
 

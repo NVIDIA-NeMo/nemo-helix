@@ -274,7 +274,7 @@ Standard environment variables used in documentation:
 
 | Variable | Description |
 |----------|-------------|
-| `BASE_URL` | Base URL for NeMo Platform |
+| `BASE_URL` | Base URL for NeMo Helix |
 | `HF_TOKEN` | Hugging Face access token |
 | `NGC_API_KEY` | NVIDIA NGC API key |
 

@@ -12,7 +12,7 @@ removed once versioning is properly implemented.
 import re
 
 import pytest
-from nmp.common.entities.constants import NAME_PATTERN
+from nhx.common.entities.constants import NAME_PATTERN
 
 
 class TestNamePattern:
