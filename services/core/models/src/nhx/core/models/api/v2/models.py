@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -461,9 +461,11 @@ async def delete_model(
     except HTTPException:
         raise
     except EntityConflictError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
-        ) from e
+        store_error = e.__cause__
+        detail = (
+            store_error.detail if isinstance(store_error, NemoHTTPError) else "Concurrent modification - please retry."
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from e
     except Exception:
         logger.exception("Failed to delete model entity")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
