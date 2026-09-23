@@ -31,7 +31,7 @@ export const SkillsPanelContents = () => {
         gap="density-sm"
         className="border-b border-base px-density-md py-density-sm"
       >
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           {skills.length} skills
         </Text>
         <Tooltip slotContent="Refresh skills">

@@ -6,7 +6,7 @@
 This is the platform-side replacement for running the Analyst from an
 operator's shell: everything here goes through the ``analysis-runs`` API, so
 passing it means the path works on a remotely-deployed platform, where nobody
-can run ``nemo agents analyst run`` locally.
+needs to execute analysis in an operator's shell.
 
 The Analyst's model is mocked, deliberately. What is under test is the wiring —
 run recorded, job submitted under the run's name, Fabric runs the inline

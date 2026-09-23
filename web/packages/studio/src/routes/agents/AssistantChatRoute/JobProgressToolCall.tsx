@@ -73,7 +73,7 @@ export const JobProgressToolCall: FC<JobProgressToolCallProps> = ({ args }) => {
               <Text kind="label/bold/md" className="truncate">
                 {displayName}
               </Text>
-              <Text kind="body/regular/sm" color="secondary" className="truncate">
+              <Text kind="body/regular/sm" className="truncate text-secondary">
                 {description ?? 'Job progress'}
               </Text>
             </Stack>
@@ -84,7 +84,7 @@ export const JobProgressToolCall: FC<JobProgressToolCallProps> = ({ args }) => {
         {isLoading ? (
           <Flex align="center" gap="density-sm">
             <Spinner size="small" aria-label="Loading job..." />
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               Loading job...
             </Text>
           </Flex>

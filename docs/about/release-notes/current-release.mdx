@@ -42,7 +42,7 @@ Docker, and local development.
 
 - NeMo Gym evaluations can run in a sandboxed Gym host instead of sharing the
   evaluator process. The sandboxed path supports a locked `nhx-gym-host` image,
-  the `nhx-cpu-tasks` task image, broker placement controls, rollout streaming,
+  the `nhx-tasks` task image, broker placement controls, rollout streaming,
   and long-running rollout batches.
 - Gym trials can capture model calls and project `ng_trajectory` data into OTLP
   spans. Trials with traces can publish those traces to Intake so Evaluator,

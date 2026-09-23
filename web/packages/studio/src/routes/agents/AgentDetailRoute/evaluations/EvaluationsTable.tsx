@@ -218,7 +218,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                     align="baseline"
                     className="rounded bg-surface-raised px-1.5 py-0.5"
                   >
-                    <Text kind="body/regular/sm" color="secondary">
+                    <Text className="text-secondary" kind="body/regular/sm">
                       {score.label}
                     </Text>
                     <Text kind="body/semibold/sm">{score.value}</Text>

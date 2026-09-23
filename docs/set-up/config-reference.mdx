@@ -313,7 +313,7 @@ jobs:
       cleanup_completed_jobs_immediately: true
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
       launcher_tool_path: /tools/jobs-launcher
-      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
@@ -341,10 +341,12 @@ jobs:
       cleanup_completed_jobs_immediately: true
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
       launcher_tool_path: /tools/jobs-launcher
-      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # How long a pod may spend in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 600
+      ttl_seconds_image_pull: 600
       # Kubernetes namespace to submit the job to. If not set, it will be determined from the environment.
       namespace:
       # Kubernetes service account name for job pods. Uses the Kubernetes default service account when set to 'default'. | default: 'default'
@@ -421,10 +423,12 @@ jobs:
       cleanup_completed_jobs_immediately: true
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
       launcher_tool_path: /tools/jobs-launcher
-      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # How long a pod may spend in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 600
+      ttl_seconds_image_pull: 600
       # Kubernetes namespace to submit the job to. If not set, it will be determined from the environment.
       namespace:
       # Kubernetes service account name for job pods. Uses the Kubernetes default service account when set to 'default'. | default: 'default'
@@ -509,7 +513,7 @@ jobs:
       cleanup_completed_jobs_immediately: false
       # Path to the jobs launcher tool | default: '/tools/jobs-launcher'
       launcher_tool_path: /tools/jobs-launcher
-      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+      # Default container image for job task pods. Used when a job step omits container.image. When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}

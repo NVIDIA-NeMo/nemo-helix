@@ -365,6 +365,7 @@ nemo-deployments-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-evaluator-plugin = [
   "cloudpickle>=3.1.1",
+  "filesets",
   "nemo-evaluator-sdk[harbor]",
   "nemo-helix-plugin",
   "pydantic>=2.12.0",
@@ -686,10 +687,6 @@ customization = "nemo_customizer.cli:CustomizationCLI"
 guardrail = "nemo_guardrails_plugin.cli:GuardrailCLI"
 intake = "nhx.intake.cli:IntakeCLI"
 experiments = "nhx.intake.cli:ExperimentsCLI"
-
-# Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.cli.agents"]
-analyst = "nemo_insights_plugin.analyst.cli:AnalystCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.client_provider"]

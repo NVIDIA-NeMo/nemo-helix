@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// The wizard's deployment section is gated on the deployments preview flag, which is
+// off by default. Turn it on so the suite below can exercise it; the flag-off behavior
+// has its own file, since the flag is read once at module load and cannot be flipped
+// per-test. Hoisted so it lands before `constants/featureFlags` parses the env.
+vi.hoisted(() => {
+  vi.stubEnv('VITE_FF_DEPLOYMENTS_ENABLED', 'true');
+});
+
 // vi.mock calls below are hoisted by vitest, so this import still resolves the mocks.
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import { NewCustomizationForm } from '@studio/components/NewCustomizationForm';

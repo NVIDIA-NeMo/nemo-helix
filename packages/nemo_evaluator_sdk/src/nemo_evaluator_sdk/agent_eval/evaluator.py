@@ -29,7 +29,7 @@ from nemo_evaluator_sdk.agent_eval.scores import (
     AgentEvalTaskScore,
     TRIAL_STATUS_DETAIL,
 )
-from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, as_base_task, _base_task_fields
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTarget,
     AgentEvalTrial,
@@ -213,6 +213,9 @@ class AgentEvaluator:
                 changed_assignments.extend(_changed_trial_assignments(source_trial_list, source_task_ids))
                 if changed_assignments:
                     raise ValueError(_scoring_metrics_assignment_error(changed_assignments))
+            else:
+                # Runners may need subclass fields to execute; scoring and results use base tasks.
+                task_list = [as_base_task(task) for task in task_list]
             scores = await self._score_trials(
                 tasks=task_list,
                 trials=trial_list,
@@ -484,9 +487,10 @@ def _task_with_updated_metrics(task: AgentEvalTask, metrics: Sequence[Metric]) -
     duplicate metric types and views referencing outputs the new metrics do not declare. Every
     other field is carried over by value, so a field added to :class:`AgentEvalTask` later cannot
     quietly revert to its default here -- ``extra="forbid"`` catches an unknown key, not an
-    omitted one.
+    omitted one. Runner-only subclass fields are dropped, so views validate against the
+    finalized metrics exactly once, on the base task.
     """
-    fields: dict[str, Any] = dict(task)
+    fields = _base_task_fields(task)
     fields["metrics"] = list(metrics)
     return AgentEvalTask(**fields)
 

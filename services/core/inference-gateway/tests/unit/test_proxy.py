@@ -6,10 +6,11 @@
 import asyncio
 import gzip
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import aiohttp
 import anthropic.types as anthropic_types
@@ -32,6 +33,9 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.core.inference_gateway.api.authz import MODEL_EXEC_PERMISSION
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     ResolvedMiddlewareCall,
@@ -1101,6 +1105,101 @@ async def test_virtual_model_proxy_broken_vm_returns_503_without_running_middlew
     # Critical: no middleware (and no backend call) was attempted.
     assert request_plugin_called is False
     assert response_plugin_called is False
+    mock_proxy_client.request.assert_not_called()
+
+
+def _serving_provider(workspace: str, name: str, model_entity_id: str) -> ModelProviderInfo:
+    served_models = [ServedModelMapping(model_entity_id=model_entity_id, served_model_name="served-model")]
+    return ModelProviderInfo(
+        model_provider=ModelProvider(
+            workspace=workspace,
+            name=name,
+            host_url=f"http://{name}.local",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            served_models=served_models,
+            status="READY",
+        )
+    )
+
+
+def _model_cache_with(*provider_infos: ModelProviderInfo) -> ModelCache:
+    model_cache = ModelCache()
+    for provider_info in provider_infos:
+        model_cache.update_model_info(provider_info)
+    model_cache.rebuild_model_entity_map()
+    return model_cache
+
+
+@contextmanager
+def _caller_with_access_to(*workspaces: str) -> Iterator[MagicMock]:
+    auth_client = MagicMock()
+    auth_client.auth_enabled = True
+    auth_client.principal = Principal(id="user:carol", email="carol@example.com")
+    auth_client.has_permissions = AsyncMock(side_effect=lambda workspace, _permissions: workspace in workspaces)
+    token = auth_client_context.set(auth_client)
+    try:
+        yield auth_client
+    finally:
+        auth_client_context.reset(token)
+
+
+async def _proxy_to_model_entity(
+    mock_proxy_client: Any, model_cache: ModelCache, workspace: str, model_entity_id: str
+) -> Any:
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+    vm_name = "explicit-probe"
+    return await virtual_model_proxy(
+        request=request,
+        workspace=workspace,
+        vm_name=vm_name,
+        virtual_model=SDKVirtualModel(
+            id=f"{workspace}/{vm_name}",
+            entity_id=f"{workspace}/{vm_name}",
+            name=vm_name,
+            workspace=workspace,
+            parent=workspace,
+            db_version=1,
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            default_model_entity=model_entity_id,
+        ),
+        trailing_uri="v1/chat/completions",
+        json_body={"messages": [{"role": "user", "content": "hi"}]},
+        http_client=mock_proxy_client,
+        model_cache=model_cache,
+        registry=MiddlewareRegistry(plugins={}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_denies_cross_workspace_model_without_permission(mock_proxy_client):
+    model_entity_id = "default/openai-gpt-oss-20b"
+    model_cache = _model_cache_with(_serving_provider("default", "nim", model_entity_id))
+
+    with _caller_with_access_to() as auth_client, pytest.raises(HTTPException) as exc_info:
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert exc_info.value.status_code == 403
+    assert "default" in exc_info.value.detail
+    auth_client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+    mock_proxy_client.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_denies_lora_adapter_from_inaccessible_workspace(mock_proxy_client):
+    model_entity_id = "carol-ws/base&adapters/secret-ws/private-adapter"
+    model_cache = _model_cache_with(_serving_provider("carol-ws", "nim", model_entity_id))
+
+    with _caller_with_access_to() as auth_client, pytest.raises(HTTPException) as exc_info:
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert exc_info.value.status_code == 403
+    assert "secret-ws" in exc_info.value.detail
+    auth_client.has_permissions.assert_awaited_once_with("secret-ws", [MODEL_EXEC_PERMISSION])
     mock_proxy_client.request.assert_not_called()
 
 

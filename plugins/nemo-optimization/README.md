@@ -51,7 +51,7 @@ analyzer; MCP servers are declared statically under ``mcp.servers``.
 Job registration: ``agents.optimize`` (mounted by the agents plugin, which also
 owns the ``prepare-fileset`` CLI command).  ``compile`` selects the ``subprocess``
 execution profile when the platform registers one and otherwise the ``cpu``
-profile with the ``nhx-cpu-tasks`` image.
+profile with the ``nhx-tasks`` image.
 Backend registry: ``nemo.optimization.backends`` (``optuna``, ``ga`` stub).
 
 Trials execute the Agent under Test in the study's own process tree; see

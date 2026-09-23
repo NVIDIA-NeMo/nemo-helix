@@ -1,183 +1,198 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""References to persisted tasksets and their resolution into inline tasks.
+"""Load generic selectors, snapshot definitions, and validate execution policy."""
 
-An agent-eval submission carries ``tasks`` as either an inline list of
-:class:`~nemo_evaluator.jobs.agent_spec.AgentEvalTaskInput` or a
-:class:`~nemo_evaluator.api.schemas.TasksetRef` pointing at a stored taskset. During spec resolution
-(``AgentEvalJob.to_spec``) a taskset reference is loaded from storage and its member tasks are
-expanded into the same inline task DTOs, so the rest of the pipeline (metric-ref resolution, the
-canonical :class:`~nemo_evaluator.jobs.agent_spec.AgentEvalSpec`) only ever sees inline tasks.
+from collections.abc import Mapping, Sequence
 
-This mirrors :mod:`nemo_evaluator.metric_refs`: references are loaded here, next to the entity types,
-so the job's ``to_spec`` stays a thin orchestration over ref-resolution helpers.
-"""
-
-from __future__ import annotations
-
-from typing import cast
-
-from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, TasksetRef, parse_subentity_ref
-from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.jobs.agent_spec import AgentEvalTaskInput
+from nemo_evaluator.api.schemas import TaskRef, TasksetRef, parse_subentity_ref
+from nemo_evaluator.entities import TasksetEntity, TasksetRevisionEntity
+from nemo_evaluator.harbor.resolution import map_with_limited_concurrency, task_revision
+from nemo_evaluator.jobs.agent_spec import AgentEvalTaskInput, ResolvedTask, Target, validate_single_kind
+from nemo_evaluator.jobs.kinds.registry import get_adapter
+from nemo_evaluator.jobs.kinds.types import LoadedTask, SubmitContext, TaskKindAdapter
 from nemo_evaluator.revisions import RevisionNotFoundError, get_revision
-from nemo_helix_plugin.entities import EntityClientProtocol
+from nemo_evaluator.task_identity import UnsupportedTaskKindError, qualified_task_refs
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
+from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
-class UnsupportedTaskKindError(ValueError):
-    """A taskset member's runner kind cannot be executed by the requested target.
+async def _resolve_task_ref(ref: TaskRef, client: EntityClient, *, taskset: TasksetRef | None) -> LoadedTask:
+    """Load one stored task's head and the revision named by its ref.
 
-    A taskset may group tasks of different kinds — that is the point of managing every evaluation
-    unit in one place — but a single run has one target, so expansion is where a mismatch surfaces.
-
-    Raised during ``to_spec``, which the job submit path wraps: any exception there becomes a 422
-    carrying this message (``_apply_transformer`` in ``nemo_helix_plugin.jobs.api_factory``). It
-    subclasses ``ValueError`` for local callers that catch it deliberately, not to obtain that
-    mapping — the mapping is a catch-all and would apply to any exception type.
+    A missing task or revision raises ``ValueError``. When ``taskset`` is set, the message names that
+    taskset, because the missing member was referenced by it.
     """
+    try:
+        head, revision = await task_revision(ref, client)
+        return LoadedTask(stored=(head, revision))
+    except NemoEntityNotFoundError as exc:
+        if taskset is not None:
+            raise ValueError(
+                f"Taskset reference '{taskset.root}' names a member that does not resolve: "
+                f"Task '{ref.root}' referenced by taskset '{taskset.root}' was not found; "
+                "the stored task may have been deleted."
+            ) from exc
+        raise ValueError(f"Task '{ref.root}' was not found; the stored task may have been deleted.") from exc
+    except RevisionNotFoundError as exc:
+        if taskset is not None:
+            raise ValueError(
+                f"Taskset reference '{taskset.root}' names a member that does not resolve: "
+                f"Task '{ref.root}' names a revision that no longer resolves: {exc}"
+            ) from exc
+        raise ValueError(f"Task '{ref.root}' names a revision that no longer resolves: {exc}") from exc
 
 
-def _entity_to_task_input(entity: TaskEntity, revision: TaskRevisionEntity) -> AgentEvalTaskInput:
-    """Project a stored task's *published revision* onto the submitter-facing inline task DTO.
+async def load_tasks(
+    tasks: TasksetRef | Sequence[AgentEvalTaskInput] | Sequence[TaskRef], ctx: SubmitContext
+) -> list[LoadedTask]:
+    """Load the tasks from entity store. Inline tasks are not loaded but validated.
 
-    Identity (``id``) comes from the head record — it is the same task — while every content field
-    comes from the revision the taskset pinned. That split is what makes a taskset-driven evaluation
-    reproducible: re-running it expands to the same content even if the member task has published
-    since.
+    A stored ref loads one task record and the one revision its fragment names. A missing fragment is
+    ``latest`` tag that is resolved to the latest revision at the time of the submission.
 
-    A stored task holds metric *references* (inline metrics were normalized to derived stored
-    metrics on create); those resolve to inline bundles in the shared metric-ref pass that runs
-    after expansion. The grader-only ``reference`` comes from the revision too, so a taskset-driven
-    run grades against the ground truth that revision pinned — held-out data is not the privilege of
-    inline submissions.
+    - Tasksets: a taskset ref resolves to its revision, then to that revision's member task refs.
+    - Inline inputs: become ``LoadedTask.inline`` values. Mixing them with stored refs is rejected.
+    - TaskRefs: each ref is rewritten to ``workspace/name#fragment``. A missing fragment becomes ``latest``.
+      The load fetches that one ``TaskEntity`` and ``TaskRevisionEntity``.
+    - Empty inputs, duplicate ids, and Harbor tasksets with ``files_ref`` are rejected.
     """
-    spec = revision.spec
-    if not isinstance(spec, EvaluatorTaskDefinition):
-        # A Harbor task's content is a *directory of files*, not fields — the runner needs the
-        # archive materialized on disk, which this pure projection cannot do. Rejecting here means a
-        # mismatched taskset fails before the run rather than silently evaluating an empty task.
-        #
-        # Deliberately does *not* suggest picking a different target: no target can run a stored
-        # task of this kind yet, so pointing at one would send the reader in circles. Storing the
-        # kind landed ahead of the execution bridge (AALGO-481).
-        raise UnsupportedTaskKindError(
-            f"Task '{entity.workspace}/{entity.name}' is a {spec.kind!r} task. Running a stored "
-            f"{spec.kind!r} task is not supported yet — no target can execute one, so this taskset "
-            "cannot be evaluated until that lands. Remove the member, or submit an "
-            "'evaluator'-kind taskset."
-        )
-    return AgentEvalTaskInput(
-        id=entity.name,
-        intent=spec.intent,
-        inputs=spec.inputs,
-        reference=dict(spec.reference),
-        metrics=list(spec.metrics),
-        views=spec.views,
-        metadata=revision.metadata,
+    taskset_revision = None
+    if isinstance(tasks, TasksetRef):
+        if ctx.entity_client is None:
+            raise ValueError("A TasksetRef requires a platform connection (entity store)")
+        workspace, name, fragment = parse_subentity_ref(tasks.root, ctx.workspace)
+        try:
+            head = await ctx.entity_client.get(TasksetEntity, name=name, workspace=workspace)
+        except NemoEntityNotFoundError as exc:
+            raise ValueError(f"Taskset reference '{tasks.root}' not found in workspace '{workspace}'") from exc
+        try:
+            taskset_revision = await get_revision(ctx.entity_client, TasksetRevisionEntity, head, fragment)
+        except RevisionNotFoundError as exc:
+            raise ValueError(f"Taskset reference '{tasks.root}' names a revision that does not resolve: {exc}") from exc
+        if not taskset_revision.tasks:
+            raise ValueError(
+                f"Taskset '{tasks.root}' has no member tasks; an agent evaluation needs at least one task."
+            )
+        refs = qualified_task_refs(taskset_revision.tasks, taskset_revision.workspace)
+    # handle inline tasks and TaskRefs as input
+    else:
+        # handle TaskRefs case
+        refs = [task for task in tasks if isinstance(task, TaskRef)]
+        if refs and len(refs) != len(tasks):
+            raise ValueError("Cannot mix inline tasks and stored task references")
+        # handle AgentEvalTaskInput case
+        if not refs:
+            loaded = []
+            for task in tasks:
+                if not isinstance(task, AgentEvalTaskInput):
+                    raise ValueError("Expected inline tasks or stored task references")
+                loaded.append(LoadedTask(inline=task))
+            _validate_loaded_ids(loaded, ctx.adapters, None)
+            return loaded
+        refs = qualified_task_refs(refs, ctx.workspace)
+    if ctx.entity_client is None:
+        raise ValueError("TaskRef inputs require a platform connection (entity store)")
+    client = ctx.entity_client
+    # load the tasks from the entity store
+    taskset = tasks if isinstance(tasks, TasksetRef) else None
+    loaded = await map_with_limited_concurrency(
+        lambda ref: _resolve_task_ref(ref, client, taskset=taskset),
+        refs,
+    )
+    _reject_harbor_taskset_fileref(taskset_revision, loaded)
+    _validate_loaded_ids(loaded, ctx.adapters, taskset)
+    return loaded
+
+
+def _reject_harbor_taskset_fileref(revision: TasksetRevisionEntity | None, tasks: Sequence[LoadedTask]) -> None:
+    """Reject a Harbor taskset that carries ``files_ref``.
+
+    That field is a fileset directory owned by the taskset and shared by its members. Harbor
+    materializes only each task's own archive and never mounts this directory, so the shared files
+    would be stored and then ignored which might be confusing to a user.
+    """
+    if revision is not None and revision.files_ref is not None and any(task.kind == "harbor" for task in tasks):
+        raise ValueError("Stored Harbor tasksets do not support shared files_ref")
+
+
+def _validate_loaded_ids(
+    tasks: Sequence[LoadedTask], adapters: Mapping[str, TaskKindAdapter], taskset: TasksetRef | None
+) -> None:
+    """Reject an empty task list and runtime ids that collide, ignoring case.
+
+    The id comes from the kind adapter: the inline task id, the stored task name, or a Harbor
+    ``native_task_id``. When ``taskset`` is set, a collision names that taskset in the error.
+    """
+    if not tasks:
+        raise ValueError("Expected at least one task")
+    seen: set[str] = set()
+    for task in tasks:
+        # Kinds may be mixed in the future, so we resolve kind-specific adapter per task here
+        # instead of passing a kind-specific adapter as an arg.
+        task_id = get_adapter(task.kind, adapters).runtime_id(task)
+        if task_id.casefold() in seen:
+            prefix = f"Taskset '{taskset.root}' expands to more than one task named '{task_id}'; " if taskset else ""
+            raise ValueError(prefix + "task ids must be unique within an evaluation")
+        seen.add(task_id.casefold())
+
+
+async def snapshot_task(loaded_task: LoadedTask, ctx: SubmitContext) -> ResolvedTask:
+    """Create a submission-time snapshot with resolved metrics and pinned stored provenance.
+
+    The kind adapter returns the resolved definition, including provenance for stored tasks.
+    Both stored and inline tasks copy their metadata into the resulting snapshot.
+    """
+    adapter = get_adapter(loaded_task.kind, ctx.adapters)
+    if loaded_task.inline is not None:
+        metadata = loaded_task.inline.metadata
+    else:
+        assert loaded_task.stored is not None
+        _, revision = loaded_task.stored
+        metadata = revision.metadata
+    return ResolvedTask(
+        id=adapter.runtime_id(loaded_task),
+        spec=await adapter.resolve(loaded_task, ctx),
+        metadata=[item.model_copy(deep=True) for item in metadata],
     )
 
 
-#: Expanding a taskset reads four entity types through one client — the taskset head, its pinned
-#: revision, each member task's head, and the pinned revision of each member. Python has no
-#: intersection types, so the parameter is annotated at one of them and the rest are taken as typed
-#: views of the same object; the concrete client's methods are generic over the entity type and
-#: satisfy all four.
-TasksetStoreProtocol = EntityClientProtocol[TasksetEntity]
+def groupby_kind(tasks: Sequence[ResolvedTask]) -> list[tuple[str, list[ResolvedTask]]]:
+    """Preserve first-seen kind order and input order inside each group."""
+    groups: dict[str, list[ResolvedTask]] = {}
+    for task in tasks:
+        groups.setdefault(task.spec.kind, []).append(task)
+    return list(groups.items())
 
 
-async def resolve_taskset_ref(
-    ref: TasksetRef,
-    *,
-    workspace: str,
-    entity_client: TasksetStoreProtocol | None,
-) -> list[AgentEvalTaskInput]:
-    """Load a stored taskset and expand its members into inline task DTOs.
+def validate_execution_support(
+    tasks: Sequence[ResolvedTask], *, target: Target | None, adapters: Mapping[str, TaskKindAdapter]
+) -> None:
+    """Reject tasks that the selected execution target cannot run.
 
-    Loading needs only the entity store (metrics stay as refs, resolved downstream), so unlike
-    metric-ref resolution this does not require an async SDK / file I/O.
-
-    The ref may pin a taskset revision (``suite#<tag-or-digest>``); an absent fragment means
-    ``latest``. Both paths go through :func:`get_revision` rather than reading the head's own
-    ``tasks``, because a head and its ``latest`` revision are guaranteed to agree and resolving one
-    way for pinned refs and another way for bare ones would make the two drift apart on the next
-    bug. It also buys content verification for the bare case for free.
+    A single evaluation must contain one task kind. After enforcing that constraint, the kind's
+    adapter decides whether the target, including a trials-only run represented by ``None``, is
+    supported.
     """
-    if entity_client is None:
-        raise ValueError(
-            "A TasksetRef requires a platform connection (entity store) to resolve; pass an inline task list instead."
+    kind = validate_single_kind(tasks)
+    if not get_adapter(kind, adapters).accepts_target(target, tasks):
+        raise UnsupportedTaskKindError(
+            f"{kind} tasks cannot run on a {target.kind if target else 'trials-only'} target"
         )
-    task_store = cast(EntityClientProtocol[TaskEntity], entity_client)
-    revision_store = cast(EntityClientProtocol[TaskRevisionEntity], entity_client)
-    taskset_revision_store = cast(EntityClientProtocol[TasksetRevisionEntity], entity_client)
-
-    ref_workspace, name, taskset_fragment = parse_subentity_ref(ref.root, workspace)
-    try:
-        taskset = await entity_client.get(TasksetEntity, name=name, workspace=ref_workspace)
-    except NemoEntityNotFoundError as exc:
-        raise ValueError(
-            f"Taskset reference '{ref.root}' not found. "
-            f"Ensure a stored taskset named '{name}' exists in workspace '{ref_workspace}', "
-            "or pass an inline task list instead."
-        ) from exc
-
-    # Expand the taskset revision the ref names. Members are digest-pinned inside a revision, so a
-    # member republishing on its own never moves this. A bare ref still follows the taskset's own
-    # revisions, and a ``replace`` re-resolves members on write — so it can change both which members
-    # are named and what they resolve to. Only a pinned ref holds both steady.
-    try:
-        taskset_revision = await get_revision(taskset_revision_store, TasksetRevisionEntity, taskset, taskset_fragment)
-    except RevisionNotFoundError as exc:
-        raise ValueError(f"Taskset reference '{ref.root}' names a revision that does not resolve: {exc}") from exc
-
-    if not taskset_revision.tasks:
-        raise ValueError(f"Taskset '{ref.root}' has no member tasks; an agent evaluation needs at least one task.")
-
-    tasks: list[AgentEvalTaskInput] = []
-    seen_ids: set[str] = set()
-    for task_ref in taskset_revision.tasks:
-        task_workspace, task_name, fragment = parse_subentity_ref(task_ref.root, ref_workspace)
-        try:
-            entity = await task_store.get(TaskEntity, name=task_name, workspace=task_workspace)
-        except NemoEntityNotFoundError as exc:
-            raise ValueError(
-                f"Task '{task_ref.root}' referenced by taskset '{ref.root}' was not found; "
-                "the stored task may have been deleted after the taskset was created."
-            ) from exc
-        # Expand the *pinned* revision, not the task's current content. A published taskset names
-        # exact revisions; resolving to whatever is current would silently defeat the pinning and
-        # make an evaluation irreproducible the moment a member republished.
-        try:
-            revision = await get_revision(revision_store, TaskRevisionEntity, entity, fragment)
-        except RevisionNotFoundError as exc:
-            raise ValueError(
-                f"Task '{task_ref.root}' referenced by taskset '{ref.root}' names a revision that no "
-                f"longer resolves: {exc}"
-            ) from exc
-        # Agent-eval task ids must be unique within a run. Member refs are unique per (workspace,
-        # name), but refs from different workspaces can share a name — surface that as a clear error
-        # rather than letting the SDK evaluator reject duplicate ids deeper in the run.
-        if entity.name in seen_ids:
-            raise ValueError(
-                f"Taskset '{ref.root}' expands to more than one task named '{entity.name}'; "
-                "task ids must be unique within an evaluation."
-            )
-        seen_ids.add(entity.name)
-        tasks.append(_entity_to_task_input(entity, revision))
-    return tasks
 
 
-async def resolve_agent_eval_tasks(
-    tasks: TasksetRef | list[AgentEvalTaskInput],
+def validate_scoring(
+    tasks: Sequence[ResolvedTask],
     *,
-    workspace: str,
-    entity_client: TasksetStoreProtocol | None,
-) -> list[AgentEvalTaskInput]:
-    """Normalize an agent-eval ``tasks`` field to an inline task list.
+    target: Target | None,
+    trials: Sequence[AgentEvalTrial] | None,
+    adapters: Mapping[str, TaskKindAdapter],
+) -> None:
+    """Validate each task kind's scoring requirements for the requested run.
 
-    An inline list passes through unchanged; a :class:`TasksetRef` is loaded and expanded.
+    Tasks are grouped without changing their order, then each kind's adapter validates the target
+    and any supplied trials for that group.
     """
-    if isinstance(tasks, TasksetRef):
-        return await resolve_taskset_ref(tasks, workspace=workspace, entity_client=entity_client)
-    return tasks
+    for kind, group in groupby_kind(tasks):
+        get_adapter(kind, adapters).validate_scoring(group, target=target, trials=trials)

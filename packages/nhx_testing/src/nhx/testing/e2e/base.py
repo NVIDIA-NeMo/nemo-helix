@@ -72,7 +72,7 @@ class E2EBackend(ABC):
         """Get a fully qualified image name for any NeMo Helix image.
 
         Args:
-            name: The image name (e.g., 'nhx-api', 'nhx-cpu-tasks').
+            name: The image name (e.g., 'nhx-api', 'nhx-tasks').
 
         Returns:
             Fully qualified image name.

@@ -36,7 +36,7 @@ AGENT_EVAL_STEP_NAME = "agent-evaluate"
 #: Container wiring for agent-evaluate steps, run via ``python -m``. Colocated Gym targets use a
 #: dedicated image because NeMo Gym requires Ray. Sandboxed Gym targets only orchestrate the separate
 #: Gym host, so they use the shared CPU task image.
-AGENT_EVAL_IMAGE = "nhx-cpu-tasks"
+AGENT_EVAL_IMAGE = "nhx-tasks"
 GYM_AGENT_EVAL_IMAGE = "nhx-gym-tasks"
 AGENT_EVAL_ENTRYPOINT = ["python", "-m"]
 GYM_AGENT_EVAL_ENTRYPOINT = ["/app/.venv/bin/python", "-m"]
@@ -110,7 +110,8 @@ def _compile_agent_eval_cpu_job(
 def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
     """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
     for task in spec.tasks:
-        for bundle in task.metrics:
+        metrics = task.spec.metrics
+        for bundle in metrics:
             for env_name, secret_ref in bundle.secrets.items():
                 yield env_name, secret_ref.root
 

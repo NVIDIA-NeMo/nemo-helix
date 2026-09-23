@@ -117,7 +117,7 @@ const startItems = (rerunDisabled: boolean) => [
             </Tooltip>
           )}
         </Flex>
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Reuses the eval config saved on a previous run. The new run joins that run&apos;s
           experiment, so the two sit side by side on its leaderboard.
         </Text>
@@ -129,7 +129,7 @@ const startItems = (rerunDisabled: boolean) => [
     children: (
       <Stack gap="density-xs">
         <Text kind="label/bold/md">Create a new experiment</Text>
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Sets up a fresh experiment to group runs under, then takes a dataset and an eval config to
           measure them with.
         </Text>
@@ -989,7 +989,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                   the name is derived from the pick, so the two belong on the same screen. */}
               {mode === MODE_EXPERIMENT &&
                 (hasNoEvaluations ? (
-                  <Text kind="body/regular/md" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/md">
                     {NO_EVALUATIONS_MESSAGE}
                   </Text>
                 ) : (
@@ -1018,10 +1018,10 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
 
               {isCreateMode && (
                 <>
-                  <Text kind="label/bold/sm" color="secondary">
+                  <Text className="text-secondary" kind="label/bold/sm">
                     Select evaluation set
                   </Text>
-                  <Text kind="body/regular/md" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/md">
                     Learn more about evaluation set requirements in the{' '}
                     <Anchor
                       kind="inline"
@@ -1088,7 +1088,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
           )}
 
           {blocker && step !== 'start' && (
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               {blocker}
             </Text>
           )}

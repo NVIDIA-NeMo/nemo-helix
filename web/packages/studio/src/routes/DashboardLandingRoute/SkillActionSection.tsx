@@ -70,14 +70,13 @@ const SkillActionList: FC<SkillActionListProps> = ({ actions, onSelect }) => {
                   {action.skillName ? (
                     <Text
                       kind="body/regular/xs"
-                      color="secondary"
-                      className="block truncate"
+                      className="block truncate text-secondary"
                       data-testid="skill-action-skill-name"
                     >
                       {action.skillName}
                     </Text>
                   ) : null}
-                  <Text kind="body/regular/sm" color="secondary" className="line-clamp-2 block">
+                  <Text kind="body/regular/sm" className="line-clamp-2 block text-secondary">
                     {action.description}
                   </Text>
                 </Flex>
@@ -129,7 +128,7 @@ export const SkillActionSection: FC<SkillActionSectionProps> = ({
   if (!actions.length) {
     return (
       <Stack gap="density-sm" className="w-full text-center" data-testid="skill-actions-disabled">
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Skills are installed, but none are enabled for this workspace configuration.
         </Text>
       </Stack>

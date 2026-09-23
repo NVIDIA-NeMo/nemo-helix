@@ -4,11 +4,11 @@
 
 # Colocated Gym task image for NeMo Evaluator agent-evaluation jobs.
 #
-# Sandboxed Gym jobs use nhx-cpu-tasks to orchestrate a separate nhx-gym-host.
+# Sandboxed Gym jobs use nhx-tasks to orchestrate a separate nhx-gym-host.
 # This image retains Gym and Ray only for trusted deployments that run Gym
 # directly in the task container.
 
-ARG NHX_CPU_TASKS_BASE=nhx-cpu-tasks
+ARG NHX_CPU_TASKS_BASE=nhx-tasks
 ARG NHX_PYTHON_BASE=nhx-python-base
 
 FROM ${NHX_CPU_TASKS_BASE} AS cpu-tasks

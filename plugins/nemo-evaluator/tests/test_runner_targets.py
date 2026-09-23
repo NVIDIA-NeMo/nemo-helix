@@ -5,18 +5,110 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import Mock
+
 import pytest
 from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement, GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement, GymRunnerTarget, HarborRunnerTarget
 from nemo_evaluator.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from pydantic import ValidationError
 
 #: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
 #: discriminates the target union, and the other two come from the ``GymPlacement``.
 WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name"}
+
+HARBOR_CARRIED_VALUES = {
+    "agent_name": "codex",
+    "agent_import_path": "custom_agent:Agent",
+    "agent_model_name": "model",
+    "agent_kwargs": {"temperature": 0.2},
+    "n_attempts": 2,
+    "n_concurrent_trials": 3,
+    "max_retries": 2,
+    "artifacts": ["/app/output"],
+    "trace_dir": "/app/traces",
+    "reward_key": "score",
+}
+HARBOR_REJECTED_VALUES = {
+    "job_name": "existing-job",
+    "force_rerun": True,
+    "quiet": False,
+    "agent_dir": Path("local-agent"),
+    "agent_env_from_host": ["MODEL_API_KEY"],
+    "timeout_multiplier": 2.0,
+    "agent_timeout_multiplier": 2.0,
+    "verifier_timeout_multiplier": 2.0,
+    "agent_setup_timeout_multiplier": 2.0,
+    "environment_build_timeout_multiplier": 2.0,
+}
+
+
+def test_harbor_configuration_survives_submission_without_local_storage(tmp_path, monkeypatch):
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", **HARBOR_CARRIED_VALUES)
+    runner = HarborAgentTaskRunner(config=config)
+    # Conversion must not inspect the caller's filesystem or start Harbor.
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "exists", Mock(side_effect=AssertionError("local filesystem accessed")))
+        scoped.setattr(Path, "mkdir", Mock(side_effect=AssertionError("local filesystem modified")))
+        target = runner_to_target(runner)
+    assert isinstance(target, HarborRunnerTarget)
+    assert target.model_dump(mode="json") == {"kind": "harbor", "env_secrets": {}, **HARBOR_CARRIED_VALUES}
+
+
+def test_every_harbor_runtime_field_has_a_submission_policy():
+    assert set(HarborRuntimeConfig.model_fields) == (
+        set(HARBOR_CARRIED_VALUES) | set(HARBOR_REJECTED_VALUES) | {"jobs_dir"}
+    )
+
+
+@pytest.mark.parametrize("field,value", HARBOR_REJECTED_VALUES.items())
+def test_harbor_rejects_settings_the_job_cannot_preserve(tmp_path, monkeypatch, field, value):
+    config = HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="custom_agent:Agent", **{field: value})
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = Mock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    with pytest.raises(UnsubmittableRunnerError, match=field):
+        evaluator.submit(tasks=TasksetRef("suite"), target=HarborAgentTaskRunner(config=config))
+    create_job.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("dataset_path", "dataset"), ("task_names", []), ("job_dir", "job"), ("run_job", Mock())],
+)
+def test_harbor_rejects_local_execution_overrides(tmp_path, monkeypatch, field, value):
+    runner = HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path), **{field: value})
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = Mock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    with pytest.raises(UnsubmittableRunnerError, match=field):
+        evaluator.submit(tasks=TasksetRef("suite"), target=runner)
+    create_job.assert_not_called()
+
+
+def test_harbor_offline_runner_requires_saved_trial_rescoring(tmp_path):
+    with pytest.raises(UnsubmittableRunnerError, match="config"):
+        runner_to_target(HarborAgentTaskRunner(job_dir=tmp_path))
+
+
+def test_harbor_refuses_gym_placement(tmp_path):
+    with pytest.raises(UnsubmittableRunnerError, match="GymPlacement"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path)), GymPlacement())
+
+
+def test_harbor_revalidates_mutated_configuration(tmp_path):
+    config = HarborRuntimeConfig(jobs_dir=tmp_path)
+    config.n_attempts = 0
+    with pytest.raises(UnsubmittableRunnerError) as raised:
+        runner_to_target(HarborAgentTaskRunner(config=config))
+    assert isinstance(raised.value.__cause__, ValidationError)
 
 
 def _configured() -> GymRuntimeConfig:

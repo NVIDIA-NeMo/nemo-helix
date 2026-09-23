@@ -9,7 +9,7 @@ The platform injects real implementations via app.dependency_overrides.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -98,3 +98,14 @@ def get_entity_client() -> EntityClient:
         "Ensure your Service subclass calls super().create_app() or "
         "configure entity_client in the service."
     )
+
+
+class RequestAuthorizer(Protocol):
+    """Authorize an operation as the current caller, retaining their token scopes."""
+
+    async def __call__(self, method: str, path: str) -> None: ...
+
+
+def get_request_authorizer() -> RequestAuthorizer:
+    """Platform-injected authorization; never falls back to service-principal permissions."""
+    raise RuntimeError("get_request_authorizer must be supplied by the platform")
