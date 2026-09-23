@@ -20,7 +20,7 @@ preconditions:
   - nemo_setup_complete
   - workspace_exists
   - provider_registered
-compatibility: NeMo Helix >= 0.4.0; installs the optional NeMo Agents plugin when the user approves and verifies its supported Fabric Deep Agents adapter; Python and uv for local MCP projects; network access and provider credentials for live model tests; Docker for packaged custom code; macOS or Linux.
+compatibility: NeMo Helix >= 0.4.0; installs the optional NeMo Agents plugin with its Deep Agents extra when the user approves and verifies the supported Fabric adapter and harness; Python and uv for local MCP projects; network access and provider credentials for live model tests; Docker for packaged custom code; macOS or Linux.
 maturity: beta
 license: Apache-2.0
 user-invocable: true
@@ -33,9 +33,10 @@ metadata:
 
 Build a tested, config-driven LangChain Deep Agent and onboard it through the
 NeMo Helix Fabric path. Fabric owns runtime orchestration and constructs the
-agent from config. The optional NeMo Agents plugin supplies the Fabric harness
-adapters and their runtime dependencies. Customer code runs only when it is
-packaged as a config-referenced service such as MCP.
+agent from config. The base NeMo Agents plugin supplies the Fabric harness
+adapters; its Deep Agents extra supplies the compatible harness runtime.
+Customer code runs only when it is packaged as a config-referenced service such
+as MCP.
 
 ## Confirm requirements and the supported path
 
@@ -45,9 +46,10 @@ by the user, including an existing `ETHOS.md` when available. Resolve missing
 requirements conversationally before implementation.
 
 Explain that the supported build path uses LangChain Deep Agents through Fabric.
-The optional NeMo Agents plugin supplies the adapter and runtime dependencies.
-Custom executable tools are packaged as MCP services. Confirm this path with the
-user before proceeding; do not fall back to NAT.
+The optional NeMo Agents plugin supplies the adapter, and its Deep Agents extra
+supplies the harness runtime. Custom executable tools are packaged as MCP
+services. Confirm this path with the user before proceeding; do not fall back to
+NAT.
 
 ## Confirm the build environment
 
@@ -63,21 +65,27 @@ active Python environment for `nemo_agents_plugin`,
 `nemo_fabric_adapters.deepagents` and `deepagents`. Do not infer that a harness
 is available from config acceptance alone.
 
-If the NeMo Agents plugin and Deep Agents harness are already available, reuse
-them. Do not reinstall or change their versions. If the plugin is absent,
-explain that agent management is optional in NeMo Helix and that this build
-requires it. Show the appropriate install command and ask for approval before
-running it:
+If the NeMo Agents plugin, adapter and Deep Agents harness are already
+available, reuse them. Do not reinstall or change their versions. If the plugin
+is absent, explain that agent management is optional in NeMo Helix and that this
+build requires the plugin with its Deep Agents extra. If the plugin and adapter
+are present but `deepagents` is absent, explain that this is a valid
+adapter-only installation and ask for approval to add the harness extra.
 
-- Published Platform install: `uv pip install "nemo-helix[nemo-agents-plugin]"`
-- NeMo Helix source checkout: `uv pip install -e plugins/nemo-agents/`
+Choose the command that matches how NeMo Helix is installed:
 
-The plugin owns selection of compatible Fabric adapter and harness versions.
-Do not add a separate Deep Agents version constraint. After installation,
-restart Platform services and repeat all four checks. If the plugin is present
-but its Deep Agents adapter or runtime is absent, report a broken plugin
-installation. Offer to reinstall the same Agents plugin only after approval.
-Do not install the harness independently as an untracked repair.
+- Published NeMo Helix tool install: `uv tool install --force "nemo-helix[nemo-agents-plugin-deepagents]"`
+- Published NeMo Helix virtual-environment install: `uv pip install "nemo-helix[nemo-agents-plugin-deepagents]"`
+- NeMo Helix source checkout: `uv sync --package nemo-agents-plugin --extra deepagents`
+
+Do not mutate a `uv tool` environment with `uv pip install`. Show the command
+and ask for approval before running it. The extra owns selection of compatible
+Fabric adapter and harness versions. Do not add a separate Deep Agents version
+constraint. After installation, restart Platform services and repeat all four
+checks. If the adapter is absent while the plugin imports successfully, report
+a broken base plugin installation and offer the appropriate reinstall only
+after approval. Do not install the harness independently as an untracked
+repair.
 
 ## Choose supported artifacts
 
@@ -200,9 +208,9 @@ and thresholds. Report passed, failed and skipped checks separately.
 - Prompt instructions and subagent delegation do not guarantee fixed ordering.
 - Packaging copies the selected build context. Untracked secrets can enter an
   image even when they are absent from committed files.
-- The optional NeMo Agents plugin supplies the selected harness adapter and its
-  runtime dependencies. Reuse an installed harness and let the plugin resolve
-  compatible versions.
+- The base NeMo Agents plugin supplies the selected harness adapter; the
+  corresponding extra supplies its runtime dependencies. Reuse an installed
+  harness and let the extra resolve compatible versions.
 - Docker is the supported local container path. Treat Kubernetes as a separate
   environment contract that must be verified.
 
