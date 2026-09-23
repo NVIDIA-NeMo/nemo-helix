@@ -6,8 +6,8 @@ from dataclasses import replace
 from typing import Callable
 
 import httpx
-from nemo_helix import NeMoHelix
 from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
+from nemo_helix_plugin.client.client import NemoClient
 
 from tests.auth_idp.common import jwt_claims
 from tests.auth_idp.device_flow import authenticate_authentik_device_flow
@@ -111,29 +111,14 @@ class ComposeAuthIdpRuntime:
             ),
         )
 
-    def e2e_setup_sdk(self) -> NeMoHelix:
-        token = self.e2e_setup_token().access_token
-        return NeMoHelix(
-            base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-        )
+    def e2e_setup_client(self) -> NemoClient:
+        return NemoClient(base_url=self.gateway_base_url, auth=self.e2e_setup_token().access_token)
 
-    def interactive_user_sdk(self) -> NeMoHelix:
-        token = self.interactive_user_token().access_token
-        return NeMoHelix(
-            base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-        )
+    def interactive_user_client(self) -> NemoClient:
+        return NemoClient(base_url=self.gateway_base_url, auth=self.interactive_user_token().access_token)
 
-    def workload_provider_sdk(self) -> NeMoHelix:
-        token = self.workload_platform_token().access_token
-        return NeMoHelix(
-            base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-        )
+    def workload_provider_client(self) -> NemoClient:
+        return NemoClient(base_url=self.gateway_base_url, auth=self.workload_platform_token().access_token)
 
     def workload_role_principals(self) -> list[str]:
         return list(self.provider.workload_expected_groups)

@@ -135,7 +135,6 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
         device_authorization_endpoint=runtime_device_authorization_endpoint,
         token_endpoint=runtime_token_endpoint,
     )
-    monkeypatch.setattr("nemo_helix.client.bootstrap.discover_nhx_config", lambda *_args, **_kwargs: runtime_oidc)
     monkeypatch.setattr(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
         lambda *_args, **_kwargs: runtime_oidc,
