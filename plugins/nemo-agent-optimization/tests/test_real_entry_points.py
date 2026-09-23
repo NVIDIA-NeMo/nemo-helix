@@ -22,13 +22,16 @@ import importlib
 import importlib.util
 import tomllib
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from nemo_agent_optimization_plugin.cli import OPTIMIZE_CLI_GROUP
 from nemo_agent_optimization_plugin.discovery import STRATEGY_ATTR, declared_strategy, discover_strategy_jobs
 from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
+from nemo_agent_optimization_plugin.schemas.optimize import RunStrategySpec
 from nemo_helix_plugin.discovery import discover
 from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.scheduler import submit_path_for
 
 # Strategy name -> a module owned by the plugin that ships it, used only to decide
@@ -80,6 +83,28 @@ def test_every_shipped_strategy_resolves_from_real_entry_points() -> None:
             'owning plugin\'s pyproject.toml [project.entry-points."nemo.jobs"] table for a stale or '
             f"misspelled 'module:ClassName' target, and that the class declares {STRATEGY_ATTR}."
         )
+
+
+@_STRATEGIES_INSTALLED
+@pytest.mark.asyncio
+async def test_the_router_applies_the_nat_strategys_own_submit_rules() -> None:
+    """A submission without a staged bundle is refused by nat's *submit* schema.
+
+    That rule lives only on ``OptimizeSubmitSpec``; nat's canonical ``OptimizeSpec``
+    accepts a missing bundle for local runs.  Reaching it proves the router put the
+    forwarded fields through the strategy's own input schema rather than straight
+    into its canonical one.
+    """
+    spec = RunStrategySpec.model_validate(
+        {"strategy": "nat", "optimize_config": "/host/only/optimize.yml", "workspace": "default"}
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'nat'") as excinfo:
+        await RunStrategyJob.compile(
+            workspace="default", spec=spec, entity_client=MagicMock(), job_name=None, async_sdk=MagicMock()
+        )
+
+    assert "optimize_config_fileset is required" in str(excinfo.value)
 
 
 def test_the_router_job_submits_to_this_plugins_api_segment() -> None:

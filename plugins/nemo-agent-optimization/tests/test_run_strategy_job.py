@@ -21,7 +21,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     HelixJobStep,
     SubprocessExecutionProviderSpec,
 )
-from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
 from pydantic import BaseModel, model_validator
 
 #: What every test submits: the router's own fields, one strategy deep.
@@ -119,6 +119,65 @@ class _NoSchemaStrategyJob(_FakeStrategyJob):
         )
 
 
+class _FakeSubmitSpec(BaseModel):
+    """What a submitter types: the agent by *name*, and a remote-only rule the canonical shape lacks."""
+
+    optimize_config: str
+    optimize_config_fileset: str | None = None
+    agent: str | None = None
+    output: str | None = None
+    workspace: str = "default"
+
+    @model_validator(mode="after")
+    def _submit_needs_a_staged_bundle(self) -> "_FakeSubmitSpec":
+        if self.optimize_config_fileset is None:
+            raise ValueError("a submission must name a staged bundle")
+        return self
+
+
+class _FakeResolvedSpec(BaseModel):
+    """What ``compile`` needs: the agent resolved to an id.  Accepts a missing bundle."""
+
+    optimize_config: str
+    optimize_config_fileset: str | None = None
+    agent_id: str | None = None
+    output: str | None = None
+    workspace: str = "default"
+
+
+class _ResolvingStrategyJob(_FakeStrategyJob):
+    """A strategy whose ``to_spec`` does real work, so skipping it would be visible."""
+
+    name: ClassVar[str] = "resolving"
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="resolving")
+    spec_schema: ClassVar[type[BaseModel]] = _FakeResolvedSpec
+    input_spec_schema: ClassVar[type[BaseModel]] = _FakeSubmitSpec
+
+    #: Recorded by ``to_spec`` so tests can assert what the router handed it.
+    to_spec_called_with: ClassVar[dict[str, Any]] = {}
+
+    @classmethod
+    async def to_spec(
+        cls,
+        input_spec: BaseModel,
+        *,
+        workspace: str,
+        entity_client: object,
+        async_sdk: object,
+        is_local: bool,
+    ) -> _FakeResolvedSpec:
+        cls.to_spec_called_with = {
+            "input_spec": input_spec,
+            "workspace": workspace,
+            "entity_client": entity_client,
+            "async_sdk": async_sdk,
+            "is_local": is_local,
+        }
+        payload = input_spec.model_dump()
+        agent = payload.pop("agent")
+        return _FakeResolvedSpec.model_validate({**payload, "agent_id": f"agent-{agent}", "workspace": workspace})
+
+
 @pytest.fixture(autouse=True)
 def installed_strategies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin discovery to the fakes above so no real plugin install can change a result."""
@@ -129,13 +188,20 @@ def submitted_spec(**overrides: Any) -> RunStrategySpec:
     return RunStrategySpec.model_validate({**SUBMITTED, "workspace": "default", **overrides})
 
 
-async def compile_spec(spec: RunStrategySpec, *, workspace: str = "default", profile: str | None = None) -> Any:
+async def compile_spec(
+    spec: RunStrategySpec,
+    *,
+    workspace: str = "default",
+    profile: str | None = None,
+    entity_client: Any = None,
+    async_sdk: Any = None,
+) -> Any:
     return await RunStrategyJob.compile(
         workspace=workspace,
         spec=spec,
-        entity_client=MagicMock(),
+        entity_client=MagicMock() if entity_client is None else entity_client,
         job_name=None,
-        async_sdk=MagicMock(),
+        async_sdk=MagicMock() if async_sdk is None else async_sdk,
         profile=profile,
     )
 
@@ -216,6 +282,97 @@ async def test_a_strategy_without_a_spec_schema_gets_the_raw_payload(monkeypatch
     forwarded = _NoSchemaStrategyJob.compiled_with["spec"]
     assert isinstance(forwarded, dict)
     assert "strategy" not in forwarded
+
+
+# ---------------------------------------------------------------------------
+# compile — the strategy's own submit lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def resolving_strategy(monkeypatch: pytest.MonkeyPatch) -> type[_ResolvingStrategyJob]:
+    monkeypatch.setattr(run_strategy, "discover_strategy_jobs", lambda: {"resolving": _ResolvingStrategyJob})
+    _ResolvingStrategyJob.to_spec_called_with = {}
+    _ResolvingStrategyJob.compiled_with = {}
+    return _ResolvingStrategyJob
+
+
+@pytest.mark.asyncio
+async def test_compile_hands_the_strategy_what_its_own_to_spec_produced(
+    resolving_strategy: type[_ResolvingStrategyJob],
+) -> None:
+    """The strategy's ``compile`` sees its canonical shape, not a re-validation of the router's fields."""
+    await compile_spec(submitted_spec(strategy="resolving"), workspace="staging")
+
+    forwarded = resolving_strategy.compiled_with["spec"]
+    assert isinstance(forwarded, _FakeResolvedSpec)
+    assert forwarded.agent_id == "agent-react-agent"
+    assert forwarded.workspace == "staging"
+    assert not hasattr(forwarded, "agent")
+
+
+@pytest.mark.asyncio
+async def test_compile_calls_to_spec_the_way_the_route_layer_would(
+    resolving_strategy: type[_ResolvingStrategyJob],
+) -> None:
+    """Same submit context the strategy would get if it were submitted directly, and never local."""
+    entity_client = object()
+    async_sdk = object()
+
+    await compile_spec(
+        submitted_spec(strategy="resolving"), workspace="staging", entity_client=entity_client, async_sdk=async_sdk
+    )
+
+    called_with = resolving_strategy.to_spec_called_with
+    assert isinstance(called_with["input_spec"], _FakeSubmitSpec)
+    assert called_with["input_spec"].agent == "react-agent"
+    assert called_with["workspace"] == "staging"
+    assert called_with["entity_client"] is entity_client
+    assert called_with["async_sdk"] is async_sdk
+    assert called_with["is_local"] is False
+
+
+@pytest.mark.asyncio
+async def test_compile_applies_the_strategys_submit_rules_not_only_its_canonical_ones(
+    resolving_strategy: type[_ResolvingStrategyJob],
+) -> None:
+    """A rule that lives only on the submit shape (like nat's remote-only bundle check) still fires."""
+    spec = submitted_spec(strategy="resolving", optimize_config_fileset=None)
+
+    with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'resolving'"):
+        await compile_spec(spec)
+
+    assert resolving_strategy.to_spec_called_with == {}, "to_spec must not run on input its own schema rejected"
+
+
+@pytest.mark.asyncio
+async def test_a_to_spec_that_cannot_prepare_its_spec_is_a_submit_error(
+    resolving_strategy: type[_ResolvingStrategyJob], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whatever ``to_spec`` raises becomes a 422, as it would at the route layer -- not a 500."""
+
+    async def _unresolvable(_input_spec: BaseModel, **_kwargs: Any) -> BaseModel:
+        raise LookupError("no agent named 'react-agent'")
+
+    monkeypatch.setattr(resolving_strategy, "to_spec", _unresolvable)
+
+    with pytest.raises(HelixJobCompilationError, match=r"'resolving' could not prepare its spec.*no agent named"):
+        await compile_spec(submitted_spec(strategy="resolving"))
+
+
+@pytest.mark.asyncio
+async def test_a_to_spec_that_reports_a_dependency_outage_keeps_its_own_error(
+    resolving_strategy: type[_ResolvingStrategyJob], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The factory maps this one to a 503; wrapping it would downgrade a retryable outage to a 422."""
+
+    async def _platform_down(_input_spec: BaseModel, **_kwargs: Any) -> BaseModel:
+        raise HelixJobDependencyUnavailableError("entities service is unavailable")
+
+    monkeypatch.setattr(resolving_strategy, "to_spec", _platform_down)
+
+    with pytest.raises(HelixJobDependencyUnavailableError, match="entities service is unavailable"):
+        await compile_spec(submitted_spec(strategy="resolving"))
 
 
 # ---------------------------------------------------------------------------
