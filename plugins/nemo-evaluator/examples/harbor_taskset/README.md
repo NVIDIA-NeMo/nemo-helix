@@ -12,8 +12,8 @@ worker with Docker available. This source-checkout example requires the worker
 and notebook to use the same repository checkout.
 
 Export `OPENAI_API_KEY` before starting Jupyter, and allow task containers to
-reach `api.openai.com`. Set `NMP_BASE_URL`, `NMP_WORKSPACE`, and, if required,
-`NMP_API_KEY` in the notebook environment. The defaults are
+reach `api.openai.com`. Set `NHX_BASE_URL`, `NHX_WORKSPACE`, and, if required,
+`NHX_API_KEY` in the notebook environment. The defaults are
 `http://localhost:8080` and `default`; no machine-specific configuration file
 is needed. Non-loopback Platform URLs must use HTTPS because the notebook
 uploads `OPENAI_API_KEY` to Platform Secrets.
