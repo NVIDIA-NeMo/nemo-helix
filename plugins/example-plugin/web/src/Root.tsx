@@ -26,7 +26,8 @@ import type { PluginHost, PluginRootProps } from "./types";
  *
  * Call `host.auth.getAccessToken()` per request (not once at render) so calls keep
  * working after OIDC silent renew rotates the token, e.g.:
- *   fetch('/apis/my-resource', { headers: { Authorization: `Bearer ${getAccessToken()}` } })
+ *   const token = getAccessToken()
+ *   fetch('/apis/my-resource', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
  */
 export function Root({ host }: PluginRootProps) {
   return (
@@ -189,16 +190,17 @@ function AuthPage({ getAccessToken }: { getAccessToken: () => string }) {
     <Stack gap="3">
       <Text kind="label/bold/md">Auth</Text>
       <Text kind="body/regular/sm" color="secondary">
-        Studio passes its configured OIDC bearer token (access token or ID token)
-        to every plugin via the plugin&apos;s auth prop. Call getAccessToken() per
-        request — it returns the current token after silent renewal — and use it
-        as a Bearer token.
+        Studio passes its configured OIDC bearer token (access token or ID
+        token) to every plugin via the plugin&apos;s auth prop. Call
+        getAccessToken() per request — it returns the current token after silent
+        renewal — and use it as a Bearer token.
       </Text>
 
       <Stack gap="1">
         <Text kind="label/bold/sm">Example API call</Text>
-        <CodeBlock>{`fetch('/apis/v1/workspaces', {
-  headers: { Authorization: \`Bearer \${getAccessToken()}\` },
+        <CodeBlock>{`const token = getAccessToken()
+fetch('/apis/v1/workspaces', {
+  headers: token ? { Authorization: \`Bearer \${token}\` } : {},
 })`}</CodeBlock>
       </Stack>
 
@@ -234,8 +236,9 @@ function WorkspacePage({ workspaceId }: { workspaceId: string }) {
         <Text kind="label/bold/sm">
           Example API call scoped to this workspace
         </Text>
-        <CodeBlock>{`fetch(\`/apis/v1/workspaces/\${workspaceId}/models\`, {
-  headers: { Authorization: \`Bearer \${getAccessToken()}\` },
+        <CodeBlock>{`const token = getAccessToken()
+fetch(\`/apis/v1/workspaces/\${workspaceId}/models\`, {
+  headers: token ? { Authorization: \`Bearer \${token}\` } : {},
 })`}</CodeBlock>
       </Stack>
     </Stack>

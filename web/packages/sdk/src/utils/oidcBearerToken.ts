@@ -40,10 +40,11 @@ export const selectOidcBearerToken = (
   user: User | null | undefined,
   configuredSource?: string
 ): string | undefined => {
-  if (!user || user.expired) return undefined;
+  if (!user) return undefined;
 
   const source = parseBearerTokenSource(configuredSource);
   if (!source) return undefined;
+  if (source === 'access_token' && user.expired) return undefined;
 
   const token = user[source];
   if (!token) return undefined;

@@ -57,13 +57,20 @@ describe('selectOidcBearerToken', () => {
     expect(selectOidcBearerToken(createUser(), 'refresh_token')).toBeUndefined();
   });
 
-  it('does not return a token for an expired user', () => {
+  it('does not return an access token for an expired access-token session', () => {
+    expect(
+      selectOidcBearerToken(createUser({ expiresAt: Math.floor(Date.now() / 1000) - 1 }))
+    ).toBeUndefined();
+  });
+
+  it('returns a current ID token when only the access-token session has expired', () => {
+    const idToken = createIdToken();
     expect(
       selectOidcBearerToken(
-        createUser({ expiresAt: Math.floor(Date.now() / 1000) - 1 }),
+        createUser({ idToken, expiresAt: Math.floor(Date.now() / 1000) - 1 }),
         'id_token'
       )
-    ).toBeUndefined();
+    ).toBe(idToken);
   });
 
   it('does not return an expired ID token even if the access-token session is current', () => {

@@ -504,7 +504,7 @@ class TestStudioConfigEnvReplacements:
 
     def test_env_replacements_publishes_oidc_bearer_token_source(self, monkeypatch: pytest.MonkeyPatch):
         """Test that Studio receives the configured OIDC bearer token source."""
-        from nmp.common import config as common_config
+        from nhx.common import config as common_config
 
         monkeypatch.setattr(
             common_config.Configuration,
