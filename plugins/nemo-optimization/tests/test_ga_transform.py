@@ -39,7 +39,9 @@ def _payload() -> dict[str, Any]:
 
 
 def test_model_prompt_transformer_uses_platform_inference_gateway() -> None:
-    sdk, model = _sdk({"choices": [{"message": {"content": "```text\nImproved prompt\n```"}}]})
+    sdk, model = _sdk(
+        {"choices": [{"finish_reason": "stop", "message": {"content": "```text\nImproved prompt\n```"}}]}
+    )
     transformer = ModelPromptTransformer(
         sdk=sdk,
         workspace="default",
@@ -105,6 +107,26 @@ def test_model_prompt_transformer_rejects_malformed_response() -> None:
     )
 
     with pytest.raises(PromptTransformError, match="non-object response"):
+        transformer.mutate(
+            prompt_name="system_prompt",
+            prompt="Base prompt.",
+            purpose="Answer accurately.",
+            prompt_format=None,
+            feedback=None,
+        )
+
+
+@pytest.mark.parametrize("finish_reason", [None, "length", "content_filter", "tool_calls"])
+def test_model_prompt_transformer_rejects_incomplete_completion(finish_reason: str | None) -> None:
+    sdk, _ = _sdk({"choices": [{"finish_reason": finish_reason, "message": {"content": "Partial prompt"}}]})
+    transformer = ModelPromptTransformer(
+        sdk=sdk,
+        workspace="default",
+        payload=_payload(),
+        model_name="prompt_optimizer",
+    )
+
+    with pytest.raises(PromptTransformError, match="did not complete normally"):
         transformer.mutate(
             prompt_name="system_prompt",
             prompt="Base prompt.",

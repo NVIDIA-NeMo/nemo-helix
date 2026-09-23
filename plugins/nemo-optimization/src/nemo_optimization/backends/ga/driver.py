@@ -24,13 +24,12 @@ from nemo_optimization.backends.ga.fitness import (
     FitnessSnapshot,
     GaFitnessError,
     assign_generation_fitness,
-    best_individual,
     rank_valid_individuals,
-    target_met,
 )
 from nemo_optimization.backends.ga.individual import GaIndividual
 from nemo_optimization.backends.ga.oracle_feedback import (
     OracleFeedbackState,
+    adaptive_feedback_triggered,
     build_oracle_feedback,
     should_use_oracle_feedback,
 )
@@ -102,7 +101,8 @@ def run_ga_prompt_optimization(
     )
     history: list[GaIndividual] = []
     best_so_far: GaIndividual | None = None
-    stagnation_generations = 0
+    best_fitness_history: list[float] = []
+    adaptive_feedback_enabled = False
     generations_completed = 0
 
     for generation in range(ga_config.generations):
@@ -134,24 +134,14 @@ def run_ga_prompt_optimization(
             ) from exc
 
         history.extend(copy.deepcopy(population))
-        previous_best_id = best_so_far.individual_id if best_so_far is not None else None
-        best_so_far = best_individual(
-            history,
-            metrics=ga_config.metrics,
-            mode=ga_config.multi_objective_mode,
-        )
-        if best_so_far is None:
-            message = "Prompt GA completed a generation but no valid best individual was available."
-            raise GaPromptOptimizerError(
-                message,
-                optimized_payload=copy.deepcopy(base_payload),
-                trial_count=next_phase_trial_number,
+        best_so_far = rank_valid_individuals(population)[0]
+        best_fitness_history.append(best_so_far.fitness or 0.0)
+        if ga_config.oracle_feedback_mode == "adaptive" and not adaptive_feedback_enabled:
+            adaptive_feedback_enabled = adaptive_feedback_triggered(
+                best_fitness_history=best_fitness_history,
+                population=rank_valid_individuals(population),
+                config=ga_config,
             )
-
-        if previous_best_id is not None and best_so_far.individual_id == previous_best_id:
-            stagnation_generations += 1
-        else:
-            stagnation_generations = 0
         generations_completed = generation + 1
         _write_generation_artifacts(
             output_dir,
@@ -162,9 +152,6 @@ def run_ga_prompt_optimization(
             config=ga_config,
         )
 
-        if target_met(best_so_far, metrics=ga_config.metrics, target=ga_config.target):
-            logger.info("Prompt GA stopped early after meeting target")
-            break
         if generation == ga_config.generations - 1:
             break
 
@@ -174,11 +161,7 @@ def run_ga_prompt_optimization(
             config=ga_config,
             transformer=transformer,
             rng=rng,
-            oracle_state=OracleFeedbackState(
-                stagnation_generations=stagnation_generations,
-                fitness_variance=snapshot.fitness_variance,
-                duplicate_ratio=snapshot.duplicate_ratio,
-            ),
+            oracle_state=OracleFeedbackState(adaptive_enabled=adaptive_feedback_enabled),
         )
         _fail_if_systematic_transform_failure(
             population,
@@ -322,9 +305,7 @@ def _child_prompt(
     successes: list[str],
 ) -> str:
     parent_prompt = parent_a.prompts[name]
-    prompt_sources = (parent_a,)
     if rng.random() < config.crossover_rate and parent_a.individual_id != parent_b.individual_id:
-        feedback = _feedback_for_sources((parent_a, parent_b), config=config, state=oracle_state)
         try:
             parent_prompt = transformer.recombine(
                 prompt_name=name,
@@ -332,25 +313,20 @@ def _child_prompt(
                 parent_b=parent_b.prompts[name],
                 purpose=spec.purpose,
                 prompt_format=spec.format,
-                feedback=feedback,
+                feedback=None,
             )
             _validate_transform_output(name, parent_prompt, spec=spec)
             successes.append(f"recombine:{name}:{parent_a.individual_id},{parent_b.individual_id}")
-            prompt_sources = (parent_a, parent_b)
         except PromptTransformError as exc:
             fallback_parent = rng.choice([parent_a, parent_b])
             parent_prompt = fallback_parent.prompts[name]
-            prompt_sources = (fallback_parent,)
             failures.append(
                 f"recombine:{name}:{parent_a.individual_id},{parent_b.individual_id}:"
                 f"{exc}; used {fallback_parent.individual_id}"
             )
-    elif rng.random() < 0.5:
-        parent_prompt = parent_b.prompts[name]
-        prompt_sources = (parent_b,)
 
     if rng.random() < config.mutation_rate:
-        feedback = _feedback_for_sources(prompt_sources, config=config, state=oracle_state)
+        feedback = _feedback_for_sources((parent_a,), config=config, state=oracle_state)
         parent_prompt = _mutate_prompt(
             transformer,
             prompt_name=name,
@@ -434,7 +410,7 @@ def _select_parent(
 ) -> GaIndividual:
     if config.selection_method == "tournament":
         contenders = rng.sample(list(parents), k=min(config.tournament_size, len(parents)))
-        return rank_valid_individuals(contenders)[0]
+        return max(contenders, key=lambda parent: parent.fitness or 0.0)
 
     positive_weights = [max(0.0, parent.fitness or 0.0) for parent in parents]
     total = sum(positive_weights)
@@ -507,7 +483,7 @@ def _evaluate_assigned_individual(
             for rep in range(config.reps_per_param_set)
         ]
         individual.aggregate_metrics = _average_rep_metrics(rep_results, config.metric_names)
-        individual.raw_scores = tuple(score for result in rep_results for score in result.scores)
+        individual.raw_scores = tuple(rep_results[-1].scores)
         individual.status = "completed"
         individual.failure_reason = None
     except CandidateEvaluationError as exc:
@@ -572,7 +548,7 @@ def _feedback_for_sources(
             continue
         feedback = build_oracle_feedback(individual=source, config=config)
         if feedback:
-            sections.append(f"Feedback from {source.individual_id}:\n{feedback}")
+            sections.append(feedback)
     if not sections:
         return None
     return "\n\n".join(sections)
@@ -717,8 +693,6 @@ def _history_fieldnames(rows: Sequence[Mapping[str, Any]]) -> list[str]:
 def _score_record_rows(history: Sequence[GaIndividual]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for individual in history:
-        if individual.carried_from is not None:
-            continue
         metadata = {
             "individual_id": individual.individual_id,
             "phase": "prompt",

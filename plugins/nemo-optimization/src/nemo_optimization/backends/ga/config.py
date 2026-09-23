@@ -53,7 +53,9 @@ class GaPromptOptimizerConfig:
 def parse_ga_prompt_optimizer_config(payload: dict[str, Any]) -> GaPromptOptimizerConfig:
     config = parse_optimizer_config(payload)
     prompt = config.prompt
-    if prompt is None or not prompt.enabled:
+    if prompt is None:
+        raise GaConfigError("optimizer.prompt section is required.", phase="prompt")
+    if not prompt.enabled:
         raise GaConfigError("optimizer.prompt.enabled must be true.", phase="prompt")
     assert prompt.elitism is not None
     return GaPromptOptimizerConfig(

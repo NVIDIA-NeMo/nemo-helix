@@ -14,13 +14,18 @@ from nemo_optimization.backends.ga.config import parse_ga_prompt_optimizer_confi
 from nemo_optimization.backends.ga.driver import GaPromptOptimizerError, _child_prompt, run_ga_prompt_optimization
 from nemo_optimization.backends.ga.fitness import assign_generation_fitness, rank_valid_individuals
 from nemo_optimization.backends.ga.individual import GaIndividual
-from nemo_optimization.backends.ga.oracle_feedback import OracleFeedbackState, build_oracle_feedback
+from nemo_optimization.backends.ga.oracle_feedback import (
+    OracleFeedbackState,
+    adaptive_feedback_triggered,
+    build_oracle_feedback,
+)
 from nemo_optimization.backends.ga.transform import PromptTransformError
 from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvaluationResult
 
 
 def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Path) -> None:
     payload = _payload(
+        optimizer={"reps_per_param_set": 1},
         prompt={
             "population_size": 3,
             "generations": 2,
@@ -28,7 +33,7 @@ def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Pat
             "crossover_rate": 1.0,
             "elitism": 1,
             "seed": 11,
-        }
+        },
     )
     evaluator = RecordingEvaluator()
 
@@ -40,9 +45,9 @@ def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Pat
         trial_number_offset=10,
     )
 
-    assert result.executed_trials == 5
+    assert result.executed_trials == 6
     assert result.generations_completed == 2
-    assert result.best_individual.global_trial_number in {10, 11, 12, 13, 14}
+    assert result.best_individual.global_trial_number in {13, 14, 15}
     assert "[system_prompt:" in result.optimized_payload["instructions"]["system"]["content"]
     assert "optimizer" in result.optimized_payload
     assert (tmp_path / "optimized_config.yml").is_file()
@@ -58,6 +63,7 @@ def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Pat
         12,
         13,
         14,
+        15,
     ]
     assert {call["metadata"]["nemo.optimizer.phase"] for call in evaluator.calls} == {"prompt"}
     assert any(individual.carried_from for individual in result.history)
@@ -184,14 +190,70 @@ def test_ga_fitness_supports_minimize_and_diversity_penalty() -> None:
 
     assert snapshot.duplicate_ratio == pytest.approx(1 / 3)
     ranked = rank_valid_individuals(population)
-    assert ranked[0].individual_index == 1
-    assert ranked[0].normalized_metrics["latency"] == 1.0
+    assert ranked[0].individual_index == 2
+    assert ranked[0].normalized_metrics["latency"] == 0.5
+    assert population[0].fitness == pytest.approx(-0.6)
+    assert population[1].fitness == pytest.approx(0.4)
+
+
+def test_ga_fitness_matches_nat_constant_and_multi_objective_scoring() -> None:
+    population = [
+        GaIndividual(
+            prompts={"system_prompt": f"prompt-{index}"},
+            generation=0,
+            individual_index=index,
+            status="completed",
+            aggregate_metrics={"quality": 1.0, "safety": 1.0},
+        )
+        for index in range(2)
+    ]
+    config = parse_ga_prompt_optimizer_config(
+        _payload(
+            optimizer={
+                "multi_objective_combination_mode": "weighted_sum",
+                "eval_metrics": {
+                    "quality": {"direction": "maximize", "weight": 2.0},
+                    "safety": {"direction": "maximize", "weight": 3.0},
+                },
+            },
+            prompt={"population_size": 2, "generations": 1},
+        )
+    )
+
+    assign_generation_fitness(
+        population,
+        metrics=config.metrics,
+        mode=config.multi_objective_mode,
+        diversity_lambda=0.0,
+    )
+
+    assert population[0].normalized_metrics == {"quality": 0.5, "safety": 0.5}
+    assert population[0].fitness == pytest.approx(2.5)
 
 
 @pytest.mark.parametrize("option", ["ga_population_size", "parallel_evaluations"])
 def test_ga_config_rejects_unsupported_options(option: str) -> None:
     with pytest.raises(ValueError, match=option):
         parse_ga_prompt_optimizer_config(_payload(prompt={option: 4}))
+
+
+def test_ga_config_reports_missing_prompt_section() -> None:
+    payload = _payload()
+    del payload["optimizer"]["prompt"]
+
+    with pytest.raises(ValueError, match="optimizer.prompt section is required"):
+        parse_ga_prompt_optimizer_config(payload)
+
+
+def test_ga_config_uses_nat_defaults() -> None:
+    config = parse_ga_prompt_optimizer_config(_payload())
+
+    assert config.population_size == 24
+    assert config.generations == 15
+    assert config.crossover_rate == 0.8
+    assert config.mutation_rate == 0.3
+    assert config.elitism == 2
+    assert config.reps_per_param_set == 3
 
 
 def test_oracle_feedback_uses_worst_reasoning_rows_for_metric() -> None:
@@ -216,7 +278,6 @@ def test_oracle_feedback_uses_worst_reasoning_rows_for_metric() -> None:
     feedback = build_oracle_feedback(individual=individual, config=config)
 
     assert feedback is not None
-    assert "bad-row" in feedback
     assert "Missed the key fact." in feedback
     assert "good-row" not in feedback
 
@@ -258,11 +319,11 @@ def test_oracle_feedback_prioritizes_high_weight_metrics_when_truncated() -> Non
     feedback = build_oracle_feedback(individual=individual, config=config)
 
     assert feedback is not None
-    assert feedback.startswith("Metric high_value")
+    assert feedback.startswith("1. [high_value]")
     assert len(feedback) <= 160
 
 
-def test_mutation_feedback_follows_selected_prompt_source() -> None:
+def test_no_crossover_inherits_parent_a_and_uses_its_mutation_feedback() -> None:
     config = parse_ga_prompt_optimizer_config(
         _payload(
             prompt={
@@ -285,20 +346,19 @@ def test_mutation_feedback_follows_selected_prompt_source() -> None:
         parent_a=parent_a,
         parent_b=parent_b,
         config=config,
-        rng=FixedRandom([0.99, 0.0, 0.0]),
-        oracle_state=OracleFeedbackState(stagnation_generations=0, fitness_variance=0.0, duplicate_ratio=0.0),
+        rng=FixedRandom([0.99, 0.0]),
+        oracle_state=OracleFeedbackState(),
         failures=[],
         successes=[],
     )
 
-    assert prompt == "Parent B"
+    assert prompt == "Parent A"
     assert transformer.mutation_feedback is not None
-    assert "Feedback from g000-i001" in transformer.mutation_feedback
-    assert "reasoning from B" in transformer.mutation_feedback
-    assert "reasoning from A" not in transformer.mutation_feedback
+    assert "reasoning from A" in transformer.mutation_feedback
+    assert "reasoning from B" not in transformer.mutation_feedback
 
 
-def test_recombination_feedback_combines_both_parents() -> None:
+def test_recombination_does_not_receive_oracle_feedback() -> None:
     config = parse_ga_prompt_optimizer_config(
         _payload(
             prompt={
@@ -322,26 +382,25 @@ def test_recombination_feedback_combines_both_parents() -> None:
         parent_b=parent_b,
         config=config,
         rng=FixedRandom([0.0, 0.99]),
-        oracle_state=OracleFeedbackState(stagnation_generations=0, fitness_variance=0.0, duplicate_ratio=0.0),
+        oracle_state=OracleFeedbackState(),
         failures=[],
         successes=[],
     )
 
     assert prompt == "Parent A + Parent B"
-    assert transformer.recombination_feedback is not None
-    assert "reasoning from A" in transformer.recombination_feedback
-    assert "reasoning from B" in transformer.recombination_feedback
+    assert transformer.recombination_feedback is None
 
 
-def test_raw_score_records_skip_carried_elites(tmp_path: Path) -> None:
+def test_carried_elites_are_reevaluated_and_write_score_records(tmp_path: Path) -> None:
     payload = _payload(
+        optimizer={"reps_per_param_set": 1},
         prompt={
             "population_size": 2,
             "generations": 2,
             "mutation_rate": 1.0,
             "crossover_rate": 1.0,
             "elitism": 1,
-        }
+        },
     )
 
     result = run_ga_prompt_optimization(
@@ -355,7 +414,75 @@ def test_raw_score_records_skip_carried_elites(tmp_path: Path) -> None:
     assert len(records) == result.executed_trials
     carried_ids = {individual.individual_id for individual in result.history if individual.carried_from}
     assert carried_ids
-    assert carried_ids.isdisjoint({record["individual_id"] for record in records})
+    assert carried_ids.issubset({record["individual_id"] for record in records})
+
+
+def test_oracle_feedback_keeps_only_the_last_repetition_scores(tmp_path: Path) -> None:
+    payload = _payload(
+        optimizer={"reps_per_param_set": 2},
+        prompt={"population_size": 2, "generations": 1},
+    )
+
+    result = run_ga_prompt_optimization(
+        payload,
+        tmp_path,
+        RawScoreEvaluator(),
+        DeterministicTransformer(),
+    )
+
+    assert all(len(individual.raw_scores) == 1 for individual in result.history)
+    assert all("rep 1" in str(individual.raw_scores[0].outputs[1].value) for individual in result.history)
+
+
+def test_final_winner_comes_from_last_generation(tmp_path: Path) -> None:
+    payload = _payload(
+        optimizer={"reps_per_param_set": 1, "target": -1.0},
+        prompt={
+            "population_size": 2,
+            "generations": 2,
+            "mutation_rate": 0.0,
+            "crossover_rate": 0.0,
+            "elitism": 1,
+            "seed": 3,
+        },
+    )
+
+    result = run_ga_prompt_optimization(
+        payload,
+        tmp_path,
+        DecreasingTrialEvaluator(),
+        DeterministicTransformer(),
+    )
+
+    assert result.executed_trials == 4
+    assert result.generations_completed == 2
+    assert result.best_individual.generation == 1
+
+
+def test_adaptive_feedback_trigger_matches_nat_stagnation_window() -> None:
+    config = parse_ga_prompt_optimizer_config(
+        _payload(
+            prompt={
+                "population_size": 2,
+                "generations": 1,
+                "oracle_feedback_mode": "adaptive",
+                "oracle_feedback_stagnation_generations": 3,
+                "oracle_feedback_fitness_variance_threshold": 0.0,
+            }
+        )
+    )
+    population = [
+        _completed_individual(prompt="a", score=0.0, index=0, metric_name="average_score"),
+        _completed_individual(prompt="b", score=0.0, index=1, metric_name="average_score"),
+    ]
+    population[0].fitness = 0.4
+    population[1].fitness = 0.6
+
+    assert adaptive_feedback_triggered(
+        best_fitness_history=[0.5, 0.5005, 0.5004],
+        population=population,
+        config=config,
+    )
 
 
 class RecordingEvaluator:
@@ -380,6 +507,19 @@ class RecordingEvaluator:
         )
         prompt = str(suggestions["instructions.system.content"])
         return CandidateEvaluationResult(aggregate_metrics={"average_score": float(len(prompt))})
+
+
+class DecreasingTrialEvaluator:
+    def evaluate(
+        self,
+        *,
+        trial_number: int,
+        suggestions: dict[str, Any],
+        trial_overlay: dict[str, Any],
+        rep: int,
+    ) -> CandidateEvaluationResult:
+        del suggestions, trial_overlay, rep
+        return CandidateEvaluationResult(aggregate_metrics={"average_score": float(100 - trial_number)})
 
 
 class DeterministicTransformer:
@@ -488,17 +628,17 @@ class RawScoreEvaluator:
         trial_overlay: dict[str, Any],
         rep: int,
     ) -> CandidateEvaluationResult:
-        del trial_overlay, rep
+        del trial_overlay
         prompt = str(suggestions["instructions.system.content"])
         score_value = float(len(prompt))
         return CandidateEvaluationResult(
             aggregate_metrics={"average_score": score_value},
             scores=(
                 _score(
-                    task_id=f"row-{trial_number}",
+                    task_id=f"row-{trial_number}-rep-{rep}",
                     metric_name="average_score",
                     value=score_value,
-                    reasoning=f"reasoning for trial {trial_number}",
+                    reasoning=f"reasoning for trial {trial_number} rep {rep}",
                 ),
             ),
         )
