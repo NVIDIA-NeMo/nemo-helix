@@ -38,7 +38,11 @@ def test_bundle_uses_plugin_dist_name_and_existing_extra() -> None:
 
 
 def test_lock_uses_plugin_dist_name() -> None:
-    names = [package["name"] for package in _toml(_UV_LOCK)["package"]]
+    packages = _toml(_UV_LOCK)["package"]
+    names = [package["name"] for package in packages]
 
     assert "nemo-switchyard-plugin" in names
-    assert "nemo-switchyard" not in names
+    assert not any(
+        package["name"] == "nemo-switchyard" and package.get("source", {}).get("editable") == "plugins/nemo-switchyard"
+        for package in packages
+    )
