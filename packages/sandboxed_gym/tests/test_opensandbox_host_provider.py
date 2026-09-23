@@ -18,7 +18,13 @@ from typing import Any
 from urllib.error import HTTPError
 
 import pytest
-from sandboxed_gym.host.models import GymHostBootstrapFailed, GymHostHandle, GymHostSpec, GymHostVolumeMount
+from sandboxed_gym.host.models import (
+    GymHostBootstrapFailed,
+    GymHostHandle,
+    GymHostSpec,
+    GymHostVolumeMount,
+    render_host_error,
+)
 from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider
 
 HEALTH_URL = "https://sandbox.example/gym-1/health"
@@ -177,3 +183,18 @@ def test_a_503_health_response_without_a_body_still_reads_as_starting(
     monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
 
     assert provider._get_json(HEALTH_URL, {}) == {"status": "starting"}
+
+
+def test_a_rendered_error_keeps_every_line_the_host_sent() -> None:
+    """The host bounds the tail against its own response budget before sending it.
+
+    A second, smaller bound here would silently drop diagnostics that already survived the wire,
+    which is the opposite of what shipping them was for.
+    """
+    tail = [f"line {index}" for index in range(80)]
+
+    rendered = render_host_error({"code": "bootstrap_failed", "host_output_tail": tail})
+
+    assert "line 0" in rendered
+    assert "line 79" in rendered
+    assert "(80 lines)" in rendered

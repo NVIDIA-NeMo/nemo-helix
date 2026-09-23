@@ -29,9 +29,6 @@ DEFAULT_ROLLOUT_TIMEOUT_S = 30 * 60
 # than the batch. Tune the two together: concurrency offsets the split.
 #: A request that failed faster than this cannot have been cut for staying open too long.
 MIN_PROXY_CUTOFF_S = 30.0
-#: Host output lines rendered into a failure. The host caps what it sends; this caps what a
-#: single exception message carries.
-HOST_OUTPUT_TAIL_LINES = 40
 DEFAULT_ROLLOUT_CHUNK_SIZE = 8
 DEFAULT_ROLLOUT_MAX_IN_FLIGHT = 8
 # Applied to transport failures only. An error the host itself reported is deterministic, so
@@ -335,7 +332,8 @@ def render_host_error(error: object) -> str:
     summary = {key: value for key, value in error.items() if key != "host_output_tail"}
     rendered = json.dumps(summary)[:2000]
     if isinstance(tail, list) and tail:
-        lines = "\n".join(str(line) for line in tail[-HOST_OUTPUT_TAIL_LINES:])
-        shown = min(len(tail), HOST_OUTPUT_TAIL_LINES)
-        rendered = f"{rendered}\n--- gym host output (last {shown} lines) ---\n{lines}"
+        # Every line the host sent. It already bounded the tail against its own response budget, and
+        # re-bounding here would drop diagnostics that survived the wire.
+        lines = "\n".join(str(line) for line in tail)
+        rendered = f"{rendered}\n--- gym host output ({len(tail)} lines) ---\n{lines}"
     return rendered
