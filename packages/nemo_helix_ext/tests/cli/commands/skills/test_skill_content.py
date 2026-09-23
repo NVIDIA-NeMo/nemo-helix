@@ -147,6 +147,17 @@ class TestLoadHelixSkills:
         assert "If the adapter is absent while the plugin imports successfully" in content
         assert "Do not install the harness independently" in content
 
+    def test_agent_config_distinguishes_adapters_from_harness_runtimes(self):
+        content = " ".join(load_skills()["nemo-agent-config"].content.split())
+        assert "supplies the adapter implementations, not the third-party harness runtimes" in content
+        assert "A missing harness is a valid adapter-only installation" in content
+        assert "nemo-helix[nemo-agents-plugin-claude]" in content
+        assert "nemo-helix[nemo-agents-plugin-codex]" in content
+        assert "nemo-helix[nemo-agents-plugin-deepagents]" in content
+        assert "No plugin extra; set `ADAPTER_PYTHON`" in content
+        assert "Do not mutate a `uv tool` environment with `uv pip install`" in content
+        assert "packaged Docker or Kubernetes image can provide the harness independently" in content
+
     def test_build_agent_defers_registration_until_after_local_gates(self):
         content = load_skills()["nemo-build-agent"].content
         normalized = " ".join(content.split())
