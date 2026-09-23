@@ -144,7 +144,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 
 ### SDK
 
-The Python SDK (`sdk/python/nemo-platform`) is checked in to this repository and hand-maintained. The `nemo` CLI is hand-written in `nemo_platform_ext` and bundled into the SDK package at build time.
+The Python SDK (`sdk/python/nemo-helix`) is checked in to this repository and hand-maintained. The `nemo` CLI is hand-written in `nemo_helix_ext` and bundled into the SDK package at build time.
 
 The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platform's HTTP API routes. It is regenerated locally from the FastAPI service code (no cloud credentials required).
 
@@ -152,7 +152,7 @@ The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platfo
 - `make refresh-openapi` - Regenerate `openapi/openapi.yaml` from API definitions
 
 **Update web SDK / CLI:**
-- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), then vendor `nemo_platform_ext` into the SDK and regenerate the CLI reference docs.
+- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), then vendor `nemo_helix_ext` into the SDK and regenerate the CLI reference docs.
 
 **When to run `make refresh-openapi`:**
 Run it whenever you modify:
@@ -167,7 +167,7 @@ Run it whenever you modify:
 
 #### Changing SDK types
 
-The SDK package is not regenerated. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-platform`: use the corresponding typed client from `nemo_platform_plugin` instead and migrate consumers to it.
+The SDK package is not regenerated. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
 
 #### Testing Python Code
 
