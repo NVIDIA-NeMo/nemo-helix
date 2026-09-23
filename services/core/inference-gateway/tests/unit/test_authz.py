@@ -13,8 +13,10 @@ from fastapi import HTTPException
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.core.inference_gateway.api.authz import (
+    MODEL_READ_PERMISSION,
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
+    enforce_resolved_model_workspace_access,
 )
 
 
@@ -23,6 +25,7 @@ def _auth_client(principal: Principal, *, enabled: bool = True, allowed: bool = 
     client.auth_enabled = enabled
     client.principal = principal
     client.on_behalf_of_has_permissions = AsyncMock(return_value=allowed)
+    client.has_permissions = AsyncMock(return_value=allowed)
     return client
 
 
@@ -85,3 +88,44 @@ async def test_delegated_service_principal_denied_when_obo_user_lacks_permission
     assert exc.value.status_code == 403
     assert "secret-ws" in exc.value.detail
     client.on_behalf_of_has_permissions.assert_awaited_once_with("secret-ws", [OPENAI_EXEC_PERMISSION])
+
+
+@pytest.mark.asyncio
+async def test_resolved_model_same_workspace_is_noop() -> None:
+    # The resolved model entity is in the request's own workspace: nothing to check.
+    client = _auth_client(Principal(id="user:alice", email="alice@example.com"), allowed=False)
+    auth_client_context.set(client)
+    await enforce_resolved_model_workspace_access("carol-ws", "carol-ws")
+    client.has_permissions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolved_model_no_auth_context_is_noop() -> None:
+    await enforce_resolved_model_workspace_access("carol-ws", "default")
+
+
+@pytest.mark.asyncio
+async def test_resolved_model_auth_disabled_is_noop() -> None:
+    client = _auth_client(Principal(id="user:alice", email="alice@example.com"), enabled=False, allowed=False)
+    auth_client_context.set(client)
+    await enforce_resolved_model_workspace_access("carol-ws", "default")
+    client.has_permissions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolved_model_cross_workspace_allowed_when_caller_has_permission() -> None:
+    client = _auth_client(Principal(id="user:alice", email="alice@example.com"), allowed=True)
+    auth_client_context.set(client)
+    await enforce_resolved_model_workspace_access("carol-ws", "default")
+    client.has_permissions.assert_awaited_once_with("default", [MODEL_READ_PERMISSION])
+
+
+@pytest.mark.asyncio
+async def test_resolved_model_cross_workspace_denied_when_caller_lacks_permission() -> None:
+    client = _auth_client(Principal(id="user:carol", email="carol@example.com"), allowed=False)
+    auth_client_context.set(client)
+    with pytest.raises(HTTPException) as exc:
+        await enforce_resolved_model_workspace_access("carol-ws", "default")
+    assert exc.value.status_code == 403
+    assert "default" in exc.value.detail
+    client.has_permissions.assert_awaited_once_with("default", [MODEL_READ_PERMISSION])

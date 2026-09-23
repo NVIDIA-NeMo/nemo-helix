@@ -1105,6 +1105,84 @@ async def test_virtual_model_proxy_broken_vm_returns_503_without_running_middlew
 
 
 @pytest.mark.asyncio
+async def test_virtual_model_proxy_denies_cross_workspace_model_without_permission(mock_proxy_client):
+    """A VirtualModel resolving to another workspace's model must not proxy without access there."""
+    from unittest.mock import MagicMock
+
+    from nhx.common.auth.dependencies import auth_client_context
+    from nhx.common.auth.models import Principal
+
+    workspace = "carol-ws"
+    other_workspace = "default"
+    vm_name = "explicit-probe"
+    model_entity_id = f"{other_workspace}/openai-gpt-oss-20b"
+
+    model_cache = ModelCache()
+    model_cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace=other_workspace,
+                name="nim",
+                host_url="http://nim.local",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id=model_entity_id,
+                        served_model_name="openai-gpt-oss-20b",
+                    )
+                ],
+                status="READY",
+            )
+        )
+    )
+    model_cache.rebuild_model_entity_map()
+
+    registry = MiddlewareRegistry(plugins={})
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    auth_client = MagicMock()
+    auth_client.auth_enabled = True
+    auth_client.principal = Principal(id="user:carol", email="carol@example.com")
+    auth_client.has_permissions = AsyncMock(return_value=False)
+    token = auth_client_context.set(auth_client)
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await virtual_model_proxy(
+                request=request,
+                workspace=workspace,
+                vm_name=vm_name,
+                virtual_model=SDKVirtualModel(
+                    id=f"{workspace}/{vm_name}",
+                    entity_id=f"{workspace}/{vm_name}",
+                    name=vm_name,
+                    workspace=workspace,
+                    parent=workspace,
+                    db_version=1,
+                    created_at="2026-01-01T00:00:00Z",
+                    updated_at="2026-01-01T00:00:00Z",
+                    default_model_entity=model_entity_id,
+                ),
+                trailing_uri="v1/chat/completions",
+                json_body={"messages": [{"role": "user", "content": "hi"}]},
+                http_client=mock_proxy_client,
+                model_cache=model_cache,
+                registry=registry,
+            )
+    finally:
+        auth_client_context.reset(token)
+
+    assert exc_info.value.status_code == 403
+    assert other_workspace in exc_info.value.detail
+    auth_client.has_permissions.assert_awaited_once_with(other_workspace, ["models.read"])
+    mock_proxy_client.request.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_proxy_request_client_error(mock_proxy_client, next_request_info):
     mock_proxy_client.request = AsyncMock(side_effect=ClientError("Connection failed"))
 

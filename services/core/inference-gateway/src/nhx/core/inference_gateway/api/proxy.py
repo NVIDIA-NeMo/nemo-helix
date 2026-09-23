@@ -33,6 +33,7 @@ from nemo_helix_plugin.inference_middleware import (
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
+from nhx.core.inference_gateway.api.authz import enforce_resolved_model_workspace_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
 from nhx.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -1100,6 +1101,8 @@ async def virtual_model_proxy(
                 http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Could not resolve model entity from body['model'] after request middleware: {exc}",
             ) from exc
+
+        await enforce_resolved_model_workspace_access(workspace, modified_model_ref.workspace)
 
         resolved_model_entity = model_cache.get_from_model_entity(modified_model_ref.workspace, modified_model_ref.name)
         if resolved_model_entity is None:
