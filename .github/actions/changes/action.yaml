@@ -107,6 +107,7 @@ runs:
             - 'tools/python/**'
           fabric:
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/runtimes/fabric/**'
+            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/**'
             - 'packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_*.py'
             - 'packages/nemo_evaluator_sdk/pyproject.toml'
             - '.github/workflows/ci.yaml'
@@ -114,12 +115,15 @@ runs:
           evaluator-sdk-closure:
             # Paths that can change what `import ...harbor_runtime` loads or how the smoke job runs.
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure
+            - 'packages/nemo_evaluator_sdk/tests/test_lazy_public_api.py'  # smoke test file
             - 'packages/nemo_evaluator_sdk/pyproject.toml'  # declared [project] dependencies
             - 'uv.lock'  # locked versions installed for the package
             - '.github/workflows/ci.yaml'  # smoke job definition
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           scaled-evals:
             - 'plugins/_temporary-scaled-evals/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_platform_runner/**'
           e2e:
             - 'e2e/**'
           docs:
@@ -127,6 +131,10 @@ runs:
             - 'sdk/python/nemo-helix/src/**'
           tools:
             - 'tools/**'
+            - 'packages/nemo_helix_ext/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'
+            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           web-studio:
             - 'web/**'
             - '.nvmrc'
@@ -165,8 +173,11 @@ runs:
           guardrails-benchmark:
             - 'plugins/nemo-guardrails/**'
             - 'services/guardrails/**'
+            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
