@@ -25,7 +25,8 @@ may need network access.
 
 Publication follows the Harbor runner guide: discover the dataset, replace each
 task, replace the taskset from the returned IDs, and submit a HarborAgentTaskRunner.
-Repeat publication must reuse the same revisions. The three saved trials and
+Repeat publication must reuse the same revisions and archives. The job must
+persist one Harbor result record. The three saved trials and
 scores distinguish a correct greeting (reward=1), a completed wrong answer
 (reward=0, format_ok=1), and an AgentTimeoutError (partial, reward=0). The summary
 must count the error; raw Harbor output must show only the first step executed.
@@ -104,6 +105,7 @@ def test_harbor_taskset(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     repeated_tasks, repeated_taskset = publish()
     assert {task.spec.native_task_id for task in tasks} == EXPECTED.keys()
     assert [task.revision for task in repeated_tasks] == [task.revision for task in tasks]
+    assert [task.spec.source.fileset_ref for task in repeated_tasks] == [task.spec.source.fileset_ref for task in tasks]
     assert repeated_taskset.revision == taskset.revision
     assert len(taskset.tasks) == 3
     assert all("#" in ref.root for ref in taskset.tasks)
@@ -128,8 +130,11 @@ def test_harbor_taskset(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     try:
         job.wait_until_done(poll_interval_seconds=2, job_timeout_seconds=300, pending_timeout_seconds=300)
     finally:
-        (tmp_path / "status.json").write_text(job.get_job_status().model_dump_json(indent=2))
-        # Failure to retrieve logs must not obscure the original polling failure.
+        # Failure to retrieve diagnostics must not obscure the original polling failure.
+        try:
+            (tmp_path / "status.json").write_text(job.get_job_status().model_dump_json(indent=2))
+        except Exception as exc:
+            (tmp_path / "status.json").write_text(json.dumps({"error": str(exc)}))
         try:
             logs = (
                 evaluator_client.list_agent_eval_job_logs(
@@ -143,6 +148,10 @@ def test_harbor_taskset(request: pytest.FixtureRequest, tmp_path: Path) -> None:
             log_text = f"Could not retrieve logs: {exc}"
         (tmp_path / "job-logs.jsonl").write_text(log_text)
         print(f"Job {job.name}; diagnostics: {tmp_path}\nRecent logs:\n{log_text}")
+
+    stored_results = evaluator.agent_eval_results.list(job_id=job.name).data
+    assert len(stored_results) == 1, stored_results
+    assert stored_results[0].target_kind == "harbor", stored_results[0]
 
     payload = evaluator_client.download_agent_eval_job_result(
         workspace="default", job=job.name, name="agent-eval-results"
