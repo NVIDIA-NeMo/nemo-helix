@@ -80,7 +80,7 @@ class OptimizeJob(NemoJob):
     #: while this one tells a caller choosing a ``--strategy`` what this one does.
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
         name="nat",
-        description="Numeric hyperparameter search (Optuna) over a Fabric agent workflow.",
+        description="Hyperparameter and GA prompt optimization.",
     )
     description: ClassVar[str] = "Optimize a Fabric agent workflow (numeric HPO)."
     container: ClassVar[str] = "cpu-tasks"
