@@ -96,7 +96,7 @@ export const EvalAggregateScoresTable: FC<EvalAggregateScoresTableProps> = ({
         size: 90,
         enableSorting: false,
         cell: ({ row }) => (
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             {trialsText(row.original)}
           </Text>
         ),
@@ -111,7 +111,7 @@ export const EvalAggregateScoresTable: FC<EvalAggregateScoresTableProps> = ({
                 const { mode_category: mode, rubric_distribution: distribution } = row.original;
                 if (!distribution?.length) {
                   return (
-                    <Text kind="body/regular/sm" color="secondary">
+                    <Text className="text-secondary" kind="body/regular/sm">
                       —
                     </Text>
                   );
@@ -119,7 +119,7 @@ export const EvalAggregateScoresTable: FC<EvalAggregateScoresTableProps> = ({
                 return (
                   <Stack gap="density-xs">
                     {mode ? (
-                      <Text kind="body/regular/sm" color="secondary">
+                      <Text className="text-secondary" kind="body/regular/sm">
                         Most frequent: {mode}
                       </Text>
                     ) : null}

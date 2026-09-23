@@ -127,7 +127,7 @@ export const TrainingMethodSection = () => {
                 value={opt.value}
                 label={<Text kind="body/bold/md">{opt.title}</Text>}
                 description={
-                  <Text kind="body/regular/md" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/md">
                     {opt.description}
                   </Text>
                 }
@@ -183,7 +183,7 @@ export const TrainingMethodSection = () => {
                   value={opt.value}
                   label={<Text kind="body/bold/md">{opt.title}</Text>}
                   description={
-                    <Text kind="body/regular/md" color="secondary">
+                    <Text className="text-secondary" kind="body/regular/md">
                       {opt.description}
                     </Text>
                   }
@@ -219,7 +219,7 @@ export const TrainingMethodSection = () => {
                     value={opt.value}
                     label={<Text kind="body/bold/md">{opt.title}</Text>}
                     description={
-                      <Text kind="body/regular/md" color="secondary">
+                      <Text className="text-secondary" kind="body/regular/md">
                         {opt.description}
                       </Text>
                     }

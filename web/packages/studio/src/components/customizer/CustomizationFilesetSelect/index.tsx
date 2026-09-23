@@ -246,7 +246,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
         />
       )}
       {backend === 'rl' && trainingType === 'dpo' && (
-        <Text kind="body/regular/md" color="secondary">
+        <Text className="text-secondary" kind="body/regular/md">
           Dataset must contain <strong>training.jsonl</strong> in a preference format (chosen /
           rejected pairs, BinaryPreference, Tulu3, HelpSteer3, or native Preference).{' '}
           <strong>validation.jsonl</strong> is optional — training data is split automatically when

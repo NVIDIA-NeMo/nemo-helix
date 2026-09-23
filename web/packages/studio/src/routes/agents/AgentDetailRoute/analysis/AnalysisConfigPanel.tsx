@@ -135,17 +135,17 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
       }
     >
       {isLoading ? (
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Loading analysis config...
         </Text>
       ) : isError && !notFound ? (
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Could not load the analysis config for this agent.
         </Text>
       ) : editing ? (
         <Stack gap="density-md">
           {notFound && (
-            <Text kind="body/regular/xs" color="secondary">
+            <Text className="text-secondary" kind="body/regular/xs">
               Analysis has never been enabled for this agent. Saving creates the config.
             </Text>
           )}
@@ -196,7 +196,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
           </FormField>
         </Stack>
       ) : notFound ? (
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Analysis is not enabled for this agent. Choose Edit to enable it, or run{' '}
           <code>nemo insights analysis enable --agent {agent}</code>.
         </Text>

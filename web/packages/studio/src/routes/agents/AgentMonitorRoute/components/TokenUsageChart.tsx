@@ -207,7 +207,7 @@ export const TokenUsageChart: FC<Props> = ({ runs, isPending, height = 320 }) =>
         <Flex justify="between" align="center">
           <Stack gap="density-xs">
             <Text kind="title/sm">Token usage over time</Text>
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               Prompt and completion tokens per run
             </Text>
           </Stack>
@@ -237,7 +237,7 @@ export const TokenUsageChart: FC<Props> = ({ runs, isPending, height = 320 }) =>
             </ResponsiveContainer>
           </Stack>
         ) : (
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             No telemetry runs available — invoke an agent to populate this view.
           </Text>
         )}
