@@ -33,9 +33,9 @@ const listOnly = (studyName: string) => {
         pagination: {
           page: 1,
           page_size: 20,
-          current_page_size: 1,
+          current_page_size: data.length,
           total_pages: 1,
-          total_results: 1,
+          total_results: data.length,
         },
       })
     )
@@ -134,5 +134,18 @@ describe('AgentDetailRoute optimizations tab', () => {
     renderDetail();
 
     expect(await openRowActions(user, 'accuracy-sweep-1')).toBeDisabled();
+  });
+
+  it('offers Optimize from the empty state', async () => {
+    const user = userEvent.setup();
+    listOnly('no-such-study');
+    renderDetail();
+
+    const emptyState = await screen.findByTestId('entity-empty-state-first-use', undefined, {
+      timeout: LG_SELECTOR_TIMEOUT,
+    });
+    await user.click(within(emptyState).getByRole('button', { name: 'Optimize' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
   });
 });

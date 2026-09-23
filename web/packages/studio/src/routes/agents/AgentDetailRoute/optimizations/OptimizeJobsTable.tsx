@@ -46,6 +46,7 @@ const agentJobsFilter = (
 
 interface OptimizeJobsTableProps {
   agentName?: string;
+  onOptimize?: () => void;
 }
 
 /**
@@ -59,7 +60,7 @@ interface OptimizeJobsTableProps {
  * is no Trials or Best result column, even though the design calls for both — those need the job to
  * publish a study summary first.
  */
-export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => {
+export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOptimize }) => {
   const workspace = useWorkspaceFromPath();
   const openRow = useRowNavigation();
   const dataViewState = useStudioDataViewState({
@@ -184,6 +185,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
                   entity="agentOptimizations"
                   variant="first-use"
                   workspace={workspace}
+                  onCreate={onOptimize}
                 />
               ),
           },
