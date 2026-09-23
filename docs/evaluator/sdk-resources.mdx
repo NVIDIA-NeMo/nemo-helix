@@ -46,6 +46,7 @@ The `dataset` argument accepts inline rows, local dataset paths, local glob path
 | `metric` | `Metric` | Row evaluation | Metric configuration serialized into the durable platform job. |
 | `dataset` | `PluginDatasetInput` | Row evaluation | Inline rows, local dataset paths, local glob paths, or fileset references with optional fragment selectors. |
 | `tasks` | `TasksetRef \\| None` | Taskset evaluation | Stored taskset the agent runner evaluates. Mutually exclusive with `metric` + `dataset`. |
+| `trials` | `list[AgentEvalTrial] \\| None` | Taskset evaluation | Saved trials to rescore offline, instead of generating them with a runner. Mutually exclusive with `target`. |
 | `config` | `RunConfig \\| RunConfigOnline \\| RunConfigOnlineModel \\| None` | No | Runtime settings applied when the submitted job executes. Row evaluation only. |
 | `target` | `Model \\| ModelRef \\| Agent \\| AgentTaskRunner \\| None` | No | Model, model reference, or agent target for a row evaluation; the live agent runner for a taskset evaluation. |
 | `placement` | `GymPlacement \\| None` | No | Where the platform runs a `GymAgentTaskRunner` — a staged environment FileSet and the agent instance a sandboxed host routes to. Taskset evaluation only. |

@@ -341,12 +341,21 @@ class AsyncEvaluator:
         target: AgentTaskRunner,
     ) -> AsyncAgentEvaluatorJobResource: ...
 
+    @overload
+    async def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        trials: list[AgentEvalTrial],
+    ) -> AsyncAgentEvaluatorJobResource: ...
+
     async def submit(
         self,
         *,
         metric: Metric | None = None,
         dataset: PluginDatasetInput | None = None,
         tasks: TasksetRef | None = None,
+        trials: list[AgentEvalTrial] | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,
         placement: GymPlacement | None = None,
@@ -357,9 +366,9 @@ class AsyncEvaluator:
         """Submit an evaluation job through the evaluator plugin executor.
 
         The async counterpart of :meth:`Evaluator.submit`, with the same two shapes and the same
-        argument rules: ``metric`` + ``dataset`` evaluates rows, ``tasks`` + ``target`` evaluates a
-        stored taskset with a live agent runner, and ``placement`` says where the platform runs that
-        runner.
+        argument rules: ``metric`` + ``dataset`` evaluates rows, and ``tasks`` with either
+        ``target`` (a live agent runner) or ``trials`` (saved trials, rescored offline) evaluates a
+        stored taskset. ``placement`` says where the platform runs that runner.
         """
         if tasks is not None:
             if metric is not None or dataset is not None:
@@ -367,7 +376,9 @@ class AsyncEvaluator:
                     "submit() takes either `tasks` (a taskset evaluation) or `metric` + `dataset` "
                     "(a row evaluation), not both. Drop whichever does not describe this run."
                 )
-            if not isinstance(target, AgentTaskRunner):
+            if (target is None) == (trials is None):
+                raise TypeError("submit(tasks=...) requires exactly one of `target` or `trials`.")
+            if target is not None and not isinstance(target, AgentTaskRunner):
                 raise TypeError(
                     "submit(tasks=...) evaluates a taskset with an agent runner, so `target` must be "
                     f"an AgentTaskRunner; got {type(target).__name__}. Pass a runner such as "
@@ -394,7 +405,11 @@ class AsyncEvaluator:
                     f"placement=GymPlacement(...) places a GymAgentTaskRunner, not a {type(target).__name__}. "
                     "Placement is per runner kind, so honouring it here would mean guessing."
                 )
-            return await self._executor.submit_agent_eval(tasks=tasks, target=target, placement=placement)
+            return await self._executor.submit_agent_eval(
+                tasks=tasks, target=target, trials=trials, placement=placement
+            )
+        if trials is not None:
+            raise TypeError("submit(trials=...) requires `tasks=TasksetRef(...)`.")
         if placement is not None:
             raise TypeError(
                 "placement configures a taskset evaluation's runner; a row evaluation has no runner to "

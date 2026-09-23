@@ -406,18 +406,25 @@ class _AsyncEvaluatorPluginExecutor:
         self,
         *,
         tasks: TasksetRef,
-        target: AgentTaskRunner,
+        target: AgentTaskRunner | None = None,
+        trials: list[AgentEvalTrial] | None = None,
         placement: GymPlacement | None = None,
         wait_until_done: bool = False,
     ) -> AsyncAgentEvaluatorJobResource:
-        """Submit an agent evaluation over a stored taskset.
+        """Submit a stored taskset with a live runner or precomputed trials.
 
         The async twin of :meth:`_SyncEvaluatorPluginExecutor.submit_agent_eval`. ``target`` is a
         live runner, described for the wire by :func:`runner_to_target`, which refuses runners
         carrying state the spec cannot express.
         """
+        if placement is not None and target is None:
+            raise TypeError("placement requires target; saved trials are not executed")
         resolved_workspace = self._client.require_workspace(self._workspace)
-        spec = AgentEvalInputSpec(tasks=tasks, target=runner_to_target(target, placement))
+        spec = AgentEvalInputSpec(
+            tasks=tasks,
+            target=runner_to_target(target, placement) if target is not None else None,
+            trials=trials,
+        )
         return await self.create_agent_eval(
             spec=spec,
             workspace=resolved_workspace,

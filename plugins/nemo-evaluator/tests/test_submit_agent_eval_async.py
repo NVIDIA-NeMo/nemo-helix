@@ -18,6 +18,8 @@ from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator.sdk.resources import AsyncEvaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient
 
 
 def _evaluator() -> tuple[AsyncEvaluator, MagicMock]:
@@ -200,3 +202,67 @@ def test_the_async_agent_job_resource_mirrors_the_sync_one() -> None:
     assert "download_artifacts" not in async_surface
     assert not issubclass(AsyncAgentEvaluatorJobResource, AsyncEvaluatorJobResource)
     assert not issubclass(AsyncEvaluatorJobResource, AsyncAgentEvaluatorJobResource)
+
+
+@pytest.mark.parametrize("empty", [False, True])
+async def test_saved_trials_reach_the_job_spec_without_runner_conversion(monkeypatch, empty: bool) -> None:
+    """Offline rescoring has no runner, so nothing may be asked to describe one."""
+    evaluator = AsyncEvaluator(client=AsyncEvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = AsyncMock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    monkeypatch.setattr(
+        "nemo_evaluator.sdk._executor.runner_to_target",
+        MagicMock(side_effect=AssertionError("Offline submission must not convert a runner")),
+    )
+    trials = (
+        []
+        if empty
+        else [
+            AgentEvalTrial(
+                id="trial-1",
+                task_id="task-1",
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="Done"),
+            )
+        ]
+    )
+    tasks = TasksetRef("default/suite")
+
+    job = await evaluator.submit(tasks=tasks, trials=trials)
+
+    assert job is create_job.return_value
+    spec = create_job.call_args.kwargs["spec"]
+    assert spec.tasks == tasks
+    assert spec.trials == trials
+    assert spec.target is None
+
+
+async def test_a_taskset_with_both_a_runner_and_trials_is_refused() -> None:
+    """The spec takes exactly one trial source, so accepting both would just fail later."""
+    evaluator, _ = _evaluator()
+
+    with pytest.raises(TypeError) as excinfo:
+        await evaluator.submit(tasks=TasksetRef("ts"), target=_runner(), trials=[])  # ty: ignore[no-matching-overload]
+
+    assert "exactly one of" in str(excinfo.value)
+
+
+async def test_trials_without_a_taskset_are_refused() -> None:
+    """Trials are scored against the tasks they belong to; alone they name nothing."""
+    evaluator, _ = _evaluator()
+
+    with pytest.raises(TypeError) as excinfo:
+        await evaluator.submit(trials=[])  # ty: ignore[no-matching-overload]
+
+    assert "requires `tasks=TasksetRef(...)`" in str(excinfo.value)
+
+
+async def test_a_placement_with_saved_trials_is_refused() -> None:
+    """Placement says where a runner runs, and saved trials are not executed at all."""
+    # The real executor, not the stub: this guard lives below the resource layer.
+    evaluator = AsyncEvaluator(client=AsyncEvaluatorClient(base_url="http://test", workspace="default"))
+
+    with pytest.raises(TypeError, match="placement requires target"):
+        await evaluator._executor.submit_agent_eval(
+            tasks=TasksetRef("default/suite"), trials=[], placement=GymPlacement()
+        )
