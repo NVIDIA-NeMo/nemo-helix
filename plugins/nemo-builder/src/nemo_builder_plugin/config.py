@@ -165,7 +165,7 @@ class BuilderConfig(NemoConfig):
             "backend qualifies it with the job's workspace. So every workspace that submits builds "
             "needs a secret of exactly this name, and whatever it holds is the credential `push` "
             "uses -- the submitter's, not the operator's, despite this being operator config. "
-            "Whether that is the intended ownership is an open decision; see the README."
+            "Whether that is the intended ownership is an open decision."
         ),
     )
     signing_key: str | None = Field(
