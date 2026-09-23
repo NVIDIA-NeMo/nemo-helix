@@ -299,6 +299,8 @@ _POST_START_REACHABLE_RETRIES = 6
 _POST_START_REACHABLE_DELAY = 2.0
 
 _DEMO_AGENT_NAME = "calculator-agent"
+_SAMPLE_AGENT_NAME = "email-security-triage"
+_SAMPLE_AGENT_DESCRIPTION = "Fabric email security triage sample agent created by the NeMo setup flow."
 _SAMPLE_WORKSPACE_NAME = "sample"
 _SAMPLE_WORKSPACE_DESCRIPTION = "Sample workspace created by the NeMo setup flow."
 _LOCAL_CONTEXT_NAME = "local"
@@ -1799,18 +1801,33 @@ def _agent_config_path() -> Traversable | None:
     return None
 
 
+def _sample_agent_config_path() -> Traversable | None:
+    """Return the packaged Email Security Triage config YAML, or None."""
+    try:
+        from email_security_triage.resources import sample_file
+
+        candidate = sample_file("agent.yaml")
+        if candidate.is_file():
+            return candidate
+    except (ImportError, ModuleNotFoundError):
+        logger.debug("email_security_triage package not importable; sample agent config unavailable", exc_info=True)
+
+    return None
+
+
 def _agent_exists(
     base_url: str,
     workspace: str,
     headers: dict[str, str] | None = None,
     *,
+    agent_name: str = _DEMO_AGENT_NAME,
     certificate_authority: str | None = None,
 ) -> bool:
-    """Return True if the demo agent already exists on the platform."""
+    """Return True if the named agent already exists on the platform."""
     tls_config = httpx_tls_config_from_env(certificate_authority)
     try:
         resp = httpx.get(
-            f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}/agents/{_DEMO_AGENT_NAME}",
+            f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}/agents/{agent_name}",
             headers=headers,
             timeout=10.0,
             **tls_config,
@@ -1848,9 +1865,11 @@ def _deploy_demo_agent(
     default_model: str,
     headers: dict[str, str] | None = None,
     *,
+    agent_name: str = _DEMO_AGENT_NAME,
+    description: str = "Demo calculator agent",
     certificate_authority: str | None = None,
 ) -> bool:
-    """Deploy the demo agent and emit one ``agent_deployed`` event.
+    """Deploy a packaged setup agent and emit one ``agent_deployed`` event.
 
     Telemetry wrapper around :func:`_deploy_demo_agent_impl`: COMPLETED when the
     deployment reaches running, ERROR when it fails, times out, or raises.
@@ -1862,6 +1881,8 @@ def _deploy_demo_agent(
             config_path,
             default_model,
             headers=headers,
+            agent_name=agent_name,
+            description=description,
             certificate_authority=certificate_authority,
         )
     except Exception:
@@ -1881,19 +1902,35 @@ def _deploy_demo_agent_impl(
     default_model: str,
     headers: dict[str, str] | None = None,
     *,
+    agent_name: str = _DEMO_AGENT_NAME,
+    description: str = "Demo calculator agent",
     certificate_authority: str | None = None,
 ) -> bool:
-    """Create and deploy the demo calculator agent. Returns True on success."""
+    """Create and deploy a packaged setup agent. Returns True on success."""
     # Optional plugin: import here so ``nemo setup`` works without nemo-agents installed.
     from nemo_agents_plugin.utils import expand_env_vars
 
     api_base = base_url.rstrip("/")
     tls_config = httpx_tls_config_from_env(certificate_authority)
 
-    if not _agent_exists(base_url, workspace, headers=headers, certificate_authority=certificate_authority):
+    if not _agent_exists(
+        base_url,
+        workspace,
+        headers=headers,
+        agent_name=agent_name,
+        certificate_authority=certificate_authority,
+    ):
         config_dict = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config_dict = expand_env_vars(config_dict, vars_dict={"NEMO_DEFAULT_MODEL": default_model})
-        payload = {"name": _DEMO_AGENT_NAME, "description": "Demo calculator agent", "config": config_dict}
+        config_format = config_dict.get("config_format", "nat-workflow-v1")
+        if config_format == "nemo-agents-spec-v1":
+            config_dict["models"]["default"]["model"] = default_model
+        payload = {
+            "name": agent_name,
+            "description": description,
+            "config": config_dict,
+            "config_format": config_format,
+        }
         resp = httpx.post(
             f"{api_base}/apis/agents/v2/workspaces/{workspace}/agents",
             headers=headers,
@@ -1902,24 +1939,24 @@ def _deploy_demo_agent_impl(
             **tls_config,
         )
         resp.raise_for_status()
-        console.print(f"  {CHECK} Created agent '{_DEMO_AGENT_NAME}'")
+        console.print(f"  {CHECK} Created agent '{agent_name}'")
     else:
-        console.print(f"  {CHECK} Agent '{_DEMO_AGENT_NAME}' already exists")
+        console.print(f"  {CHECK} Agent '{agent_name}' already exists")
 
     resp = httpx.post(
         f"{api_base}/apis/agents/v2/workspaces/{workspace}/deployments",
         headers=headers,
-        json={"agent": _DEMO_AGENT_NAME},
+        json={"agent": agent_name},
         timeout=30.0,
         **tls_config,
     )
     if resp.status_code == 409:
-        console.print(f"  {CHECK} Agent '{_DEMO_AGENT_NAME}' already deployed")
+        console.print(f"  {CHECK} Agent '{agent_name}' already deployed")
         return True
 
     resp.raise_for_status()
     deployment_name = resp.json().get("name", "")
-    console.print(f"  {CHECK} Deployed agent '{_DEMO_AGENT_NAME}'")
+    console.print(f"  {CHECK} Deployed agent '{agent_name}'")
 
     # Poll the specific deployment we just created by name, not the full
     # list.  Previous runs may leave stale "failed" deployments that would
@@ -1950,6 +1987,78 @@ def _deploy_demo_agent_impl(
 
     console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
     return False
+
+
+def _wait_for_agents_api(
+    base_url: str,
+    workspace: str,
+    headers: dict[str, str] | None = None,
+    *,
+    certificate_authority: str | None = None,
+) -> bool:
+    """Wait for the agents API to become ready."""
+    start = time.monotonic()
+    deadline = start + _AGENT_API_READINESS_TIMEOUT
+    with console.status("[bold cyan]Waiting for agents API...") as spinner:
+        while time.monotonic() < deadline:
+            elapsed = int(time.monotonic() - start)
+            spinner.update(f"[bold cyan]Waiting for agents API... ({elapsed}s)")
+            if _agents_api_ready(
+                base_url,
+                workspace,
+                headers=headers,
+                certificate_authority=certificate_authority,
+            ):
+                return True
+            _pause(_AGENT_API_READINESS_POLL_INTERVAL)
+    return False
+
+
+def _maybe_deploy_sample_agent(
+    base_url: str,
+    workspace: str,
+    default_model: str | None,
+    headers: dict[str, str] | None = None,
+    *,
+    certificate_authority: str | None = None,
+) -> bool:
+    """Create and deploy the packaged Fabric sample agent when prerequisites are available."""
+    if not _agents_plugin_available():
+        console.print(f"  {WARN} nemo-agents plugin not installed, skipping sample agent deployment")
+        return False
+
+    if not default_model:
+        console.print(f"  {WARN} No default model selected, skipping sample agent deployment")
+        return False
+
+    config_path = _sample_agent_config_path()
+    if config_path is None:
+        console.print(f"  {WARN} Could not find Email Security Triage config YAML, skipping sample agent deployment")
+        return False
+
+    if not _wait_for_agents_api(
+        base_url,
+        workspace,
+        headers=headers,
+        certificate_authority=certificate_authority,
+    ):
+        console.print(f"  {WARN} Agents API not ready at {base_url}, skipping sample agent deployment")
+        return False
+
+    try:
+        return _deploy_demo_agent(
+            base_url,
+            workspace,
+            config_path,
+            default_model,
+            headers=headers,
+            agent_name=_SAMPLE_AGENT_NAME,
+            description=_SAMPLE_AGENT_DESCRIPTION,
+            certificate_authority=certificate_authority,
+        )
+    except Exception as exc:
+        console.print(f"  {WARN} Sample agent deployment failed: {exc}")
+        return False
 
 
 def _maybe_deploy_agent(
@@ -2008,23 +2117,12 @@ def _maybe_deploy_agent(
         console.print(f"  {WARN} Could not find calculator-agent config YAML, skipping agent deployment")
         return False
 
-    start = time.monotonic()
-    deadline = start + _AGENT_API_READINESS_TIMEOUT
-    api_ready = False
-    with console.status("[bold cyan]Waiting for agents API...") as spinner:
-        while time.monotonic() < deadline:
-            elapsed = int(time.monotonic() - start)
-            spinner.update(f"[bold cyan]Waiting for agents API... ({elapsed}s)")
-            if _agents_api_ready(
-                base_url,
-                workspace,
-                headers=headers,
-                certificate_authority=certificate_authority,
-            ):
-                api_ready = True
-                break
-            _pause(_AGENT_API_READINESS_POLL_INTERVAL)
-    if not api_ready:
+    if not _wait_for_agents_api(
+        base_url,
+        workspace,
+        headers=headers,
+        certificate_authority=certificate_authority,
+    ):
         console.print(f"  {WARN} Agents API not ready at {base_url}, skipping agent deployment")
         console.print("  Ensure the agents service is running (e.g. [cyan]nemo services run --services agents[/cyan])")
         return False
@@ -2921,6 +3019,13 @@ def _run_interactive_mode(
                 description=_SAMPLE_WORKSPACE_DESCRIPTION,
             ):
                 console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
+            _maybe_deploy_sample_agent(
+                base_url,
+                _SAMPLE_WORKSPACE_NAME,
+                default_model,
+                headers=_platform_request_headers(cli_context),
+                certificate_authority=certificate_authority,
+            )
         return selected_path
 
     except UserCancelled:
