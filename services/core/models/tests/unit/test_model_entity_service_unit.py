@@ -973,6 +973,28 @@ async def test_create_model_adapter_success(
 
 
 @pytest.mark.asyncio
+async def test_create_adapter_on_a_shared_base_records_the_base_where_it_lives(
+    adapter_entity_service, mock_entity_client, create_adapter_request
+):
+    shared_base = create_model_entity(entity_id="shared-base-id", name="llama", workspace="default")
+    mock_entity_client.get.return_value = shared_base
+    mock_entity_client.list.return_value = Page(
+        data=[],
+        pagination=PaginationData(page=1, page_size=100, total_pages=1, total_results=0, current_page_size=0),
+    )
+    mock_entity_client.create.return_value = create_adapter_entity(
+        parent=shared_base, name=create_adapter_request.name, workspace="team-a"
+    )
+
+    await adapter_entity_service.create_adapter("team-a", create_adapter_request, base_model="llama")
+
+    created: Adapter = mock_entity_client.create.call_args.args[0]
+    assert created.workspace == "team-a"
+    assert created.model == "default/llama"
+    assert created.parent == "shared-base-id"
+
+
+@pytest.mark.asyncio
 async def test_create_model_adapter_model_not_found(adapter_entity_service, mock_entity_client, create_adapter_request):
     """Test create adapter when model does not exist returns None."""
     mock_entity_client.get.side_effect = EntityNotFoundError("Entity not found")

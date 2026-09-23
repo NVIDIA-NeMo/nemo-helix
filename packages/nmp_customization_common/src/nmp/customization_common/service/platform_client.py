@@ -140,13 +140,7 @@ async def check_gym_dataset_layout(
 
 
 def model_weights_ref(model: ModelEntity) -> FileSetRef:
-    """Return a model's weights fileset, qualified with the workspace it lives in.
-
-    An unqualified fileset reference on a model names a fileset in the model's own
-    workspace. Left unqualified, the file_io task would resolve it against the job's
-    workspace instead, which differs whenever the model is shared from the global
-    workspace.
-    """
+    """A model's weights fileset; an unqualified one lives in the model's workspace, not the job's."""
     if not model.fileset:
         raise ValueError(f"Model '{model.workspace}/{model.name}' has no fileset.")
     ref = FileSetRef.model_validate(model.fileset)
@@ -177,15 +171,10 @@ async def fetch_model_entity(
         ) from None
 
     if model.fileset:
-        # An unqualified fileset reference on a model names a fileset in the model's own
-        # workspace, which is not always the workspace the reference pointed at: a shared
-        # model resolves out of the global workspace, so resolved_ref would send the lookup
-        # to the caller's workspace and miss.
-        owning_workspace = getattr(model, "workspace", None) or resolved_ref.workspace
         await check_fileset_access(
             platform,
-            model.fileset,
-            owning_workspace,
-            label=f"weights for model '{owning_workspace}/{model.name}'",
+            str(model_weights_ref(model)),
+            model.workspace,
+            label=f"weights for model '{model.workspace}/{model.name}'",
         )
     return model

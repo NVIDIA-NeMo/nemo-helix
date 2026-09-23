@@ -28,7 +28,6 @@ from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
     CreateAdapterRequest,
-    CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
@@ -368,7 +367,7 @@ class TestCreateAdapter:
         models, files = _make_clients()
         base_me = _model_entity(name="base-model")
         models.get_model.return_value = _response(base_me)
-        models.create_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
+        models.create_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
         runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
@@ -381,12 +380,12 @@ class TestCreateAdapter:
 
         _result, deploy_target = runner.create_model_entity(config)
 
-        models.create_model_adapter.assert_called_once()
-        create_call = models.create_model_adapter.call_args
-        assert create_call.kwargs["model_name"] == "base-model"
+        models.create_adapter.assert_called_once()
+        create_call = models.create_adapter.call_args
         assert create_call.kwargs["workspace"] == "default"
         body = create_call.kwargs["body"]
-        assert isinstance(body, CreateModelAdapterRequest)
+        assert isinstance(body, CreateAdapterRequest)
+        assert body.model == "default/base-model"
         assert body.name == "adapter-x"
         assert body.fileset == "default/adapter-x"
         assert body.lora_config is not None
@@ -402,8 +401,9 @@ class TestCreateAdapter:
 
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
-        models.create_model_adapter.side_effect = lambda **_: _raise_runner_conflict()
-        models.update_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
+        models.create_adapter.side_effect = lambda **_: _raise_runner_conflict()
+        models.get_adapter.return_value = _response(types.SimpleNamespace(model="default/base-model"))
+        models.update_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
         runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
@@ -416,15 +416,39 @@ class TestCreateAdapter:
 
         runner.create_model_entity(config)
 
-        models.update_model_adapter.assert_called_once()
-        update_call = models.update_model_adapter.call_args
-        assert update_call.kwargs["adapter"] == "adapter-x"
-        assert update_call.kwargs["model_name"] == "base-model"
+        models.update_adapter.assert_called_once()
+        update_call = models.update_adapter.call_args
+        assert update_call.kwargs["name"] == "adapter-x"
         assert update_call.kwargs["workspace"] == "default"
         body = update_call.kwargs["body"]
         assert isinstance(body, UpdateAdapterRequest)
         assert body.fileset == "default/adapter-x"
         assert body.enabled is True
+
+    def test_adapter_conflict_on_another_base_model_is_not_overwritten(self) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nmp.customization_common.tasks.model_entity.run import ModelEntityCreationError
+        from nmp.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.get_model.return_value = _response(_model_entity(name="base-model"))
+        models.create_adapter.side_effect = lambda **_: _raise_runner_conflict()
+        models.get_adapter.return_value = _response(types.SimpleNamespace(model="default/other-model"))
+
+        runner = _make_runner(models, files)
+        config = ModelEntityTaskConfig(
+            name="adapter-x",
+            workspace="default",
+            fileset=FileSetRef(workspace="default", name="adapter-x"),
+            model_entity="default/base-model",
+            peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+        )
+
+        with pytest.raises(ModelEntityCreationError, match="already exists on base model 'default/other-model'"):
+            runner.create_model_entity(config)
+
+        models.update_adapter.assert_not_called()
 
 
 def _shared_base_lora_config(
@@ -466,7 +490,6 @@ class TestSharedBaseAdapter:
 
         # The bare reference was looked up where the job runs and answered from `default`.
         models.get_model.assert_called_once_with(name="base-model", workspace="marcus")
-        models.create_model_adapter.assert_not_called()
         create_call = models.create_adapter.call_args
         assert create_call.kwargs["workspace"] == "marcus"
         body = create_call.kwargs["body"]
@@ -483,11 +506,11 @@ class TestSharedBaseAdapter:
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(workspace="default", name="base-model"))
         models.create_adapter.side_effect = lambda **_: _raise_runner_conflict()
+        models.get_adapter.return_value = _response(types.SimpleNamespace(model="default/base-model"))
         models.update_adapter.return_value = _response(_model_entity(workspace="marcus", name="adapter-x"))
 
         _marcus_runner(models, files).create_model_entity(_shared_base_lora_config())
 
-        models.update_model_adapter.assert_not_called()
         update_call = models.update_adapter.call_args
         assert update_call.kwargs["workspace"] == "marcus"
         assert update_call.kwargs["name"] == "adapter-x"
@@ -499,14 +522,13 @@ class TestSharedBaseAdapter:
         """Naming ``default/base`` resolved exactly where it pointed, so nothing changes for it."""
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(workspace="default", name="base-model"))
-        models.create_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
+        models.create_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
         _marcus_runner(models, files).create_model_entity(_shared_base_lora_config(model_entity="default/base-model"))
 
-        models.create_adapter.assert_not_called()
-        create_call = models.create_model_adapter.call_args
-        assert create_call.kwargs["model_name"] == "base-model"
+        create_call = models.create_adapter.call_args
         assert create_call.kwargs["workspace"] == "default"
+        assert create_call.kwargs["body"].model == "default/base-model"
 
     def test_inline_deployment_goes_into_the_jobs_workspace(self) -> None:
         from nemo_platform_plugin.deployment import DeploymentParams

@@ -107,7 +107,7 @@ class AdapterEntityService:
             finetuning_type=request.finetuning_type,
             enabled=request.enabled,
             lora_config=request.lora_config,
-            model=f"{model_ws}/{model_name}",
+            model=f"{model.workspace}/{model.name}",
         )
         adapter._parent = model.id
 

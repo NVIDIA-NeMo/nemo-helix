@@ -28,7 +28,6 @@ from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
     ContainerExecutorConfig,
     CreateAdapterRequest,
-    CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
@@ -228,37 +227,29 @@ class ModelEntityRunner:
         base_me: ModelEntity = self.get_model_entity(config.model_entity, fileset_workspace)
 
         if config.peft is not None and config.peft.type == FinetuningType.LORA:
-            adapter_workspace = self._shared_base_adapter_workspace(config, base_me)
-            if adapter_workspace is not None:
-                return self._create_or_update_shared_base_adapter(config, base_me, fileset_ref, adapter_workspace)
-            return self._create_or_update_adapter(config, base_me, fileset_ref)
+            adapter_workspace = self._shared_base_adapter_workspace(config, base_me) or base_me.workspace
+            return self._create_or_update_adapter(config, base_me, fileset_ref, adapter_workspace)
         return self._create_or_update_full_entity(config, fileset_ref, output_workspace)
 
     def _shared_base_adapter_workspace(self, config: ModelEntityTaskConfig, base_me: ModelEntity) -> str | None:
-        """Return the job's workspace when *base_me* was shared in from another workspace, else None.
-
-        A base model found in a different workspace than its reference named can only have
-        arrived through the global-workspace fallback: before sharing, such a reference failed.
-        Its adapter and any deployment then belong to the job's workspace, since the job has no
-        standing to write into the shared one. Every reference that resolves where it points,
-        including one naming another workspace explicitly, keeps the original behaviour.
-        """
+        """The job's workspace when *base_me* resolved through the global-workspace fallback, else None."""
         fileset_workspace = config.fileset.workspace or self.job_ctx.workspace
         requested_workspace, _ = self._parse_model_entity_ref(config.model_entity, fileset_workspace)
         if base_me.workspace == requested_workspace:
             return None
         return config.workspace
 
-    def _create_or_update_shared_base_adapter(
+    def _create_or_update_adapter(
         self,
         config: ModelEntityTaskConfig,
         base_me: ModelEntity,
         fileset_ref: str,
         workspace: str,
     ) -> tuple[dict, ModelEntity]:
-        """Create or update a LoRA adapter in *workspace* whose base lives in another workspace."""
+        """Create or update a LoRA adapter on ``base_me`` in *workspace*. Returns (result, base_me)."""
         assert config.peft is not None
         base_ref = f"{base_me.workspace}/{base_me.name}"
+        adapter_ref = f"{workspace}/{config.name}"
         try:
             adapter = self.models.create_adapter(
                 workspace=workspace,
@@ -275,93 +266,40 @@ class ModelEntityRunner:
                     enabled=True,
                 ),
             ).data()
-            logger.info(f"Created adapter {workspace}/{config.name} for shared base model {base_ref}")
+            logger.info(f"Created adapter {adapter_ref} for base model {base_ref}")
             return adapter.model_dump(), base_me
         except ConflictError:
-            logger.warning(f"Adapter {workspace}/{config.name} already exists, updating with new fileset")
-            try:
-                adapter = self.models.update_adapter(
-                    workspace=workspace,
-                    name=config.name,
-                    body=UpdateAdapterRequest(
-                        fileset=fileset_ref,
-                        description=config.description,
-                        enabled=True,
-                    ),
-                ).data()
-                logger.info(f"Updated adapter {workspace}/{config.name} for shared base model {base_ref}")
-                return adapter.model_dump(), base_me
-            except TRANSIENT_RETRYABLE_EXCEPTIONS:
-                raise
-            except Exception as update_error:
-                logger.exception(f"Failed to update existing adapter {workspace}/{config.name}: {update_error}")
-                raise ModelEntityCreationError(
-                    f"Adapter '{config.name}' already exists but update failed: {update_error}"
-                ) from update_error
+            logger.warning(f"Adapter {adapter_ref} already exists, updating with new fileset")
         except TRANSIENT_RETRYABLE_EXCEPTIONS:
             raise
         except Exception as e:
-            logger.exception(f"Failed to create adapter {workspace}/{config.name}: {e}")
+            logger.exception(f"Failed to create adapter {adapter_ref}: {e}")
             raise ModelEntityCreationError(f"Failed to create model adapter: {e}") from e
 
-    def _create_or_update_adapter(
-        self,
-        config: ModelEntityTaskConfig,
-        base_me: ModelEntity,
-        fileset_ref: str,
-    ) -> tuple[dict, ModelEntity]:
-        """Create or update a LoRA adapter on ``base_me``. Returns (result, base_me)."""
-        assert config.peft is not None
         try:
-            output_me = self.models.create_model_adapter(
-                model_name=base_me.name,
-                workspace=base_me.workspace,
-                body=CreateModelAdapterRequest(
-                    name=config.name,
-                    description=config.description,
+            existing = self.models.get_adapter(workspace=workspace, name=config.name).data()
+            if existing.model != base_ref:
+                raise ModelEntityCreationError(
+                    f"Adapter '{adapter_ref}' already exists on base model '{existing.model}', not '{base_ref}'"
+                )
+            adapter = self.models.update_adapter(
+                workspace=workspace,
+                name=config.name,
+                body=UpdateAdapterRequest(
                     fileset=fileset_ref,
-                    finetuning_type=ModelsFinetuningType(config.peft.type.value),
-                    lora_config=Lora(
-                        alpha=config.peft.alpha,
-                        rank=config.peft.rank,
-                    ),
+                    description=config.description,
                     enabled=True,
                 ),
             ).data()
-            return output_me.model_dump(), base_me
-        except ConflictError:
-            logger.warning(
-                f"Adapter {base_me.workspace}/{config.name} already exists for model "
-                f"{base_me.workspace}/{base_me.name}, updating with new fileset"
-            )
-            try:
-                output_me = self.models.update_model_adapter(
-                    adapter=config.name,
-                    model_name=base_me.name,
-                    workspace=base_me.workspace,
-                    body=UpdateAdapterRequest(
-                        fileset=fileset_ref,
-                        description=config.description,
-                        enabled=True,
-                    ),
-                ).data()
-                logger.info(
-                    f"Successfully updated adapter: {base_me.workspace}/{config.name} "
-                    f"for base model {base_me.workspace}/{base_me.name}"
-                )
-                return output_me.model_dump(), base_me
-            except TRANSIENT_RETRYABLE_EXCEPTIONS:
-                raise
-            except Exception as update_error:
-                logger.exception(
-                    f"Failed to update existing adapter, {base_me.workspace}/{config.name}: {update_error}"
-                )
-                raise ModelEntityCreationError(
-                    f"Adapter '{config.name}' already exists but update failed: {update_error}"
-                ) from update_error
-        except Exception as e:
-            logger.exception(f"Failed to create model adapter: {e}")
-            raise ModelEntityCreationError(f"Failed to create model adapter: {e}") from e
+        except (ModelEntityCreationError, *TRANSIENT_RETRYABLE_EXCEPTIONS):
+            raise
+        except Exception as update_error:
+            logger.exception(f"Failed to update existing adapter {adapter_ref}: {update_error}")
+            raise ModelEntityCreationError(
+                f"Adapter '{config.name}' already exists but update failed: {update_error}"
+            ) from update_error
+        logger.info(f"Updated adapter {adapter_ref} for base model {base_ref}")
+        return adapter.model_dump(), base_me
 
     def _create_or_update_full_entity(
         self,
@@ -421,9 +359,7 @@ class ModelEntityRunner:
 
         is_lora = config.peft is not None and config.peft.type == FinetuningType.LORA
 
-        # A LoRA job on a base shared in from another workspace deploys into its own workspace:
-        # it cannot write to the shared one, and an existing LoRA-enabled deployment of the base
-        # there already hot-loads the adapter without any deployment from this job.
+        # The job cannot write to the shared base's workspace, so it deploys into its own.
         target_workspace = me.workspace
         if is_lora:
             shared_base_workspace = self._shared_base_adapter_workspace(config, me)
