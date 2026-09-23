@@ -310,7 +310,7 @@ def test_fabric_codex_live_eval_captures_atif_trajectory(tmp_path: Path) -> None
     )
 
     trial = result.trials[0]
-    assert trial.status == "completed", trial.metadata
+    assert trial.status == "completed", f"{trial.metadata.get('error_type')}: {trial.metadata.get('error')}"
     assert trial.evidence is not None
     # OTLP is primary because Relay exported one and the runner captured it; ATIF stays reachable
     # under its own key, so a metric written against either view still finds it.
@@ -397,7 +397,7 @@ async def test_a_relay_export_is_captured_and_becomes_the_primary_trace(
     )
 
     trial = result.trials[0]
-    assert trial.status == "completed", trial.metadata
+    assert trial.status == "completed", f"{trial.metadata.get('error_type')}: {trial.metadata.get('error')}"
     assert trial.evidence is not None
     trace = trial.evidence.descriptors[EVIDENCE_TRACE]
     assert trace.format == EVIDENCE_FORMAT_OTLP

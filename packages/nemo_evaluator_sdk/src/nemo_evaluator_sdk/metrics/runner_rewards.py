@@ -65,11 +65,20 @@ class HarborRewardMetric(MetricBase):
     The primary reward is always emitted, preserving Harbor's accepted zero
     fallback. Finalized secondary rewards are optional and are omitted when the
     verifier did not provide a usable finite number.
+
+    On a Harbor task this metric is a placeholder. A Harbor runner (``HarborAgentTaskRunner``,
+    ``run_harbor_eval``, or a platform job) replaces it with one whose ``output_name`` is
+    ``HarborRuntimeConfig.reward_key``; ``description`` and ``labels`` are not kept, and
+    ``reward_keys`` are merged with keys found in the trials. Only when saved trials are rescored
+    with ``AgentEvaluator.run(tasks, trials)`` and no runner is the task's metric used as is.
+    Set ``reward_key`` on ``HarborRuntimeConfig`` to choose the primary reward.
     """
 
     type: Literal[MetricType.HARBOR_REWARD] = MetricType.HARBOR_REWARD
     output_name: str = Field(
-        default="reward", description="Name of the emitted score, read from the trial's `reward` metadata."
+        default="reward",
+        description="Name of the emitted score, read from the trial's `reward` metadata. Harbor "
+        "runners replace it with `HarborRuntimeConfig.reward_key`.",
     )
     reward_keys: tuple[str, ...] = Field(
         default=(), description="Finalized task-local Harbor reward keys, including the primary output."

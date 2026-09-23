@@ -12,19 +12,20 @@ each other.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self, TypeAlias
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal, Self, TypeAlias
 
 # Imported for their registration side effects: each module registers its bundle
 # payload kind so MetricBundle payloads round-trip through validation.
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TasksetRef
+from nemo_evaluator.api.schemas import TaskInputs, TaskMetadataList, TaskRef, TasksetRef
+from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
+from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_model_refs
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
-from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
@@ -332,13 +333,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
     return None, None
 
 
-class _AgentEvalTaskCommon(BaseModel):
-    """Fields shared by the submitter and canonical task DTOs (everything but ``metrics``).
-
-    ``metrics`` differs between the two (refs allowed vs. fully resolved), so — as
-    with ``EvaluateInputSpec``/``EvaluateSpec`` — the variants are siblings that add
-    it, not a subtype pair (a mutable field can't be narrowed across inheritance).
-    """
+class AgentEvalTaskInput(BaseModel):
+    """Submitter-facing task DTO: metrics may be inline bundles or stored-metric references."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -357,23 +353,69 @@ class _AgentEvalTaskCommon(BaseModel):
     )
     metadata: TaskMetadataList = Field(default_factory=list, description="Key/value annotations for the task.")
 
-
-class AgentEvalTaskInput(_AgentEvalTaskCommon):
-    """Submitter-facing task DTO: metrics may be inline bundles or stored-metric references."""
-
     metrics: list[MetricRefOrInline] = Field(
         default_factory=list,
         description="Metrics that score this task, inline and/or references to stored metrics.",
     )
 
 
-class AgentEvalTaskSpec(_AgentEvalTaskCommon):
-    """Canonical task DTO: metrics fully resolved to inline bundles, reconstructed at run time."""
+ResolvedTaskDefinition: TypeAlias = Annotated[
+    ResolvedEvaluatorTaskDefinition | ResolvedHarborTaskDefinition, Field(discriminator="kind")
+]
 
-    metrics: list[MetricInline] = Field(
-        default_factory=list,
-        description="Inline metric bundles that score this task; reconstructed to runtime metrics at run time.",
-    )
+
+class ResolvedTask(BaseModel):
+    """A task captured in the canonical specification of a submitted job.
+
+    This submission-time snapshot is distinct from a persisted task revision: it contains the
+    runtime identity, metadata, and execution-ready definition with metric references expanded.
+    For a stored task, ``spec.provenance`` identifies the immutable revision from which the
+    snapshot was derived. Expanding metric/model references does not rewrite that
+    provenance digest; an inline task has no stored revision or provenance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    spec: ResolvedTaskDefinition
+    metadata: TaskMetadataList = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _harbor_envelope_invariants(self) -> Self:
+        """Require Harbor snapshots to use the native task ID as their runtime ID."""
+        if self.spec.kind == "harbor":
+            if self.id != self.spec.native_task_id:
+                raise ValueError("Harbor task id must equal spec.native_task_id")
+        return self
+
+
+def validate_task_collection(tasks: Sequence[ResolvedTask]) -> None:
+    """Require a nonempty selection with unique runtime IDs ignoring case and no repeated stored entities."""
+    if not tasks:
+        raise ValueError("Expected at least one task")
+    ids = [task.id.casefold() for task in tasks]
+    if len(set(ids)) != len(ids):
+        raise ValueError("task ids must be unique within an evaluation")
+    entities = [task.spec.provenance.entity_name for task in tasks if task.spec.provenance is not None]
+    if len(set(entities)) != len(entities):
+        raise ValueError("Duplicate task identity")
+
+
+def validate_single_kind(tasks: Sequence[ResolvedTask]) -> str:
+    """Require one task kind across an evaluation and return its discriminator.
+
+    Args:
+        tasks: Resolved tasks already validated as a nonempty collection.
+
+    Returns:
+        The single shared task-kind discriminator.
+
+    Raises:
+        ValueError: The collection mixes evaluator and Harbor tasks.
+    """
+    kinds = {task.spec.kind for task in tasks}
+    if len(kinds) != 1:
+        raise ValueError("An evaluation requires exactly one task kind; cannot mix Harbor and evaluator tasks")
+    return next(iter(kinds))
 
 
 class _AgentEvalSpecCommon(BaseModel):
@@ -452,13 +494,16 @@ class _AgentEvalSpecCommon(BaseModel):
 class AgentEvalInputSpec(_AgentEvalSpecCommon):
     """Submitter-facing agent-evaluation input.
 
-    ``tasks`` is either an inline list of tasks (whose metrics may be inline or references) or a
-    :class:`TasksetRef` naming a stored taskset whose member tasks are loaded and expanded during spec
-    resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks`` list.
+    ``tasks`` accepts inline tasks, stored task references, or a stored taskset reference.
+    Stored definitions and scoring expand at submission; Harbor archives are prepared on the worker.
     """
 
-    tasks: TasksetRef | list[AgentEvalTaskInput] = Field(
-        description="Tasks to evaluate: an inline list (at least one) or a reference to a stored taskset.",
+    tasks: (
+        TasksetRef
+        | Annotated[list[AgentEvalTaskInput], Field(min_length=1)]
+        | Annotated[list[TaskRef], Field(min_length=1)]
+    ) = Field(
+        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, or a stored taskset reference.",
     )
 
     @model_validator(mode="after")
@@ -471,17 +516,14 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
 
 
 class AgentEvalSpec(_AgentEvalSpecCommon):
-    """Canonical agent-evaluation spec: tasks with all metric references resolved to inline."""
+    """Canonical evaluation containing self-contained, resolved task snapshots."""
 
-    tasks: list[AgentEvalTaskSpec] = Field(min_length=1, description="Tasks to evaluate; at least one is required.")
+    tasks: Annotated[list[ResolvedTask], Field(min_length=1)] = Field(
+        description="Resolved task snapshots in execution order. Only archive materialization remains on the worker."
+    )
 
     @model_validator(mode="after")
-    def _reject_unresolved_metric_model_refs(self) -> Self:
-        for task in self.tasks:
-            unresolved = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in task.metrics])
-            if unresolved:
-                raise ValueError(
-                    f"AgentEvalSpec task {task.id!r} metric models must be resolved before run: "
-                    + ", ".join(unresolved)
-                )
+    def _validate_resolved_tasks(self) -> Self:
+        validate_task_collection(self.tasks)
+        validate_single_kind(self.tasks)
         return self

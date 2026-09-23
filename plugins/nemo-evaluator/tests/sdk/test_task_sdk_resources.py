@@ -310,3 +310,79 @@ async def test_async_tag_puts_to_the_tag_url() -> None:
     request = recorder.requests[0]
     assert request.method == "PUT"
     assert _request_url(request) == f"{_BASE}/tasks/task-1/tags/blessed"
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("method", ["create", "replace"])
+@pytest.mark.parametrize("kind", ["ready", "sdk_harbor", "sdk_gym"])
+@pytest.mark.parametrize("failed", [False, True])
+async def test_preparation_dispatch_and_registration_errors(tmp_path, monkeypatch, asynchronous, method, kind, failed):
+    from unittest.mock import AsyncMock, Mock
+
+    from nemo_evaluator.sdk.task_preparation import TaskPublicationError
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+    from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
+
+    prepared = _task_input()
+    inputs = {
+        "sdk_harbor": HarborAgentEvalTask(id="task", intent="test", inputs={}, source_dir=tmp_path),
+        "sdk_gym": AgentEvalTask(id="task", intent="test", inputs={}),
+        "ready": prepared,
+    }
+    prepare = AsyncMock(return_value=prepared) if asynchronous else Mock(return_value=prepared)
+    preparation_name = "prepare_task_async" if asynchronous else "prepare_task"
+    monkeypatch.setattr(f"nemo_evaluator.sdk.task_resources.{preparation_name}", prepare)
+    factory = _async_resource if asynchronous else _sync_resource
+    resource, recorder = factory(_task_payload("task-1"))
+    failure = RuntimeError("registration failed")
+    if failed:
+        write = AsyncMock(side_effect=failure) if asynchronous else Mock(side_effect=failure)
+        monkeypatch.setattr(resource._client, f"{method}_task", write)
+
+    async def invoke():
+        result = getattr(resource, method)("task-1", task=inputs[kind])
+        return await result if asynchronous else result
+
+    if failed:
+        expected = RuntimeError if kind == "ready" else TaskPublicationError
+        with pytest.raises(expected) as raised:
+            await invoke()
+        if kind == "ready":
+            assert raised.value is failure
+        else:
+            assert isinstance(raised.value, TaskPublicationError)
+            assert raised.value.prepared_task is prepared
+            assert raised.value.__cause__ is failure
+    else:
+        assert (await invoke()).name == "task-1"
+        assert len(recorder.requests) == 1
+    assert prepare.call_count == (0 if kind == "ready" else 1)
+    if asynchronous:
+        assert prepare.await_count == (0 if kind == "ready" else 1)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("method", ["create", "replace"])
+@pytest.mark.parametrize("option", ["fileset_ref", "path_prefix", "metric_bundle_packager"])
+async def test_ready_input_rejects_preparation_options(monkeypatch, asynchronous, method, option):
+    from unittest.mock import AsyncMock, Mock
+
+    factory = _async_resource if asynchronous else _sync_resource
+    resource, recorder = factory(_task_payload("task-1"))
+    prepare = AsyncMock() if asynchronous else Mock()
+    preparation_name = "prepare_task_async" if asynchronous else "prepare_task"
+    monkeypatch.setattr(f"nemo_evaluator.sdk.task_resources.{preparation_name}", prepare)
+    write = AsyncMock() if asynchronous else Mock()
+    monkeypatch.setattr(resource._client, f"{method}_task", write)
+    value = {
+        "fileset_ref": "storage/custom",
+        "path_prefix": "release-1",
+        "metric_bundle_packager": Mock(),
+    }[option]
+    with pytest.raises(ValueError, match="Preparation options cannot be used with TaskInput"):
+        result = getattr(resource, method)("task-1", task=_task_input(), **{option: value})
+        if asynchronous:
+            await result
+    prepare.assert_not_called()
+    write.assert_not_called()
+    assert recorder.requests == []

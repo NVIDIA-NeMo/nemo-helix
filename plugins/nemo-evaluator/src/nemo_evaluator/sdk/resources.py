@@ -47,7 +47,7 @@ from nemo_evaluator.sdk.types import (
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackager
 from nemo_evaluator.shared.metric_bundles.defaults import resolve_default_metric_bundle_packager
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
-from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentTaskRunner
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.values import (
     Agent,
@@ -147,12 +147,21 @@ class Evaluator:
         target: AgentTaskRunner,
     ) -> AgentEvaluatorJobResource: ...
 
+    @overload
+    def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        trials: list[AgentEvalTrial],
+    ) -> AgentEvaluatorJobResource: ...
+
     def submit(
         self,
         *,
         metric: Metric | None = None,
         dataset: PluginDatasetInput | None = None,
         tasks: TasksetRef | None = None,
+        trials: list[AgentEvalTrial] | None = None,
         config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
         target: SubmitTargetSpec | AgentTaskRunner | None = None,
         placement: GymPlacement | None = None,
@@ -163,7 +172,8 @@ class Evaluator:
         """Submit an evaluation job through the evaluator plugin executor.
 
         Two shapes, discriminated by what you supply: ``metric`` + ``dataset`` evaluates rows, and
-        ``tasks`` + ``target`` evaluates a stored taskset with a live agent runner. They are one
+        ``tasks`` with either ``target`` or ``trials`` evaluates a stored taskset. Supply a live
+        runner as ``target`` or saved trials for offline rescoring. They are one
         method because they are one concept — the split is a property of how the work is described
         today, not of what the caller is asking for.
 
@@ -178,7 +188,9 @@ class Evaluator:
                     "submit() takes either `tasks` (a taskset evaluation) or `metric` + `dataset` "
                     "(a row evaluation), not both. Drop whichever does not describe this run."
                 )
-            if not isinstance(target, AgentTaskRunner):
+            if (target is None) == (trials is None):
+                raise TypeError("submit(tasks=...) requires exactly one of `target` or `trials`.")
+            if target is not None and not isinstance(target, AgentTaskRunner):
                 raise TypeError(
                     "submit(tasks=...) evaluates a taskset with an agent runner, so `target` must be "
                     f"an AgentTaskRunner; got {type(target).__name__}. Pass a runner such as "
@@ -205,7 +217,9 @@ class Evaluator:
                     f"placement=GymPlacement(...) places a GymAgentTaskRunner, not a {type(target).__name__}. "
                     "Placement is per runner kind, so honouring it here would mean guessing."
                 )
-            return self._executor.submit_agent_eval(tasks=tasks, target=target, placement=placement)
+            return self._executor.submit_agent_eval(tasks=tasks, target=target, trials=trials, placement=placement)
+        if trials is not None:
+            raise TypeError("submit(trials=...) requires `tasks=TasksetRef(...)`.")
         if placement is not None:
             raise TypeError(
                 "placement configures a taskset evaluation's runner; a row evaluation has no runner to "

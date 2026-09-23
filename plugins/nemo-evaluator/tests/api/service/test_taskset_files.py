@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+from unittest.mock import AsyncMock
 
 import pytest
 from nemo_evaluator.api.schemas import TaskRef, TasksetInput
@@ -23,6 +24,12 @@ class _FakeTaskService:
     def __init__(self, existing: set[tuple[str, str]]) -> None:
         self.existing = existing
 
+    async def head_by_id(self, task_id):
+        raise NotImplementedError("Use the real TaskService for ID tests")
+
+    async def resolve_head_revision(self, head):
+        raise NotImplementedError("Use the real TaskService for ID tests")
+
     async def get_task(self, workspace: str, name: str) -> object | None:
         return object() if (workspace, name) in self.existing else None
 
@@ -34,7 +41,7 @@ class _FakeTaskService:
 
 @pytest.fixture
 def service(entity_store) -> TasksetService:
-    return TasksetService(entity_store, _FakeTaskService({("default", "task-a")}))
+    return TasksetService(entity_store, _FakeTaskService({("default", "task-a")}), authorize_task_read=AsyncMock())
 
 
 def _input(files_ref: str | None = None) -> TasksetInput:
@@ -107,13 +114,13 @@ async def test_clearing_the_ref_publishes_a_revision(service: TasksetService) ->
 
 def test_a_plain_prefix_is_accepted() -> None:
     """The simplest useful form: a fileset plus the prefix its files sit under."""
-    assert TasksetInput(files_ref="default/my-dataset#files").files_ref == "default/my-dataset#files"
+    assert TasksetInput(tasks=[], files_ref="default/my-dataset#files").files_ref == "default/my-dataset#files"
 
 
 def test_the_ref_must_be_a_fileset_reference() -> None:
-    """Including the fragment. Same shape as ``bundle_ref``/``archive_ref``, so a bare
+    """Including the fragment. Same shape as ``bundle_ref``/Harbor tree references, so a bare
     ``workspace/fileset`` is not a Files reference here and is rejected rather than quietly
     stored as something no reader can resolve."""
     for bad in ("not a ref", "", "default/my-dataset", "default/fs#bad path"):
         with pytest.raises(ValidationError):
-            TasksetInput(files_ref=bad)
+            TasksetInput(tasks=[], files_ref=bad)

@@ -110,7 +110,8 @@ def _compile_agent_eval_cpu_job(
 def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
     """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
     for task in spec.tasks:
-        for bundle in task.metrics:
+        metrics = task.spec.metrics
+        for bundle in metrics:
             for env_name, secret_ref in bundle.secrets.items():
                 yield env_name, secret_ref.root
 

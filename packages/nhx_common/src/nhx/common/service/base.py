@@ -263,7 +263,15 @@ class DependencyProvider:
         return get_auth_client(request).principal.effective_id
 
     def setup_dependencies(self, app: FastAPI, service: "Service") -> None:
-        """Configure FastAPI dependency overrides."""
+        """Bind shared FastAPI dependencies to this service's request-scoped providers.
+
+        Algorithm:
+            - Replace platform authorization and client factories with request-aware providers.
+            - Expose the effective principal, entity client, and platform configuration.
+            - Register the service configuration only when this service owns one.
+        """
+        from nemo_helix_plugin.dependencies import get_request_authorizer
+        from nhx.common.auth.dependencies import get_request_authorizer as request_authorizer
         from nhx.common.service.dependencies import (
             get_effective_principal_id,
             get_entity_client,
@@ -274,6 +282,7 @@ class DependencyProvider:
             get_sync_sdk_client,
         )
 
+        app.dependency_overrides[get_request_authorizer] = request_authorizer
         app.dependency_overrides[get_sdk_client] = self.get_request_scoped_sdk
         app.dependency_overrides[get_sync_sdk_client] = self.get_request_scoped_sync_sdk
         app.dependency_overrides[get_nemo_client] = self.get_request_scoped_nemo_client

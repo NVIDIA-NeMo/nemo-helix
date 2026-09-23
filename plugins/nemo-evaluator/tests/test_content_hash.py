@@ -25,6 +25,7 @@ from nemo_evaluator.api.schemas import (
     TaskInputs,
     TaskRef,
 )
+from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.content_hash import DIGEST_PATTERN, canonical_payload, content_hash
 from nemo_evaluator.entities import TaskEntity, TasksetEntity
 from nemo_evaluator.revisions import head_digest
@@ -68,12 +69,16 @@ def _task(
     )
 
 
-def _harbor_task(*, config: dict[str, Any] | None = None, archive_digest: str = "a" * 64) -> TaskEntity:
+def _harbor_task(*, config: dict[str, Any] | None = None, files_hash: str = "a" * 64) -> TaskEntity:
     return TaskEntity(
         spec=HarborTaskDefinition(
             kind="harbor",
-            archive_ref="default/harbor#packages/o-n/abc/dist.tar.gz",
-            archive_digest=archive_digest,
+            native_task_id="task",
+            harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+            source=HarborArchiveSource(
+                fileset_ref="default/harbor#packages/o-n/abc/files",
+                files_hash=files_hash,
+            ),
             config=config if config is not None else {},
         ),
         name="harbor-1",
@@ -94,6 +99,29 @@ def test_digest_matches_sha256_of_canonical_payload() -> None:
     entity = _task()
     expected = hashlib.sha256(canonical_payload(entity).encode("utf-8")).hexdigest()
     assert content_hash(entity) == expected
+
+
+def test_harbor_scoring_fields_are_part_of_canonical_content():
+    entity = _harbor_task()
+    payload = json.loads(canonical_payload(entity))
+    assert payload["spec"]["metrics"] == [] and payload["spec"]["views"] == {}
+    original_digest = content_hash(entity)
+    restored = TaskEntity.model_validate(entity.model_dump())
+    assert content_hash(restored) == original_digest
+    restored.spec.metrics = [MetricRef("default/custom")]
+    assert content_hash(restored) != original_digest
+    metrics_digest = content_hash(restored)
+    restored.spec.views = _DEFAULT_VIEWS
+    assert content_hash(restored) != metrics_digest
+    assert restored.spec.source == entity.spec.source
+
+
+def test_harbor_native_identity_participates_in_revision_hash():
+    entity = _harbor_task()
+    original = content_hash(entity)
+    assert json.loads(canonical_payload(entity))["spec"]["native_task_id"] == "task"
+    entity.spec.native_task_id = "other"
+    assert content_hash(entity) != original
 
 
 def test_canonical_payload_is_compact_and_key_sorted() -> None:
@@ -229,7 +257,7 @@ def test_int_and_float_render_distinctly() -> None:
 def test_harbor_config_does_not_change_digest() -> None:
     """``config`` is a *projection* of ``task.toml``, never an execution input.
 
-    Harbor reads the real ``task.toml`` out of the materialized archive at run time, so this copy
+    Harbor reads the real ``task.toml`` out of the materialized tree at run time, so this copy
     affects neither execution nor grading. Hashing it would buy no coverage and would make revision
     history sensitive to Harbor's serialization — a release that reordered keys or emitted a new
     defaulted field would cut a revision for byte-identical files.
@@ -242,14 +270,14 @@ def test_harbor_config_does_not_change_digest() -> None:
     assert head_digest(plain) == head_digest(configured)
 
 
-def test_harbor_archive_digest_changes_digest() -> None:
+def test_harbor_files_hash_changes_digest() -> None:
     """The invariant that makes excluding ``config`` safe.
 
-    ``archive_digest`` is authoritative over every file in the task directory, ``task.toml``
+    ``files_hash`` is authoritative over every file in the task directory, ``task.toml``
     included — so a config change that genuinely alters execution or grading moves *this* field and
     is covered. If this ever stopped holding, excluding ``config`` would become a real gap.
     """
-    assert head_digest(_harbor_task()) != head_digest(_harbor_task(archive_digest="b" * 64))
+    assert head_digest(_harbor_task()) != head_digest(_harbor_task(files_hash="b" * 64))
 
 
 # --- Tasksets ----------------------------------------------------------------
@@ -283,3 +311,13 @@ def test_taskset_membership_change_changes_digest() -> None:
 
 def test_taskset_description_change_changes_digest() -> None:
     assert content_hash(_taskset()) != content_hash(_taskset(description="Different."))
+
+
+@pytest.mark.parametrize("field", ["fileset_ref", "files_hash"])
+def test_harbor_source_fields_all_affect_revision(field):
+    original = _harbor_task()
+    changed = original.model_copy(deep=True)
+    assert isinstance(changed.spec, HarborTaskDefinition)
+    tree = changed.spec.source
+    setattr(tree, field, "d" * 64 if field == "files_hash" else f"default/other#{field}")
+    assert head_digest(original) != head_digest(changed)

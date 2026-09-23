@@ -9,7 +9,7 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from nemo_helix_plugin.entities import EntityBase, ListResponse, PaginationInfo
+from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import LogicalOperation
 
@@ -30,7 +30,7 @@ def matches_filter(entity, operation) -> bool:
     return actual == operation.value
 
 
-class FakeEntityStore:
+class FakeEntityStore(EntityClient):
     """In-memory entity store standing in for ``NemoEntitiesClient``.
 
     Two behaviors are reproduced deliberately, because service logic depends on them:
@@ -52,6 +52,8 @@ class FakeEntityStore:
     """
 
     def __init__(self) -> None:
+        # The job transformer now accepts only the concrete typed-client boundary. This fake
+        # implements that boundary directly while keeping all storage in memory.
         self.entities: dict[tuple[str, str, str, str | None], EntityBase] = {}
         #: Monotonic tick for creation timestamps. Wall-clock ``now()`` can repeat within a test,
         #: which would make ``-created_at`` ordering non-deterministic — the real store's inserts
@@ -70,7 +72,7 @@ class FakeEntityStore:
         if key in self.entities:
             raise NemoEntityConflictError(f"{key} exists")
         now = self._now()
-        entity._id = f"{entity.__entity_type__}-{entity.name}"
+        entity._id = f"{entity.__entity_type__}-{self._tick}"
         entity._created_at = now
         entity._updated_at = now
         entity._db_version = 0
@@ -82,6 +84,12 @@ class FakeEntityStore:
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
         return self.entities[key].model_copy(deep=True)
+
+    async def get_by_id(self, entity_type, entity_id):
+        for entity in self.entities.values():
+            if entity.id == entity_id and isinstance(entity, entity_type):
+                return entity.model_copy(deep=True)
+        raise NemoEntityNotFoundError("Task not found")
 
     async def update(self, entity, *, original_name: str | None = None):
         key = self._key(type(entity), original_name or entity.name, entity.workspace, entity._parent)

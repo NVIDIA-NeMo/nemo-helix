@@ -76,7 +76,7 @@ from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN as FILESET_REF_PATTERN,
 )
 from nemo_helix_plugin.schema import DatetimeFilter, Filter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: A stored task's content, discriminated by which runner executes it. Widen with more members as
 #: runners land — the same way ``AgentRunnerTarget`` does on the target side.
@@ -306,7 +306,7 @@ class Taskset(BaseModel):
     )
     files_ref: TasksetFilesRef | None = Field(
         default=None,
-        description="Files reference to the taskset's own files — shared by its members, owned by none.",
+        description="Reference to taskset-level files shared across member tasks, such as a common scoring script.",
     )
     metadata: TaskMetadataList = Field(default_factory=list, description="Key/value annotations for the taskset.")
     revision: int = Field(
@@ -330,7 +330,10 @@ class TasksetInput(BaseModel):
     timestamps).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"oneOf": [{"required": ["tasks"]}, {"required": ["task_ids"]}]},
+    )
 
     description: str | None = Field(default=None, description="Human-readable description of the grouping.")
     tasks: TaskRefList = Field(
@@ -341,6 +344,26 @@ class TasksetInput(BaseModel):
         "Because membership is a set, the stored order is canonical rather than the submitted order: "
         "reordering the same members is not a content change and publishes no revision.",
     )
+    task_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        default_factory=list, description="Stored task record IDs; mutually exclusive with tasks. Resolved on write."
+    )
+
+    @model_validator(mode="after")
+    def exclusive_membership(self) -> TasksetInput:
+        """Require exactly one membership representation and reject duplicate task IDs.
+
+        Returns:
+            The validated taskset input.
+
+        Raises:
+            ValueError: Both or neither membership fields are supplied, or task IDs repeat.
+        """
+        if len(self.model_fields_set & {"tasks", "task_ids"}) != 1:
+            raise ValueError("Supply exactly one of tasks or task_ids")
+        if len(set(self.task_ids)) != len(self.task_ids):
+            raise ValueError("Duplicate task IDs")
+        return self
+
     files_ref: TasksetFilesRef | None = Field(
         default=None,
         description="Files reference to the taskset's own files — shared by its members, owned by none. "

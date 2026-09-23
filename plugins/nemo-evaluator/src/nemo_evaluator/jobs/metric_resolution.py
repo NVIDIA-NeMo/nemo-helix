@@ -13,6 +13,7 @@ through the platform. This module is the one place that logic lives.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from models import parse_workspace_name_ref
@@ -54,6 +55,35 @@ def to_inline(bundle: MetricBundle) -> MetricInline:
 def to_runtime_bundle(metric: MetricInline) -> MetricBundle:
     """Reconstruct the runtime bundle from a wire DTO for execution."""
     return MetricBundle.model_validate_json(metric.model_dump_json())
+
+
+def to_runtime_metrics(metrics: Sequence[MetricInline]) -> list[Metric]:
+    """Return runtime metrics reconstructed from the ordered inline bundle DTOs.
+
+    Args:
+        metrics: Inline metric bundles to decode without changing their order.
+
+    Returns:
+        One runtime metric instance per supplied bundle.
+    """
+    return [unbundle_metric(to_runtime_bundle(metric)) for metric in metrics]
+
+
+def require_resolved_model_refs(metrics: list[Metric], *, subject: str) -> None:
+    """Require all models in the supplied runtime metrics to be resolved.
+
+    Args:
+        metrics: Runtime metrics whose model references are inspected.
+        subject: Diagnostic prefix identifying the task or scoring kind.
+
+    Returns:
+        None when no unresolved model references remain.
+
+    Raises:
+        ValueError: A metric still carries an unresolved model reference.
+    """
+    if unresolved := unresolved_model_refs(metrics):
+        raise ValueError(f"{subject} metric models must be resolved before run: {', '.join(unresolved)}")
 
 
 def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> MetricBundle:
