@@ -72,9 +72,11 @@ version = "0.0.0"
 # Insights analyst plugin convenience group.
 insights = ["nemo-insights-plugin"]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
-# The scaled-evals plugin stays out of `enabled-plugins` so a platform install does not
-# pick it up. CI still has to see it, so the lint and pytest entry points ask for this
-# group by name; without it neither the plugin nor psycopg is importable there.
+# The scaled-evals plugin is opt-in: it is a path dependency rather than a workspace
+# member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
+# external config (e.g. `credentials_encryption_key`) and would otherwise fail readiness.
+# CI still has to see it, so the lint and pytest entry points ask for this group by name;
+# without it neither the plugin nor psycopg is importable there.
 scaled-evals = [
   "nemo-scaled-evals-plugin",
 ]
@@ -424,7 +426,7 @@ nemo-helix-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
-nemo-scaled-evals-plugin = { workspace = true }
+nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-auditor-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
@@ -487,7 +489,6 @@ members = [
   "packages/models",
   "plugins/nemo-guardrails",
   "plugins/nemo-evaluator",
-  "plugins/_temporary-scaled-evals",
   "plugins/nemo-auditor",
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
