@@ -175,21 +175,17 @@ class ModelEntityRunner:
             f"model's specifications. Verify the model checkpoint is valid and in a supported format."
         )
 
-    @staticmethod
-    def _parse_model_entity_ref(model_entity: str, fileset_workspace: str) -> tuple[str, str]:
-        """Split ``"workspace/name"`` (or bare ``"name"``, resolved in *fileset_workspace*)."""
-        parts = model_entity.split("/")
-        if len(parts) == 1 and parts[0]:
-            return fileset_workspace, parts[0]
-        if len(parts) == 2 and all(parts):
-            return parts[0], parts[1]
-        raise ModelEntityCreationError(
-            f"Invalid model entity reference '{model_entity}': expected 'name' or 'workspace/name'."
-        )
-
     def get_model_entity(self, model_entity: str, fileset_workspace: str) -> ModelEntity:
         """Resolve ``"workspace/name"`` (or bare ``"name"``) to a ``ModelEntity``."""
-        me_workspace, me_name = self._parse_model_entity_ref(model_entity, fileset_workspace)
+        parts = model_entity.split("/")
+        if len(parts) == 1 and parts[0]:
+            me_workspace, me_name = fileset_workspace, parts[0]
+        elif len(parts) == 2 and all(parts):
+            me_workspace, me_name = parts[0], parts[1]
+        else:
+            raise ModelEntityCreationError(
+                f"Invalid model entity reference '{model_entity}': expected 'name' or 'workspace/name'."
+            )
 
         try:
             me = self.models.get_model(name=me_name, workspace=me_workspace).data()
@@ -405,9 +401,8 @@ class ModelEntityRunner:
 
         self._create_deployment(deployment_config, me, discriminator=discriminator)
 
-    def _has_active_deployment(self, me: ModelEntity, workspace: str | None = None) -> bool:
-        """Check if the model entity already has an active deployment in *workspace* (default: its own)."""
-        workspace = workspace or me.workspace
+    def _has_active_deployment(self, me: ModelEntity, workspace: str) -> bool:
+        """Check if the model entity already has an active deployment in *workspace*."""
         config_query = ListDeploymentConfigsQueryParams(
             filter=json.dumps({"model_entity_id": f"{me.workspace}/{me.name}"})
         )
@@ -452,10 +447,9 @@ class ModelEntityRunner:
         self,
         deploy_params: DeploymentParams,
         me: ModelEntity,
-        workspace: str | None = None,
+        workspace: str,
     ) -> ModelDeploymentConfig:
-        """Create (or update) a ``ModelDeploymentConfig`` for *me* in *workspace* (default: its own)."""
-        workspace = workspace or me.workspace
+        """Create (or update) a ``ModelDeploymentConfig`` for *me* in *workspace*."""
         model_spec = ModelDeploymentConfigModelSpec(
             model_name=me.name,
             model_namespace=me.workspace,
@@ -486,10 +480,10 @@ class ModelEntityRunner:
         template: ModelDeploymentConfig,
         me: ModelEntity,
         *,
+        workspace: str,
         discriminator: str | None = None,
-        workspace: str | None = None,
     ) -> ModelDeploymentConfig:
-        """Derive a config that serves ``me`` from an unbound ``template``, in *workspace* (default: ``me``'s).
+        """Derive a config that serves ``me`` from an unbound ``template``, in *workspace*.
 
         The referenced config names no model, so deploying it verbatim would leave
         the deployment with no weights to resolve. Instead copy its engine, executor
@@ -519,14 +513,13 @@ class ModelEntityRunner:
         engine: Engine,
         model_spec: ModelDeploymentConfigModelSpec,
         executor_config: ContainerExecutorConfig,
+        workspace: str,
         discriminator: str | None = None,
-        workspace: str | None = None,
     ) -> ModelDeploymentConfig:
-        """Create the auto-deploy config for ``me`` in *workspace* (default: ``me``'s), updating it if it exists.
+        """Create the auto-deploy config for ``me`` in *workspace*, updating it if it exists.
 
         ``discriminator`` scopes the name to the config's source; see ``sanitize_name``.
         """
-        workspace = workspace or me.workspace
         deployment_cfg_name = sanitize_name("sft-cfg", me.name, discriminator)
         try:
             return self.models.create_deployment_config(
