@@ -42,6 +42,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
+    JobUpdate,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesJobStorageConfig,
@@ -1587,3 +1588,57 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
         assert call_args.kwargs["name"] == "orphan-job-with-storage"
         # Persistent storage is also cleaned (job not found is treated as terminal)
         mock_cleanup_storage.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Image-pull backoff
+# ---------------------------------------------------------------------------
+
+_VJ = "nhx.core.jobs.controllers.backends.kubernetes.volcano_job"
+
+
+def _pending_volcano_step(step: HelixJobStepWithContext) -> None:
+    recent = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
+    step.created_at = recent
+    step.updated_at = recent
+    step.status = HelixJobStatus.PENDING
+
+
+def test_stuck_image_pull_fails_a_pending_volcano_job(volcano_job, test_step_pending):
+    """A Volcano job backing off on a bad ref must not wait out the scheduling TTL.
+
+    The Volcano backend does not inherit from KubernetesJobBackend, so it needs
+    its own call into the shared decision; without it this field is accepted on
+    Volcano profiles and silently ignored.
+    """
+    _pending_volcano_step(test_step_pending)
+    message = 'Image pull did not succeed within 600s (ImagePullBackOff): Failed to pull image "registry.invalid/x:y"'
+
+    with (
+        patch(f"{_VJ}.image_pull_backoff_failure", return_value=message) as decide,
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value={"metadata": {"name": "vj"}}),
+        patch.object(volcano_job, "sync_remove_job_with_status") as remove,
+    ):
+        volcano_job.sync(test_step_pending)
+
+    decide.assert_called_once()
+    assert decide.call_args.args[3] == volcano_job._execution_profile_config.ttl_seconds_image_pull
+    remove.assert_called_once()
+    assert remove.call_args.args[1] == HelixJobStatus.ERROR
+    assert remove.call_args.kwargs["error_details"]["message"] == message
+
+
+def test_volcano_job_not_backing_off_keeps_its_scheduling_ttl(volcano_job, test_step_pending):
+    """When no pod is stuck on a pull, the generic pending TTL still owns the step."""
+    _pending_volcano_step(test_step_pending)
+
+    with (
+        patch(f"{_VJ}.image_pull_backoff_failure", return_value=None),
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value={"metadata": {"name": "vj"}}),
+        patch.object(volcano_job, "sync_remove_job_with_status") as remove,
+        patch.object(volcano_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
+    ):
+        update = volcano_job.sync(test_step_pending)
+
+    assert update.status == HelixJobStatus.PENDING
+    remove.assert_not_called()

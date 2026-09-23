@@ -374,6 +374,40 @@ def image_pull_failure_message(events: list[dict[str, Any]]) -> str:
     return warnings[-1] if warnings else ""
 
 
+def image_pull_backoff_failure(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    step: HelixJobStepWithContext,
+    ttl_seconds: int,
+) -> str | None:
+    """Describe a pull the kubelet has been retrying past *ttl_seconds*, else ``None``.
+
+    Shared by the Kubernetes and Volcano backends: deciding that a pull is never
+    going to succeed is identical for both, and only the teardown that follows
+    differs.
+    """
+    if ttl_seconds <= 0:
+        return None
+
+    stuck = [
+        pod for pod in list_pod_status(core_v1, namespace, common_labels_for_step(step)) if is_retrying_image_pull(pod)
+    ]
+    if not stuck:
+        return None
+
+    pod_info, error_details, _ = get_pod_details(core_v1, namespace, stuck[0].name)
+    events = pod_info.get("events") or []
+    backoff_age = image_pull_backoff_age_seconds(events)
+    if backoff_age is None or backoff_age < ttl_seconds:
+        return None
+
+    # Only the pull reasons; a sibling container waiting on init is noise here.
+    reasons = sorted({r for pod in stuck for r in pod.waiting.values() if r in RECOVERABLE_WAITING_REASONS})
+    detail = image_pull_failure_message(events) or error_details.get("failed", "")
+    message = f"Image pull did not succeed within {ttl_seconds}s ({', '.join(reasons)})"
+    return f"{message}: {detail}" if detail else message
+
+
 def is_retrying_image_pull(pod_status: PodStatus) -> bool:
     """Whether the pod has not failed and is only held up by a pull the kubelet keeps retrying."""
     if pod_status.errors or pod_status.phase == "Failed":

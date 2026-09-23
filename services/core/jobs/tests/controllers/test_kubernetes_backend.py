@@ -2988,6 +2988,9 @@ def test_cancel_sweep_attempts_every_task_when_one_update_fails(kubernetes_job):
 # ---------------------------------------------------------------------------
 
 _KJ = "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job"
+# The decision itself lives in common, shared with the Volcano backend; patch it
+# there so these still exercise the real backoff-age and message logic.
+_COMMON = "nhx.core.jobs.controllers.backends.kubernetes.common"
 _PULL_DETAIL = (
     'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": '
     "failed to resolve reference: dial tcp: lookup registry.invalid: no such host"
@@ -3040,8 +3043,8 @@ def _pending_step(step, age_seconds: int = 30) -> None:
 
 def _sync_with(kubernetes_job, step, pods, details):
     with (
-        patch(f"{_KJ}.list_pod_status", return_value=pods),
-        patch(f"{_KJ}.get_pod_details", return_value=details),
+        patch(f"{_COMMON}.list_pod_status", return_value=pods),
+        patch(f"{_COMMON}.get_pod_details", return_value=details),
         patch(f"{_KJ}.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
         patch.object(kubernetes_job, "terminate_job") as terminate,
