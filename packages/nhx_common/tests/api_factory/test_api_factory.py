@@ -54,7 +54,7 @@ from nhx.common.jobs.schemas import (
     HelixJobLogPage,
     HelixJobResultResponse,
 )
-from nhx.common.service.dependencies import get_entity_client, get_sdk_client
+from nhx.common.service.dependencies import get_entity_client, get_nemo_client
 from pydantic import BaseModel
 
 
@@ -346,12 +346,13 @@ def _client_error(error_cls, status_code: int, detail: str):
 def _job_routes_app():
     """Create a test FastAPI app with job routes, patching the typed jobs client.
 
-    The generated handlers call ``client_from_platform(sdk, AsyncJobsClient)`` and then
-    invoke methods on the returned client. We patch ``client_from_platform`` in the
-    api_factory module to return a single ``MagicMock`` jobs client that tests configure
-    (each method as an ``AsyncMock`` returning a ``_resp(...)`` / ``_page_resp(...)``).
+    The generated handlers call ``AsyncJobsClient.from_client(async_client)`` (and
+    ``AsyncFilesClient.from_client`` for downloads) and then invoke methods on the
+    returned client. We patch both ``from_client`` hooks in the api_factory module to
+    return a single ``MagicMock`` client that tests configure (each method as an
+    ``AsyncMock`` returning a ``_resp(...)`` / ``_page_resp(...)``).
     """
-    from nhx.common.service.dependencies import get_sdk_client
+    from nhx.common.service.dependencies import get_nemo_client
 
     mock_sdk = MagicMock()
     mock_jobs = MagicMock()
@@ -367,13 +368,16 @@ def _job_routes_app():
     register_sdk_exception_handlers(app)
 
     # Setup dependency overrides for SDK and entity client injection
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_nemo_client] = lambda: mock_sdk
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
 
     # Include a prefix to indicate the location of the jobs router
     app.include_router(router, prefix="/v2/workspaces/{workspace}/test")
 
-    with patch("nemo_helix_plugin.jobs.api_factory.client_from_platform", return_value=mock_jobs):
+    with (
+        patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=mock_jobs),
+        patch("nemo_helix_plugin.jobs.api_factory.AsyncFilesClient.from_client", return_value=mock_jobs),
+    ):
         yield app, mock_jobs
 
 
@@ -1447,7 +1451,7 @@ def test_validate_and_resolve_job_output_transformer_without_output():
 
 def test_create_job_injects_workspace_and_entity_client():
     """Test that compiler receives workspace and entity_client."""
-    from nhx.common.service.dependencies import get_sdk_client
+    from nhx.common.service.dependencies import get_nemo_client
 
     mock_sdk = MagicMock()
     mock_entity_client = MagicMock()
@@ -1484,14 +1488,14 @@ def test_create_job_injects_workspace_and_entity_client():
 
     app = FastAPI()
     app.include_router(router, prefix="/v2/workspaces/{workspace}/test")
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_nemo_client] = lambda: mock_sdk
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
 
     mock_jobs = MagicMock()
     mock_jobs.create_job = AsyncMock(return_value=_resp(create_mock_platform_job("test-job-123", "pending")))
 
     client = TestClient(app)
-    with patch("nemo_helix_plugin.jobs.api_factory.client_from_platform", return_value=mock_jobs):
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=mock_jobs):
         response = client.post("/v2/workspaces/default/test/jobs", json={"spec": {"foo": "test", "bar": 42}})
 
     assert response.status_code == 201
@@ -1538,11 +1542,11 @@ def test_sync_compiler_is_called_correctly():
     mock_jobs = MagicMock()
     mock_jobs.create_job = AsyncMock(return_value=_resp(create_mock_platform_job("test-job-123", "pending")))
 
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_nemo_client] = lambda: mock_sdk
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
 
     client = TestClient(app)
-    with patch("nemo_helix_plugin.jobs.api_factory.client_from_platform", return_value=mock_jobs):
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=mock_jobs):
         response = client.post("/v2/workspaces/default/test/jobs", json={"spec": {"foo": "test", "bar": 42}})
 
     assert response.status_code == 201
