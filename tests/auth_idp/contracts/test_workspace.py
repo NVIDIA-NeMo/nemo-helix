@@ -3,12 +3,13 @@
 
 import httpx
 import pytest
-from nemo_helix import APIStatusError
 from nemo_helix_ext.auth.helpers import discover_nhx_config
-from nhx.testing import grant_workspace_role
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
 from tests.auth_idp.device_flow import authenticate_authentik_device_flow, with_url_origin
+from tests.auth_idp.helpers import grant_workspace_role
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, TokenSet
 
 pytestmark = [
@@ -72,10 +73,8 @@ def test_provider_workload_identity_is_denied_before_binding(
 ):
     require_capability(auth_idp_case, "workspace_rbac")
 
-    with pytest.raises(APIStatusError) as exc_info:
-        auth_idp_runtime.workload_provider_sdk().workspaces.retrieve(auth_idp_workspace)
-
-    assert exc_info.value.status_code == 403
+    with pytest.raises(PermissionDeniedError):
+        WorkspacesClient.from_client(auth_idp_runtime.workload_provider_client()).get_workspace(name=auth_idp_workspace)
 
 
 def test_provider_workload_identity_is_allowed_after_binding(
@@ -85,11 +84,15 @@ def test_provider_workload_identity_is_allowed_after_binding(
 ):
     require_capability(auth_idp_case, "workspace_rbac")
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     for principal in auth_idp_runtime.workload_role_principals():
-        grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
+        grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
 
-    retrieved = auth_idp_runtime.workload_provider_sdk().workspaces.retrieve(auth_idp_workspace)
+    retrieved = (
+        WorkspacesClient.from_client(auth_idp_runtime.workload_provider_client())
+        .get_workspace(name=auth_idp_workspace)
+        .data()
+    )
     assert retrieved.name == auth_idp_workspace
 
 
@@ -104,8 +107,8 @@ def test_provider_workload_identity_is_allowed_by_subject_alias_binding(
     subject = workload_token.claims.get("sub")
     assert isinstance(subject, str)
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
-    grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=subject, roles=["Viewer"])
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
+    grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=subject, roles=["Viewer"])
 
     response = _retrieve_workspace_with_token(auth_idp_runtime, workload_token.access_token, auth_idp_workspace)
 
@@ -126,8 +129,8 @@ def test_provider_interactive_user_is_allowed_by_email_alias_binding(
     assert isinstance(email, str)
     assert email == auth_idp_case.provider.interactive_user_expected_email
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
-    grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=email, roles=["Viewer"])
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
+    grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=email, roles=["Viewer"])
 
     response = _retrieve_workspace_with_token(auth_idp_runtime, access_token, auth_idp_workspace)
 
@@ -142,16 +145,14 @@ def test_provider_workload_identity_returns_to_denied_after_revoke(
 ):
     require_capability(auth_idp_case, "workspace_rbac")
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     for principal in auth_idp_runtime.workload_role_principals():
-        grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
-        e2e_setup_sdk.workspaces.members.delete(
-            principal,
+        grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
+        WorkspacesClient.from_client(e2e_setup_client).delete_workspace_member(
             workspace=auth_idp_workspace,
-            wait_role_propagation=True,
+            principal_id=principal,
+            query_params={"wait_role_propagation": True},
         )
 
-    with pytest.raises(APIStatusError) as exc_info:
-        auth_idp_runtime.workload_provider_sdk().workspaces.retrieve(auth_idp_workspace)
-
-    assert exc_info.value.status_code == 403
+    with pytest.raises(PermissionDeniedError):
+        WorkspacesClient.from_client(auth_idp_runtime.workload_provider_client()).get_workspace(name=auth_idp_workspace)

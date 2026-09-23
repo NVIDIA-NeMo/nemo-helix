@@ -7,9 +7,9 @@ import uuid
 import httpx
 import pytest
 from nemo_helix_ext.client.tls import HttpxTLSConfig
-from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
+from tests.auth_idp.helpers import grant_workspace_role
 from tests.auth_idp.runtime_contract import AuthIdpRuntime, JsonObject
 
 pytestmark = [
@@ -131,10 +131,10 @@ def test_provider_platform_access_key_authenticates_and_uses_workspace_rbac(
     )
     assert denied_response.status_code == 403, denied_response.text
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     role_principals = sorted(_claim_values(access_key_claims.get("groups"))) or [str(created["principal"])]
     for principal in role_principals:
-        grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
+        grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
 
     allowed_response = _get_until_workspace_role_grant_applies(
         workspace_url,
@@ -172,7 +172,7 @@ def test_provider_platform_access_key_is_allowed_by_principal_alias_binding(
 
     principal = str(created["principal"])
     grant_workspace_role(
-        auth_idp_runtime.e2e_setup_sdk(),
+        auth_idp_runtime.e2e_setup_client(),
         workspace=auth_idp_workspace,
         principal=principal,
         roles=["Viewer"],

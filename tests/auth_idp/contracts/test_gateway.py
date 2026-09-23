@@ -7,9 +7,9 @@ import uuid
 import httpx
 import pytest
 from nemo_helix_ext.client.tls import HttpxTLSConfig
-from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
+from tests.auth_idp.helpers import grant_workspace_role
 
 pytestmark = [
     pytest.mark.auth_idp,
@@ -222,9 +222,9 @@ def test_provider_gateway_forwards_workload_groups(
     role_principals = auth_idp_runtime.workload_role_principals()
     assert set(role_principals).intersection(token_groups)
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     for principal in role_principals:
-        grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
+        grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
 
     tls_config = runtime_tls_config(auth_idp_runtime)
     response = _gateway_get_with_transient_retries(

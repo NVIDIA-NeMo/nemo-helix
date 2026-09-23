@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from _pytest.mark.structures import Mark, MarkDecorator
-from nemo_helix import NeMoHelix
 from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nemo_helix_plugin.client.client import NemoClient
 
 from tests.auth_idp.providers import ProviderConfig
 
@@ -66,13 +66,13 @@ class AuthIdpRuntime(Protocol):
     def deployment_workload_runtime_config(self) -> DeploymentWorkloadRuntimeConfig:
         raise NotImplementedError
 
-    def e2e_setup_sdk(self) -> NeMoHelix:
+    def e2e_setup_client(self) -> NemoClient:
         raise NotImplementedError
 
-    def interactive_user_sdk(self) -> NeMoHelix:
+    def interactive_user_client(self) -> NemoClient:
         raise NotImplementedError
 
-    def workload_provider_sdk(self) -> NeMoHelix:
+    def workload_provider_client(self) -> NemoClient:
         raise NotImplementedError
 
     def workload_role_principals(self) -> list[str]:
