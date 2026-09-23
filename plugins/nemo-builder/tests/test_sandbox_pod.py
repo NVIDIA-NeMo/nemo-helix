@@ -10,6 +10,11 @@ posture the namespace admits -- neither of which a packet can tell you.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
+import pytest
+from nemo_builder_plugin.run import supervise
 from nemo_builder_plugin.run.supervise import (
     KANIKO_CAPABILITIES,
     RESULT_MARKER,
@@ -131,13 +136,6 @@ class TestTheBuildScript:
         assert script.count("/kaniko/executor") == 3
         assert script.count("--cleanup") == 3
 
-    def test_a_failing_image_does_not_abort_the_set(self) -> None:
-        """One broken Dockerfile in a set of ten must not cost the other nine -- which is also
-        why the reconciler asks the registry even when the job exited non-zero."""
-        script = _build_script(_group(2), _sandbox())
-        assert script.count("|| true") == 2
-        assert script.count(f'echo "{RESULT_MARKER}') == 2
-
     def test_a_mirror_disables_fallback_past_it(self) -> None:
         """Without this, a mirror is decorative: with public egress available the fallback would
         succeed silently and no error would appear anywhere."""
@@ -147,6 +145,59 @@ class TestTheBuildScript:
 
     def test_no_mirror_means_no_fallback_flag(self) -> None:
         assert "--skip-default-registry-fallback" not in _build_script(_group(1), _sandbox())
+
+
+class TestTheBuildScriptRuns:
+    """The script executed by a real shell, against a stand-in for kaniko.
+
+    The tests above read the script as text, and text is exactly where the last bug here hid: the
+    script contained a marker line per image, as asserted, and every marker said 0 because each
+    invocation ended in ``|| true``. What `supervise` needs is a behaviour of the shell, so this
+    runs one.
+    """
+
+    @staticmethod
+    def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dockerfiles: list[str]) -> dict[str, int]:
+        executor = tmp_path / "executor"
+        # Exits 3 for any Dockerfile whose name starts with "broken", 0 otherwise. 3 rather than
+        # 1 so the test proves the real status is recorded, not merely a non-zero one.
+        executor.write_text(
+            '#!/bin/sh\nfor arg in "$@"; do case "$arg" in --dockerfile=broken*) exit 3;; esac; done\nexit 0\n'
+        )
+        executor.chmod(0o755)
+        monkeypatch.setattr(supervise, "KANIKO_EXECUTOR", str(executor))
+
+        group = SandboxGroup(
+            context_sub_path="context/fs-a",
+            output_sub_path="out",
+            images=[
+                SandboxImage(
+                    image=f"demo-1-{i}",
+                    platform="linux/amd64",
+                    context="/ctx",
+                    dockerfile=dockerfile,
+                    layout=f"/out/demo-1-{i}",
+                )
+                for i, dockerfile in enumerate(dockerfiles)
+            ],
+        )
+        result = subprocess.run(
+            ["sh", "-c", _build_script(group, _sandbox())], capture_output=True, text=True, check=False
+        )
+        return _results_from_log(result.stdout)
+
+    def test_each_marker_records_kanikos_own_exit_status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The regression. With `|| true` this came back all zeros, and a failed build was logged
+        as built -- on the cluster, not just here."""
+        results = self._run(tmp_path, monkeypatch, ["Dockerfile", "broken.Dockerfile", "Dockerfile"])
+        assert results == {"demo-1-0": 0, "demo-1-1": 3, "demo-1-2": 0}
+
+    def test_a_failing_image_does_not_abort_the_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """One broken Dockerfile in a set of ten must not cost the other nine -- which is also
+        why the reconciler asks the registry even when the job exited non-zero. The images after
+        the failure still ran and still reported."""
+        results = self._run(tmp_path, monkeypatch, ["broken.Dockerfile", "Dockerfile"])
+        assert results == {"demo-1-0": 3, "demo-1-1": 0}
 
 
 class TestResultParsing:

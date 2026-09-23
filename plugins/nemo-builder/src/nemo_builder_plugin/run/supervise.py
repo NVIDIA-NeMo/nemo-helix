@@ -49,6 +49,10 @@ KANIKO_CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"]
 #: the volume the sandbox wrote to.
 RESULT_MARKER = "NMP_IMAGE_RESULT"
 
+#: The executor inside the kaniko `:debug` image. A constant so the script's shell semantics can
+#: be tested by running it against a stand-in, rather than only by reading it.
+KANIKO_EXECUTOR = "/kaniko/executor"
+
 _POD_TIMEOUT_SECONDS = 60 * 60
 
 
@@ -62,11 +66,17 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     **The set is not aborted on a failure.** Each image gets its own exit line, so one broken
     Dockerfile in a set of ten does not cost the other nine -- which is also why the reconciler
     must ask the registry even when the job as a whole exited non-zero.
+
+    That needs nothing more than the absence of ``set -e``, and the marker line must come
+    *immediately* after kaniko so ``$?`` is kaniko's status. An earlier version appended
+    ``|| true`` to each invocation "to keep going" -- after which ``$?`` is the status of
+    ``true``, so every image reported 0 and ``supervise`` logged a failed build as built. Found on
+    the cluster, where a Dockerfile written to fail printed ``NMP_IMAGE_RESULT ... 0``.
     """
     lines = ["set -u"]
     for image in group.images:
         args = [
-            "/kaniko/executor",
+            KANIKO_EXECUTOR,
             f"--context=dir://{image.context}",
             f"--dockerfile={image.dockerfile}",
             f"--custom-platform={image.platform}",
@@ -82,7 +92,7 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
             # deployment believes every FROM is bounded when some are not.
             args.append(f"--registry-mirror={sandbox.registry_mirror}")
             args.append("--skip-default-registry-fallback")
-        lines.append(" ".join(shlex.quote(a) for a in args) + " || true")
+        lines.append(" ".join(shlex.quote(a) for a in args))
         lines.append(f'echo "{RESULT_MARKER} {image.image} $?"')
     return "\n".join(lines)
 
