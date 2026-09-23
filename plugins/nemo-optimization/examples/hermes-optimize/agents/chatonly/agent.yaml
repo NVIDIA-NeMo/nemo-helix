@@ -33,7 +33,6 @@ harnesses:
 models:
   judge:
     provider: openai
-    # A reasoning model spends its reply thinking and never reaches the JSON the judge parses.
     model: nvidia-nemotron-3-super-120b-a12b
     base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
     api_key_env: NEMO_AGENTS_IGW_API_KEY
