@@ -460,3 +460,32 @@ def test_a_host_failure_without_output_reads_as_before() -> None:
 def test_a_non_mapping_error_is_still_rendered() -> None:
     """Older hosts send a bare string; it must not become a stack trace in the caller."""
     assert "plain failure" in sandboxed._host_error_message("http://sandbox/run", "plain failure")
+
+
+async def test_a_503_bootstrap_failure_renders_the_envelope_it_carried(tasks, tmp_path, monkeypatch) -> None:
+    """A host that failed to bootstrap answers 503 with the same envelope a 200 would carry.
+
+    Truncating the raw body instead drops the output tail, which is ordered oldest first, so the
+    cut lands on the traceback that says why the host never started.
+    """
+    tail = [f"bootstrap line {index}" for index in range(80)]
+    host = _FakeHost(
+        status=503,
+        body={
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "PolicyCredentialRejected: the policy endpoint rejected the configured credential",
+                "host_output_tail": tail,
+            }
+        },
+    )
+    runner = runner_against(host, monkeypatch)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    message = str(excinfo.value)
+    assert "rejected the configured credential" in message
+    assert "gym host output" in message, "the tail must be labelled, not left as raw JSON"
+    assert "bootstrap line 0" in message, "the oldest line is where the traceback starts"
+    assert "bootstrap line 79" in message

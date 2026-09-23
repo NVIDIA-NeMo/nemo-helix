@@ -1514,6 +1514,11 @@ def _policy_config(key: str = "${oc.env:GYM_POLICY_API_KEY}") -> dict[str, Any]:
     }
 
 
+def _opener(open_fn):
+    """The preflight calls ``_NO_REDIRECT_OPENER.open``, so stubs must present that surface."""
+    return SimpleNamespace(open=open_fn)
+
+
 def _raising_urlopen(status: int):
     def _urlopen(request, timeout=None):
         raise urllib.error.HTTPError(request.full_url, status, "", Message(), io.BytesIO(b""))
@@ -1528,7 +1533,7 @@ def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch)
     server discards the upstream status, and the sandbox carrying the only log of it is destroyed.
     """
     monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-expired")
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(401))
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(401)))
 
     config = _policy_config()
 
@@ -1550,7 +1555,7 @@ def test_preflight_lets_a_non_auth_failure_through(monkeypatch, status: int) -> 
     retryable rollout error into an unrecoverable startup failure.
     """
     monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(status))
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(status)))
 
     runtime._preflight_policy_credential(_policy_config())
 
@@ -1561,7 +1566,7 @@ def test_preflight_survives_a_network_error(monkeypatch) -> None:
     def _urlopen(request, timeout=None):
         raise OSError("name resolution failed")
 
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_urlopen))
 
     runtime._preflight_policy_credential(_policy_config())
 
@@ -1582,7 +1587,7 @@ def test_preflight_skips_what_it_cannot_resolve(monkeypatch, config: dict[str, A
     def _never(request, timeout=None):  # pragma: no cover - asserted by not being called
         raise AssertionError("preflight probed an endpoint it could not resolve")
 
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _never)
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_never))
 
     runtime._preflight_policy_credential(config)
 
@@ -1597,7 +1602,7 @@ def test_preflight_reads_the_key_from_the_environment(monkeypatch) -> None:
         sent["url"] = request.full_url
         raise urllib.error.HTTPError(request.full_url, 500, "", Message(), io.BytesIO(b""))
 
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_urlopen))
     runtime._preflight_policy_credential(_policy_config())
 
     assert sent["auth"] == "Bearer sk-live", "the resolved value, not the interpolation text"
@@ -1798,10 +1803,54 @@ def test_preflight_does_not_blame_the_credential_for_a_403(monkeypatch):
     naming the credential sends an operator to rotate a key that was never the problem.
     """
     monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-fine")
-    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(403))
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(403)))
 
     with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
         runtime._preflight_policy_credential(_policy_config())
 
     assert "refused the request" in str(excinfo.value)
     assert "rejected the configured credential" not in str(excinfo.value)
+
+
+def test_a_secret_split_across_two_writes_is_still_masked(monkeypatch):
+    """A stream splits where the writer flushes, not where a secret ends.
+
+    Masking each write on its own stores the halves as two unmasked fragments, and the tail goes
+    to the caller and the job log.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-splitsecret123")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("key=nvapi-split")
+    tail.write("secret123 done\n")
+
+    assert list(buffer) == ["key=*** done"]
+
+
+def test_an_unterminated_write_is_held_rather_than_captured(monkeypatch):
+    """Capturing it early is what splits a secret in the first place."""
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer)
+
+    tail.write("no newline yet")
+
+    assert list(buffer) == []
+
+
+def test_the_preflight_refuses_to_follow_a_redirect() -> None:
+    """Following one re-sends the Authorization header wherever the endpoint points.
+
+    Only the sandbox egress policy would stand between the policy key and an arbitrary origin, and
+    Docker applies none. Returning None from ``redirect_request`` makes urllib surface the 3xx as
+    its own status, which the preflight then treats as inconclusive.
+    """
+    # `handlers` is real but absent from typeshed's OpenerDirector stub.
+    handlers = [type(handler) for handler in getattr(runtime._NO_REDIRECT_OPENER, "handlers")]
+    assert runtime._RefuseRedirect in handlers, "the preflight opener must refuse redirects"
+
+    refused = runtime._RefuseRedirect().redirect_request(
+        MagicMock(), MagicMock(), 302, "Found", Message(), "https://evil.example/v1/chat/completions"
+    )
+
+    assert refused is None

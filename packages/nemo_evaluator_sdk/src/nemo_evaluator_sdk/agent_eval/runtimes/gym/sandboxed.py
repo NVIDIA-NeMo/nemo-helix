@@ -267,11 +267,16 @@ class SandboxedGymAgentTaskRunner:
             )
         elapsed = time.monotonic() - started
         if response.status_code >= 400:
-            # The body is the host's own error envelope; it names which example or server failed,
-            # which the status code alone does not.
+            # A bootstrap failure arrives here as a 503 carrying the same envelope a 200 would, so
+            # render it the same way. Truncating the raw body instead cuts the output tail short.
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            error = payload.get("error") if isinstance(payload, Mapping) else None
+            detail = render_host_error(error) if error is not None else response.text[:2000]
             raise RuntimeError(
-                f"sandboxed Gym host returned {response.status_code} from {self._config.rollout_url}: "
-                f"{response.text[:2000]}"
+                f"sandboxed Gym host returned {response.status_code} from {self._config.rollout_url}: {detail}"
             )
         body = self._decode_body(response, elapsed)
         error = body.get("error") if isinstance(body, Mapping) else None

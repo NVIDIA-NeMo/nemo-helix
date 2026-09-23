@@ -126,9 +126,14 @@ class _OutputTail:
         self._stream = stream
         self._buffer = buffer
         self._secrets = secrets
+        self._partial = ""
 
     def write(self, text: str) -> int:
-        for line in text.splitlines():
+        # Captured only once a line terminator arrives. Masking each write on its own would store a
+        # secret straddling two writes as two fragments, neither of which matches it.
+        pending = self._partial + text
+        self._partial = "" if pending.endswith(("\n", "\r")) else pending.rpartition("\n")[2]
+        for line in pending[: len(pending) - len(self._partial)].splitlines():
             if line.strip():
                 self._buffer.append(self._scrub(line))
         return self._stream.write(text)
@@ -230,6 +235,20 @@ def _resolved_policy_route(global_config: dict[str, Any]) -> tuple[str, str, str
     return values
 
 
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """Surfaces a redirect as its own status instead of following it.
+
+    Following one re-sends the ``Authorization`` header to whatever the endpoint names, and only
+    the sandbox egress policy would stand between that and an arbitrary origin.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_RefuseRedirect)
+
+
 def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
     """Reject a bad policy credential before Gym's servers are built."""
     base_url, api_key, model_name = _resolved_policy_route(global_config)
@@ -245,7 +264,7 @@ def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=_PREFLIGHT_TIMEOUT_S):
+        with _NO_REDIRECT_OPENER.open(request, timeout=_PREFLIGHT_TIMEOUT_S):
             return
     except urllib.error.HTTPError as error:
         if error.code not in (401, 403):
