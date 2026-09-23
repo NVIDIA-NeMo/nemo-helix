@@ -21,6 +21,11 @@ export interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupIte
   label: ReactNode;
   /** Optional secondary description text */
   description?: ReactNode;
+  /**
+   * Tightens the card to a single-row tile: 12px of padding over a 4px gap, rather than
+   * the 24px and 8px a full-size card uses.
+   */
+  compact?: boolean;
   /** Type scale for the label and description. Defaults suit a full-size card. */
   labelKind?: ComponentProps<typeof Text>['kind'];
   descriptionKind?: ComponentProps<typeof Text>['kind'];
@@ -61,6 +66,7 @@ export const RadioCard: FC<RadioCardProps> = ({
   description,
   icon,
   slotEnd,
+  compact = false,
   labelKind = 'body/bold/lg',
   descriptionKind = 'body/regular/md',
   value,
@@ -100,10 +106,16 @@ export const RadioCard: FC<RadioCardProps> = ({
     : labelSide === 'right'
       ? '[&_.nv-radio-group-input]:col-start-1'
       : '[&_.nv-radio-group-input]:col-start-2';
-  const gapClass = hasDescription
-    ? '[&_.nv-card-content]:gap-2!'
-    : '[&_.nv-card-content]:gap-0! [&_.nv-card-content]:gap-x-2!';
-  const nvPanelContentClass = `[&_.nv-card-content]:grid ${colClass} [&_.nv-card-content]:grid-rows-[auto_auto] [&_.nv-card-content]:items-center! [&_.nv-card-content]:w-full ${inputClass} ${gapClass} ${hasDescription ? '[&_.nv-card-content]:row-gap-2' : ''}`;
+  // Compact emits its own row gap rather than overriding `gap-2!`, so the two never
+  // race on specificity.
+  const gapClass = !hasDescription
+    ? '[&_.nv-card-content]:gap-0! [&_.nv-card-content]:gap-x-2!'
+    : compact
+      ? '[&_.nv-card-content]:gap-x-2! [&_.nv-card-content]:gap-y-1!'
+      : '[&_.nv-card-content]:gap-2!';
+  const rowGapClass = hasDescription && !compact ? '[&_.nv-card-content]:row-gap-2' : '';
+  const paddingClass = compact ? '[&_.nv-card-content]:p-3!' : '';
+  const nvPanelContentClass = `[&_.nv-card-content]:grid ${colClass} [&_.nv-card-content]:grid-rows-[auto_auto] [&_.nv-card-content]:items-center! [&_.nv-card-content]:w-full ${inputClass} ${gapClass} ${rowGapClass} ${paddingClass}`;
 
   return (
     <RadioGroupItem
