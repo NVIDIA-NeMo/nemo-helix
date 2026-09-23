@@ -1530,14 +1530,16 @@ def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch)
     monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-expired")
     monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(401))
 
-    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
-        runtime._preflight_policy_credential(_policy_config())
+    config = _policy_config()
 
-    message = str(excinfo.value)
-    assert "integrate.api.nvidia.com" in message, "name the endpoint that refused the credential"
-    assert "401" in message
-    assert "nemotron-3.5-lightning-30b-a3b" in message, "name the model, which may itself be wrong"
-    assert "GYM_POLICY_API_KEY" in message, "name the variable an operator has to rotate"
+    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
+        runtime._preflight_policy_credential(config)
+
+    assert str(excinfo.value) == (
+        f"the policy endpoint {config['policy_base_url']} rejected the configured credential "
+        f"(HTTP 401) for model {config['policy_model_name']}, read from $GYM_POLICY_API_KEY. "
+        "Every rollout would fail the same way."
+    )
 
 
 @pytest.mark.parametrize("status", [429, 500, 502, 503])
