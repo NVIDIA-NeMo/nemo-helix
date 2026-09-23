@@ -30,7 +30,7 @@ from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.service import DataDesignerService
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.commands import add_function_commands, add_job_commands
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -224,9 +224,9 @@ def _create_nemotron_personas_fileset(sdk: NeMoHelix, persona_data: pd.DataFrame
 async def compile_create_job(
     original_spec: DataDesignerJobConfig,
     workspace: str = WORKSPACE_NAME,
-    sdk: AsyncNeMoHelix | None = None,
+    sdk: AsyncNemoClient | None = None,
 ) -> HelixJobSpec:
-    sdk = sdk or AsyncMock(spec=AsyncNeMoHelix)
+    sdk = sdk or AsyncMock(spec=AsyncNemoClient)
     entity_client = Mock()
     job = CreateJob()
     # This helper exercises the plugin-service compilation path, where
