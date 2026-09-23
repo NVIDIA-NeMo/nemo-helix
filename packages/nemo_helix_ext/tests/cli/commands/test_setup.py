@@ -60,6 +60,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _load_persisted_data_dir,
     _load_skills_with_warnings,
     _maybe_deploy_agent,
+    _maybe_deploy_sample_agent,
     _maybe_install_skills,
     _maybe_start_services,
     _model_parameter_size,
@@ -78,6 +79,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _resolve_setup_workspace,
     _run_auto_mode,
     _run_interactive_mode,
+    _sample_agent_config_path,
     _save_data_dir,
     _select_model_pair,
     _select_usable_model_pair,
@@ -2268,6 +2270,10 @@ class TestInteractiveModelPairSelection:
                 f"{self._MOD}._ensure_workspace_exists",
                 side_effect=lambda *args, **kwargs: event_order.append("workspace") or True,
             ) as ensure_workspace,
+            patch(
+                f"{self._MOD}._maybe_deploy_sample_agent",
+                side_effect=lambda *args, **kwargs: event_order.append("agent") or True,
+            ) as deploy_sample_agent,
         ):
             selected_path = _run_interactive_mode(
                 cli_context,
@@ -2287,7 +2293,14 @@ class TestInteractiveModelPairSelection:
             "sample",
             description="Sample workspace created by the NeMo setup flow.",
         )
-        assert event_order == ["skills", "complete", "post_setup", "workspace"]
+        deploy_sample_agent.assert_called_once_with(
+            "http://localhost:8080",
+            "sample",
+            "default/claude-sonnet-4-6",
+            headers=None,
+            certificate_authority=None,
+        )
+        assert event_order == ["skills", "complete", "post_setup", "workspace", "agent"]
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
         """When the new provider is still syncing, setup should not show a misleading picker."""
@@ -2351,6 +2364,7 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._maybe_install_skills"),
             patch(f"{self._MOD}._print_setup_complete"),
             patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
+            patch(f"{self._MOD}._maybe_deploy_sample_agent") as deploy_sample_agent,
             patch(f"{self._MOD}.console") as mock_console,
         ):
             _run_interactive_mode(
@@ -2363,6 +2377,13 @@ class TestInteractiveModelPairSelection:
             )
 
         mock_select_model_pair.assert_not_called()
+        deploy_sample_agent.assert_called_once_with(
+            "http://localhost:8080",
+            "sample",
+            None,
+            headers=None,
+            certificate_authority=None,
+        )
         printed_lines = [call.args[0] for call in mock_console.print.call_args_list if call.args]
         assert any(
             "Models from existing providers are available, but not from 'my-ollama-custom' yet." in line
@@ -3907,6 +3928,13 @@ class TestDeployDemoAgentSpinner:
 
         assert _agent_config_path() == config
 
+    def test_sample_agent_config_path_uses_packaged_resource(self):
+        config = _sample_agent_config_path()
+
+        assert config is not None
+        assert config.name == "agent.yaml"
+        assert "name: email-security-triage" in config.read_text(encoding="utf-8")
+
     def _mock_deploy_responses(self, *, status_sequence):
         """Build httpx response mocks for create + deployment status polling.
 
@@ -4042,6 +4070,109 @@ class TestDeployDemoAgentSpinner:
         create_call = mock_post.call_args_list[0]
         sent_config = create_call.kwargs["json"]["config"]
         assert sent_config["llms"]["agent"]["model_name"] == "nvidia-nemotron-3-super-v3"
+
+    def test_deploys_named_fabric_agent_with_setup_model(self, tmp_path, spinner_console):
+        config = tmp_path / "agent.yaml"
+        config.write_text(
+            "\n".join(
+                [
+                    "config_format: nemo-agents-spec-v1",
+                    "name: email-security-triage",
+                    "models:",
+                    "  default:",
+                    "    provider: nvidia",
+                    "    model: bundled-model",
+                    "",
+                ]
+            )
+        )
+        responses = self._mock_deploy_responses(status_sequence=["running"])
+
+        with (
+            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
+            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]) as mock_post,
+            patch(f"{self._MOD}._agent_exists", return_value=False) as agent_exists,
+            patch(f"{self._MOD}._pause"),
+            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
+        ):
+            result = _deploy_demo_agent(
+                "http://localhost:8080",
+                "sample",
+                config,
+                default_model="sample/selected-model",
+                agent_name="email-security-triage",
+                description="Setup sample",
+            )
+
+        assert result is True
+        agent_exists.assert_called_once_with(
+            "http://localhost:8080",
+            "sample",
+            headers=None,
+            agent_name="email-security-triage",
+            certificate_authority=None,
+        )
+        create_payload = mock_post.call_args_list[0].kwargs["json"]
+        assert create_payload == {
+            "name": "email-security-triage",
+            "description": "Setup sample",
+            "config_format": "nemo-agents-spec-v1",
+            "config": {
+                "config_format": "nemo-agents-spec-v1",
+                "name": "email-security-triage",
+                "models": {
+                    "default": {
+                        "provider": "nvidia",
+                        "model": "sample/selected-model",
+                    }
+                },
+            },
+        }
+        assert mock_post.call_args_list[1].kwargs["json"] == {"agent": "email-security-triage"}
+
+
+class TestMaybeDeploySampleAgent:
+    _MOD = "nemo_helix_ext.cli.commands.setup"
+
+    def test_deploys_packaged_agent_in_sample_workspace(self):
+        config = MagicMock()
+        with (
+            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
+            patch(f"{self._MOD}._sample_agent_config_path", return_value=config),
+            patch(f"{self._MOD}._wait_for_agents_api", return_value=True),
+            patch(f"{self._MOD}._deploy_demo_agent", return_value=True) as deploy_agent,
+        ):
+            result = _maybe_deploy_sample_agent(
+                "http://localhost:8080",
+                "sample",
+                "sample/selected-model",
+                headers={"Authorization": "Bearer token"},
+                certificate_authority="/tmp/ca.pem",
+            )
+
+        assert result is True
+        deploy_agent.assert_called_once_with(
+            "http://localhost:8080",
+            "sample",
+            config,
+            "sample/selected-model",
+            headers={"Authorization": "Bearer token"},
+            agent_name="email-security-triage",
+            description="Fabric email security triage sample agent created by the NeMo setup flow.",
+            certificate_authority="/tmp/ca.pem",
+        )
+
+    def test_skips_when_default_model_is_unavailable(self):
+        with (
+            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
+            patch(f"{self._MOD}._sample_agent_config_path") as config_path,
+            patch(f"{self._MOD}._deploy_demo_agent") as deploy_agent,
+        ):
+            result = _maybe_deploy_sample_agent("http://localhost:8080", "sample", None)
+
+        assert result is False
+        config_path.assert_not_called()
+        deploy_agent.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
