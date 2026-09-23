@@ -911,9 +911,10 @@ async def test_grpo_lora_rejects_an_output_name_owned_by_a_different_base_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Adapter names are workspace-unique, so this can never succeed -- fail before training."""
-    from nmp.rl.app.jobs.compiler import _validate_adapter_base_model
-    from nmp.rl.schemas import LoRAParams
-
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
     adapter = MagicMock()
     adapter.model = "default/some-other-model"
     response = MagicMock()
@@ -922,13 +923,22 @@ async def test_grpo_lora_rejects_an_output_name_owned_by_a_different_base_model(
     lookup.side_effect = None
     lookup.return_value = response
 
-    job = RlJobOutput(
-        model="default/base-model",
-        dataset="default/prefs",
-        environment="default/env",
-        training=GRPOTraining(type="grpo", finetuning_type="lora", lora=LoRAParams(rank=8, alpha=16)),
-        output=OutputResponse(name="my-lora", type=OutputNameType.ADAPTER, fileset="my-lora-fs"),
+    with pytest.raises(PlatformJobCompilationError, match="default/some-other-model"):
+        await platform_job_config_compiler("default", _grpo_lora_job(), platform_clients)
+    lookup.assert_awaited_once_with(name="my-lora", workspace="default")
+
+
+@pytest.mark.asyncio
+async def test_dpo_does_not_look_up_an_adapter(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only GRPO LoRA writes an adapter, so no other job is checked against existing adapters."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="default/some-other-model"):
-        await _validate_adapter_base_model("default", job, platform_clients)
+    await platform_job_config_compiler("default", _make_job_output(), platform_clients)
+
+    _adapter_lookup(platform_clients).assert_not_awaited()

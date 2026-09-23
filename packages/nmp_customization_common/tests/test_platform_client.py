@@ -2,17 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nmp.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     check_dataset_access,
     check_environment_access,
     check_gym_dataset_layout,
     fetch_model_entity,
+    validate_adapter_base_model,
 )
 
 
@@ -120,3 +123,42 @@ async def test_environment_access_rejects_directory_path() -> None:
 
     with pytest.raises(ValueError, match="must not include a '#path/' directory"):
         await check_environment_access(platform, "default/environment#package", "default")
+
+
+def _adapter_clients(existing_base: str | None, *, missing: bool = False) -> AsyncCustomizationPlatformClients:
+    models = MagicMock()
+    if missing:
+        models.get_adapter = AsyncMock(side_effect=_not_found())
+    else:
+        models.get_adapter = AsyncMock(return_value=SimpleNamespace(data=lambda: SimpleNamespace(model=existing_base)))
+    return AsyncCustomizationPlatformClients(files=MagicMock(), models=models)
+
+
+@pytest.mark.parametrize(
+    ("base_model_ref", "existing_base", "missing"),
+    [
+        ("default/base", None, True),
+        ("default/base", "default/base", False),
+        ("base", "default/base", False),
+        ("default/base", None, False),
+    ],
+    ids=["no-adapter-yet", "retrain-same-base", "bare-name-same-base", "adapter-without-base"],
+)
+async def test_adapter_base_model_allows(base_model_ref: str, existing_base: str | None, missing: bool) -> None:
+    platform = _adapter_clients(existing_base, missing=missing)
+
+    await validate_adapter_base_model("my-lora", base_model_ref, "default", platform)
+
+    cast(AsyncMock, platform.models.get_adapter).assert_awaited_once_with(name="my-lora", workspace="default")
+
+
+async def test_adapter_base_model_rejects_a_different_base() -> None:
+    """The adapter name is taken in this workspace, so training would only fail at the end."""
+    platform = _adapter_clients("default/other-base")
+
+    with pytest.raises(
+        PlatformJobCompilationError,
+        match=r"Adapter 'default/my-lora' already exists on base model 'default/other-base', "
+        r"but this job trains against 'default/base'",
+    ):
+        await validate_adapter_base_model("my-lora", "default/base", "default", platform)

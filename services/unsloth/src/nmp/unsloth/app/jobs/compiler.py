@@ -47,6 +47,7 @@ from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig,
 from nmp.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     fetch_model_entity,
+    validate_adapter_base_model,
 )
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.unsloth.app.constants import (
@@ -341,35 +342,6 @@ async def _validate_deployment_config(
         )
 
 
-async def _validate_adapter_base_model(
-    workspace: str,
-    job_spec: UnslothJobOutput,
-    platform: AsyncCustomizationPlatformClients,
-) -> None:
-    """Reject a LoRA job whose output name is an adapter of a different base model."""
-    # Adapter names are unique per workspace, so retraining an existing adapter name under a
-    # different base model conflicts on create and cannot be updated. Without this the job
-    # trains to completion first and only fails in the model-entity step.
-    if _resolve_finetuning_type(job_spec) != FinetuningType.LORA:
-        return
-
-    output_name = job_spec.output.name
-    try:
-        existing = (await platform.models.get_adapter(name=output_name, workspace=workspace)).data()
-    except NotFoundError:
-        return
-
-    base = parse_entity_ref(job_spec.model.name, workspace)
-    expected = f"{base.workspace}/{base.name}"
-    if existing.model is not None and existing.model != expected:
-        raise PlatformJobCompilationError(
-            f"Adapter '{workspace}/{output_name}' already exists on base model '{existing.model}', "
-            f"but this job trains against '{expected}'. Adapter names are unique per workspace, so "
-            "the existing adapter cannot be re-parented. Choose a different output.name, or train "
-            f"against '{existing.model}'."
-        )
-
-
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: UnslothJobOutput,
@@ -385,7 +357,8 @@ async def platform_job_config_compiler(
 
     me = await fetch_model_entity(job_spec.model.name, workspace, platform)
 
-    await _validate_adapter_base_model(workspace, job_spec, platform)
+    if _resolve_finetuning_type(job_spec) == FinetuningType.LORA:
+        await validate_adapter_base_model(job_spec.output.name, job_spec.model.name, workspace, platform)
     await _validate_deployment_config(workspace, job_spec, platform)
 
     cpu_resources = _get_cpu_resources()

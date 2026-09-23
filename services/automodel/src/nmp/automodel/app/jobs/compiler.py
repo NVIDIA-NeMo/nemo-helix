@@ -60,7 +60,11 @@ from nmp.customization_common.schemas.model_entity import (
 from nmp.customization_common.schemas.model_entity import (
     PEFTConfig as ModelEntityPEFTConfig,
 )
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    fetch_model_entity,
+    validate_adapter_base_model,
+)
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 
 logger = logging.getLogger(__name__)
@@ -392,35 +396,6 @@ async def _validate_deployment_config(
             )
 
 
-async def _validate_adapter_base_model(
-    workspace: str,
-    transformed_spec: CustomizationJobOutput,
-    platform: AsyncCustomizationPlatformClients,
-) -> None:
-    """Reject a LoRA job whose output name is an adapter of a different base model."""
-    # Adapter names are unique per workspace, so retraining an existing adapter name under a
-    # different base model conflicts on create and cannot be updated. Without this the job
-    # trains to completion first and only fails in the model-entity step.
-    if transformed_spec.training.finetuning_type != FinetuningType.LORA:
-        return
-
-    output_name = transformed_spec.output.name
-    try:
-        existing = (await platform.models.get_adapter(name=output_name, workspace=workspace)).data()
-    except NotFoundError:
-        return
-
-    base = parse_entity_ref(transformed_spec.model, workspace)
-    expected = f"{base.workspace}/{base.name}"
-    if existing.model is not None and existing.model != expected:
-        raise PlatformJobCompilationError(
-            f"Adapter '{workspace}/{output_name}' already exists on base model '{existing.model}', "
-            f"but this job trains against '{expected}'. Adapter names are unique per workspace, so "
-            "the existing adapter cannot be re-parented. Choose a different output.name, or train "
-            f"against '{existing.model}'."
-        )
-
-
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: CustomizationJobOutput,
@@ -458,7 +433,8 @@ async def platform_job_config_compiler(
                 f"Access denied to teacher model '{transformed_spec.training.teacher_model}'."
             ) from e
 
-    await _validate_adapter_base_model(workspace, transformed_spec, platform)
+    if transformed_spec.training.finetuning_type == FinetuningType.LORA:
+        await validate_adapter_base_model(transformed_spec.output.name, transformed_spec.model, workspace, platform)
 
     if transformed_spec.deployment_config is not None:
         await _validate_deployment_config(workspace, transformed_spec, platform)

@@ -14,6 +14,7 @@ from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from
 from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.files.types import FilesetPurpose
+from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.common.entities.utils import parse_entity_ref
@@ -168,3 +169,32 @@ async def fetch_model_entity(
             label=f"weights for model '{resolved_ref.workspace}/{resolved_ref.name}'",
         )
     return model
+
+
+async def validate_adapter_base_model(
+    adapter_name: str,
+    base_model_ref: str,
+    workspace: str,
+    platform: AsyncCustomizationPlatformClients,
+) -> None:
+    """Reject a LoRA output name that is already an adapter of a different base model.
+
+    Adapter names are unique per workspace, so retraining an existing adapter name under a
+    different base model conflicts on create and cannot be updated. Without this check the
+    job trains to completion first and only fails in the model-entity step. Callers decide
+    whether the job trains a LoRA adapter; this only compares base models.
+    """
+    try:
+        existing = (await platform.models.get_adapter(name=adapter_name, workspace=workspace)).data()
+    except NotFoundError:
+        return
+
+    base = parse_entity_ref(base_model_ref, workspace)
+    expected = f"{base.workspace}/{base.name}"
+    if existing.model is not None and existing.model != expected:
+        raise PlatformJobCompilationError(
+            f"Adapter '{workspace}/{adapter_name}' already exists on base model '{existing.model}', "
+            f"but this job trains against '{expected}'. Adapter names are unique per workspace, so "
+            "the existing adapter cannot be re-parented. Choose a different output.name, or train "
+            f"against '{existing.model}'."
+        )
