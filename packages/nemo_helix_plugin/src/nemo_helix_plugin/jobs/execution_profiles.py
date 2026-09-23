@@ -102,7 +102,7 @@ class JobExecutionProfileConfig(BaseModel):
         default=None,
         min_length=1,
         description="Default container image for job task pods. Used when a job step omits container.image. "
-        "When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).",
+        "When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-tasks:platform.image_tag).",
     )
     env: dict[str, str] = Field(
         default_factory=dict,

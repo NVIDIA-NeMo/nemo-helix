@@ -62,7 +62,7 @@ OPTIMIZE_COMMAND = [OPTIMIZE_TASK_MODULE]
 
 #: Image for the cpu (docker / kubernetes_job) fallback.  ``nemo-optimization-plugin`` is part of
 #: the ``cpu-tasks`` dependency group so ``python -m nemo_optimization.tasks.optimize`` imports there.
-OPTIMIZE_TASK_IMAGE = "nhx-cpu-tasks"
+OPTIMIZE_TASK_IMAGE = "nhx-tasks"
 
 
 class OptimizeJob(NemoJob):

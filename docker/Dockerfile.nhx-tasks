@@ -17,18 +17,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-workspace-sdists.py \
         --python /app/.venv/bin/python \
-        --output /app/.source-distributions/nhx-cpu-tasks && \
+        --output /app/.source-distributions/nhx-tasks && \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-python-sdists.py \
         --python /app/.venv/bin/python \
-        --output /app/.source-distributions/nhx-cpu-tasks \
+        --output /app/.source-distributions/nhx-tasks \
         --lock-file /app/uv.lock \
         --label app-venv && \
-    bash /usr/local/bin/collect-apt-sources.sh /app/.source-distributions/nhx-cpu-tasks/apt --installed && \
+    bash /usr/local/bin/collect-apt-sources.sh /app/.source-distributions/nhx-tasks/apt --installed && \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-cpython-source.py \
         --python /app/.venv/bin/python \
-        --output /app/.source-distributions/nhx-cpu-tasks
+        --output /app/.source-distributions/nhx-tasks
 RUN mkdir -p /app/.runtime-home/nvs
 
 # Job steps and plugin tasks may shell out to small POSIX utilities. Keep the
@@ -69,7 +69,7 @@ ENV USERNAME=nvs \
     HOME=/home/nvs
 COPY --chown=1000:1000 --from=builder /app/.runtime-home/nvs /home/nvs
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
-COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-cpu-tasks/ /usr/share/nemo-helix/source-distributions/nhx-cpu-tasks/
+COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-tasks/ /usr/share/nemo-helix/source-distributions/nhx-tasks/
 COPY --chown=1000:1000 --from=builder /app/plugins/nemo-data-designer/tiktoken-cache /app/tiktoken-cache
 ENV TIKTOKEN_CACHE_DIR=/app/tiktoken-cache
 ENV VIRTUAL_ENV=/app/.venv \

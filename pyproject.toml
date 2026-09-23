@@ -240,7 +240,7 @@ agents-deepagents-e2e-services = [
   "nemo-agents-plugin[deepagents]",
 ]
 
-# CPU task dependencies (for nhx-cpu-tasks container)
+# CPU task dependencies (for nhx-tasks container)
 # Services that have CPU-only batch tasks
 cpu-tasks = [
   { include-group = "nhx-base" },
@@ -362,7 +362,7 @@ override-dependencies = [
   "jaraco-context>=6.1.0",    # High OOS – nhx-auditor-tasks + customizer
   "joserfc>=1.7.2",
   "pyasn1>=0.6.4",            # High OOS – nhx-auditor-tasks + customizer
-  "setuptools>=78.1.1",       # High OOS – nhx-cpu-tasks/gpu-tasks/customizer-tasks
+  "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
   "urllib3>=2.7.0",           # High OOS – nhx-auditor-tasks + customizer
   "wheel>=0.46.2",            # High OOS – widespread
   "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks

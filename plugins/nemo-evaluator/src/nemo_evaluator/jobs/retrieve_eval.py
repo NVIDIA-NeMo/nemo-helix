@@ -205,7 +205,7 @@ class _RetrieveEvalJobBase(NemoJob):
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nhx-cpu-tasks"),
+                            image=get_qualified_image("nhx-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_evaluator.tasks.retrieve_eval"],
                         ),

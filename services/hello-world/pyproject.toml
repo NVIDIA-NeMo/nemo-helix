@@ -23,7 +23,7 @@ nhx-testing = { workspace = true }
 
 
 [dependency-groups]
-# Task execution dependencies (for nhx-cpu-tasks container - demo task)
+# Task execution dependencies (for nhx-tasks container - demo task)
 task = [
   "requests",
   "nhx-common",

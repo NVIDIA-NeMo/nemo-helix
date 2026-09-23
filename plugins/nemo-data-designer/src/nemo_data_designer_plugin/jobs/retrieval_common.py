@@ -56,7 +56,7 @@ def cpu_retrieval_step(
     spec: BaseModel,
     profile: str | None,
     module_args: list[str] | None = None,
-    image: str = "nhx-cpu-tasks",
+    image: str = "nhx-tasks",
     hf_token_secret: str | None = None,
 ) -> HelixJobStep:
     return HelixJobStep(

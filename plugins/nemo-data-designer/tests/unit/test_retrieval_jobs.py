@@ -93,7 +93,7 @@ async def test_retrieval_generate_compile_is_cpu() -> None:
     assert len(steps) == 1
     executor = _executor(steps[0])
     assert executor["provider"] == "cpu"
-    assert "nhx-cpu-tasks" in executor["container"]["image"]
+    assert "nhx-tasks" in executor["container"]["image"]
 
 
 @pytest.mark.asyncio

@@ -162,14 +162,14 @@ async def test_compile_prefers_the_subprocess_profile() -> None:
 async def test_compile_falls_back_to_the_cpu_profile_with_a_task_image() -> None:
     with (
         profiles(CPU_PROFILE),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec())
 
     executor = next(iter(platform_spec["steps"]))["executor"]
     assert executor["provider"] == "cpu"
     assert executor["profile"] == "default"
-    assert executor["container"]["image"] == "reg.example/nhx-cpu-tasks:test"
+    assert executor["container"]["image"] == "reg.example/nhx-tasks:test"
     assert [*executor["container"]["entrypoint"], *executor["container"]["command"]] == [
         "python",
         "-m",
@@ -185,7 +185,7 @@ async def test_compile_matches_the_requested_profile_name() -> None:
             SUBPROCESS_PROFILE,
             DockerJobExecutionProfile(provider="cpu", profile="high-mem", config=DockerJobExecutionProfileConfig()),
         ),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec(), profile="high-mem")
 

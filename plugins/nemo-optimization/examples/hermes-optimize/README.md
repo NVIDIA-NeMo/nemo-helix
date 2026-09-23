@@ -263,7 +263,7 @@ read them back from.
 **Where the study runs:** optimize compiles to the `subprocess` execution
 profile when the platform registers one, and otherwise to the `cpu` profile
 (docker or `kubernetes_job`, whichever the deployment registered) using the
-`nhx-cpu-tasks` image. Either way the fileset is the only input, so both
+`nhx-tasks` image. Either way the fileset is the only input, so both
 backends see the same tree. See
 [Operator notes](../../../../docs/agents/optimization.mdx) for what each backend
 needs installed.

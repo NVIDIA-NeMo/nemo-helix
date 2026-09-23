@@ -80,7 +80,7 @@ def test_ngc_sdk_supports_required_metadata_parameters() -> None:
 
 
 def test_default_display_name_preserves_known_names() -> None:
-    assert default_display_name("nhx-cpu-tasks") == "NeMo Helix CPU Tasks"
+    assert default_display_name("nhx-tasks") == "NeMo Helix Tasks"
     assert default_display_name("nhx-safe-synthesizer-tasks") == "Safe Synthesizer Tasks"
 
 

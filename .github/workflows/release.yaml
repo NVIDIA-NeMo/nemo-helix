@@ -52,7 +52,7 @@ on:
       container-ids:
         description: >-
           Custom only. Comma-separated container IDs.
-          Allowed: nhx-api, nhx-cpu-tasks, nhx-gym-tasks, nhx-gym-host,
+          Allowed: nhx-api, nhx-tasks, nhx-gym-tasks, nhx-gym-host,
           nhx-customizer-tasks, nhx-automodel-training, nhx-unsloth-training,
           nhx-rl-training, nhx-auditor-tasks, nhx-safe-synthesizer-tasks.
         required: false
@@ -125,7 +125,7 @@ env:
   RELEASE_CONTAINERS_JSON: >-
     [
       {"id":"nhx-api","target":"nhx-api-docker"},
-      {"id":"nhx-cpu-tasks","target":"nhx-cpu-tasks-docker"},
+      {"id":"nhx-tasks","target":"nhx-tasks-docker"},
       {"id":"nhx-gym-tasks","target":"nhx-gym-tasks-docker"},
       {"id":"nhx-gym-host","target":"nhx-gym-host-docker"},
       {"id":"nhx-customizer-tasks","target":"nhx-customizer-tasks"},
