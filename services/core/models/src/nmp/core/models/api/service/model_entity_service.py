@@ -350,7 +350,9 @@ class ModelEntityService:
         logger.debug(f"Creating model entity: {workspace}/{request.name}")
         # Check if entity already exists (entities API doesn't enforce uniqueness)
         try:
-            existing: Model = await self.entity_client.get(Model, name=request.name, workspace=workspace)
+            existing: Model = await self.entity_client.get(
+                Model, name=request.name, workspace=workspace, local_only=True
+            )
             if existing:
                 logger.warning(f"Model already exists: {workspace}/{request.name}")
                 raise ValueError(f"Model with name '{request.name}' already exists in workspace '{workspace}'")

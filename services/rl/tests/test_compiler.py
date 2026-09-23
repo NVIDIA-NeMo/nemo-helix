@@ -893,3 +893,11 @@ async def test_inline_lora_enabled_false_is_rejected_at_compile(
 
     with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler("default", job, platform_clients)
+
+
+def test_download_pins_bare_weights_to_the_models_own_workspace() -> None:
+    """A job in another workspace must download a shared model's weights from where they live."""
+    cfg = _build_download_config(_make_job_output(), _make_model_entity(fileset="base-model"), workspace="marcus")
+
+    model_download = next(item for item in cfg.download if item.src.name == "base-model")
+    assert model_download.src.workspace == "default"

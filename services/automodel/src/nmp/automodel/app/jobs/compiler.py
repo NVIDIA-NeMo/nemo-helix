@@ -60,7 +60,11 @@ from nmp.customization_common.schemas.model_entity import (
 from nmp.customization_common.schemas.model_entity import (
     PEFTConfig as ModelEntityPEFTConfig,
 )
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    fetch_model_entity,
+    model_weights_ref,
+)
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 
 logger = logging.getLogger(__name__)
@@ -166,13 +170,13 @@ def _build_file_download_config(
     """
     downloads: list[DownloadItem] = []
 
-    model_fileset = _require_fileset_for_download(
+    _require_fileset_for_download(
         _extract_model_uri(me),
         entity_label=f"Model '{me.workspace}/{me.name}'",
     )
     _append_download_if_present(
         downloads,
-        fileset_name=model_fileset,
+        fileset_name=str(model_weights_ref(me)),
         dest=DEFAULT_MODEL_PATH,
         field_name="model",
     )
@@ -184,13 +188,13 @@ def _build_file_download_config(
     )
 
     if teacher_me is not None:
-        teacher_fileset = _require_fileset_for_download(
+        _require_fileset_for_download(
             _extract_model_uri(teacher_me),
             entity_label=f"Teacher model '{teacher_me.workspace}/{teacher_me.name}'",
         )
         _append_download_if_present(
             downloads,
-            fileset_name=teacher_fileset,
+            fileset_name=str(model_weights_ref(teacher_me)),
             dest=DEFAULT_TEACHER_MODEL_PATH,
             field_name="teacher_model",
         )

@@ -1243,6 +1243,13 @@ paths:
       description: 'Delete an entity by its name.
 
 
+        Refused with 409 when the entity has child entities in other workspaces, naming
+
+        them: ``entities.parent`` cascades, so deleting would remove another workspace''s
+
+        work. Remove those entities first.
+
+
         Example:
 
         ```

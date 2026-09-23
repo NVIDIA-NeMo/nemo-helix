@@ -20,6 +20,7 @@ from nmp.core.entities.app.repository.entity import EntityRepositoryInterface
 from nmp.core.entities.cache import TTLCache
 from nmp.core.entities.config import EntitiesConfig
 from nmp.core.entities.entities import Entity
+from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE, is_globally_shareable
 
 # Entity type for role bindings (used for access control queries)
 ROLE_BINDING_ENTITY_TYPE = "role_binding"
@@ -349,3 +350,27 @@ def add_workspace_filtering(
         )
 
     return workspace_filter
+
+
+def can_read_global_workspace(
+    accessible_workspaces: Optional[Set[str]],
+    entity_type: Optional[str],
+) -> bool:
+    """Whether a caller may see global-workspace entities of *entity_type*.
+
+    Sharing resolves a shared entity into the caller's own workspace; it does not grant
+    access to the global workspace. A caller entitled only to their own workspace sees
+    nothing from the global one, by any route. ``None`` means unrestricted access
+    (auth disabled, or a service principal).
+    """
+    if not is_globally_shareable(entity_type):
+        return False
+    return accessible_workspaces is None or GLOBAL_WORKSPACE in accessible_workspaces
+
+
+async def resolve_global_readability(
+    entity_repository: EntityRepositoryInterface,
+    entity_type: Optional[str],
+) -> bool:
+    """Resolve accessible workspaces and report whether the global workspace is among them."""
+    return can_read_global_workspace(await get_accessible_workspaces(entity_repository), entity_type)

@@ -33,6 +33,7 @@ from nemo_platform_plugin.inference_middleware import (
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
 from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
+from nmp.core.inference_gateway.api.authz import OPENAI_EXEC_PERMISSION, may_use_from_workspace
 from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
 from nmp.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -972,9 +973,14 @@ async def virtual_model_proxy(
     http_client: ClientSession,
     model_cache: "ModelCache",
     registry: "MiddlewareRegistry",
+    permission: str = OPENAI_EXEC_PERMISSION,
     request_nemo_client: AsyncNemoClient | None = None,
 ) -> Response:
     """Execute the full VirtualModel middleware pipeline and return a streaming response.
+
+    *permission* is the calling route's exec permission. The model entity the request
+    finally resolves to, and a LoRA adapter's own workspace, are checked against it when
+    they lie outside *workspace* (see :func:`may_use_from_workspace`).
 
     Shared implementation for both ``openai_proxy`` and ``model_entity_proxy``.
     The caller is responsible for:
@@ -1102,6 +1108,15 @@ async def virtual_model_proxy(
             ) from exc
 
         resolved_model_entity = model_cache.get_from_model_entity(modified_model_ref.workspace, modified_model_ref.name)
+        # A model entity shared in from the global workspace, or a LoRA adapter living in
+        # another workspace, is usable only by a caller entitled there; to anyone else it
+        # does not exist.
+        adapter_parts = parse_adapters_suffix(modified_model_ref.name)
+        if resolved_model_entity is not None and (
+            not await may_use_from_workspace(modified_model_ref.workspace, resolved_model_entity.workspace, permission)
+            or (adapter_parts is not None and not await may_use_from_workspace(workspace, adapter_parts[1], permission))
+        ):
+            resolved_model_entity = None
         if resolved_model_entity is None:
             raise_model_entity_not_found(modified_model_ref.workspace, modified_model_ref.name)
         if not resolved_model_entity.model_providers:

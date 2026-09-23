@@ -9,6 +9,7 @@ Covers:
 - Update-on-conflict semantics (matches automodel behavior)
 - Deployment launch with string-ref and inline DeploymentParams
 - Skipping deployment when there's already an active one for a LoRA base
+- LoRA on a base shared from another workspace: adapter and deployment stay in the job's workspace
 - sanitize_name utility
 """
 
@@ -22,9 +23,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from nemo_platform_plugin.deployment import DeploymentParams
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
+    CreateAdapterRequest,
     CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
@@ -422,6 +425,200 @@ class TestCreateAdapter:
         assert isinstance(body, UpdateAdapterRequest)
         assert body.fileset == "default/adapter-x"
         assert body.enabled is True
+
+
+def _shared_base_lora_config(
+    *,
+    model_entity: str = "base-model",
+    deployment_config: str | DeploymentParams | None = None,
+):
+    """A LoRA job in ``marcus`` whose base reference only resolves through the global fallback."""
+    from nmp.customization_common.schemas.file_io import FileSetRef
+    from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+    from nmp.unsloth.entities.values import FinetuningType
+
+    return ModelEntityTaskConfig(
+        name="adapter-x",
+        workspace="marcus",
+        fileset=FileSetRef(workspace=None, name="adapter-x"),
+        model_entity=model_entity,
+        peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+        deployment_config=deployment_config,
+    )
+
+
+def _marcus_runner(models: ModelsClient, files: FilesClient):
+    from nmp.customization_common.tasks.model_entity.run import ModelEntityRunner
+
+    return ModelEntityRunner(models=models, files=files, job_ctx=_make_job_ctx(workspace="marcus"))
+
+
+class TestSharedBaseAdapter:
+    """A base shared in from ``default`` puts the adapter, and any deployment, in the job's workspace."""
+
+    def test_adapter_is_created_in_the_jobs_workspace(self) -> None:
+        models, files = _make_clients()
+        base_me = _model_entity(workspace="default", name="base-model")
+        models.get_model.return_value = _response(base_me)
+        models.create_adapter.return_value = _response(_model_entity(workspace="marcus", name="adapter-x"))
+
+        _result, deploy_target = _marcus_runner(models, files).create_model_entity(_shared_base_lora_config())
+
+        # The bare reference was looked up where the job runs and answered from `default`.
+        models.get_model.assert_called_once_with(name="base-model", workspace="marcus")
+        models.create_model_adapter.assert_not_called()
+        create_call = models.create_adapter.call_args
+        assert create_call.kwargs["workspace"] == "marcus"
+        body = create_call.kwargs["body"]
+        assert isinstance(body, CreateAdapterRequest)
+        assert body.model == "default/base-model"
+        assert body.name == "adapter-x"
+        assert body.fileset == "marcus/adapter-x"
+        assert body.lora_config is not None
+        assert (body.lora_config.rank, body.lora_config.alpha) == (8, 16)
+        assert body.enabled is True
+        assert deploy_target is base_me
+
+    def test_adapter_conflict_updates_the_adapter_in_the_jobs_workspace(self) -> None:
+        models, files = _make_clients()
+        models.get_model.return_value = _response(_model_entity(workspace="default", name="base-model"))
+        models.create_adapter.side_effect = lambda **_: _raise_runner_conflict()
+        models.update_adapter.return_value = _response(_model_entity(workspace="marcus", name="adapter-x"))
+
+        _marcus_runner(models, files).create_model_entity(_shared_base_lora_config())
+
+        models.update_model_adapter.assert_not_called()
+        update_call = models.update_adapter.call_args
+        assert update_call.kwargs["workspace"] == "marcus"
+        assert update_call.kwargs["name"] == "adapter-x"
+        body = update_call.kwargs["body"]
+        assert isinstance(body, UpdateAdapterRequest)
+        assert body.fileset == "marcus/adapter-x"
+
+    def test_explicit_reference_to_another_workspace_keeps_the_original_behaviour(self) -> None:
+        """Naming ``default/base`` resolved exactly where it pointed, so nothing changes for it."""
+        models, files = _make_clients()
+        models.get_model.return_value = _response(_model_entity(workspace="default", name="base-model"))
+        models.create_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
+
+        _marcus_runner(models, files).create_model_entity(_shared_base_lora_config(model_entity="default/base-model"))
+
+        models.create_adapter.assert_not_called()
+        create_call = models.create_model_adapter.call_args
+        assert create_call.kwargs["model_name"] == "base-model"
+        assert create_call.kwargs["workspace"] == "default"
+
+    def test_inline_deployment_goes_into_the_jobs_workspace(self) -> None:
+        from nemo_platform_plugin.deployment import DeploymentParams
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([])
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="marcus", name="sft-cfg-base-model")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="marcus", name="sft-deploy-base-model")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(
+                workspace="marcus", name="sft-deploy-base-model", status=ModelDeploymentStatus.PENDING
+            )
+        )
+        base_me = _model_entity(
+            workspace="default",
+            name="base-model",
+            spec=types.SimpleNamespace(family="llama", base_num_parameters=1_000_000_000),
+        )
+
+        _marcus_runner(models, files).launch_model(
+            _shared_base_lora_config(deployment_config=DeploymentParams(lora_enabled=True)), base_me
+        )
+
+        config_call = models.create_deployment_config.call_args
+        assert config_call.kwargs["workspace"] == "marcus"
+        # The config lives with the job but still serves the shared base where it is.
+        assert config_call.kwargs["body"].model_spec.model_namespace == "default"
+        assert config_call.kwargs["body"].model_spec.model_name == "base-model"
+        assert models.create_deployment.call_args.kwargs["workspace"] == "marcus"
+
+    def test_active_deployment_is_looked_for_in_the_jobs_workspace(self) -> None:
+        from nemo_platform_plugin.deployment import DeploymentParams
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([types.SimpleNamespace(name="cfg-1")])
+        models.list_deployments.return_value = _page([types.SimpleNamespace(status=ModelDeploymentStatus.READY)])
+
+        _marcus_runner(models, files).launch_model(
+            _shared_base_lora_config(deployment_config=DeploymentParams(lora_enabled=True)),
+            _model_entity(workspace="default", name="base-model"),
+        )
+
+        config_call = models.list_deployment_configs.call_args
+        assert config_call.kwargs["workspace"] == "marcus"
+        assert json.loads(config_call.kwargs["query_params"]["filter"]) == {"model_entity_id": "default/base-model"}
+        assert models.list_deployments.call_args.kwargs["workspace"] == "marcus"
+        models.create_deployment.assert_not_called()
+
+    def test_bare_deployment_config_reference_resolves_in_the_jobs_workspace(self) -> None:
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([])
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(
+                workspace="marcus",
+                name="my-cfg",
+                model_entity_id="default/base-model",
+                model_name="base-model",
+                model_namespace="default",
+            )
+        )
+        models.create_deployment.return_value = _response(types.SimpleNamespace(workspace="marcus", name="d"))
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="marcus", name="d", status=ModelDeploymentStatus.PENDING)
+        )
+
+        _marcus_runner(models, files).launch_model(
+            _shared_base_lora_config(deployment_config="my-cfg"),
+            _model_entity(
+                workspace="default",
+                name="base-model",
+                spec=types.SimpleNamespace(family="llama", base_num_parameters=1),
+            ),
+        )
+
+        models.get_deployment_config.assert_called_once_with(workspace="marcus", name="my-cfg")
+        assert models.create_deployment.call_args.kwargs["workspace"] == "marcus"
+
+    def test_unbound_template_is_bound_in_the_jobs_workspace(self) -> None:
+        """A template from the job's workspace is bound there, still serving the shared base."""
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([])
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(
+                workspace="marcus", name="tmpl", model_entity_id=None, model_name=None, model_namespace=None
+            )
+        )
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="marcus", name="sft-cfg-base-model")
+        )
+        models.create_deployment.return_value = _response(types.SimpleNamespace(workspace="marcus", name="d"))
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="marcus", name="d", status=ModelDeploymentStatus.PENDING)
+        )
+
+        _marcus_runner(models, files).launch_model(
+            _shared_base_lora_config(deployment_config="tmpl"),
+            _model_entity(
+                workspace="default",
+                name="base-model",
+                spec=types.SimpleNamespace(family="llama", base_num_parameters=1),
+            ),
+        )
+
+        models.get_deployment_config.assert_called_once_with(workspace="marcus", name="tmpl")
+        config_call = models.create_deployment_config.call_args
+        assert config_call.kwargs["workspace"] == "marcus"
+        assert config_call.kwargs["body"].model_spec.model_namespace == "default"
+        assert config_call.kwargs["body"].model_spec.model_name == "base-model"
 
 
 # ---------------------------------------------------------------------------

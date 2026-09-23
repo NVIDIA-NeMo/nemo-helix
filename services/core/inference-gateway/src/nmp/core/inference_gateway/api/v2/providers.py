@@ -10,6 +10,7 @@ from nmp.core.inference_gateway.api.authz import (
     PROVIDER_EXEC_PERMISSION,
     PROVIDER_READ_PERMISSION,
     enforce_delegated_workspace_access,
+    may_use_from_workspace,
 )
 from nmp.core.inference_gateway.api.dependencies import global_http_client, global_model_cache
 from nmp.core.inference_gateway.api.errors import raise_unresolved_provider_secret
@@ -55,6 +56,10 @@ async def provider_ready(
     logger.info(f"Provider ready check: {workspace}/{name}")
 
     model_info = model_cache.get_from_provider(workspace, name)
+    if model_info is not None and not await may_use_from_workspace(
+        workspace, model_info.model_provider.workspace, PROVIDER_READ_PERMISSION
+    ):
+        model_info = None  # a shared provider the caller may not use does not exist for them
     if model_info is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Model provider not found for {workspace}/{name}")
 
@@ -131,6 +136,10 @@ async def provider_proxy(
         return await handle_mock_request(request=request, trailing_uri=trailing_uri)
 
     model_info = model_cache.get_from_provider(workspace, name)
+    if model_info is not None and not await may_use_from_workspace(
+        workspace, model_info.model_provider.workspace, PROVIDER_EXEC_PERMISSION
+    ):
+        model_info = None  # a shared provider the caller may not use does not exist for them
     if model_info is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Model provider not found for {workspace}/{name}")
 

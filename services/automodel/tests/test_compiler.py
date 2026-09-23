@@ -835,3 +835,19 @@ async def test_inline_lora_enabled_false_is_rejected_at_compile(
 
     with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler(_lora_job(DeploymentParams(lora_enabled=False)), "default", platform_clients)
+
+
+def test_build_file_download_config_pins_bare_weights_to_the_models_own_workspace() -> None:
+    """A shared model's bare fileset lives in its own workspace, not the job's.
+
+    Left unqualified, the file_io task falls back to the job's workspace, so a job in
+    another workspace would download from a fileset that does not exist there.
+    """
+    shared = _make_mock_model_entity(workspace="default", fileset="base-model")
+    teacher = _make_mock_model_entity(workspace="default", name="teacher", fileset="teacher-weights")
+
+    config = _build_file_download_config(_make_job_output(), shared, teacher)
+
+    weights = {item.src.name: item.src.workspace for item in config.download}
+    assert weights["base-model"] == "default"
+    assert weights["teacher-weights"] == "default"

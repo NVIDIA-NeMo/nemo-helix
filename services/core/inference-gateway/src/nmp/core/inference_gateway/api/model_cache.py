@@ -17,6 +17,7 @@ from nemo_platform_plugin.client.errors import NemoTransportError as PluginTrans
 from nemo_platform_plugin.inference_middleware import BackendFormat
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.models.types import ModelEntity
+from nmp.common.entities.global_workspace import workspace_lookup_order
 from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nmp.core.inference_gateway.api.proxy import retrieve_secret_value
 from nmp.core.inference_gateway.api.virtual_model_cache import (
@@ -94,11 +95,20 @@ class ModelCache:
     """Time-to-live in seconds for cached secrets (0 = always refresh)"""
 
     def get_from_provider(self, workspace: str, provider_name: str) -> ModelProviderInfo | None:
-        model_info = self.workspace_name_provider_map.get((workspace, provider_name))
-        return model_info
+        """Look up a provider, falling back to the global workspace (local wins)."""
+        for candidate in workspace_lookup_order(workspace):
+            model_info = self.workspace_name_provider_map.get((candidate, provider_name))
+            if model_info is not None:
+                return model_info
+        return None
 
     def get_from_model_entity(self, workspace: str, model_entity_name: str) -> ModelEntityInfo | None:
-        return self.model_entity_info_map.get((workspace, model_entity_name))
+        """Look up a model entity, falling back to the global workspace (local wins)."""
+        for candidate in workspace_lookup_order(workspace):
+            model_entity_info = self.model_entity_info_map.get((candidate, model_entity_name))
+            if model_entity_info is not None:
+                return model_entity_info
+        return None
 
     def update_model_info(self, model_info: ModelProviderInfo):
         self.workspace_name_provider_map[(model_info.model_provider.workspace, model_info.model_provider.name)] = (

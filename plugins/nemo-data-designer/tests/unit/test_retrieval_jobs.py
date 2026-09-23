@@ -676,3 +676,23 @@ def test_retrieval_prepare_materialize_input_forwards_hf_token(tmp_path: Path, m
         _materialize_input("hf://example/private-stage0", tmp_path / "dest", ctx, Mock())
 
     assert materialize.call_args.kwargs["hf_token"] == "hf_secret_value"
+
+
+@pytest.mark.asyncio
+async def test_retrieval_prepare_pins_bare_model_fileset_to_the_models_own_workspace() -> None:
+    """The mining download runs in the job's workspace, so a shared model's bare fileset must be qualified."""
+    model = SimpleNamespace(workspace="default", name="embed", fileset="embed-weights", trust_remote_code=False)
+    with patch(
+        "nemo_data_designer_plugin.jobs.retrieval_prepare.fetch_model_entity",
+        new=AsyncMock(return_value=model),
+    ):
+        step = await RetrievalPrepareJob.to_spec(
+            RetrievalPrepareJobConfig(sdg_input="marcus/stage0", enable_mining=True),
+            workspace="marcus",
+            entity_client=Mock(),
+            async_sdk=_async_platform(),
+            is_local=False,
+        )
+
+    assert isinstance(step, RetrievalPrepareStepConfig)
+    assert step.model_fileset == "default/embed-weights"

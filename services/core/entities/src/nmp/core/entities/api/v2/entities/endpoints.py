@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from nmp.common.api.common import DeleteResponse, Page, PaginationData
 from nmp.common.auth import ALL_WORKSPACES
 from nmp.common.auth.client import AuthClient
+from nmp.common.entities.global_workspace import workspace_lookup_order
 from nmp.core.entities.api.dependencies import (
     AuthClientDep,
     EntityRepository,
@@ -35,15 +36,21 @@ from nmp.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
     bindings_cache_delete,
+    can_read_global_workspace,
     get_accessible_workspaces,
     raise_if_workspace_inaccessible,
     require_workspace_access,
 )
 from nmp.core.entities.app.repository import WorkspaceRepositoryInterface
-from nmp.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nmp.core.entities.app.repository.exceptions import (
+    EntityNotFoundError,
+    EntityVersionConflictError,
+    ForeignChildEntitiesError,
+)
 from nmp.core.entities.entities import Entity
 from nmp.core.entities.utils.filter import FilterDep
 from nmp.core.entities.utils.identifiers import generate_entity_name
+from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE
 from sqlalchemy.exc import IntegrityError
 
 
@@ -95,10 +102,17 @@ async def _validate_parent_access(
     request. Here we only ensure the **parent row's** workspace is in
     ``get_accessible_workspaces`` (same role-binding / OBO logic as list filters), so a child in W1
     cannot point at a parent in W2 unless the effective user has access to W2.
+
+    Referencing is a read of the parent, so a globally shareable parent in the global workspace
+    is allowed — this is the case where a workspace fine-tunes an adapter against a shared base
+    model. The child still lands in the request workspace.
     """
 
     parent = await repository.get_entity_by_id(entity_id=parent_id)
-    if not parent or (accessible is not None and parent.workspace not in accessible):
+    allowed = accessible
+    if parent and accessible is not None and can_read_global_workspace(accessible, parent.entity_type):
+        allowed = accessible | {GLOBAL_WORKSPACE}
+    if not parent or (allowed is not None and parent.workspace not in allowed):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Parent entity '{parent_id}' not found or not in accessible workspaces",
@@ -343,6 +357,7 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
+    # Reads of a globally shareable type also see the global workspace; writes do not.
     accessible_workspaces = await get_accessible_workspaces(repository)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
@@ -358,6 +373,9 @@ async def list_entities(
         # Check if workspace is being deleted (404 for user requests)
         await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
+        # Listing a workspace returns that workspace only. Shared entities resolve by name
+        # (see get_entity_by_name) but are deliberately not folded into listings: doing so
+        # would redefine what this endpoint returns for every existing caller.
         query_workspace = workspace
         effective_filter = filter
 
@@ -425,21 +443,28 @@ async def get_entity_by_name(
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
-    await require_workspace_access(
-        repository,
+    accessible = await get_accessible_workspaces(repository)
+    raise_if_workspace_inaccessible(
+        accessible,
         workspace,
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
 
-    entity = await repository.get_entity_by_name(
-        workspace=workspace,
-        entity_type=entity_type,
-        name=name,
-        parent=parent,
+    # Shareable types also resolve out of the global workspace. Local wins, so a
+    # same-named entity in the request workspace always shadows the global one.
+    candidates = (
+        workspace_lookup_order(workspace) if can_read_global_workspace(accessible, entity_type) else (workspace,)
     )
-    if entity is None:
-        raise HTTPException(status_code=404, detail="Entity not found")
-    return entity
+    for candidate in candidates:
+        entity = await repository.get_entity_by_name(
+            workspace=candidate,
+            entity_type=entity_type,
+            name=name,
+            parent=parent,
+        )
+        if entity is not None:
+            return entity
+    raise HTTPException(status_code=404, detail="Entity not found")
 
 
 @router.put(
@@ -577,6 +602,10 @@ async def update_entity_by_name(
     description=textwrap.dedent("""
         Delete an entity by its name.
 
+        Refused with 409 when the entity has child entities in other workspaces, naming
+        them: ``entities.parent`` cascades, so deleting would remove another workspace's
+        work. Remove those entities first.
+
         Example:
         ```
         DELETE /apis/entities/v2/workspaces/default/entities/customization_config/my-config
@@ -614,7 +643,17 @@ async def delete_entity_by_name(
             name=name,
             parent=parent,
             expected_db_version=expected_db_version,
+            refuse_children_outside=workspace,
         )
+    except ForeignChildEntitiesError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Entity '{name}' has child entities in other workspaces "
+                f"({', '.join(e.workspaces)}). Deleting it would also delete them. "
+                f"Remove those entities first."
+            ),
+        ) from e
     except EntityVersionConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

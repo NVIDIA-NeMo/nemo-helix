@@ -25,6 +25,7 @@ from nmp.customization_common.retrieval.inline import move_aux_files_to_addition
 from nmp.customization_common.service.platform_client import (
     async_customization_platform_clients_from_platform,
     fetch_model_entity,
+    model_weights_ref,
 )
 from pydantic import BaseModel
 
@@ -66,7 +67,7 @@ class RetrievalPrepareJob(NemoJob):
         return RetrievalPrepareStepConfig(
             job_config=job_config,
             phase="convert",
-            model_fileset=model.fileset,
+            model_fileset=str(model_weights_ref(model)),
             model_trust_remote_code=model.trust_remote_code or False,
         )
 

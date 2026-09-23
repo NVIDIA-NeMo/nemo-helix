@@ -27,6 +27,7 @@ from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
     ContainerExecutorConfig,
+    CreateAdapterRequest,
     CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
@@ -174,17 +175,21 @@ class ModelEntityRunner:
             f"model's specifications. Verify the model checkpoint is valid and in a supported format."
         )
 
-    def get_model_entity(self, model_entity: str, fileset_workspace: str) -> ModelEntity:
-        """Resolve ``"workspace/name"`` (or bare ``"name"``) to a ``ModelEntity``."""
+    @staticmethod
+    def _parse_model_entity_ref(model_entity: str, fileset_workspace: str) -> tuple[str, str]:
+        """Split ``"workspace/name"`` (or bare ``"name"``, resolved in *fileset_workspace*)."""
         parts = model_entity.split("/")
         if len(parts) == 1 and parts[0]:
-            me_workspace, me_name = fileset_workspace, parts[0]
-        elif len(parts) == 2 and all(parts):
-            me_workspace, me_name = parts[0], parts[1]
-        else:
-            raise ModelEntityCreationError(
-                f"Invalid model entity reference '{model_entity}': expected 'name' or 'workspace/name'."
-            )
+            return fileset_workspace, parts[0]
+        if len(parts) == 2 and all(parts):
+            return parts[0], parts[1]
+        raise ModelEntityCreationError(
+            f"Invalid model entity reference '{model_entity}': expected 'name' or 'workspace/name'."
+        )
+
+    def get_model_entity(self, model_entity: str, fileset_workspace: str) -> ModelEntity:
+        """Resolve ``"workspace/name"`` (or bare ``"name"``) to a ``ModelEntity``."""
+        me_workspace, me_name = self._parse_model_entity_ref(model_entity, fileset_workspace)
 
         try:
             me = self.models.get_model(name=me_name, workspace=me_workspace).data()
@@ -223,8 +228,81 @@ class ModelEntityRunner:
         base_me: ModelEntity = self.get_model_entity(config.model_entity, fileset_workspace)
 
         if config.peft is not None and config.peft.type == FinetuningType.LORA:
+            adapter_workspace = self._shared_base_adapter_workspace(config, base_me)
+            if adapter_workspace is not None:
+                return self._create_or_update_shared_base_adapter(config, base_me, fileset_ref, adapter_workspace)
             return self._create_or_update_adapter(config, base_me, fileset_ref)
         return self._create_or_update_full_entity(config, fileset_ref, output_workspace)
+
+    def _shared_base_adapter_workspace(self, config: ModelEntityTaskConfig, base_me: ModelEntity) -> str | None:
+        """Return the job's workspace when *base_me* was shared in from another workspace, else None.
+
+        A base model found in a different workspace than its reference named can only have
+        arrived through the global-workspace fallback: before sharing, such a reference failed.
+        Its adapter and any deployment then belong to the job's workspace, since the job has no
+        standing to write into the shared one. Every reference that resolves where it points,
+        including one naming another workspace explicitly, keeps the original behaviour.
+        """
+        fileset_workspace = config.fileset.workspace or self.job_ctx.workspace
+        requested_workspace, _ = self._parse_model_entity_ref(config.model_entity, fileset_workspace)
+        if base_me.workspace == requested_workspace:
+            return None
+        return config.workspace
+
+    def _create_or_update_shared_base_adapter(
+        self,
+        config: ModelEntityTaskConfig,
+        base_me: ModelEntity,
+        fileset_ref: str,
+        workspace: str,
+    ) -> tuple[dict, ModelEntity]:
+        """Create or update a LoRA adapter in *workspace* whose base lives in another workspace."""
+        assert config.peft is not None
+        base_ref = f"{base_me.workspace}/{base_me.name}"
+        try:
+            adapter = self.models.create_adapter(
+                workspace=workspace,
+                body=CreateAdapterRequest(
+                    model=base_ref,
+                    name=config.name,
+                    description=config.description,
+                    fileset=fileset_ref,
+                    finetuning_type=ModelsFinetuningType(config.peft.type.value),
+                    lora_config=Lora(
+                        alpha=config.peft.alpha,
+                        rank=config.peft.rank,
+                    ),
+                    enabled=True,
+                ),
+            ).data()
+            logger.info(f"Created adapter {workspace}/{config.name} for shared base model {base_ref}")
+            return adapter.model_dump(), base_me
+        except ConflictError:
+            logger.warning(f"Adapter {workspace}/{config.name} already exists, updating with new fileset")
+            try:
+                adapter = self.models.update_adapter(
+                    workspace=workspace,
+                    name=config.name,
+                    body=UpdateAdapterRequest(
+                        fileset=fileset_ref,
+                        description=config.description,
+                        enabled=True,
+                    ),
+                ).data()
+                logger.info(f"Updated adapter {workspace}/{config.name} for shared base model {base_ref}")
+                return adapter.model_dump(), base_me
+            except TRANSIENT_RETRYABLE_EXCEPTIONS:
+                raise
+            except Exception as update_error:
+                logger.exception(f"Failed to update existing adapter {workspace}/{config.name}: {update_error}")
+                raise ModelEntityCreationError(
+                    f"Adapter '{config.name}' already exists but update failed: {update_error}"
+                ) from update_error
+        except TRANSIENT_RETRYABLE_EXCEPTIONS:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to create adapter {workspace}/{config.name}: {e}")
+            raise ModelEntityCreationError(f"Failed to create model adapter: {e}") from e
 
     def _create_or_update_adapter(
         self,
@@ -342,7 +420,21 @@ class ModelEntityRunner:
             return
 
         is_lora = config.peft is not None and config.peft.type == FinetuningType.LORA
-        if is_lora and self._has_active_deployment(me):
+
+        # A LoRA job on a base shared in from another workspace deploys into its own workspace:
+        # it cannot write to the shared one, and an existing LoRA-enabled deployment of the base
+        # there already hot-loads the adapter without any deployment from this job.
+        target_workspace = me.workspace
+        if is_lora:
+            shared_base_workspace = self._shared_base_adapter_workspace(config, me)
+            if shared_base_workspace is not None:
+                target_workspace = shared_base_workspace
+                logger.info(
+                    f"Base model {me.workspace}/{me.name} is shared from another workspace; "
+                    f"deploying into the job's workspace {target_workspace}"
+                )
+
+        if is_lora and self._has_active_deployment(me, target_workspace):
             return
 
         if is_lora and isinstance(dc, DeploymentParams) and not dc.lora_enabled:
@@ -362,35 +454,36 @@ class ModelEntityRunner:
 
         if isinstance(dc, str):
             logger.info(f"Resolving deployment config reference: {dc}")
-            referenced = self._resolve_config_ref(dc, me.workspace)
+            referenced = self._resolve_config_ref(dc, target_workspace)
             if is_unbound_deployment_config(referenced):
                 if not is_lora:
                     discriminator = template_discriminator(referenced.workspace, referenced.name)
-                deployment_config = self._bind_deployment_config(referenced, me, discriminator=discriminator)
+                deployment_config = self._bind_deployment_config(
+                    referenced, me, discriminator=discriminator, workspace=target_workspace
+                )
             else:
                 deployment_config = referenced
             logger.info(f"Using deployment config: {deployment_config.workspace}/{deployment_config.name}")
         else:
-            deployment_config = self._create_deployment_config(dc, me)
+            deployment_config = self._create_deployment_config(dc, me, target_workspace)
 
         self._create_deployment(deployment_config, me, discriminator=discriminator)
 
-    def _has_active_deployment(self, me: ModelEntity) -> bool:
-        """Check if the model entity already has an active deployment."""
+    def _has_active_deployment(self, me: ModelEntity, workspace: str | None = None) -> bool:
+        """Check if the model entity already has an active deployment in *workspace* (default: its own)."""
+        workspace = workspace or me.workspace
         config_query = ListDeploymentConfigsQueryParams(
             filter=json.dumps({"model_entity_id": f"{me.workspace}/{me.name}"})
         )
         deployment_configs = self.models.list_deployment_configs(
-            workspace=me.workspace,
+            workspace=workspace,
             query_params=config_query,
         ).items()
 
         for c in deployment_configs:
-            deployment_query = ListDeploymentsQueryParams(
-                filter=json.dumps({"config": c.name, "workspace": me.workspace})
-            )
+            deployment_query = ListDeploymentsQueryParams(filter=json.dumps({"config": c.name, "workspace": workspace}))
             deployments = self.models.list_deployments(
-                workspace=me.workspace,
+                workspace=workspace,
                 query_params=deployment_query,
             ).items()
             for d in deployments:
@@ -419,8 +512,14 @@ class ModelEntityRunner:
                 f"Failed to resolve deployment config '{config_ref}' in workspace '{workspace}': {e}"
             ) from e
 
-    def _create_deployment_config(self, deploy_params: DeploymentParams, me: ModelEntity) -> ModelDeploymentConfig:
-        """Create (or update) a ``ModelDeploymentConfig`` from inline parameters."""
+    def _create_deployment_config(
+        self,
+        deploy_params: DeploymentParams,
+        me: ModelEntity,
+        workspace: str | None = None,
+    ) -> ModelDeploymentConfig:
+        """Create (or update) a ``ModelDeploymentConfig`` for *me* in *workspace* (default: its own)."""
+        workspace = workspace or me.workspace
         model_spec = ModelDeploymentConfigModelSpec(
             model_name=me.name,
             model_namespace=me.workspace,
@@ -443,6 +542,7 @@ class ModelEntityRunner:
             engine=Engine.NIM,
             model_spec=model_spec,
             executor_config=executor_config,
+            workspace=workspace,
         )
 
     def _bind_deployment_config(
@@ -451,8 +551,9 @@ class ModelEntityRunner:
         me: ModelEntity,
         *,
         discriminator: str | None = None,
+        workspace: str | None = None,
     ) -> ModelDeploymentConfig:
-        """Derive a config that serves ``me`` from an unbound ``template``.
+        """Derive a config that serves ``me`` from an unbound ``template``, in *workspace* (default: ``me``'s).
 
         The referenced config names no model, so deploying it verbatim would leave
         the deployment with no weights to resolve. Instead copy its engine, executor
@@ -472,6 +573,7 @@ class ModelEntityRunner:
             model_spec=model_spec,
             executor_config=template.executor_config,
             discriminator=discriminator,
+            workspace=workspace,
         )
 
     def _create_or_update_config(
@@ -482,15 +584,17 @@ class ModelEntityRunner:
         model_spec: ModelDeploymentConfigModelSpec,
         executor_config: ContainerExecutorConfig,
         discriminator: str | None = None,
+        workspace: str | None = None,
     ) -> ModelDeploymentConfig:
-        """Create the auto-deploy config for ``me``, updating it if it already exists.
+        """Create the auto-deploy config for ``me`` in *workspace* (default: ``me``'s), updating it if it exists.
 
         ``discriminator`` scopes the name to the config's source; see ``sanitize_name``.
         """
+        workspace = workspace or me.workspace
         deployment_cfg_name = sanitize_name("sft-cfg", me.name, discriminator)
         try:
             return self.models.create_deployment_config(
-                workspace=me.workspace,
+                workspace=workspace,
                 body=CreateModelDeploymentConfigRequest(
                     name=deployment_cfg_name,
                     engine=engine,
@@ -499,9 +603,9 @@ class ModelEntityRunner:
                 ),
             ).data()
         except ConflictError:
-            logger.info(f"Deployment config {me.workspace}/{deployment_cfg_name} already exists, updating")
+            logger.info(f"Deployment config {workspace}/{deployment_cfg_name} already exists, updating")
             return self.models.update_deployment_config(
-                workspace=me.workspace,
+                workspace=workspace,
                 name=deployment_cfg_name,
                 body=UpdateModelDeploymentConfigRequest(
                     engine=engine,

@@ -134,3 +134,24 @@ async def test_compiler_applies_profile_to_task_steps() -> None:
         compiler_mod.fetch_model_entity = original_fetch
 
     assert [step["executor"]["profile"] for step in job["steps"]] == ["custom-gpu"] * 4
+
+
+@pytest.mark.asyncio
+async def test_download_pins_bare_weights_to_the_models_own_workspace() -> None:
+    """A job in another workspace must download a shared model's weights from where they live."""
+    from nmp.unsloth.app.jobs import compiler as compiler_mod
+
+    shared = _model_entity().model_copy(update={"fileset": "qwen3-1.7b"})
+    original_fetch = compiler_mod.fetch_model_entity
+    compiler_mod.fetch_model_entity = AsyncMock(return_value=shared)
+    try:
+        job = await platform_job_config_compiler(
+            workspace="marcus",
+            job_spec=_spec(validation_path=None),
+            platform=MagicMock(),
+        )
+    finally:
+        compiler_mod.fetch_model_entity = original_fetch
+
+    download = next(s for s in job["steps"] if s["name"] == "model-and-dataset-download")
+    assert download["config"]["download"][0]["src"]["workspace"] == "default"

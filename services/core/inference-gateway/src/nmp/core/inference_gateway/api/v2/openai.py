@@ -13,6 +13,7 @@ from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
+    may_use_from_workspace,
 )
 from nmp.core.inference_gateway.api.dependencies import (
     global_http_client,
@@ -108,7 +109,8 @@ def resolve_vm_for_model(
     - **Plain name**: looked up as-is.
 
     The composite-awareness lives here, *outside* the cache layer:
-    :meth:`VirtualModelCache.get` stays a dumb exact-match dict lookup.
+    :meth:`VirtualModelCache.get` owns only the workspace dimension (request workspace
+    first, then the global workspace), not the composite-name grammar.
 
     Args:
         virtual_model_cache: The in-memory VirtualModel cache.
@@ -124,6 +126,21 @@ def resolve_vm_for_model(
     adapter_parts = parse_adapters_suffix(model_name)
     base_model_name = adapter_parts[0] if adapter_parts is not None else model_name
     return virtual_model_cache.get(workspace, base_model_name)
+
+
+async def resolve_vm_for_request(
+    virtual_model_cache: VirtualModelCache,
+    workspace: str,
+    model_name: str,
+    permission: str,
+) -> "SDKVirtualModel | None":
+    """:func:`resolve_vm_for_model` for a caller: a VirtualModel shared in from another
+    workspace resolves only if the caller holds *permission* where it lives, and is
+    otherwise indistinguishable from a missing one."""
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    if virtual_model is not None and not await may_use_from_workspace(workspace, virtual_model.workspace, permission):
+        return None
+    return virtual_model
 
 
 class OpenAIModelResp(BaseModel):
@@ -164,12 +181,15 @@ async def openai_get_models(
     validate_entity_name(workspace, field_name="workspace")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
 
-    all_oai_models: list[OpenAIModelResp] = []
-
-    for (vm_workspace, vm_name), _ in virtual_model_cache.virtual_model_map.items():
-        if vm_workspace != workspace:
-            continue
-        all_oai_models.append(OpenAIModelResp(id=f"{vm_workspace}/{vm_name}", owned_by=vm_workspace))
+    # The catalog lists this workspace only. A VirtualModel shared from the global
+    # workspace is still routable by name (see resolve_vm_for_model) but is deliberately
+    # not listed here, matching the entity store: sharing resolves names, it does not
+    # fold shared entities into a workspace's listings.
+    all_oai_models = [
+        OpenAIModelResp(id=f"{vm_workspace}/{vm_name}", owned_by=vm_workspace)
+        for vm_workspace, vm_name in virtual_model_cache.virtual_model_map
+        if vm_workspace == workspace
+    ]
 
     return OpenAIListModelsResp(data=all_oai_models)
 
@@ -198,7 +218,7 @@ async def openai_get_model(
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
-    if resolve_vm_for_model(virtual_model_cache, workspace, model_name) is None:
+    if await resolve_vm_for_request(virtual_model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION) is None:
         raise_virtual_model_not_found(workspace, model_name)
 
     return OpenAIModelResp(
@@ -294,7 +314,7 @@ async def openai_proxy(
 
     validate_model_entity_name(model_name, field_name="model")
 
-    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
+    virtual_model = await resolve_vm_for_request(virtual_model_cache, workspace, model_name, OPENAI_EXEC_PERMISSION)
     logger.debug(
         "openai_proxy: workspace=%s model_name=%s body_model=%s vm_hit=%s",
         workspace,
@@ -316,5 +336,6 @@ async def openai_proxy(
         http_client=http_client,
         model_cache=model_cache,
         registry=registry,
+        permission=OPENAI_EXEC_PERMISSION,
         request_nemo_client=nemo_client,
     )

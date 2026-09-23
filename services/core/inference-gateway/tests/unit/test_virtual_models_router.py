@@ -14,7 +14,7 @@ models service.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
@@ -749,3 +749,42 @@ class TestDeleteVirtualModel:
 
         get_resp = client.get(f"{BASE}/vm-stale-delete")
         assert get_resp.status_code == 200
+
+
+@pytest.fixture
+def team_client() -> Iterator[TestClient]:
+    """Like ``client``, with a second workspace to address shared VirtualModels through."""
+    with create_test_client(
+        InferenceGatewayService,
+        client_type=TestClient,
+        workspaces=["default", "team-a"],
+        service_configs={
+            InferenceGatewayService: InferenceGatewayConfig(
+                refresh_model_cache_interval_sec=0,
+                mock_provider_prefix="igw-mock-",
+            )
+        },
+    ) as tc:
+        yield tc
+
+
+class TestSharedVirtualModelWrites:
+    """A VirtualModel shared from ``default`` is readable through another workspace, not writable."""
+
+    TEAM = "/apis/inference-gateway/v2/workspaces/team-a/virtual-models"
+
+    def test_update_through_another_workspace_does_not_modify_the_shared_vm(self, team_client: TestClient):
+        _create(team_client, "vm-shared", default_model_entity="default/model-a")
+
+        resp = team_client.patch(f"{self.TEAM}/vm-shared", json={"default_model_entity": "default/hijacked"})
+
+        assert resp.status_code == 404, resp.text
+        assert team_client.get(f"{BASE}/vm-shared").json()["default_model_entity"] == "default/model-a"
+
+    def test_shared_vm_still_resolves_through_another_workspace(self, team_client: TestClient):
+        _create(team_client, "vm-readable", default_model_entity="default/model-a")
+
+        resp = team_client.get(f"{self.TEAM}/vm-readable")
+
+        assert resp.status_code == 200
+        assert resp.json()["workspace"] == "default"

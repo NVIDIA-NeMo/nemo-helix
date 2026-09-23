@@ -255,6 +255,7 @@ class EntityGetterProtocol(Protocol[EntityT]):
         name: str,
         workspace: str,
         parent: Optional[str] = None,
+        local_only: bool = False,
     ) -> EntityT: ...
 
 
@@ -742,6 +743,7 @@ class EntityClient:
         *,
         workspace: Optional[str] = None,
         parent: Optional[str] = None,
+        local_only: bool = False,
     ) -> EntityT:
         """Get entity by name (primary lookup method).
 
@@ -752,12 +754,17 @@ class EntityClient:
             name: Entity name (can be workspace-qualified like "prod/my-model")
             parent: Optional parent entity ID for nested entities
             workspace: Optional workspace override (ignored if name is qualified)
+            local_only: Only return an entity that lives in the requested workspace. A
+                globally shareable type otherwise also resolves out of the global
+                workspace; pass True before any write, so a request against one
+                workspace can never modify or delete the shared entity it resolved to.
 
         Returns:
             Entity matching the name
 
         Raises:
-            EntityNotFoundError: Entity not found
+            EntityNotFoundError: Entity not found (or, with ``local_only``, found only
+                in another workspace)
         """
         ws, entity_name = parse_qualified_name(name, default_workspace=workspace)
         query_params: EntityByNameQueryParams | None = {"parent": parent} if parent else None
@@ -768,9 +775,12 @@ class EntityClient:
                 workspace=ws,
                 query_params=query_params,
             )
-            return self._convert_api_entity_to_model(response.data(), entity_type)
+            entity = self._convert_api_entity_to_model(response.data(), entity_type)
         except NotFoundError as e:
             raise EntityNotFoundError(f"Entity '{entity_name}' not found in workspace '{ws}'") from e
+        if local_only and entity.workspace != ws:
+            raise EntityNotFoundError(f"Entity '{entity_name}' not found in workspace '{ws}'")
+        return entity
 
     async def get_by_id(
         self,
@@ -1219,8 +1229,9 @@ class SyncEntityClient:
         *,
         workspace: Optional[str] = None,
         parent: Optional[str] = None,
+        local_only: bool = False,
     ) -> EntityT:
-        """Get entity by name (primary lookup method)."""
+        """Get entity by name (primary lookup method). See ``EntityClient.get`` for ``local_only``."""
         ws, entity_name = parse_qualified_name(name, default_workspace=workspace)
         query_params: EntityByNameQueryParams | None = {"parent": parent} if parent else None
         try:
@@ -1230,9 +1241,12 @@ class SyncEntityClient:
                 workspace=ws,
                 query_params=query_params,
             )
-            return self._convert_api_entity_to_model(response.data(), entity_type)
+            entity = self._convert_api_entity_to_model(response.data(), entity_type)
         except NotFoundError as e:
             raise EntityNotFoundError(f"Entity '{entity_name}' not found in workspace '{ws}'") from e
+        if local_only and entity.workspace != ws:
+            raise EntityNotFoundError(f"Entity '{entity_name}' not found in workspace '{ws}'")
+        return entity
 
     def get_by_id(
         self,

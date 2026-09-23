@@ -20,3 +20,11 @@ class EntityVersionConflictError(EntityRepositoryError):
     """Raised when entity version doesn't match (optimistic locking conflict)."""
 
     pass
+
+
+class ForeignChildEntitiesError(EntityRepositoryError):
+    """Raised when a delete would cascade into workspaces other than the entity's own."""
+
+    def __init__(self, workspaces: set[str]) -> None:
+        self.workspaces = sorted(workspaces)
+        super().__init__(f"Entity has child entities in other workspaces: {', '.join(self.workspaces)}")

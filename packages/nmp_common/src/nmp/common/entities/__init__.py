@@ -36,6 +36,11 @@ from nmp.common.entities.constants import (
 
 # Entity utilities and values
 from nmp.common.entities.filters import make_filter_obj_dep
+from nmp.common.entities.global_workspace import (
+    GLOBAL_WORKSPACE,
+    is_global_workspace,
+    workspace_lookup_order,
+)
 from nmp.common.entities.query_utils import coerce_existence_operator
 from nmp.common.entities.utils import (
     get_random_bytes,
@@ -77,6 +82,9 @@ __all__ = [
     "DEFAULT_WORKSPACE",
     "ENTITY_BASE_FIELDS",
     "SYSTEM_WORKSPACE",
+    "GLOBAL_WORKSPACE",
+    "is_global_workspace",
+    "workspace_lookup_order",
     "DatetimeFilter",
     "Filter",
     "StringFilter",
