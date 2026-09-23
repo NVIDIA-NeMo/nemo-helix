@@ -283,7 +283,8 @@ class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
         default=10 * 60,
         ge=0,
         description="How long a pod may spend in image-pull backoff before the pull is treated as "
-        "unrecoverable and the step fails naming the image. 0 disables it.",
+        "unrecoverable and the step fails naming the image. 0 disables it. Enforced by the "
+        "kubernetes_job backend; the volcano_job backend does not yet honour it.",
     )
 
     namespace: str | None = Field(

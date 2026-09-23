@@ -40,6 +40,13 @@ platformConfig:
   inference_gateway:
     mock_provider_prefix: igw-mock-
   jobs:
+    # Applies to every kubernetes_job profile, including the default one that a
+    # job without an explicit ``profile`` resolves to. Every image e2e asks for
+    # is either already on the node or cannot resolve at all, so none of them
+    # needs the production-sized grace period for a registry blip to clear.
+    executor_defaults:
+      kubernetes_job:
+        ttl_seconds_image_pull: 30
     executors:
       - provider: cpu
         profile: additional-volume
@@ -47,10 +54,6 @@ platformConfig:
         config:
           service_account_name: '{{ include "nhx-core.jobsServiceAccountName" . }}'
           launcher_image: '{{ include "nhx-core.image" . }}'
-          # Every image e2e asks for is either already on the node or cannot
-          # resolve at all, so nothing here needs the production-sized grace
-          # period for a registry blip to clear.
-          ttl_seconds_image_pull: 30
           storage:
             pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
             volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'
