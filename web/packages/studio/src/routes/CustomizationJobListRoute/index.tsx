@@ -25,18 +25,18 @@ export const CustomizationJobListRoute: FC = () => {
   );
 
   useBreadcrumbs({
-    items: [{ slotLabel: 'Fine-tune' }],
+    items: [{ slotLabel: 'Fine-tuning' }],
   });
 
   const { jobName: customizationJobName } = useCustomizationJobForModel(workspace, selectedModel);
 
   return (
-    <AccessibleTitle title={`Fine-tune for ${workspace}`}>
+    <AccessibleTitle title={`Fine-tuning for ${workspace}`}>
       <Stack className="h-full" gap="density-2xl" padding="density-2xl">
         <PageHeader
           className="p-0"
-          slotHeading="Fine-tune"
-          slotDescription="Create, manage, and deploy custom AI models with fine-tuning."
+          slotHeading="Fine-tuning"
+          slotDescription="Create, manage, and deploy fine-tuned models."
           slotActions={<CustomizeModelButton workspace={workspace} />}
         />
         <CustomModelsDataView

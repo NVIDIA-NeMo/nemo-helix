@@ -33,17 +33,17 @@ export const customizationRoutes: RouteObject[] = gateCustomizationRoutes([
   {
     path: ROUTES.workspace.newCustomizationJob,
     element: <NewCustomizationRoute />,
-    errorElement: <RouteErrorPanel title="Fine-tune" />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
   {
     path: ROUTES.workspace.customizationJobList,
     element: <CustomizationJobListRoute />,
-    errorElement: <RouteErrorPanel title="Fine-tune" />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
   {
     path: ROUTES.workspace.customizationJobDetails,
     element: <CustomizationJobDetailsRoute />,
-    errorElement: <RouteErrorPanel title="Fine-tune" />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
 ]);
 
@@ -55,7 +55,7 @@ export const getCustomizationSideNavItems = (workspace: string) =>
         {
           id: 'custom-models',
           slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Fine-tune',
+          slotLabel: 'Fine-tuning',
           href: getWorkspaceCustomizationJobListRoute(workspace),
         },
       ]

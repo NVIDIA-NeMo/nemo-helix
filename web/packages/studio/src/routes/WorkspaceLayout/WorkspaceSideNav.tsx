@@ -113,12 +113,14 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
 
     const observabilityItems = [...optimizerNav, ...tracesNav];
 
+    // Ordered as the funnel a user walks: pick a model, measure it, improve it, try it, ship it.
+    // Virtual Models trails the funnel because it composes models rather than producing one.
     const modelSubItems = [
       ...getBaseModelsSideNavItems(workspace),
-      ...deploymentsNav,
-      ...customizerNav,
       ...evalNav,
+      ...customizerNav,
       ...modelCompareNav,
+      ...deploymentsNav,
       ...virtualModelsNav,
     ];
     const datasetSubItems = [...anonymizerNav, ...dataDesignerNav, ...safeSynthesizerNav];
