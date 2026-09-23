@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Iterator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, overload
@@ -427,6 +427,14 @@ class NemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]):
     def http_response(self) -> httpx.Response:
         return self._first_response
 
+    @property
+    def data(self) -> list[PaginatedModelT]:
+        """First page items, matching legacy generated-SDK page objects."""
+        return self.page().items
+
+    def __iter__(self) -> Iterator[PaginatedModelT]:
+        return self.items()
+
     def _parse_page(self, raw: httpx.Response) -> tuple[list[PaginatedModelT], dict, Any]:
         """Parse a page response into items, its raw body, and typed metadata."""
         raise_for_status(raw)
@@ -506,6 +514,14 @@ class AsyncNemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]
     def http_response(self) -> httpx.Response:
         return self._first_response
 
+    @property
+    def data(self) -> list[PaginatedModelT]:
+        """First page items, matching legacy generated-SDK page objects."""
+        return self.page().items
+
+    def __aiter__(self) -> AsyncIterator[PaginatedModelT]:
+        return self.items()
+
     def _parse_page(self, raw: httpx.Response) -> tuple[list[PaginatedModelT], dict, Any]:
         """Parse a page response into items, its raw body, and typed metadata."""
         raise_for_status(raw)
@@ -557,3 +573,44 @@ class AsyncNemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]
             items, body, metadata = self._parse_page(raw)
             yield PageResult(items=items, metadata=metadata)
             next_page = self._strategy.next_page(body)
+
+
+class AsyncNemoPaginatedCall(Generic[PaginatedModelT, PaginatedStrategyT_co]):
+    """Awaitable and async-iterable handle for a pending paginated request.
+
+    Nested resources use this when callers need both async styles:
+    ``response = await client.items.list(...)`` and
+    ``async for item in client.items.list(...): ...``.
+    Pagination itself stays in :class:`AsyncNemoPaginatedResponse`.
+    """
+
+    def __init__(
+        self,
+        loader: Callable[[], Awaitable[AsyncNemoPaginatedResponse[PaginatedModelT, PaginatedStrategyT_co]]],
+    ) -> None:
+        self._loader = loader
+        self._response: AsyncNemoPaginatedResponse[PaginatedModelT, PaginatedStrategyT_co] | None = None
+
+    def __await__(
+        self,
+    ) -> Generator[object, None, AsyncNemoPaginatedResponse[PaginatedModelT, PaginatedStrategyT_co]]:
+        return self._get_response().__await__()
+
+    def __aiter__(self) -> AsyncIterator[PaginatedModelT]:
+        return self.items()
+
+    async def _get_response(self) -> AsyncNemoPaginatedResponse[PaginatedModelT, PaginatedStrategyT_co]:
+        if self._response is None:
+            self._response = await self._loader()
+        return self._response
+
+    async def page(self) -> PageResult[PaginatedModelT, Any]:
+        return (await self._get_response()).page()
+
+    async def items(self) -> AsyncIterator[PaginatedModelT]:
+        async for item in (await self._get_response()).items():
+            yield item
+
+    async def pages(self) -> AsyncIterator[PageResult[PaginatedModelT, Any]]:
+        async for page in (await self._get_response()).pages():
+            yield page

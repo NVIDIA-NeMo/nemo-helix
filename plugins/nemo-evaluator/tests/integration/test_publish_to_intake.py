@@ -313,8 +313,8 @@ async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
         assert trace.root_span_id == t1.span_id
         assert trace.evaluation_context is not None
         evaluation_context = trace.evaluation_context
-        assert evaluation_context["evaluation_name"] == EXPERIMENT_NAME
-        assert evaluation_context["test_case_name"] == "task-1"
+        assert evaluation_context.evaluation_name == EXPERIMENT_NAME
+        assert evaluation_context.test_case_name == "task-1"
 
         # --- trial-1 scores: every field, every data_type coercion.
         rows = await intake.spans.evaluator_results.list(t1.span_id, workspace=WORKSPACE)
@@ -547,7 +547,7 @@ async def test_row_result_publishes_and_is_idempotent(platform_base_url: str) ->
         traces = await _list_traces(intake, trace_filter)
         assert len(traces) == 1, "re-publish duplicated the row instead of replacing it"
         assert traces[0].evaluation_context is not None
-        assert traces[0].evaluation_context["test_case_id"] == "q-1"
+        assert traces[0].evaluation_context.test_case_id == "q-1"
 
         rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
         assert [row.name for row in rows] == ["exact_match.score"]
