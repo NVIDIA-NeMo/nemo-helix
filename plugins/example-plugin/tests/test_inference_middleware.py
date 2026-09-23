@@ -21,8 +21,8 @@ from nemo_example_plugin.middleware import (  # pyright: ignore[reportMissingImp
     _redact_keywords,
 )
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig  # pyright: ignore[reportMissingImports]
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareCacheAccessor,
     InferenceMiddlewareContext,
@@ -85,7 +85,7 @@ async def test_startup_adapts_sdk_to_typed_entities_client() -> None:
     entity_client = MagicMock()
 
     with (
-        patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
+        patch("nemo_helix_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
         patch(
             "nemo_example_plugin.middleware.client_from_platform",
             return_value=typed_client,

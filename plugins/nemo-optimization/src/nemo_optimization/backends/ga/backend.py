@@ -8,8 +8,8 @@ from __future__ import annotations
 import copy
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.job_context import JobContext
 
 from nemo_optimization.backends.protocol import (
     OptimizationBackendCapabilities,
@@ -36,7 +36,7 @@ class GaBackend:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> dict[str, Any]:
         request = OptimizationPhaseRequest(payload=payload, phase=OptimizationPhase.PROMPT)
         self.validate_phase(request, ctx=ctx, sdk=sdk)
@@ -52,7 +52,7 @@ class GaBackend:
         request: OptimizationPhaseRequest,
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> None:
         del ctx, sdk
         if not self.capabilities.supports(request.phase):
@@ -68,7 +68,7 @@ class GaBackend:
         request: OptimizationPhaseRequest,
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> OptimizationPhaseResult:
         del sdk
         if not self.capabilities.supports(request.phase):

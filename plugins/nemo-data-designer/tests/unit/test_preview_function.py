@@ -16,10 +16,10 @@ from fastapi.testclient import TestClient
 from nemo_data_designer_plugin.functions import preview as preview_module
 from nemo_data_designer_plugin.functions._types import LogFrame, PreviewSpec
 from nemo_data_designer_plugin.functions.preview import PreviewFunction
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.dependencies import get_sdk_client, get_sync_sdk_client
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.dependencies import get_sdk_client, get_sync_sdk_client
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
 from pydantic import BaseModel
 
 
@@ -37,12 +37,12 @@ def _config() -> dd.DataDesignerConfig:
     return builder.build()
 
 
-def _sync_sdk() -> NeMoPlatform:
-    return NeMoPlatform(base_url="http://testserver", workspace="default")
+def _sync_sdk() -> NeMoHelix:
+    return NeMoHelix(base_url="http://testserver", workspace="default")
 
 
-def _async_sdk() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url="http://testserver", workspace="default")
+def _async_sdk() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(base_url="http://testserver", workspace="default")
 
 
 async def _resolve_runnable_config(

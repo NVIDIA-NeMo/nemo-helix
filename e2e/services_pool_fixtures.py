@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from _pytest.reports import TestReport
-from nemo_platform import DefaultHttpxClient, NeMoPlatform
+from nemo_helix import DefaultHttpxClient, NeMoHelix
 
 from e2e.services_pool import E2EServicesPool, RunningServices, admin_headers
 
@@ -28,9 +28,9 @@ def _read_services_log_tail(log_path: Path) -> list[str]:
 def configure_services_pool(config: pytest.Config, *, configure_mock_provider: bool = True) -> None:
     """Initialize the shared service-pool manager for a pytest session."""
     if configure_mock_provider:
-        os.environ.setdefault("NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX", "igw-mock-")
+        os.environ.setdefault("NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX", "igw-mock-")
 
-        from nemo_platform_plugin.config import Configuration
+        from nemo_helix_plugin.config import Configuration
 
         Configuration.clear_cache()
     if config.stash.get(_services_pool_manager_key, None) is None:
@@ -119,12 +119,12 @@ def _services(_services_instance: RunningServices) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module", name="services_pool_sdk")
-def services_pool_sdk(_services: str, _services_instance: RunningServices) -> NeMoPlatform:
-    access_token = os.environ.get("NMP_ACCESS_TOKEN")
-    context_name = os.environ.get("NMP_CONTEXT_NAME")
+def services_pool_sdk(_services: str, _services_instance: RunningServices) -> NeMoHelix:
+    access_token = os.environ.get("NHX_ACCESS_TOKEN")
+    context_name = os.environ.get("NHX_CONTEXT_NAME")
     headers = admin_headers() if _services_instance.auth_enabled else {}
     http_client = DefaultHttpxClient(base_url=_services, verify=True) if _services_instance.proc is not None else None
-    return NeMoPlatform(
+    return NeMoHelix(
         base_url=_services,
         access_token=access_token,
         context_name=context_name,

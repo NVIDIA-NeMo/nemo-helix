@@ -14,21 +14,32 @@ Stage 0:
 nemo data-designer retrieval-generate --spec '{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3-nano-30b-a3b","qa_generation_model":"nvidia/nemotron-3-nano-30b-a3b","quality_judge_model":"nvidia/nemotron-3-nano-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"}'
 ```
 
-Stage 1 (conversion only; mining is off unless you set `enable_mining`):
+Stage 1 (mine immediately; convert-only `enable_mining: false` is inspect-only):
 
 ```bash
-nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out"}'
+nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out","enable_mining":true,"model":"default/nemotron-3-embed-1b"}'
 ```
 
 Skip SDG entirely by pointing `sdg_input` at a Stage 0 fileset or `hf://` URI. Live generate writes `generation_result.json` (the default `generation_file`). For Hub dumps, name the file on the ref or set `generation_file`:
 
 ```bash
-nemo data-designer retrieval-prepare --spec '{"sdg_input":"hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<rev>/nv_pp_dd_sdg.json","enable_mining":false}'
+nemo data-designer retrieval-prepare --spec '{"sdg_input":"hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<rev>/nv_pp_dd_sdg.json","enable_mining":true,"model":"default/nemotron-3-embed-1b"}'
 # or
-nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-synthetic-nvdocs-v1","generation_file":"nv_pp_dd_sdg.json","enable_mining":false}'
+nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-synthetic-nvdocs-v1","generation_file":"nv_pp_dd_sdg.json","enable_mining":true,"model":"default/nemotron-3-embed-1b"}'
 ```
 
 Model roles resolve through Inference Gateway (`provider` + served model names). Do not set `NVIDIA_API_KEY` on the job.
+
+The Nemotron embed recipe uses [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) for all three chat roles. Examples here use `nvidia/nemotron-3-nano-30b-a3b` only so they can run on a typical already-deployed IGW model. Outside of examples, always use a larger model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Nano in an example is not a recommendation for a real run.
+
+Stage 0 quality controls are fields on the generate spec:
+`file_extensions` (default `.txt`, `.md`, `.text`, and no extension),
+`sentences_per_chunk` (5), `max_artifacts_per_type` (2), `num_pairs` (7),
+`multi_doc` (false), and `max_parallel_requests_for_gen` (provider default).
+When changing `num_pairs`, make both `query_counts` and `reasoning_counts` sum
+to it. `multi_doc` also exposes `bundle_size`, `bundle_strategy`, and
+`max_docs_per_bundle`. Stage 1 `quality_threshold` defaults to 7.0 and filters
+generated pairs by judge score.
 
 Stage 1 mining (`enable_mining: true`) is a GPU step. Pass `--profile` (or set
 `data_designer.job_executor_profile`) so generate, convert, and mine share job
@@ -52,10 +63,13 @@ Convert-only prepare (`enable_mining: false`) writes `training.jsonl` with empty
 
 `retrieval-prepare` saves one `artifacts` job result holding `training.jsonl`,
 `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`), and the wrapped
-`train.json` that mining consumes. Pass that fileset directly to both consumers:
-Automodel's dataset discovery selects `training.jsonl` and ignores the non-JSONL
-siblings, and the BEIR loader accepts a fileset root containing `eval_beir`.
-Splitting the artifacts into separate training and eval filesets is optional.
+`train.json` that mining consumes. Copy `training.jsonl` and `eval_beir/` to a
+fileset root (no path fragment) before Automodel `dataset.training` and
+`retrieve-eval` `dataset`. Automodel's dataset discovery selects `training.jsonl`
+and ignores the non-JSONL siblings; Stage 1 unique-keys qrels. Drop duplicate
+`(query-id, corpus-id)` rows from `eval_beir/qrels/test.tsv` if you are uploading
+an older dump — the BEIR loader rejects them. Splitting the artifacts into
+separate training and eval filesets is optional.
 
 ## Previous / Next / artifacts
 

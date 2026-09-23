@@ -11,7 +11,9 @@ import {
 import {
   getModelEntityChatStatus,
   groupModelsByWorkspace,
+  isServedByBaseModel,
   toInferenceModelEntityId,
+  toInferenceModelName,
 } from './models';
 
 const createModel = (overrides: Partial<ModelEntity> = {}): ModelEntity => ({
@@ -29,6 +31,29 @@ const createAdapter = (overrides: Partial<Adapter> = {}): Adapter => ({
   fileset: 'test-namespace/test-adapter',
   finetuning_type: FinetuningType.lora,
   ...overrides,
+});
+
+describe('toInferenceModelName', () => {
+  it('returns the bare model name when there is no adapter', () => {
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    expect(toInferenceModelName(model)).toBe('qwen3-0.6b');
+    expect(toInferenceModelName(model, null)).toBe('qwen3-0.6b');
+  });
+
+  // The gateway splits on "&adapters/" and looks the VirtualModel up by the base
+  // segment, taking the workspace from the URL. A workspace-qualified base segment
+  // would key a VM that does not exist.
+  it('leaves the base segment unqualified so the gateway can key the base VM', () => {
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    expect(toInferenceModelName(model, adapter)).toBe('qwen3-0.6b&adapters/default/pirate-voice');
+  });
+
+  it('qualifies the adapter segment, which may live in another workspace', () => {
+    const model = createModel({ workspace: 'nvidia', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    expect(toInferenceModelName(model, adapter)).toBe('qwen3-0.6b&adapters/default/pirate-voice');
+  });
 });
 
 describe('toInferenceModelEntityId', () => {
@@ -281,5 +306,65 @@ describe('groupModelsByWorkspace', () => {
       { sort: true }
     );
     expect(groups.map((g) => g.workspace)).toEqual(['deepseek', 'meta', 'nvidia']);
+  });
+});
+
+describe('isServedByBaseModel', () => {
+  // The reported bug: a full-weight run registers its own model, deployment and
+  // provider, but sets `base_model` like any fine-tune. Reading that as "served by
+  // the base" resolved status against a base that is usually not deployed, so the
+  // chat panel said "This model does not have an active deployment".
+  it('is false for a full-weight fine-tune', () => {
+    expect(
+      isServedByBaseModel(
+        createModel({
+          base_model: 'default/qwen3-0.6b',
+          finetuning_type: FinetuningType.all_weights,
+        })
+      )
+    ).toBe(false);
+  });
+
+  // Merged weights are a complete model despite the `lora` in the name — which is
+  // why the set is explicit rather than a prefix match.
+  it('is false for a merged LoRA', () => {
+    expect(
+      isServedByBaseModel(
+        createModel({
+          base_model: 'default/qwen3-0.6b',
+          finetuning_type: FinetuningType.lora_merged,
+        })
+      )
+    ).toBe(false);
+  });
+
+  it('is false for a preference-optimisation run', () => {
+    expect(
+      isServedByBaseModel(
+        createModel({ base_model: 'default/qwen3-0.6b', finetuning_type: FinetuningType.dpo })
+      )
+    ).toBe(false);
+  });
+
+  it.each([
+    FinetuningType.lora,
+    FinetuningType.qlora,
+    FinetuningType.dora,
+    FinetuningType.prompt_tuning,
+    FinetuningType.p_tuning,
+    FinetuningType.soft_prompt,
+  ])('is true for %s, which has no weights of its own', (finetuning_type) => {
+    expect(
+      isServedByBaseModel(createModel({ base_model: 'default/qwen3-0.6b', finetuning_type }))
+    ).toBe(true);
+  });
+
+  it('is false without a base model at all', () => {
+    expect(isServedByBaseModel(createModel({ finetuning_type: FinetuningType.lora }))).toBe(false);
+  });
+
+  // Not a fine-tune: nothing says it is served by anything but itself.
+  it('is false when the finetuning type is absent', () => {
+    expect(isServedByBaseModel(createModel({ base_model: 'default/qwen3-0.6b' }))).toBe(false);
   });
 });

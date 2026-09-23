@@ -8,7 +8,7 @@ description: ""
 
 <a id="agents"></a>
 
-An agent on NeMo Platform calls tools, accesses models through shared Platform
+An agent on NeMo Helix calls tools, accesses models through shared Platform
 infrastructure, and runs as a service you can register, deploy, and
 invoke. New agents use the Platform-managed `nemo-agents-spec-v1` `agent.yaml`
 contract. Legacy NVIDIA NeMo Agent Toolkit (NAT) workflow configurations remain
@@ -21,7 +21,7 @@ A platform-managed agent consists of three components:
 
 1. **The agent entity.** `nemo agents create` stores the agent YAML as an entity in the workspace. The same configuration can be redeployed without re-registering it.
 1. **The deployment controller.** `nemo agents deploy` passes the stored config to the Agents service controller. By default it launches a FastAPI server, assigns a port, watches its health, and tears it down on `nemo agents undeploy`. With `--mode docker` or `--mode k8s` it instead runs the agent as a durable container through the deployments plugin — see [Deploy Agents](/documentation/agents/deploy-agents).
-1. **The Agents gateway.** The gateway resolves the agent to its current running deployment and proxies client requests to it, including streaming responses. From a client's perspective, the agent is an OpenAI-compatible endpoint owned by NeMo Platform.
+1. **The Agents gateway.** The gateway resolves the agent to its current running deployment and proxies client requests to it, including streaming responses. From a client's perspective, the agent is an OpenAI-compatible endpoint owned by NeMo Helix.
 
 Model traffic from inside the agent process routes back through the Inference Gateway, which resolves model entity names to upstream providers and supplies their credentials. This is why agent configs do not carry `base_url` or `api_key` values — the deployment injects the gateway URL automatically, and the gateway looks up the rest.
 
@@ -85,11 +85,73 @@ It standardizes configuration, lifecycle management, and results without requiri
 To learn more about Fabric, see
 [NeMo Fabric](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/).
 
-NeMo Platform uses Fabric as the runtime wrapper around your agent so the
+NeMo Helix uses Fabric as the runtime wrapper around your agent so the
 platform can deploy it and route its model traffic
 through shared infrastructure.
 
-Intended behavior is recorded in [`ETHOS.md`](/documentation/agents/optimize-agents/ethos).
+### Install Harness Support
+
+The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
+DeepAgents, and Hermes adapter implementations. It does not install the
+third-party harness packages. Choose an extra when the harness should share the
+Platform environment:
+
+| Harness selection | `nemo-helix` package expression | Source checkout plugin expression | Harness packages installed |
+|---|---|---|---|
+| Adapters only | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
+| Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
+| Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
+| DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
+| All installable harnesses | `nemo-helix[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
+| Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
+
+Install the Agents plugin and one harness with its namespaced Platform extra.
+For example, install DeepAgents with:
+
+```bash
+uv tool install "nemo-helix[nemo-agents-plugin-deepagents]"
+```
+
+In an activated virtual environment, install the same package expression with:
+
+```bash
+uv pip install "nemo-helix[nemo-agents-plugin-deepagents]"
+```
+
+Plain `pip install` also works in an environment you manage yourself.
+Add `all` to the extra list only when the environment must also run every local
+Platform service: `nemo-helix[all,nemo-agents-plugin-deepagents]`.
+
+From a source checkout, use the standalone plugin extra instead:
+
+```bash
+uv sync --package nemo-agents-plugin --extra deepagents
+```
+
+Hermes Agent 0.20 and later is not distributed through PyPI and has dependency
+conflicts with the Platform environment. Follow the
+[Hermes Agent installation guide](https://hermes-agent.nousresearch.com/docs/installation)
+to create a separate environment, then install the matching Fabric runtime and
+Hermes adapter into that environment:
+
+```bash
+uv python install 3.12
+uv venv --python 3.12 .venv-hermes
+export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
+
+PLATFORM_PYTHON="$(sed -n '1s/^#!//p' "$(command -v nemo)")"
+FABRIC_VERSION="$("$PLATFORM_PYTHON" -c \
+  'import importlib.metadata as m; print(m.version("nemo-fabric"))')"
+
+uv pip install --python "$ADAPTER_PYTHON" \
+  "nemo-fabric[relay]==$FABRIC_VERSION" \
+  "nemo-fabric-adapters-hermes==$FABRIC_VERSION"
+```
+
+Keep `ADAPTER_PYTHON` set when starting NeMo Helix. Source-checkout users
+can instead run `script/dev-install-hermes.sh`, which performs these steps and
+installs the supported Hermes version in `.venv-hermes`.
+
 Runtime behavior is described by the platform-managed `agent.yaml`:
 
 | Section | Purpose | Example |
@@ -175,7 +237,7 @@ NVIDIA NeMo Agent Toolkit is a flexible, lightweight, and unifying library
 that allows you to easily connect existing enterprise agents to data sources
 and tools across any framework.
 
-NeMo Platform uses NAT as the runtime wrapper around your agent so the
+NeMo Helix uses NAT as the runtime wrapper around your agent so the
 platform can deploy it, evaluate it, optimize it, and route its model traffic
 through shared infrastructure. For the toolkit itself, see the
 [NeMo Agent Toolkit documentation](https://docs.nvidia.com/nemo/agent-toolkit/latest/).
@@ -218,11 +280,10 @@ route through middleware on the agent's behalf. Two conventions apply when a
 config targets a deployed agent:
 
 - **Model names use the Inference Gateway entity form**, with slashes and dots converted to hyphens (`nvidia/nemotron-3-nano-30b-a3b` becomes `nvidia-nemotron-3-nano-30b-a3b`). The Inference Gateway resolves the entity to the upstream provider that owns it.
-- **Leave `base_url` and `api_key` unset on `openai` and `nim` LLMs.** NeMo Platform injects an Inference Gateway URL when it deploys the agent, and the gateway retrieves upstream credentials from the secrets service. Setting `base_url` explicitly bypasses both.
+- **Leave `base_url` and `api_key` unset on `openai` and `nim` LLMs.** NeMo Helix injects an Inference Gateway URL when it deploys the agent, and the gateway retrieves upstream credentials from the secrets service. Setting `base_url` explicitly bypasses both.
 
 ## Common Tasks
 
-- [Agent Ethos](/documentation/agents/optimize-agents/ethos): `ETHOS.md`, the durable contract for intended behavior.
 - [Deploy Agents](/documentation/agents/deploy-agents): run an agent as a local subprocess or as a
   durable container on Docker or Kubernetes, and invoke it through the Agents gateway.
 - [Observe Agents](/documentation/agents/observe-agents): ingest and query agent telemetry with NeMo

@@ -1,4 +1,4 @@
-module github.com/NVIDIA-NeMo/nemo-platform/services/core/jobs/jobs-launcher
+module github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher
 
 go 1.26.7
 

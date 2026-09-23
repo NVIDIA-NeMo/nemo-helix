@@ -9,7 +9,7 @@ usage() {
 }
 
 source_collection_enabled() {
-    case "${NMP_COLLECT_SOURCES:-0}" in
+    case "${NHX_COLLECT_SOURCES:-0}" in
         1 | true | TRUE | True | yes | YES | Yes | on | ON | On)
             return 0
             ;;
@@ -59,7 +59,7 @@ done
 
 if ! source_collection_enabled; then
     mkdir -p "${output_dir}/manifests"
-    echo "source collection disabled; set NMP_COLLECT_SOURCES=1 to enable" > \
+    echo "source collection disabled; set NHX_COLLECT_SOURCES=1 to enable" > \
         "${output_dir}/manifests/source-collection-disabled.txt"
     exit 0
 fi

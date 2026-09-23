@@ -8,9 +8,9 @@ description: ""
 <a id="database-setup"></a>
 <a id="external-database-secrets"></a>
 
-The NeMo Platform uses a SQL-based database to store entities such as workspaces, jobs, and other records.
+The NeMo Helix uses a SQL-based database to store entities such as workspaces, jobs, and other records.
 
-By default, the NeMo Platform Helm chart deploys an embedded PostgreSQL instance (a StatefulSet using the official Postgres image) with simplified authentication to enable quick installation. This should not be used for production use, and an external PostgreSQL instance is recommended.
+By default, the NeMo Helix Helm chart deploys an embedded PostgreSQL instance (a StatefulSet using the official Postgres image) with simplified authentication to enable quick installation. This should not be used for production use, and an external PostgreSQL instance is recommended.
 
 ## External PostgreSQL Database
 
@@ -26,13 +26,13 @@ Use a secret that holds the full database connection URI and reference it with `
 1. **Create a secret** containing the connection URI (optionally with SSL parameters):
 
  ```sh
- kubectl create secret generic my-db-uri-secret --from-literal=uri='postgresql://nemo:my-password@db-host:5432/nemoplatform'
+ kubectl create secret generic my-db-uri-secret --from-literal=uri='postgresql://nemo@db-host:5432/nemohelix'
  ```
 
  For SSL, include `sslmode` in the URI:
 
  ```sh
- kubectl create secret generic my-db-uri-secret --from-literal=uri='postgresql://nemo:my-password@db-host:5432/nemoplatform?sslmode=require'
+ kubectl create secret generic my-db-uri-secret --from-literal=uri='postgresql://nemo@db-host:5432/nemohelix?sslmode=require'
  ```
 
 2. **Configure the chart** to use that secret:
@@ -79,7 +79,7 @@ Use individual `host`, `port`, `user`, and `database` values and a secret that c
  host: db-host.example.com
  port: 5432
  user: nemo
- database: nemoplatform
+ database: nemohelix
  existingSecret: my-db-password-secret
  existingSecretPasswordKey: "password" # key in the secret that holds the password
  ```

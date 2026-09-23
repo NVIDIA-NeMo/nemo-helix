@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from helpers import list_response, make_deployment, make_deployment_config
 from nemo_deployments_plugin.api.v2 import deployment_configs as configs_module
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,

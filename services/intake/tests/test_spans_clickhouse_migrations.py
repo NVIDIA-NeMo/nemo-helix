@@ -6,10 +6,10 @@
 import re
 from pathlib import Path
 
-import nmp.intake.spans.clickhouse_migrations as clickhouse_migrations
+import nhx.intake.spans.clickhouse_migrations as clickhouse_migrations
 import pytest
-from nmp.intake.spans.clickhouse_migrations import parse_clickhouse_url
-from nmp.intake.spans.span_attribute_catalog import SpanAttributeField, spec_for_field
+from nhx.intake.spans.clickhouse_migrations import parse_clickhouse_url
+from nhx.intake.spans.span_attribute_catalog import SpanAttributeField, spec_for_field
 
 
 def test_parse_clickhouse_url_rejects_hostless_url():

@@ -87,9 +87,9 @@ runs:
             - 'plugins/*/openapi/**'
             - 'plugins/*/src/**'
             - 'plugins/*/pyproject.toml'
-            - 'packages/nmp_common/src/nmp_common/api/**'
-            - 'packages/nmp_common/src/nmp_common/datamodel/**'
-            - 'packages/nemo_platform_plugin/src/**'
+            - 'packages/nhx_common/src/nhx_common/api/**'
+            - 'packages/nhx_common/src/nhx_common/datamodel/**'
+            - 'packages/nemo_helix_plugin/src/**'
             - 'packages/nemo_evaluator_sdk/src/**'
             - 'script/generate_openapi_spec.py'
             - 'script/generate-openapi-spec.sh'
@@ -124,7 +124,7 @@ runs:
             - 'e2e/**'
           docs:
             - 'docs/**'
-            - 'sdk/python/nemo-platform/src/**'
+            - 'sdk/python/nemo-helix/src/**'
           tools:
             - 'tools/**'
           web-studio:
@@ -155,7 +155,7 @@ runs:
             - 'packages/**'
             - 'services/**'
             - 'plugins/**'
-            - 'sdk/python/nemo-platform/**'
+            - 'sdk/python/nemo-helix/**'
           k8s-smoke:
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'

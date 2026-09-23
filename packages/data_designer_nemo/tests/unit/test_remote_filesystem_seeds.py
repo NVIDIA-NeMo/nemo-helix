@@ -12,8 +12,8 @@ from data_designer_nemo.context.execution import DataDesignerExecutionContext
 from data_designer_nemo.errors import NDDInvalidConfigError
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.seed import _validate_seed_from_files_service, validate_seed
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.files.types import ListFilesQueryParams
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
 
 
 def _list_files_response(paths: list[str]) -> Mock:
@@ -21,7 +21,7 @@ def _list_files_response(paths: list[str]) -> Mock:
 
 
 def test_remote_context_includes_filesystem_seed_readers() -> None:
-    readers = DataDesignerExecutionContext(Mock(spec=NeMoPlatform), "default").get_seed_readers()
+    readers = DataDesignerExecutionContext(Mock(spec=NemoClient), "default").get_seed_readers()
 
     assert any(isinstance(reader, DirectorySeedReader) for reader in readers)
     assert any(isinstance(reader, FileContentsSeedReader) for reader in readers)
@@ -29,7 +29,7 @@ def test_remote_context_includes_filesystem_seed_readers() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_seed_returns_canonical_validated_filesystem_root() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response(["corpus/a.md"]))
@@ -52,7 +52,7 @@ async def test_validate_seed_returns_canonical_validated_filesystem_root() -> No
 
 @pytest.mark.asyncio
 async def test_validate_seed_rejects_fileset_root_with_no_files() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response([]))
@@ -74,7 +74,7 @@ async def test_validate_seed_rejects_fileset_root_with_no_files() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_seed_rejects_path_with_no_files() -> None:
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response([]))
@@ -92,7 +92,7 @@ async def test_validate_seed_rejects_path_with_no_files() -> None:
 async def test_validate_seed_reports_missing_fileset_file() -> None:
     # FilesetFileSeedSource points at a single file, so the error should say "File ... not found"
     # rather than the directory-style "contains no files" message.
-    sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response([]))

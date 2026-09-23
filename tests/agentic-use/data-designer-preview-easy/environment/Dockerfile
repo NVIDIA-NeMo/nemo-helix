@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-FROM nmp-agentic-base:latest
+FROM nhx-agentic-base:latest
 
-# Override entrypoint to start NeMo Platform API and pre-configure CLI auth.
+# Override entrypoint to start NeMo Helix API and pre-configure CLI auth.
 # Agent handles inference provider setup and data designer config.
 ENTRYPOINT ["/bin/bash", "-c", "\
-cd /app && /app/.venv/bin/nemo services run > /tmp/nmp-api.log 2>&1 & API_PID=$!; \
+cd /app && /app/.venv/bin/nemo services run > /tmp/nhx-api.log 2>&1 & API_PID=$!; \
 echo 'Started API server with PID: '$API_PID; \
 CONSECUTIVE_SUCCESS=0; \
 for i in {1..60}; do \
@@ -14,7 +14,7 @@ for i in {1..60}; do \
         CONSECUTIVE_SUCCESS=$((CONSECUTIVE_SUCCESS+1)); \
         echo 'Health check passed ('$CONSECUTIVE_SUCCESS'/3)'; \
         if [ $CONSECUTIVE_SUCCESS -ge 3 ]; then \
-            echo 'NeMo Platform API ready and stable'; \
+            echo 'NeMo Helix API ready and stable'; \
             break; \
         fi; \
     else \
@@ -24,7 +24,7 @@ for i in {1..60}; do \
 done; \
 if [ $CONSECUTIVE_SUCCESS -lt 3 ]; then \
     echo 'API failed to become stable!'; \
-    cat /tmp/nmp-api.log; \
+    cat /tmp/nhx-api.log; \
     kill $API_PID 2>/dev/null; \
     exit 1; \
 fi; \

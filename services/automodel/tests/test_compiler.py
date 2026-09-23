@@ -7,14 +7,17 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock, Mock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, Mock
 
+import httpx
 import pytest
-from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.automodel.adapter import automodel_spec_to_compiler_output
-from nmp.automodel.api.v2.jobs.schemas import (
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.deployment import DeploymentParams, ToolCallParams
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.automodel.adapter import automodel_spec_to_compiler_output
+from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     ExportParams,
@@ -23,13 +26,18 @@ from nmp.automodel.api.v2.jobs.schemas import (
     RetrievalParams,
     SFTTraining,
 )
-from nmp.automodel.app.jobs.compiler import _build_file_download_config
-from nmp.automodel.compile import platform_job_config_compiler
-from nmp.automodel.entities.values import CheckpointSelection, OutputNameType
-from nmp.automodel.images import get_tasks_image, get_training_image
-from nmp.common.entities.utils import get_random_id
-from nmp.common.jobs.exceptions import PlatformJobCompilationError
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.automodel.app.jobs.compiler import _build_file_download_config
+from nhx.automodel.compile import platform_job_config_compiler
+from nhx.automodel.entities.values import CheckpointSelection, OutputNameType
+from nhx.automodel.images import get_tasks_image, get_training_image
+from nhx.common.entities.utils import get_random_id
+from nhx.common.jobs.exceptions import HelixJobCompilationError
+from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
+
+
+def _adapter_lookup(platform: AsyncCustomizationHelixClients) -> AsyncMock:
+    """The mocked ``get_adapter`` on a test platform client."""
+    return cast(AsyncMock, platform.models.get_adapter)
 
 
 def _make_mock_model_entity(
@@ -50,8 +58,24 @@ def _make_mock_model_entity(
 
 
 @pytest.fixture
-def platform_clients() -> AsyncCustomizationPlatformClients:
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock())
+def platform_clients() -> AsyncCustomizationHelixClients:
+    models = AsyncMock()
+    # Default to "no adapter with this output name exists", which is what every test that is
+    # not about adapter re-parenting assumes.
+    models.get_adapter.side_effect = _not_found()
+    return AsyncCustomizationHelixClients(files=AsyncMock(), models=models, jobs=MagicMock())
+
+
+def _not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+
+
+def _adapter_on(model_ref: str | None) -> Any:
+    adapter = MagicMock()
+    adapter.model = model_ref
+    response = MagicMock()
+    response.data.return_value = adapter
+    return response
 
 
 def _output(*, output_type: OutputNameType = OutputNameType.ADAPTER) -> OutputResponse:
@@ -84,13 +108,13 @@ def _make_job_output() -> CustomizationJobOutput:
 
 
 def test_build_file_download_config_rejects_missing_model_fileset() -> None:
-    with pytest.raises(PlatformJobCompilationError, match="has no fileset"):
+    with pytest.raises(HelixJobCompilationError, match="has no fileset"):
         _build_file_download_config(_make_job_output(), _make_mock_model_entity(fileset=None))
 
 
 def test_compile_training_step_carries_pass2_fields() -> None:
     """Pass-2 hyperparameters on the v2 SFTTraining reach the internal TrainingStepConfig."""
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -123,7 +147,7 @@ def test_compile_training_step_carries_pass2_fields() -> None:
 
 
 def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -144,7 +168,7 @@ def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
 
 
 def test_compile_training_step_carries_retrieval_config() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -216,8 +240,8 @@ def test_distillation_with_resolved_recipe_rejects_encoder_recipes() -> None:
 
 
 def test_resolve_training_recipe_auto_uses_cross_encoder_head() -> None:
-    from nmp.automodel.app.jobs.training.compiler import _resolve_training_recipe
-    from nmp.automodel.app.jobs.training.schemas import TrainingRecipe
+    from nhx.automodel.app.jobs.training.compiler import _resolve_training_recipe
+    from nhx.automodel.app.jobs.training.schemas import TrainingRecipe
 
     me = Mock()
     me.spec.model_fields_set = {"head_type"}
@@ -226,7 +250,7 @@ def test_resolve_training_recipe_auto_uses_cross_encoder_head() -> None:
 
 
 def test_compile_training_step_applies_retrieval_defaults_after_auto_resolution() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     me = _make_mock_model_entity()
     me.spec = Mock()
@@ -253,7 +277,7 @@ def test_compile_training_step_applies_retrieval_defaults_after_auto_resolution(
 
 
 def test_compile_training_step_auto_defaults_keep_explicit_lr() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     me = _make_mock_model_entity()
     me.spec = Mock()
@@ -279,11 +303,11 @@ def test_compile_training_step_auto_defaults_keep_explicit_lr() -> None:
 
 @pytest.mark.asyncio
 async def test_platform_job_config_compiler_rejects_unmerged_lora_for_encoders(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     job = CustomizationJobOutput(
@@ -297,7 +321,7 @@ async def test_platform_job_config_compiler_rejects_unmerged_lora_for_encoders(
         ),
         output=_output(),
     )
-    with pytest.raises(PlatformJobCompilationError, match="unmerged LoRA"):
+    with pytest.raises(HelixJobCompilationError, match="unmerged LoRA"):
         await platform_job_config_compiler(job, "default", platform_clients)
 
 
@@ -309,8 +333,8 @@ def test_the_reporting_budget_reaches_the_training_step_config() -> None:
     link defaults, so a broken one reports at 200 rather than failing, which is
     exactly the kind of regression nothing else here would notice.
     """
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -335,7 +359,7 @@ def test_a_spec_still_carrying_log_every_n_steps_compiles() -> None:
     did. Pinned because a later `extra="forbid"` here would turn that silent
     tolerance into a hard failure for exactly those specs.
     """
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     training = SFTTraining.model_validate({"learning_rate": 1e-4, "log_every_n_steps": 10})
     assert not hasattr(training, "log_every_n_steps")
@@ -355,7 +379,7 @@ def test_a_spec_still_carrying_log_every_n_steps_compiles() -> None:
 
 def test_the_reporting_budget_survives_the_plugin_adapter() -> None:
     """The adapter flattens the plugin's schedule block and is easy to drop a field from."""
-    from nmp.automodel.adapter import automodel_spec_to_compiler_output
+    from nhx.automodel.adapter import automodel_spec_to_compiler_output
 
     spec = {
         "model": "default/test-target",
@@ -371,7 +395,7 @@ def test_the_reporting_budget_survives_the_plugin_adapter() -> None:
 
 def test_a_plugin_spec_without_a_schedule_block_still_compiles() -> None:
     """`schedule` is optional in the plugin shape, so the adapter must not index it."""
-    from nmp.automodel.adapter import automodel_spec_to_compiler_output
+    from nhx.automodel.adapter import automodel_spec_to_compiler_output
 
     spec = {
         "model": "default/test-target",
@@ -386,11 +410,11 @@ def test_a_plugin_spec_without_a_schedule_block_still_compiles() -> None:
 
 @pytest.mark.asyncio
 async def test_platform_job_config_compiler_sft_lora(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     contract_dir = Path(__file__).resolve().parent / "contract" / "input_configs"
@@ -437,11 +461,11 @@ async def test_platform_job_config_compiler_sft_lora(
     training_name = training_step.name if hasattr(training_step, "name") else training_step["name"]
     assert training_name == "training"
     training_cmd = _executor_container(training_step).command
-    assert "nmp.automodel.tasks.training" in " ".join(training_cmd)
+    assert "nhx.automodel.tasks.training" in " ".join(training_cmd)
     download_cmd = _executor_container(steps[0]).command
     assert download_cmd == [
         "-m",
-        "nmp.customization_common.tasks.file_io",
+        "nhx.customization_common.tasks.file_io",
         "--service-source",
         "automodel",
         "--service-name",
@@ -467,11 +491,11 @@ async def test_platform_job_config_compiler_sft_lora(
 
 @pytest.mark.asyncio
 async def test_platform_job_config_compiler_applies_profile_to_task_steps(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
 
@@ -482,7 +506,7 @@ async def test_platform_job_config_compiler_applies_profile_to_task_steps(
 
 def test_build_model_entity_config_forwards_inline_deployment_config() -> None:
     """The plugin-supplied deployment_config must reach the model_entity step config."""
-    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+    from nhx.automodel.app.jobs.compiler import _build_model_entity_config
 
     job_spec = _make_job_output().model_copy(
         update={"deployment_config": DeploymentParams(gpu=2, image_name="img", lora_enabled=True)}
@@ -496,7 +520,7 @@ def test_build_model_entity_config_forwards_inline_deployment_config() -> None:
 
 
 def test_build_model_entity_config_forwards_deployment_config_string_ref() -> None:
-    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+    from nhx.automodel.app.jobs.compiler import _build_model_entity_config
 
     job_spec = _make_job_output().model_copy(update={"deployment_config": "shared/existing-cfg"})
     config = _build_model_entity_config("default", job_spec)
@@ -505,7 +529,7 @@ def test_build_model_entity_config_forwards_deployment_config_string_ref() -> No
 
 
 def test_build_model_entity_config_omits_deployment_config_by_default() -> None:
-    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+    from nhx.automodel.app.jobs.compiler import _build_model_entity_config
 
     config = _build_model_entity_config("default", _make_job_output())
 
@@ -514,7 +538,7 @@ def test_build_model_entity_config_omits_deployment_config_by_default() -> None:
 
 def test_deployment_config_survives_the_plugin_adapter() -> None:
     """End-to-end: plugin JSON -> adapter -> compiler -> model_entity step config."""
-    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+    from nhx.automodel.app.jobs.compiler import _build_model_entity_config
 
     spec = automodel_spec_to_compiler_output(
         {
@@ -548,15 +572,15 @@ def _deployable_job(deployment_config: str | DeploymentParams) -> CustomizationJ
 
 @pytest.mark.asyncio
 async def test_inline_deployment_config_compiles_without_an_auth_context(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only tool_call_plugin is permission-gated; plain params must not demand auth."""
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
-    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    monkeypatch.setattr("nhx.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
 
     spec = await platform_job_config_compiler(_deployable_job(DeploymentParams(gpu=2)), "default", platform_clients)
 
@@ -567,14 +591,14 @@ async def test_inline_deployment_config_compiles_without_an_auth_context(
 
 @pytest.mark.asyncio
 async def test_string_deployment_config_compiles_without_an_auth_context(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
-    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    monkeypatch.setattr("nhx.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
     platform_clients.models.get_deployment_config = AsyncMock(
         return_value=SimpleNamespace(
             data=lambda: SimpleNamespace(
@@ -598,35 +622,35 @@ async def test_string_deployment_config_compiles_without_an_auth_context(
 
 @pytest.mark.asyncio
 async def test_tool_call_plugin_without_an_auth_context_is_rejected(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
-    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    monkeypatch.setattr("nhx.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
     job = _deployable_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
 
-    with pytest.raises(PlatformJobCompilationError, match="No auth context available"):
+    with pytest.raises(HelixJobCompilationError, match="No auth context available"):
         await platform_job_config_compiler(job, "default", platform_clients)
 
 
 @pytest.mark.asyncio
 async def test_tool_call_plugin_without_the_permission_is_rejected(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     auth_client = AsyncMock()
     auth_client.has_permissions = AsyncMock(return_value=False)
-    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: auth_client))
+    monkeypatch.setattr("nhx.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: auth_client))
     job = _deployable_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
 
-    with pytest.raises(PlatformJobCompilationError, match="models.tool-call-plugin.set"):
+    with pytest.raises(HelixJobCompilationError, match="models.tool-call-plugin.set"):
         await platform_job_config_compiler(job, "default", platform_clients)
 
 
@@ -640,12 +664,16 @@ def _lora_job(deployment_config: str | DeploymentParams) -> CustomizationJobOutp
     )
 
 
+def _not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+
+
 def _deployment_config(
     *,
     lora_enabled: bool = True,
-    model_entity_id: str = "default/test-target",
-    model_name: str = "test-target",
-    model_namespace: str = "default",
+    model_entity_id: str | None = "default/test-target",
+    model_name: str | None = "test-target",
+    model_namespace: str | None = "default",
 ) -> Any:
     return SimpleNamespace(
         workspace="default",
@@ -657,12 +685,12 @@ def _deployment_config(
 
 @pytest.mark.asyncio
 async def test_lora_job_rejects_a_config_for_a_different_base_model(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The adapter is served from its base model's deployment, so the config must target it."""
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     platform_clients.models.get_deployment_config = AsyncMock(
@@ -671,17 +699,17 @@ async def test_lora_job_rejects_a_config_for_a_different_base_model(
         )
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="different model entity than the base model"):
+    with pytest.raises(HelixJobCompilationError, match="different model entity than the base model"):
         await platform_job_config_compiler(_lora_job("default/other-cfg"), "default", platform_clients)
 
 
 @pytest.mark.asyncio
 async def test_lora_job_accepts_a_config_targeting_its_base_model(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     platform_clients.models.get_deployment_config = AsyncMock(
@@ -696,15 +724,211 @@ async def test_lora_job_accepts_a_config_targeting_its_base_model(
 
 
 @pytest.mark.asyncio
+async def test_lora_job_accepts_an_unbound_config(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config naming no model is a template, bound to the base model at deploy time."""
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id=None, model_name=None, model_namespace=None)
+        )
+    )
+
+    spec = await platform_job_config_compiler(_lora_job("default/template-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/template-cfg"
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_an_unbound_config_without_lora_enabled(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unbound-ness excuses the model link, not a deployment that cannot load adapters."""
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(
+                lora_enabled=False, model_entity_id=None, model_name=None, model_namespace=None
+            )
+        )
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="lora_enabled=false"):
+        await platform_job_config_compiler(_lora_job("default/template-cfg"), "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_all_weights_job_accepts_a_config_pointing_at_the_unborn_output_model(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config created before the run, naming forward at the model it will produce.
+
+    Studio creates the config up front so a bad engine or image surfaces at submit
+    rather than after training, and so the deployment can start the moment the run
+    ends. The output entity does not exist yet; the reference is still correct.
+    """
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id="default/out", model_name="out", model_namespace="default")
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+
+    spec = await platform_job_config_compiler(_deployable_job("default/existing-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/existing-cfg"
+    # The entity's existence is never consulted -- only the config's target.
+    platform_clients.models.get_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_all_weights_job_accepts_an_unbound_config_for_a_new_model_entity(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The output entity does not exist on a first run, so it cannot be named up front."""
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id=None, model_name=None, model_namespace=None)
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+
+    spec = await platform_job_config_compiler(_deployable_job("default/template-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/template-cfg"
+    platform_clients.models.get_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_all_weights_job_rejects_a_config_naming_another_model_for_a_new_entity(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id="default/unrelated", model_name="unrelated")
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+
+    with pytest.raises(HelixJobCompilationError, match="targets a different model entity"):
+        await platform_job_config_compiler(_deployable_job("default/other-cfg"), "default", platform_clients)
+
+
+@pytest.mark.asyncio
 async def test_inline_lora_enabled_false_is_rejected_at_compile(
-    platform_clients: AsyncCustomizationPlatformClients,
+    platform_clients: AsyncCustomizationHelixClients,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AutomodelJobInput rejects this at submit; the compiler takes the output spec."""
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
+    with pytest.raises(HelixJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler(_lora_job(DeploymentParams(lora_enabled=False)), "default", platform_clients)
+
+
+def _adapter_retrain_job(model: str = "default/test-target") -> CustomizationJobOutput:
+    return CustomizationJobOutput(
+        model=model,
+        dataset="default/my-dataset",
+        training=SFTTraining(
+            peft=LoRAParams(rank=8, alpha=32, merge=False),
+            batch_size=4,
+            micro_batch_size=1,
+        ),
+        output=_output(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_an_output_name_owned_by_a_different_base_model(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter names are workspace-unique, so this can never succeed -- fail before training."""
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    lookup = _adapter_lookup(platform_clients)
+    lookup.side_effect = None
+    lookup.return_value = _adapter_on("default/some-other-model")
+
+    with pytest.raises(HelixJobCompilationError, match="default/some-other-model"):
+        await platform_job_config_compiler(_adapter_retrain_job(), "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_lora_job_allows_retraining_its_own_adapter(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same base model is the supported retrain path -- the fileset is updated in place."""
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    lookup = _adapter_lookup(platform_clients)
+    lookup.side_effect = None
+    lookup.return_value = _adapter_on("default/test-target")
+
+    spec = await platform_job_config_compiler(_adapter_retrain_job(), "default", platform_clients)
+    assert spec is not None
+
+
+@pytest.mark.asyncio
+async def test_full_weight_job_rejects_an_output_name_a_running_job_will_register(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two in-flight jobs with one output name share a fileset and collide at registration.
+
+    Checking existing entities misses this: neither job has registered yet. Not LoRA-specific.
+    """
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    running = SimpleNamespace(name="automodel-job-1", status=HelixJobStatus.ACTIVE, spec={"output": {"name": "out"}})
+    cast(MagicMock, platform_clients.jobs).list.return_value.__aiter__.return_value = [running]
+    job = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(batch_size=4, micro_batch_size=1),
+        output=_output(output_type=OutputNameType.MODEL),
+    )
+
+    with pytest.raises(HelixJobCompilationError, match=r"Job 'automodel-job-1' \(active\) is already producing"):
+        await platform_job_config_compiler(job, "default", platform_clients)

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for post-run NMP Intake ATIF upload."""
+"""Unit tests for post-run NHX Intake ATIF upload."""
 
 from __future__ import annotations
 
@@ -817,7 +817,7 @@ def test_upload_job_atif_creates_experiment_then_logs_trials(tmp_path: Path) -> 
     assert any(u.endswith("/evaluations") for u in urls)
     # The Evaluation records which intake contract version produced it.
     exp_body = next(p for _, u, p in seen if u.endswith("/evaluations"))
-    assert exp_body["metadata"]["intake_contract_ref"].startswith("nemo-platform@")
+    assert exp_body["metadata"]["intake_contract_ref"].startswith("nemo-helix@")
     # It belongs to its parent Experiment via the canonical experiment_ids list (not the
     # deprecated experiment_group_id scalar).
     assert exp_body["experiment_ids"] == ["eg-1"]

@@ -36,7 +36,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
 from nemo_agent_hardener_plugin.jobs.hitl import StatusDetailsChannel, drive_synth_hitl
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.synth_client import launch_synth_service
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
 

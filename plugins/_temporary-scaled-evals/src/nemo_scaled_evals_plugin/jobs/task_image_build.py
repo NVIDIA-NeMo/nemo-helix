@@ -9,15 +9,15 @@ import os
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
     EnvironmentVariableFromSecret,
     ExecutorSpec,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
     ResourcesSpec,
     SubprocessExecutionProviderSpec,
 )
@@ -47,13 +47,13 @@ class TaskImageBuildJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile a task-image build into one CPU container step."""
         del workspace, entity_client, job_name, async_sdk
         canonical = TaskImageBuildSpec.model_validate(spec)
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="task-image-build",
                     executor=resolve_executor(
                         options,

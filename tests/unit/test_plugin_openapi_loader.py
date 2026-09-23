@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from fastapi import APIRouter
-from nemo_platform_plugin.jobs.openapi_utils import clear_query_param_schemas, generate_openapi_extra_params
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.jobs.openapi_utils import clear_query_param_schemas, generate_openapi_extra_params
+from nemo_helix_plugin.service import NemoService, RouterSpec
 from pydantic import BaseModel
 
 from script.openapi_helper.openapi_tools import validate_refs

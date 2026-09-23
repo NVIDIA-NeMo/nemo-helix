@@ -17,7 +17,7 @@ Use this skill for API-driven input and output rails on chat-completions traffic
 
 ## API surfaces
 
-All paths below are relative to the NeMo Platform base URL (locally, `http://localhost:8080`):
+All paths below are relative to the NeMo Helix base URL (locally, `http://localhost:8080`):
 
 | Purpose | Method and path |
 |---|---|
@@ -233,9 +233,9 @@ See [Rails Config Reference](resources/rails-config.md) for full input/output ex
 When the assistant has the Python platform SDK rather than a generic HTTP tool, use the same API resources:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 configs = client.guardrail.configs.list()
 ```
 

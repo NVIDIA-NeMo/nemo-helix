@@ -132,7 +132,7 @@ class SwitchyardRecipes:
                 Defaults to ``True`` here (recipe path) where embedded
                 Python users typically want switchyard's stats endpoint;
                 the factory's :class:`PassthroughConfig` defaults to
-                ``False`` so config-driven hosts (NeMo Platform IGW) don't
+                ``False`` so config-driven hosts (NeMo Helix IGW) don't
                 double-count with their own observability.
         """
         # Local import: avoids pulling the factory (and the OpenAI SDK

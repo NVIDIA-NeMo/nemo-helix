@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 apiVersion: v2
-name: nemo-platform-authentik
-description: Single-chart Authentik reference deployment for NeMo Platform auth-idp tests
+name: nemo-helix-authentik
+description: Single-chart Authentik reference deployment for NeMo Helix auth-idp tests
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -11,6 +11,6 @@ dependencies:
   - name: authentik
     version: 2026.5.4
     repository: https://charts.goauthentik.io
-  - name: nemo-platform
+  - name: nemo-helix
     version: 0.0.0
     repository: file://../../../../k8s/helm

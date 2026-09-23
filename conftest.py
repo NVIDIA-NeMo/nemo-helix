@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Root-level conftest.py for NeMo Platform
+Root-level conftest.py for NeMo Helix
 
 This file contains shared fixtures and configuration that are available to all tests
 in the repository. Individual packages and services can add their own conftest.py
@@ -21,10 +21,10 @@ from tests.xdist_cache import xdist_worker_xdg_cache_home
 _xdist_cache_home = xdist_worker_xdg_cache_home(os.environ)
 if _xdist_cache_home is not None:
     os.environ["XDG_CACHE_HOME"] = _xdist_cache_home
-    os.environ["NMP_PYTEST_XDIST_CACHE_HOME_ISOLATED"] = "1"
+    os.environ["NHX_PYTEST_XDIST_CACHE_HOME_ISOLATED"] = "1"
 
 import pytest  # noqa: E402
-from nmp.testing.pytest_outcomes import pytest_skip as skip_test  # noqa: E402
+from nhx.testing.pytest_outcomes import pytest_skip as skip_test  # noqa: E402
 
 from tests.auth_idp.xdist import append_xdist_group_suffix  # noqa: E402
 from tests.discovery_exclusions import TEST_DISCOVERY_EXCLUSIONS  # noqa: E402
@@ -36,8 +36,8 @@ if "MODE" not in os.environ:
 
 # Silence config warnings during tests - services don't need the config file
 # when using create_test_client() which programmatically sets configuration overrides
-if "NMP_CONFIG_WARNINGS_DISABLED" not in os.environ:
-    os.environ["NMP_CONFIG_WARNINGS_DISABLED"] = "1"
+if "NHX_CONFIG_WARNINGS_DISABLED" not in os.environ:
+    os.environ["NHX_CONFIG_WARNINGS_DISABLED"] = "1"
 
 
 # ============================================================================
@@ -240,6 +240,9 @@ _CRASH_DUMP_FILE = None
 #: Session-wide per-test timeout, to judge a lost worker's elapsed time against.
 _SESSION_TIMEOUT_SECONDS = None
 
+#: How long before the session timeout the stack dump fires, so it lands before os._exit.
+_TIMEOUT_DUMP_LEAD_SECONDS = 5
+
 #: Start time of each in-flight test, by nodeid. xdist forwards `logstart` to the controller, so a
 #: lost worker's test can still be timed from there.
 _TEST_START_TIMES: dict[str, float] = {}
@@ -257,6 +260,32 @@ def pytest_runtest_logfinish(nodeid, location):
     """Forget a test that finished, so only genuinely in-flight tests are timed."""
     del location
     _TEST_START_TIMES.pop(nodeid, None)
+    if _CRASH_DUMP_FILE is not None:
+        import faulthandler
+
+        faulthandler.cancel_dump_traceback_later()
+
+
+def _effective_timeout_seconds(item) -> float | None:
+    """The pytest-timeout budget for ``item``: its closest ``timeout`` marker, else the session default."""
+    marker = item.get_closest_marker("timeout")
+    if marker is None:
+        return _SESSION_TIMEOUT_SECONDS
+    value = marker.args[0] if marker.args else marker.kwargs.get("timeout")
+    return float(value) if value is not None else _SESSION_TIMEOUT_SECONDS
+
+
+def _arm_timeout_stack_dump(timeout_seconds: float | None) -> None:
+    """Dump every thread's stack into the crash file just before pytest-timeout kills the worker.
+
+    pytest-timeout's thread method prints its stacks to worker stderr, which xdist discards, so a
+    timed-out test otherwise leaves only its name behind.
+    """
+    if not timeout_seconds or timeout_seconds <= _TIMEOUT_DUMP_LEAD_SECONDS:
+        return
+    import faulthandler
+
+    faulthandler.dump_traceback_later(timeout_seconds - _TIMEOUT_DUMP_LEAD_SECONDS, file=_CRASH_DUMP_FILE, exit=False)
 
 
 def pytest_handlecrashitem(crashitem, report, sched):
@@ -297,8 +326,8 @@ def pytest_collection_modifyitems(config, items):
         "auth_idp_docker",
         "auth_idp_k8s",
         "smoke_gpu_tasks",
-        "smoke_nmp_customizer_tasks",
-        "smoke_nmp_automodel_training",
+        "smoke_nhx_customizer_tasks",
+        "smoke_nhx_automodel_training",
         "integration",
         "regression",
         "canary",
@@ -387,6 +416,8 @@ def pytest_runtest_setup(item):
     """
     Run before each test to check if it should be skipped based on command-line options.
     """
+    if _CRASH_DUMP_FILE is not None:
+        _arm_timeout_stack_dump(_effective_timeout_seconds(item))
     if "slow" in [marker.name for marker in item.iter_markers()]:
         if not item.config.getoption("--run-slow"):
             skip_test("Skipping slow test (use --run-slow to run)")
@@ -396,14 +427,14 @@ def pytest_runtest_setup(item):
         if not item.config.getoption("--run-e2e") and not auth_idp_runtime_selected:
             skip_test("Skipping e2e test (use --run-e2e to run)")
     if "subprocess_only" in [marker.name for marker in item.iter_markers()]:
-        if os.environ.get("NMP_BASE_URL"):
-            skip_test("Skipping subprocess-only test (NMP_BASE_URL is set)")
+        if os.environ.get("NHX_BASE_URL"):
+            skip_test("Skipping subprocess-only test (NHX_BASE_URL is set)")
     if "container_only" in [marker.name for marker in item.iter_markers()]:
-        if not os.environ.get("NMP_BASE_URL"):
-            skip_test("Skipping container-only test (requires NMP_BASE_URL)")
-    if "needs_nmp_api_image" in [marker.name for marker in item.iter_markers()]:
-        if not (os.environ.get("NMP_E2E_IMAGE_REGISTRY") and os.environ.get("NMP_E2E_IMAGE_TAG")):
-            skip_test("Skipping nmp-api-image test (set NMP_E2E_IMAGE_REGISTRY and NMP_E2E_IMAGE_TAG)")
+        if not os.environ.get("NHX_BASE_URL"):
+            skip_test("Skipping container-only test (requires NHX_BASE_URL)")
+    if "needs_agents_e2e_image" in [marker.name for marker in item.iter_markers()]:
+        if not (os.environ.get("NHX_E2E_IMAGE_REGISTRY") and os.environ.get("NHX_E2E_IMAGE_TAG")):
+            skip_test("Skipping agents-image test (set NHX_E2E_IMAGE_REGISTRY and NHX_E2E_IMAGE_TAG)")
     if "requires_gpu" in [marker.name for marker in item.iter_markers()]:
         if "gpu" not in _e2e_features_enabled(item.config):
             skip_test("Skipping GPU container e2e (pass --feature gpu)")

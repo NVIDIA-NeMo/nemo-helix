@@ -19,8 +19,8 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentSpec,
     EnvironmentSpecInline,
 )
-from nemo_platform_plugin.entity import NemoEntity
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,

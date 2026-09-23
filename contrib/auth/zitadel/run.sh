@@ -18,26 +18,26 @@ BAKE_TAG="${BAKE_TAG:-local}"
 REUSE_SET="false"
 TEST_PLATFORM=""
 TEST_PLATFORM_SET="false"
-TEST_DOCKER_TARGET="nmp-api-docker"
-REUSE_K8S_CLUSTER_NAME="${NMP_ZITADEL_K8S_REUSE_CLUSTER_NAME:-}"
+TEST_DOCKER_TARGET="nhx-api-docker"
+REUSE_K8S_CLUSTER_NAME="${NHX_ZITADEL_K8S_REUSE_CLUSTER_NAME:-}"
 DEFAULT_K8S_GATEWAY_PORT="18084"
-K8S_GATEWAY_PORT="${NMP_ZITADEL_K8S_GATEWAY_PORT:-}"
-K8S_JUNIT_XML="${NMP_ZITADEL_K8S_JUNIT_XML:-report-auth-idp-zitadel-kubernetes.xml}"
-HELM_NAMESPACE="${HELM_NAMESPACE:-${NMP_ZITADEL_K8S_NAMESPACE:-nemo-zitadel}}"
-HELM_RELEASE="${HELM_RELEASE:-${NMP_ZITADEL_K8S_HELM_RELEASE:-zitadel-demo}}"
-HELM_WAIT_TIMEOUT="${HELM_WAIT_TIMEOUT:-${NMP_ZITADEL_K8S_HELM_WAIT_TIMEOUT:-20m}}"
-K8S_CLUSTER_NAME="${NMP_ZITADEL_K8S_CLUSTER_NAME:-}"
-K8S_RUNTIME="${NMP_ZITADEL_K8S_RUNTIME:-kind}"
+K8S_GATEWAY_PORT="${NHX_ZITADEL_K8S_GATEWAY_PORT:-}"
+K8S_JUNIT_XML="${NHX_ZITADEL_K8S_JUNIT_XML:-report-auth-idp-zitadel-kubernetes.xml}"
+HELM_NAMESPACE="${HELM_NAMESPACE:-${NHX_ZITADEL_K8S_NAMESPACE:-nemo-zitadel}}"
+HELM_RELEASE="${HELM_RELEASE:-${NHX_ZITADEL_K8S_HELM_RELEASE:-zitadel-demo}}"
+HELM_WAIT_TIMEOUT="${HELM_WAIT_TIMEOUT:-${NHX_ZITADEL_K8S_HELM_WAIT_TIMEOUT:-20m}}"
+K8S_CLUSTER_NAME="${NHX_ZITADEL_K8S_CLUSTER_NAME:-}"
+K8S_RUNTIME="${NHX_ZITADEL_K8S_RUNTIME:-kind}"
 K8S_RUNTIME_SET="false"
-K8S_KEEP_CLUSTER="${NMP_ZITADEL_K8S_KEEP_CLUSTER:-0}"
-K8S_REUSE_CLUSTER="${NMP_ZITADEL_K8S_REUSE_CLUSTER:-0}"
-K8S_SKIP_IMAGE_LOAD="${NMP_ZITADEL_K8S_SKIP_IMAGE_LOAD:-0}"
+K8S_KEEP_CLUSTER="${NHX_ZITADEL_K8S_KEEP_CLUSTER:-0}"
+K8S_REUSE_CLUSTER="${NHX_ZITADEL_K8S_REUSE_CLUSTER:-0}"
+K8S_SKIP_IMAGE_LOAD="${NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD:-0}"
 K8S_SKIP_IMAGE_LOAD_SET="false"
-K8S_EXPORT_KUBECONFIG="${NMP_ZITADEL_K8S_EXPORT_KUBECONFIG:-0}"
+K8S_EXPORT_KUBECONFIG="${NHX_ZITADEL_K8S_EXPORT_KUBECONFIG:-0}"
 K8S_EXPORT_KUBECONFIG_SET="false"
-K8S_NGC_EXISTING_SECRET="${NMP_ZITADEL_K8S_NGC_EXISTING_SECRET:-}"
-K8S_IMAGE_PULL_SECRET="${NMP_ZITADEL_K8S_IMAGE_PULL_SECRET:-}"
-ZITADEL_WORKSPACE="${NMP_ZITADEL_WORKSPACE:-zitadel-demo}"
+K8S_NGC_EXISTING_SECRET="${NHX_ZITADEL_K8S_NGC_EXISTING_SECRET:-}"
+K8S_IMAGE_PULL_SECRET="${NHX_ZITADEL_K8S_IMAGE_PULL_SECRET:-}"
+ZITADEL_WORKSPACE="${NHX_ZITADEL_WORKSPACE:-zitadel-demo}"
 ZITADEL_PROVIDER_IMAGES=(
     "ghcr.io/zitadel/zitadel:v4.15.3"
     "docker.io/alpine/k8s:1.32.2"
@@ -101,10 +101,10 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 
 validate_k8s_gateway_port() {
     if [[ ! "${K8S_GATEWAY_PORT}" =~ ^[0-9]+$ ]]; then
-        die "NMP_ZITADEL_K8S_GATEWAY_PORT must be an integer TCP port"
+        die "NHX_ZITADEL_K8S_GATEWAY_PORT must be an integer TCP port"
     fi
     if ((K8S_GATEWAY_PORT < 1 || K8S_GATEWAY_PORT > 65535)); then
-        die "NMP_ZITADEL_K8S_GATEWAY_PORT must be between 1 and 65535"
+        die "NHX_ZITADEL_K8S_GATEWAY_PORT must be between 1 and 65535"
     fi
 }
 
@@ -152,22 +152,22 @@ Actions:
   clean                Remove stale recorded instances using down semantics.
 
 Image options:
-  --image IMAGE        Use an existing nmp-api image.
-                       Expected format: <registry>/nmp-api:<tag>
+  --image IMAGE        Use an existing nhx-api image.
+                       Expected format: <registry>/nhx-api:<tag>
 
 Test options:
   --reuse              Reuse a deterministic test environment.
-                       For k8s, use cluster nmp-zitadel-reuse with the selected
+                       For k8s, use cluster nhx-zitadel-reuse with the selected
                        runtime, creating it if needed and keeping it after the
                        run. The up action uses this reusable resource by default.
                        The k8s up action uses gateway port 18084 by default.
                        The k8s test action chooses a free local port by default.
-                       Override either with NMP_ZITADEL_K8S_GATEWAY_PORT.
+                       Override either with NHX_ZITADEL_K8S_GATEWAY_PORT.
   --platform PLATFORM  Platform for the default local test image build.
                        Default: current machine architecture.
   --runtime RUNTIME    Kubernetes runtime for k8s/down: kind or k3d.
                        Default: kind.
-  --skip-image-load    Do not load the nmp-api image into the reused cluster.
+  --skip-image-load    Do not load the nhx-api image into the reused cluster.
                        For a fresh cluster, use only with an explicit pullable
                        --image.
   --export-kubeconfig  Also merge and switch the Kubernetes context into the
@@ -208,17 +208,17 @@ fail() {
 }
 
 image_ref() {
-    printf "%s/nmp-api:%s" "${IMAGE_REGISTRY}" "${BAKE_TAG}"
+    printf "%s/nhx-api:%s" "${IMAGE_REGISTRY}" "${BAKE_TAG}"
 }
 
 parse_image() {
     local image="$1"
 
-    if [[ "${image}" != */nmp-api:* ]]; then
-        die "--image must use the form <registry>/nmp-api:<tag>"
+    if [[ "${image}" != */nhx-api:* ]]; then
+        die "--image must use the form <registry>/nhx-api:<tag>"
     fi
 
-    IMAGE_REGISTRY="${image%/nmp-api:*}"
+    IMAGE_REGISTRY="${image%/nhx-api:*}"
     BAKE_TAG="${image##*:}"
     IMAGE_SELECTED="true"
 
@@ -269,9 +269,9 @@ configure_instance_defaults() {
 
     if [[ -z "${REUSE_K8S_CLUSTER_NAME}" ]]; then
         if [[ -n "${INSTANCE_KEY}" ]]; then
-            REUSE_K8S_CLUSTER_NAME="nmp-zitadel-${INSTANCE_KEY}"
+            REUSE_K8S_CLUSTER_NAME="nhx-zitadel-${INSTANCE_KEY}"
         else
-            REUSE_K8S_CLUSTER_NAME="nmp-zitadel-reuse"
+            REUSE_K8S_CLUSTER_NAME="nhx-zitadel-reuse"
         fi
     fi
 }
@@ -734,7 +734,7 @@ k8s_helm_install() {
     local -a args
 
     image="$(image_ref)"
-    registry="${image%/nmp-api:*}"
+    registry="${image%/nhx-api:*}"
     tag="${image##*:}"
     workload_token_private_key="$(workload_token_private_key_file)"
 
@@ -756,29 +756,29 @@ k8s_helm_install() {
         --timeout
         "${HELM_WAIT_TIMEOUT}"
         --set
-        "nemo-platform.api.image.repository=${registry}/nmp-api"
+        "nemo-helix.api.image.repository=${registry}/nhx-api"
         --set
-        "nemo-platform.api.image.tag=${tag}"
+        "nemo-helix.api.image.tag=${tag}"
         --set
-        "nemo-platform.core.image.repository=${registry}/nmp-api"
+        "nemo-helix.core.image.repository=${registry}/nhx-api"
         --set
-        "nemo-platform.core.image.tag=${tag}"
+        "nemo-helix.core.image.tag=${tag}"
         --set-string
-        "nemo-platform.platformConfig.platform.image_registry=${registry}"
+        "nemo-helix.platformConfig.platform.image_registry=${registry}"
         --set-string
-        "nemo-platform.platformConfig.platform.image_tag=${tag}"
+        "nemo-helix.platformConfig.platform.image_tag=${tag}"
         --set-string
-        "nemo-platform.platformConfig.auth.access_keys.enabled=true"
+        "nemo-helix.platformConfig.auth.access_keys.enabled=true"
         --set-string
-        "nemo-platform.zitadelPublicGateway.port=${K8S_GATEWAY_PORT}"
+        "nemo-helix.zitadelPublicGateway.port=${K8S_GATEWAY_PORT}"
         --set-file
         "workloadTokenSigningKey.privateKeyPem=${workload_token_private_key}"
     )
     if [[ -n "${K8S_NGC_EXISTING_SECRET}" ]]; then
-        args+=(--set-string "nemo-platform.existingSecret=${K8S_NGC_EXISTING_SECRET}")
+        args+=(--set-string "nemo-helix.existingSecret=${K8S_NGC_EXISTING_SECRET}")
     fi
     if [[ -n "${K8S_IMAGE_PULL_SECRET}" ]]; then
-        args+=(--set-string "nemo-platform.imagePullSecrets[0].name=${K8S_IMAGE_PULL_SECRET}")
+        args+=(--set-string "nemo-helix.imagePullSecrets[0].name=${K8S_IMAGE_PULL_SECRET}")
     fi
 
     echo "Installing ZITADEL Kubernetes demo into ${cluster_name}/${HELM_NAMESPACE}"
@@ -790,7 +790,7 @@ k8s_wait_for_zitadel() {
     local kubeconfig="$2"
     local deployment
 
-    for deployment in zitadel nemo-platform-api nemo-platform-core-controller nemo-platform-envoy; do
+    for deployment in zitadel nemo-helix-api nemo-helix-core-controller nemo-helix-envoy; do
         k8s_kubectl_command "${context}" "${kubeconfig}" \
             -n "${HELM_NAMESPACE}" rollout status "deploy/${deployment}" --timeout=240s
     done
@@ -804,17 +804,17 @@ k8s_write_ca_bundle() {
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         print_command kubectl --kubeconfig "${kubeconfig}" --context "${context}" \
-            -n "${HELM_NAMESPACE}" get secret nemo-platform-envoy-tls -o "jsonpath={.data.ca\\.crt}"
+            -n "${HELM_NAMESPACE}" get secret nemo-helix-envoy-tls -o "jsonpath={.data.ca\\.crt}"
         printf "+ write %q\n" "${ca_bundle}"
         return
     fi
 
     encoded="$(
         kubectl --kubeconfig "${kubeconfig}" --context "${context}" \
-            -n "${HELM_NAMESPACE}" get secret nemo-platform-envoy-tls -o "jsonpath={.data.ca\\.crt}"
+            -n "${HELM_NAMESPACE}" get secret nemo-helix-envoy-tls -o "jsonpath={.data.ca\\.crt}"
     )"
     if [[ -z "${encoded}" ]]; then
-        fail "secret nemo-platform-envoy-tls in ${HELM_NAMESPACE} has no ca.crt entry"
+        fail "secret nemo-helix-envoy-tls in ${HELM_NAMESPACE} has no ca.crt entry"
     fi
     if printf "%s" "${encoded}" | base64 --decode >"${ca_bundle}" 2>/dev/null; then
         return
@@ -858,7 +858,7 @@ k8s_port_forward_pid_is_running() {
     args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
     [[ "${args}" == *"kubectl"* ]] || return 1
     [[ "${args}" == *"port-forward"* ]] || return 1
-    [[ "${args}" == *"svc/nemo-platform-envoy"* ]] || return 1
+    [[ "${args}" == *"svc/nemo-helix-envoy"* ]] || return 1
     if [[ -n "${expected_port}" ]]; then
         [[ " ${args} " == *" ${expected_port}:8080 "* ]] || return 1
     fi
@@ -908,7 +908,7 @@ k8s_start_port_forward() {
     if [[ "${DRY_RUN}" == "true" ]]; then
         printf "+ nohup "
         quote_args kubectl --kubeconfig "${kubeconfig}" --context "${context}" \
-            -n "${HELM_NAMESPACE}" port-forward svc/nemo-platform-envoy "${K8S_GATEWAY_PORT}:8080"
+            -n "${HELM_NAMESPACE}" port-forward svc/nemo-helix-envoy "${K8S_GATEWAY_PORT}:8080"
         printf "> %q 2>&1 &\n" "${log_file}"
         printf "+ write %q\n" "${pid_file}"
         wait_for_https_ready "${gateway_url}/health/gateway/ready" "${ca_bundle}" 30
@@ -928,7 +928,7 @@ k8s_start_port_forward() {
     fi
 
     nohup kubectl --kubeconfig "${kubeconfig}" --context "${context}" \
-        -n "${HELM_NAMESPACE}" port-forward svc/nemo-platform-envoy "${K8S_GATEWAY_PORT}:8080" \
+        -n "${HELM_NAMESPACE}" port-forward svc/nemo-helix-envoy "${K8S_GATEWAY_PORT}:8080" \
         >"${log_file}" 2>&1 &
     printf "%s\n" "$!" >"${pid_file}"
     k8s_wait_for_port_forward_ready "${gateway_url}" "${ca_bundle}" "${log_file}"
@@ -1156,19 +1156,19 @@ run_k8s_tests() {
         run_pytest_with_diagnostics "${diagnostics}" \
             env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" "BAKE_TAG=${BAKE_TAG}" \
             "E2E_SERVICES_LOG_DIR=${diagnostics}" \
-            "NMP_ZITADEL_K8S_LOG_DIR=${k8s_diagnostics}" \
-            "NMP_ZITADEL_K8S_HELM_RELEASE=${HELM_RELEASE}" \
-            "NMP_ZITADEL_K8S_HELM_WAIT_TIMEOUT=${HELM_WAIT_TIMEOUT}" \
-            "NMP_ZITADEL_K8S_NAMESPACE=${HELM_NAMESPACE}" \
-            "NMP_ZITADEL_K8S_RUNTIME=${K8S_RUNTIME}" \
-            "NMP_ZITADEL_K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" \
-            "NMP_ZITADEL_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" \
-            "NMP_ZITADEL_K8S_KEEP_CLUSTER=${K8S_KEEP_CLUSTER}" \
-            "NMP_ZITADEL_K8S_REUSE_CLUSTER=${K8S_REUSE_CLUSTER}" \
-            "NMP_ZITADEL_K8S_SKIP_IMAGE_LOAD=${K8S_SKIP_IMAGE_LOAD}" \
-            "NMP_ZITADEL_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
-            "NMP_ZITADEL_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
-            "NMP_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
+            "NHX_ZITADEL_K8S_LOG_DIR=${k8s_diagnostics}" \
+            "NHX_ZITADEL_K8S_HELM_RELEASE=${HELM_RELEASE}" \
+            "NHX_ZITADEL_K8S_HELM_WAIT_TIMEOUT=${HELM_WAIT_TIMEOUT}" \
+            "NHX_ZITADEL_K8S_NAMESPACE=${HELM_NAMESPACE}" \
+            "NHX_ZITADEL_K8S_RUNTIME=${K8S_RUNTIME}" \
+            "NHX_ZITADEL_K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" \
+            "NHX_ZITADEL_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" \
+            "NHX_ZITADEL_K8S_KEEP_CLUSTER=${K8S_KEEP_CLUSTER}" \
+            "NHX_ZITADEL_K8S_REUSE_CLUSTER=${K8S_REUSE_CLUSTER}" \
+            "NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD=${K8S_SKIP_IMAGE_LOAD}" \
+            "NHX_ZITADEL_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
+            "NHX_ZITADEL_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
+            "NHX_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
             uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime zitadel-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
         return
     fi
@@ -1177,19 +1177,19 @@ run_k8s_tests() {
     run_pytest_with_diagnostics "${diagnostics}" \
         env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" "BAKE_TAG=${BAKE_TAG}" \
         "E2E_SERVICES_LOG_DIR=${diagnostics}" \
-        "NMP_ZITADEL_K8S_LOG_DIR=${k8s_diagnostics}" \
-        "NMP_ZITADEL_K8S_HELM_RELEASE=${HELM_RELEASE}" \
-        "NMP_ZITADEL_K8S_HELM_WAIT_TIMEOUT=${HELM_WAIT_TIMEOUT}" \
-        "NMP_ZITADEL_K8S_NAMESPACE=${HELM_NAMESPACE}" \
-        "NMP_ZITADEL_K8S_RUNTIME=${K8S_RUNTIME}" \
-        "NMP_ZITADEL_K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" \
-        "NMP_ZITADEL_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" \
-        "NMP_ZITADEL_K8S_KEEP_CLUSTER=${K8S_KEEP_CLUSTER}" \
-        "NMP_ZITADEL_K8S_REUSE_CLUSTER=${K8S_REUSE_CLUSTER}" \
-        "NMP_ZITADEL_K8S_SKIP_IMAGE_LOAD=${K8S_SKIP_IMAGE_LOAD}" \
-        "NMP_ZITADEL_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
-        "NMP_ZITADEL_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
-        "NMP_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
+        "NHX_ZITADEL_K8S_LOG_DIR=${k8s_diagnostics}" \
+        "NHX_ZITADEL_K8S_HELM_RELEASE=${HELM_RELEASE}" \
+        "NHX_ZITADEL_K8S_HELM_WAIT_TIMEOUT=${HELM_WAIT_TIMEOUT}" \
+        "NHX_ZITADEL_K8S_NAMESPACE=${HELM_NAMESPACE}" \
+        "NHX_ZITADEL_K8S_RUNTIME=${K8S_RUNTIME}" \
+        "NHX_ZITADEL_K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" \
+        "NHX_ZITADEL_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" \
+        "NHX_ZITADEL_K8S_KEEP_CLUSTER=${K8S_KEEP_CLUSTER}" \
+        "NHX_ZITADEL_K8S_REUSE_CLUSTER=${K8S_REUSE_CLUSTER}" \
+        "NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD=${K8S_SKIP_IMAGE_LOAD}" \
+        "NHX_ZITADEL_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
+        "NHX_ZITADEL_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
+        "NHX_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
         uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime zitadel-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
     status="$?"
     echo "Auth-idp Kubernetes diagnostics: ${diagnostics}"

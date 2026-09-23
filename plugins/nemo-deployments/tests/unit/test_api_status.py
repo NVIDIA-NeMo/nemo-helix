@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 from helpers import make_deployment, make_volume
 from nemo_deployments_plugin.api.v2 import status as status_module
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
-_SERVICE_HEADERS = {"X-NMP-Principal-Id": "service:deployments"}
-_USER_HEADERS = {"X-NMP-Principal-Id": "user@example.com"}
+_SERVICE_HEADERS = {"X-NHX-Principal-Id": "service:deployments"}
+_USER_HEADERS = {"X-NHX-Principal-Id": "user@example.com"}
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def test_status_put_rejects_malformed_service_principal(client: TestClient) -> N
     resp = client.put(
         "/apis/deployments/v2/workspaces/default/deployments/dep1/status",
         json={"status": "READY"},
-        headers={"X-NMP-Principal-Id": "service:"},
+        headers={"X-NHX-Principal-Id": "service:"},
     )
     assert resp.status_code == 403
 
@@ -56,8 +56,8 @@ def test_status_put_ignores_on_behalf_of_for_auth(client: TestClient) -> None:
         "/apis/deployments/v2/workspaces/default/deployments/dep1/status",
         json={"status": "READY"},
         headers={
-            "X-NMP-Principal-Id": "user@example.com",
-            "X-NMP-Principal-On-Behalf-Of": "service:deployments",
+            "X-NHX-Principal-Id": "user@example.com",
+            "X-NHX-Principal-On-Behalf-Of": "service:deployments",
         },
     )
     assert resp.status_code == 403

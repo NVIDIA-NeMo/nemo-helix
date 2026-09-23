@@ -42,10 +42,10 @@ nemo data-designer create product_reviews.py --num-records 30
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 data_designer = client.data_designer
@@ -75,6 +75,13 @@ Generate a product review dataset using samplers and LLM-generated text. Learn t
 Use external datasets to ground synthetic data generation. Generate realistic patient medical notes from symptom-to-diagnosis data.
 
 <small><span class="md-tag">intermediate</span> <span class="md-tag">data-designer</span></small>
+
+</Card>
+<Card title="Generate Retrieval Training Data" href="/documentation/design-synthetic-data/tutorials/retrieval-generate">
+
+Turn your own document corpus into judged question-and-answer pairs, ready for embedding fine-tuning. Hard-negative mining uses the current encoder to select non-answer passages that rank near each positive, giving the model useful examples to distinguish.
+
+<small><span class="md-tag">intermediate</span> <span class="md-tag">data-designer</span> <span class="md-tag">retrieval</span></small>
 
 </Card>
 

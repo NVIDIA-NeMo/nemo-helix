@@ -18,8 +18,8 @@ from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.functions import _preview_worker as worker_module
 from nemo_anonymizer_plugin.functions._preview_logs import request_callback_cvar
 from nemo_anonymizer_plugin.functions.preview import LogFrame, PreviewFunction, PreviewSpec, TraceDatasetFrame
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.function_context import FunctionContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.function_context import FunctionContext
 from pydantic import BaseModel
 
 
@@ -83,7 +83,7 @@ async def test_preview_function_resets_request_log_callback(
     igw_lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
     monkeypatch.setattr(worker_module, "_make_preview", fake_worker)
-    async_sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    async_sdk = AsyncMock(spec=AsyncNemoClient)
 
     frames = [
         frame
@@ -116,7 +116,7 @@ async def test_preview_function_rejects_selected_models_without_model_configs() 
             async for frame in PreviewFunction().run(
                 spec,
                 ctx=FunctionContext(workspace="team-a"),
-                async_sdk=AsyncMock(spec=AsyncNeMoPlatform),
+                async_sdk=AsyncMock(spec=AsyncNemoClient),
             )
         ]
 
@@ -129,6 +129,6 @@ async def test_preview_submit_requires_model_configs() -> None:
             async for frame in PreviewFunction().run(
                 _preview_spec().model_copy(update={"model_configs": None}),
                 ctx=FunctionContext(workspace="team-a"),
-                async_sdk=AsyncMock(spec=AsyncNeMoPlatform),
+                async_sdk=AsyncMock(spec=AsyncNemoClient),
             )
         ]

@@ -50,7 +50,7 @@ class _FakeSession:
 @contextmanager
 def _github_at(sha: str, status: int = 200) -> Iterator[_FakeSession]:
     session = _FakeSession(sha, status=status)
-    with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+    with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
         yield session
 
 
@@ -132,7 +132,7 @@ class TestRefreshFileset:
             _create_github_fileset(client, name, revision=FIRST_SHA)
 
         with patch(
-            "nmp.core.files.api.v2.filesets.endpoints.resolve_storage_secrets_for_user",
+            "nhx.core.files.api.v2.filesets.endpoints.resolve_storage_secrets_for_user",
             side_effect=AssertionError("secrets must not be resolved for an ineligible fileset"),
         ):
             response = client.post(f"{FILESETS_URL}/{name}/refresh")

@@ -3,23 +3,23 @@
 
 """Validate the platform refs (model entity + dataset/environment filesets)
 against the live SDK, resolve output naming, and return the
-canonical :class:`~nmp.rl.schemas.RlJobOutput`. Only platform refs are
+canonical :class:`~nhx.rl.schemas.RlJobOutput`. Only platform refs are
 accepted — the container pipeline expects a real fileset to download from.
 """
 
 from __future__ import annotations
 
-from nmp.customization_common.contributor.transform import generated_output_name
-from nmp.customization_common.schemas.values import OutputNameType
-from nmp.customization_common.service.platform_client import (
-    AsyncCustomizationPlatformClients,
+from nhx.customization_common.contributor.transform import generated_output_name
+from nhx.customization_common.schemas.values import OutputNameType
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
     check_dataset_access,
     check_environment_access,
     check_gym_dataset_layout,
     fetch_model_entity,
 )
-from nmp.rl.entities.values import TrainingType
-from nmp.rl.schemas import OutputResponse, RlJobOutput
+from nhx.rl.entities.values import TrainingType
+from nhx.rl.schemas import OutputResponse, RlJobOutput
 
 from nemo_rl_plugin.environment import check_environment_package
 from nemo_rl_plugin.schema import OutputRequest, RlJobInput
@@ -34,7 +34,7 @@ def _infer_output_type(input_spec: RlJobInput) -> OutputNameType:
 async def transform_input_to_output(
     input_spec: RlJobInput,
     workspace: str,
-    platform: AsyncCustomizationPlatformClients,
+    platform: AsyncCustomizationHelixClients,
 ) -> RlJobOutput:
     """Enrich submitter input into a canonical :class:`RlJobOutput`.
 

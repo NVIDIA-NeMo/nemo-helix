@@ -7,7 +7,7 @@ One subcommand, ``nemo agents usage show <ref>``, registered onto the
 parent ``agents`` Typer app under a ``usage`` group.
 
 ``<ref>`` accepts a ``Union[LocalDir, FilesetRef]`` per the
-``nemo_platform_plugin.refs`` convention — path-shaped values are read locally,
+``nemo_helix_plugin.refs`` convention — path-shaped values are read locally,
 bare names download from a fileset.
 """
 
@@ -19,7 +19,11 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from nemo_agents_plugin.cli_context import BaseUrlOption, resolve_base_url, resolve_context_headers
+from nemo_agents_plugin.cli_context import (
+    BaseUrlOption,
+    resolve_base_url,
+    resolve_context_headers,
+)
 from nemo_agents_plugin.usage import compute, render
 from nemo_agents_plugin.usage import parser as parser_module
 from nemo_agents_plugin.usage.models import (
@@ -29,12 +33,12 @@ from nemo_agents_plugin.usage.models import (
 )
 from nemo_agents_plugin.usage.sources.fileset import FilesetDownloadError, FilesetRefError, fileset_path
 from nemo_agents_plugin.usage.sources.local import UsageSourceError, local_path
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.refs import FilesetRef, LocalDir, classify_output_target
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.refs import FilesetRef, LocalDir, classify_output_target
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_WORKSPACE = "default"
 
 
 def _validate_total_params(value: Optional[float]) -> Optional[float]:
@@ -58,10 +62,11 @@ def register_usage_commands(app: typer.Typer) -> None:
 
     @usage_app.command(name="show")
     def show_cmd(
+        typer_ctx: typer.Context,
         ref: str = typer.Argument(
             ...,
             metavar="<PATH | FILESET_REF>",
-            help="Local path to a result.json / run dir / nat-jobs dir, or a NeMo Platform fileset reference.",
+            help="Local path to a result.json / run dir / nat-jobs dir, or a NeMo Helix fileset reference.",
         ),
         total_params: Optional[float] = typer.Option(
             None,
@@ -72,10 +77,11 @@ def register_usage_commands(app: typer.Typer) -> None:
             "compute_units = total_tokens × total_params.  Closed-source models have no "
             "public number — leave unset and compute_units stays null.",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Show a usage report for *ref*."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         _show(
             ref,
             total_params=total_params,
@@ -194,7 +200,7 @@ def _build_sdk(*, base_url: str) -> NemoClient:
     """Construct a typed platform client for fileset downloads.
 
     *base_url* is the value already resolved by ``resolve_base_url`` (flag /
-    ``NEMO_BASE_URL`` > shared CLI config / ``NMP_BASE_URL`` > localhost), so
+    ``NEMO_BASE_URL`` > shared CLI config / ``NHX_BASE_URL`` > localhost), so
     don't re-read the env here — that would invert precedence.
 
     Attaches the CLI auth token from the shared context (the same

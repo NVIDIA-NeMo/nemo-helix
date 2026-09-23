@@ -3,14 +3,14 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- if and (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled }}
+{{- if and (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled }}
 {{- if .Values.envoyProxy.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "nmp-envoy.servicename" . }}
+  name: {{ include "nhx-envoy.servicename" . }}
   labels:
-    {{- include "nmp-envoy.labels" . | nindent 4 }}
+    {{- include "nhx-envoy.labels" . | nindent 4 }}
     {{- with .Values.envoyProxy.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -24,8 +24,8 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: nmp-envoy
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nhx-envoy
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}

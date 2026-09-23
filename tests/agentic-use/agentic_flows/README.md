@@ -1,17 +1,17 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Agentic Flows Documentation
+# NeMo Helix Agentic Flows Documentation
 
-This directory contains curated documentation of 39 E2E agentic flows for the NeMo Platform, derived from the NeMo Platform v2 Phase 4 Plan of Record (POR).
+This directory contains curated documentation of 39 E2E agentic flows for the NeMo Helix, derived from the NeMo Helix v2 Phase 4 Plan of Record (POR).
 
 ## Purpose
 
 These flow documents serve as:
-1. **Reference** for users/agents building agent-based automation with NeMo Platform
+1. **Reference** for users/agents building agent-based automation with NeMo Helix
 2. **Test specifications** for Harbor framework agentic tests
 3. **MCP development roadmap** showing which tools agents need
-4. **Training data** for agent-assisted NeMo Platform usage
+4. **Training data** for agent-assisted NeMo Helix usage
 
 ## Organization
 
@@ -40,7 +40,7 @@ The [cross-service.md](cross-service.md) file documents flows that orchestrate m
 
 Each flow includes:
 - **Name**: Unique identifier for the flow
-- **Services**: List of NeMo Platform services involved
+- **Services**: List of NeMo Helix services involved
 - **Complexity**: 1-5 stars (from POR)
 - **Description**: Brief summary of what the flow accomplishes
 - **Source**: Reference to POR, test file, or documentation
@@ -111,7 +111,7 @@ Each flow includes:
 
 ## Data Sources
 
-- **Primary**: NeMo Platform v2 POR (Plan of Record) - 39 official flows
+- **Primary**: NeMo Helix v2 POR (Plan of Record) - 39 official flows
 - **Test References**: `tests/e2e/`
 - **Architecture**: `architecture/docs/`
 

@@ -3,7 +3,7 @@
 
 # NeMo Studio
 
-NeMo Studio is a UI built on the NeMo Platform, which is aimed at improving agents and making LLM customization much more accessible.
+NeMo Studio is a UI built on the NeMo Helix, which is aimed at improving agents and making LLM customization much more accessible.
 
 ## Getting Started
 
@@ -37,7 +37,7 @@ pnpm dev
 
 This runs the vite dev server, which has hot module reloading. This server is accessible at `http://localhost:5173`.
 
-By default your `.env.dev.local` (copied from `.env.dev.local.sample`) points your locally running Studio to a NeMo Platform deployment. You can configure this to point to a local or remote deployment as needed.
+By default your `.env.dev.local` (copied from `.env.dev.local.sample`) points your locally running Studio to a NeMo Helix deployment. You can configure this to point to a local or remote deployment as needed.
 
 ## Development
 
@@ -88,7 +88,7 @@ pnpm test -- --coverage  # coverage report
 
 Studio is configured using environment variables. How they make their way into the React app depends on the environment Studio is running in. For the full list of environment variables Studio accepts, look at `packages/studio/env/.env.fastapi`.
 
-When the bundle is built for the **Studio FastAPI** app (`pnpm build --mode fastapi`), `STUDIO_UI_*` placeholders come from `packages/studio/env/.env.fastapi` and are resolved at runtime using **`services/studio/src/nmp/studio/env_mappings.py`** at the Platform repository root (alongside `web/`). Keep `.env.fastapi` and `env_mappings.py` in sync (see the parity comment in `.env.fastapi`).
+When the bundle is built for the **Studio FastAPI** app (`pnpm build --mode fastapi`), `STUDIO_UI_*` placeholders come from `packages/studio/env/.env.fastapi` and are resolved at runtime using **`services/studio/src/nhx/studio/env_mappings.py`** at the Platform repository root (alongside `web/`). Keep `.env.fastapi` and `env_mappings.py` in sync (see the parity comment in `.env.fastapi`).
 
 #### Local Development
 

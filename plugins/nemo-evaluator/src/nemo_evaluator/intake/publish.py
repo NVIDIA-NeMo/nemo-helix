@@ -28,9 +28,9 @@ from nemo_evaluator.intake import mapping
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalTaskScore
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
-from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.errors import NotFoundError, UnprocessableEntityError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     AtifCreateParams,
     AtifCreateRequest,
     AtifFinalMetricsParam,

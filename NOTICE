@@ -1,4 +1,4 @@
-NeMo Platform
+NeMo Helix
 Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 Licensed under the Apache License, Version 2.0.
@@ -14,8 +14,8 @@ below. Each component retains its original license, which can be found in the
 respective directory or package metadata.
 
 --------------------------------------------------------------------------------
-sdk/python/nemo-platform/LICENSE
-sdk/python/overrides/nemo-platform/LICENSE
+sdk/python/nemo-helix/LICENSE
+sdk/python/overrides/nemo-helix/LICENSE
   These files are packaging copies of the root Apache-2.0 LICENSE used by the
   generated Python SDK and its Stainless override inputs. They do not declare a
   separate sub-component license from the repository root license.
@@ -28,7 +28,7 @@ packages/garak_api/
   Home: https://github.com/NVIDIA/garak
 
   The following files are vendored from the upstream garak project and
-  modified for standalone use within NeMo Platform:
+  modified for standalone use within NeMo Helix:
 
     garakapi/_config.py        — from garak/_config.py (v0.14.1)
     garakapi/_plugins.py       — from garak/_plugins.py (v0.14.1)
@@ -50,7 +50,7 @@ plugins/nemo-switchyard/vendor/switchyard/
 
   Only `switchyard.lib` and `switchyard.telemetry` are included here. The
   upstream CLI, server, and experimental subpackages are intentionally
-  omitted because NeMo Platform does not depend on them.
+  omitted because NeMo Helix does not depend on them.
 
   The vendored snapshot retains its own LICENSE and NOTICE files in:
     plugins/nemo-switchyard/vendor/switchyard/
@@ -89,7 +89,7 @@ cut-cross-entropy 25.1.1
 
   The PyPI wheel for cut-cross-entropy 25.1.1 includes Apple's license text but
   does not include the upstream ACKNOWLEDGEMENTS.md file referenced by that
-  license text. NeMo Platform preserves those acknowledgements at
+  license text. NeMo Helix preserves those acknowledgements at
   LICENSES/cut-cross-entropy-25.1.1.txt.
   No dual-license basis was verified; the upstream acknowledgements list
   subcomponent notices for PyTorch, Triton, and Transformers.
@@ -140,7 +140,7 @@ Ray-bundled JAXB runtime dependencies
       Source archive:
         https://repo1.maven.org/maven2/org/glassfish/jaxb/txw2/2.3.0/txw2-2.3.0-sources.jar
 
-  These components are distributed unmodified. NeMo Platform does not elect the
+  These components are distributed unmodified. NeMo Helix does not elect the
   GPL-2.0-only WITH Classpath-exception-2.0 branch for these components.
   Preserve the notices shipped in the upstream jars. Source code for the
   CDDL-covered components is available from the versioned upstream source
@@ -180,7 +180,7 @@ wandb-core MPL-2.0 Go dependencies
 
   These components are distributed unmodified as linked dependencies in the
   wandb-core executable. The MPL-2.0 obligations apply to the MPL-covered source
-  files for those modules and do not require NeMo Platform, the rest of
+  files for those modules and do not require NeMo Helix, the rest of
   wandb-core, or the container image to be licensed under MPL-2.0. Preserve
   upstream notices and make the source for the exact module versions above
   available to recipients through the listed source locations or an equivalent

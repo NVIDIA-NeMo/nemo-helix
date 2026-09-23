@@ -17,7 +17,7 @@ uv sync --package garak_api
 
 The package contains several files copied from the corresponding version of the garak repo, including the plugin cache json
 and several `.py` files that access the cache. The `__init__.py` script bridges the gap between the downloaded python
-files and the NeMo Platform side of the API.
+files and the NeMo Helix side of the API.
 
 To upgrade the API and plugin cache run `./scripts/update_plugin_cache.sh`. Run tests in `./tests/` after upgrade to confirm
 that the newly downloaded `*.py` files play nicely with the rest of the package. There are only a few interactions,

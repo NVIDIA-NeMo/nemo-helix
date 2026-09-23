@@ -6,7 +6,7 @@
 import logging
 from typing import Any
 
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_safe_synthesizer.config.job import SafeSynthesizerJobConfig as SafeSynthesizerJobConfigInternal
 from nemo_safe_synthesizer.config.job import SafeSynthesizerParameters as SafeSynthesizerParametersInternal
 from nemo_safe_synthesizer.config.replace_pii import PiiReplacerConfig
@@ -19,7 +19,7 @@ DEFAULT_PRETRAINED_MODEL = "HuggingFaceTB/SmolLM3-3B"
 
 
 class SafeSynthesizerParameters(SafeSynthesizerParametersInternal):
-    """NMP-facing Safe Synthesizer parameters with SDK convenience flags."""
+    """NHX-facing Safe Synthesizer parameters with SDK convenience flags."""
 
     enable_synthesis: bool = Field(
         default=True,
@@ -35,7 +35,7 @@ class SafeSynthesizerParameters(SafeSynthesizerParametersInternal):
 
 
 class SafeSynthesizerJobConfig(SafeSynthesizerJobConfigInternal):
-    """NMP-facing Safe Synthesizer job config with SDK convenience flags."""
+    """NHX-facing Safe Synthesizer job config with SDK convenience flags."""
 
     __doc__ = SafeSynthesizerJobConfigInternal.__doc__
 
@@ -132,7 +132,7 @@ def parse_pretrained_model_job_ref(job_ref: str, workspace_fallback: str) -> tup
         workspace, job_name = parts
 
     if not workspace or not job_name:
-        raise PlatformJobCompilationError(
+        raise HelixJobCompilationError(
             f"Invalid pretrained_model_job format: {job_ref!r}. Expected '<job>' or '<workspace>/<job>'."
         )
     return workspace, job_name

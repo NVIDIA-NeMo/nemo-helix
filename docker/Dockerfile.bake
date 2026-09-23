@@ -90,50 +90,50 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     COPY .golangci.yml /artifacts/
 
 # TESTS
-#nmp-persistence-base:
-    FROM root-python-3-11 AS root-nmp-persistence-base
+#nhx-persistence-base:
+    FROM root-python-3-11 AS root-nhx-persistence-base
     COPY --from=root-lib-source-artifacts /artifacts/uv.lock /artifacts/pyproject.toml /app/
     COPY --from=root-lib-source-artifacts /artifacts/docs /app/docs
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
-    RUN uv sync --frozen --no-install-project --no-install-workspace --package=nmp-persistence
+    RUN uv sync --frozen --no-install-project --no-install-workspace --package=nhx-persistence
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
     COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
-    RUN uv sync --frozen --package=nmp-persistence
+    RUN uv sync --frozen --package=nhx-persistence
 
-#nmp-persistence-test:
-    FROM root-nmp-persistence-base AS root-nmp-persistence-test
-    RUN uv run --no-sync pytest packages/nmp_persistence
+#nhx-persistence-test:
+    FROM root-nhx-persistence-base AS root-nhx-persistence-test
+    RUN uv run --no-sync pytest packages/nhx_persistence
 
-#nmp-common-base:
-    FROM root-python-3-11 AS root-nmp-common-base
+#nhx-common-base:
+    FROM root-python-3-11 AS root-nhx-common-base
     COPY --from=root-lib-source-artifacts /artifacts/uv.lock /artifacts/pyproject.toml /app/
     COPY --from=root-lib-source-artifacts /artifacts/docs /app/docs
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
-    RUN uv sync --frozen --no-install-project --no-install-workspace --package=nmp-common
+    RUN uv sync --frozen --no-install-project --no-install-workspace --package=nhx-common
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
     COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
-    RUN uv sync --frozen --package=nmp-common
+    RUN uv sync --frozen --package=nhx-common
 
-#nmp-common-test:
-    FROM root-nmp-common-base AS root-nmp-common-test
-    RUN uv run --no-sync pytest packages/nmp_common
+#nhx-common-test:
+    FROM root-nhx-common-base AS root-nhx-common-test
+    RUN uv run --no-sync pytest packages/nhx_common
 
-#nemo-platform-base:
-    FROM root-python-3-11 AS root-nemo-platform-base
+#nemo-helix-base:
+    FROM root-python-3-11 AS root-nemo-helix-base
     COPY --from=root-lib-source-artifacts /artifacts/uv.lock /artifacts/pyproject.toml /app/
     COPY --from=root-lib-source-artifacts /artifacts/docs /app/docs
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
-    RUN uv sync --frozen --no-install-project --no-install-workspace --package=nemoplatform
+    RUN uv sync --frozen --no-install-project --no-install-workspace --package=nemohelix
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
     COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
     COPY --from=root-service-source-artifacts /artifacts/services /app/services
 
-    # nemoplatform is a top level package
+    # nemohelix is a top level package
     COPY src README.md /app/
     RUN uv sync --frozen --no-dev
 
-#nemo-platform-test:
-    FROM root-nemo-platform-base AS root-nemo-platform-test
+#nemo-helix-test:
+    FROM root-nemo-helix-base AS root-nemo-helix-test
     COPY ./tests /app/tests
     RUN uv run --no-sync pytest tests/integration
 

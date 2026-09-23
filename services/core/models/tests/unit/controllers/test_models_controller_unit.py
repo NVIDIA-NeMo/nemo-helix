@@ -11,9 +11,9 @@ from collections.abc import Mapping
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nmp.core.models.config import config as models_config
-from nmp.core.models.controllers.context import ModelContext
-from nmp.core.models.controllers.models_controller import NON_TERMINAL_STATES, ModelsController
+from nhx.core.models.config import config as models_config
+from nhx.core.models.controllers.context import ModelContext
+from nhx.core.models.controllers.models_controller import NON_TERMINAL_STATES, ModelsController
 
 from .conftest import _AsyncPage, _ModelResponse, make_async_models_client
 
@@ -63,19 +63,19 @@ def _patch_typed_model_client(mock_models_sdk):
 
     with (
         patch(
-            "nmp.core.models.controllers.models_controller.client_from_platform",
+            "nhx.core.models.controllers.models_controller.client_from_platform",
             side_effect=_client_from_platform,
         ),
         patch(
-            "nmp.core.models.controllers.entity_cache.client_from_platform",
+            "nhx.core.models.controllers.entity_cache.client_from_platform",
             side_effect=_client_from_platform,
         ),
         patch(
-            "nmp.core.models.controllers.deployment_reconciler.client_from_platform",
+            "nhx.core.models.controllers.deployment_reconciler.client_from_platform",
             side_effect=_client_from_platform,
         ),
         patch(
-            "nmp.core.models.controllers.provider_reconciler.client_from_platform",
+            "nhx.core.models.controllers.provider_reconciler.client_from_platform",
             side_effect=_client_from_platform,
         ),
     ):
@@ -169,7 +169,7 @@ async def test_get_non_terminal_deployments_calls_sdk(
     )
 
     # Create controller and inject mock SDK
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call retrieve_non_terminal_deployments
@@ -202,7 +202,7 @@ async def test_get_non_terminal_deployments_handles_sdk_errors(
     mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=side_effect)
 
     # Create controller and inject mock SDK
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call retrieve_non_terminal_deployments
@@ -239,7 +239,7 @@ async def test_get_non_terminal_deployments_with_multiple_deployments(
     mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
 
     # Create controller and inject mock SDK
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call retrieve_non_terminal_deployments
@@ -267,7 +267,7 @@ async def test_get_model_providers_calls_sdk(mock_get_config_patch, mock_models_
     mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
     # Create controller and inject mock SDK
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call get_model_providers
@@ -308,7 +308,7 @@ async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mo
     mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
     # Create controller and inject mock SDK
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Mock the reconciler methods to track calls
@@ -342,7 +342,7 @@ async def test_async_controller_step_runs_provider_reconciler_with_no_providers(
     mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
     mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -363,7 +363,7 @@ async def test_async_controller_step_skips_provider_reconciler_when_provider_lis
     mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
     mock_models_sdk.models_client.list_providers = AsyncMock(side_effect=RuntimeError("providers unavailable"))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -514,7 +514,7 @@ async def test_retrieve_model_entity_for_config_uses_model_entity_id_when_set(
     config.model_spec.model_name = "other-model"
     config.model_spec.model_revision = None
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
@@ -534,7 +534,7 @@ async def test_retrieve_model_entity_for_config_uses_model_entity_id_with_revisi
     config.model_entity_id = "my-ws/my-model@v2"
     config.model_spec = MagicMock()
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
@@ -562,7 +562,7 @@ async def test_retrieve_model_entity_for_config_falls_back_to_nim_deployment_whe
     config.model_spec.model_name = "nim-model"
     config.model_spec.model_revision = "v1"
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
@@ -579,7 +579,7 @@ async def test_retrieve_model_entity_for_config_returns_none_when_no_nim_deploym
     config.model_entity_id = None
     config.model_spec = None
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
@@ -602,7 +602,7 @@ async def test_retrieve_model_entity_for_config_invalid_model_entity_id_falls_ba
     config.model_spec.model_name = "fallback-model"
     config.model_spec.model_revision = None
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
@@ -623,7 +623,7 @@ async def test_retrieve_error_deployments_calls_sdk(mock_get_config_patch, mock_
 
     mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([mock_deployment]))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller.retrieve_error_deployments()
 
@@ -647,7 +647,7 @@ async def test_retrieve_error_deployments_handles_sdk_error(
     """Test that retrieve_error_deployments returns empty list on SDK error."""
     mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=Exception("API Error"))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller.retrieve_error_deployments()
 
@@ -675,7 +675,7 @@ async def test_async_controller_step_calls_gc(mock_get_config_patch, mock_models
     mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
     mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -702,7 +702,7 @@ async def test_async_controller_step_skips_gc_when_no_error_deployments(
     mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
     mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -725,7 +725,7 @@ async def test_async_controller_step_stop_signal_skips_gc(
     mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
     mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
 
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry, stop_signal=stop_signal)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()

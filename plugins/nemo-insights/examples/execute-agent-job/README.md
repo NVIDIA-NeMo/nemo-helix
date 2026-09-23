@@ -3,9 +3,8 @@
 
 # Insights Analyst as ExecuteAgentJob Demo
 
-This directory contains additive demo scaffolding for running the Insights
-Analyst through the generic `agents.execute` job while the existing `AnalyzeJob`
-continues to run side-by-side.
+This directory demonstrates running the Insights Analyst through AnalysisRuns
+backed by the generic `agents.execute` job.
 
 ## Pieces
 
@@ -44,9 +43,9 @@ keep in sync with a shipped version.
 
   ```bash
   ENT=nvidia-nemotron-3-nano-30b-a3b
-  SERVED=$(curl -s "$NMP_BASE_URL/apis/models/v2/workspaces/default/providers/nvidia-build" \
+  SERVED=$(curl -s "$NHX_BASE_URL/apis/models/v2/workspaces/default/providers/nvidia-build" \
     | python3 -c "import json,sys;print(next(m['served_model_name'] for m in json.load(sys.stdin)['served_models'] if m['model_entity_id']=='default/$ENT'))")
-  curl -s -X POST "$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/$ENT/-/v1/chat/completions" \
+  curl -s -X POST "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/$ENT/-/v1/chat/completions" \
     -H 'Content-Type: application/json' \
     -d "{\"model\":\"$SERVED\",\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}],\"max_tokens\":5}"
   ```
@@ -69,7 +68,7 @@ keep in sync with a shipped version.
   ```
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
 The target agent (`demo-agent` below) does not need to exist as an Agent
@@ -130,7 +129,7 @@ entity — the Analyst only matches it against each span's normalized
    ```
 
    The model pair is **required** on the request. It lives only in the
-   operator's local CLI config (`~/.config/nmp/config.yaml`), which the
+   operator's local CLI config (`~/.config/nhx/config.yaml`), which the
    Platform process cannot read, so the request has to carry it. The CLI fills
    it in from that config, which is why the equivalent one-liner needs no model
    flags:
@@ -159,20 +158,18 @@ entity — the Analyst only matches it against each span's normalized
    are still fetched from there:
 
    ```bash
-   curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results"
-   curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results/analysis-report/download"
+   curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results"
+   curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results/analysis-report/download"
    ```
 
    The report is what tells you which Insights the run created or updated:
-   insights carry no per-run provenance, by either path. The agent's current
+   insights carry no per-run provenance. The agent's current
    insights are read with `client.insights.insights.list_insights(...)`, or
    from a shell with
    `GET /apis/insights/v2/workspaces/default/insights?agent=demo-agent`.
 
 ## Notes
 
-- The existing `AnalyzeJob` remains untouched for comparison. It is submitted at
-  `/apis/insights/v2/workspaces/{workspace}/jobs/analyze-job`.
 - There is no Analyst Agent entity in the database; the route delivers an inline
   configuration to the agents service.
 - Dynamic read settings such as `since` and `evaluation_id` are request fields

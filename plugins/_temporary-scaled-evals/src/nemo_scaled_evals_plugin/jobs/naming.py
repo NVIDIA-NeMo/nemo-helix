@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from nemo_platform_plugin.entity_naming import NAME_MAX_LENGTH
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 
 _JOB_NAME_MAX_LENGTH = NAME_MAX_LENGTH - len("job-fileset-")
 

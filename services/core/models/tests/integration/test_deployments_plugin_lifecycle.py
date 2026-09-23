@@ -10,8 +10,8 @@ import uuid
 import pytest
 from docker.errors import NotFound
 from nemo_deployments_plugin.backends.labels import container_name
-from nemo_platform_plugin.client.errors import NotFoundError
-from nmp.core.models.controllers.backends.deployments_plugin.naming import entity_names
+from nemo_helix_plugin.client.errors import NotFoundError
+from nhx.core.models.controllers.backends.deployments_plugin.naming import entity_names
 from tenacity import retry, stop_after_delay, wait_fixed
 
 import docker

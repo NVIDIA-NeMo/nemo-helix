@@ -146,7 +146,7 @@ if TYPE_CHECKING:
 
 
 # Re-exported name -> the submodule that defines it, relative to this package. Relative on
-# purpose: the vendoring tool mirrors this file into nemo_platform.beta.evaluator by rewriting
+# purpose: the vendoring tool mirrors this file into nemo_helix.beta.evaluator by rewriting
 # module paths, and a relative name has nothing to rewrite, so the mirror is correct by
 # construction. Mirrors the TYPE_CHECKING block above, in the same order.
 _LAZY_ATTRS: dict[str, str] = {

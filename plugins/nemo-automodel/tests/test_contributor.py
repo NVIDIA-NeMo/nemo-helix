@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
+import pytest
 from fastapi import FastAPI
 from nemo_automodel_plugin.contributor import AutomodelContributor
 
@@ -60,3 +61,77 @@ def test_contributor_exposes_sdk_resources() -> None:
     assert sdk is not None
     assert sdk.sync_resource is AutomodelCustomization
     assert sdk.async_resource is AsyncAutomodelCustomization
+
+
+def test_cli_summary_states_what_it_trains_and_where_it_runs() -> None:
+    summary = AutomodelContributor().get_cli_summary()
+    assert summary is not None
+    assert "SFT" in summary.trains and "LoRA" in summary.trains
+    assert "volcano_job or kubernetes_job for multi-node" in summary.runs_on
+    assert summary.command == "nemo customization automodel submit job.json"
+
+
+def test_summary_and_help_agree_on_multi_node_backends() -> None:
+    """The overview must not exclude a backend the detailed help accepts."""
+    contributor = AutomodelContributor()
+    summary = contributor.get_cli_summary()
+    assert summary is not None
+    for backend in ("kubernetes_job", "volcano_job"):
+        assert backend in summary.runs_on, backend
+        assert backend in contributor.cli_help, backend
+
+
+def test_help_scopes_the_single_node_backends() -> None:
+    """docker and kubernetes_job are the single-node list; volcano_job is for multi-node only."""
+    help_text = " ".join(AutomodelContributor.cli_help.split())
+    assert "On a single node, that profile's backend is docker or kubernetes_job" in help_text
+    assert "Multi-node training (parallelism.num_nodes above 1) runs on a volcano_job or kubernetes_job backend" in (
+        help_text
+    )
+
+
+def test_cli_summary_fits_the_rendered_width() -> None:
+    """The router prints the summary through an 80-column Rich console."""
+    summary = AutomodelContributor().get_cli_summary()
+    assert summary is not None
+    rendered = summary.render("automodel")
+    assert [line for line in rendered.splitlines() if len(line) > 80] == []
+
+
+def test_backend_help_goes_deeper_than_the_top_level_summary() -> None:
+    contributor = AutomodelContributor()
+    summary = contributor.get_cli_summary()
+    assert summary is not None
+    summary_text = summary.render(contributor.name)
+    help_text = contributor.cli_help
+
+    assert len(help_text) > len(summary_text)
+    # Job JSON fields and schema names belong on the backend, not in the overview.
+    for detail in ("AutomodelJobInput", "global_batch_size", "num_nodes", "explain"):
+        assert detail in help_text, detail
+        assert detail not in summary_text, detail
+
+
+def test_submit_help_explains_the_job_json() -> None:
+    cli = AutomodelContributor().get_cli()
+    submit = next(cmd for cmd in cli.registered_commands if cmd.name == "submit")
+    assert submit.help is not None
+    assert "AutomodelJobInput" in submit.help
+    assert "nemo customization automodel explain" in submit.help
+
+
+def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tracking message names this backend, so all three job id prefixes read correctly."""
+    import typer
+    from nhx.customization_common.cli import overrides
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        overrides,
+        "_replace_job_submit",
+        lambda group, backend, *args, **kwargs: captured.update(backend=backend),
+    )
+    from nemo_automodel_plugin.cli.inputs import apply_automodel_job_cli_overrides
+
+    apply_automodel_job_cli_overrides(typer.Typer())
+    assert captured["backend"] == "automodel"

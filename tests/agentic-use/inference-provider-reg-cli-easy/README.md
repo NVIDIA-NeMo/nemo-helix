@@ -5,7 +5,7 @@
 
 ## Overview
 
-This eval tests whether a coding agent can register a model provider in NeMo Platform's Inference Gateway (IGW) using the CLI. It covers the basic flow of creating an API key secret and registering a provider that references it.
+This eval tests whether a coding agent can register a model provider in NeMo Helix's Inference Gateway (IGW) using the CLI. It covers the basic flow of creating an API key secret and registering a provider that references it.
 
 ## What it tests
 

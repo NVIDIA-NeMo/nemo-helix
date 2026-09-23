@@ -12,10 +12,10 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import BadRequestError
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import GuardrailCheckRequest, GuardrailCheckResponse
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import BadRequestError
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import GuardrailCheckRequest, GuardrailCheckResponse
 
 from e2e.guardrails.utils import (
     BACKEND_RESPONSE,

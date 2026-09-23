@@ -13,10 +13,10 @@ from nemo_data_designer_plugin.cli.personas import make_fileset_command
 from nemo_data_designer_plugin.cli.renderers import CreateRenderer, PreviewRenderer
 from nemo_data_designer_plugin.functions.preview import PreviewFunction
 from nemo_data_designer_plugin.jobs.create import CreateJob
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_renderer import CLIRenderer
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.job import NemoJob
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_renderer import CLIRenderer
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.job import NemoJob
 
 
 class DataDesignerCLI(NemoCLI):

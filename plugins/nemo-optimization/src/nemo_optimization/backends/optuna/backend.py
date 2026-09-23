@@ -10,8 +10,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.job_context import JobContext
 
 from nemo_optimization.atif_metadata import resolve_experiment_id
 from nemo_optimization.backends.optuna.study_driver import (
@@ -51,7 +51,7 @@ class OptunaBackend:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> dict[str, Any]:
         result = self.run_phase(
             OptimizationPhaseRequest(payload=payload, phase=OptimizationPhase.NUMERIC),
@@ -65,7 +65,7 @@ class OptunaBackend:
         request: OptimizationPhaseRequest,
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> None:
         del ctx, sdk
         if not self.capabilities.supports(request.phase):
@@ -85,7 +85,7 @@ class OptunaBackend:
         request: OptimizationPhaseRequest,
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> OptimizationPhaseResult:
         del sdk
         if not self.capabilities.supports(request.phase):

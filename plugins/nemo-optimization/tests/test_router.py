@@ -8,6 +8,7 @@ from typing import Any
 
 import nemo_optimization.router as router_module
 import pytest
+from nemo_helix_plugin.job_context import JobContext
 from nemo_optimization.backends.ga.backend import GaBackend, GaBackendError
 from nemo_optimization.backends.optuna.backend import OptunaBackend
 from nemo_optimization.backends.optuna.study_driver import StudyDriverError
@@ -21,7 +22,6 @@ from nemo_optimization.backends.protocol import (
 )
 from nemo_optimization.optimizer_config import OptimizerConfigError
 from nemo_optimization.router import OptimizeRouter, OptimizeRouterError
-from nemo_platform_plugin.job_context import JobContext
 
 
 def test_dispatch_routes_numeric_to_optuna_study(ctx: JobContext) -> None:

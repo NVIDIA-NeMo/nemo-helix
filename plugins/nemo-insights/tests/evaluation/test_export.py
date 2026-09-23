@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 from evaluation import artifact, export
 from evaluation.registry import Subject
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 # --------------------------------------------------------------------------- #
 # fake SDK client
@@ -201,7 +201,7 @@ def test_export_closes_injected_client(tmp_path):
         ["ws-a"],
         tmp_path,
         since=None,
-        client=cast(AsyncNeMoPlatform, client),
+        client=cast(AsyncNeMoHelix, client),
     )
 
     assert client.closed
@@ -318,7 +318,7 @@ _STATS = {
 }
 
 CI_LINEAGE_KEYS = (
-    "nemo_platform_sha",
+    "nemo_helix_sha",
     "tau2_bench_sha",
     "github_run_id",
     "num_tasks",
@@ -383,7 +383,7 @@ def test_build_export_manifest_carries_ci_lineage(tmp_path):
         platform_info=None,
         env=env,
     )
-    assert manifest["nemo_platform_sha"] == "abc"
+    assert manifest["nemo_helix_sha"] == "abc"
     assert manifest["tau2_bench_sha"] == "t2sha"
     assert manifest["github_run_id"] == "42"
     assert manifest["num_tasks"] == "2"
@@ -633,5 +633,5 @@ def test_snapshot_export_lineage_env_lands_in_manifest(tmp_path, monkeypatch):
     out = tmp_path / "b.tar.zst"
     artifact.snapshot_export([subject], out, tmp_path / "tmp", since=None)
     manifest = _extract_manifest(out)
-    assert manifest["nemo_platform_sha"] == "abc"
+    assert manifest["nemo_helix_sha"] == "abc"
     assert manifest["reason"] == "export bundles"

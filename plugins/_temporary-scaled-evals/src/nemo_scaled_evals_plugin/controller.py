@@ -14,15 +14,15 @@ from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entities.base import SyncEntityClient
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entities.base import SyncEntityClient
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -41,18 +41,18 @@ from scaled_evals.dispatch.worker import _retry_delay_seconds
 
 LOG = logging.getLogger(__name__)
 _ACTIVE_JOB_STATUSES = {
-    PlatformJobStatus.CREATED,
-    PlatformJobStatus.PENDING,
-    PlatformJobStatus.ACTIVE,
-    PlatformJobStatus.PAUSED,
-    PlatformJobStatus.PAUSING,
-    PlatformJobStatus.RESUMING,
-    PlatformJobStatus.CANCELLING,
+    HelixJobStatus.CREATED,
+    HelixJobStatus.PENDING,
+    HelixJobStatus.ACTIVE,
+    HelixJobStatus.PAUSED,
+    HelixJobStatus.PAUSING,
+    HelixJobStatus.RESUMING,
+    HelixJobStatus.CANCELLING,
 }
 # Statuses in which no task has executed yet, so no sandbox can exist.
 _PRELAUNCH_JOB_STATUSES = {
-    PlatformJobStatus.CREATED,
-    PlatformJobStatus.PENDING,
+    HelixJobStatus.CREATED,
+    HelixJobStatus.PENDING,
 }
 
 
@@ -130,18 +130,34 @@ class ScaledEvalsJobsController(NemoController):
         phases: list[tuple[str, Callable[[], Awaitable[None]]]] = []
         if settings.platform_build_jobs_enabled:
             phases += [
-                ("submit_build", self._submit_one_build),
+                ("submit_build", self._drain(self._submit_one_build)),
                 ("reconcile_builds", self._reconcile_builds),
             ]
         if settings.platform_evaluation_jobs_enabled:
             phases += [
-                ("submit_evaluation", self._submit_one_evaluation),
-                ("reconcile_evaluation", self._reconcile_one_evaluation),
+                ("submit_evaluation", self._drain(self._submit_one_evaluation)),
+                ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
                 ("cancel_evaluations", self._cancel_evaluation_jobs),
             ]
         if self._projection is not None:
             phases.append(("project_evaluations", self._project_evaluations))
         return phases
+
+    def _drain(self, step: Callable[[], Awaitable[bool]]) -> Callable[[], Awaitable[None]]:
+        """Wrap a single-row step so one pass drains a bounded batch of rows."""
+
+        async def drained() -> None:
+            # A raising step ends the batch and is logged by reconcile(). Each
+            # step marks its own row failed before raising, so continuing here
+            # would turn a Jobs outage into a batch of failed rows per pass
+            # instead of one. Progress is still one row per pass in that case.
+            deadline = time.monotonic() + settings.platform_jobs_phase_budget_seconds
+            for _ in range(settings.platform_jobs_phase_batch_size):
+                claimed = await step()
+                if not claimed or time.monotonic() >= deadline:
+                    return
+
+        return drained
 
     async def _project_evaluations(self) -> None:
         """Project one bounded batch of changed evaluation rows into entities."""
@@ -166,14 +182,15 @@ class ScaledEvalsJobsController(NemoController):
         with pooled_connection() as conn:
             return EvaluationRepository(conn).list_changed_since(updated_after, limit=limit)
 
-    async def _submit_one_build(self) -> None:
+    async def _submit_one_build(self) -> bool:
+        """Submit one claimed build; return False only when the queue is empty."""
         job = await asyncio.to_thread(self._claim_build)
         if job is None:
-            return
+            return False
         name = task_image_build_job_name(job.task_id, job.revision, job.attempt)
         bound = await asyncio.to_thread(self._bind_build, job, name)
         if not bound:
-            return
+            return True
         spec = TaskImageBuildSpec.model_validate(
             {
                 "task_id": job.task_id,
@@ -191,15 +208,17 @@ class ScaledEvalsJobsController(NemoController):
         except Exception as exc:
             await asyncio.to_thread(self._fail_build, job, name, f"Platform Job submission failed: {exc}")
             raise
+        return True
 
-    async def _submit_one_evaluation(self) -> None:
+    async def _submit_one_evaluation(self) -> bool:
+        """Submit one claimed evaluation; return False only when the queue is empty."""
         row = await asyncio.to_thread(self._claim_evaluation)
         if row is None:
-            return
+            return False
         evaluation_id = str(row["id"])
         current = await asyncio.to_thread(self._load_evaluation, evaluation_id)
         if current is None:
-            return
+            return True
         execution_number = int(current.get("current_execution") or 1)
         name = evaluation_execution_job_name(evaluation_id, execution_number)
         spec = EvaluationExecutionSpec(
@@ -225,6 +244,7 @@ class ScaledEvalsJobsController(NemoController):
             name,
             platform_job.id,
         )
+        return True
 
     async def _create_job(
         self,
@@ -246,7 +266,7 @@ class ScaledEvalsJobsController(NemoController):
                 }
             },
         )
-        request = CreatePlatformJobRequest(
+        request = CreateHelixJobRequest(
             name=name,
             description=job_cls.description,
             source=f"scaled-evals.{job_cls.name}",
@@ -270,31 +290,37 @@ class ScaledEvalsJobsController(NemoController):
             if status.status in _ACTIVE_JOB_STATUSES:
                 await asyncio.to_thread(self._heartbeat_build, row)
             elif status.status in {
-                PlatformJobStatus.ERROR,
-                PlatformJobStatus.CANCELLED,
-                PlatformJobStatus.COMPLETED,
+                HelixJobStatus.ERROR,
+                HelixJobStatus.CANCELLED,
+                HelixJobStatus.COMPLETED,
             }:
                 detail = f"Platform build job ended as {status.status.value} without recording a ready task revision"
                 await asyncio.to_thread(self._fail_build_row, row, detail)
 
-    async def _reconcile_one_evaluation(self) -> None:
+    async def _reconcile_one_evaluation(self) -> bool:
+        """Repair one stale evaluation; return False only when none are stale."""
         row = await asyncio.to_thread(self._claim_stale_evaluation)
         if row is None:
-            return
+            return False
         name = str(row["dispatch_job_name"])
         try:
             status = (await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)).data()
         except NotFoundError:
             await asyncio.to_thread(self._fail_evaluation_job, row, "Platform evaluation job was not found")
-            return
+            return True
         if status.status in _ACTIVE_JOB_STATUSES:
-            await asyncio.to_thread(self._release_evaluation_reconcile_claim, row)
-            return
-        if status.status == PlatformJobStatus.COMPLETED:
+            # Hold the lease rather than releasing it. The claim orders by
+            # dispatch_claimed_at, which a release does not change, so a
+            # released row sorts first again and the drain re-claims this same
+            # row instead of advancing. The lease lapses after claim_timeout,
+            # which is soon enough for a job that is running normally.
+            return True
+        if status.status == HelixJobStatus.COMPLETED:
             detail = "Platform evaluation job completed without recording a terminal evaluation status"
         else:
             detail = f"Platform evaluation job ended as {status.status.value}"
         await asyncio.to_thread(self._fail_evaluation_job, row, detail)
+        return True
 
     async def _cancel_evaluation_jobs(self) -> None:
         for row in await asyncio.to_thread(self._list_cancelled_evaluations):
@@ -403,7 +429,7 @@ class ScaledEvalsJobsController(NemoController):
             EvaluationRepository(conn).schedule_retry(
                 evaluation_id,
                 execution_number=execution_number,
-                failure_code="PlatformJobSubmissionError",
+                failure_code="HelixJobSubmissionError",
                 failure_category="infrastructure",
                 delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
                 expected_dispatch_owner=self._worker_id,
@@ -417,15 +443,6 @@ class ScaledEvalsJobsController(NemoController):
                 worker_id=self._worker_id,
             )
 
-    def _release_evaluation_reconcile_claim(self, row: dict[str, Any]) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).release_dispatch_reconcile_claim(
-                str(row["id"]),
-                execution_number=int(row["current_execution"]),
-                dispatch_job_name=str(row["dispatch_job_name"]),
-                worker_id=self._worker_id,
-            )
-
     def _fail_evaluation_job(self, row: dict[str, Any], detail: str) -> None:
         evaluation_id = str(row["id"])
         execution_number = int(row["current_execution"])
@@ -435,7 +452,7 @@ class ScaledEvalsJobsController(NemoController):
                 execution_number=execution_number,
                 dispatch_job_name=str(row["dispatch_job_name"]),
                 reconcile_worker_id=self._worker_id,
-                failure_code="PlatformJobInfrastructureError",
+                failure_code="HelixJobInfrastructureError",
                 detail=detail,
                 retry_delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
             )

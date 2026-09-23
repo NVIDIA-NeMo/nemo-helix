@@ -41,6 +41,12 @@ export const ASSISTANT_STUDIO_ENABLED =
   featureFlags.assistantStudioEnabled !== false || featureFlags.copilotStudioEnabled !== false;
 export const CUSTOMIZER_ENABLED = featureFlags.customizerEnabled !== false;
 export const DASHBOARD_ENABLED = featureFlags.dashboardEnabled !== false;
+export const DASHBOARD_SANDBOX_ENABLED = featureFlags.dashboardSandboxEnabled !== false;
+// The /dashboard route is reachable if any variant behind it is enabled — kept as one derived
+// constant so the three flags can't drift out of sync across the route table, the side-nav
+// link, and the default-landing redirect (each of which needs this exact condition).
+export const DASHBOARD_ROUTE_ENABLED =
+  DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED || DASHBOARD_SANDBOX_ENABLED;
 export const DATA_DESIGNER_ENABLED = featureFlags.dataDesignerEnabled !== false;
 export const DATASETS_ENABLED = featureFlags.datasetsEnabled !== false;
 export const DEPLOYMENTS_ENABLED = featureFlags.deploymentsEnabled !== false;

@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="install-prerequisites"></a>
 
-Before installing the NeMo Platform Helm chart, prepare Kubernetes access, storage, and NGC credentials.
+Before installing the NeMo Helix Helm chart, prepare Kubernetes access, storage, and NGC credentials.
 
 ## Kubernetes cluster access
 
@@ -20,8 +20,8 @@ Install and configure these tools on the machine where you run the install:
 Set a namespace variable used by the examples:
 
 ```sh
-export NMP_NAMESPACE=nemo-platform
-kubectl create namespace "$NMP_NAMESPACE"
+export NHX_NAMESPACE=nemo-helix
+kubectl create namespace "$NHX_NAMESPACE"
 ```
 
 Review the [system requirements](/documentation/reference/system-requirements) before choosing node types. For storage and persistent volume configuration, including ReadWriteMany and StorageClass requirements, see [Persistent Volumes](/documentation/kubernetes-deployment/setup/helm/persistent-volumes).
@@ -40,13 +40,13 @@ The chart can run on local or managed Kubernetes clusters when the required stor
 
 ## Create NGC API key and secrets
 
-You need an NGC account and an NGC API key that can access the NeMo Platform chart and container images in the `nvidia/nemo-platform` org. NeMo Platform images are hosted under paths such as `nvcr.io/nvidia/nemo-platform/nmp-api` and `nvcr.io/nvidia/nemo-platform/safe-synthesizer-tasks`.
+You need an NGC account and an NGC API key that can access the NeMo Helix chart and container images in the `nvidia/nemo-helix` org. NeMo Helix images are hosted under paths such as `nvcr.io/nvidia/nemo-helix/nhx-api` and `nvcr.io/nvidia/nemo-helix/nhx-safe-synthesizer-tasks`.
 
 To learn more about using Helm charts in the NGC Catalog console, refer to the [Helm Charts](https://docs.nvidia.com/ngc/gpu-cloud/ngc-catalog-user-guide/index.html#helm-charts) section in the NGC Catalog User Guide.
 
 1. Create an NGC API key following [Generating NGC API Keys](https://docs.nvidia.com/ngc/latest/ngc-private-registry-user-guide.html#generating-ngc-api-keys).
 
-   Include permissions that allow access to NGC Catalog artifacts and the NVIDIA private registry. At minimum, include the NGC Catalog and Public API Endpoints permissions shown in the NGC API key UI. If your organization uses scoped service keys, ensure the key can read the `nvidia/nemo-platform` org.
+   Include permissions that allow access to NGC Catalog artifacts and the NVIDIA private registry. At minimum, include the NGC Catalog and Public API Endpoints permissions shown in the NGC API key UI. If your organization uses scoped service keys, ensure the key can read the `nvidia/nemo-helix` org.
 
 2. Store the key in your shell environment.
 
@@ -63,7 +63,7 @@ To learn more about using Helm charts in the NGC Catalog console, refer to the [
      --docker-server=nvcr.io \
      --docker-username='$oauthtoken' \
      --docker-password="$NGC_API_KEY" \
-     --namespace "$NMP_NAMESPACE"
+     --namespace "$NHX_NAMESPACE"
    ```
 
 4. Create the NGC API secret.
@@ -73,13 +73,13 @@ To learn more about using Helm charts in the NGC Catalog console, refer to the [
    ```sh
    kubectl create secret generic ngc-api \
      --from-literal=NGC_API_KEY="$NGC_API_KEY" \
-     --namespace "$NMP_NAMESPACE"
+     --namespace "$NHX_NAMESPACE"
    ```
 
 5. Confirm both secrets exist.
 
    ```sh
-   kubectl get secret nvcrimagepullsecret ngc-api -n "$NMP_NAMESPACE"
+   kubectl get secret nvcrimagepullsecret ngc-api -n "$NHX_NAMESPACE"
    ```
 
 For more information about other secrets you might configure through the Helm chart, see [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets).

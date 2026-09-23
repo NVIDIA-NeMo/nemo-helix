@@ -14,8 +14,8 @@ For the release process (version bumps, triggering stable releases, verification
 Clone the repository before bootstrapping the local environment.
 
 ```bash
-git clone <repo-url> nemo-platform
-cd nemo-platform
+git clone <repo-url> nemo-helix
+cd nemo-helix
 ```
 
 #### Repository bootstrapping
@@ -55,7 +55,7 @@ Install `uv`:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-> **NeMo Platform requires the uv version reported by `make toolchain-versions`.**
+> **NeMo Helix requires the uv version reported by `make toolchain-versions`.**
 > Flox and CI use that exact version; `pyproject.toml` intentionally remains a range.
 
 #### Studio Environment Setup
@@ -147,7 +147,7 @@ make run
 uv run nemo services run --services studio,entities
 
 # Or run with a config file for additional settings
-NMP_CONFIG_FILE_PATH=packages/nmp_platform/config/local.yaml \
+NHX_CONFIG_FILE_PATH=packages/nhx_platform/config/local.yaml \
   uv run nemo services run --services studio,entities
 ```
 
@@ -171,7 +171,7 @@ make run
 nemo services run
 
 # Or run with a custom config file
-nemo services run --config packages/nmp_platform/config/local.yaml
+nemo services run --config packages/nhx_platform/config/local.yaml
 ```
 
 For more options and details, see [Local Development](#local-development) below.
@@ -250,15 +250,15 @@ Alternatively, you can use the SDK/license maintenance CLI directly:
 
 ```bash
 # Generate license reports for Python and Go dependencies
-uv run nemo-platform-sdk-tools license generate
+uv run nemo-helix-sdk-tools license generate
 
 # Find packages with missing licenses
-uv run nemo-platform-sdk-tools license find-missing
+uv run nemo-helix-sdk-tools license find-missing
 ```
 
 The license generation process creates intermediate JSON files (`third_party/osv-licenses*.json`) which are marked as generated files in `.gitattributes`. The main `third_party/osv-licenses.json` file is the merged artifact used by downstream reports.
 
-License overrides for packages where osv-scanner cannot determine the correct license are maintained in `tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/license/overrides.yaml`. This YAML file supports comments to document the source of license information.
+License overrides for packages where osv-scanner cannot determine the correct license are maintained in `tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/license/overrides.yaml`. This YAML file supports comments to document the source of license information.
 
 This may be added as a pre-commit job in the future.
 
@@ -280,7 +280,7 @@ For source development, prefer running Python processes directly in your local e
 
 #### In-Process Development
 
-`nemo services run` runs NeMo Platform services directly in your local Python environment, which is ideal for active development with fast iteration.
+`nemo services run` runs NeMo Helix services directly in your local Python environment, which is ideal for active development with fast iteration.
 
 ##### Prerequisites
 

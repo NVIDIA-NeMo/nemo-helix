@@ -45,16 +45,16 @@ on:
       wheel-ids:
         description: >-
           Custom only. Comma-separated wheel IDs.
-          Allowed: nemo-platform, nemo-platform-plugin, nemo-sandboxed-gym.
+          Allowed: nemo-helix, nemo-helix-plugin, nemo-sandboxed-gym.
         required: false
         type: string
         default: ""
       container-ids:
         description: >-
           Custom only. Comma-separated container IDs.
-          Allowed: nmp-api, nmp-cpu-tasks, nmp-gym-tasks, nmp-gym-host,
-          nmp-customizer-tasks, nmp-automodel-training, nmp-unsloth-training,
-          nmp-rl-training, auditor-tasks, safe-synthesizer-tasks.
+          Allowed: nhx-api, nhx-cpu-tasks, nhx-gym-tasks, nhx-gym-host,
+          nhx-customizer-tasks, nhx-automodel-training, nhx-unsloth-training,
+          nhx-rl-training, nhx-auditor-tasks, nhx-safe-synthesizer-tasks.
         required: false
         type: string
         default: ""
@@ -112,8 +112,8 @@ env:
   #                 `pattern-prefix` its dynamic versioning reads.
   RELEASE_WHEELS_JSON: >-
     [
-      {"id":"nemo-platform","package":"nemo-platform","path":"packages/nemo_platform"},
-      {"id":"nemo-platform-plugin","package":"nemo-platform-plugin","path":"packages/nemo_platform_plugin"},
+      {"id":"nemo-helix","package":"nemo-helix","path":"packages/nemo_helix"},
+      {"id":"nemo-helix-plugin","package":"nemo-helix-plugin","path":"packages/nemo_helix_plugin"},
       {"id":"nemo-sandboxed-gym","package":"nemo-sandboxed-gym","path":"packages/sandboxed_gym","independent":true,"tagPrefix":"nemo-sandboxed-gym-v"}
     ]
   # Container fields:
@@ -124,31 +124,31 @@ env:
   # the published image has matching NGC catalog metadata.
   RELEASE_CONTAINERS_JSON: >-
     [
-      {"id":"nmp-api","target":"nmp-api-docker"},
-      {"id":"nmp-cpu-tasks","target":"nmp-cpu-tasks-docker"},
-      {"id":"nmp-gym-tasks","target":"nmp-gym-tasks-docker"},
-      {"id":"nmp-gym-host","target":"nmp-gym-host-docker"},
-      {"id":"nmp-customizer-tasks","target":"nmp-customizer-tasks"},
-      {"id":"nmp-automodel-training","target":"nmp-automodel-training-docker"},
-      {"id":"nmp-unsloth-training","target":"nmp-unsloth-training"},
-      {"id":"nmp-rl-training","target":"nmp-rl-training"},
-      {"id":"auditor-tasks","target":"auditor-tasks-docker"},
-      {"id":"safe-synthesizer-tasks","target":"safe-synthesizer-tasks-docker"}
+      {"id":"nhx-api","target":"nhx-api-docker"},
+      {"id":"nhx-cpu-tasks","target":"nhx-cpu-tasks-docker"},
+      {"id":"nhx-gym-tasks","target":"nhx-gym-tasks-docker"},
+      {"id":"nhx-gym-host","target":"nhx-gym-host-docker"},
+      {"id":"nhx-customizer-tasks","target":"nhx-customizer-tasks"},
+      {"id":"nhx-automodel-training","target":"nhx-automodel-training-docker"},
+      {"id":"nhx-unsloth-training","target":"nhx-unsloth-training"},
+      {"id":"nhx-rl-training","target":"nhx-rl-training"},
+      {"id":"nhx-auditor-tasks","target":"nhx-auditor-tasks-docker"},
+      {"id":"nhx-safe-synthesizer-tasks","target":"nhx-safe-synthesizer-tasks-docker"}
     ]
-  RELEASE_HELM_ID: nemo-platform
+  RELEASE_HELM_ID: nemo-helix
   RELEASE_HELM_PATH: k8s/helm
-  RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-platform-dev
-  STABLE_IMAGE_REGISTRY: nvcr.io/nvidia/nemo-platform
+  RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-helix-dev
+  STABLE_IMAGE_REGISTRY: nvcr.io/nvidia/nemo-helix
   RELEASE_PUBLISH_NIGHTLY_WHEELS: "true"
   RELEASE_NIGHTLY_WHEEL_INDEX: https://pypi.nvidia.com
   RELEASE_STABLE_WHEEL_INDEX: https://pypi.org/simple
   # Nightly GHCR readiness checks authenticate with the repository GITHUB_TOKEN.
-  RELEASE_NIGHTLY_CONTAINER_REGISTRY: ghcr.io/nvidia-nemo/nemo-platform
-  RELEASE_STABLE_CONTAINER_REGISTRY: nvcr.io/nvidia/nemo-platform
-  RELEASE_NIGHTLY_HELM_OCI_REGISTRY: oci://ghcr.io/nvidia-nemo/nemo-platform
+  RELEASE_NIGHTLY_CONTAINER_REGISTRY: ghcr.io/nvidia-nemo/nemo-helix
+  RELEASE_STABLE_CONTAINER_REGISTRY: nvcr.io/nvidia/nemo-helix
+  RELEASE_NIGHTLY_HELM_OCI_REGISTRY: oci://ghcr.io/nvidia-nemo/nemo-helix
   # Stable charts must be promoted from RELEASE_HELM_REGISTRY before polling.
-  RELEASE_STABLE_HELM_REPOSITORY: https://helm.ngc.nvidia.com/nvidia/nemo-platform
-  RELEASE_NGC_CATALOG_BASE: https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo-platform
+  RELEASE_STABLE_HELM_REPOSITORY: https://helm.ngc.nvidia.com/nvidia/nemo-helix
+  RELEASE_NGC_CATALOG_BASE: https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo-helix
 
 jobs:
   plan-release:
@@ -428,7 +428,7 @@ jobs:
               containers.forEach((container) => lines.push(`- ${container}`));
             }
             if (process.env.INCLUDE_HELM === "true") {
-              lines.push("*:helm: Helm chart to publish:*", "- nemo-platform");
+              lines.push("*:helm: Helm chart to publish:*", "- nemo-helix");
             }
             lines.push(
               process.env.DRY_RUN === "true" && "Mode: dry run (no publishing)",
@@ -503,7 +503,7 @@ jobs:
               clientPayload: {
                 version: process.env.RELEASE_VERSION,
                 source_sha: process.env.SOURCE_SHA,
-                source_team: "nemo-platform-dev",
+                source_team: "nemo-helix-dev",
                 container_version: process.env.SOURCE_SHA,
                 source_run_url: process.env.SOURCE_RUN_URL,
                 wheel_ids: JSON.parse(process.env.WHEEL_IDS),
@@ -611,7 +611,7 @@ jobs:
                 containers: JSON.parse(process.env.CONTAINER_IDS),
                 collect_sources: true,
                 bake_env: {
-                  NMP_COLLECT_SOURCES: "1",
+                  NHX_COLLECT_SOURCES: "1",
                 },
               },
             });
@@ -679,8 +679,8 @@ jobs:
           chart_version="${HELM_VERSION}"
 
           yq -i ".platformConfig.platform.image_registry = \"${release_registry}\"" "${chart_dir}/values.yaml"
-          yq -i ".api.image.repository = \"${release_registry}/nmp-api\"" "${chart_dir}/values.yaml"
-          yq -i ".core.image.repository = \"${release_registry}/nmp-api\"" "${chart_dir}/values.yaml"
+          yq -i ".api.image.repository = \"${release_registry}/nhx-api\"" "${chart_dir}/values.yaml"
+          yq -i ".core.image.repository = \"${release_registry}/nhx-api\"" "${chart_dir}/values.yaml"
 
           mkdir -p "${package_dir}"
           helm package "${chart_dir}" \
@@ -689,7 +689,7 @@ jobs:
             --destination "${package_dir}"
 
           echo "chart_version=${chart_version}" >> "${GITHUB_OUTPUT}"
-          echo "chart_package=${package_dir}/nemo-platform-${chart_version}.tgz" >> "${GITHUB_OUTPUT}"
+          echo "chart_package=${package_dir}/nemo-helix-${chart_version}.tgz" >> "${GITHUB_OUTPUT}"
 
       - name: Report packaged Helm chart
         if: needs.plan-release.outputs.dry_run == 'true'
@@ -728,14 +728,14 @@ jobs:
           set -euo pipefail
 
           helm_repository="https://helm.ngc.nvidia.com/${RELEASE_REGISTRY#nvcr.io/}"
-          printf '%s' "${HELM_PASSWORD}" | helm repo add nemo-platform "${helm_repository}" \
+          printf '%s' "${HELM_PASSWORD}" | helm repo add nemo-helix "${helm_repository}" \
             --username "\$oauthtoken" --password-stdin
 
-          if helm search repo nemo-platform/nemo-platform --devel --version "${CHART_VERSION}" \
+          if helm search repo nemo-helix/nemo-helix --devel --version "${CHART_VERSION}" \
             | grep -qv 'No results found'; then
             echo "Helm chart version ${CHART_VERSION} already exists. Skipping."
           else
-            helm cm-push "${CHART_PACKAGE}" nemo-platform
+            helm cm-push "${CHART_PACKAGE}" nemo-helix
           fi
 
   signal-deployment:
@@ -913,8 +913,8 @@ jobs:
             }
           else
             chart_is_available() {
-              helm repo add nemo-platform "${STABLE_HELM_REPOSITORY}" --force-update >/dev/null 2>&1 \
-                && helm search repo nemo-platform/nemo-platform --devel --version "${CHART_VERSION}" \
+              helm repo add nemo-helix "${STABLE_HELM_REPOSITORY}" --force-update >/dev/null 2>&1 \
+                && helm search repo nemo-helix/nemo-helix --devel --version "${CHART_VERSION}" \
                 | grep -qv 'No results found'
             }
           fi
@@ -1015,7 +1015,9 @@ jobs:
     # custom runs can finish or retry a release without manual tagging.
     name: Create or confirm GitHub Release
     needs: [plan-release, poll-final-release]
+    # Explicit status check allows intentionally skipped upstream artifact jobs.
     if: >-
+      !cancelled() &&
       needs.plan-release.outputs.release_type == 'stable' &&
       needs.plan-release.outputs.dry_run != 'true' &&
       needs.plan-release.outputs.act != 'true' &&

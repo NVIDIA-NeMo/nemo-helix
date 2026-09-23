@@ -8,10 +8,10 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from nmp.rl.entities.values import TrainingType
-from nmp.rl.schemas.environment import GymDatasetRow, GymVerifiersDatasetRow
-from nmp.rl.tasks.training.datasets import validation as validation_mod
-from nmp.rl.tasks.training.datasets.validation import GRPO_SCHEMA, DatasetValidator
+from nhx.rl.entities.values import TrainingType
+from nhx.rl.schemas.environment import GymDatasetRow, GymVerifiersDatasetRow
+from nhx.rl.tasks.training.datasets import validation as validation_mod
+from nhx.rl.tasks.training.datasets.validation import GRPO_SCHEMA, DatasetValidator
 
 VERIFIERS_ROW = {
     "task_idx": 0,

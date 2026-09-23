@@ -27,12 +27,12 @@ _AUTH_HEADER_PATTERNS: tuple[str, ...] = (
     "bearer",
     "cookie",
     "set-cookie",
-    "x-nmp-principal-",
-    "x-nmp-actor-",
-    "x-nmp-subject-",
-    "x-nmp-scopes",
+    "x-nhx-principal-",
+    "x-nhx-actor-",
+    "x-nhx-subject-",
+    "x-nhx-scopes",
 )
-# Keep this aligned with nmp.common.entities.constants.NAME_PATTERN without adding an SDK dependency on nmp_common.
+# Keep this aligned with nhx.common.entities.constants.NAME_PATTERN without adding an SDK dependency on nhx_common.
 # This pydantic-core-compatible form avoids lookarounds while preserving the naming syntax:
 # start with lowercase alpha, require at least one more valid character, allow single hyphens between non-hyphen chars,
 # and do not end in hyphen.

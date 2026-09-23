@@ -5,7 +5,7 @@ import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/c
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
 import type {
   CustomizationMetricValue,
@@ -61,7 +61,7 @@ export const getFormattedTrainingType = (type?: string) => {
  * 'Deployment In Progress', optionally with the progress percentage.
  */
 export const getFormattedCustomizationStatus = (
-  status?: PlatformJobStatus | string,
+  status?: HelixJobStatus | string,
   progressPercent?: number
 ) => {
   let statusText = '';

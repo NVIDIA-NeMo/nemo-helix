@@ -77,13 +77,13 @@ dev = [
 sandboxed-gym = "sandboxed_gym.cli:main"
 
 [tool.hatch.version]
-source = "nmp-dynamic-versioning"
+source = "nhx-dynamic-versioning"
 # Tags of its own, so a build never inherits the platform's release lineage.
 pattern-prefix = "nemo-sandboxed-gym-v"
 fallback-version = "0.0.0"
 
 [build-system]
-requires = ["hatchling", "nmp-build-tools"]
+requires = ["hatchling", "nhx-build-tools"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

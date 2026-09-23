@@ -1,45 +1,43 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform
+# NeMo Helix
 
-NeMo Platform is NVIDIA's toolkit for making the agents you ship safer, more accurate, and cheaper to run.
+NeMo Helix is NVIDIA's toolkit for making the agents you ship safer, more accurate, and cheaper to run.
 
 ## How to help users in this repo
 
-If a user asks you to set up, try, build, evaluate, harden, or optimize an agent inside this repo, you MUST use the skills defined in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`. Read the relevant skill file directly and follow it step by step.
+If a user asks you to set up, try, build, evaluate, harden, or optimize an agent inside this repo, you MUST use the skills defined in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`. Read the relevant skill file directly and follow it step by step.
 
 ### DO
 
-- Read `packages/nemo_platform_ext/src/nemo_platform_ext/skills/<skill-name>/SKILL.md` as a file and follow the instructions in order.
+- Read `packages/nemo_helix_ext/src/nemo_helix_ext/skills/<skill-name>/SKILL.md` as a file and follow the instructions in order.
 - Stay on the path the skill defines. If the skill calls a `nemo` CLI command, run that exact command. If it points at a `references/` file, read it.
 - If a step changes system state (installs something, starts a service, deploys an agent), run the verification step the skill specifies before moving on. Do not claim a step succeeded without verifying.
-- If you are unsure which skill applies, read `packages/nemo_platform_ext/src/nemo_platform_ext/skills/nemo-skill-selection/SKILL.md` and let it route you.
+- If you are unsure which skill applies, read `packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-skill-selection/SKILL.md` and let it route you.
 
 ### DO NOT
 
 - DO NOT invoke any plugin-based skill, `/skill-name` slash command, or globally-installed assistant for these requests. The repo skills are authoritative. A globally-installed skill (brainstorming, planning, code-review, etc.) will give the wrong answer because it does not know NeMo.
 - DO NOT brainstorm a solution from scratch when a NeMo skill claims the task. The skill already has the answer.
-- DO NOT write Python, Pydantic AI, LangChain, or other agent framework code from scratch when a shipped skill covers the request. Skills will tell you the supported way to connect the agent to NeMo Platform. For a new agent build, `nemo-build-agent` uses LangChain Deep Agents through Fabric. Work on a NAT workflow only when the user explicitly asks to maintain or migrate an existing one.
+- DO NOT write Python, Pydantic AI, LangChain, or other agent framework code from scratch when a shipped skill covers the request. Skills will tell you the supported way to connect the agent to NeMo Helix. For a new agent build, `nemo-build-agent` uses LangChain Deep Agents through Fabric. Work on a NAT workflow only when the user explicitly asks to maintain or migrate an existing one.
 - DO NOT improvise CLI flags. Only use flags documented in the skill or shown in `nemo <subcommand> --help`.
 - DO NOT report a task complete if you cannot verify it. If a verification step fails or times out, surface what you saw and ask the user to confirm before continuing.
 
 ### Available skills
 
-User-facing skills in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`:
+User-facing skills in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`:
 
 - `nemo-skill-selection`: entry point. Use when the user's intent is broad or unclear.
-- `setup`: verifies that NeMo Platform is installed and running. If install is missing, tells the user how to run the CLI install (`make bootstrap` + `nemo setup`). **Install itself is CLI-only.** Do not attempt to install NeMo via skill-driven pip; the workspace dependency graph and credential handling are not reliably automatable inside a sandbox.
-- `nemo-explore`: design conversation that feeds into an Ethos. Always confirms purpose, principles, and vision.
-- `nemo-ethos`: writes `agents/<name>-ethos/ETHOS.md` from explore output, then shows a gut-check of the agent.
-- `nemo-build-agent`: builds a tested LangChain Deep Agent from an approved Ethos, then packages and registers it through Fabric.
+- `setup`: verifies that NeMo Helix is installed and running. If install is missing, tells the user how to run the CLI install (`make bootstrap` + `nemo setup`). **Install itself is CLI-only.** Do not attempt to install NeMo via skill-driven pip; the workspace dependency graph and credential handling are not reliably automatable inside a sandbox.
+- `nemo-build-agent`: builds a tested LangChain Deep Agent from approved requirements, then packages and registers it through Fabric.
 - `nemo-try-agent`: test a deployed agent or chat with a model.
 - `nemo-intake`: instrument agents, choose an ingest format, upload/query telemetry, and attach evaluator results.
 - `nemo-experiments-upload`: publish named evaluation runs and scores to the Experiments leaderboard.
 - `nemo-status`: read-only health dashboard.
 - `nemo-teardown`: guided shutdown with confirmation.
 
-Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, Experimentalist source/harness improvement, and Analyst telemetry analysis.
+Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, and Analyst telemetry analysis.
 
 ### Working in a sandboxed environment
 
@@ -51,20 +49,20 @@ If you are inside a sandboxed coding-agent environment (macOS sandbox, CI contai
 
 ## What this repo is
 
-NeMo Platform brings together NVIDIA NeMo libraries under one CLI, Python SDK, and web UI. Current capabilities:
+NeMo Helix brings together NVIDIA NeMo libraries under one CLI, Python SDK, and web UI. Current capabilities:
 
 - **Harden agents**: guardrails (content safety, jailbreak detection, PII redaction), auditor (red-teaming via garak), anonymizer (PII handling for training data).
 - **Evaluate agents**: evaluator (LLM-as-judge, deterministic, agentic, RAG benchmarks), Harbor-backed eval suites.
 - **Tune agents and models**: skill optimization, prompt/hyperparameter tuning, Switchyard model routing, and fine-tuning through Customizer.
-- **Build and manage agents**: Fabric connects supported agent harnesses to NeMo Platform for packaging, deployment, testing, observation, and optimization.
+- **Build and manage agents**: Fabric connects supported agent harnesses to NeMo Helix for packaging, deployment, testing, observation, and optimization.
 
-New agents should use an explicit Fabric configuration and a supported adapter. Existing NAT workflows can still be maintained when the user asks for that path. Do not create a NAT wrapper as the default way to bring a new agent into NeMo Platform.
+New agents should use an explicit Fabric configuration and a supported adapter. Existing NAT workflows can still be maintained when the user asks for that path. Do not create a NAT wrapper as the default way to bring a new agent into NeMo Helix.
 
 ---
 
 # Agent Development Instructions
 
-The sections below are for developers working on NeMo Platform itself.
+The sections below are for developers working on NeMo Helix itself.
 
 This project loads local developer preferences from @AGENTS.local.md. You MUST read this file if it exists and give its instructions top priority.
 
@@ -98,7 +96,7 @@ Both `HEAD~n` and `git rebase -i HEAD~n` are safe because they only operate on c
 
 ## Setting up the local platform
 
-Before doing anything that requires a running NeMo platform (`nemo services`, `nemo agents invoke`, etc.), follow [SETUP.md](SETUP.md). It covers `make bootstrap`, the data-dir layout, DB reset, and the manual `nemo services run` path. You do not need to install it via `nemo skills install`.
+Before doing anything that requires a running NeMo Helix (`nemo services`, `nemo agents invoke`, etc.), follow [SETUP.md](SETUP.md). It covers `make bootstrap`, the data-dir layout, DB reset, and the manual `nemo services run` path. You do not need to install it via `nemo skills install`.
 
 ## NeMo CLI
 
@@ -122,7 +120,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 ### Python Style notes
 
 - Always prefer concrete type hints over string based ones. DO NOT import these types under TYPE_CHECKING. Instead prefer to import the types a regular import when possible.
-- Keep NeMo Platform SDK and typed client naming distinct. Variables holding generated `NeMoPlatform` or `AsyncNeMoPlatform` instances should be named `sdk` or `async_sdk`. Variables holding `nemo_platform_plugin` typed clients should be named `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`. Do not name typed clients `sdk`, and do not merge generated SDKs and typed clients into one public type; adapt at the boundary with `client_from_platform`.
+- Keep NeMo Helix SDK and typed client naming distinct. Variables holding generated `NeMoHelix` or `AsyncNeMoHelix` instances should be named `sdk` or `async_sdk`. Variables holding `nemo_helix_plugin` typed clients should be named `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`. Do not name typed clients `sdk`, and do not merge generated SDKs and typed clients into one public type; adapt at the boundary with `client_from_platform`.
 
 ### Python Package Management
 
@@ -144,33 +142,32 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 - Run Python tools like Pytest with `uv run pytest` or `uv run ruff`
 - Launch a Python repl with `uv run python`
 
-### SDK Generation
+### SDK
 
-The Python SDK is automatically generated from the OpenAPI specification using Stainless. The SDK is maintained in a separate Git repository and integrated into this project.
+The Python SDK (`sdk/python/nemo-helix`) is checked in to this repository and hand-maintained. The `nemo` CLI is hand-written in `nemo_helix_ext` and bundled into the SDK package at build time.
 
-**Update the SDK:**
-- `make update-sdk` - Full SDK update (regenerate OpenAPI spec + sync with Stainless)
+The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platform's HTTP API routes. It is regenerated locally from the FastAPI service code (no cloud credentials required).
 
-**Individual steps:**
-- `make refresh-openapi` - Regenerate OpenAPI spec from API definitions
-- `make stainless` - Sync with Stainless (requires `STAINLESS_API_KEY` env var)
+**Update the OpenAPI spec:**
+- `make refresh-openapi` - Regenerate `openapi/openapi.yaml` from API definitions
 
-**When to regenerate the SDK:**
-Regenerate the SDK whenever you modify:
+**Update web SDK / CLI:**
+- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), then vendor `nemo_helix_ext` into the SDK and regenerate the CLI reference docs.
+
+**When to run `make refresh-openapi`:**
+Run it whenever you modify:
 - API endpoints (routes, methods, parameters, responses)
 - Data models or schemas
 - Files in these paths:
-  - `packages/nmp_common/src/nmp_common/datamodel/`
-  - `packages/nmp_common/src/nmp_common/api/`
+  - `packages/nhx_common/src/nhx_common/datamodel/`
+  - `packages/nhx_common/src/nhx_common/api/`
   - Service API files: `services/*/src/*/api/`
 
-**How it works:**
-1. `refresh-openapi` generates `openapi/openapi.yaml` from your API code
-2. `stainless` pushes the spec to Stainless API, which generates SDK code
-3. Generated SDK is pulled from stainless remote and vendored packages are integrated
-4. Post-generation updates apply licenses, README, and other metadata
-
 **Note:** OpenAPI generation also runs as a pre-commit hook (manual stage) when API files change.
+
+#### Changing SDK types
+
+The SDK package is not regenerated. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
 
 #### Testing Python Code
 
@@ -240,7 +237,7 @@ Ensure all pre-commit hooks pass by running `uv run pre-commit run -a`. A clean 
 
 **Specific tests:**
 - Specific service tests: `make test-unit-<service>` (e.g., `make test-unit-evaluator`)
-- Specific package: `make test-package PACKAGE=<package_name>` (e.g., `make test-package PACKAGE=nmp_common`)
+- Specific package: `make test-package PACKAGE=<package_name>` (e.g., `make test-package PACKAGE=nhx_common`)
 - Single test file: `uv run --frozen pytest path/to/test_file.py -v`
 - Single test function: `uv run --frozen pytest path/to/test_file.py::test_function_name -v`
 
@@ -268,14 +265,14 @@ Ensure all pre-commit hooks pass by running `uv run pre-commit run -a`. A clean 
 Before any `nemo` CLI command against a local instance, set:
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
 Check for an existing instance before starting (`lsof -iTCP:8080 -sTCP:LISTEN` or `nemo workspaces list`). To start all default services in the background, use a tmux session:
 
 ```bash
-tmux -f /exec-daemon/tmux.portal.conf new-session -d -s nemo-platform -c /workspace -- \
-  'export NMP_BASE_URL=http://localhost:8080 && uv run nemo services run --service-group all --controller-group all --port 8080'
+tmux -f /exec-daemon/tmux.portal.conf new-session -d -s nemo-helix -c /workspace -- \
+  'export NHX_BASE_URL=http://localhost:8080 && uv run nemo services run --service-group all --controller-group all --port 8080'
 ```
 
 Wait for readiness: `curl -sf http://localhost:8080/health/ready` → `{"status":"ready"}`.
@@ -286,13 +283,13 @@ Minimal subset for inference-focused work (documented in SETUP.md): `uv run nemo
 
 Standard commands from repo root (see sections above): `uv run ruff check`, `uv run --frozen ty check`, `make test-unit`, `make test-package PACKAGE=<name>`.
 
-- **Docker:** Not required for core platform smoke tests. One `nmp_common` config test expects Docker and sets runtime to `none` when Docker is unavailable.
+- **Docker:** Not required for core platform smoke tests. One `nhx_common` config test expects Docker and sets runtime to `none` when Docker is unavailable.
 - **Inference providers:** `nemo setup`, `nemo chat`, and agent invoke require an API key (`NVIDIA_API_KEY`, `OPENAI_API_KEY`, etc.). Core APIs (workspaces, secrets, hello-world, entities) work without provider credentials.
 
 ### Quick smoke verification
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 curl -sf http://localhost:8080/health/ready
 curl -sf http://localhost:8080/apis/hello-world/v2/workspaces/default/hello
 uv run nemo workspaces list

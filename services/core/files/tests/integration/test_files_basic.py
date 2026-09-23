@@ -22,12 +22,12 @@ import duckdb
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import BadRequestError, ConflictError, NemoHTTPError, NotFoundError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetOutput, UpdateFilesetRequest
-from nmp.core.files.testing.utils import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import BadRequestError, ConflictError, NemoHTTPError, NotFoundError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput, UpdateFilesetRequest
+from nhx.core.files.testing.utils import (
     DEFAULT_WORKSPACE_ID,
     HTTPXFileSystem,
     create_fileset,
@@ -36,14 +36,14 @@ from pydantic import ValidationError
 
 
 class TestFilesBasic:
-    def test_fileset_get(self, sdk: NeMoPlatform):
+    def test_fileset_get(self, sdk: NeMoHelix):
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk) as fileset:
             fetched = files.get_fileset(name=fileset.name, workspace=fileset.workspace).data()
             assert fetched.id == fileset.id
             assert fetched.name == fileset.name
 
-    def test_fileset_list(self, sdk: NeMoPlatform):
+    def test_fileset_list(self, sdk: NeMoHelix):
         """Test listing filesets and filtering by workspace."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk) as fileset1:
@@ -52,7 +52,7 @@ class TestFilesBasic:
                 assert any(fs.id == fileset1.id for fs in filesets)
                 assert any(fs.id == fileset2.id for fs in filesets)
 
-    def test_fileset_list_filter_by_name(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_name(self, sdk: NeMoHelix):
         """Test listing filesets with name filter."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk) as fileset1:
@@ -87,7 +87,7 @@ class TestFilesBasic:
                 )
                 assert len(filtered_none) == 0
 
-    def test_fileset_list_filter_by_purpose(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_purpose(self, sdk: NeMoHelix):
         """Test listing filesets with purpose filter."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk, purpose="dataset") as dataset_fileset:
@@ -112,7 +112,7 @@ class TestFilesBasic:
                 assert any(fs.id == generic_fileset.id for fs in generic_filesets)
                 assert not any(fs.id == dataset_fileset.id for fs in generic_filesets)
 
-    def test_fileset_list_filter_by_storage_type(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_storage_type(self, sdk: NeMoHelix):
         """Test listing filesets with storage_type filter."""
         files = client_from_platform(sdk, FilesClient)
         # Create filesets with default local storage
@@ -132,7 +132,7 @@ class TestFilesBasic:
                     if fs.id in [local_fileset1.id, local_fileset2.id]:
                         assert fs.storage.type == "local"
 
-    def test_fileset_list_pagination(self, sdk: NeMoPlatform):
+    def test_fileset_list_pagination(self, sdk: NeMoHelix):
         """Test listing filesets with pagination."""
         files = client_from_platform(sdk, FilesClient)
         with ExitStack() as stack:
@@ -164,7 +164,7 @@ class TestFilesBasic:
             page2_ids = {fs.id for fs in page2.items}
             assert page1_ids.isdisjoint(page2_ids), "Pages should have different filesets"
 
-    def test_file_upload_download(self, sdk: NeMoPlatform, fileset: FilesetOutput):
+    def test_file_upload_download(self, sdk: NeMoHelix, fileset: FilesetOutput):
         """Test uploading and downloading a file using application/octet-stream."""
 
         test_content = b"Hello, World! This is a test file.\nLine 2\nLine 3"
@@ -212,7 +212,7 @@ class TestFilesBasic:
         )
         assert len(files_response) == 0, "File should be deleted"
 
-    def test_file_upload_nested_paths_and_list(self, sdk: NeMoPlatform, fileset: FilesetOutput):
+    def test_file_upload_nested_paths_and_list(self, sdk: NeMoHelix, fileset: FilesetOutput):
         """Test uploading multiple files with nested paths concurrently and listing them."""
 
         # Upload multiple files with nested paths
@@ -264,7 +264,7 @@ class TestFilesBasic:
             )
             assert downloaded == expected_content
 
-    def test_file_range_requests_with_duckdb(self, sdk: NeMoPlatform, fileset: FilesetOutput, client: TestClient):
+    def test_file_range_requests_with_duckdb(self, sdk: NeMoHelix, fileset: FilesetOutput, client: TestClient):
         """Test HTTP range requests by querying a parquet file with DuckDB.
 
         Uses HTTPXFileSystem to route DuckDB requests through the test client,
@@ -322,7 +322,7 @@ class TestFilesBasic:
 
         conn.close()
 
-    def test_error_handling(self, sdk: NeMoPlatform):
+    def test_error_handling(self, sdk: NeMoHelix):
         """Test error handling for various 404 scenarios."""
         files = client_from_platform(sdk, FilesClient)
 
@@ -401,7 +401,7 @@ class TestFilesBasic:
         except NotFoundError:
             pass  # Expected
 
-    def test_fileset_create_conflict(self, sdk: NeMoPlatform):
+    def test_fileset_create_conflict(self, sdk: NeMoHelix):
         """Test that creating a fileset with a duplicate name returns 409 Conflict."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk) as fileset:
@@ -416,7 +416,7 @@ class TestFilesBasic:
                 # Verify the error message mentions the conflict
                 assert "already exists" in str(e).lower() or e.status_code == 409
 
-    def test_fileset_create_rejects_user_provided_local_storage(self, sdk: NeMoPlatform):
+    def test_fileset_create_rejects_user_provided_local_storage(self, sdk: NeMoHelix):
         """Test that explicitly requesting local storage is rejected."""
         files = client_from_platform(sdk, FilesClient)
         try:
@@ -432,7 +432,7 @@ class TestFilesBasic:
             assert exc.status_code == 400
             assert "local storage is not allowed" in str(exc.body).lower()
 
-    def test_fileset_create_rejects_s3_use_sdk_auth(self, sdk: NeMoPlatform):
+    def test_fileset_create_rejects_s3_use_sdk_auth(self, sdk: NeMoHelix):
         """Test that S3 storage with use_sdk_auth=True is rejected for user-provided storage."""
         files = client_from_platform(sdk, FilesClient)
         try:
@@ -453,7 +453,7 @@ class TestFilesBasic:
             assert "use_sdk_auth=true is not allowed" in str(exc.body).lower()
 
     def test_fileset_create_allows_user_provided_local_storage_when_enabled(
-        self, sdk_allow_user_local_storage: NeMoPlatform, tmp_path: Path
+        self, sdk_allow_user_local_storage: NeMoHelix, tmp_path: Path
     ):
         """Test that explicit local storage is allowed when feature flag is enabled."""
         files = client_from_platform(sdk_allow_user_local_storage, FilesClient)
@@ -471,7 +471,7 @@ class TestFilesBasic:
         # Cleanup because not using create_fileset() helper.
         files.delete_fileset(name=fileset.name, workspace=fileset.workspace)
 
-    def test_fileset_update_partial(self, sdk: NeMoPlatform):
+    def test_fileset_update_partial(self, sdk: NeMoHelix):
         """Test that partial updates work - only specified fields are updated."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(
@@ -497,7 +497,7 @@ class TestFilesBasic:
             assert updated.name == fileset.name
             assert updated.id == fileset.id
 
-    def test_fileset_update_description_purpose_custom_fields(self, sdk: NeMoPlatform):
+    def test_fileset_update_description_purpose_custom_fields(self, sdk: NeMoHelix):
         """Test that description, purpose, and custom_fields can all be updated."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk, purpose="generic") as fileset:
@@ -523,7 +523,7 @@ class TestFilesBasic:
             assert fetched.purpose == "dataset"
             assert fetched.custom_fields == {"new_key": "new_value", "another": 123}
 
-    def test_fileset_update_not_found(self, sdk: NeMoPlatform):
+    def test_fileset_update_not_found(self, sdk: NeMoHelix):
         """Test that updating a non-existent fileset returns 404."""
         files = client_from_platform(sdk, FilesClient)
         try:
@@ -536,7 +536,7 @@ class TestFilesBasic:
         except NotFoundError:
             pass  # Expected
 
-    def test_fileset_update_returns_updated_output(self, sdk: NeMoPlatform):
+    def test_fileset_update_returns_updated_output(self, sdk: NeMoHelix):
         """Test that update returns the updated FilesetOutput with correct fields."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk, purpose="generic") as fileset:
@@ -560,7 +560,7 @@ class TestFilesBasic:
             assert updated.created_at is not None
             assert updated.updated_at is not None
 
-    def test_fileset_create_with_dataset_metadata(self, sdk: NeMoPlatform):
+    def test_fileset_create_with_dataset_metadata(self, sdk: NeMoHelix):
         """Test creating a fileset with dataset purpose and metadata."""
         with create_fileset(
             sdk,
@@ -618,7 +618,7 @@ class TestFilesBasic:
             }
             assert fileset.metadata.dataset.schemas_by_path == {"validation.jsonl": "validation_row"}
 
-    def test_fileset_create_rejects_invalid_dataset_schema_metadata(self, sdk: NeMoPlatform):
+    def test_fileset_create_rejects_invalid_dataset_schema_metadata(self, sdk: NeMoHelix):
         """Test invalid JSON Schema metadata is rejected at fileset create time."""
         with pytest.raises(
             (NemoHTTPError, ValidationError),
@@ -635,7 +635,7 @@ class TestFilesBasic:
             ):
                 pass
 
-    def test_fileset_default_storage_path(self, sdk: NeMoPlatform):
+    def test_fileset_default_storage_path(self, sdk: NeMoHelix):
         """Test that fileset created without storage uses default with workspace/name subpath."""
         with create_fileset(sdk, purpose="generic") as fileset:
             # Verify storage config was set with the expected subpath
@@ -644,7 +644,7 @@ class TestFilesBasic:
             # The path should end with filesets/{workspace}/{name}
             assert fileset.storage.path.endswith(f"filesets/{DEFAULT_WORKSPACE_ID}/{fileset.name}")
 
-    def test_fileset_delete_removes_storage_data(self, sdk: NeMoPlatform):
+    def test_fileset_delete_removes_storage_data(self, sdk: NeMoHelix):
         """Test that deleting a fileset also deletes the underlying storage directory."""
         files = client_from_platform(sdk, FilesClient)
         # Create fileset manually (not using context manager) so we control deletion
@@ -689,7 +689,7 @@ class TestFilesBasic:
                 pass
             raise
 
-    def test_fileset_list_filter_by_created_at_gte(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_created_at_gte(self, sdk: NeMoHelix):
         """Test listing filesets with created_at[gte] filter."""
         files = client_from_platform(sdk, FilesClient)
         # Record time before creating filesets
@@ -709,7 +709,7 @@ class TestFilesBasic:
                 assert fileset1.id in fileset_ids
                 assert fileset2.id in fileset_ids
 
-    def test_fileset_list_filter_by_created_at_lte(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_created_at_lte(self, sdk: NeMoHelix):
         """Test listing filesets with created_at[lte] filter."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk) as fileset1:
@@ -732,7 +732,7 @@ class TestFilesBasic:
                 fileset_ids = {fs.id for fs in filtered}
                 assert fileset1.id in fileset_ids
 
-    def test_fileset_list_filter_by_created_at_range(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_created_at_range(self, sdk: NeMoHelix):
         """Test listing filesets with both created_at[gte] and created_at[lte]."""
         files = client_from_platform(sdk, FilesClient)
         before_create = datetime.now(timezone.utc)
@@ -757,7 +757,7 @@ class TestFilesBasic:
             fileset_ids = {fs.id for fs in filtered}
             assert fileset.id in fileset_ids
 
-    def test_fileset_list_filter_by_created_at_excludes_older(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_created_at_excludes_older(self, sdk: NeMoHelix):
         """Test that created_at[gte] filter excludes older filesets."""
         files = client_from_platform(sdk, FilesClient)
         with create_fileset(sdk) as old_fileset:
@@ -783,7 +783,7 @@ class TestFilesBasic:
                 # Old fileset should be excluded
                 assert old_fileset.id not in fileset_ids
 
-    def test_fileset_list_filter_by_updated_at(self, sdk: NeMoPlatform):
+    def test_fileset_list_filter_by_updated_at(self, sdk: NeMoHelix):
         """Test listing filesets with updated_at filter."""
         files = client_from_platform(sdk, FilesClient)
         before_create = datetime.now(timezone.utc)
@@ -799,7 +799,7 @@ class TestFilesBasic:
             fileset_ids = {fs.id for fs in filtered}
             assert fileset.id in fileset_ids
 
-    def test_fileset_list_combined_filters_with_datetime(self, sdk: NeMoPlatform):
+    def test_fileset_list_combined_filters_with_datetime(self, sdk: NeMoHelix):
         """Test combining datetime filters with other filters."""
         files = client_from_platform(sdk, FilesClient)
         before_create = datetime.now(timezone.utc)

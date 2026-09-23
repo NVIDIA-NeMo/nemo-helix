@@ -8,11 +8,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nmp.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
-from nmp.core.models.entities import ModelDeployment as ModelDeploymentEntity
-from nmp.core.models.entities import ModelDeploymentConfig as ModelDeploymentConfigEntity
-from nmp.core.models.schemas import (
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
+from nhx.core.models.entities import ModelDeployment as ModelDeploymentEntity
+from nhx.core.models.entities import ModelDeploymentConfig as ModelDeploymentConfigEntity
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelDeploymentRequest,
     ModelDeployment,
@@ -61,16 +61,16 @@ def mock_entity_client() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_nmp_sdk() -> AsyncMock:
-    """Create a mock NeMo Platform SDK for testing secret validation."""
+def mock_nhx_sdk() -> AsyncMock:
+    """Create a mock NeMo Helix SDK for testing secret validation."""
     mock = AsyncMock()
     return mock
 
 
 @pytest.fixture
-def deployment_service(mock_entity_client, mock_nmp_sdk):
+def deployment_service(mock_entity_client, mock_nhx_sdk):
     """Create a ModelDeploymentService with mocked EntityClient and SDK."""
-    return ModelDeploymentService(mock_entity_client, mock_nmp_sdk)
+    return ModelDeploymentService(mock_entity_client, mock_nhx_sdk)
 
 
 @pytest.fixture

@@ -38,8 +38,8 @@ export const WorkspaceDashboardRoute: FC = () => {
             slotHeading="Welcome to NeMo Studio"
             slotDescription={
               CUSTOMIZER_ENABLED
-                ? 'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
-                : 'Evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
+                ? 'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
+                : 'Evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
             }
           />
 

@@ -21,8 +21,8 @@ import json
 import os
 
 import pytest
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import GuardrailCheckRequest, GuardrailConfig
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import GuardrailCheckRequest, GuardrailConfig
 from trace_reader import get_session
 
 WORKSPACE = "default"
@@ -46,8 +46,8 @@ def _make_unsigned_jwt() -> str:
 
 @pytest.fixture
 def client() -> GuardrailClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return GuardrailClient(base_url=nmp_base_url, workspace=WORKSPACE, auth=_make_unsigned_jwt())
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return GuardrailClient(base_url=nhx_base_url, workspace=WORKSPACE, auth=_make_unsigned_jwt())
 
 
 @pytest.fixture

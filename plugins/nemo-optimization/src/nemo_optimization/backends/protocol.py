@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.job_context import JobContext
 
 
 class OptimizationPhase(str, Enum):
@@ -163,7 +163,7 @@ class OptimizationBackend(Protocol):
         request: OptimizationPhaseRequest,
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> None:
         """Validate a phase request before any expensive optimization work starts."""
         ...
@@ -173,7 +173,7 @@ class OptimizationBackend(Protocol):
         request: OptimizationPhaseRequest,
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> OptimizationPhaseResult:
         """Execute one optimizer phase for the given Fabric-native payload."""
         ...

@@ -25,13 +25,13 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 
 from .platform_runtime import (
-    DEFAULT_LOCAL_NMP_BASE_URL,
+    DEFAULT_LOCAL_NHX_BASE_URL,
     DEFAULT_TIMEOUT_SEC,
     INSTRUCTION_CONTAINER_PATH,
     NAT_TRACE_EXPORT_SCRIPT_CONTAINER_PATH,
     REPO_ROOT,
     AgenticRunLayout,
-    PlatformDockerEnvironmentProvider,
+    HelixDockerEnvironmentProvider,
     base_container_env,
     docker_socket_mounts,
     resolve_run_layout,
@@ -52,7 +52,7 @@ class AutConfig:
     aut_seed_providers: bool = True
     aut_health_wait_seconds: int = int(os.environ.get("NAT_AUT_HEALTH_WAIT_SECONDS", "60"))
     agent_model: str | None = None
-    nmp_base_url: str = DEFAULT_LOCAL_NMP_BASE_URL
+    nhx_base_url: str = DEFAULT_LOCAL_NHX_BASE_URL
     nvidia_api_key: str | None = None
     inference_nvidia_api_key: str | None = None
     anthropic_api_key: str | None = None
@@ -94,7 +94,7 @@ def build_aut_agent_cmd(instruction_container: str) -> list[str]:
             if [ "${{AUT_SEED_PROVIDERS:-1}}" = "1" ]; then
               /app/.venv/bin/python /app/tests/agentic-use/seed_providers.py \\
                 --manifest /app/tests/agentic-use/providers.yaml \\
-                --base-url "${{NMP_BASE_URL:-http://localhost:8080}}" \\
+                --base-url "${{NHX_BASE_URL:-http://localhost:8080}}" \\
                 2>&1 | tee /tmp/aut_provider_seed.log
             fi
             collect_aut_diagnostics() {{
@@ -104,7 +104,7 @@ def build_aut_agent_cmd(instruction_container: str) -> list[str]:
               cp /tmp/aut_create.log /logs/agent/aut_create.log 2>/dev/null || true
               cp /tmp/aut_get_before.log /logs/agent/aut_get_before.log 2>/dev/null || true
               cp /tmp/aut_provider_seed.log /logs/agent/aut_provider_seed.log 2>/dev/null || true
-              cp /tmp/nmp-api.log /logs/agent/nmp-api.log 2>/dev/null || true
+              cp /tmp/nhx-api.log /logs/agent/nhx-api.log 2>/dev/null || true
               return 0
             }}
             cleanup() {{
@@ -162,7 +162,7 @@ def prepare_aut_config_for_runtime(
     output_dir: Path,
     *,
     nat_model: str | None = None,
-    nmp_base_url: str = DEFAULT_LOCAL_NMP_BASE_URL,
+    nhx_base_url: str = DEFAULT_LOCAL_NHX_BASE_URL,
     workspace: str = "default",
 ) -> Path:
     """Prepare an AUT agent config for IGW-routed container runtime."""
@@ -174,7 +174,7 @@ def prepare_aut_config_for_runtime(
             if isinstance(llm_cfg, dict) and llm_cfg.get("_type") in ("openai", "nim"):
                 llm_cfg["model_name"] = nat_model
                 break
-    config = inject_gateway_url(config, workspace, base_url=nmp_base_url)
+    config = inject_gateway_url(config, workspace, base_url=nhx_base_url)
     rewritten = output_dir / "aut.runtime.yml"
     rewritten.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False), encoding="utf-8")
     return rewritten
@@ -187,7 +187,7 @@ class NatAutRuntime:
         if not config.aut_agent_name:
             raise ValueError("NatAutRuntime requires aut_agent_name")
         self.config = config
-        self.environment = environment or PlatformDockerEnvironmentProvider()
+        self.environment = environment or HelixDockerEnvironmentProvider()
 
     def runner_info(self) -> RunnerInfo:
         """Identify this runtime and the settings that shape its results (the AgentTaskRunner contract).
@@ -204,7 +204,7 @@ class NatAutRuntime:
                 "aut_seed_providers": self.config.aut_seed_providers,
                 "aut_health_wait_seconds": self.config.aut_health_wait_seconds,
                 "agent_model": self.config.agent_model,
-                "nmp_base_url": self.config.nmp_base_url,
+                "nhx_base_url": self.config.nhx_base_url,
                 "timeout_sec": self.config.timeout_sec,
             },
         )
@@ -228,7 +228,7 @@ class NatAutRuntime:
             runtime_name=RUNTIME_NAME,
             agent_model=agent_model,
             run_verify=self.config.run_verify,
-            nmp_base_url=self.config.nmp_base_url,
+            nhx_base_url=self.config.nhx_base_url,
             verify_timeout_sec=self.config.timeout_sec + 120,
             docker_extra_args=list(self.config.docker_extra_args),
         )
@@ -238,7 +238,7 @@ class NatAutRuntime:
         task_timeout = task_agent_timeout_sec(task_dir) or 0
         timeout_sec = max(self.config.timeout_sec, task_timeout)
 
-        env = base_container_env(self.config.nmp_base_url, timeout_sec=timeout_sec)
+        env = base_container_env(self.config.nhx_base_url, timeout_sec=timeout_sec)
         if self.config.nvidia_api_key:
             env["NVIDIA_API_KEY"] = self.config.nvidia_api_key
         if self.config.anthropic_api_key:
@@ -268,7 +268,7 @@ class NatAutRuntime:
                 aut_config_path,
                 layout.agent_log_dir,
                 nat_model=self.config.agent_model,
-                nmp_base_url=self.config.nmp_base_url,
+                nhx_base_url=self.config.nhx_base_url,
             )
             env["AUT_AGENT_CONFIG"] = AUT_CONFIG_CONTAINER_PATH
             mounts.append((str(aut_config_host), AUT_CONFIG_CONTAINER_PATH))

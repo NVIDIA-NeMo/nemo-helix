@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: safe-synthesizer
-description: "Use NeMo Safe Synthesizer from the NMP plugin through platform job creation, configuration, troubleshooting, artifacts, privacy settings, PII replacement, and evaluation reports. Use when the user asks about safe-synthesizer, NeMo Safe Synthesizer, synthetic tabular data, DP settings, generation failures, filesets, model filesets, or Safe Synthesizer jobs."
+description: "Use NeMo Safe Synthesizer from the NHX plugin through platform job creation, configuration, troubleshooting, artifacts, privacy settings, PII replacement, and evaluation reports. Use when the user asks about safe-synthesizer, NeMo Safe Synthesizer, synthetic tabular data, DP settings, generation failures, filesets, model filesets, or Safe Synthesizer jobs."
 license: Apache-2.0
 allowed-tools: Bash, Read
 metadata:
@@ -12,11 +12,11 @@ metadata:
 
 # Safe Synthesizer
 
-Task router for agents helping a person use the NeMo Safe Synthesizer NMP plugin. Read the task file that matches the user request before giving user-facing instructions.
+Task router for agents helping a person use the NeMo Safe Synthesizer NHX plugin. Read the task file that matches the user request before giving user-facing instructions.
 
 ## Prerequisites
 
-- The NeMo Safe Synthesizer plugin is installed in the active NeMo Platform environment.
+- The NeMo Safe Synthesizer plugin is installed in the active NeMo Helix environment.
 - Platform jobs require workspace access to the input fileset and any `hf_token_secret` or PII classification provider.
 - Container jobs require a GPU-capable Jobs backend and access to the configured Safe Synthesizer task image.
 - Fileset references use `<workspace>/<fileset>#<path>` unless a workflow states otherwise.
@@ -33,7 +33,7 @@ Task router for agents helping a person use the NeMo Safe Synthesizer NMP plugin
 
 - Use platform container jobs for Safe Synthesizer usage.
 - Use `nemo safe-synthesizer generate`, the Jobs API, or the SDK for Safe Synthesizer jobs.
-- Configure released container jobs with `NMP_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-platform`, `NMP_IMAGE_TAG=<tag>`, and `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=safe-synthesizer-tasks`.
+- Configure released container jobs with `NHX_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-helix`, `NHX_IMAGE_TAG=<tag>`, and `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=nhx-safe-synthesizer-tasks`.
 - Override local task images with `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF=<image-ref>`; this bypasses platform registry/tag qualification.
 - Treat `data_source` as a fileset URL for platform jobs, usually `<workspace>/<fileset>#<path>`.
 - If the job uses PII classification, `config.replace_pii.globals.classify.classify_model_provider` must be `<workspace>/<provider_name>`.

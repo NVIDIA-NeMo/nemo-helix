@@ -12,19 +12,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_platform.types.inference import ModelProvider, ServedModelMapping
-from nemo_platform.types.inference.virtual_model import VirtualModel
-from nmp.core.inference_gateway.api.dependencies import (
+from nemo_helix.types.inference import ModelProvider, ServedModelMapping
+from nemo_helix.types.inference.virtual_model import VirtualModel
+from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
     global_model_cache,
     global_virtual_model_cache,
 )
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
-from nmp.core.inference_gateway.config import DebugModelProvider, config
-from nmp.core.inference_gateway.service import InferenceGatewayService
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.inference_gateway.config import DebugModelProvider, config
+from nhx.core.inference_gateway.service import InferenceGatewayService
 
 
 def default_model_infos() -> list[ModelProviderInfo]:
@@ -146,7 +146,7 @@ def middleware_registry() -> MiddlewareRegistry:
 
 @pytest.fixture
 def app_and_client(
-    mocker, model_cache, virtual_model_cache, middleware_registry, mock_proxy_client, mock_nmp_sdk
+    mocker, model_cache, virtual_model_cache, middleware_registry, mock_proxy_client, mock_nhx_sdk
 ) -> Iterator[tuple[FastAPI, TestClient]]:
     """
     This is a joint fixture for both a fastapi app and client. The reason they are combined
@@ -171,7 +171,7 @@ def app_and_client(
     )
 
     service = InferenceGatewayService()
-    mocker.patch.object(service.dependency_provider, "get_sdk_client", return_value=mock_nmp_sdk)
+    mocker.patch.object(service.dependency_provider, "get_sdk_client", return_value=mock_nhx_sdk)
     app = service.app
     app.dependency_overrides[global_http_client] = lambda: mock_proxy_client
     app.dependency_overrides[global_model_cache] = lambda: model_cache
@@ -230,10 +230,10 @@ def mock_proxy_client(mock_proxy_response):
 
 
 @pytest.fixture
-def mock_nmp_sdk():
-    """Create a mock async NeMo Platform SDK client.
+def mock_nhx_sdk():
+    """Create a mock async NeMo Helix SDK client.
 
-    This mocks AsyncNeMoPlatform for use with the inference gateway.
+    This mocks AsyncNeMoHelix for use with the inference gateway.
     """
     m = AsyncMock()
     return m

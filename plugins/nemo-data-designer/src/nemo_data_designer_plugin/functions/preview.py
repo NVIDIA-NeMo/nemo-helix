@@ -32,10 +32,10 @@ from nemo_data_designer_plugin.functions._types import (
     PreviewSpec,
     ProcessorOutputFrame,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.frames import Done, Error
 from pydantic import BaseModel
 
 
@@ -53,8 +53,8 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
         spec: PreviewSpec,
         *,
         ctx: FunctionContext,
-        sdk: NeMoPlatform,
-        async_sdk: AsyncNeMoPlatform,
+        sdk: NeMoHelix,
+        async_sdk: AsyncNeMoHelix,
     ) -> AsyncIterator[BaseModel]:
         # Fail fast on request shape (``num_records``) before doing any config-validation work.
         num_records = _validate_and_get_num_records(spec.num_records)

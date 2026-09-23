@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 Image Definition Parsing
 Favor not using a separate registry because it is confusing, but support it.
 */}}
-{{- define "nmp-api.image" -}}
+{{- define "nhx-api.image" -}}
 {{- if .Values.api.image.registry -}}
 {{ .Values.api.image.registry }}/{{ .Values.api.image.repository }}:{{ default .Chart.AppVersion .Values.api.image.tag }}
 {{- else -}}
@@ -18,16 +18,16 @@ Favor not using a separate registry because it is confusing, but support it.
 {{/*
 Create a named api service name which can be included from parent chart
 */}}
-{{- define "nmp-api.api-servicename" }}
-{{- printf "%s-api" ( include "nemo-platform.fullname" . | trunc 59 ) }}
+{{- define "nhx-api.api-servicename" }}
+{{- printf "%s-api" ( include "nemo-helix.fullname" . | trunc 59 ) }}
 {{- end }}
 
 {{/*
 Create the name of the API service account to use
 */}}
-{{- define "nmp-api.apiServiceAccountName" -}}
+{{- define "nhx-api.apiServiceAccountName" -}}
 {{- if .Values.api.serviceAccount.create }}
-{{- default (printf "%s-api" (include "nemo-platform.fullname" .)) .Values.api.serviceAccount.name }}
+{{- default (printf "%s-api" (include "nemo-helix.fullname" .)) .Values.api.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.api.serviceAccount.name }}
 {{- end }}
@@ -36,7 +36,7 @@ Create the name of the API service account to use
 {{/*
 Detect legacy service selection flags passed through api.extraArgs.
 */}}
-{{- define "nmp-api.hasServiceSelectionExtraArgs" -}}
+{{- define "nhx-api.hasServiceSelectionExtraArgs" -}}
 {{- $hasSelection := false -}}
 {{- range .Values.api.extraArgs }}
 {{- $arg := toString . -}}
@@ -54,8 +54,8 @@ Render the `nemo services run` service selection arg for the API pod.
 api.services takes precedence over api.serviceGroup so explicit services can be
 set without also clearing the default service group value.
 */}}
-{{- define "nmp-api.serviceSelectionArgs" -}}
-{{- if not (include "nmp-api.hasServiceSelectionExtraArgs" .) -}}
+{{- define "nhx-api.serviceSelectionArgs" -}}
+{{- if not (include "nhx-api.hasServiceSelectionExtraArgs" .) -}}
 {{- if and (hasKey .Values.api "services") (not (kindIs "slice" .Values.api.services)) -}}
 {{- fail "api.services must be a list when set" -}}
 {{- end -}}
@@ -77,16 +77,16 @@ set without also clearing the default service group value.
 {{/*
 Create the PVC name
 */}}
-{{- define "nmp-core.persistentVolumeClaim" -}}
-{{- printf "%s-core-storage" (include "nemo-platform.fullname" .) }}
+{{- define "nhx-core.persistentVolumeClaim" -}}
+{{- printf "%s-core-storage" (include "nemo-helix.fullname" .) }}
 {{- end }}
 
 {{/*
 Define whether local files backend is enabled
 */}}
-{{- define "nmp-core.localStorageEnabled" -}}
-{{- if (include "nemo-platform.calculatedConfig" . | fromYaml).files -}}
-{{- eq ( (include "nemo-platform.calculatedConfig" . | fromYaml).files.default_storage_config.type ) "local" -}}
+{{- define "nhx-core.localStorageEnabled" -}}
+{{- if (include "nemo-helix.calculatedConfig" . | fromYaml).files -}}
+{{- eq ( (include "nemo-helix.calculatedConfig" . | fromYaml).files.default_storage_config.type ) "local" -}}
 {{- else -}}
 false
 {{- end -}}
@@ -95,8 +95,8 @@ false
 {{/*
 Create the local storage path for files
 */}}
-{{- define "nmp-core.localStoragePath" -}}
-{{- if (include "nemo-platform.calculatedConfig" . | fromYaml).files -}}
-{{ (include "nemo-platform.calculatedConfig" . | fromYaml).files.default_storage_config.path | default "" }}
+{{- define "nhx-core.localStoragePath" -}}
+{{- if (include "nemo-helix.calculatedConfig" . | fromYaml).files -}}
+{{ (include "nemo-helix.calculatedConfig" . | fromYaml).files.default_storage_config.path | default "" }}
 {{- end -}}
 {{- end }}

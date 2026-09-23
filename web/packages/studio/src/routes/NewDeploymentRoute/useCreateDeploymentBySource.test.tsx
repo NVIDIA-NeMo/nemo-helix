@@ -19,6 +19,8 @@ import {
   type WizardFormValues,
 } from '@studio/routes/NewDeploymentRoute/schema';
 import {
+  createUnboundDeploymentConfig,
+  ensureUnboundDeploymentConfig,
   ensureWorkspaceDeploymentConfig,
   useCreateDeploymentBySource,
 } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
@@ -42,6 +44,16 @@ const mockModelsGetLatestDeploymentConfig = vi.mocked(modelsGetLatestDeploymentC
 const mockModelsCreateDeployment = vi.mocked(modelsCreateDeployment);
 
 const workspace = 'ws';
+
+/** What axios raises on a 409; `isVersionConflictError` tests `instanceof AxiosError`. */
+const conflict = () =>
+  new AxiosError('Conflict', '409', undefined, undefined, {
+    status: 409,
+    data: {},
+    statusText: 'Conflict',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+  });
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -103,6 +115,7 @@ describe('useCreateDeploymentBySource — workspace source', () => {
       },
       executor_config: {
         gpu: 2,
+        disk_size: '50Gi',
       },
       model_entity_id: 'other-ws/existing-model',
     });
@@ -146,6 +159,7 @@ describe('useCreateDeploymentBySource — workspace source', () => {
       },
       executor_config: {
         gpu: 2,
+        disk_size: '50Gi',
       },
       model_entity_id: 'ws/my-deploy',
     });
@@ -180,6 +194,7 @@ describe('useCreateDeploymentBySource — workspace source', () => {
         engine: 'nim',
         executor_config: {
           gpu: 2,
+          disk_size: '50Gi',
           image_name: 'nvcr.io/nim/meta/llama-3.1-8b-instruct',
           image_tag: '1.8.5',
         },
@@ -204,7 +219,9 @@ describe('useCreateDeploymentBySource — workspace source', () => {
     });
 
     const [, request] = mockModelsCreateDeploymentConfig.mock.calls.at(-1)!;
-    expect(request.executor_config).toEqual({ gpu: 2 });
+    // `disk_size` comes from the form's own default ('50Gi'), which is a filled-in field
+    // rather than a blank one -- this case is about the image fields.
+    expect(request.executor_config).toEqual({ gpu: 2, disk_size: '50Gi' });
     expect(request.executor_config).not.toHaveProperty('image_name');
   });
 
@@ -319,16 +336,6 @@ describe('useCreateDeploymentBySource — huggingface name collisions', () => {
 describe('ensureWorkspaceDeploymentConfig', () => {
   const noop = () => {};
 
-  /** What axios raises on a 409; `isVersionConflictError` tests `instanceof AxiosError`. */
-  const conflict = () =>
-    new AxiosError('Conflict', '409', undefined, undefined, {
-      status: 409,
-      data: {},
-      statusText: 'Conflict',
-      headers: {},
-      config: { headers: new AxiosHeaders() },
-    });
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockModelsGetModel.mockRejectedValue({ response: { status: 404 } });
@@ -388,5 +395,173 @@ describe('ensureWorkspaceDeploymentConfig', () => {
       )
     ).rejects.toThrow('image pull denied');
     expect(mockModelsGetLatestDeploymentConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe('createUnboundDeploymentConfig', () => {
+  const noop = () => {};
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockModelsCreateDeploymentConfig.mockResolvedValue({ name: 'out-config' } as Awaited<
+      ReturnType<typeof modelsCreateDeploymentConfig>
+    >);
+  });
+
+  // The whole point of the unbound shape: `is_unbound_deployment_config` returns true
+  // only when *neither* link to a model is set, and a config that names a model the
+  // run has not produced yet is what the compilers used to reject.
+  it('sends neither model_entity_id nor a model name', async () => {
+    await createUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/output' }),
+      'out-config',
+      noop
+    );
+
+    expect(mockModelsCreateDeploymentConfig).toHaveBeenCalledTimes(1);
+    const body = mockModelsCreateDeploymentConfig.mock.calls[0][1];
+    expect(body.model_entity_id).toBeUndefined();
+    expect(body.model_spec.model_name).toBeUndefined();
+    expect(body.model_spec.model_namespace).toBeUndefined();
+  });
+
+  // The reported bug: `AdvancedSettingsAccordion` collects these two and both creators
+  // dropped them, so a user who asked for a bigger volume or extra env vars got neither
+  // -- and only found out when the deployment came up hours after training.
+  it('sends the advanced settings the form collected', async () => {
+    await createUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({
+        workspacePickerType: WORKSPACE_PICKER_MODEL,
+        modelRef: 'ws/output',
+        diskSize: '200Gi',
+        additionalEnvs: [{ key: 'NIM_MAX_MODEL_LEN', value: '8192' }],
+      }),
+      'out-config',
+      noop
+    );
+
+    const { executor_config } = mockModelsCreateDeploymentConfig.mock.calls[0][1];
+    expect(executor_config.disk_size).toBe('200Gi');
+    expect(executor_config.additional_envs).toEqual({ NIM_MAX_MODEL_LEN: '8192' });
+  });
+
+  // Blank is meaningful, as it is for the image overrides: an empty field must be
+  // omitted so the platform applies its own default rather than the client pinning one.
+  it('omits a blank disk size rather than sending one', async () => {
+    await createUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({
+        workspacePickerType: WORKSPACE_PICKER_MODEL,
+        modelRef: 'ws/output',
+        diskSize: '   ',
+      }),
+      'out-config',
+      noop
+    );
+
+    const { executor_config } = mockModelsCreateDeploymentConfig.mock.calls[0][1];
+    expect(executor_config).not.toHaveProperty('disk_size');
+  });
+
+  // A serving option rather than a model link: the task copies model_spec onto the
+  // derived config and only overwrites the name/namespace, so this choice survives.
+  it('still sends lora_enabled, the engine and the executor', async () => {
+    await createUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({
+        workspacePickerType: WORKSPACE_PICKER_MODEL,
+        modelRef: 'ws/output',
+        engine: Engine.vllm,
+        loraEnabled: true,
+      }),
+      'out-config',
+      noop
+    );
+
+    expect(mockModelsCreateDeploymentConfig).toHaveBeenCalledWith(
+      workspace,
+      expect.objectContaining({
+        name: 'out-config',
+        engine: Engine.vllm,
+        model_spec: { lora_enabled: true },
+        executor_config: expect.objectContaining({ gpu: 2 }),
+      })
+    );
+  });
+
+  // No model means no Model Entity to register, unlike the fileset branch of the
+  // bound creator — an unbound config touches nothing but itself.
+  it('registers no model', async () => {
+    await createUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/output' }),
+      'out-config',
+      noop
+    );
+
+    expect(mockModelsCreateModel).not.toHaveBeenCalled();
+  });
+
+  it('adopts the existing config on a 409', async () => {
+    const existing = { name: 'out-config', engine: Engine.nim };
+    mockModelsCreateDeploymentConfig.mockRejectedValue(conflict());
+    mockModelsGetLatestDeploymentConfig.mockResolvedValue(
+      existing as Awaited<ReturnType<typeof modelsGetLatestDeploymentConfig>>
+    );
+
+    const result = await ensureUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/output' }),
+      'out-config',
+      noop
+    );
+
+    expect(result).toEqual({ config: existing, reused: true });
+  });
+
+  // Adopting is only safe while what is adopted is itself unbound. A bound config here
+  // would be handed to a job that produces a different model; the compiler rejects that,
+  // but not until the job is submitted, so the error would arrive detached from its cause.
+  it.each([
+    ['model_entity_id', { name: 'out-config', model_entity_id: 'ws/other-model' }],
+    ['model_spec.model_name', { name: 'out-config', model_spec: { model_name: 'other-model' } }],
+  ])('refuses to adopt a config bound by %s', async (_label, existing) => {
+    mockModelsCreateDeploymentConfig.mockRejectedValue(conflict());
+    mockModelsGetLatestDeploymentConfig.mockResolvedValue(
+      existing as Awaited<ReturnType<typeof modelsGetLatestDeploymentConfig>>
+    );
+
+    await expect(
+      ensureUnboundDeploymentConfig(
+        workspace,
+        baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/output' }),
+        'out-config',
+        noop
+      )
+    ).rejects.toThrow(/already exists and is bound to "other-model"|bound to "ws\/other-model"/);
+  });
+
+  // `model_namespace` alone is not a binding -- `is_unbound_deployment_config` checks
+  // `model_entity_id` and `model_spec.model_name` only, and this must match it.
+  it('adopts a config carrying only a namespace', async () => {
+    const existing = {
+      name: 'out-config',
+      model_spec: { model_namespace: 'ws', lora_enabled: true },
+    };
+    mockModelsCreateDeploymentConfig.mockRejectedValue(conflict());
+    mockModelsGetLatestDeploymentConfig.mockResolvedValue(
+      existing as Awaited<ReturnType<typeof modelsGetLatestDeploymentConfig>>
+    );
+
+    const result = await ensureUnboundDeploymentConfig(
+      workspace,
+      baseWorkspaceValues({ workspacePickerType: WORKSPACE_PICKER_MODEL, modelRef: 'ws/output' }),
+      'out-config',
+      noop
+    );
+
+    expect(result.reused).toBe(true);
   });
 });

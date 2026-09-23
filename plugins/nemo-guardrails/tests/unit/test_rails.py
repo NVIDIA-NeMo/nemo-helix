@@ -35,9 +35,9 @@ from nemo_guardrails_plugin.requests import (
     sanitize_request_body_for_proxy,
 )
 from nemo_guardrails_plugin.responses import extract_response_content
-from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
-from nemo_platform_plugin.guardrail.types import RailsConfig as SDKRailsConfig
-from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError, OpenAICompatibleInferenceTarget
+from nemo_helix_plugin.guardrail.types import GenerationLogOptionsParam
+from nemo_helix_plugin.guardrail.types import RailsConfig as SDKRailsConfig
+from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError, OpenAICompatibleInferenceTarget
 from nemoguardrails.rails.llm.config import Model
 from nemoguardrails.rails.llm.options import (
     ActivatedRail,
@@ -590,7 +590,7 @@ class TestBuildMainLlm:
         assert [r for r in caplog.records if r.levelname == "WARNING"] == []
 
     def test_forwards_allowlisted_request_headers(self) -> None:
-        """Forward ``x-*`` (NeMo Platform principal, ``x-otel-*``, custom) and W3C
+        """Forward ``x-*`` (NeMo Helix principal, ``x-otel-*``, custom) and W3C
         Trace Context (``traceparent``, ``tracestate``, ``baggage``) into
         the main LLM client; drop everything else (``Authorization`` is
         IGW's responsibility, not the plugin's).
@@ -621,7 +621,7 @@ class TestBuildMainLlm:
             build_main_llm(
                 {"model": "ws/llama"},
                 {
-                    "X-NMP-Principal": "user-1",
+                    "X-NHX-Principal": "user-1",
                     "x-otel-traceparent": "00-trace-001",
                     "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
                     "tracestate": "vendor=foo,other=bar",
@@ -635,7 +635,7 @@ class TestBuildMainLlm:
 
         headers = captured["kwargs"]["default_headers"]
         assert headers["X-Static"] == "yes"
-        assert headers["X-NMP-Principal"] == "user-1"
+        assert headers["X-NHX-Principal"] == "user-1"
         assert headers["x-otel-traceparent"] == "00-trace-001"
         assert headers["traceparent"] == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
         assert headers["tracestate"] == "vendor=foo,other=bar"

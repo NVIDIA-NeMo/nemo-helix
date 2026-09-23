@@ -4,7 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   baseDeploymentDefaults,
-  DEFAULT_DEPLOY_BASE_MODEL,
+  DEPLOY_BY_DEFAULT,
 } from '@studio/components/NewCustomizationForm/baseDeploymentForm';
 import { DeploymentSection } from '@studio/components/NewCustomizationForm/DeploymentSection';
 import type { BaseModelDeploymentReadiness } from '@studio/hooks/useBaseModelDeploymentReadiness';
@@ -122,7 +122,7 @@ describe('DeploymentSection', () => {
 
   describe('opting out', () => {
     it('defaults to deploying', () => {
-      expect(DEFAULT_DEPLOY_BASE_MODEL).toBe(true);
+      expect(DEPLOY_BY_DEFAULT).toBe(true);
       render(<Harness r={readiness({ state: 'none' })} />);
       expect(screen.getByRole('switch')).toBeChecked();
     });

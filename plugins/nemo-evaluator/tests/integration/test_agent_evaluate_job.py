@@ -62,16 +62,16 @@ from nemo_evaluator_sdk.enums import AgentFormat, ModelFormat
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-from nemo_platform_plugin.sdk import NeMoPlatform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.testing import add_mock_provider
-from nmp.testing.e2e import wait_for_platform_job
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing import add_mock_provider
+from nhx.testing.e2e import wait_for_platform_job
 
 #: Opt-in: these tests spin real ``nemo services`` platforms (subprocess/docker/auth), so they're
 #: kept out of the standard CI integration job. Run them locally (or on demand) with
@@ -90,9 +90,9 @@ WORKSPACE = "default"
 #: default PDP policy grants full permissions. Authenticates test-side calls against the
 #: auth-enabled platform without standing up OIDC.
 SERVICE_PRINCIPAL_HEADERS = {
-    "X-NMP-Principal-Id": "service:evaluator",
-    "X-NMP-Actor-Aliases": "service:evaluator",
-    "X-NMP-Internal": "true",
+    "X-NHX-Principal-Id": "service:evaluator",
+    "X-NHX-Actor-Aliases": "service:evaluator",
+    "X-NHX-Internal": "true",
 }
 
 
@@ -199,7 +199,7 @@ def _unique(prefix: str) -> str:
 def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp_path: Path) -> None:
     # dim 1 (Model endpoint target): generate a trial against an IGW mock provider that returns
     # "DONE" (no real model/key), then score the trial output with the inline metric.
-    sdk = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    sdk = NeMoHelix(base_url=subprocess_platform, max_retries=2)
     client_from_platform(sdk, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -243,7 +243,7 @@ def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp
 def test_sync_job_agent_target_scores_a_real_trial(subprocess_platform: str, tmp_path: Path) -> None:
     # dim 1 (Agent endpoint target): a generic-HTTP agent posts to an IGW mock provider returning
     # "DONE"; response_path extracts the assistant content, then the inline metric scores it.
-    sdk = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    sdk = NeMoHelix(base_url=subprocess_platform, max_retries=2)
     client_from_platform(sdk, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -377,7 +377,7 @@ def test_mixed_job_types_list_endpoints_do_not_cross_render(subprocess_platform:
     which would otherwise still cross-render into the row list.
     """
     workspace = _unique("mixed-list")
-    client = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=workspace)
     ).data()
@@ -433,7 +433,7 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
     # an agent eval whose `tasks` is a TasksetRef (no inline tasks). Server-side to_spec must load the
     # taskset, expand BOTH member tasks, and resolve each task's stored MetricRef — all against the
     # live entity store — before the job runs. A Model target -> IGW mock provider keeps it hermetic.
-    client = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -508,11 +508,11 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
 @pytest.mark.timeout(420)
 def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess_platform: str) -> None:
     # dim 1 (Model target) x dim 3 (submit) under auth.enabled: the submitted task's get_task_nemo_client
-    # identity (X-NMP-Principal-Id: service:evaluator) must be forwarded to the evaluator's IGW
+    # identity (X-NHX-Principal-Id: service:evaluator) must be forwarded to the evaluator's IGW
     # inference client (AgentEvalJob._build_evaluator) — otherwise the IGW returns 401 and the job
     # fails. A clean completion proves the forwarded service-principal headers authenticate online
     # inference under auth, with no bearer. (Probed directly too: service headers -> 200, none -> 401.)
-    sdk = NeMoPlatform(base_url=auth_subprocess_platform, default_headers=SERVICE_PRINCIPAL_HEADERS, max_retries=2)
+    sdk = NeMoHelix(base_url=auth_subprocess_platform, default_headers=SERVICE_PRINCIPAL_HEADERS, max_retries=2)
     client_from_platform(sdk, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -564,7 +564,7 @@ def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess
 @pytest.mark.timeout(300)
 def test_submit_harbor_target_to_docker_backend_fails_fast(docker_platform: str) -> None:
     workspace = _unique("harbor-docker-guard")
-    client = NeMoPlatform(base_url=docker_platform, max_retries=2)
+    client = NeMoHelix(base_url=docker_platform, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=workspace)
     ).data()
@@ -610,7 +610,7 @@ def test_submit_to_docker_backend_runs_agent_eval(docker_platform: str) -> None:
     # from the cpu-tasks image); it fails today because that image predates this work — hence xfail.
     # An offline trials spec keeps the task self-contained in-container, so this isolates the
     # backend-wiring + entrypoint condition rather than also depending on a live model endpoint.
-    client = NeMoPlatform(base_url=docker_platform, max_retries=2)
+    client = NeMoHelix(base_url=docker_platform, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()

@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-automodel"
+name = "nhx-automodel"
 description = "NeMo Automodel job compiler and platform tasks (no HTTP server)."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nmp-common",
-    "nmp-customization-common",
-    "nemo-platform-plugin",
+    "nhx-common",
+    "nhx-customization-common",
+    "nemo-helix-plugin",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "httpx>=0.27.0",
@@ -27,19 +27,19 @@ training = ["peft>=0.20.0"]
 dev = ["pytest>=8.3.4", "pytest-asyncio>=0.25.3", "pytest-mock>=3.14.0"]
 
 [project.scripts]
-nmp-automodel-training = "nmp.automodel.tasks.training.__main__:run"
+nhx-automodel-training = "nhx.automodel.tasks.training.__main__:run"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-customization-common = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nhx-common = { workspace = true }
+nhx-customization-common = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

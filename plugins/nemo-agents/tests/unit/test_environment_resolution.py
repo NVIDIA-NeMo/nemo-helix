@@ -28,7 +28,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 def _agent_config(**overrides: Any) -> dict[str, Any]:

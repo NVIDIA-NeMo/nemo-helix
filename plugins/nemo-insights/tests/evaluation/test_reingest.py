@@ -349,7 +349,7 @@ def test_load_catalog_from_checkout_layout(tmp_path):
 
 
 def test_load_catalog_missing_checkout(tmp_path):
-    with pytest.raises(FileNotFoundError, match="nemo-platform checkout"):
+    with pytest.raises(FileNotFoundError, match="nemo-helix checkout"):
         reingest.load_catalog(tmp_path / "nowhere")
 
 
@@ -1200,7 +1200,7 @@ def _stale_manifest(workspace: str, spans: int) -> dict:
 
 def test_stale_loopback_restore_stops_ttl_merges(tmp_path, monkeypatch, quiet_platform, fake_docker, capsys):
     export_dir = _write_export(tmp_path, "ws-a", [AGENT_DOC, LLM_DOC])
-    container = "nmp-intake-clickhouse-a1b2c3d4e5f6"
+    container = "nhx-intake-clickhouse-a1b2c3d4e5f6"
     monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: container)
     quiet_platform["span_counts"] = [0, 2]
     quiet_platform["annotation_counts"] = [0]
@@ -1243,7 +1243,7 @@ def test_stale_loopback_restore_with_external_clickhouse_never_touches_docker(
     capsys,
 ):
     export_dir = _write_export(tmp_path, "ws-a", [AGENT_DOC, LLM_DOC])
-    monkeypatch.setenv("NMP_INTAKE_CLICKHOUSE_URL", "https://clickhouse.example.internal:8443")
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "https://clickhouse.example.internal:8443")
     quiet_platform["span_counts"] = [0, 2]
     quiet_platform["annotation_counts"] = [0]
     quiet_platform["result_counts"] = [0]
@@ -1282,20 +1282,20 @@ def test_local_clickhouse_container_resolves_managed_name_by_label(monkeypatch):
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout="nmp-intake-clickhouse-a1b2c3d4e5f6\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="nhx-intake-clickhouse-a1b2c3d4e5f6\n", stderr="")
 
-    monkeypatch.setenv("NMP_INTAKE_CLICKHOUSE_URL", "http://localhost:55123")
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://localhost:55123")
     monkeypatch.setattr(reingest.shutil, "which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(reingest.subprocess, "run", fake_run)
 
-    assert reingest._local_clickhouse_container() == "nmp-intake-clickhouse-a1b2c3d4e5f6"
-    assert "label=nmp.nvidia.com/managed-by=nemo-platform" in commands[0]
-    assert "label=nmp.nvidia.com/component=intake-clickhouse" in commands[0]
+    assert reingest._local_clickhouse_container() == "nhx-intake-clickhouse-a1b2c3d4e5f6"
+    assert "label=nhx.nvidia.com/managed-by=nemo-helix" in commands[0]
+    assert "label=nhx.nvidia.com/component=intake-clickhouse" in commands[0]
     assert "publish=55123" in commands[0]
 
 
 def test_local_clickhouse_container_rejects_multiple_managed_instances(monkeypatch):
-    monkeypatch.setenv("NMP_INTAKE_CLICKHOUSE_URL", "http://127.0.0.1:55123")
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://127.0.0.1:55123")
     monkeypatch.setattr(reingest.shutil, "which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(
         reingest.subprocess,
@@ -1315,7 +1315,7 @@ def test_ttl_stop_failure_is_nonfatal_and_tells_user(tmp_path, quiet_platform, m
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no such container")
 
     monkeypatch.setattr(reingest.subprocess, "run", failing_run)
-    monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: "nmp-intake-clickhouse-a1b2c3d4e5f6")
+    monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: "nhx-intake-clickhouse-a1b2c3d4e5f6")
     export_dir = _write_export(tmp_path, "ws-a", [AGENT_DOC, LLM_DOC])
     quiet_platform["span_counts"] = [0, 2]
     quiet_platform["annotation_counts"] = [0]
@@ -1546,7 +1546,7 @@ def test_cleanup_scratch_loopback_deletes_rows_and_keeps_reusable_record(monkeyp
             raise AssertionError("row cleanup must keep the active workspace record")
 
     monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
-    monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: "nmp-intake-clickhouse-a1b2c3d4e5f6")
+    monkeypatch.setattr(reingest, "_local_clickhouse_container", lambda: "nhx-intake-clickhouse-a1b2c3d4e5f6")
     reingest.cleanup_scratch("http://127.0.0.1:8080", ["scratch-rt-abc12345-ws-a"])
     tables = {cmd[-1].split("FROM intake.")[1].split(" ")[0] for cmd in fake_docker}
     assert tables == {"spans", "annotations", "evaluator_results", "trace_index"}
@@ -1578,12 +1578,12 @@ def test_cleanup_scratch_ignores_unlabeled_legacy_name_collision(monkeypatch, ca
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        # An unrelated running nmp-intake-clickhouse exists, but it does not
+        # An unrelated running nhx-intake-clickhouse exists, but it does not
         # carry the durable Intake ownership labels selected by this query.
-        stdout = "nmp-intake-clickhouse\n" if any(part.startswith("name=") for part in command) else ""
+        stdout = "nhx-intake-clickhouse\n" if any(part.startswith("name=") for part in command) else ""
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setenv("NMP_INTAKE_CLICKHOUSE_URL", "http://localhost:8123")
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://localhost:8123")
     monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
     monkeypatch.setattr(reingest.shutil, "which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(reingest.subprocess, "run", fake_run)
@@ -1600,7 +1600,7 @@ def test_cleanup_scratch_loopback_with_external_clickhouse_preserves_all_state(m
         def __init__(self, *args, **kwargs):
             raise AssertionError("unverified cleanup must not delete workspace records")
 
-    monkeypatch.setenv("NMP_INTAKE_CLICKHOUSE_URL", "https://clickhouse.example.internal:8443")
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "https://clickhouse.example.internal:8443")
     monkeypatch.setattr(reingest.httpx, "Client", _NoHTTP)
 
     def fail_docker_lookup(name: str) -> str:
@@ -1651,7 +1651,7 @@ def _checkout_with_catalog(root: Path) -> Path:
 def test_resolve_platform_root_explicit_beats_everything(tmp_path):
     root = reingest.resolve_platform_root(
         str(tmp_path / "explicit"),
-        env={"NMP_PLATFORM_ROOT": "/env"},
+        env={"NHX_PLATFORM_ROOT": "/env"},
         candidates=[tmp_path / "cand"],
     )
     assert root == tmp_path / "explicit"
@@ -1659,13 +1659,13 @@ def test_resolve_platform_root_explicit_beats_everything(tmp_path):
 
 def test_resolve_platform_root_env_beats_candidates(tmp_path):
     good = _checkout_with_catalog(tmp_path / "cand")
-    root = reingest.resolve_platform_root(None, env={"NMP_PLATFORM_ROOT": "/env"}, candidates=[good])
+    root = reingest.resolve_platform_root(None, env={"NHX_PLATFORM_ROOT": "/env"}, candidates=[good])
     assert root == Path("/env")
 
 
 def test_resolve_platform_root_first_candidate_with_catalog_wins(tmp_path):
-    ci = _checkout_with_catalog(tmp_path / "ci" / "nemo-platform")
-    home = _checkout_with_catalog(tmp_path / "home" / "nemo-platform")
+    ci = _checkout_with_catalog(tmp_path / "ci" / "nemo-helix")
+    home = _checkout_with_catalog(tmp_path / "home" / "nemo-helix")
     assert reingest.resolve_platform_root(None, env={}, candidates=[ci, home]) == ci
 
 
@@ -1680,14 +1680,14 @@ def test_resolve_platform_root_nothing_found_exits_with_fix(tmp_path):
     with pytest.raises(SystemExit) as exc:
         reingest.resolve_platform_root(None, env={}, candidates=[tmp_path / "nowhere"])
     assert "--platform-root" in str(exc.value)
-    assert "NMP_PLATFORM_ROOT" in str(exc.value)
+    assert "NHX_PLATFORM_ROOT" in str(exc.value)
 
 
 def test_default_platform_roots_monorepo_then_legacy_checkout():
     plugin_root = Path(reingest.__file__).resolve().parent.parent
     assert reingest.default_platform_roots() == [
         plugin_root.parents[1],
-        Path.home() / "workstation" / "nemo-platform",
+        Path.home() / "workstation" / "nemo-helix",
     ]
 
 

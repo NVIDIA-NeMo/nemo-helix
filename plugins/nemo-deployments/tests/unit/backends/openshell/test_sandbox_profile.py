@@ -21,7 +21,7 @@ def test_openshell_profile_shape() -> None:
 def test_openshell_profile_is_discoverable() -> None:
     # Registered under nemo.sandbox_profiles so the agent packager can find it
     # by name without importing anything OpenShell-specific.
-    from nemo_platform_plugin import discovery
+    from nemo_helix_plugin import discovery
 
     discovery.discover.cache_clear()
     discovery.discover_entry_points.cache_clear()

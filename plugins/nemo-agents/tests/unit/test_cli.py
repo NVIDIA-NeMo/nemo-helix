@@ -219,8 +219,8 @@ def test_list_404_prints_request_context_and_hint() -> None:
 def test_optimize_targets_agents_route() -> None:
     captured: dict[str, Any] = {}
 
-    from nemo_platform_plugin.commands import add_job_commands
-    from nemo_platform_plugin.scheduler import submit_path_for
+    from nemo_helix_plugin.commands import add_job_commands
+    from nemo_helix_plugin.scheduler import submit_path_for
 
     OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
     assert submit_path_for(OptimizeJob, workspace="default") == "/apis/agents/v2/workspaces/default/jobs/optimize"
@@ -235,7 +235,7 @@ def test_optimize_targets_agents_route() -> None:
     agents_cli = AgentsCLI()
     app = agents_cli.get_cli()
     add_job_commands(app, {"agents.optimize": OptimizeJob}, cli=agents_cli)
-    with patch("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
+    with patch("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
         result = CliRunner().invoke(
             app,
             [
@@ -262,7 +262,7 @@ def test_optimize_targets_agents_route() -> None:
 
 
 def test_optimize_prepare_fileset_stays_under_optimize_command() -> None:
-    from nemo_platform_plugin.commands import add_job_commands
+    from nemo_helix_plugin.commands import add_job_commands
 
     OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
 
@@ -288,8 +288,8 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
     from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
-    from nemo_platform_plugin.commands import add_job_commands
-    from nemo_platform_plugin.job import NemoJob
+    from nemo_helix_plugin.commands import add_job_commands
+    from nemo_helix_plugin.job import NemoJob
     from typer.main import get_command
 
     OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
@@ -514,7 +514,7 @@ def test_spec_package_warning_points_at_nemo_ethos(tmp_path: Path, monkeypatch: 
 
     assert _spec_package_warning("acme-bot", config) == (
         "Warning: This package uses AGENT-SPEC.md.",
-        "Run the nemo-ethos skill to write ETHOS.md, then delete the acme-bot-spec package.",
+        "Provide an existing ETHOS.md, then delete the acme-bot-spec package.",
     )
     assert _spec_package_warning("acme-bot", tmp_path / "agent.yaml") == ()
     escaped = tmp_path / "escaped-spec"

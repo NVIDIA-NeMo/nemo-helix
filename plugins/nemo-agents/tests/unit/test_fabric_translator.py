@@ -14,7 +14,7 @@ from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 from nemo_agents_plugin.telemetry.intake_export import configure_intake_atif_export
-from nemo_fabric.models import RelayHttpStorageConfig
+from nemo_fabric.models import RelayAtifConfig, RelayHttpStorageConfig
 
 
 def _example_yaml_config() -> dict[str, Any]:
@@ -133,8 +133,8 @@ class TestTranslateAgentConfig:
 
     def test_selected_harness_uses_default_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NEMO_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+        monkeypatch.delenv("NHX_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
         config = AgentConfig.model_validate(_example_yaml_config())
 
         fabric_config = translate_agent_config(config, harness_name="codex")
@@ -157,8 +157,8 @@ class TestTranslateAgentConfig:
 
     def test_forwards_platform_runtime_environment_to_child_tools(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_BASE_URL", "http://command-platform:8080")
-        monkeypatch.setenv("NMP_BASE_URL", "http://shared-platform:8080")
-        monkeypatch.setenv("NMP_WORKSPACE", "request-workspace")
+        monkeypatch.setenv("NHX_BASE_URL", "http://shared-platform:8080")
+        monkeypatch.setenv("NHX_WORKSPACE", "request-workspace")
         config = AgentConfig.model_validate(_example_yaml_config())
 
         fabric_config = translate_agent_config(config, harness_name="codex")
@@ -167,8 +167,8 @@ class TestTranslateAgentConfig:
         assert environment is not None
         assert environment.env == {
             "NEMO_BASE_URL": "http://command-platform:8080",
-            "NMP_BASE_URL": "http://shared-platform:8080",
-            "NMP_WORKSPACE": "request-workspace",
+            "NHX_BASE_URL": "http://shared-platform:8080",
+            "NHX_WORKSPACE": "request-workspace",
             PLATFORM_IGW_API_KEY_ENV: PLATFORM_IGW_API_KEY_PLACEHOLDER,
         }
 
@@ -242,11 +242,11 @@ class TestTranslateAgentConfig:
         # Simulates a config after an EnvironmentSpec merge: environment.env holds
         # the spec's plaintext vars. Platform-injected runtime values win on key
         # collision.
-        monkeypatch.setenv("NMP_WORKSPACE", "runtime-ws")
+        monkeypatch.setenv("NHX_WORKSPACE", "runtime-ws")
         monkeypatch.delenv("NEMO_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_BASE_URL", raising=False)
         payload = copy.deepcopy(_example_yaml_config())
-        payload["environment"]["env"] = {"CUSTOM": "from-spec", "NMP_WORKSPACE": "spec-should-lose"}
+        payload["environment"]["env"] = {"CUSTOM": "from-spec", "NHX_WORKSPACE": "spec-should-lose"}
         config = AgentConfig.model_validate(payload)
 
         fabric_config = translate_agent_config(config, harness_name="codex")
@@ -254,7 +254,7 @@ class TestTranslateAgentConfig:
         environment = fabric_config.environment
         assert environment is not None
         assert environment.env["CUSTOM"] == "from-spec"
-        assert environment.env["NMP_WORKSPACE"] == "runtime-ws"
+        assert environment.env["NHX_WORKSPACE"] == "runtime-ws"
 
     def test_environment_mirror_fields_forwarded(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
@@ -606,12 +606,7 @@ def test_auto_wired_intake_telemetry_translates_to_a_relay_http_storage() -> Non
     payload = _example_yaml_config()
     # The shared fixture opts out; this is about a config that does not.
     payload.pop("telemetry")
-    configure_intake_atif_export(
-        payload,
-        workspace="team-a",
-        base_url="http://nemo-platform-api:8080",
-        header_env={"X-NMP-Principal-Id": "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"},
-    )
+    configure_intake_atif_export(payload, workspace="team-a", base_url="http://127.0.0.1:54321")
 
     fabric_config = translate_agent_config(AgentConfig.model_validate(payload))
 
@@ -620,12 +615,16 @@ def test_auto_wired_intake_telemetry_translates_to_a_relay_http_storage() -> Non
     observability = relay.observability
     assert observability is not None
     atif = observability.atif
-    assert atif is not None
+    # Narrowed rather than merely non-None: the field is typed as the model or a
+    # raw dict, and the point of this test is that the translator produced the model.
+    assert isinstance(atif, RelayAtifConfig)
+    assert atif.storage is not None
     storage = atif.storage[0]
     assert isinstance(storage, RelayHttpStorageConfig)
-    assert storage.endpoint == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
-    assert storage.header_env == {"X-NMP-Principal-Id": "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"}
-    assert not storage.headers, "credentials must reach Relay through the environment, not the config"
+    assert storage.endpoint == "http://127.0.0.1:54321/apis/intake/v2/workspaces/team-a/ingest/atif"
+    assert not storage.header_env and not storage.headers, (
+        "the proxy at that origin authenticates the export; no credential belongs in the config"
+    )
     # Relay identifies the trajectory by these; both come from the agent config.
     assert atif.agent_name == payload["name"]
     assert atif.model_name

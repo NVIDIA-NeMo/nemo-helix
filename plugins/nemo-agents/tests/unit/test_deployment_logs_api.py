@@ -185,7 +185,7 @@ def test_logs_workspace_namespacing_separates_same_named_deployments(
 
 def test_logs_404_when_deployment_not_in_workspace(fake_log: Path) -> None:  # noqa: ARG001
     """Cross-workspace requests must 404 instead of returning logs."""
-    from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+    from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
     app = FastAPI()
     app.include_router(module.router, prefix="/apis/agents/v2/workspaces/{workspace}")

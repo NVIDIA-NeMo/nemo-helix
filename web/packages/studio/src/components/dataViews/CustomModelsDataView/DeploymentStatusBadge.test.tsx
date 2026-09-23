@@ -12,25 +12,31 @@ describe('DeploymentStatusBadge', () => {
     expect(screen.getByText('Deployed')).toBeVisible();
   });
 
-  it('reads "Served" for a loaded adapter, not "Deployed"', () => {
+  it('reads "Active" for a loaded adapter, not "Deployed"', () => {
     render(
       <DeploymentStatusBadge
         state={{ kind: 'served', hasDeployment: true, status: 'READY' }}
         isAdapter
       />
     );
-    expect(screen.getByText('Served')).toBeVisible();
+    expect(screen.getByText('Active')).toBeVisible();
     expect(screen.queryByText('Deployed')).not.toBeInTheDocument();
   });
 
-  it('reads "Not served" when the base is up but the adapter is not loaded', () => {
+  it('reads "Not active" when the base is up but the adapter is not loaded', () => {
     render(<DeploymentStatusBadge state={{ kind: 'adapter-not-loaded' }} isAdapter />);
-    expect(screen.getByText('Not served')).toBeVisible();
+    expect(screen.getByText('Not active')).toBeVisible();
   });
 
   it('reads "Not deployed" when nothing serves it', () => {
     render(<DeploymentStatusBadge state={{ kind: 'not-deployed' }} />);
     expect(screen.getByText('Not deployed')).toBeVisible();
+  });
+
+  it('reads "Not active", not "Not deployed", for an adapter nothing serves', () => {
+    render(<DeploymentStatusBadge state={{ kind: 'not-deployed' }} isAdapter />);
+    expect(screen.getByText('Not active')).toBeVisible();
+    expect(screen.queryByText('Not deployed')).not.toBeInTheDocument();
   });
 
   it('reads "Deploying" while a deployment is coming up', () => {
@@ -79,7 +85,7 @@ describe('DeploymentStatusBadge', () => {
 
   it('shows no status text while the row is still resolving', () => {
     render(<DeploymentStatusBadge state={undefined} />);
-    for (const label of ['Deployed', 'Served', 'Not deployed', 'Not served', 'Unknown']) {
+    for (const label of ['Deployed', 'Active', 'Not deployed', 'Not active', 'Unknown']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
   });

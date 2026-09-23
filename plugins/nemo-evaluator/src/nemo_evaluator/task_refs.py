@@ -22,8 +22,8 @@ from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, TasksetRef, pars
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evaluator.jobs.agent_spec import AgentEvalTaskInput
 from nemo_evaluator.revisions import RevisionNotFoundError, get_revision
-from nemo_platform_plugin.entities import EntityClientProtocol
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entities import EntityClientProtocol
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 class UnsupportedTaskKindError(ValueError):
@@ -33,7 +33,7 @@ class UnsupportedTaskKindError(ValueError):
     unit in one place — but a single run has one target, so expansion is where a mismatch surfaces.
 
     Raised during ``to_spec``, which the job submit path wraps: any exception there becomes a 422
-    carrying this message (``_apply_transformer`` in ``nemo_platform_plugin.jobs.api_factory``). It
+    carrying this message (``_apply_transformer`` in ``nemo_helix_plugin.jobs.api_factory``). It
     subclasses ``ValueError`` for local callers that catch it deliberately, not to obtain that
     mapping — the mapping is a catch-all and would apply to any exception type.
     """

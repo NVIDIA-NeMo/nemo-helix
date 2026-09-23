@@ -42,7 +42,7 @@ ordinary ``logging`` configuration.
 
 **Where Gym finds things.** NeMo Gym must be installed and its ``gym`` on PATH,
 along with the target environment's own dependencies. Generally that means a
-*separate* environment: Gym imports Ray at module load, and nemo-platform
+*separate* environment: Gym imports Ray at module load, and nemo-helix
 excludes Ray by constraint over an unfixed CVE, so the two cannot share one. In a
 job image the image owns PATH and this is unremarkable. There is deliberately no
 config field naming a checkout, a venv, or a search root — these runner configs

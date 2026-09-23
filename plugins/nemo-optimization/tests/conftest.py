@@ -10,11 +10,11 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import FilesetOutput
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import FilesetOutput
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 
 
 @pytest.fixture

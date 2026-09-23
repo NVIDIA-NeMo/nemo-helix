@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NMP_BASE_URL } from '@e2e-tests/utils/environment';
+import { NHX_BASE_URL } from '@e2e-tests/utils/environment';
 import { APIRequestContext } from '@playwright/test';
 
 /** Evaluation config shape for e2e API. */
@@ -13,7 +13,7 @@ export class EvaluationsAPI {
   constructor(private request: APIRequestContext) {}
 
   async createEvaluationConfig(data: EvaluationConfigInput) {
-    const response = await this.request.post(`${NMP_BASE_URL}/v1/evaluation/configs`, {
+    const response = await this.request.post(`${NHX_BASE_URL}/v1/evaluation/configs`, {
       data,
     });
 
@@ -30,7 +30,7 @@ export class EvaluationsAPI {
 
   async deleteEvaluationConfig(configNamespace: string, configName: string) {
     await this.request.delete(
-      `${NMP_BASE_URL}/v1/evaluation/configs/${configNamespace}/${configName}`
+      `${NHX_BASE_URL}/v1/evaluation/configs/${configNamespace}/${configName}`
     );
   }
 }

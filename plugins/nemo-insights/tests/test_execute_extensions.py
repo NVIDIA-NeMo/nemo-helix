@@ -9,14 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_insights_plugin.execute_extensions import InsightsAnalysisExtension
-from nemo_insights_plugin.jobs.analyze import REPORT_RESULT_NAME
-from nemo_platform_plugin.agents.execute_extensions import (
+from nemo_helix_plugin.agents.execute_extensions import (
     ExecuteAgentAfterInvokeContext,
     FabricRuntimeResult,
 )
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_insights_plugin.execute_extensions import REPORT_RESULT_NAME, InsightsAnalysisExtension
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ Jinja2 syntax:
 """
 
 import pytest
-from nmp.core.models.schemas import _validate_auth_header_format
+from nhx.core.models.schemas import _validate_auth_header_format
 
 
 class TestAuthHeaderFormatValidation:

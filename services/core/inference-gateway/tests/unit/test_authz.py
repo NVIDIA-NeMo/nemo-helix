@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
-from nmp.common.auth.dependencies import auth_client_context
-from nmp.common.auth.models import Principal
-from nmp.core.inference_gateway.api.authz import (
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
 )

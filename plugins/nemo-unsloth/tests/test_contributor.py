@@ -18,7 +18,8 @@ from __future__ import annotations
 import re
 
 import pytest
-from nemo_platform_plugin.customization_contributor import CustomizationContributor
+from nemo_helix_plugin.customization_contributor import CustomizationContributor
+from nemo_unsloth_plugin.contributor import UnslothContributor
 from typer.testing import CliRunner
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -30,8 +31,6 @@ def _plain(text: str) -> str:
 
 @pytest.fixture
 def contributor() -> CustomizationContributor:
-    from nemo_unsloth_plugin.contributor import UnslothContributor
-
     return UnslothContributor()
 
 
@@ -53,7 +52,7 @@ class TestAuthz:
         ``AuthzScope("customization").child(name, "jobs")``), not a separate
         ``get_authz_contribution`` declaration."""
         from fastapi.routing import APIRoute
-        from nemo_platform_plugin.authz import get_path_rules
+        from nemo_helix_plugin.authz import get_path_rules
 
         try:
             specs = contributor.get_routers()
@@ -104,7 +103,9 @@ class TestCLI:
         plain = _plain(result.output)
         assert "submit" in plain
         assert "explain" in plain
-        assert "run" not in plain
+        # Match on the registered verbs, not the rendered text: the help prose
+        # legitimately contains words like "runs".
+        assert {cmd.name for cmd in cli.registered_commands} == {"submit", "explain"}
 
     def test_submit_help_shows_job_json_positional(self, contributor: CustomizationContributor) -> None:
         try:
@@ -130,3 +131,61 @@ class TestSDK:
         assert sdk is not None
         assert sdk.sync_resource is UnslothCustomization
         assert sdk.async_resource is AsyncUnslothCustomization
+
+
+class TestCLIHelp:
+    """Typed against the concrete class: ``cli_help`` is a backend detail, not protocol."""
+
+    @pytest.fixture
+    def unsloth(self) -> UnslothContributor:
+        return UnslothContributor()
+
+    def test_cli_summary_states_what_it_trains_and_where_it_runs(self, unsloth: UnslothContributor) -> None:
+        summary = unsloth.get_cli_summary()
+        assert summary is not None
+        assert "SFT" in summary.trains and "LoRA" in summary.trains
+        assert "One job uses one GPU." in summary.runs_on
+        assert summary.command == "nemo customization unsloth submit job.json"
+
+    def test_cli_summary_fits_the_rendered_width(self, unsloth: UnslothContributor) -> None:
+        """The router prints the summary through an 80-column Rich console."""
+        summary = unsloth.get_cli_summary()
+        assert summary is not None
+        rendered = summary.render("unsloth")
+        assert [line for line in rendered.splitlines() if len(line) > 80] == []
+
+    def test_backend_help_goes_deeper_than_the_top_level_summary(self, unsloth: UnslothContributor) -> None:
+        summary = unsloth.get_cli_summary()
+        assert summary is not None
+        summary_text = summary.render(unsloth.name)
+        help_text = unsloth.cli_help
+
+        assert len(help_text) > len(summary_text)
+        # Job JSON fields and schema names belong on the backend, not in the overview.
+        for detail in ("UnslothJobInput", "gradient_accumulation_steps", "save_method", "explain"):
+            assert detail in help_text, detail
+            assert detail not in summary_text, detail
+
+    def test_submit_help_explains_the_job_json(self, unsloth: UnslothContributor) -> None:
+        cli = unsloth.get_cli()
+        submit = next(cmd for cmd in cli.registered_commands if cmd.name == "submit")
+        assert submit.help is not None
+        assert "UnslothJobInput" in submit.help
+        assert "nemo customization unsloth explain" in submit.help
+
+
+def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tracking message names this backend, so all three job id prefixes read correctly."""
+    import typer
+    from nhx.customization_common.cli import overrides
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        overrides,
+        "_replace_job_submit",
+        lambda group, backend, *args, **kwargs: captured.update(backend=backend),
+    )
+    from nemo_unsloth_plugin.cli.inputs import apply_unsloth_job_cli_overrides
+
+    apply_unsloth_job_cli_overrides(typer.Typer())
+    assert captured["backend"] == "unsloth"

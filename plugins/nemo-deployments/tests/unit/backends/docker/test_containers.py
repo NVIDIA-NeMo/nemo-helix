@@ -32,7 +32,7 @@ def test_auth_proxy_injected_as_docker_sidecar_when_auth_on() -> None:
     config = config.model_copy(update={"auth_proxy_sidecar": True, "auth_proxy_sidecar_identity": "agents"})
     with (
         patch(f"{_AUTH_PROXY_MOD}.platform_auth_enabled", return_value=True),
-        patch(f"{_AUTH_PROXY_MOD}.get_qualified_image", return_value="my-registry/nmp-api:local"),
+        patch(f"{_AUTH_PROXY_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
         patch(f"{_AUTH_PROXY_MOD}._upstream_base_url", return_value="http://host.docker.internal:8080"),
     ):
         plan = build_docker_plan(config)
@@ -40,8 +40,8 @@ def test_auth_proxy_injected_as_docker_sidecar_when_auth_on() -> None:
     assert plan.primary.name == "main"
     proxy = next(c for c in plan.sidecars if c.name == "auth-proxy")
     env = {e.name: e.value for e in proxy.env}
-    assert env["NMP_AUTH_PROXY_PRINCIPAL"] == "agents"
-    assert env["NMP_BASE_URL"] == "http://host.docker.internal:8080"
+    assert env["NHX_AUTH_PROXY_PRINCIPAL"] == "agents"
+    assert env["NHX_BASE_URL"] == "http://host.docker.internal:8080"
     # Sidecar must not declare ports (shares netns).
     assert proxy.ports == []
 
@@ -55,12 +55,12 @@ def test_auth_proxy_not_injected_when_auth_off() -> None:
 
 def test_auth_proxy_docker_upstream_rewrites_loopback() -> None:
     # docker=True + loopback base_url -> host.docker.internal substitution.
-    # _upstream_base_url imports these lazily from nemo_platform_plugin.config.
+    # _upstream_base_url imports these lazily from nemo_helix_plugin.config.
     from nemo_deployments_plugin.auth_proxy import _upstream_base_url
 
     with (
-        patch("nemo_platform_plugin.config.determine_loopback_override", return_value="host.docker.internal"),
-        patch("nemo_platform_plugin.config.get_platform_config") as get_cfg,
+        patch("nemo_helix_plugin.config.determine_loopback_override", return_value="host.docker.internal"),
+        patch("nemo_helix_plugin.config.get_platform_config") as get_cfg,
     ):
         get_cfg.return_value.base_url = "http://localhost:8080"
         assert _upstream_base_url(docker=True) == "http://host.docker.internal:8080"

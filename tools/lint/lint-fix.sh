@@ -7,7 +7,7 @@ set -euo pipefail
 #   1. OpenAPI spec regeneration (other steps depend on this)
 #   2. Web SDK regeneration (Orval reads openapi/ga/individual/platform.openapi.yaml)
 #   3. Python style (ruff; run before vendoring so generated files aren't re-linted)
-#   4. Vendor all packages (covers nemo_platform_ext too) + CLI reference docs
+#   4. Vendor all packages (covers nemo_helix_ext too) + CLI reference docs
 #   5. Copyright headers (after generated files are in place)
 #   6. License update (may change after vendoring)
 #   7. Config reference docs (independent, but run after structural changes)
@@ -15,8 +15,8 @@ set -euo pipefail
 #   9. Verification (optional) — run the same checks as CI (tools/lint/lint-all.sh)
 #      Enable with LINT_FIX_VERIFY=1.
 #
-# Note: update-cli = vendor-nemo-platform-ext + generate-cli-reference-docs, but
-# vendor-nemo-platform-ext is a subset of make vendor, so we let make vendor cover
+# Note: update-cli = vendor-nemo-helix-ext + generate-cli-reference-docs, but
+# vendor-nemo-helix-ext is a subset of make vendor, so we let make vendor cover
 # all vendoring and then regenerate the CLI reference docs once.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${CI_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"

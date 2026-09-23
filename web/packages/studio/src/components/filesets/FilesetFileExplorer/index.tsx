@@ -45,7 +45,7 @@ export const FilesetFileExplorer: FC<FilesetFileExplorerProps> = ({
   // affordances that would 4xx at the API. HF + NGC backends raise
   // NotImplementedError on upload/delete server-side.
   //
-  // Follow-up: when a backend write-capability endpoint ships (e.g. nmp-2gk),
+  // Follow-up: when a backend write-capability endpoint ships (e.g. nhx-2gk),
   // swap the source of this signal from `storage.type` to the API response.
   const { data: dataset } = useFilesRetrieveFileset(workspace, datasetName, {
     query: { enabled },

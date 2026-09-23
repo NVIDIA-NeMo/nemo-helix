@@ -14,7 +14,7 @@ pytest.importorskip("nemo_scaled_evals_plugin")
 import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
 import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
 import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
-from nemo_platform_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -171,7 +171,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_jobs_are_discovered_from_plugin_entry_points() -> None:
-    from nemo_platform_plugin.discovery import discover, discover_controllers, discover_jobs
+    from nemo_helix_plugin.discovery import discover, discover_controllers, discover_jobs
     from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
 
     discover.cache_clear()
@@ -194,3 +194,27 @@ def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) ->
     assert config["clusters"][0]["cluster"]["server"] == "https://10.0.0.1:6443"
     assert config["contexts"][0]["context"]["namespace"] == "test-namespace"
     assert config["users"][0]["user"]["tokenFile"].endswith("/serviceaccount/token")
+
+
+def test_platform_jobs_default_on_and_legacy_workers_stand_down() -> None:
+    """Both flags ship enabled, and the legacy workers refuse to claim under them.
+
+    The GKE acceptance matrix passed end to end, so Platform Jobs is the
+    default execution path. The legacy in-process workers must not race it:
+    the build queue worker returns without claiming, and the dispatcher skips
+    evaluation claims while still draining cleanup rows.
+    """
+    from scaled_evals.api.settings import Settings
+
+    # The declared defaults, not the live instance, which env vars may override.
+    declared = Settings.model_fields
+    assert declared["platform_build_jobs_enabled"].default is True
+    assert declared["platform_evaluation_jobs_enabled"].default is True
+
+    # Legacy build worker stands down without touching the queue.
+    from scaled_evals.api.build.queue_worker import TaskBuildWorker
+
+    worker = MagicMock(spec=TaskBuildWorker)
+    worker.claim_next.side_effect = AssertionError("legacy build worker must not claim")
+    assert TaskBuildWorker.work_once(worker) is False
+    worker.claim_next.assert_not_called()

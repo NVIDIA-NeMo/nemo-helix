@@ -28,12 +28,12 @@ import httpx
 import pytest
 from nemo_agents_plugin.service import AgentsService
 from nemo_insights_plugin.service import InsightsService
-from nmp.core.entities.service import EntitiesService
-from nmp.core.files.service import FilesService
-from nmp.core.jobs.service import JobsService
-from nmp.core.models.service import ModelsService
-from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
-from nmp.testing import ClientContext, create_test_client, subprocess_job_executor_patch
+from nhx.core.entities.service import EntitiesService
+from nhx.core.files.service import FilesService
+from nhx.core.jobs.service import JobsService
+from nhx.core.models.service import ModelsService
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
+from nhx.testing import ClientContext, create_test_client, subprocess_job_executor_patch
 from pydantic import ValidationError
 
 pytestmark = pytest.mark.integration

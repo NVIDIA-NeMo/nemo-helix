@@ -26,11 +26,11 @@ from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_platform_plugin.entities import ListResponse, PaginationInfo
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.filter_ops import FilterOperation
+from nemo_helix_plugin.entities import ListResponse, PaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.filter_ops import FilterOperation
 
 # ---- in-memory fakes -------------------------------------------------------
 
@@ -258,7 +258,7 @@ def test_metric_filter_translates_custom_fields_to_data_namespace() -> None:
     # metric_type/description are custom (data.*) fields; base columns (name) pass through. Without
     # this translation the entity store can't resolve the field and 500s (matches the result filters).
     from nemo_evaluator.api.schemas import MetricFilter
-    from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+    from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 
     assert MetricFilter._get_entity_field_map() == {
         "metric_type": "data.metric_type",

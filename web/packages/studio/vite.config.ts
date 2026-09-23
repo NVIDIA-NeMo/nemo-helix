@@ -513,7 +513,7 @@ export default defineConfig(({ mode }) => {
   // This avoids Safari's mixed-content block on an HTTPS page calling http://.
   // Gated on VITE_PLATFORM_PROXY_DOMAIN so it stays opt-in per developer.
   const proxyDomain = VITE_PLATFORM_PROXY_DOMAIN?.trim();
-  const shouldProxyPlatform = VITE_PLATFORM_BASE_URL?.trim() === '' && Boolean(proxyDomain);
+  const shouldProxyHelix = VITE_PLATFORM_BASE_URL?.trim() === '' && Boolean(proxyDomain);
 
   const inTestMode = isTest || mode.includes('test');
 
@@ -576,7 +576,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: devServerHost,
       port: 5173,
-      ...(shouldProxyPlatform
+      ...(shouldProxyHelix
         ? {
             proxy: {
               '/apis': {

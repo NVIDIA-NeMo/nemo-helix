@@ -8,7 +8,7 @@ discovers this class and mounts it as ``nemo agents <command>``.
 
 **Local commands (no platform required):**
 
-These run against a local agent config and work without a running NeMo Platform
+These run against a local agent config and work without a running NeMo Helix
 instance.
 
 - ``invoke``   — single invocation
@@ -88,16 +88,16 @@ from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from nemo_agents_plugin.usage.cli import register_usage_commands
-from nemo_platform_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
-from nemo_platform_ext.cli.core.api import is_tty
-from nemo_platform_ext.cli.core.formatters import Column, format_output
-from nemo_platform_ext.cli.core.help_formatter import NmpGroup
-from nemo_platform_ext.ui.prompts import is_interactive
-from nemo_platform_plugin.agents.client import AgentsClient
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
+from nemo_helix_ext.cli.core.api import is_tty
+from nemo_helix_ext.cli.core.formatters import Column, format_output
+from nemo_helix_ext.cli.core.help_formatter import NhxGroup
+from nemo_helix_ext.ui.prompts import is_interactive
+from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.types import (
     AgentDeployment as ClientAgentDeployment,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateAgentRequest,
     CreateComputeSpecRequest,
     CreateDeploymentRequest,
@@ -106,23 +106,25 @@ from nemo_platform_plugin.agents.types import (
     CreateSessionRequest,
     ListSessionsQueryParams,
 )
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
-from nemo_platform_plugin.cli_progress import request_progress
-from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.client.errors import (
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_progress import request_progress
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import (
     NemoClientError,
     NemoHTTPError,
     NemoTransportError,
 )
-from nemo_platform_plugin.client.errors import (
+from nemo_helix_plugin.client.errors import (
     NotFoundError as PluginNotFoundError,
 )
-from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
-from nemo_platform_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.job import NemoJob
+from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
+from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job import NemoJob
 from pydantic import ValidationError
 from typer.main import get_command as _typer_get_command
 
@@ -189,7 +191,7 @@ class _LazyAgentCliEntry:
     ``help`` is a generic placeholder (entry-point metadata carries no
     description) — same trade-off the top-level ``nemo`` CLI already makes
     for lazily-loaded plugin commands (see ``functional_plugin_entry`` in
-    ``nemo_platform_ext.cli.manifest``).
+    ``nemo_helix_ext.cli.manifest``).
     """
 
     import_path: str
@@ -198,26 +200,26 @@ class _LazyAgentCliEntry:
     hidden: bool = False
 
 
-class _LazyAgentCliGroup(NmpGroup):
+class _LazyAgentCliGroup(NhxGroup):
     """Group that defers importing plugin agent-CLI extensions until needed.
 
-    ``discover_agent_cli()`` (``nemo_platform_plugin.discovery``) fully imports
+    ``discover_agent_cli()`` (``nemo_helix_plugin.discovery``) fully imports
     every ``nemo.cli.agents`` entry point up front, which makes plain ``nemo
     agents -h`` pay the import cost of every contributing plugin (e.g. the
     nemo-insights analyst stack) even though none of them is being invoked.
     This group instead lists subcommand names from cheap entry-point metadata
     and only imports/builds a given plugin's Typer app when that specific
     subcommand name is resolved by Click — including when rendering its own
-    one-line help, which ``NmpGroup.format_commands`` reads from
+    one-line help, which ``NhxGroup.format_commands`` reads from
     ``_lazy_entries`` instead of calling ``get_command`` for every row.
-    Mirrors ``ManifestBackedNmpGroup`` (top-level lazy loading in
-    ``nemo_platform_ext.cli.core.lazy_load``) one level down.
+    Mirrors ``ManifestBackedNhxGroup`` (top-level lazy loading in
+    ``nemo_helix_ext.cli.core.lazy_load``) one level down.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         callback = getattr(self, "callback", None)
-        self._lazy_entries: dict[str, _LazyAgentCliEntry] = getattr(callback, "__nmp_lazy_agent_cli__", {})
+        self._lazy_entries: dict[str, _LazyAgentCliEntry] = getattr(callback, "__nhx_lazy_agent_cli__", {})
 
     def list_commands(self, ctx: click.Context) -> list[str]:
         names = list(self.commands)
@@ -277,7 +279,7 @@ class AgentsCLI(NemoCLI):
         # ``_LazyAgentCliGroup.get_command`` only for the subcommand resolved.
         setattr(
             agents_callback,
-            "__nmp_lazy_agent_cli__",
+            "__nhx_lazy_agent_cli__",
             {
                 name: _LazyAgentCliEntry(
                     import_path=entry_point.value,
@@ -370,6 +372,7 @@ def _register_local_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Local commands")
     def invoke(
+        typer_ctx: typer.Context,
         agent_config: Optional[Path] = typer.Option(
             None,
             "--agent-config",
@@ -403,7 +406,7 @@ def _register_local_commands(app: typer.Typer) -> None:
             "-d",
             help="Name of a specific deployment to invoke (platform required).",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         timeout: float = typer.Option(
             300,
@@ -419,6 +422,7 @@ def _register_local_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Invoke an agent — locally (with --agent-config) or via the platform (with --agent or --agent-deployment)."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if agent_config:
             _local_invoke(agent_config, input, input_file, workspace=workspace, base_url=base_url)
@@ -523,7 +527,11 @@ def _register_package_command(app: typer.Typer) -> None:
             ...,
             "--agent",
             "-c",
-            help="Path to a NAT workflow YAML config file.",
+            help=(
+                "Path to an agent YAML config file: a Fabric agent spec "
+                "('config_format: nemo-agents-spec-v1') or a NAT workflow "
+                "('config_format: nat-workflow-v1', the default when omitted)."
+            ),
             exists=True,
             file_okay=True,
             dir_okay=False,
@@ -601,7 +609,8 @@ def _register_package_command(app: typer.Typer) -> None:
             None,
             "--nat-version",
             help=(
-                "NAT release to install (e.g. '1.7.0').  Strongly recommended: "
+                "NAT release to install (e.g. '1.7.0').  NAT workflow configs only; "
+                "rejected for Fabric agent specs.  Strongly recommended: "
                 "pin explicitly so image tags/labels/deps are reproducible.  "
                 "When omitted, a baked-in default is used and a warning is printed."
             ),
@@ -631,7 +640,7 @@ def _register_package_command(app: typer.Typer) -> None:
             None, "--template", help="Path to an external Jinja2 Dockerfile template."
         ),
     ) -> None:
-        """Package a NAT agent -- render -> validate -> build -> publish.
+        """Package a Fabric or NAT agent -- render -> validate -> build -> publish.
 
         \b
         Progressive pipeline controlled by flags:
@@ -977,6 +986,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Deployed agent interaction (requires running cluster)")
     def chat(
+        typer_ctx: typer.Context,
         input: Optional[str] = typer.Option(
             None,
             "--input",
@@ -1000,7 +1010,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "--session-name",
             help="Name for a new session; valid only with --agent-deployment.",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         timeout: float = typer.Option(
             300,
@@ -1012,6 +1022,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Chat interactively with a new or existing deployed-agent session."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         _validate_session_chat_options(
             agent_deployment=agent_deployment,
             session=session,
@@ -1052,7 +1063,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "-d",
             help="Limit results to sessions bound to this deployment.",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
             None,
@@ -1071,6 +1082,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """List persisted sessions, newest first."""
+        workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         query_params: ListSessionsQueryParams | None = None
@@ -1099,11 +1111,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @sessions_app.command(name="get")
     def sessions_get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Session name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Get a persisted session by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1114,12 +1128,14 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @sessions_app.command(name="close")
     def sessions_close(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Session name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Close a session and release its deployed runtime."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Close session '{name}'? It cannot be resumed after it is closed.", abort=True)
@@ -1132,6 +1148,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def create(
+        typer_ctx: typer.Context,
         name: str = typer.Option(..., "--name", "-n", help="Agent name."),
         agent_config: Path = typer.Option(
             ...,
@@ -1143,10 +1160,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
             dir_okay=False,
         ),
         description: str = typer.Option("", "--description"),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Register an agent on the platform."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         config_dict, config_format = _validate_agent_config_for_create(agent_config, name=name)
         resp = _create_agent_from_validated_config(
@@ -1163,7 +1181,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
     @app.command(name="list", rich_help_panel="Agent Resources (requires running cluster)")
     def list_agents(
         ctx: typer.Context,
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
             None,
@@ -1182,6 +1200,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """List agents on the platform."""
+        workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1198,11 +1217,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Get an agent by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1213,12 +1234,14 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def delete(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete an agent from the platform."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete agent '{name}'?", abort=True)
@@ -1227,6 +1250,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def deploy(
+        typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the agent to deploy."),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Deployment name (auto-generated if omitted)."),
         mode: str = typer.Option(
@@ -1276,7 +1300,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "-t",
             help="Maximum seconds to wait for a terminal status (only with --wait).",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Deploy an agent on the platform.
@@ -1295,6 +1319,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         inference gateway, wheel staging) are still evolving — docker mode is the
         supported local path today.
         """
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         valid_modes: tuple[str, ...] = ("subprocess", *sorted(CONTAINER_DEPLOYMENT_MODES))
         if mode not in valid_modes:
             typer.echo(f"Invalid --mode {mode!r}; expected {', '.join(valid_modes)}.", err=True)
@@ -1347,6 +1372,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def redeploy(
+        typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the deployed agent to rebuild."),
         agent_config: Path = typer.Option(
             ...,
@@ -1410,7 +1436,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             help="Maximum seconds to wait for a terminal status (only with --wait).",
         ),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Redeploy an agent from a new config, in one command.
@@ -1424,6 +1450,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         runtime flags are auto-detected from the existing deployment. See the
         Deploy Agents docs for the full contract.
         """
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
 
         # 1. Fail-fast: validate the new config client-side, before any teardown.
@@ -1579,6 +1606,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def logs(
+        typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(
             None,
             help=(
@@ -1609,7 +1637,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "--path",
             help="Print only the absolute log file path and exit (useful for scripting).",
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Show logs for an agent deployment.
@@ -1618,7 +1646,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         NAT subprocess deployments write process output there; Fabric-backed
         deployments write validation/preparation entries there. The log file
         location is the same convention the backend uses internally:
-        ``nmp_user_data_dir() / 'agents' / 'system' / <deployment-name>.log``
+        ``nhx_user_data_dir() / 'agents' / 'system' / <deployment-name>.log``
         by default. This command is therefore only meaningful when the CLI runs
         on the same host as the platform — once a remote backend lands, log
         retrieval should move to a server-side endpoint.
@@ -1626,6 +1654,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         With ``--follow`` (``-f``), this command behaves like ``tail -f`` and
         streams new output until interrupted with Ctrl-C.
         """
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         if tail is not None and tail <= 0:
             typer.echo("Error: --tail must be a positive integer.", err=True)
             raise typer.Exit(code=1)
@@ -1676,15 +1705,17 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def undeploy(
+        typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(None, help="Deployment name to remove."),
         agent: Optional[str] = typer.Option(
             None, "--agent", "--all", "-a", help="Remove all deployments for this agent."
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Stop and remove a deployment (or all deployments for an agent)."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         if name:
@@ -1723,7 +1754,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
     @deps_app.command(name="list")
     def deployments_list(
         ctx: typer.Context,
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
             None,
@@ -1742,6 +1773,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """List deployments."""
+        workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1758,11 +1790,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @deps_app.command(name="get")
     def deployments_get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Deployment name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Get a deployment by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1773,12 +1807,14 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @deps_app.command(name="delete")
     def deployments_delete(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Deployment name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete a deployment by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete deployment '{name}'?", abort=True)
@@ -1791,6 +1827,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     @deps_app.command(name="wait")
     def deployments_wait(
+        typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(None, help="Deployment name to wait for."),
         agent: Optional[str] = typer.Option(
             None,
@@ -1800,7 +1837,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
         timeout: int = typer.Option(300, "--timeout", "-t", help="Maximum seconds to wait."),
         interval: float = typer.Option(2.0, "--interval", help="Poll interval in seconds."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Wait for a deployment to reach 'running' or 'failed' status.
@@ -1811,6 +1848,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         Provide either a deployment name directly or --agent to resolve the
         latest active deployment for that agent automatically.
         """
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not name and not agent:
             typer.echo("Error: provide a deployment name or --agent.", err=True)
@@ -1902,15 +1940,17 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @espec_app.command(name="create")
     def environment_spec_create(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Unique environment-spec name."),
         spec_file: Optional[Path] = typer.Option(
             None, "--spec-file", "-f", help="Path to a JSON/YAML EnvironmentSpec body (without 'name')."
         ),
         spec: Optional[str] = typer.Option(None, "--spec", help="Inline EnvironmentSpec body as a JSON object string."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Create an environment spec from a file or inline JSON."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
         client = _agents_client(base_url, workspace)
@@ -1928,7 +1968,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
     @espec_app.command(name="list")
     def environment_spec_list(
         ctx: typer.Context,
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
             None,
@@ -1947,6 +1987,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """List environment specs."""
+        workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1963,11 +2004,13 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @espec_app.command(name="get")
     def environment_spec_get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment-spec name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Get an environment spec by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1978,12 +2021,14 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @espec_app.command(name="delete")
     def environment_spec_delete(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment-spec name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete an environment spec by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete environment-spec '{name}'?", abort=True)
@@ -2000,6 +2045,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @env_app.command(name="create")
     def environment_create(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Unique environment name."),
         environment_spec: Optional[str] = typer.Option(
             None, "--environment-spec", help="'workspace/name' ref to a stored AgentEnvironmentSpec."
@@ -2013,7 +2059,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
         spec: Optional[str] = typer.Option(
             None, "--spec", help="Inline AgentEnvironment body as a JSON object string."
         ),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Create an AgentEnvironment.
@@ -2022,6 +2068,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
         --spec-file / --spec for a fully inline body. The ref flags override the
         matching keys from a file/inline body.
         """
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
         if environment_spec is not None:
@@ -2043,7 +2090,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
     @env_app.command(name="list")
     def environment_list(
         ctx: typer.Context,
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
             None,
@@ -2062,6 +2109,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """List environments."""
+        workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -2078,11 +2126,13 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @env_app.command(name="get")
     def environment_get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Get an environment by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -2093,12 +2143,14 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @env_app.command(name="delete")
     def environment_delete(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete an environment by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete environment '{name}'?", abort=True)
@@ -2115,15 +2167,17 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @cspec_app.command(name="create")
     def compute_spec_create(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Unique compute-spec name."),
         spec_file: Optional[Path] = typer.Option(
             None, "--spec-file", "-f", help="Path to a JSON/YAML ComputeSpec body (without 'name')."
         ),
         spec: Optional[str] = typer.Option(None, "--spec", help="Inline ComputeSpec body as a JSON object string."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Create a compute spec from a file or inline JSON."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
         client = _agents_client(base_url, workspace)
@@ -2141,7 +2195,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
     @cspec_app.command(name="list")
     def compute_spec_list(
         ctx: typer.Context,
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
             None,
@@ -2160,6 +2214,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
         ),
     ) -> None:
         """List compute specs."""
+        workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -2176,11 +2231,13 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @cspec_app.command(name="get")
     def compute_spec_get(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Compute-spec name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
     ) -> None:
         """Get a compute spec by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -2191,12 +2248,14 @@ def _register_environment_commands(app: typer.Typer) -> None:
 
     @cspec_app.command(name="delete")
     def compute_spec_delete(
+        typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Compute-spec name."),
-        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete a compute spec by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete compute-spec '{name}'?", abort=True)
@@ -2943,7 +3002,7 @@ def _client_error_request(exc: NemoHTTPError) -> httpx.Request:
     try:
         return exc.http_response.request
     except RuntimeError:
-        url = str(exc.http_response.url) if exc.http_response.url else "http://nemo-platform"
+        url = str(exc.http_response.url) if exc.http_response.url else "http://nemo-helix"
         return httpx.Request("GET", url)
 
 
@@ -3009,7 +3068,7 @@ def _collect_text_agent_artifacts(
 
 def _clear_existing_ethos_artifacts(
     *,
-    sdk: SyncPlatformClient,
+    sdk: SyncHelixClient,
     fileset: str,
     workspace: str,
 ) -> None:
@@ -3157,7 +3216,7 @@ def _create_agent_from_validated_config(
 
 
 def _spec_package_warning(agent: str, agent_config: Path) -> tuple[str, ...]:
-    """Return skill guidance when *agent_config* lives in a spec package."""
+    """Return migration guidance when *agent_config* lives in a spec package."""
     if not agent or agent in {".", ".."} or "\0" in agent:
         return ()
     if "/" in agent or "\\" in agent or Path(agent).is_absolute() or Path(agent).name != agent:
@@ -3169,7 +3228,7 @@ def _spec_package_warning(agent: str, agent_config: Path) -> tuple[str, ...]:
         return ()
     return (
         f"Warning: This package uses {AGENT_SPEC_FILENAME}.",
-        f"Run the nemo-ethos skill to write {ETHOS_FILENAME}, then delete the {agent}-spec package.",
+        f"Provide an existing {ETHOS_FILENAME}, then delete the {agent}-spec package.",
     )
 
 
@@ -3228,8 +3287,8 @@ def _delete_agent_entity(*, agent_name: str, workspace: str, base_url: str) -> N
     """Delete the agent entity, leaving the ``{agent}-ethos`` fileset in place.
 
     The fileset outlives the agent on purpose: it is the canonical home of
-    ``ETHOS.md`` (see ``ethos_file_ref``), which ``nemo-ethos`` writes
-    before the agent exists and ``nemo-build-agent`` reads on every rebuild.
+    ``ETHOS.md`` (see ``ethos_file_ref``), which may be supplied
+    before the agent exists and Analyst reads during analysis.
     Deleting the fileset here would destroy that durable contract, so the
     executable artifacts it also carries are left behind instead.
     """

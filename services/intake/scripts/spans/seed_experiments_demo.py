@@ -701,7 +701,7 @@ def _preflight(base_url: str) -> None:
         response = httpx.get(_replace_path(base_url, "/openapi.json"), timeout=2.0)
         response.raise_for_status()
     except Exception as exc:
-        raise SystemExit(f"Cannot reach NeMo Platform at {base_url}: {exc}") from exc
+        raise SystemExit(f"Cannot reach NeMo Helix at {base_url}: {exc}") from exc
 
 
 def _intake_url(base_url: str, workspace: str, suffix: str) -> str:

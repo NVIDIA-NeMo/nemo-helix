@@ -1,6 +1,6 @@
 # Default Approval rule
-* @NVIDIA-NeMo/nmp_team @NVIDIA-NeMo/nmp_maintainers
+* @NVIDIA-NeMo/nhx_team @NVIDIA-NeMo/nhx_maintainers
 
 # Restrictive initial .github approval
-/.github/ @NVIDIA-NeMo/nmp_devops
-/release/ @NVIDIA-NeMo/nmp_devops
+/.github/ @NVIDIA-NeMo/nhx_devops
+/release/ @NVIDIA-NeMo/nhx_devops

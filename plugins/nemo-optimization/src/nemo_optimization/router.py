@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.job_context import JobContext
 
 from nemo_optimization.artifact_utils import sanitize_config_for_artifact
 from nemo_optimization.atif_metadata import resolve_experiment_id
@@ -52,7 +52,7 @@ class OptimizeRouter:
         agent_config: dict[str, Any] | None,
         optimize_config: dict[str, Any],
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> dict[str, Any]:
         payload = build_optimize_payload(agent_config=agent_config, optimize_config=optimize_config)
         return _run_phases(payload, ctx=ctx, sdk=sdk)
@@ -62,13 +62,13 @@ class OptimizeRouter:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> dict[str, Any]:
         require_fabric_agent_config(payload, label="optimize payload")
         return _run_phases(payload, ctx=ctx, sdk=sdk)
 
 
-def _run_phases(payload: dict[str, Any], *, ctx: JobContext, sdk: SyncPlatformClient | None) -> dict[str, Any]:
+def _run_phases(payload: dict[str, Any], *, ctx: JobContext, sdk: SyncHelixClient | None) -> dict[str, Any]:
     plan = _phase_plan(payload)
     experiment_id = resolve_experiment_id(payload, generate_id=generate_optimize_id)
     output_dir = ctx.storage.persistent / "results" / RESULT_NAME

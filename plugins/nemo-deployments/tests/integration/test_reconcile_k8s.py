@@ -37,14 +37,14 @@ from nemo_deployments_plugin.entities import (
 )
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 pytestmark = [
     pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend (AIRCORE-757)"),
     skip_without_kubeconfig,
 ]
 
-NAMESPACE = os.environ.get("NMP_K8S_ITEST_NAMESPACE", "default")
+NAMESPACE = os.environ.get("NHX_K8S_ITEST_NAMESPACE", "default")
 POLL_ATTEMPTS = 60
 POLL_INTERVAL_SECONDS = 1
 ALPINE_IMAGE = "docker.io/library/alpine:3.20"

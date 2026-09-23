@@ -10,7 +10,7 @@ import hashlib
 import pytest
 from nemo_evaluator.api.schemas import TaskRef, TasksetInput
 from nemo_evaluator.api.service.taskset_service import TasksetService
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from pydantic import ValidationError
 
 DIGEST_A = hashlib.sha256(b"files-v1").hexdigest()

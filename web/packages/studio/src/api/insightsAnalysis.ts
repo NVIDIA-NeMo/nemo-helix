@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { insightsCreateAnalyzeJob } from '@nemo/sdk/generated/insights/insights-analysis-jobs';
+import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
 import { AxiosError } from 'axios';
 
@@ -11,7 +11,7 @@ export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
 export interface InsightsTriggerResult {
   agent: string;
   status: InsightsTriggerStatus;
-  /** Name of the created analyze-job, when one was created. */
+  /** Name shared by the AnalysisRun and its backing execute job. */
   jobName?: string;
   message?: string;
 }
@@ -34,8 +34,7 @@ export interface InsightsModelOverrides {
 }
 
 /**
- * Model Entity IDs are always `workspace/name`. An unqualified ref survives job
- * creation and only fails inside the running job, so it is rejected here instead.
+ * Studio stores Model Entity references in `workspace/name` format.
  */
 export const isQualifiedModelRef = (ref: string): boolean => {
   const [workspace, ...rest] = ref.split('/');
@@ -49,6 +48,9 @@ const messageOf = (error: unknown): string => {
   if (error instanceof AxiosError) {
     const detail = error.response?.data?.detail;
     if (typeof detail === 'string') return detail;
+    if (detail && typeof detail === 'object' && typeof detail.error === 'string') {
+      return detail.error;
+    }
   }
   return error instanceof Error ? error.message : 'Unknown error.';
 };
@@ -56,7 +58,7 @@ const messageOf = (error: unknown): string => {
 /**
  * Queues one insights analyst run per agent.
  *
- * The analyze-job spec needs the default/fast model pair, which only exists on the
+ * The analysis run needs the default/fast model pair, which only exists on the
  * agent's AnalysisConfig — so an agent that has never been enabled reports
  * `not-enabled` rather than failing the import it followed.
  */
@@ -111,15 +113,19 @@ export const triggerInsightsRun = async (
   }
 
   try {
-    const job = await insightsCreateAnalyzeJob(workspace, {
-      description: `Insights analysis triggered by a trace import for ${agent}.`,
-      spec: {
-        agent,
-        default_model: defaultModel,
-        fast_model: fastModel,
-      },
+    const response = await insightsCreateAnalysisRun(workspace, {
+      agent,
+      default_model: defaultModel,
+      fast_model: fastModel,
     });
-    return { agent, status: 'started', jobName: job.name };
+    if (!response.job) {
+      return {
+        agent,
+        status: 'error',
+        message: `Analysis run "${response.run.name}" has no backing job.`,
+      };
+    }
+    return { agent, status: 'started', jobName: response.run.name };
   } catch (error) {
     return { agent, status: 'error', message: messageOf(error) };
   }

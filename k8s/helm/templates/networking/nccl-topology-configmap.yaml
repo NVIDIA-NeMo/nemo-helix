@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "nemo-platform.fullname" . }}-nccl-topo
+  name: {{ include "nemo-helix.fullname" . }}-nccl-topo
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 data:
   nccl-topo.xml: |
     <system version="1">

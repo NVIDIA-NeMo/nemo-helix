@@ -2,31 +2,31 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-auth"
-description = "Authentication and Authorization service for NeMo Platform"
+name = "nhx-auth"
+description = "Authentication and Authorization service for NeMo Helix"
 requires-python = ">=3.11,<3.15"
 
 dependencies = [
-    # API server dependencies (for nmp-api/nmp-core containers)
+    # API server dependencies (for nhx-api/nhx-core containers)
     "fastapi[standard]>=0.115.4",
     "uvicorn[standard]>=0.12.0",
     "pydantic>=2.10.3",
     "pydantic-settings>=2.6.1",
     "httpx>=0.27.0",
     "pyyaml>=6.0.0",
-    "nmp-common",
-    "nmp-entities",
+    "nhx-common",
+    "nhx-entities",
     "wasmtime>=20.0.0",
 ]
 version = "0.0.0"
 
 [project.scripts]
-auth-server = "nmp.core.auth.main:run_standalone"
+auth-server = "nhx.core.auth.main:run_standalone"
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-entities = { workspace = true }
-nmp-testing = { workspace = true }
+nhx-common = { workspace = true }
+nhx-entities = { workspace = true }
+nhx-testing = { workspace = true }
 
 
 [dependency-groups]
@@ -36,7 +36,7 @@ dev = [
   "pytest>=8.3.3",
   "pytest-asyncio>=0.23.0",
   "respx>=0.21.0",
-  "nmp-testing",
+  "nhx-testing",
   "ruamel.yaml>=0.18.0",
   "typer>=0.9.0",
   "rich>=13.0.0",
@@ -47,7 +47,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 
 
 [tool.pytest.ini_options]

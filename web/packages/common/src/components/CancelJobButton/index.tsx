@@ -10,7 +10,7 @@ import {
   getJobsListJobsQueryKey,
   useJobsCancelJob,
 } from '@nemo/sdk/generated/platform/jobs';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
@@ -19,7 +19,7 @@ import { FC, MouseEvent, useState } from 'react';
 interface CancelJobButtonProps {
   workspace: string;
   jobName: string;
-  jobStatus?: PlatformJobStatus;
+  jobStatus?: HelixJobStatus;
   compact?: boolean;
 }
 
@@ -57,7 +57,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
   };
 
   const isCancellable = jobStatus && CJobCancellableStatuses.includes(jobStatus);
-  const isCancelling = jobStatus === PlatformJobStatus.cancelling;
+  const isCancelling = jobStatus === HelixJobStatus.cancelling;
 
   if (!isCancellable && !isCancelling) {
     return null;

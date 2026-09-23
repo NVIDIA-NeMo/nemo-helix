@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 import pytest
-from nemo_platform_plugin.files.types import FilesetOutput
+from nemo_helix_plugin.files.types import FilesetOutput
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 
 
@@ -431,6 +431,23 @@ def test_query_logs_rejects_tail_with_page_cursor(
         response.json()["detail"]
         == "tail cannot be combined with page_cursor; pass the returned prev_page as page_cursor without tail."
     )
+
+
+def test_query_logs_rejects_invalid_page_cursor(
+    client: httpx.Client,
+    fileset: FilesetOutput,
+):
+    """Malformed pagination cursors are client validation errors."""
+    workspace = fileset.workspace
+    fileset_name = fileset.name
+
+    response = client.post(
+        f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset_name}/otlp/v1/logs/query",
+        json={"filters": {"job": "tail-test-job"}, "page_cursor": "garbage"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid page cursor"
 
 
 def test_upload_logs_missing_attributes_partial_success(

@@ -33,27 +33,27 @@ from typing import Any
 import pytest
 from nemo_deployments_plugin.backends.labels import container_name as plugin_container_name
 from nemo_deployments_plugin.backends.labels import docker_volume_name
-from nemo_platform import NeMoPlatform, NotFoundError
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix import NeMoHelix, NotFoundError
+from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceRequest,
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nmp.core.inference_gateway.api.dependencies import (
+from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
     global_virtual_model_cache,
 )
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     ResolvedMiddlewareCall,
 )
-from nmp.core.inference_gateway.api.model_cache import ModelProviderInfo
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
-from nmp.core.models.controllers.backends.deployments_plugin.naming import entity_names
-from nmp.core.models.controllers.models_controller import ModelsController
+from nhx.core.inference_gateway.api.model_cache import ModelProviderInfo
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.models.controllers.backends.deployments_plugin.naming import entity_names
+from nhx.core.models.controllers.models_controller import ModelsController
 from tenacity import retry, stop_after_delay, wait_fixed
 
 DEFAULT_WORKSPACE = "default"
@@ -61,7 +61,7 @@ DEFAULT_WORKSPACE = "default"
 
 def _wait_for_deployment_deleted(
     controller: ModelsController,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     deployment_name: str,
     max_wait: float = 30,
     poll_interval: float = 0.1,

@@ -2128,6 +2128,15 @@ class EvaluationRepository:
                 WHERE id = %s
                   AND (%s::text IS NULL OR dispatch_claimed_by = %s::text)
                   AND (%s::integer IS NULL OR current_execution = %s::integer)
+                  -- Status never moves backward. A terminal row only accepts
+                  -- another terminal status, so a stale observation cannot
+                  -- return a finished evaluation to `running`. Retry is
+                  -- unaffected: it clears the row through its own statement
+                  -- and bumps `current_execution`.
+                  AND (
+                      status NOT IN ('succeeded', 'failed', 'cancelled')
+                      OR %s IN ('succeeded', 'failed', 'cancelled')
+                  )
                 """,
                 (
                     status,
@@ -2154,6 +2163,7 @@ class EvaluationRepository:
                     expected_dispatch_owner,
                     expected_execution_number,
                     expected_execution_number,
+                    status,
                 ),
             )
             updated = cur.rowcount != 0

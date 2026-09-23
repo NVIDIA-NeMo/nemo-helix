@@ -4,7 +4,7 @@
 
 # Shared helpers for OpenSandbox runtime verification.
 # Sourced by shared-kernel.sh / kata-qemu.sh — do not run directly.
-# Set OPEN_SANDBOX_WORKLOAD_NS (or NMP_NAMESPACE) to the platform job namespace.
+# Set OPEN_SANDBOX_WORKLOAD_NS (or NHX_NAMESPACE) to the platform job namespace.
 
 set -euo pipefail
 
@@ -87,7 +87,7 @@ require_profile() {
     shared-kernel)
       SERVER_DEPLOY="opensandbox-server"
       SERVER_SVC="opensandbox-server"
-      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NMP_NAMESPACE:-}}"
+      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NHX_NAMESPACE:-}}"
       API_SECRET="opensandbox-server-api-key"
       EXPECT_RUNTIME_CLASS=""          # cluster default OCI runtime
       EXPECT_KATA_NODE="false"
@@ -95,7 +95,7 @@ require_profile() {
     kata-qemu)
       SERVER_DEPLOY="opensandbox-server-kata"
       SERVER_SVC="opensandbox-server-kata"
-      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NMP_NAMESPACE:-}}"
+      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NHX_NAMESPACE:-}}"
       API_SECRET="opensandbox-server-kata-api-key"
       EXPECT_RUNTIME_CLASS="kata-qemu"
       EXPECT_KATA_NODE="true"
@@ -104,7 +104,7 @@ require_profile() {
       die "unknown profile '${profile}' (expected shared-kernel|kata-qemu)"
       ;;
   esac
-  [[ -n "${WORKLOAD_NS}" ]] || die "set OPEN_SANDBOX_WORKLOAD_NS or NMP_NAMESPACE to the platform job namespace"
+  [[ -n "${WORKLOAD_NS}" ]] || die "set OPEN_SANDBOX_WORKLOAD_NS or NHX_NAMESPACE to the platform job namespace"
 }
 
 preflight_control_plane() {
@@ -252,7 +252,7 @@ print(json.dumps({
   "metadata": {
     "purpose": "runtime-verify",
     "profile": "${PROFILE}",
-    "nmp-verify-request": "${request_id}",
+    "nhx-verify-request": "${request_id}",
   },
 }))
 PY

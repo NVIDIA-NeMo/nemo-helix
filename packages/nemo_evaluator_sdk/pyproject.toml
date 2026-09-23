@@ -25,7 +25,7 @@ dependencies = [
   # directly: nemo-sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
   # pieces are extras -- so this adds request/response models, not a web stack.
   # Workspace member for now; becomes an exact PyPI pin once published, per the note on
-  # `[tool.bundle-package]` in packages/nemo_platform/pyproject.toml.
+  # `[tool.bundle-package]` in packages/nemo_helix/pyproject.toml.
   "nemo-sandboxed-gym",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
@@ -51,7 +51,7 @@ dependencies = [
 version = "0.0.0"
 
 [dependency-groups]
-dev = ["nemo-evaluator-plugin", "nemo-platform-sdk"]
+dev = ["nemo-evaluator-plugin", "nemo-helix-sdk"]
 
 [project.optional-dependencies]
 agent-runtimes = [
@@ -66,8 +66,8 @@ engine = []
 harbor = [
   "harbor>=0.20,<0.21",
 ]
-nemo-platform = [
-  "nemo-platform-sdk",
+nemo-helix = [
+  "nemo-helix-sdk",
 ]
 # NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or
 # sandbox mode). The Fabric SDK itself is a base dependency above; this extra adds the
@@ -90,7 +90,8 @@ nemo-platform = [
 #   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
 #     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
-#     Python<3.14-gated upstream, which the lock's own <3.14 ceiling already satisfies.
+#     It is Python<3.14-gated upstream, and the lock now reaches 3.14, so the marker below really does
+#     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [

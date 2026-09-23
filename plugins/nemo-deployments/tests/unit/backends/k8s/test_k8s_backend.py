@@ -10,7 +10,7 @@ from nemo_deployments_plugin.backends.base import BackendStatusUpdate
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
 from nemo_deployments_plugin.backends.k8s.config import K8sExecutorConfig
 from nemo_deployments_plugin.entities import Container, DeploymentConfig
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 def test_executor_config_parsed_from_dict(k8s_backend: K8sDeploymentBackend) -> None:

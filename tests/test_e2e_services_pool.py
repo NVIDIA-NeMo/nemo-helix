@@ -51,8 +51,8 @@ def test_render_e2e_config_for_subprocess_rewrites_instance_paths(tmp_path) -> N
 def test_docker_backend_overrides_prefer_e2e_specific_env(monkeypatch) -> None:
     monkeypatch.setenv("IMAGE_REGISTRY", "ghcr.io/example/default")
     monkeypatch.setenv("BAKE_TAG", "default-tag")
-    monkeypatch.setenv("NMP_E2E_IMAGE_REGISTRY", "ghcr.io/example/e2e")
-    monkeypatch.setenv("NMP_E2E_IMAGE_TAG", "e2e-tag")
+    monkeypatch.setenv("NHX_E2E_IMAGE_REGISTRY", "ghcr.io/example/e2e")
+    monkeypatch.setenv("NHX_E2E_IMAGE_TAG", "e2e-tag")
 
     overrides = services_pool._docker_backend_overrides()
 
@@ -63,8 +63,8 @@ def test_docker_backend_overrides_prefer_e2e_specific_env(monkeypatch) -> None:
 
 
 def test_docker_backend_overrides_fall_back_to_ci_bake_env(monkeypatch) -> None:
-    monkeypatch.delenv("NMP_E2E_IMAGE_REGISTRY", raising=False)
-    monkeypatch.delenv("NMP_E2E_IMAGE_TAG", raising=False)
+    monkeypatch.delenv("NHX_E2E_IMAGE_REGISTRY", raising=False)
+    monkeypatch.delenv("NHX_E2E_IMAGE_TAG", raising=False)
     monkeypatch.setenv("IMAGE_REGISTRY", "ghcr.io/example/default")
     monkeypatch.setenv("BAKE_TAG", "default-tag")
 
@@ -162,7 +162,7 @@ def test_auth_ready_url_override_uses_url_probe_and_skips_default_probe(monkeypa
         {
             "backend": "subprocess",
             "auth_ready_url": "${service_url}/health/gateway/ready",
-            "env": {"NMP_CLIENT_SSL_CERT_FILE": "/tmp/ca.crt"},
+            "env": {"NHX_CLIENT_SSL_CERT_FILE": "/tmp/ca.crt"},
         },
     )
 
@@ -171,7 +171,7 @@ def test_auth_ready_url_override_uses_url_probe_and_skips_default_probe(monkeypa
             "url",
             "http://127.0.0.1:38080/health/gateway/ready",
             None,
-            {"NMP_CLIENT_SSL_CERT_FILE": "/tmp/ca.crt"},
+            {"NHX_CLIENT_SSL_CERT_FILE": "/tmp/ca.crt"},
         )
     ]
 
@@ -264,7 +264,7 @@ def test_start_services_docker_compose_resolves_dynamic_port_templates(tmp_path,
                                 "additional_volume_mounts": [
                                     {
                                         "volume_name": "authentik-gateway-tls-${gateway_port}",
-                                        "mount_path": "/etc/nmp/gateway-tls",
+                                        "mount_path": "/etc/nhx/gateway-tls",
                                     }
                                 ]
                             }

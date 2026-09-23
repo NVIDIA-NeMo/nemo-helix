@@ -9,14 +9,16 @@ Mapping: one Gym dataset → one run; each distinct row → one `AgentEvalTask` 
 
 ## Prerequisites
 
-**1. NeMo Gym installed in its own environment, with that environment's `bin` on `PATH`**, plus the target environment's own dependencies. Gym imports Ray at module load and nemo-platform excludes Ray by constraint, so the two generally cannot share a virtualenv; the runner resolves `gym` from `PATH` only. Environments ship in the `nemo-gym` wheel — `resources_servers` and friends install beside `nemo_gym`, configs and `data/example.jsonl` included — so no checkout is needed:
+**1. NeMo Gym installed in its own environment, with that environment's `bin` on `PATH`**, plus the target environment's own dependencies. Gym imports Ray at module load and nemo-helix excludes Ray by constraint, so the two generally cannot share a virtualenv; the runner resolves `gym` from `PATH` only. Environments ship in the `nemo-gym` wheel — `resources_servers` and friends install beside `nemo_gym`, configs and `data/example.jsonl` included — so no checkout is needed:
 
 ```bash
-uv venv ~/gym-env --python 3.12
+uv venv ~/gym-env --python 3.13.14
 # tiktoken is mcqa's own dependency; each resources_server ships a requirements.txt
 uv pip install --python ~/gym-env/bin/python nemo-gym tiktoken
 export PATH="$HOME/gym-env/bin:$PATH"
 ```
+
+`nemo-gym` declares `Requires-Python: >=3.13.14`, which `uv` downloads on demand. A `uv` predating that build fails with `No interpreter found for Python 3.13.14` — upgrade `uv` instead of dropping to an earlier Python, and note the Flox-pinned `uv` in this repo is too old for it.
 
 The runner shells out to whatever `gym` is on PATH. There is deliberately no setting for a checkout, another venv, or a search root: this config becomes a serialized job spec when Gym runs as a platform job, and a local path means nothing on the other side of that boundary.
 
@@ -114,7 +116,7 @@ logging.getLogger("nemo_evaluator_sdk.agent_eval.runtimes.gym").setLevel(logging
 - This example covers the local subprocess path. Platform deployments can run the same target
   colocated or provision a separate sandboxed Gym host; custom environment FileSets require the
   sandboxed path. See the
-  [Evaluator Gym documentation](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/gym-runner).
+  [Evaluator Gym documentation](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/gym-runner).
 
 ## Next steps
 

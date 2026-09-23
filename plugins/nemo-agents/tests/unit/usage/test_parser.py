@@ -108,7 +108,7 @@ def test_parse_path_handles_error_build(fixtures_dir: Path) -> None:
     assert report.task.agent_status is None
     assert report.task.verify_status is None
     assert report.task.reward is None
-    assert report.task.image == "nmp-nat-models-list-mcp:latest"
+    assert report.task.image == "nhx-nat-models-list-mcp:latest"
 
 
 def test_parse_path_skips_subdirs_without_result(tmp_path: Path, fixtures_dir: Path) -> None:

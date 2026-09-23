@@ -26,10 +26,10 @@ class TestHeaderNameHelpers:
             ("openai-api-key", True),
             ("my_secret_header", True),
             ("X-Trace-Id", False),
-            ("X-NMP-Principal-Id", True),
-            ("X-NMP-Scopes", True),
-            ("X-NMP-Actor-Account-Id", True),
-            ("X-NMP-Subject-Aliases", True),
+            ("X-NHX-Principal-Id", True),
+            ("X-NHX-Scopes", True),
+            ("X-NHX-Actor-Account-Id", True),
+            ("X-NHX-Subject-Aliases", True),
         ],
     )
     def test_is_auth_header_name(self, header_name: str, expected: bool):
@@ -40,7 +40,7 @@ class TestHeaderNameHelpers:
             {
                 "Authorization": "Bearer secret-token",
                 "X-Trace-Id": "trace-123",
-                "X-NMP-Principal-Id": "service:evaluator",
+                "X-NHX-Principal-Id": "service:evaluator",
             }
         ) == {"X-Trace-Id": "trace-123"}
 
@@ -56,13 +56,13 @@ class TestModelDefaultHeaders:
             default_headers={"X-Existing": "model"},
         )
 
-        updated = model.with_default_headers({"X-NMP-Principal-Id": "service:evaluator"})
+        updated = model.with_default_headers({"X-NHX-Principal-Id": "service:evaluator"})
 
         assert updated is not model
         assert model.default_headers == {"X-Existing": "model"}
         assert updated.default_headers == {
             "X-Existing": "model",
-            "X-NMP-Principal-Id": "service:evaluator",
+            "X-NHX-Principal-Id": "service:evaluator",
         }
 
     def test_model_dump_excludes_default_headers(self):
@@ -85,10 +85,10 @@ class TestModelDefaultHeaders:
             "x-auth-token",
             "openai-api-key",
             "my_secret_header",
-            "X-NMP-Principal-Id",
-            "X-NMP-Actor-Aliases",
-            "X-NMP-Subject-Aliases",
-            "X-NMP-Scopes",
+            "X-NHX-Principal-Id",
+            "X-NHX-Actor-Aliases",
+            "X-NHX-Subject-Aliases",
+            "X-NHX-Scopes",
         ],
     )
     def test_rejects_auth_style_default_headers(self, header_name: str):
