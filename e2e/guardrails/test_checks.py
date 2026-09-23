@@ -12,7 +12,6 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import BadRequestError
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import GuardrailCheckRequest, GuardrailCheckResponse
@@ -43,7 +42,7 @@ def _post_check(
         guardrails.update(extra_guardrails)
 
     return (
-        client_from_platform(test_case.sdk, GuardrailClient)
+        GuardrailClient.from_client(test_case.client)
         .check_guardrail(
             workspace=test_case.workspace,
             body=GuardrailCheckRequest(

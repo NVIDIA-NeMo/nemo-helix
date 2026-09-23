@@ -75,6 +75,7 @@ from collections.abc import Iterator
 import pytest
 from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
@@ -90,6 +91,7 @@ from e2e.services_pool_fixtures import (  # noqa: F401
     append_services_pool_report_sections,
     configure_services_pool,
     register_services_pool_items,
+    services_pool_client,
     services_pool_sdk,
 )
 
@@ -199,6 +201,12 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # noqa
 def e2e_sdk(request: pytest.FixtureRequest) -> NeMoHelix:
     """Provide the conventional e2e SDK fixture name."""
     return request.getfixturevalue("services_pool_sdk")
+
+
+@pytest.fixture(scope="module", name="client")
+def e2e_client(request: pytest.FixtureRequest) -> NemoClient:
+    """Typed platform client for the module's pooled services instance."""
+    return request.getfixturevalue("services_pool_client")
 
 
 @pytest.fixture(scope="module")

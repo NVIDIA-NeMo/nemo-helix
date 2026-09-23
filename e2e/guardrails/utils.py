@@ -8,8 +8,19 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from nemo_helix import APIStatusError, NeMoHelix
-from nemo_helix.types.inference import MiddlewareCallParam
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import (
+    CreateVirtualModelRequest,
+    MiddlewareCall,
+    VirtualModelInferenceConfig,
+)
 from nhx.testing import MockProviderResponse, add_mock_provider
 
 from e2e.utils import collect_sse_chunks
@@ -113,7 +124,7 @@ CONTENT_SAFETY_OUTPUT_PROMPT = {
 
 @dataclass(frozen=True)
 class GuardrailsChatTestCase:
-    sdk: NeMoHelix  # SDK client connected to the e2e platform instance.
+    client: NemoClient  # Typed client connected to the e2e platform instance.
     workspace: str  # Per-test workspace that owns all created entities.
     virtual_model_name: str  # Guarded VirtualModel name hit by chat completions.
     backend_model_name: str  # Mock model entity that represents the app LLM.
@@ -204,18 +215,37 @@ def setup_mock_provider(sdk: NeMoHelix, test_case: GuardrailsChatTestCase) -> No
     )
 
 
+def create_guardrail_config(
+    client: NemoClient,
+    *,
+    workspace: str,
+    name: str,
+    description: str,
+    config_data: dict[str, Any],
+) -> None:
+    GuardrailClient.from_client(client).create_guardrail_config(
+        workspace=workspace,
+        body=CreateGuardrailConfigRequest(name=name, description=description, data=config_data),
+    )
+
+
+def delete_guardrail_config(client: NemoClient, *, workspace: str, name: str) -> None:
+    GuardrailClient.from_client(client).delete_guardrail_config(workspace=workspace, name=name)
+
+
 def create_guarded_virtual_model(
     *,
-    sdk: NeMoHelix,
+    client: NemoClient,
     test_case: GuardrailsChatTestCase,
     config_data: dict[str, Any],
 ) -> None:
     if test_case.config_mode == "referenced":
-        sdk.guardrail.configs.create(
+        create_guardrail_config(
+            client,
             workspace=test_case.workspace,
             name=test_case.config_name,
             description="E2E content-safety Guardrails config",
-            data=config_data,
+            config_data=config_data,
         )
 
     middleware_call = _middleware_call(
@@ -224,15 +254,17 @@ def create_guarded_virtual_model(
         config_name=test_case.config_name,
         config_data=config_data,
     )
-    sdk.inference.virtual_models.create(
+    VirtualModelsClient.from_client(client).create_virtual_model(
         workspace=test_case.workspace,
-        name=test_case.virtual_model_name,
-        default_model_entity=test_case.backend_model_ref,
-        models=[{"model": test_case.backend_model_ref, "backend_format": "OPENAI_CHAT"}],
-        request_middleware=[middleware_call],
-        response_middleware=[middleware_call],
+        body=CreateVirtualModelRequest(
+            name=test_case.virtual_model_name,
+            default_model_entity=test_case.backend_model_ref,
+            models=[VirtualModelInferenceConfig(model=test_case.backend_model_ref, backend_format="OPENAI_CHAT")],
+            request_middleware=[middleware_call],
+            response_middleware=[middleware_call],
+        ),
     )
-    _wait_for_guarded_virtual_model(sdk, test_case)
+    _wait_for_guarded_virtual_model(client, test_case)
 
 
 def post_chat_completion(
@@ -240,20 +272,25 @@ def post_chat_completion(
     *,
     extra_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return test_case.sdk.inference.gateway.model.post(
-        "v1/chat/completions",
-        name=test_case.virtual_model_name,
-        workspace=test_case.workspace,
-        body=_chat_body(test_case, extra=extra_body),
+    return (
+        InferenceGatewayClient.from_client(test_case.client)
+        .model_post(
+            trailing_uri="v1/chat/completions",
+            name=test_case.virtual_model_name,
+            workspace=test_case.workspace,
+            body=JsonBody(_chat_body(test_case, extra=extra_body)),
+        )
+        .data()
     )
 
 
 def post_streaming_chat_completion(test_case: GuardrailsChatTestCase) -> dict[str, Any]:
-    with test_case.sdk._client.stream(
+    with test_case.client._client.stream(
         "POST",
-        f"/apis/inference-gateway/v2/workspaces/{test_case.workspace}/model/"
+        f"{test_case.client.base_url}/apis/inference-gateway/v2/workspaces/{test_case.workspace}/model/"
         f"{test_case.virtual_model_name}/-/v1/chat/completions",
         json=_chat_body(test_case, stream=True),
+        headers=test_case.client.default_headers,
     ) as response:
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
@@ -320,20 +357,20 @@ def _middleware_call(
     config_ref: str,
     config_name: str,
     config_data: dict[str, Any],
-) -> MiddlewareCallParam:
+) -> MiddlewareCall:
     if config_mode == "referenced":
-        return {
-            "name": GUARDRAILS_PLUGIN_NAME,
-            "config_type": GUARDRAILS_PLUGIN_CONFIG_TYPE,
-            "config_id": config_ref,
-        }
+        return MiddlewareCall(
+            name=GUARDRAILS_PLUGIN_NAME,
+            config_type=GUARDRAILS_PLUGIN_CONFIG_TYPE,
+            config_id=config_ref,
+        )
 
     inline_config = {**config_data, "name": config_name}
-    return {
-        "name": GUARDRAILS_PLUGIN_NAME,
-        "config_type": GUARDRAILS_PLUGIN_CONFIG_TYPE,
-        "config": inline_config,
-    }
+    return MiddlewareCall(
+        name=GUARDRAILS_PLUGIN_NAME,
+        config_type=GUARDRAILS_PLUGIN_CONFIG_TYPE,
+        config=inline_config,
+    )
 
 
 def _content_safety_responses(test_case: GuardrailsChatTestCase) -> list[MockProviderResponse]:
@@ -351,7 +388,7 @@ def _content_safety_responses(test_case: GuardrailsChatTestCase) -> list[MockPro
 
 
 def _wait_for_guarded_virtual_model(
-    sdk: NeMoHelix,
+    client: NemoClient,
     test_case: GuardrailsChatTestCase,
     timeout: float = 60,
     poll_interval: float = 0.5,
@@ -374,15 +411,16 @@ def _wait_for_guarded_virtual_model(
         extra={"guardrails": {"config_id": test_case.config_ref}},
     )
 
+    gateway = InferenceGatewayClient.from_client(client)
     while time.time() - start < timeout:
         try:
-            sdk.inference.gateway.model.post(
-                "v1/chat/completions",
+            gateway.model_post(
+                trailing_uri="v1/chat/completions",
                 name=test_case.virtual_model_name,
                 workspace=test_case.workspace,
-                body=probe_body,
+                body=JsonBody(probe_body),
             )
-        except APIStatusError as exc:
+        except NemoHTTPError as exc:
             last_error = exc
             if exc.status_code == 422:
                 return
