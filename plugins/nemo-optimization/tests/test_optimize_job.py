@@ -22,6 +22,12 @@ from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
     HelixJobDependencyUnavailableError,
 )
+from nemo_helix_plugin.jobs.execution_profiles import (
+    DockerJobExecutionProfile,
+    DockerJobExecutionProfileConfig,
+    SubprocessJobExecutionProfile,
+)
+from nemo_helix_plugin.refs import FilesetRef
 from nemo_optimization.backends.protocol import (
     OptimizationBackendCapabilities,
     OptimizationPhase,
@@ -29,12 +35,6 @@ from nemo_optimization.backends.protocol import (
     OptimizationPhaseResult,
     OptimizationPhaseStatus,
 )
-from nemo_helix_plugin.jobs.execution_profiles import (
-    DockerJobExecutionProfile,
-    DockerJobExecutionProfileConfig,
-    SubprocessJobExecutionProfile,
-)
-from nemo_helix_plugin.refs import FilesetRef
 from nemo_optimization.jobs.optimize import OptimizeJob
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 from pydantic import ValidationError

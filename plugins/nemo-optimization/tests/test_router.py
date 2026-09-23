@@ -187,17 +187,24 @@ def test_dispatch_integrates_real_optuna_then_ga_with_injected_dependencies(
     assert result["status"] == "completed"
     assert result["backend"] == "orchestrator"
     assert result["phase"] == "multi"
-    assert result["trial_number_range"] == {"start": 0, "end_exclusive": 4, "count": 4}
+    assert result["trial_number_range"] == {"start": 0, "end_exclusive": 6, "count": 6}
     assert [phase["backend"] for phase in result["phases"]] == ["optuna", "ga"]
     assert result["phases"][0]["trial_number_range"] == {"start": 0, "end_exclusive": 2, "count": 2}
-    assert result["phases"][1]["trial_number_range"] == {"start": 2, "end_exclusive": 4, "count": 2}
+    assert result["phases"][1]["trial_number_range"] == {"start": 2, "end_exclusive": 6, "count": 4}
     assert [call["trial_number"] for call in evaluators["numeric"].calls] == [0, 1]
-    assert [call["trial_number"] for call in evaluators["prompt"].calls] == [2, 3]
-    assert {call["metadata"]["nemo.optimizer.global_trial_number"] for call in evaluators["prompt"].calls} == {2, 3}
+    assert [call["trial_number"] for call in evaluators["prompt"].calls] == [2, 3, 4, 5]
+    assert {call["metadata"]["nemo.optimizer.global_trial_number"] for call in evaluators["prompt"].calls} == {
+        2,
+        3,
+        4,
+        5,
+    }
 
     out_dir = ctx.storage.persistent / "results" / "optimizer_results"
     assert (out_dir / "config_prompt_trial_002.yml").is_file()
     assert (out_dir / "config_prompt_trial_003.yml").is_file()
+    assert (out_dir / "config_prompt_trial_004.yml").is_file()
+    assert (out_dir / "config_prompt_trial_005.yml").is_file()
     intermediate = yaml.safe_load((out_dir / "intermediate_numeric_config.yml").read_text(encoding="utf-8"))
     final = yaml.safe_load((out_dir / "final_optimized_config.yml").read_text(encoding="utf-8"))
     assert intermediate["models"]["default"]["temperature"] == 0.4
@@ -467,7 +474,7 @@ def test_router_rejects_backend_results_that_violate_the_plan(
             )
 
     plan = router_module._PhasePlan(OptimizationPhase.PROMPT, "ga", InvalidResultBackend())
-    monkeypatch.setattr(router_module, "_phase_plan", lambda payload: plan)
+    monkeypatch.setattr(router_module, "_phase_plan", lambda payload: [plan])
 
     with pytest.raises(OptimizeRouterError, match=message):
         router_module._run_phases({}, ctx=ctx, sdk=None)
