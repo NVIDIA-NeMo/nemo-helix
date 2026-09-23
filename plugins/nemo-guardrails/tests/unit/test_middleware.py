@@ -1843,7 +1843,7 @@ class TestStreamingLeaseLifecycle:
         observed_active: list[bool] = []
 
         @contextmanager
-        def _platform_context(_sdk: Any):
+        def _platform_context(_sdk: Any, _on_behalf_of_headers: Any):
             nonlocal active
             active = True
             try:
@@ -2562,7 +2562,7 @@ class TestProcessRequestErrorSurfacing:
         observed_active: list[bool] = []
 
         @contextmanager
-        def _platform_context(_sdk: Any):
+        def _platform_context(_sdk: Any, _on_behalf_of_headers: Any):
             nonlocal active
             active = True
             try:
@@ -2581,6 +2581,31 @@ class TestProcessRequestErrorSurfacing:
 
         assert observed_active == [True]
         assert active is False
+
+    async def test_run_rails_forwards_caller_on_behalf_of_headers(self, middleware: GuardrailsMiddleware) -> None:
+        request_body = {
+            "messages": [{"role": "user", "content": "Hi"}],
+            "model": "ws/llama",
+        }
+        caller_headers = {"X-NMP-Principal-On-Behalf-Of": "user:carol"}
+        ctx = _make_ctx(request_body)
+        ctx.on_behalf_of_headers = caller_headers
+        forwarded: list[Any] = []
+
+        @contextmanager
+        def _platform_context(_sdk: Any, on_behalf_of_headers: Any):
+            forwarded.append(on_behalf_of_headers)
+            yield
+
+        with patch.object(middleware, "_prepare_lease", new=_patch_prepare_lease()):
+            with patch("nemo_guardrails_plugin.middleware.platform_headers_context", new=_platform_context):
+                with patch(
+                    "nemo_guardrails_plugin.middleware.run_generate_in_new_loop",
+                    return_value=_make_generation_response(is_blocked=False),
+                ):
+                    await _process_request(middleware, request_body, {}, _entity_source(), ctx=ctx)
+
+        assert forwarded == [caller_headers]
 
     async def test_runtime_error_from_prepare_lease_wraps_to_503(self, middleware: GuardrailsMiddleware) -> None:
         """A non-caller-shape failure during eager lease setup (here: a

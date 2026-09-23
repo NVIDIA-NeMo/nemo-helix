@@ -142,3 +142,16 @@ async def enforce_model_ref_access(request_workspace: str, model_ref: ParsedEnti
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to run inference on models in workspace '{workspace}'.",
         )
+
+
+def caller_on_behalf_of_headers() -> dict[str, str]:
+    auth_client = auth_client_context.get()
+    if auth_client is None or not auth_client.principal.id:
+        return {}
+    principal = auth_client.principal
+    headers = {"X-NMP-Principal-On-Behalf-Of": principal.effective_id}
+    if principal.effective_email:
+        headers["X-NMP-Principal-On-Behalf-Of-Email"] = principal.effective_email
+    if principal.effective_groups:
+        headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(principal.effective_groups)
+    return headers

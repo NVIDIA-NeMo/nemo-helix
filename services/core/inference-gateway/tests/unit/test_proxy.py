@@ -1139,6 +1139,56 @@ async def test_virtual_model_proxy_denies_lora_adapter_from_inaccessible_workspa
 
 
 @pytest.mark.asyncio
+async def test_virtual_model_proxy_passes_caller_identity_to_middleware(mock_proxy_client):
+    observed_headers: list[Any] = []
+
+    class _RecordingPlugin(NemoInferenceMiddleware):
+        async def process_request(self, ctx, request, middleware_config):
+            observed_headers.append(ctx.on_behalf_of_headers)
+            return request
+
+    model_entity_id = "carol-ws/gpt"
+    registry = MiddlewareRegistry(plugins={"recorder": _RecordingPlugin()})
+    registry.request_middleware_calls[("carol-ws", "explicit-probe")] = [
+        ResolvedMiddlewareCall(plugin_name="recorder", config_type="t", resolved_config={})
+    ]
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    with _caller_with_access_to():
+        await virtual_model_proxy(
+            request=request,
+            workspace="carol-ws",
+            vm_name="explicit-probe",
+            virtual_model=SDKVirtualModel(
+                id="carol-ws/explicit-probe",
+                entity_id="carol-ws/explicit-probe",
+                name="explicit-probe",
+                workspace="carol-ws",
+                parent="carol-ws",
+                db_version=1,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                default_model_entity=model_entity_id,
+            ),
+            trailing_uri="v1/chat/completions",
+            json_body={"messages": [{"role": "user", "content": "hi"}]},
+            http_client=mock_proxy_client,
+            model_cache=_model_cache_with(_serving_provider("carol-ws", "nim", model_entity_id)),
+            registry=registry,
+        )
+
+    assert observed_headers == [
+        {
+            "X-NMP-Principal-On-Behalf-Of": "user:carol",
+            "X-NMP-Principal-On-Behalf-Of-Email": "carol@example.com",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_proxy_request_client_error(mock_proxy_client, next_request_info):
     mock_proxy_client.request = AsyncMock(side_effect=ClientError("Connection failed"))
 

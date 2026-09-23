@@ -16,6 +16,7 @@ from nmp.common.entities.utils import ParsedEntityRef
 from nmp.core.inference_gateway.api.authz import (
     MODEL_EXEC_PERMISSION,
     OPENAI_EXEC_PERMISSION,
+    caller_on_behalf_of_headers,
     enforce_delegated_workspace_access,
     enforce_model_ref_access,
     model_ref_workspaces,
@@ -167,3 +168,21 @@ async def test_model_ref_lora_adapter_workspace_is_checked() -> None:
 )
 def test_model_ref_workspaces(name: str, expected: list[str]) -> None:
     assert model_ref_workspaces(ParsedEntityRef(workspace="base-ws", name=name)) == expected
+
+
+def test_caller_on_behalf_of_headers_without_auth_context_is_empty() -> None:
+    assert caller_on_behalf_of_headers() == {}
+
+
+def test_caller_on_behalf_of_headers_names_plain_user() -> None:
+    auth_client_context.set(_auth_client(Principal(id="user:carol", email="carol@example.com", groups=["eng", "ml"])))
+    assert caller_on_behalf_of_headers() == {
+        "X-NMP-Principal-On-Behalf-Of": "user:carol",
+        "X-NMP-Principal-On-Behalf-Of-Email": "carol@example.com",
+        "X-NMP-Principal-On-Behalf-Of-Groups": "eng,ml",
+    }
+
+
+def test_caller_on_behalf_of_headers_names_delegating_user() -> None:
+    auth_client_context.set(_auth_client(Principal(id="service:agents", on_behalf_of="user:carol")))
+    assert caller_on_behalf_of_headers() == {"X-NMP-Principal-On-Behalf-Of": "user:carol"}

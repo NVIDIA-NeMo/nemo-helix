@@ -4,7 +4,7 @@
 import asyncio
 import copy
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import nemo_platform
@@ -387,6 +387,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
             request.body,
             request.headers,
             messages=current_messages,
+            on_behalf_of_headers=ctx.on_behalf_of_headers,
             rail_types=PROCESS_REQUEST_RAIL_TYPES,
             user_log_options=user_log_options,
             error_msg="Failed to run input rails",
@@ -543,13 +544,8 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
 
             async def _streaming_with_lease() -> AsyncIterator[dict[str, Any]]:
                 try:
-                    # TODO: self._sdk carries static startup headers (service principal
-                    # + internal marker). For full per-request auth propagation, IGW
-                    # should pass a request-scoped SDK on InferenceMiddlewareContext
-                    # (built via sdk.with_options(set_default_headers=...)) so the
-                    # forwarded headers include the current user's on-behalf-of
-                    # identity and OTEL trace context.
-                    with platform_headers_context(sdk):
+                    # TODO: forward per-request OTEL trace context alongside the caller identity.
+                    with platform_headers_context(sdk, ctx.on_behalf_of_headers):
                         async with cache.lease(stable, main_llm=main_llm, provenance=lease_provenance) as llm_rails:
                             inner = handle_streaming_output_check(
                                 llm_rails,
@@ -596,6 +592,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
             request_body,
             request_headers,
             messages=output_messages,
+            on_behalf_of_headers=ctx.on_behalf_of_headers,
             rail_types=PROCESS_RESPONSE_RAIL_TYPES,
             user_log_options=user_log_options,
             error_msg="Failed to run output rails",
@@ -710,6 +707,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         request_headers: dict[str, str],
         *,
         messages: list[dict[str, Any]],
+        on_behalf_of_headers: Mapping[str, str],
         rail_types: list[str],
         user_log_options: GenerationLogOptionsParam | None,
         error_msg: str,
@@ -733,9 +731,8 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
             source, request_body, request_headers, error_msg
         )
         try:
-            # TODO: same as streaming path — use a request-scoped SDK from ctx
-            # once IGW threads one through InferenceMiddlewareContext.
-            with platform_headers_context(sdk):
+            # TODO: same as streaming path — forward per-request OTEL trace context.
+            with platform_headers_context(sdk, on_behalf_of_headers):
                 async with cache.lease(stable, main_llm=main_llm, provenance=provenance) as llm_rails:
                     raw_generation_response = await asyncio.to_thread(
                         run_generate_in_new_loop,

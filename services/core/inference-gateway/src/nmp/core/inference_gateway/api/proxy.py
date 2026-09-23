@@ -31,7 +31,7 @@ from nemo_platform_plugin.inference_middleware import (
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
 from nmp.common.entities.utils import parse_model_entity_ref
-from nmp.core.inference_gateway.api.authz import enforce_model_ref_access
+from nmp.core.inference_gateway.api.authz import caller_on_behalf_of_headers, enforce_model_ref_access
 from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
 from nmp.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -912,6 +912,7 @@ async def virtual_model_proxy(
         virtual_model_name=vm_name,
         workspace=workspace,
         original_request=original_request,
+        on_behalf_of_headers=caller_on_behalf_of_headers(),
     )
     initial_request = build_inference_request(
         body=json_body,
