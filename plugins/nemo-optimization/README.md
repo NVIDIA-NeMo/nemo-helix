@@ -3,7 +3,7 @@
 
 # nemo-optimization-plugin
 
-Shared library for Fabric-backed numeric hyperparameter optimization (Optuna),
+Shared library for hyperparameter and GA prompt optimization,
 and the ``nat`` strategy behind ``nemo agents optimize run-strategy``.
 
 ``OptimizeJob`` declares ``nemo_agent_optimization_strategy`` as an
