@@ -875,7 +875,7 @@ async def test_refresh_model_cache_task_passes_registry(mocker, model_cache: Mod
 
 
 @pytest.mark.asyncio
-async def test_refresh_skips_rebuild_when_provider_layer_unchanged(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_skips_rebuild_when_provider_layer_unchanged(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """A second refresh with an identical provider layer skips rebuild_model_entity_map.
 
     The rebuild is compute-only work; when the provider set + served_models are byte-for-byte
@@ -884,33 +884,33 @@ async def test_refresh_skips_rebuild_when_provider_layer_unchanged(mocker, model
     getter = _model_provider_getter_for()
     spy = mocker.spy(ModelCache, "rebuild_model_entity_map")
 
-    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nhx_sdk)
     assert spy.call_count == 1  # first cycle always rebuilds (signature was None)
 
-    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nhx_sdk)
     assert spy.call_count == 1  # unchanged provider layer -> rebuild skipped
 
 
 @pytest.mark.asyncio
-async def test_refresh_rebuilds_when_served_model_changes(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_rebuilds_when_served_model_changes(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """Changing a provider's served-model id changes the signature and forces a rebuild."""
     spy = mocker.spy(ModelCache, "rebuild_model_entity_map")
 
     await refresh_model_cache(
-        model_cache, _model_provider_getter_for(model_entity_id="test/a"), secrets_sdk=mock_nmp_sdk
+        model_cache, _model_provider_getter_for(model_entity_id="test/a"), secrets_sdk=mock_nhx_sdk
     )
     assert spy.call_count == 1
 
     # Different served-model id => different signature => rebuild runs again.
     await refresh_model_cache(
-        model_cache, _model_provider_getter_for(model_entity_id="test/b"), secrets_sdk=mock_nmp_sdk
+        model_cache, _model_provider_getter_for(model_entity_id="test/b"), secrets_sdk=mock_nhx_sdk
     )
     assert spy.call_count == 2
 
 
 @pytest.mark.asyncio
 async def test_refresh_skips_rebuild_when_map_empty_and_signature_unchanged(
-    mocker, model_cache: ModelCache, mock_nmp_sdk
+    mocker, model_cache: ModelCache, mock_nhx_sdk
 ):
     """An empty entity map with an unchanged signature is a valid steady state and is skipped.
 
@@ -921,17 +921,17 @@ async def test_refresh_skips_rebuild_when_map_empty_and_signature_unchanged(
     """
     getter = _model_provider_getter_for()
 
-    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nhx_sdk)
     # Simulate a cache whose entity map is empty while the (matching) signature is retained.
     model_cache.model_entity_info_map = {}
     spy = mocker.spy(ModelCache, "rebuild_model_entity_map")
 
-    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nhx_sdk)
     assert spy.call_count == 0  # unchanged signature -> skipped even though the map is empty
 
 
 @pytest.mark.asyncio
-async def test_refresh_runs_metadata_update_even_when_rebuild_skipped(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_runs_metadata_update_even_when_rebuild_skipped(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """update_model_entity_metadata runs every cycle, independent of the rebuild skip.
 
     Metadata (spec/finetuning_type/backend_format) is applied in place, so it must not be
@@ -942,8 +942,8 @@ async def test_refresh_runs_metadata_update_even_when_rebuild_skipped(mocker, mo
     meta_spy = mocker.spy(ModelCache, "update_model_entity_metadata")
     rebuild_spy = mocker.spy(ModelCache, "rebuild_model_entity_map")
 
-    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nmp_sdk, model_entity_getter=entity_getter)
-    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nmp_sdk, model_entity_getter=entity_getter)
+    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nhx_sdk, model_entity_getter=entity_getter)
+    await refresh_model_cache(model_cache, getter, secrets_sdk=mock_nhx_sdk, model_entity_getter=entity_getter)
 
     assert rebuild_spy.call_count == 1  # second rebuild skipped (unchanged)
     assert meta_spy.call_count == 2  # metadata update still ran both cycles
@@ -970,7 +970,7 @@ def _model_provider_getter_with_mappings(mappings: list[tuple[str, str]]):
 
 
 @pytest.mark.asyncio
-async def test_refresh_rebuilds_when_served_models_reordered(mocker, model_cache: ModelCache, mock_nmp_sdk):
+async def test_refresh_rebuilds_when_served_models_reordered(mocker, model_cache: ModelCache, mock_nhx_sdk):
     """Reordering same-entity served-model mappings must invalidate the signature and rebuild.
 
     The rebuild appends providers to an entity's model_providers list in served_models order,
@@ -982,13 +982,13 @@ async def test_refresh_rebuilds_when_served_models_reordered(mocker, model_cache
     getter_ab = _model_provider_getter_with_mappings([(entity, "backend-a"), (entity, "backend-b")])
     getter_ba = _model_provider_getter_with_mappings([(entity, "backend-b"), (entity, "backend-a")])
 
-    await refresh_model_cache(model_cache, getter_ab, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, getter_ab, secrets_sdk=mock_nhx_sdk)
     # The first-listed backend is selected as model_providers[0].
     first_before = model_cache.model_entity_info_map[("test-ns", "claude-sonnet")].model_providers[0][0]
     assert first_before == "backend-a"
 
     spy = mocker.spy(ModelCache, "rebuild_model_entity_map")
-    await refresh_model_cache(model_cache, getter_ba, secrets_sdk=mock_nmp_sdk)
+    await refresh_model_cache(model_cache, getter_ba, secrets_sdk=mock_nhx_sdk)
     assert spy.call_count == 1  # reorder changed the signature -> rebuild ran
     first_after = model_cache.model_entity_info_map[("test-ns", "claude-sonnet")].model_providers[0][0]
     assert first_after == "backend-b"  # routing now reflects the new order
