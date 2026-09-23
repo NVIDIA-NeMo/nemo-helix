@@ -107,8 +107,11 @@ uv run plugins/nemo-insights/examples/execute-agent-job/reset_intake.py \
 Intake has no public span delete API, so this removes the demo source's
 spans directly in ClickHouse. It finds the ClickHouse container that Intake
 runs locally, or uses `NHX_INTAKE_CLICKHOUSE_URL` when that is set.
-Annotations are removed through the Intake API. Telemetry from other sources
-is untouched. Pass `--dry-run` to see the counts first.
+Only spans and `trace_index` rows from the demo source are deleted there;
+spans from other sources are untouched. Annotations have no source, so the
+script deletes, through the Intake API, every annotation on a session that has
+demo spans. That includes any annotation someone else added to those sessions.
+Pass `--dry-run` to see the counts first.
 
 ### 2. Submit an analysis run
 

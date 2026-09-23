@@ -11,7 +11,8 @@ Deletes, for one workspace:
   ClickHouse. Intake has no public span delete API, and ``trace_index`` is
   filled by a materialized view on insert, so both tables need a delete.
 
-Telemetry from any other source is left alone.
+Spans from any other source are left alone. Annotations carry no source, so
+every annotation on a demo session is deleted, whoever created it.
 
 ClickHouse is located the same way Intake locates it: ``NHX_INTAKE_CLICKHOUSE_URL``
 (with ``_USER``, ``_PASSWORD``, ``_DATABASE``) when set, otherwise the running
