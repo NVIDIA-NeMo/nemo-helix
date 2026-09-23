@@ -22,6 +22,9 @@ outputs:
   evaluator-sdk-closure:
     description: "'true' if anything that can change the agent_eval import closure changed"
     value: ${{ steps.filter.outputs.evaluator-sdk-closure }}
+  evaluator-integration:
+    description: "'true' if anything the evaluator integration tests exercise changed"
+    value: ${{ steps.filter.outputs.evaluator-integration }}
   scaled-evals:
     description: "'true' if the temporary scaled-evals plugin changed"
     value: ${{ steps.filter.outputs.scaled-evals }}
@@ -112,6 +115,38 @@ runs:
             - 'packages/nemo_evaluator_sdk/pyproject.toml'
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
+          evaluator-integration:
+            # What the evaluator integration suite actually drives. The harness starts a real
+            # platform (`nemo services run --service-group all`), so a change to a service it calls
+            # can break these tests without touching evaluator code at all -- and because the job is
+            # required, a filter that missed those paths would let the skip count as a pass.
+            #
+            # The services listed are the ones the suite calls, not everything `--service-group all`
+            # happens to start: entities (workspaces, tasks, tasksets, metrics), jobs (submission and
+            # reconciliation), files (filesets, derived metrics), models + inference-gateway (model
+            # targets via the IGW mock provider), secrets (env_secrets references), auth (the
+            # auth-enabled platform fixture) and intake (result publishing). Extend it deliberately
+            # when the suite starts calling something new.
+            - 'plugins/nemo-evaluator/**'
+            - 'packages/nemo_evaluator_sdk/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'  # shared contracts every service above is built on
+            - 'services/core/entities/**'
+            - 'services/core/jobs/**'
+            - 'services/core/files/**'
+            - 'services/core/models/**'
+            - 'services/core/inference-gateway/**'
+            - 'services/core/secrets/**'
+            - 'services/core/auth/**'
+            - 'services/intake/**'
+            # The suite runs under `uv run --frozen`, so the lockfile decides every version it
+            # executes against, and the root manifest decides which workspace members and
+            # dependency groups exist at all. Per-package manifests are already covered by the
+            # globs above. Without these two, a lockfile-only PR skips a required job.
+            - 'pyproject.toml'
+            - 'uv.lock'
+            - '.github/workflows/ci.yaml'  # the job definition itself
+            - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
             # Paths that can change what `import ...harbor_runtime` loads or how the smoke job runs.
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure

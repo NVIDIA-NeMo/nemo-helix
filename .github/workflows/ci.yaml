@@ -48,6 +48,7 @@ jobs:
       deps: ${{ steps.changes.outputs.deps }}
       fabric: ${{ steps.changes.outputs.fabric }}
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
+      evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
       e2e: ${{ steps.changes.outputs.e2e }}
       docs: ${{ steps.changes.outputs.docs }}
@@ -106,6 +107,26 @@ jobs:
           enable-cache: false
       - name: Run NGC metadata unit tests
         run: uv run --no-cache .github/scripts/tests/test_ngc_metadata.py
+
+  test-gates:
+    name: Check test gates
+    # Deliberately unconditional. An orphaned gate arrives by editing a test file, not by editing
+    # .github/scripts, so a path filter here would let exactly the case this guards slip through.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - name: Run test-gate check unit tests
+        run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
+      - name: Check for test gates no workflow sets
+        run: uv run --no-cache .github/scripts/check_test_gates.py
 
   uv-lock:
     name: Check uv lock
@@ -1320,6 +1341,44 @@ jobs:
           if-no-files-found: ignore
           path: crash-dumps/
 
+  evaluator-integration-test:
+    name: Evaluator integration tests
+    # Required (see ci-status), unlike the repo-wide `python-integration-test` job, which stays
+    # advisory so this does not make every team's integration suite blocking. Path-filtered, so it
+    # skips -- and skips count as pass -- on PRs that do not touch the evaluator.
+    needs: [changes, policy-wasm]
+    if: >-
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.evaluator-integration == 'true'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+      - name: Download policy WASM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: policy-wasm
+          path: services/core/auth/src/nhx/core/auth/assets
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run evaluator integration tests
+        run: >-
+          uv run --frozen pytest plugins/nemo-evaluator/tests/integration
+          -m integration -n 4 --dist loadgroup -v
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
   python-auth-idp-static-test:
     name: Python auth-idp static tests
     needs: [changes]
@@ -2299,7 +2358,9 @@ jobs:
       - helm-lint
       - helm-chart-verifier
       - lint
+      - evaluator-integration-test
       - ngc-metadata-test
+      - test-gates
       - policy-wasm
       - python-unit-test-tools
       - python-unit-test
