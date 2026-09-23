@@ -8,18 +8,15 @@
 # Builds Python wheels for:
 #   - causal-conv1d (CUDA extension required by mamba-ssm)
 #   - mamba-ssm     (selective state space model)
-#   - magi-attention (context-parallel attention, Automodel `magi` dependency group)
 #   - av + opencv-python-headless + decord2 (FFmpeg 8.1.2 bundled wheels for nspect / VLM)
 #
-# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc; magi-attention is
-# git-only and compiles CUDA kernels against the NGC torch.
+# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc.
 # av / opencv wheels bundle FFmpeg; upstream PyPI wheels lag nspect 8.1.2.
 # Build via the nhx-automodel-gpu-wheels bake group.
 #
 # Build args:
 #   CAUSAL_CONV1D_VERSION  - git tag to build              (default: v1.5.3)
 #   MAMBA_22_COMMIT        - git SHA or tag to build
-#   MAGI_ATTENTION_COMMIT  - MagiAttention git SHA (match Automodel's [tool.uv.sources] rev)
 #   CUDA_VERSION           - CUDA devel image version      (default: 12.8.1)
 #   TORCH_CUDA_ARCH_LIST   - semicolon-separated SM targets (default: "8.0;8.6;9.0")
 #   FFMPEG_VERSION         - FFmpeg for av/opencv wheels   (default: 8.1.2)
@@ -282,33 +279,6 @@ COPY --from=mamba-ssm-25-wheel-builder-py312 /wheels /wheels
 COPY --from=mamba-ssm-23-wheel-builder-py312 /wheels /wheels
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.1.1 /wheels /wheels/cu13.1.1
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
-
-# =============================================================================
-# magi-attention wheel — Python 3.12 (for Python 3.12 consumers) - Using CUDA 13.3
-# =============================================================================
-FROM mamba-wheel-base-py312-cu13.3 AS magi-attention-wheel-builder-py312-cu13.3
-
-ARG MAGI_ATTENTION_COMMIT=d7ea8afd44c790b65fab68a04a6a0fdd5adbf182
-
-# Build settings mirror Automodel's docker/Dockerfile: Hopper + Blackwell kernels only,
-# FFA kernels JIT-compiled at runtime instead of prebuilt. versioningit stamps the wheel
-# version from git tags (Automodel lists it as an extra build dependency).
-RUN mkdir -p /wheels && \
-    pip install --no-cache-dir versioningit && \
-    git clone https://github.com/SandAI-org/MagiAttention.git /src/magi-attention && \
-    cd /src/magi-attention && \
-    git checkout ${MAGI_ATTENTION_COMMIT} && \
-    git submodule update --init --recursive && \
-    MAGI_ATTENTION_BUILD_COMPUTE_CAPABILITY="90,100" \
-    MAGI_ATTENTION_PREBUILD_FFA=0 \
-    MAX_JOBS=8 \
-    uv build --wheel --no-build-isolation --out-dir=/wheels . && \
-    rm -rf /src/magi-attention
-
-# The final magi-attention-wheel image contains:
-#   - cu13.3/magi_attention-*-cp312-*.whl  (for Automodel on CUDA 13.3)
-FROM scratch AS magi-attention-wheel
-COPY --from=magi-attention-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
 
 # =============================================================================
 # FFmpeg / VLM wheels (manylinux_2_28) — av + opencv-python-headless + decord2

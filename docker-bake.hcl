@@ -76,10 +76,6 @@ variable "MAMBA_SSM_WHEEL_CONTEXT" {
   default = ""
 }
 
-variable "MAGI_ATTENTION_WHEEL_CONTEXT" {
-  default = ""
-}
-
 variable "FFMPEG_VLM_WHEEL_CONTEXT" {
   default = ""
 }
@@ -186,12 +182,6 @@ variable "CAUSAL_CONV1D_VERSION" {
   default = "v1.5.3"
 }
 
-# Keep in sync with the magi_attention rev in Automodel's [tool.uv.sources]
-# (AUTOMODEL_COMMIT in docker/automodel/Dockerfile.nhx-automodel-base).
-variable "MAGI_ATTENTION_COMMIT" {
-  default = "d7ea8afd44c790b65fab68a04a6a0fdd5adbf182"
-}
-
 function "get_causal_conv1d_wheel_image" {
   params = []
   result = "${WHEELS_REGISTRY}/causal-conv1d-wheel:${WHEELS_TAG}"
@@ -200,11 +190,6 @@ function "get_causal_conv1d_wheel_image" {
 function "get_mamba_ssm_wheel_image" {
   params = []
   result = "${WHEELS_REGISTRY}/mamba-ssm-wheel:${WHEELS_TAG}"
-}
-
-function "get_magi_attention_wheel_image" {
-  params = []
-  result = "${WHEELS_REGISTRY}/magi-attention-wheel:${WHEELS_TAG}"
 }
 
 function "get_ffmpeg_vlm_wheel_image" {
@@ -242,11 +227,6 @@ function "causal_conv1d_wheel_context" {
 function "mamba_ssm_wheel_context" {
   params = []
   result = notequal(MAMBA_SSM_WHEEL_CONTEXT, "") ? MAMBA_SSM_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:mamba-ssm-wheel" : "docker-image://${get_mamba_ssm_wheel_image()}"
-}
-
-function "magi_attention_wheel_context" {
-  params = []
-  result = notequal(MAGI_ATTENTION_WHEEL_CONTEXT, "") ? MAGI_ATTENTION_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:magi-attention-wheel" : "docker-image://${get_magi_attention_wheel_image()}"
 }
 
 function "ffmpeg_vlm_wheel_context" {
@@ -383,7 +363,6 @@ group "nhx-automodel-gpu-wheels" {
   targets = [
     "causal-conv1d-wheel",
     "mamba-ssm-wheel",
-    "magi-attention-wheel",
   ]
 }
 
@@ -843,8 +822,8 @@ target "nhx-gym-host-smoke-test" {
   platforms  = get_platforms()
 }
 
-# Python wheel builders (causal-conv1d, mamba-ssm, magi-attention, av, opencv-python-headless).
-# CUDA extensions only ship source on PyPI (or git); av/opencv bundle FFmpeg. Pre-built for
+# Python wheel builders (causal-conv1d, mamba-ssm, av, opencv-python-headless).
+# CUDA extensions only ship source on PyPI; av/opencv bundle FFmpeg. Pre-built for
 # amd64 and arm64. Wheels live at /wheels/*.whl inside each image.
 
 target "causal-conv1d-wheel" {
@@ -874,20 +853,6 @@ target "mamba-ssm-wheel" {
     CUDA_VERSION    = CUDA_VERSION
     MAMBA_22_COMMIT = MAMBA_22_COMMIT
     MAMBA_23_COMMIT = MAMBA_23_COMMIT
-  }
-  platforms = get_platforms()
-}
-
-target "magi-attention-wheel" {
-  target     = "magi-attention-wheel"
-  context    = "."
-  dockerfile = "docker/base/Dockerfile.python-wheels"
-  cache-to   = maybe_registry_cache_to("magi-attention-wheel")
-  cache-from = maybe_registry_cache_from("magi-attention-wheel")
-  tags       = wheel_tags("magi-attention-wheel")
-  output     = image_output()
-  args = {
-    MAGI_ATTENTION_COMMIT = MAGI_ATTENTION_COMMIT
   }
   platforms = get_platforms()
 }
@@ -1083,9 +1048,8 @@ target "nhx-automodel-base-builder" {
   tags            = base_tags("nhx-automodel-base")
   output          = image_output()
   contexts = {
-    causal-conv1d-wheel-image  = causal_conv1d_wheel_context()
-    mamba-ssm-wheel-image      = mamba_ssm_wheel_context()
-    magi-attention-wheel-image = magi_attention_wheel_context()
+    causal-conv1d-wheel-image = causal_conv1d_wheel_context()
+    mamba-ssm-wheel-image     = mamba_ssm_wheel_context()
   }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
