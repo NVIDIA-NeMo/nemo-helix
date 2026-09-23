@@ -139,6 +139,12 @@ runs:
             - 'services/core/secrets/**'
             - 'services/core/auth/**'
             - 'services/intake/**'
+            # The suite runs under `uv run --frozen`, so the lockfile decides every version it
+            # executes against, and the root manifest decides which workspace members and
+            # dependency groups exist at all. Per-package manifests are already covered by the
+            # globs above. Without these two, a lockfile-only PR skips a required job.
+            - 'pyproject.toml'
+            - 'uv.lock'
             - '.github/workflows/ci.yaml'  # the job definition itself
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
