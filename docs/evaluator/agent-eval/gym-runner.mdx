@@ -409,8 +409,9 @@ adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment
   group — it lives on `GymRuntimeConfig` and resolves locally from your environment, so it works
   the same way in both places.
 - **No retries and no re-run cache.** A failed rollout is not retried, and nothing is reused between
-  runs: every run collects from scratch and writes a fresh output directory, refusing to reuse one
-  that already exists. Re-running a large suite pays the full collection cost again. (The
+  runs: every run collects from scratch, and refuses to run into a directory that already holds Gym
+  rollout output — rollouts, the failures sidecar, or model-call captures. (An existing empty
+  directory is fine.) Re-running a large suite pays the full collection cost again. (The
   [Harbor runner](/documentation/evaluate-models/agent-eval/harbor-runner) does have both — do not
   carry that expectation across.)
 
