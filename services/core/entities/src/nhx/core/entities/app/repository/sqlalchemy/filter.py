@@ -7,8 +7,73 @@ from datetime import datetime
 from typing import Any, List, Optional, Set
 
 from nhx.common.api.filter import FilterOperation, FilterRepository
-from sqlalchemy import JSON, ColumnElement, DateTime, String, and_, cast, false, func, not_, or_, select
+from sqlalchemy import (
+    ARRAY,
+    JSON,
+    ColumnElement,
+    DateTime,
+    Float,
+    String,
+    and_,
+    bindparam,
+    cast,
+    false,
+    func,
+    not_,
+    or_,
+    select,
+)
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql.visitors import InternalTraversal
+
+
+class _JsonNumeric(ColumnElement):
+    """A JSON value at a dotted path coerced to a number, or SQL ``NULL`` when it
+    is not a JSON number (non-numeric text, JSON ``null``, or an absent key).
+
+    Ordered comparisons against SQL ``NULL`` are never true, so non-numeric and
+    absent values become "no match" on BOTH backends — matching
+    ``InMemoryFilterRepository``'s ordered-comparison contract — and PostgreSQL
+    never hits the hard ``invalid input syntax for type double precision`` error
+    that an unconditional ``CAST(text AS FLOAT)`` raises on non-numeric JSON text
+    (AIRCORE-749). The path is bound as a parameter, so the emitted SQL text is
+    constant regardless of path; ``_traverse_internals`` gives a path-distinct
+    cache key so SQLAlchemy can cache these statements (a bare ``inherit_cache``
+    would yield a ``None`` key and silently disable statement caching).
+    """
+
+    type = Float()
+    _traverse_internals = [
+        ("data_column", InternalTraversal.dp_clauseelement),
+        ("path", InternalTraversal.dp_string_list),
+    ]
+
+    def __init__(self, data_column: Any, path: List[str]):
+        self.data_column = data_column
+        self.path = list(path)
+
+
+@compiles(_JsonNumeric, "sqlite")
+def _compile_json_numeric_sqlite(element: _JsonNumeric, compiler: Any, **kw: Any) -> str:
+    col = compiler.process(element.data_column, **kw)
+    json_path = "$" + "".join('."' + seg.replace('"', '""') + '"' for seg in element.path)
+    path_param = compiler.process(bindparam(None, json_path), **kw)
+    # json_extract returns the native value; restrict to actual numbers so text /
+    # null / absent fall through to NULL (no match), as SQLite would otherwise
+    # coerce e.g. "abc" -> 0.0.
+    return f"CASE WHEN json_type({col}, {path_param}) IN ('integer', 'real') THEN json_extract({col}, {path_param}) END"
+
+
+@compiles(_JsonNumeric, "postgresql")
+def _compile_json_numeric_postgresql(element: _JsonNumeric, compiler: Any, **kw: Any) -> str:
+    col = compiler.process(element.data_column, **kw)
+    path_param = compiler.process(bindparam(None, element.path, type_=ARRAY(String)), **kw)
+    json_elem = f"({col} #> {path_param})"
+    json_text = f"({col} #>> {path_param})"
+    # Only cast when the JSON value is actually a number; otherwise NULL (no match)
+    # so a non-numeric/absent value never reaches the CAST and errors.
+    return f"CASE WHEN json_typeof({json_elem}) = 'number' THEN CAST({json_text} AS DOUBLE PRECISION) END"
 
 
 def _escape_like(value: str) -> str:
@@ -114,21 +179,19 @@ class SQLAlchemyFilterRepository(FilterRepository):
         """
         return func.trim(self._cast_json_to_raw_text(column), '"')
 
-    def _cast_json_to_numeric(self, column: Any) -> Any:
-        """Cast a JSON column element to a float for numeric comparisons.
-
-        Uses CAST(... AS FLOAT) which works on both SQLite (REAL) and PostgreSQL.
-        """
-        from sqlalchemy import Float
-
-        return cast(self._cast_json_to_text(column), Float)
-
     def _json_comparison(self, field: str, value: Any, op: str) -> Any:
-        """Build a comparison for JSON fields, using numeric cast when value is numeric."""
+        """Build an ordered comparison ($lt/$lte/$gt/$gte) for a field.
+
+        For JSON fields, a numeric filter value compares against the JSON value as a
+        number — but only when it actually is a JSON number; non-numeric text, JSON
+        null, and absent keys are no-match on both backends (see ``_JsonNumeric``),
+        matching the in-memory contract and avoiding PostgreSQL's CAST error.
+        Non-numeric filter values compare as trimmed text.
+        """
         column, is_json = self._get_column(field)
         if is_json:
-            if isinstance(value, (int, float)):
-                casted = self._cast_json_to_numeric(column)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                casted: Any = _JsonNumeric(getattr(self.model, "data"), field.split(".")[1:])
             else:
                 casted = self._cast_json_to_text(column)
                 value = str(value)
