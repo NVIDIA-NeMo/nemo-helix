@@ -3,20 +3,27 @@
 
 """SQL-parity safety net for in-memory filter evaluation.
 
-Each parametrized FilterOperation tree is run two ways against the same seeded
-SQLite rows, both through the same ``op.apply(repo)`` front door:
+Each parametrized FilterOperation tree is run against the same seeded rows on
+every available SQL backend (SQLite always; PostgreSQL via testcontainers when
+Docker is available) and through ``InMemoryFilterRepository``, all via the same
+``op.apply(repo)`` front door:
   1. ``SQLAlchemyFilterRepository`` (the SQL source of truth).
   2. ``InMemoryFilterRepository`` over the ORM instances (the in-memory backend).
 
-The two must select exactly the same set of row ids. ``InMemoryFilterRepository``
-is a native-Python evaluator, NOT a byte-for-byte SQL mirror (see its class
-docstring), so this suite only covers the cases where native
-and SQL semantics agree — strings, real numbers, native booleans (via ``$eq``),
-and logical trees. It deliberately excludes the cases where the SQL backends
-disagree with each other or rely on JSON-to-text coercion (e.g. int-vs-string
-``$eq``, boolean text rendering, non-numeric-text numeric casts); those are
-pinned as documented divergences in the plugin's test_filter_matches.py.
+All three must select exactly the same set of row ids. Production runs
+PostgreSQL while dev/CI default to SQLite, so the PostgreSQL leg is what catches
+cross-backend divergences a SQLite-only run would miss (AIRCORE-749): the
+non-numeric/null/absent numeric-cast (a hard error on PostgreSQL) and the
+absent-JSON-key semantics for ``$eq None`` are both covered here.
+
+``InMemoryFilterRepository`` is a native-Python evaluator, NOT a byte-for-byte
+SQL mirror (see its class docstring). The remaining documented divergences not
+yet reconciled in the SQL layer — int-vs-string ``$eq`` and boolean text
+rendering under ``$like``/``$in``/``$nin`` — are excluded here and pinned in the
+plugin's test_filter_matches.py.
 """
+
+from importlib.util import find_spec
 
 import pytest
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
@@ -49,11 +56,22 @@ class FakeEntity(Base):
 # substring (``_``/``%`` are ordinary characters), agreeing with the in-memory
 # backend. All keep score/tier/flag/tags present so no absent-key divergence is
 # introduced into the existing cases.
+#
+# ``data.n2`` is numeric on one row, non-numeric text on another, explicit null on a
+# third, and absent elsewhere — to pin the AIRCORE-749 numeric-comparison contract:
+# only an actual JSON number participates in $gt/$lt; non-numeric/null/absent are
+# no-match on both backends (and PostgreSQL must not error casting the text row).
 SEED = [
-    dict(id=1, name="llama", data={"score": 5, "tier": "free", "flag": True, "k": None, "tags": ["red", "blue"]}),
-    dict(id=2, name="Llama-2", data={"score": 9, "tier": "pro", "flag": False, "tags": ["red"]}),
+    dict(
+        id=1, name="llama", data={"score": 5, "tier": "free", "flag": True, "k": None, "n2": 5, "tags": ["red", "blue"]}
+    ),
+    dict(id=2, name="Llama-2", data={"score": 9, "tier": "pro", "flag": False, "n2": "notnum", "tags": ["red"]}),
     # "redish" is a deliberate prefix near-miss for "red" — quote-delimited matching must exclude it.
-    dict(id=3, name="zephyr", data={"score": 10, "tier": "pro", "flag": True, "k": "v", "tags": ["green", "redish"]}),
+    dict(
+        id=3,
+        name="zephyr",
+        data={"score": 10, "tier": "pro", "flag": True, "k": "v", "n2": None, "tags": ["green", "redish"]},
+    ),
     dict(id=4, name="mistral", data={"score": 100, "tier": "enterprise", "flag": False, "tags": []}),
     dict(id=5, name=None, data={"score": 1, "tier": "free", "flag": False, "tags": ["blue"]}),
     # `_` is a single-char wildcard under LIKE; "prod_db" must not match "prodXdb".
@@ -66,14 +84,66 @@ SEED = [
 ]
 
 
-@pytest.fixture
-def db():
-    engine = create_engine("sqlite:///:memory:")
+def _docker_available() -> bool:
+    """Whether a usable Docker daemon is reachable (for the testcontainers PG leg)."""
+    if find_spec("docker") is None:
+        return False
+    from docker.errors import DockerException
+
+    import docker
+
+    try:
+        client = docker.from_env()
+        try:
+            client.ping()
+        finally:
+            client.close()
+        return True
+    except (DockerException, OSError):
+        return False
+
+
+@pytest.fixture(scope="session")
+def _pg_engine():
+    """Session-scoped PostgreSQL engine via testcontainers; skipped without Docker.
+
+    Production runs PostgreSQL while dev/CI default to SQLite, so the SQLite-only
+    leg cannot catch cross-backend divergences (AIRCORE-749). This runs the same
+    cases against a real Postgres (matching the prod ``json`` column type).
+    """
+    if not _docker_available():
+        pytest.skip("Docker unavailable; skipping PostgreSQL parity leg")
+    from testcontainers.postgres import PostgresContainer
+
+    with PostgresContainer("postgres:16") as pg:
+        engine = create_engine(pg.get_connection_url())
+        try:
+            yield engine
+        finally:
+            engine.dispose()
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def db(request):
+    """Seed FakeEntity in SQLite and (when Docker is available) PostgreSQL.
+
+    The same cases run against both backends so SQL↔SQL and SQL↔in-memory
+    divergences are caught. The table is recreated per test so the session-scoped
+    Postgres engine stays clean between cases.
+    """
+    if request.param == "sqlite":
+        engine = create_engine("sqlite:///:memory:")
+    else:
+        engine = request.getfixturevalue("_pg_engine")
+    Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
-    with Session(engine) as session:
-        session.add_all([FakeEntity(**row) for row in SEED])
-        session.commit()
-        yield session
+    try:
+        with Session(engine) as session:
+            session.add_all([FakeEntity(**row) for row in SEED])
+            session.commit()
+            yield session
+    finally:
+        Base.metadata.drop_all(engine)
 
 
 def C(operator, field, value):
@@ -129,6 +199,11 @@ CASES = [
     ("lte_data_score", C(FilterOperator.LTE, "data.score", 9)),
     ("gt_data_tier_text", C(FilterOperator.GT, "data.tier", "a")),
     ("lt_data_tier_text", C(FilterOperator.LT, "data.tier", "g")),
+    # AIRCORE-749: ordered comparison only matches actual JSON numbers; non-numeric
+    # text / null / absent are no-match on both backends (PostgreSQL must not error
+    # casting the "notnum" row).
+    ("gt_data_n2_numeric_only", C(FilterOperator.GT, "data.n2", 4)),
+    ("lt_data_n2_numeric_only", C(FilterOperator.LT, "data.n2", 10)),
     ("and_tree", AND(C(FilterOperator.EQ, "data.tier", "pro"), C(FilterOperator.GT, "data.score", 9))),
     ("or_tree", OR(C(FilterOperator.EQ, "name", "llama"), C(FilterOperator.EQ, "name", "zephyr"))),
     ("not_tree", NOT(C(FilterOperator.EQ, "data.tier", "pro"))),
