@@ -3,6 +3,7 @@
 
 import type { BadgeProps } from '@nvidia/foundations-react-core';
 import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 export interface StartOptionTag {
   label: string;
@@ -28,15 +29,42 @@ export interface StartOption<Id extends string = string> {
   enabled: boolean;
 }
 
-export interface StartOptionCardProps {
-  option: StartOption;
-  selected: boolean;
-  /** Fired on click / keyboard activation. Only invoked for enabled options. */
-  onSelect: () => void;
-  /**
-   * Lays the icon beside the title instead of above it and drops the fixed height, so the
-   * row takes about half the vertical space. For flows where the tiles are a step on the
-   * way somewhere rather than the main event.
-   */
-  compact?: boolean;
+/** One template tile below the divider. */
+export interface StartTemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+export interface StartTemplateGroup {
+  id: string;
+  title: string;
+  templates: StartTemplate[];
+  /** Holds the section's place while it fetches; an empty group is dropped instead. */
+  loading?: boolean;
+  /** Icon colour for this group's tiles. What it signifies is the caller's to decide. */
+  accent?: string;
+}
+
+export interface StartPageProps {
+  heading: string;
+  headingDescription: string;
+  options: StartOption[];
+  templateGroups?: StartTemplateGroup[];
+  /** Selected option or template id — one namespace, so the two sets must not collide. */
+  value: string | null;
+  onChange: (value: string) => void;
+  /** Locks the whole group. Set while a selection is being acted on. */
+  disabled?: boolean;
+  /** Shown while nothing is selected, in place of the default prompt. */
+  emptyHint?: string;
+  continueLabel?: ReactNode;
+  continueLoading?: boolean;
+  canContinue: boolean;
+  onContinue: () => void;
+  /** Badge on the divider — the templates' counterpart to the per-option tags. */
+  templatesTag?: StartOptionTag;
+  /** Rendered above the footer — an error banner, typically. */
+  slotBanner?: ReactNode;
 }

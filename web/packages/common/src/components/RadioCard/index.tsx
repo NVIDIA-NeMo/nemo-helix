@@ -21,6 +21,13 @@ export interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupIte
   label: ReactNode;
   /** Optional secondary description text */
   description?: ReactNode;
+  /** Single-row tile metrics: 12px padding over a 4px gap, not 24px and 8px. */
+  compact?: boolean;
+  /** Type scale for the label and description. Defaults suit a full-size card. */
+  labelKind?: ComponentProps<typeof Text>['kind'];
+  descriptionKind?: ComponentProps<typeof Text>['kind'];
+  /** Rendered at the end of the label row, pushed right — a status or metadata Badge. */
+  slotEnd?: ReactNode;
   /** Optional icon or element shown between the radio indicator and the label */
   icon?: ReactNode;
   /** Id for the label element (used for aria-labelledby). Defaults to `${value}-label` */
@@ -55,6 +62,10 @@ export const RadioCard: FC<RadioCardProps> = ({
   label,
   description,
   icon,
+  slotEnd,
+  compact = false,
+  labelKind = 'body/bold/lg',
+  descriptionKind = 'body/regular/md',
   value,
   labelId,
   labelSide = 'right',
@@ -67,14 +78,20 @@ export const RadioCard: FC<RadioCardProps> = ({
   const id = labelId ?? `${String(value).replace(/\s+/g, '-')}-label`;
   const hasDescription = isDefined(description);
 
+  /** With no indicator the icon takes its column, so the description clears it too. */
+  const iconColumn = !showIndicator && icon != null;
+
   const textStartClass =
-    'text-left ' + (showIndicator && labelSide === 'right' ? 'col-start-2' : 'col-start-1');
+    'text-left ' +
+    ((showIndicator && labelSide === 'right') || iconColumn ? 'col-start-2' : 'col-start-1');
   const labelClass = `${textStartClass} row-start-1`;
   const descriptionClass = `${textStartClass} row-start-2`;
 
   // The hidden input is absolutely positioned, so it leaves grid flow entirely.
   const colClass = !showIndicator
-    ? '[&_.nv-card-content]:grid-cols-1'
+    ? iconColumn
+      ? '[&_.nv-card-content]:grid-cols-[auto_1fr]'
+      : '[&_.nv-card-content]:grid-cols-1'
     : labelSide === 'right'
       ? '[&_.nv-card-content]:grid-cols-[auto_1fr]'
       : '[&_.nv-card-content]:grid-cols-[1fr_auto]';
@@ -83,10 +100,15 @@ export const RadioCard: FC<RadioCardProps> = ({
     : labelSide === 'right'
       ? '[&_.nv-radio-group-input]:col-start-1'
       : '[&_.nv-radio-group-input]:col-start-2';
-  const gapClass = hasDescription
-    ? '[&_.nv-card-content]:gap-2!'
-    : '[&_.nv-card-content]:gap-0! [&_.nv-card-content]:gap-x-2!';
-  const nvPanelContentClass = `[&_.nv-card-content]:grid ${colClass} [&_.nv-card-content]:grid-rows-[auto_auto] [&_.nv-card-content]:items-center! [&_.nv-card-content]:w-full ${inputClass} ${gapClass} ${hasDescription ? '[&_.nv-card-content]:row-gap-2' : ''}`;
+  // Compact emits its own row gap rather than overriding `gap-2!`, which would race.
+  const gapClass = !hasDescription
+    ? '[&_.nv-card-content]:gap-0! [&_.nv-card-content]:gap-x-2!'
+    : compact
+      ? '[&_.nv-card-content]:gap-x-2! [&_.nv-card-content]:gap-y-1!'
+      : '[&_.nv-card-content]:gap-2!';
+  const rowGapClass = hasDescription && !compact ? '[&_.nv-card-content]:row-gap-2' : '';
+  const paddingClass = compact ? '[&_.nv-card-content]:p-3!' : '';
+  const nvPanelContentClass = `[&_.nv-card-content]:grid ${colClass} [&_.nv-card-content]:grid-rows-[auto_auto] [&_.nv-card-content]:items-center! [&_.nv-card-content]:w-full ${inputClass} ${gapClass} ${rowGapClass} ${paddingClass}`;
 
   return (
     <RadioGroupItem
@@ -115,21 +137,35 @@ export const RadioCard: FC<RadioCardProps> = ({
           aria-labelledby={id}
           {...attributes?.RadioGroupInput}
         />
+        {iconColumn && (
+          <Flex
+            align="center"
+            aria-hidden
+            className="col-start-1 row-span-2 row-start-1 shrink-0 self-start pt-0.5 text-base-foreground"
+          >
+            {icon}
+          </Flex>
+        )}
         {/* Single column for label + description (separate from the radio indicator column) */}
         <Flex direction="col" gap="density-sm" className={labelClass}>
-          <Flex gap="density-md" align="center" className="min-h-0">
-            {icon != null && (
+          <Flex
+            gap="density-md"
+            align="center"
+            className={cn('min-h-0', slotEnd != null && 'w-full')}
+          >
+            {icon != null && !iconColumn && (
               <Flex align="center" className="shrink-0 text-base-foreground" aria-hidden>
                 {icon}
               </Flex>
             )}
-            <Text kind="body/bold/lg" id={id}>
+            <Text kind={labelKind} id={id}>
               {label}
             </Text>
+            {slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
           </Flex>
         </Flex>
         {hasDescription && (
-          <Text kind="body/regular/md" color="secondary" className={descriptionClass}>
+          <Text kind={descriptionKind} color="secondary" className={descriptionClass}>
             {description}
           </Text>
         )}

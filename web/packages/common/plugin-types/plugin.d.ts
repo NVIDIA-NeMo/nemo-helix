@@ -9374,6 +9374,13 @@ interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupItem>, 'ch
   label: ReactNode;
   /** Optional secondary description text */
   description?: ReactNode;
+  /** Single-row tile metrics: 12px padding over a 4px gap, not 24px and 8px. */
+  compact?: boolean;
+  /** Type scale for the label and description. Defaults suit a full-size card. */
+  labelKind?: ComponentProps<typeof Text>['kind'];
+  descriptionKind?: ComponentProps<typeof Text>['kind'];
+  /** Rendered at the end of the label row, pushed right — a status or metadata Badge. */
+  slotEnd?: ReactNode;
   /** Optional icon or element shown between the radio indicator and the label */
   icon?: ReactNode;
   /** Id for the label element (used for aria-labelledby). Defaults to `${value}-label` */

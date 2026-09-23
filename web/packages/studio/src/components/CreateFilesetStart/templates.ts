@@ -37,7 +37,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'phishing-eval-corpus',
     title: 'Phishing email triage (evaluation set)',
     description:
-      'Labeled synthetic emails for the email-phishing-analyzer benchmark: the label is sampled, not model-authored, so recall and precision stay trustworthy. Difficulty is sampled alongside it — near-miss and ambiguous rows keep the baseline off 100%.',
+      'Labeled synthetic emails for benchmarking a phishing analyzer. Labels are sampled, not model-authored.',
     icon: MailWarning,
     tag: { label: 'Evaluation', color: 'red', kind: 'outline' },
     columns: [
@@ -128,7 +128,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'phishing-sft-training',
     title: 'Phishing analyzer fine-tuning (SFT)',
     description:
-      'Prompt–completion pairs that teach a small open model the phishing-analyzer task: a synthetic email in, a validated PhishingAnalysis JSON verdict out. Keep this dataset disjoint from the evaluation corpus.',
+      'Prompt–completion pairs teaching a small model the phishing-analyzer task. Keep it disjoint from the eval set.',
     icon: ShieldCheck,
     tag: { label: 'Fine-tuning', color: 'red', kind: 'outline' },
     columns: [
@@ -195,7 +195,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'sft-instruction',
     title: 'Instruction fine-tuning (SFT)',
     description:
-      'Instruction–response pairs for supervised fine-tuning: a sampled topic, an LLM-generated user instruction, and a model answer.',
+      'Instruction–response pairs: a sampled topic, an LLM-written instruction, and a model answer.',
     icon: GraduationCap,
     tag: { label: 'Fine-tuning', color: 'blue', kind: 'outline' },
     columns: [
@@ -232,8 +232,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
   {
     id: 'sampler-showcase',
     title: 'All samplers (showcase)',
-    description:
-      'A column for each previewable sampler sub-type — UUID, category, subcategory, uniform, gaussian, Bernoulli, Bernoulli mixture, binomial, Poisson, scipy, datetime, and timedelta — seeded with valid params for QA.',
+    description: 'One column per previewable sampler type, seeded with valid parameters — for QA.',
     icon: FlaskConical,
     tag: { label: 'Showcase', color: 'green', kind: 'outline' },
     columns: [
@@ -323,7 +322,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'code-generation',
     title: 'Code generation + validation (Python)',
     description:
-      'Python coding challenges with LLM-generated solutions and automatic code validation: exercises a sampled topic, an LLM task description, a code answer, and a pass/fail validation column.',
+      'Python exercises with LLM-written solutions and a pass/fail column from code validation.',
     icon: Code2,
     tag: { label: 'Fine-tuning', color: 'green', kind: 'outline' },
     columns: [
@@ -371,7 +370,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'structured-extraction',
     title: 'Structured data extraction',
     description:
-      'Free-form text paired with its structured JSON representation — for training extraction and information-retrieval models. An LLM writes a description; a second call extracts it into a typed schema.',
+      'Free-form text paired with the typed JSON extracted from it — for extraction models.',
     icon: Braces,
     tag: { label: 'Fine-tuning', color: 'purple', kind: 'outline' },
     columns: [
@@ -410,7 +409,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'preference-pairs',
     title: 'Preference pairs (reward modeling)',
     description:
-      'An instruction with a high-quality chosen answer, a lower-quality rejected answer, and an LLM judge score — for DPO fine-tuning and reward model training.',
+      'A chosen answer, a rejected answer and a judge score — for DPO and reward-model training.',
     icon: Scale,
     tag: { label: 'Alignment', color: 'yellow', kind: 'outline' },
     columns: [
@@ -466,7 +465,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'semantic-search',
     title: 'Semantic search dataset',
     description:
-      'Query–passage pairs with vector embeddings for retrieval, RAG evaluation, and semantic similarity benchmarks. Requires an embedding model configured under the "embedder" alias.',
+      'Query–passage pairs with embeddings for retrieval and RAG evaluation. Needs an "embedder" model.',
     icon: SearchCode,
     tag: { label: 'Retrieval', color: 'blue', kind: 'outline' },
     columns: [
@@ -522,7 +521,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'expression-transforms',
     title: 'Expression transforms (no LLM)',
     description:
-      'Derived columns computed via Jinja2 expressions — full-name concatenation, score banding into letter grades. No LLM calls; previews instantly.',
+      'Derived columns from Jinja2 expressions — no LLM calls, so it previews instantly.',
     icon: SquareFunction,
     tag: { label: 'Transform', color: 'teal', kind: 'outline' },
     columns: [
