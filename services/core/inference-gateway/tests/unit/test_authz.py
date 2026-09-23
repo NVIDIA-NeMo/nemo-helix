@@ -18,6 +18,7 @@ from nmp.core.inference_gateway.api.authz import (
     OPENAI_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
     enforce_model_ref_access,
+    enforce_model_refs_access,
     model_ref_workspaces,
 )
 
@@ -167,3 +168,18 @@ async def test_model_ref_lora_adapter_workspace_is_checked() -> None:
 )
 def test_model_ref_workspaces(name: str, expected: list[str]) -> None:
     assert model_ref_workspaces(ParsedEntityRef(workspace="base-ws", name=name)) == expected
+
+
+@pytest.mark.asyncio
+async def test_model_refs_invalid_reference_is_422() -> None:
+    with pytest.raises(HTTPException) as exc:
+        await enforce_model_refs_access("carol-ws", ["/gpt"])
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_model_refs_unqualified_reference_resolves_to_request_workspace() -> None:
+    client = _auth_client(Principal(id="user:carol", email="carol@example.com"), allowed=False)
+    auth_client_context.set(client)
+    await enforce_model_refs_access("carol-ws", ["gpt", "carol-ws/other"])
+    client.has_permissions.assert_not_awaited()

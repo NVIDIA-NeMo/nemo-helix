@@ -21,12 +21,13 @@ workspace must hold inference permission in that workspace too.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 from fastapi import HTTPException, status
 from nmp.common.auth.client import AuthClient
 from nmp.common.auth.dependencies import auth_client_context
 from nmp.common.auth.models import Principal
-from nmp.common.entities.utils import ParsedEntityRef
+from nmp.common.entities.utils import ParsedEntityRef, parse_model_entity_ref
 
 logger = logging.getLogger(__name__)
 
@@ -142,3 +143,15 @@ async def enforce_model_ref_access(request_workspace: str, model_ref: ParsedEnti
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to run inference on models in workspace '{workspace}'.",
         )
+
+
+async def enforce_model_refs_access(request_workspace: str, model_refs: Iterable[str]) -> None:
+    for model_ref in model_refs:
+        try:
+            parsed = parse_model_entity_ref(model_ref, default_workspace=request_workspace)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Invalid model entity reference {model_ref!r}: {exc}",
+            ) from exc
+        await enforce_model_ref_access(request_workspace, parsed)
