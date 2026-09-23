@@ -18,6 +18,8 @@ def _mock_oidc_config() -> SimpleNamespace:
         auth_enabled=True,
         issuer="https://idp.example.com",
         client_id="test-client",
+        cli_client_id=None,
+        bearer_token_source="access_token",
         token_endpoint="https://idp.example.com/token",
         device_authorization_endpoint="https://idp.example.com/device",
         default_scopes="openid profile email offline_access",
@@ -33,7 +35,12 @@ def test_login_password_grant_with_flags(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         "nemo_helix_ext.auth.device_flow.authenticate_with_password_grant",
-        lambda **_: SimpleNamespace(token_for_nhx="access-token", refresh_token="refresh-token"),
+        lambda **_: SimpleNamespace(
+            token_for_nhx="access-token",
+            refresh_token="refresh-token",
+            scope=None,
+            expires_in=3600,
+        ),
     )
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.auth.decode_jwt_claims",
@@ -71,7 +78,7 @@ def test_login_password_grant_with_env(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         "nemo_helix_ext.auth.device_flow.authenticate_with_password_grant",
-        lambda **_: SimpleNamespace(token_for_nhx="access-token", refresh_token=None),
+        lambda **_: SimpleNamespace(token_for_nhx="access-token", refresh_token=None, scope=None, expires_in=3600),
     )
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.auth.decode_jwt_claims",
