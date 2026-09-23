@@ -2420,7 +2420,7 @@ class TestInteractiveModelPairSelection:
         )
         upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
         upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        print_sample_setup_complete.assert_called_once_with("http://localhost:8080")
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", complete=True)
         assert event_order == [
             "skills",
             "complete",
@@ -2431,6 +2431,81 @@ class TestInteractiveModelPairSelection:
             "evaluation",
             "sample_complete",
         ]
+
+    def test_marks_sample_setup_incomplete_when_dataset_upload_fails(self):
+        client = MagicMock()
+        cli_context = MagicMock()
+        model_pair = ModelPair(default="default/model", fast="default/fast-model")
+
+        with (
+            patch(
+                f"{self._MOD}._interactive_collect_provider",
+                return_value=("provider", "https://provider.example.com", None, None, None),
+            ),
+            patch(f"{self._MOD}._register_provider_interactive"),
+            patch(f"{self._MOD}._wait_for_models", return_value=[model_pair.default]),
+            patch(f"{self._MOD}._select_model_pair", return_value=model_pair),
+            patch(f"{self._MOD}._save_model_pair"),
+            patch(f"{self._MOD}._maybe_install_skills"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
+            patch(f"{self._MOD}._ensure_workspace_exists", return_value=True),
+            patch(f"{self._MOD}._maybe_deploy_sample_agent", return_value=True),
+            patch(f"{self._MOD}._upload_sample_dataset", return_value=False),
+            patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
+            patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
+        ):
+            selected_path = _run_interactive_mode(
+                cli_context,
+                client,
+                "default",
+                "http://localhost:8080",
+                install_skills=False,
+            )
+
+        assert selected_path == "sample"
+        upload_sample_eval_config.assert_not_called()
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", complete=False)
+
+    def test_workspace_creation_failure_warns_and_skips_sample_steps(self):
+        client = MagicMock()
+        cli_context = MagicMock()
+        model_pair = ModelPair(default="default/model", fast="default/fast-model")
+
+        with (
+            patch(
+                f"{self._MOD}._interactive_collect_provider",
+                return_value=("provider", "https://provider.example.com", None, None, None),
+            ),
+            patch(f"{self._MOD}._register_provider_interactive"),
+            patch(f"{self._MOD}._wait_for_models", return_value=[model_pair.default]),
+            patch(f"{self._MOD}._select_model_pair", return_value=model_pair),
+            patch(f"{self._MOD}._save_model_pair"),
+            patch(f"{self._MOD}._maybe_install_skills"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
+            patch(f"{self._MOD}._ensure_workspace_exists", side_effect=PermissionError("forbidden")),
+            patch(f"{self._MOD}._maybe_deploy_sample_agent") as deploy_sample_agent,
+            patch(f"{self._MOD}._upload_sample_dataset") as upload_sample_dataset,
+            patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
+            patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
+            patch(f"{self._MOD}.console") as mock_console,
+        ):
+            selected_path = _run_interactive_mode(
+                cli_context,
+                client,
+                "default",
+                "http://localhost:8080",
+                install_skills=False,
+            )
+
+        assert selected_path == "sample"
+        deploy_sample_agent.assert_not_called()
+        upload_sample_dataset.assert_not_called()
+        upload_sample_eval_config.assert_not_called()
+        print_sample_setup_complete.assert_not_called()
+        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        assert "Could not create workspace 'sample': forbidden" in printed
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
         """When the new provider is still syncing, setup should not show a misleading picker."""
@@ -2493,9 +2568,9 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._maybe_install_skills"),
             patch(f"{self._MOD}._print_setup_complete"),
             patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
-            patch(f"{self._MOD}._maybe_deploy_sample_agent") as deploy_sample_agent,
+            patch(f"{self._MOD}._maybe_deploy_sample_agent", return_value=True) as deploy_sample_agent,
             patch(f"{self._MOD}._upload_sample_dataset", return_value=True) as upload_sample_dataset,
-            patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
+            patch(f"{self._MOD}._upload_sample_eval_config", return_value=True) as upload_sample_eval_config,
             patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
             patch(f"{self._MOD}.console") as mock_console,
         ):
@@ -2517,7 +2592,7 @@ class TestInteractiveModelPairSelection:
         )
         upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
         upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        print_sample_setup_complete.assert_called_once_with("http://localhost:8080")
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", complete=True)
         printed_lines = [call.args[0] for call in mock_console.print.call_args_list if call.args]
         assert any(
             "Models from existing providers are available, but not from 'my-ollama-custom' yet." in line
@@ -5052,14 +5127,25 @@ class TestPrintSetupComplete:
 class TestPrintSampleSetupComplete:
     def test_shows_studio_link_and_workspace_removal_command(self):
         with patch(f"{SETUP_MOD}.console") as mock_console:
-            _print_sample_setup_complete("http://localhost:8080/")
+            _print_sample_setup_complete("http://localhost:8080/", complete=True)
 
         panel = mock_console.print.call_args.args[0]
         assert panel.title == "[bold]Sample agent[/bold]"
+        assert panel.border_style == "green"
         assert "Sample workspace ready" in panel.renderable
         assert "http://localhost:8080/studio/workspaces/sample/dashboard" in panel.renderable
         assert "nemo workspaces delete sample" in panel.renderable
         assert "optimization" not in panel.renderable.lower()
+
+    def test_warns_when_sample_setup_is_incomplete(self):
+        with patch(f"{SETUP_MOD}.console") as mock_console:
+            _print_sample_setup_complete("http://localhost:8080/", complete=False)
+
+        panel = mock_console.print.call_args.args[0]
+        assert panel.border_style == "yellow"
+        assert "Sample workspace setup incomplete" in panel.renderable
+        assert "run [cyan]nemo setup[/cyan] again" in panel.renderable
+        assert "Sample workspace ready" not in panel.renderable
 
 
 class TestPromptPostSetupPath:
