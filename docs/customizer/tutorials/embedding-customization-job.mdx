@@ -206,7 +206,9 @@ if prepare_status != "completed":
 
 Stage 1 writes `training.jsonl` and `eval_beir/` under its job result as `workspace/fileset#path`.
 
-Automodel `dataset.training` and `retrieve-eval` `dataset` take a fileset name with no path fragment, so copy `training.jsonl` and `eval_beir/` to the root of a dataset fileset. Stage 1 unique-keys `eval_beir/qrels/test.tsv` before writing it; still drop duplicate `(query-id, corpus-id)` rows if you are uploading an older dump, because the BEIR loader rejects them. The next cell does the copy and unique-key.
+Automodel `dataset.training` and `retrieve-eval` `dataset` resolve that path fragment, so you can pass the Stage 1 `artifacts` URL through unchanged. Stage 1 unique-keys `eval_beir/qrels/test.tsv` before writing it. The BEIR loader still rejects duplicate `(query-id, corpus-id)` rows if an older dump still has them.
+
+Copy `training.jsonl` and `eval_beir/` to the root of a dataset fileset only if you want a fileset whose root already has both artifacts, or if you are uploading a dump that still has duplicate qrels. The next cell is that optional copy and unique-key.
 
 Freeze the resulting fileset and reuse it for every run. Scoring two runs on different splits measures data variance rather than model quality.
 

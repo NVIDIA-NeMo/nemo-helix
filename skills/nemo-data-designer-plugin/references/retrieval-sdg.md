@@ -63,13 +63,13 @@ Convert-only prepare (`enable_mining: false`) writes `training.jsonl` with empty
 
 `retrieval-prepare` saves one `artifacts` job result holding `training.jsonl`,
 `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`), and the wrapped
-`train.json` that mining consumes. Copy `training.jsonl` and `eval_beir/` to a
-fileset root (no path fragment) before Automodel `dataset.training` and
-`retrieve-eval` `dataset`. Automodel's dataset discovery selects `training.jsonl`
-and ignores the non-JSONL siblings; Stage 1 unique-keys qrels. Drop duplicate
-`(query-id, corpus-id)` rows from `eval_beir/qrels/test.tsv` if you are uploading
-an older dump — the BEIR loader rejects them. Splitting the artifacts into
-separate training and eval filesets is optional.
+`train.json` that mining consumes. Pass that fileset (or `workspace/fileset#path`)
+directly to Automodel `dataset.training` and `retrieve-eval` `dataset`. Automodel's
+dataset discovery selects `training.jsonl` and ignores the non-JSONL siblings;
+Stage 1 unique-keys qrels. Copy to a fileset root and drop duplicate
+`(query-id, corpus-id)` rows from `eval_beir/qrels/test.tsv` only if you want a
+rooted fileset or are uploading an older dump — the BEIR loader rejects duplicates.
+Splitting the artifacts into separate training and eval filesets is optional.
 
 ## Previous / Next / artifacts
 
