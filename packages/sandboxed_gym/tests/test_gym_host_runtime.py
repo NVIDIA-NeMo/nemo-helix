@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import collections
+import io
 import json
 import os
 import socket
 import threading
 import time
+import urllib.error
 from http.server import HTTPServer, ThreadingHTTPServer
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
@@ -1500,3 +1503,261 @@ def test_the_fallback_is_inert_without_a_vendored_snapshot(tmp_path, monkeypatch
     )
 
     assert "HF_HOME" not in os.environ
+
+
+def _policy_config(key: str = "${oc.env:GYM_POLICY_API_KEY}") -> dict[str, Any]:
+    return {
+        "policy_base_url": "https://integrate.api.nvidia.com/v1",
+        "policy_api_key": key,
+        "policy_model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    }
+
+
+def _raising_urlopen(status: int):
+    def _urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, status, "", {}, io.BytesIO(b""))
+
+    return _urlopen
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch, status: int) -> None:
+    """An auth refusal fails the host before Gym's servers are built.
+
+    Without this the refusal reaches the caller as a 500 from a loopback address: the component
+    server discards the upstream status, and the sandbox carrying the only log of it is destroyed.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-expired")
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(status))
+
+    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
+        runtime._preflight_policy_credential(_policy_config())
+
+    message = str(excinfo.value)
+    assert "integrate.api.nvidia.com" in message, "name the endpoint that refused the credential"
+    assert str(status) in message
+    assert "nemotron-3.5-lightning-30b-a3b" in message, "name the model, which may itself be wrong"
+    assert "GYM_POLICY_API_KEY" in message, "name the variable an operator has to rotate"
+
+
+@pytest.mark.parametrize("status", [429, 500, 502, 503])
+def test_preflight_lets_a_non_auth_failure_through(monkeypatch, status: int) -> None:
+    """Only authentication fails the run.
+
+    A provider that is overloaded, rate-limiting, or refuses this probe would otherwise turn a
+    retryable rollout error into an unrecoverable startup failure.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _raising_urlopen(status))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+def test_preflight_survives_a_network_error(monkeypatch) -> None:
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+
+    def _urlopen(request, timeout=None):
+        raise OSError("name resolution failed")
+
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _urlopen)
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param({"policy_base_url": "https://x/v1"}, id="incomplete"),
+        pytest.param(
+            {"policy_base_url": "${policy_root}", "policy_api_key": "k", "policy_model_name": "m"},
+            id="interpolation-gym-resolves-later",
+        ),
+    ],
+)
+def test_preflight_skips_what_it_cannot_resolve(monkeypatch, config: dict[str, Any]) -> None:
+    """Skipping beats probing an endpoint assembled from unresolved template text."""
+
+    def _never(request, timeout=None):  # pragma: no cover - asserted by not being called
+        raise AssertionError("preflight probed an endpoint it could not resolve")
+
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _never)
+
+    runtime._preflight_policy_credential(config)
+
+
+def test_preflight_reads_the_key_from_the_environment(monkeypatch) -> None:
+    """The key travels as ``${oc.env:VAR}`` so it stays out of the stored job spec."""
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+    sent: dict[str, Any] = {}
+
+    def _urlopen(request, timeout=None):
+        sent["auth"] = request.headers.get("Authorization")
+        sent["url"] = request.full_url
+        raise urllib.error.HTTPError(request.full_url, 500, "", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(runtime.urllib.request, "urlopen", _urlopen)
+    runtime._preflight_policy_credential(_policy_config())
+
+    assert sent["auth"] == "Bearer sk-live", "the resolved value, not the interpolation text"
+    # GET /v1/models is commonly unauthenticated, so it would pass for a key every rollout is refused for.
+    assert sent["url"].endswith("/chat/completions")
+
+
+def test_a_failure_carries_the_host_output_that_the_sandbox_destroys(monkeypatch) -> None:
+    """The error envelope is the only channel out: the sandbox dies with its logs."""
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+    runtime._OUTPUT_TAIL.append("(policy_model) upstream returned 401")
+
+    envelope = runtime._runtime_error("internal", "ClientResponseError: 500")
+
+    assert envelope["error"]["host_output_tail"] == ["(policy_model) upstream returned 401"]
+
+
+def test_an_error_with_no_host_output_omits_the_tail(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+
+    assert "host_output_tail" not in runtime._runtime_error("internal", "boom")["error"]
+
+
+def test_the_output_tail_keeps_the_most_recent_lines_and_still_writes_through() -> None:
+    """Bounded so a chatty host cannot crowd the rollout results out of the response."""
+    buffer: collections.deque[str] = collections.deque(maxlen=2)
+    underlying = io.StringIO()
+    tail = runtime._OutputTail(underlying, buffer)
+
+    tail.write("first\nsecond\n")
+    tail.write("third\n")
+
+    assert list(buffer) == ["second", "third"]
+    assert underlying.getvalue() == "first\nsecond\nthird\n", "output must still reach the real stream"
+
+
+@pytest.fixture
+def failed_bootstrap_server(monkeypatch):
+    """A host that recorded a bootstrap failure and is serving anyway."""
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(
+        runtime,
+        "_BOOTSTRAP_ERROR",
+        {
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "PolicyCredentialRejected: the policy endpoint rejected the configured credential",
+            }
+        },
+    )
+    server = HTTPServer(("127.0.0.1", 0), runtime.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_health_reports_a_failed_bootstrap_rather_than_starting(failed_bootstrap_server):
+    """A terminal failure reported as "starting" is polled to the readiness deadline.
+
+    The caller then reports a timeout, and the reason the host gave is never read.
+    """
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(f"{failed_bootstrap_server}/health", timeout=5)
+
+    body = json.loads(exc.value.read().decode())
+    assert body["status"] == "failed"
+    assert "rejected the configured credential" in body["error"]["message"]
+
+
+def test_a_rollout_against_a_failed_host_carries_the_bootstrap_error(failed_bootstrap_server):
+    """Nothing guarantees the caller polled /health before posting its first batch."""
+    request = urllib.request.Request(
+        f"{failed_bootstrap_server}/rollouts/run",
+        data=json.dumps({"rollouts": []}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request, timeout=5)
+
+    body = json.loads(exc.value.read().decode())
+    assert "rejected the configured credential" in body["error"]["message"]
+
+
+def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
+    """Exiting takes the sandbox down with its logs, so the diagnosis dies with it.
+
+    The caller is left polling an address that never answers, and reports a readiness timeout.
+    """
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: None)
+
+    def _reject():
+        raise runtime.PolicyCredentialRejected("the policy endpoint rejected the configured credential")
+
+    monkeypatch.setattr(runtime, "bootstrap_gym_host", _reject)
+    served = []
+    monkeypatch.setattr(
+        runtime, "ThreadingHTTPServer", lambda *a, **k: SimpleNamespace(serve_forever=lambda: served.append(True))
+    )
+
+    runtime.main()
+
+    assert served == [True]
+    assert runtime._READY is False
+    assert runtime._BOOTSTRAP_ERROR is not None
+    assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]
+
+
+def test_captured_output_masks_secret_env_values(monkeypatch):
+    """The tail is returned to the caller and stored in job logs.
+
+    A component that echoes its own environment would otherwise publish the credential it was
+    given to everyone who can read the evaluation's failure.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
+    monkeypatch.setenv("HOME", "/root")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._secret_env_values())
+
+    tail.write("resolved policy_api_key=nvapi-secretvalue123 for HOME=/root\n")
+
+    assert list(buffer) == ["resolved policy_api_key=*** for HOME=/root"]
+
+
+def test_captured_output_bounds_a_single_line(monkeypatch):
+    """One runaway line must not fill the failure response on its own."""
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer)
+
+    tail.write("x" * 5000 + "\n")
+
+    assert len(buffer[0]) == runtime._MAX_CAPTURED_LINE_CHARS
+
+
+def test_captured_output_reaches_the_underlying_stream_unchanged(monkeypatch):
+    """Masking applies to what is captured, not to what the host logs for an operator."""
+    stream = io.StringIO()
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
+    tail = runtime._OutputTail(stream, collections.deque(maxlen=10), runtime._secret_env_values())
+
+    tail.write("key=nvapi-secretvalue123\n")
+
+    assert stream.getvalue() == "key=nvapi-secretvalue123\n"
+
+
+def test_a_list_valued_policy_base_url_is_still_preflighted(monkeypatch):
+    """A vLLM-backed policy is configured with a list of endpoints, not a scalar.
+
+    Stringifying the list produces a URL no provider answers, the probe fails as inconclusive, and
+    a bad credential reaches the rollouts it was meant to be caught before.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-key")
+    assert runtime._resolved_policy_route(
+        {
+            "policy_base_url": ["http://vllm-0.svc.cluster.local:8000/v1"],
+            "policy_api_key": "${oc.env:GYM_POLICY_API_KEY}",
+            "policy_model_name": ["meta/llama-3.1-8b-instruct"],
+        }
+    ) == ("http://vllm-0.svc.cluster.local:8000/v1", "nvapi-key", "meta/llama-3.1-8b-instruct")

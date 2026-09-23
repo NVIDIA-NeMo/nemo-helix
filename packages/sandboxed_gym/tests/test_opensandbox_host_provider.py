@@ -10,15 +10,26 @@ the driver lazily, so the provider imports and constructs from a plain checkout.
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import logging
+from email.message import Message
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
-from sandboxed_gym.host.models import GymHostHandle, GymHostSpec, GymHostVolumeMount
+from sandboxed_gym.host.models import GymHostBootstrapFailed, GymHostHandle, GymHostSpec, GymHostVolumeMount
 from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider
 
 HEALTH_URL = "https://sandbox.example/gym-1/health"
 ROLLOUT_URL = "https://sandbox.example/gym-1/rollouts/run"
+
+
+def _raising(error: Exception):
+    def _raise(*args: Any, **kwargs: Any):
+        raise error
+
+    return _raise
 
 
 @pytest.fixture
@@ -107,3 +118,62 @@ def _spec() -> GymHostSpec:
         environment_mount=GymHostVolumeMount(pvc_claim="env", mount_path="/job/environment", read_only=True),
         workspace_mount=GymHostVolumeMount(pvc_claim="work", mount_path="/job/work"),
     )
+
+
+def test_a_host_that_reports_a_failed_bootstrap_stops_the_poll_immediately(
+    provider: OpenSandboxGymHostProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bootstrap failure is terminal, so polling it to the readiness deadline reports a timeout.
+
+    The reader then sees "did not become ready" for a host that answered on the first poll and
+    said exactly what was wrong.
+    """
+    handle = GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
+    polls = 0
+
+    def _failed(url: str, headers: Any) -> dict[str, Any]:
+        nonlocal polls
+        polls += 1
+        return {
+            "status": "failed",
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "the policy endpoint rejected the configured credential (HTTP 401)",
+                "host_output_tail": ["Traceback (most recent call last):"],
+            },
+        }
+
+    monkeypatch.setattr(provider, "_get_json", _failed)
+
+    with pytest.raises(GymHostBootstrapFailed) as excinfo:
+        asyncio.run(provider.wait_ready(handle, timeout_s=30))
+
+    assert polls == 1
+    message = str(excinfo.value)
+    assert "gym-1" in message
+    assert "rejected the configured credential (HTTP 401)" in message
+    assert "Traceback (most recent call last):" in message
+
+
+def test_a_503_health_response_keeps_the_body_it_carried(
+    provider: OpenSandboxGymHostProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The host reports a failed bootstrap as 503, so discarding that body discards the diagnosis."""
+    body = json.dumps({"status": "failed", "error": {"message": "boom"}}).encode("utf-8")
+    error = HTTPError(HEALTH_URL, 503, "Service Unavailable", Message(), io.BytesIO(body))
+    monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
+
+    assert provider._get_json(HEALTH_URL, {}) == {"status": "failed", "error": {"message": "boom"}}
+
+
+def test_a_503_health_response_without_a_body_still_reads_as_starting(
+    provider: OpenSandboxGymHostProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sandbox proxy 503s before the host exists at all, with no JSON of its own."""
+    error = HTTPError(HEALTH_URL, 503, "Service Unavailable", Message(), io.BytesIO(b"<html>no route</html>"))
+    monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
+
+    assert provider._get_json(HEALTH_URL, {}) == {"status": "starting"}

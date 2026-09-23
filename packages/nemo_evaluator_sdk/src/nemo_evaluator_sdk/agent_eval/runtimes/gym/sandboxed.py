@@ -54,7 +54,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.values.results import AggregateScore
 from pydantic import BaseModel, ConfigDict, Field
-from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S
+from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S, render_host_error
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,10 @@ def _unpack_model_call_captures(records: list[dict[str, Any]], work_dir: Path) -
         logger.info("Sandboxed Gym host returned no model-call captures; traces will carry no per-call timing.")
         return None
     return capture_dir
+
+
+def _host_error_message(rollout_url: str, error: object) -> str:
+    return f"sandboxed Gym host reported an error from {rollout_url}: {render_host_error(error)}"
 
 
 class SandboxedGymRuntimeConfig(BaseModel):
@@ -276,10 +280,7 @@ class SandboxedGymAgentTaskRunner:
             # connection open past the sandbox proxy's first-byte cap. A failure after that point
             # has only the body left to travel in, and carries the code and traceback that say
             # which of Gym's layers raised.
-            raise RuntimeError(
-                f"sandboxed Gym host reported an error from {self._config.rollout_url}: "
-                f"{error if isinstance(error, str) else json.dumps(error)[:2000]}"
-            )
+            raise RuntimeError(_host_error_message(self._config.rollout_url, error))
         results = body.get("results") if isinstance(body, Mapping) else None
         if not isinstance(results, list):
             raise RuntimeError(

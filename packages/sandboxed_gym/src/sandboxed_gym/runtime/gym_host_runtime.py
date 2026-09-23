@@ -11,9 +11,11 @@ is injected verbatim into the sandbox image, where ``nemo_rl`` may not be import
 """
 
 import asyncio
+import collections
 import concurrent.futures
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -21,6 +23,8 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -72,6 +76,7 @@ DEFAULT_GYM_PORT_RANGE_HIGH = 5999
 
 _DEFAULT_HTTP_PORT = 8080
 _READY: bool = False
+_BOOTSTRAP_ERROR: dict[str, Any] | None = None
 _RUN_HELPER: Any = None
 _HEAD_SERVER_CONFIG: Any = None
 _ROLLOUT_HELPER: Any = None
@@ -105,8 +110,62 @@ def _env_float(name: str, default: float) -> float:
     return float(raw)
 
 
+#: Env vars whose values are masked before a line is captured. The tail is returned to the caller
+#: and stored in job logs, so anything a component prints about its own environment must not be.
+_SECRET_ENV_NAME_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+#: Short enough that one runaway line cannot fill the failure response on its own.
+_MAX_CAPTURED_LINE_CHARS = 500
+
+
+def _secret_env_values() -> tuple[str, ...]:
+    return tuple(value for name, value in os.environ.items() if len(value) >= 8 and _SECRET_ENV_NAME_RE.search(name))
+
+
+class _OutputTail:
+    """Keeps the last ``limit`` lines written through it, and passes them on unchanged."""
+
+    def __init__(self, stream: Any, buffer: collections.deque[str], secrets: tuple[str, ...] = ()) -> None:
+        self._stream = stream
+        self._buffer = buffer
+        self._secrets = secrets
+
+    def write(self, text: str) -> int:
+        for line in text.splitlines():
+            if line.strip():
+                self._buffer.append(self._scrub(line))
+        return self._stream.write(text)
+
+    def _scrub(self, line: str) -> str:
+        for secret in self._secrets:
+            line = line.replace(secret, "***")
+        return line[:_MAX_CAPTURED_LINE_CHARS]
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+_OUTPUT_TAIL_LINES = 80
+
+#: Bounded well below the rollout deadline: preflight runs on every host start.
+_PREFLIGHT_TIMEOUT_S = 20.0
+
+_OUTPUT_TAIL: collections.deque[str] = collections.deque(maxlen=_OUTPUT_TAIL_LINES)
+
+
+def _install_output_tail() -> None:
+    secrets = _secret_env_values()
+    sys.stdout = _OutputTail(sys.stdout, _OUTPUT_TAIL, secrets)
+    sys.stderr = _OutputTail(sys.stderr, _OUTPUT_TAIL, secrets)
+
+
 def _runtime_error(code: str, message: str) -> dict[str, Any]:
-    return {"error": {"code": code, "message": message}}
+    error: dict[str, Any] = {"code": code, "message": message}
+    if _OUTPUT_TAIL:
+        error["host_output_tail"] = list(_OUTPUT_TAIL)
+    return {"error": error}
 
 
 def _load_global_config_dict() -> dict[str, Any]:
@@ -117,6 +176,82 @@ def _load_global_config_dict() -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise RuntimeError(f"{GYM_GLOBAL_CONFIG_ENV_KEY} must be a JSON object")
     return parsed
+
+
+class PolicyCredentialRejected(RuntimeError):
+    """The policy endpoint rejected the configured credential."""
+
+
+def _resolve_env_interpolation(raw: str) -> str:
+    """Resolve ``${oc.env:VAR}`` and ``${oc.env:VAR,default}``, leaving anything else untouched.
+
+    Not OmegaConf: this module is injected verbatim into the sandbox image and may import only the
+    standard library, PyYAML and ``nemo_gym``.
+    """
+
+    def substitute(match: re.Match[str]) -> str:
+        name, _, default = match.group(1).partition(",")
+        return os.environ.get(name.strip(), default.strip())
+
+    return re.sub(r"\$\{oc\.env:([^}]*)\}", substitute, raw)
+
+
+def _first_str(value: Any) -> str:
+    """Policy fields take a list as well as a scalar; a list of endpoints is probed at its first."""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return value if isinstance(value, str) else ""
+
+
+def _resolved_policy_route(global_config: dict[str, Any]) -> tuple[str, str, str]:
+    """Return ``(base_url, api_key, model_name)``, or empty strings if any stayed unresolved.
+
+    Gym supports interpolation forms this resolver does not. Those are Gym's to resolve, so a value
+    still holding ``${`` is reported as unresolved rather than probed as a literal.
+    """
+    values = tuple(
+        _resolve_env_interpolation(_first_str(global_config.get(key)))
+        for key in ("policy_base_url", "policy_api_key", "policy_model_name")
+    )
+    if any("${" in value for value in values):
+        return "", "", ""
+    return values
+
+
+def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
+    """Reject a bad policy credential before Gym's servers are built."""
+    base_url, api_key, model_name = _resolved_policy_route(global_config)
+    if not base_url or not api_key or not model_name:
+        return
+
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=json.dumps(
+            {"model": model_name, "messages": [{"role": "user", "content": "ok"}], "max_tokens": 1}
+        ).encode(),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=_PREFLIGHT_TIMEOUT_S):
+            return
+    except urllib.error.HTTPError as error:
+        if error.code not in (401, 403):
+            print(f"gym-host: policy preflight inconclusive (HTTP {error.code}); continuing", flush=True)
+            return
+        source = _policy_key_source(global_config)
+        raise PolicyCredentialRejected(
+            f"the policy endpoint {base_url} rejected the configured credential (HTTP {error.code}) "
+            f"for model {model_name}{source}. Every rollout would fail the same way."
+        ) from error
+    except Exception as error:
+        print(f"gym-host: policy preflight inconclusive ({type(error).__name__}: {error}); continuing", flush=True)
+
+
+def _policy_key_source(global_config: dict[str, Any]) -> str:
+    raw = str(global_config.get("policy_api_key") or "")
+    match = re.search(r"\$\{oc\.env:([A-Za-z_][A-Za-z0-9_]*)", raw)
+    return f", read from ${match.group(1)}" if match else ""
 
 
 def _free_port_in_range(low: int, high: int) -> int:
@@ -497,6 +632,8 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
         os.environ.get("NHX_WORK_PATH", "/job/work"),
     )
 
+    _preflight_policy_credential(global_config)
+
     # Import after the package is wired in: Gym reads extra search roots at import time.
     from nemo_gym.cli.env import RunHelper
     from nemo_gym.global_config import GlobalConfigDictParserConfig
@@ -692,7 +829,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         # Must match do_POST: a host that passes /health and then 503s every rollout is
         # invisible to wait_ready.
-        if not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
+        if _BOOTSTRAP_ERROR is not None:
+            self._send_json(503, {"status": "failed", **_BOOTSTRAP_ERROR})
+        elif not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
             self._send_json(503, {"status": "starting"})
         else:
             self._send_json(200, {"status": "ready"})
@@ -702,7 +841,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_empty(404)
             return
         if not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
-            self._send_json(503, _runtime_error("bootstrap_failed", "Gym host not ready"))
+            self._send_json(503, _BOOTSTRAP_ERROR or _runtime_error("bootstrap_failed", "Gym host not ready"))
             return
 
         try:
@@ -871,8 +1010,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    global _READY, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
+    global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
+    # Before bootstrap, so component startup output is captured if a rollout later fails.
+    _install_output_tail()
     Handler.max_request_bytes = _env_int("NHX_MAX_REQUEST_BYTES", Handler.max_request_bytes)
     Handler.max_response_bytes = _env_int("NHX_MAX_RESPONSE_BYTES", Handler.max_response_bytes)
     # Set from the caller's rollout_timeout_s. This, not that timeout, is what actually bounds a
@@ -880,8 +1021,15 @@ def main() -> None:
     Handler.rollout_deadline_s = _env_float(ROLLOUT_DEADLINE_ENV_KEY, Handler.rollout_deadline_s)
 
     _ensure_event_loop()
-    _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
-    _READY = True
+    try:
+        _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
+    except Exception as exc:
+        # Serve anyway. Exiting takes the sandbox down with its logs, and leaves the caller
+        # polling an address that never answers until its readiness timeout expires.
+        traceback.print_exc()
+        _BOOTSTRAP_ERROR = _runtime_error("bootstrap_failed", f"{type(exc).__name__}: {exc}")
+    else:
+        _READY = True
 
     port = _env_int("NHX_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
     # Threaded so chunked rollouts overlap and /health stays answerable mid-batch.
