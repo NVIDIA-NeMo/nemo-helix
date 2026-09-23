@@ -192,8 +192,7 @@ describe('StartPage selection', () => {
           templateGroups={[group()]}
           onSelect={onSelect}
           disabled
-          busyId="t1"
-          busyLabel="Registering model"
+          slotBanner={<div>Registering model</div>}
         />
       </TestProviders>
     );
