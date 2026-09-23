@@ -3,27 +3,34 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import json
+from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_optimization.backends.ga.transform import ModelPromptTransformer, PromptTransformError
 
 
-class _GatewayModel:
-    def __init__(self, response: object) -> None:
-        self.response = response
-        self.calls: list[dict[str, Any]] = []
+@dataclass
+class _Recorder:
+    response: object
+    requests: list[httpx.Request] = field(default_factory=list)
 
-    def post(self, trailing_uri: str, **kwargs: Any) -> object:
-        self.calls.append({"trailing_uri": trailing_uri, **kwargs})
-        return self.response
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(200, json=self.response)
 
 
-def _sdk(response: object) -> tuple[Any, _GatewayModel]:
-    model = _GatewayModel(response)
-    sdk = SimpleNamespace(inference=SimpleNamespace(gateway=SimpleNamespace(model=model)))
-    return sdk, model
+def _sdk(response: object) -> tuple[NemoClient, _Recorder]:
+    recorder = _Recorder(response)
+    sdk = NemoClient(
+        base_url="http://test",
+        workspace="default",
+        http_client=httpx.Client(transport=httpx.MockTransport(recorder)),
+    )
+    return sdk, recorder
 
 
 def _payload() -> dict[str, Any]:
@@ -39,7 +46,7 @@ def _payload() -> dict[str, Any]:
 
 
 def test_model_prompt_transformer_uses_platform_inference_gateway() -> None:
-    sdk, model = _sdk(
+    sdk, recorder = _sdk(
         {"choices": [{"finish_reason": "stop", "message": {"content": "```text\nImproved prompt\n```"}}]}
     )
     transformer = ModelPromptTransformer(
@@ -58,37 +65,34 @@ def test_model_prompt_transformer_uses_platform_inference_gateway() -> None:
     )
 
     assert result == "Improved prompt"
-    assert model.calls == [
-        {
-            "trailing_uri": "v1/chat/completions",
-            "workspace": "models",
-            "name": "gpt-test",
-            "body": {
-                "model": "models/gpt-test",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "Return only the revised prompt text, without commentary or markdown fences.",
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            "Prompt dimension: system_prompt\n\nPurpose: Answer accurately.\n\n"
-                            "Required format: Preserve the current prompt format.\n\nCurrent prompt:\n\n"
-                            "Base prompt.\n\nRewrite the prompt while preserving its variables, role, and constraints."
-                        ),
-                    },
-                ],
-                "temperature": 0.2,
-                "max_tokens": 77,
+    assert len(recorder.requests) == 1
+    request = recorder.requests[0]
+    assert request.method == "POST"
+    assert request.url.path == "/apis/inference-gateway/v2/workspaces/models/model/gpt-test/-/v1/chat/completions"
+    assert json.loads(request.content) == {
+        "model": "models/gpt-test",
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return only the revised prompt text, without commentary or markdown fences.",
             },
-            "timeout": 12.0,
-        }
-    ]
+            {
+                "role": "user",
+                "content": (
+                    "Prompt dimension: system_prompt\n\nPurpose: Answer accurately.\n\n"
+                    "Required format: Preserve the current prompt format.\n\nCurrent prompt:\n\n"
+                    "Base prompt.\n\nRewrite the prompt while preserving its variables, role, and constraints."
+                ),
+            },
+        ],
+        "temperature": 0.2,
+        "max_tokens": 77,
+    }
+    assert request.extensions["timeout"]["read"] == 12.0
 
 
-def test_model_prompt_transformer_requires_platform_client() -> None:
-    with pytest.raises(PromptTransformError, match="requires a NeMo Platform SDK client"):
+def test_model_prompt_transformer_requires_helix_client() -> None:
+    with pytest.raises(PromptTransformError, match="requires a Helix client"):
         ModelPromptTransformer(
             sdk=None,
             workspace="default",

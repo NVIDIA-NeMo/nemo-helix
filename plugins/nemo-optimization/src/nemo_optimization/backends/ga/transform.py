@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Prompt mutation and recombination through Platform inference."""
+"""Prompt mutation and recombination through Helix inference."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.entities.base import parse_qualified_name
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.entities.base import parse_qualified_name
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 
 
 class PromptTransformError(RuntimeError):
@@ -41,24 +43,24 @@ class PromptTransformer(Protocol):
 
 
 class ModelPromptTransformer:
-    """Invoke the configured optimizer model through Platform's inference gateway."""
+    """Invoke the configured optimizer model through Helix's inference gateway."""
 
     def __init__(
         self,
         *,
-        sdk: NeMoPlatform | None,
+        sdk: SyncHelixClient | None,
         workspace: str,
         payload: Mapping[str, Any],
         model_name: str,
     ) -> None:
         if sdk is None:
-            raise PromptTransformError("Prompt GA optimization requires a NeMo Platform SDK client.")
+            raise PromptTransformError("Prompt GA optimization requires a Helix client.")
         declaration = _model_declaration(payload, model_name)
         target = declaration.get("model") or declaration.get("model_name")
         if not isinstance(target, str) or not target.strip():
             raise PromptTransformError(f"Prompt optimizer model {model_name!r} must declare a model name.")
 
-        self._sdk = sdk
+        self._gateway = client_from_platform(sdk, InferenceGatewayClient)
         self._workspace, self._model = parse_qualified_name(target.strip(), default_workspace=workspace)
         self._model_ref = f"{self._workspace}/{self._model}"
         self._settings = _model_settings(declaration, model_name)
@@ -104,7 +106,7 @@ class ModelPromptTransformer:
         )
 
     def _complete(self, user_prompt: str) -> str:
-        body: dict[str, object] = {
+        body: dict[str, Any] = {
             "model": self._model_ref,
             "messages": [
                 {
@@ -116,12 +118,15 @@ class ModelPromptTransformer:
         }
         body.update({key: self._settings[key] for key in ("temperature", "max_tokens") if key in self._settings})
         try:
-            response = self._sdk.inference.gateway.model.post(
-                "v1/chat/completions",
-                workspace=self._workspace,
-                name=self._model,
-                body=body,
-                timeout=self._settings.get("timeout_s", 60.0),
+            response = (
+                self._gateway.with_options(timeout=self._settings.get("timeout_s", 60.0))
+                .model_post(
+                    workspace=self._workspace,
+                    name=self._model,
+                    trailing_uri="v1/chat/completions",
+                    body=JsonBody(body),
+                )
+                .data()
             )
         except Exception as exc:
             raise PromptTransformError(f"Prompt optimizer model call failed: {exc}") from exc
