@@ -4,9 +4,10 @@
 """``nemo agents optimize run-strategy`` — route a run to the strategy that implements it.
 
 This job owns no optimization logic.  It resolves ``--strategy`` to an installed
-job, hands the rest of the spec to that job's own schema, and delegates:
-:meth:`compile` returns the strategy's steps verbatim, so the strategy's work
-*is* this run — one job record, no child submission, no polling.
+job, puts the rest of the spec through that job's own submit lifecycle (its
+input schema, then its ``to_spec``), and delegates: :meth:`compile` returns the
+strategy's steps verbatim, so the strategy's work *is* this run — one job
+record, no child submission, no polling.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
-from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,9 @@ class RunStrategyJob(NemoJob):
         logger.info("Dispatching agents optimize to strategy job %s", target.__qualname__)
         compiled = await target.compile(
             workspace=workspace,
-            spec=_strategy_spec(target, spec, error=HelixJobCompilationError),
+            spec=await _strategy_spec(
+                target, spec, workspace=workspace, entity_client=entity_client, async_sdk=async_sdk
+            ),
             entity_client=entity_client,
             job_name=job_name,
             async_sdk=async_sdk,
@@ -131,19 +134,50 @@ def _strategy_payload(spec: RunStrategySpec) -> dict[str, Any]:
     return payload
 
 
-def _strategy_spec(target: type[NemoJob], spec: RunStrategySpec, *, error: type[Exception]) -> Any:
-    """Re-validate the forwarded fields against *target*'s own spec schema.
+async def _strategy_spec(
+    target: type[NemoJob],
+    spec: RunStrategySpec,
+    *,
+    workspace: str,
+    entity_client: object,
+    async_sdk: AsyncHelixClient,
+) -> Any:
+    """Put the forwarded fields through *target*'s own submit lifecycle.
 
-    The strategy owns what its inputs mean, so this is where a bad combination
-    (a config path that has to be fileset-relative, an output target the
-    strategy cannot write) is caught.  Surfacing it as *error* keeps it a clean
-    422 on the submit rather than a 500 from an unhandled ``ValidationError``.
+    The plugin service gives every job the same treatment on submit: the body is
+    validated against ``input_spec_schema`` (or ``spec_schema`` when the two
+    coincide), then ``to_spec`` turns that into the canonical shape ``compile``
+    expects.  The route layer already did that for the router's *own* spec; this
+    repeats it for the strategy, so one that resolves references or applies
+    remote-only rules in ``to_spec`` sees exactly what a direct submission would
+    have given it.  ``is_local`` is ``False`` for the same reason the route
+    adapter passes it: ``compile`` only ever runs on the plugin service.
+
+    Failures surface as :class:`HelixJobCompilationError` so the submit answers
+    with a clean 422 -- the treatment the route layer gives a ``to_spec`` that
+    fails there, re-created one layer down where the factory only maps its own
+    typed errors.  Those typed errors pass through untouched, so a strategy that
+    reports a dependency outage or a permission problem keeps its status code.
     """
     payload = _strategy_payload(spec)
-    schema = target.spec_schema
+    schema = target.input_spec_schema or target.spec_schema
     if schema is None:
         return payload
     try:
-        return schema.model_validate(payload)
+        submitted = schema.model_validate(payload)
     except ValidationError as exc:
-        raise error(f"Spec is not valid for optimization strategy {spec.strategy!r}: {exc}") from exc
+        raise HelixJobCompilationError(f"Spec is not valid for optimization strategy {spec.strategy!r}: {exc}") from exc
+    try:
+        return await target.to_spec(
+            submitted,
+            workspace=workspace,
+            entity_client=entity_client,
+            async_sdk=async_sdk,
+            is_local=False,
+        )
+    except (PermissionError, HelixJobDependencyUnavailableError, HelixJobCompilationError):
+        raise
+    except Exception as exc:  # noqa: BLE001 -- mirrors the route layer: a failing to_spec is a bad submit, not a crash
+        raise HelixJobCompilationError(
+            f"Optimization strategy {spec.strategy!r} could not prepare its spec: {exc}"
+        ) from exc
