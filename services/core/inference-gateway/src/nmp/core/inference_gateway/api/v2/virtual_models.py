@@ -35,6 +35,7 @@ from nemo_platform_plugin.inference_middleware_models import (
     GUARDRAIL_CONFIG_IDS_FIELD,
     MiddlewareCall,
     VirtualModel,
+    VirtualModelInferenceConfig,
     guardrail_config_membership_filter,
 )
 from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, UpdateVirtualModelRequest
@@ -44,6 +45,7 @@ from nmp.common.api.utils import generate_openapi_extra_params
 from nmp.common.entities import EntityClient, EntityConflictError, EntityNotFoundError
 from nmp.common.entities.values import DatetimeFilter, Filter, StringFilter, map_entity_field
 from nmp.common.service.dependencies import get_entity_client
+from nmp.core.inference_gateway.api.authz import enforce_model_refs_access
 from nmp.core.inference_gateway.api.dependencies import global_middleware_registry
 from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
 from pydantic import Field
@@ -95,6 +97,12 @@ def _rewrite_guardrail_filter(operation: FilterOperation | None) -> FilterOperat
             ],
         )
     return operation
+
+
+def _model_entity_refs(default_model_entity: str | None, models: list[VirtualModelInferenceConfig] | None) -> list[str]:
+    refs = [default_model_entity] if default_model_entity else []
+    refs.extend(entry.model for entry in models or [])
+    return refs
 
 
 def _middleware_validation_error(detail: str) -> HTTPException:
@@ -253,6 +261,7 @@ async def create_virtual_model(
     when an inference request arrives with ``model: "workspace/name"`` matching
     this entity.
     """
+    await enforce_model_refs_access(workspace, _model_entity_refs(body.default_model_entity, body.models))
     entity = VirtualModel(
         name=body.name,
         workspace=workspace,
@@ -436,6 +445,7 @@ async def update_virtual_model(
     # being flattened to plain dicts by model_dump(), which would trigger a
     # pydantic serialization warning on model_copy.
     diff = {field: getattr(body, field) for field in body.model_fields_set}
+    await enforce_model_refs_access(workspace, _model_entity_refs(diff.get("default_model_entity"), diff.get("models")))
     # model_copy skips validation, so the derived guardrail reference list would otherwise keep the
     # pre-patch pipelines' value. Everything else re-derives it through VirtualModel's validator.
     updated = existing.model_copy(update=diff).refresh_guardrail_config_ids()

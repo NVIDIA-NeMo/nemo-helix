@@ -106,6 +106,22 @@ class TestRequestHeadersContext:
 
         assert get_request_headers() == {}
 
+    def test_on_behalf_of_headers_layer_over_sdk_headers(self) -> None:
+        sdk = _make_fake_sdk(
+            **{
+                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NMP-Principal-On-Behalf-Of": "service:stale",
+            }
+        )
+
+        with platform_headers_context(sdk, {"X-NMP-Principal-On-Behalf-Of": "user:carol"}):
+            assert get_request_headers() == {
+                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NMP-Principal-On-Behalf-Of": "user:carol",
+            }
+
+        assert get_request_headers() == {}
+
 
 class TestHeaderAwareChatNVIDIA:
     def test_merges_static_headers_with_current_platform_headers(self, monkeypatch) -> None:

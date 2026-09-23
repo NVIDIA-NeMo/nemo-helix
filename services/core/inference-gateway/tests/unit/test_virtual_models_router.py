@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -749,3 +749,59 @@ class TestDeleteVirtualModel:
 
         get_resp = client.get(f"{BASE}/vm-stale-delete")
         assert get_resp.status_code == 200
+
+
+def _deny_workspace(denied_workspace: str):
+    return patch(
+        "nmp.core.inference_gateway.api.authz.can_run_inference_in",
+        new=AsyncMock(side_effect=lambda _request_workspace, workspace: workspace != denied_workspace),
+    )
+
+
+class TestModelEntityReferenceAccess:
+    def test_create_rejects_default_model_entity_in_inaccessible_workspace(self, client: TestClient):
+        with _deny_workspace("secret-ws"):
+            resp = client.post(BASE, json={"name": "vm-secret-default", "default_model_entity": "secret-ws/gpt"})
+
+        assert resp.status_code == 403
+        assert "secret-ws" in resp.json()["detail"]
+        assert client.get(f"{BASE}/vm-secret-default").status_code == 404
+
+    def test_create_rejects_models_entry_in_inaccessible_workspace(self, client: TestClient):
+        with _deny_workspace("secret-ws"):
+            resp = client.post(BASE, json={"name": "vm-secret-models", "models": [{"model": "secret-ws/gpt"}]})
+
+        assert resp.status_code == 403
+        assert client.get(f"{BASE}/vm-secret-models").status_code == 404
+
+    def test_create_rejects_lora_adapter_in_inaccessible_workspace(self, client: TestClient):
+        with _deny_workspace("secret-ws"):
+            resp = client.post(
+                BASE,
+                json={"name": "vm-secret-adapter", "default_model_entity": "default/base&adapters/secret-ws/adapter"},
+            )
+
+        assert resp.status_code == 403
+
+    def test_create_allows_accessible_cross_workspace_reference(self, client: TestClient):
+        with _deny_workspace("secret-ws"):
+            resp = client.post(BASE, json={"name": "vm-shared", "default_model_entity": "shared-ws/gpt"})
+
+        assert resp.status_code == 201, resp.text
+
+    def test_update_rejects_default_model_entity_in_inaccessible_workspace(self, client: TestClient):
+        _create(client, "vm-upd-secret", default_model_entity="default/model-a")
+
+        with _deny_workspace("secret-ws"):
+            resp = client.patch(f"{BASE}/vm-upd-secret", json={"default_model_entity": "secret-ws/gpt"})
+
+        assert resp.status_code == 403
+        assert client.get(f"{BASE}/vm-upd-secret").json()["default_model_entity"] == "default/model-a"
+
+    def test_update_does_not_recheck_unchanged_references(self, client: TestClient):
+        _create(client, "vm-upd-unchanged", default_model_entity="secret-ws/gpt")
+
+        with _deny_workspace("secret-ws"):
+            resp = client.patch(f"{BASE}/vm-upd-unchanged", json={"autoprovisioned": True})
+
+        assert resp.status_code == 200, resp.text

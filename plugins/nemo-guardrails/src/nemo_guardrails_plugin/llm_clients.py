@@ -49,7 +49,9 @@ def get_request_headers() -> RequestHeaders:
 
 
 @contextmanager
-def platform_headers_context(sdk: AsyncNeMoPlatform) -> Iterator[None]:
+def platform_headers_context(
+    sdk: AsyncNeMoPlatform, on_behalf_of_headers: Mapping[str, str] | None = None
+) -> Iterator[None]:
     """Make platform headers visible to rail model calls in this context.
 
     Model calls happen deep inside nemoguardrails/LangChain library code that
@@ -59,13 +61,14 @@ def platform_headers_context(sdk: AsyncNeMoPlatform) -> Iterator[None]:
 
     Args:
         sdk: The SDK whose forwarding headers should be propagated.
-            For per-request auth, pass a request-scoped SDK built via
-            ``sdk.with_options(set_default_headers=...)``.
+        on_behalf_of_headers: The request's caller identity from
+            ``InferenceMiddlewareContext.on_behalf_of_headers``, layered over the
+            SDK headers so rail model calls are authorized as the caller.
 
     The data flow is:
 
-    1. ``get_forwarding_headers(sdk)`` extracts the per-request
-       service-principal, on-behalf-of, and tracing headers.
+    1. ``get_forwarding_headers(sdk)`` extracts the service-principal and
+       tracing headers; ``on_behalf_of_headers`` adds the caller's identity.
     2. This context manager stores them in ``_request_headers_ctx`` for the
        current execution context.
     3. Non-streaming rails run via ``asyncio.to_thread``; Python copies the
@@ -78,7 +81,7 @@ def platform_headers_context(sdk: AsyncNeMoPlatform) -> Iterator[None]:
        ``_prepare_inputs_and_payload`` override reads ``_request_headers_ctx``
        and merges those headers into the request.
     """
-    headers = _request_headers_ctx.set(get_forwarding_headers(sdk))
+    headers = _request_headers_ctx.set({**get_forwarding_headers(sdk), **(on_behalf_of_headers or {})})
     try:
         yield
     finally:

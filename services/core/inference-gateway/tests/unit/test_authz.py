@@ -12,11 +12,16 @@ import pytest
 from fastapi import HTTPException
 from nmp.common.auth.dependencies import auth_client_context
 from nmp.common.auth.models import Principal
+from nmp.common.entities.utils import ParsedEntityRef
 from nmp.core.inference_gateway.api.authz import (
-    MODEL_READ_PERMISSION,
+    MODEL_EXEC_PERMISSION,
     OPENAI_EXEC_PERMISSION,
+    caller_on_behalf_of_headers,
+    can_run_inference_in,
     enforce_delegated_workspace_access,
-    enforce_resolved_model_workspace_access,
+    enforce_model_ref_access,
+    enforce_model_refs_access,
+    model_ref_workspaces,
 )
 
 
@@ -91,41 +96,124 @@ async def test_delegated_service_principal_denied_when_obo_user_lacks_permission
 
 
 @pytest.mark.asyncio
-async def test_resolved_model_same_workspace_is_noop() -> None:
-    # The resolved model entity is in the request's own workspace: nothing to check.
+async def test_model_ref_same_workspace_is_noop() -> None:
     client = _auth_client(Principal(id="user:alice", email="alice@example.com"), allowed=False)
     auth_client_context.set(client)
-    await enforce_resolved_model_workspace_access("carol-ws", "carol-ws")
+    await enforce_model_ref_access("carol-ws", ParsedEntityRef(workspace="carol-ws", name="gpt"))
     client.has_permissions.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_resolved_model_no_auth_context_is_noop() -> None:
-    await enforce_resolved_model_workspace_access("carol-ws", "default")
+async def test_model_ref_no_auth_context_is_noop() -> None:
+    await enforce_model_ref_access("carol-ws", ParsedEntityRef(workspace="default", name="gpt"))
 
 
 @pytest.mark.asyncio
-async def test_resolved_model_auth_disabled_is_noop() -> None:
+async def test_model_ref_auth_disabled_is_noop() -> None:
     client = _auth_client(Principal(id="user:alice", email="alice@example.com"), enabled=False, allowed=False)
     auth_client_context.set(client)
-    await enforce_resolved_model_workspace_access("carol-ws", "default")
+    await enforce_model_ref_access("carol-ws", ParsedEntityRef(workspace="default", name="gpt"))
     client.has_permissions.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_resolved_model_cross_workspace_allowed_when_caller_has_permission() -> None:
+async def test_model_ref_cross_workspace_allowed_when_caller_has_permission() -> None:
     client = _auth_client(Principal(id="user:alice", email="alice@example.com"), allowed=True)
     auth_client_context.set(client)
-    await enforce_resolved_model_workspace_access("carol-ws", "default")
-    client.has_permissions.assert_awaited_once_with("default", [MODEL_READ_PERMISSION])
+    await enforce_model_ref_access("carol-ws", ParsedEntityRef(workspace="default", name="gpt"))
+    client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
 
 
 @pytest.mark.asyncio
-async def test_resolved_model_cross_workspace_denied_when_caller_lacks_permission() -> None:
+async def test_model_ref_cross_workspace_denied_when_caller_lacks_permission() -> None:
     client = _auth_client(Principal(id="user:carol", email="carol@example.com"), allowed=False)
     auth_client_context.set(client)
     with pytest.raises(HTTPException) as exc:
-        await enforce_resolved_model_workspace_access("carol-ws", "default")
+        await enforce_model_ref_access("carol-ws", ParsedEntityRef(workspace="default", name="gpt"))
     assert exc.value.status_code == 403
     assert "default" in exc.value.detail
-    client.has_permissions.assert_awaited_once_with("default", [MODEL_READ_PERMISSION])
+    client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+
+
+@pytest.mark.asyncio
+async def test_model_ref_delegated_service_principal_checked_as_on_behalf_of_user() -> None:
+    client = _auth_client(Principal(id="service:agents", on_behalf_of="user:carol"), allowed=False)
+    auth_client_context.set(client)
+    with pytest.raises(HTTPException) as exc:
+        await enforce_model_ref_access("carol-ws", ParsedEntityRef(workspace="secret-ws", name="gpt"))
+    assert exc.value.status_code == 403
+    client.on_behalf_of_has_permissions.assert_awaited_once_with("secret-ws", [MODEL_EXEC_PERMISSION])
+    client.has_permissions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_model_ref_lora_adapter_workspace_is_checked() -> None:
+    client = _auth_client(Principal(id="user:carol", email="carol@example.com"), allowed=False)
+    auth_client_context.set(client)
+    with pytest.raises(HTTPException) as exc:
+        await enforce_model_ref_access(
+            "carol-ws", ParsedEntityRef(workspace="carol-ws", name="base&adapters/secret-ws/private-adapter")
+        )
+    assert exc.value.status_code == 403
+    assert "secret-ws" in exc.value.detail
+    client.has_permissions.assert_awaited_once_with("secret-ws", [MODEL_EXEC_PERMISSION])
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("gpt", ["base-ws"]),
+        ("base&adapters/adapter-ws/adapter", ["base-ws", "adapter-ws"]),
+        ("base&adapters/base-ws/adapter", ["base-ws"]),
+        ("base&adapters/malformed", ["base-ws"]),
+    ],
+)
+def test_model_ref_workspaces(name: str, expected: list[str]) -> None:
+    assert model_ref_workspaces(ParsedEntityRef(workspace="base-ws", name=name)) == expected
+
+
+@pytest.mark.asyncio
+async def test_permission_decisions_are_cached_per_principal() -> None:
+    client = _auth_client(Principal(id="user:alice", email="alice@example.com"), allowed=True)
+    auth_client_context.set(client)
+    assert await can_run_inference_in("carol-ws", "default")
+    assert await can_run_inference_in("carol-ws", "default")
+    client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+
+    other_client = _auth_client(Principal(id="user:bob", email="bob@example.com"), allowed=False)
+    auth_client_context.set(other_client)
+    assert not await can_run_inference_in("carol-ws", "default")
+    other_client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+
+
+@pytest.mark.asyncio
+async def test_model_refs_invalid_reference_is_422() -> None:
+    with pytest.raises(HTTPException) as exc:
+        await enforce_model_refs_access("carol-ws", ["/gpt"])
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_model_refs_unqualified_reference_resolves_to_request_workspace() -> None:
+    client = _auth_client(Principal(id="user:carol", email="carol@example.com"), allowed=False)
+    auth_client_context.set(client)
+    await enforce_model_refs_access("carol-ws", ["gpt", "carol-ws/other"])
+    client.has_permissions.assert_not_awaited()
+
+
+def test_caller_on_behalf_of_headers_without_auth_context_is_empty() -> None:
+    assert caller_on_behalf_of_headers() == {}
+
+
+def test_caller_on_behalf_of_headers_names_plain_user() -> None:
+    auth_client_context.set(_auth_client(Principal(id="user:carol", email="carol@example.com", groups=["eng", "ml"])))
+    assert caller_on_behalf_of_headers() == {
+        "X-NMP-Principal-On-Behalf-Of": "user:carol",
+        "X-NMP-Principal-On-Behalf-Of-Email": "carol@example.com",
+        "X-NMP-Principal-On-Behalf-Of-Groups": "eng,ml",
+    }
+
+
+def test_caller_on_behalf_of_headers_names_delegating_user() -> None:
+    auth_client_context.set(_auth_client(Principal(id="service:agents", on_behalf_of="user:carol")))
+    assert caller_on_behalf_of_headers() == {"X-NMP-Principal-On-Behalf-Of": "user:carol"}

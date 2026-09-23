@@ -361,6 +361,10 @@ class InferenceMiddlewareContext:
             :attr:`InferenceResponse.response_body_annotations` when it builds
             the response envelope, and final serialization uses the
             ``InferenceResponse`` field.
+        on_behalf_of_headers: ``X-NMP-Principal-On-Behalf-Of*`` headers naming the
+            acting caller of this request. Plugins that call back into the platform
+            (e.g. rail model calls through IGW) must merge these into their outbound
+            requests so those calls are authorized as the caller, not the plugin.
     """
 
     request_id: str
@@ -370,6 +374,7 @@ class InferenceMiddlewareContext:
     proxied_request: InferenceRequest | None = None
     backend_format: BackendFormat | None = None
     response_body_annotations: dict[str, Any] = field(default_factory=dict)
+    on_behalf_of_headers: Mapping[str, str] = field(default_factory=dict)
     _state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def state(self, plugin_name: str) -> PluginStateNamespace:
