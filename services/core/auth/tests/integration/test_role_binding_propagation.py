@@ -27,6 +27,10 @@ SERVICE_PRINCIPAL = "service:integration-test"
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
 IAM_ROLE_BINDINGS_PATH = "/apis/auth/v2/iam/role-bindings"
 
+# test_client is class-scoped (expensive to boot): keep these tests on one xdist worker so
+# they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("auth_role_binding_propagation")
+
 
 @pytest.fixture(scope="class")
 def test_client() -> Generator[TestClient, None, None]:
