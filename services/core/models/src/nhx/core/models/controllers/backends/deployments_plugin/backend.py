@@ -6,14 +6,29 @@
 import logging
 from typing import Any
 
-from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite, Volume
-from nemo_deployments_plugin.references import deployment_config_names_referencing_volume
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth import AuthContext as DeploymentAuthContext
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.deployments.client import AsyncDeploymentsClient
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
-from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.deployments.types import (
+    Container as ContainerDTO,
+)
+from nemo_helix_plugin.deployments.types import (
+    CreateDeploymentRequest,
+)
+from nemo_helix_plugin.deployments.types import (
+    Deployment as DeploymentDTO,
+)
+from nemo_helix_plugin.deployments.types import (
+    DeploymentConfig as DeploymentConfigDTO,
+)
+from nemo_helix_plugin.deployments.types import (
+    Prerequisite as RequestPrerequisite,
+)
+from nemo_helix_plugin.deployments.types import (
+    Volume as VolumeDTO,
+)
 from nemo_helix_plugin.models.types import ModelDeployment, ModelDeploymentStatus
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 from nhx.common.config import Runtime
@@ -24,10 +39,13 @@ from nhx.core.models.controllers.backends.deployments_plugin.compiler import com
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nhx.core.models.controllers.backends.deployments_plugin.executor import executor_for_runtime
 from nhx.core.models.controllers.backends.deployments_plugin.naming import entity_names
+from nhx.core.models.controllers.backends.deployments_plugin.request_converters import (
+    deployment_config_create_request,
+    volume_create_request,
+)
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import resolve_plugin_deployment
 from nhx.core.models.controllers.backends.deployments_plugin.status import (
     aggregate_status,
-    apply_deleting_timeout,
     apply_pending_timeout,
 )
 from nhx.core.models.controllers.context import ModelContext
@@ -39,6 +57,14 @@ _DEPLOYMENT_NAME_LABEL = "nhx.nvidia.com/deployment-name"
 _MODELS_ROLE_LABEL = "nhx.nvidia.com/models-role"
 
 
+def _config_references_volume(config: DeploymentConfigDTO, volume_name: str) -> bool:
+    """Whether a deployment config mounts the named volume (config- or container-level)."""
+    if any(mount.name == volume_name for mount in config.volume_mounts):
+        return True
+    containers: list[ContainerDTO] = [*config.containers, *config.init_containers]
+    return any(mount.name == volume_name for container in containers for mount in container.volume_mounts)
+
+
 def _deployment_auth_context(source: ModelDeployment) -> DeploymentAuthContext | None:
     auth_context = source.auth_context
     if auth_context is None:
@@ -48,12 +74,38 @@ def _deployment_auth_context(source: ModelDeployment) -> DeploymentAuthContext |
     return DeploymentAuthContext.model_validate(auth_context)
 
 
+def _on_behalf_of_headers(auth_context: DeploymentAuthContext | None) -> dict[str, str]:
+    """Headers so the models service principal acts on behalf of the requester.
+
+    The deployment must be owned by the user who requested the model, not the
+    models service. The service SDK already sends its own principal id; these add
+    the requester as the on-behalf-of principal so the plugin stamps the entity's
+    auth context to the requester (collapsing any nested delegation to the acting
+    identity).
+    """
+    if auth_context is None:
+        return {}
+    principal = auth_context.to_principal().effective_principal
+    headers = {"X-NHX-Principal-On-Behalf-Of": principal.id}
+    if principal.groups:
+        headers["X-NHX-Principal-On-Behalf-Of-Groups"] = ",".join(principal.groups)
+    if principal.email:
+        headers["X-NHX-Principal-On-Behalf-Of-Email"] = principal.email
+    # The subject's stable account id + authz aliases must travel too, or the auth
+    # layer re-resolves the forwarded identity as a fresh trusted-header account
+    # and account-bound permissions drift. Mirror the platform's delegation headers.
+    if principal.account_id:
+        headers["X-NHX-Subject-Account-Id"] = principal.account_id
+    if principal.authz_aliases:
+        headers["X-NHX-Subject-Aliases"] = ",".join(principal.authz_aliases)
+    return headers
+
+
 class DeploymentsPluginServiceBackend(ServiceBackend):
     """Compile model deployments into Volume and Deployment plugin entities."""
 
     def __init__(self, nhx_sdk: AsyncNeMoHelix, config: dict[str, Any], huggingface_model_puller: str) -> None:
         self._backend_config: DeploymentsPluginConfig | None = None
-        self._entities: NemoEntitiesClient | None = None
         self._deployments: AsyncDeploymentsClient | None = None
         self._huggingface_model_puller = huggingface_model_puller
         super().__init__(nhx_sdk, config)
@@ -62,20 +114,12 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         self._backend_config = DeploymentsPluginConfig(**self._config)
 
     def shutdown(self) -> None:
-        self._entities = None
         self._deployments = None
 
-    def _entity_client(self) -> NemoEntitiesClient:
-        if self._entities is None:
-            sdk = get_async_platform_sdk(as_service="models", internal=True)
-            self._entities = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
-        return self._entities
-
     def _deployments_client(self) -> AsyncDeploymentsClient:
-        # Read-only consumer of the deployments-plugin HTTP API (the models service
-        # principal, same SDK seam as the entity client). Writes and mutating reads
-        # still go through the entity client until the plugin write API grows the
-        # verbs they need.
+        # The models controller is a pure HTTP consumer of the deployments-plugin
+        # API (as the "models" service principal); it never touches the entity store
+        # or backend substrate directly.
         if self._deployments is None:
             sdk = get_async_platform_sdk(as_service="models", internal=True)
             self._deployments = client_from_platform(sdk, AsyncDeploymentsClient)
@@ -121,38 +165,47 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         try:
             compiled = compile_model_deployment(resolved, self._cfg)
             auth_context = _deployment_auth_context(resolved.deployment)
-            entities = self._entity_client()
+            workspace = resolved.deployment.workspace
+            # Create every entity on behalf of the requester so the deployment is
+            # owned by the user, not the models service principal. When there is no
+            # requester context, use the service client as-is.
+            obo_headers = _on_behalf_of_headers(auth_context)
+            client = self._deployments_client()
+            if obo_headers:
+                client = client.with_headers(obo_headers)
             if compiled.volume is not None:
-                await entities.create(compiled.volume)
+                await client.create_volume(workspace=workspace, body=volume_create_request(compiled.volume))
             if compiled.scratch_volume is not None:
-                await entities.create(compiled.scratch_volume)
+                await client.create_volume(workspace=workspace, body=volume_create_request(compiled.scratch_volume))
             if compiled.puller_config is not None:
-                await entities.create(compiled.puller_config)
-                await entities.create(
-                    Deployment(
+                await client.create_deployment_config(
+                    workspace=workspace, body=deployment_config_create_request(compiled.puller_config)
+                )
+                await client.create_deployment(
+                    workspace=workspace,
+                    body=CreateDeploymentRequest(
                         name=compiled.names.puller,
-                        workspace=resolved.deployment.workspace,
                         deployment_config=compiled.names.puller,
                         executor=executor,
                         desired_state="READY",
-                        status="PENDING",
-                    ).with_auth_context(auth_context)
+                    ),
                 )
-            await entities.create(compiled.server_config)
-            await entities.create(
-                Deployment(
+            await client.create_deployment_config(
+                workspace=workspace, body=deployment_config_create_request(compiled.server_config)
+            )
+            await client.create_deployment(
+                workspace=workspace,
+                body=CreateDeploymentRequest(
                     name=compiled.names.server,
-                    workspace=resolved.deployment.workspace,
                     deployment_config=compiled.names.server,
                     executor=executor,
                     desired_state="READY",
-                    status="PENDING",
                     prerequisites=(
-                        [Prerequisite(deployment_name=compiled.names.puller, condition="succeeded")]
+                        [RequestPrerequisite(deployment_name=compiled.names.puller, condition="succeeded")]
                         if compiled.puller_prerequisite
                         else []
                     ),
-                ).with_auth_context(auth_context)
+                ),
             )
         except Exception as exc:
             await self._rollback_create(ctx)
@@ -194,9 +247,9 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
                 status_message="Model deployment unavailable.",
             )
         names = entity_names(ctx.model_deployment.name)
-        server = await self._get_optional(Deployment, ctx.model_deployment.workspace, names.server)
-        puller = await self._get_optional(Deployment, ctx.model_deployment.workspace, names.puller)
-        volume = await self._get_optional(Volume, ctx.model_deployment.workspace, names.volume)
+        server = await self._get_optional_deployment(ctx.model_deployment.workspace, names.server)
+        puller = await self._get_optional_deployment(ctx.model_deployment.workspace, names.puller)
+        volume = await self._get_optional_volume(ctx.model_deployment.workspace, names.volume)
         result = aggregate_status(
             volume,
             puller,
@@ -225,19 +278,22 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         *,
         deleting_elapsed_seconds: float | None = None,
     ) -> DeploymentStatusUpdate:
-        """Stop deployments, then remove configs and volumes once substrate is gone."""
+        """Stop deployments, then remove configs and volumes once substrate is gone.
+
+        Reports the plugin's teardown progress upward rather than inventing a
+        models-side terminal state: while any substrate is still present the model
+        deployment stays DELETING. The deployments plugin owns the terminal outcome
+        (its reconciler retries substrate teardown and, if it gives up, leaves the
+        deployment FAILED); the models controller never force-removes an entity, so
+        it cannot orphan backend resources. A stuck teardown therefore surfaces as a
+        model deployment that stays DELETING until the plugin-side issue is resolved.
+        """
         names = entity_names(name)
         for deployment_name, config_name in ((names.server, names.server), (names.puller, names.puller)):
             if not await self._complete_deployment_delete(workspace, deployment_name, config_name):
-                result = DeploymentStatusUpdate(
+                return DeploymentStatusUpdate(
                     status=ModelDeploymentStatus.DELETING,
                     status_message="Waiting for plugin deployment teardown.",
-                )
-                return apply_deleting_timeout(
-                    result,
-                    elapsed_seconds=deleting_elapsed_seconds or 0.0,
-                    timeout_seconds=self._cfg.deleting_timeout_seconds,
-                    deployment_name=name,
                 )
         volumes_removed = True
         for volume_name in (names.scratch, names.volume):
@@ -249,43 +305,38 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
             if not volume_removed:
                 volumes_removed = False
         if not volumes_removed:
-            result = DeploymentStatusUpdate(status="DELETING", status_message="Waiting for plugin volume teardown.")
-            return apply_deleting_timeout(
-                result,
-                elapsed_seconds=deleting_elapsed_seconds or 0.0,
-                timeout_seconds=self._cfg.deleting_timeout_seconds,
-                deployment_name=name,
+            return DeploymentStatusUpdate(
+                status=ModelDeploymentStatus.DELETING, status_message="Waiting for plugin volume teardown."
             )
-        return DeploymentStatusUpdate(status="DELETED", status_message="Deleted deployments-plugin entities.")
+        return DeploymentStatusUpdate(
+            status=ModelDeploymentStatus.DELETED, status_message="Deleted deployments-plugin entities."
+        )
 
     async def _complete_deployment_delete(self, workspace: str, deployment_name: str, config_name: str) -> bool:
-        """Initiate plugin deployment stop and return True once config can be removed."""
-        deployment = await self._get_optional(Deployment, workspace, deployment_name)
+        """Initiate plugin deployment stop and return True once config can be removed.
+
+        Issues an idempotent delete against the plugin (a soft-delete: the plugin
+        sets the deployment DELETING and its reconciler tears down the substrate).
+        A deployment the plugin left stuck (e.g. FAILED after a deleting-timeout)
+        stays present, so this keeps returning False and the models-side
+        deleting-timeout escalates — the plugin owns that state and a human re-issues
+        delete once resolved, rather than the models controller force-removing the
+        entity and orphaning backend substrate.
+        """
+        deployment = await self._get_optional_deployment(workspace, deployment_name)
         if deployment is not None:
-            if deployment.status == "FAILED":
-                # Plugin reconciler gave up on substrate teardown; remove the stale
-                # entity so models delete can finish config/volume cleanup.
-                try:
-                    await self._entity_client().delete(
-                        Deployment,
-                        name=deployment.name,
-                        workspace=workspace,
-                        expected_db_version=deployment.db_version,
-                    )
-                except NemoEntityNotFoundError:
-                    pass
-                except NemoEntityConflictError:
-                    return False
-            elif deployment.status != "DELETING" or deployment.desired_state != "STOPPED":
-                deployment.status = "DELETING"
-                deployment.desired_state = "STOPPED"
-                await self._entity_client().update(deployment)
-                return False
-            else:
-                return False
+            # Idempotent soft-delete: a 404 means it's already gone, which is fine.
+            try:
+                await self._deployments_client().delete_deployment(name=deployment_name, workspace=workspace)
+            except NotFoundError:
+                pass
+            return False
+        # The deployment is gone; remove its config. An already-absent config (404)
+        # is success — this delete runs on a puller-less deploy, on repeat reconcile
+        # passes, and on the teardown-before-create of a fresh deployment.
         try:
-            await self._entity_client().delete(DeploymentConfig, name=config_name, workspace=workspace)
-        except NemoEntityNotFoundError:
+            await self._deployments_client().delete_deployment_config(name=config_name, workspace=workspace)
+        except NotFoundError:
             pass
         return True
 
@@ -295,17 +346,13 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         A volume still referenced by another deployment config is not owned
         exclusively by this model deployment and must be preserved.
         """
-        volume = await self._get_optional(Volume, workspace, volume_name)
+        volume = await self._get_optional_volume(workspace, volume_name)
         if volume is None:
             return True
         if volume.status == "DELETING":
             return False
 
-        referencing = await deployment_config_names_referencing_volume(
-            self._entity_client(),
-            workspace=workspace,
-            volume_name=volume_name,
-        )
+        referencing = await self._deployment_config_names_referencing_volume(workspace, volume_name)
         if referencing:
             logger.info(
                 "Preserving deployments-plugin volume %s/%s referenced by deployment configs: %s",
@@ -315,19 +362,24 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
             )
             return True
 
-        volume.status = "DELETING"
-        try:
-            await self._entity_client().update(volume)
-        except NemoEntityNotFoundError:
-            return True
-        except NemoEntityConflictError:
-            return False
+        await self._deployments_client().delete_volume(name=volume_name, workspace=workspace)
         return False
 
-    async def _get_optional(self, entity_type: type[Any], workspace: str, name: str) -> Any | None:
+    async def _deployment_config_names_referencing_volume(self, workspace: str, volume_name: str) -> list[str]:
+        """Names of deployment configs in the workspace whose mounts reference the volume."""
+        response = await self._deployments_client().list_deployment_configs(workspace=workspace)
+        return [config.name async for config in response.items() if _config_references_volume(config, volume_name)]
+
+    async def _get_optional_deployment(self, workspace: str, name: str) -> DeploymentDTO | None:
         try:
-            return await self._entity_client().get(entity_type, name=name, workspace=workspace)
-        except NemoEntityNotFoundError:
+            return (await self._deployments_client().get_deployment(name=name, workspace=workspace)).data()
+        except NotFoundError:
+            return None
+
+    async def _get_optional_volume(self, workspace: str, name: str) -> VolumeDTO | None:
+        try:
+            return (await self._deployments_client().get_volume(name=name, workspace=workspace)).data()
+        except NotFoundError:
             return None
 
     async def list_managed_deployment_names(self) -> list[str]:
