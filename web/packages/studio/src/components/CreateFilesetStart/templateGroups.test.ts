@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { OTHER_SECTION, TEMPLATE_SECTIONS } from '@studio/components/CreateFilesetStart/constants';
+import { OTHER_SECTION, SECTION_ORDER } from '@studio/components/CreateFilesetStart/constants';
 import { buildTemplateGroups } from '@studio/components/CreateFilesetStart/templateGroups';
 import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 
@@ -22,7 +22,7 @@ describe('buildTemplateGroups', () => {
 
     // A heading over a single card is padding, so these share one rather than each
     // getting their own.
-    const named: readonly string[] = TEMPLATE_SECTIONS;
+    const named: readonly string[] = SECTION_ORDER;
     const expected = FILESET_TEMPLATES.filter((t) => !named.includes(t.tag.label)).map(
       (t) => t.title
     );
