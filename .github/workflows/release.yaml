@@ -182,7 +182,7 @@ jobs:
       # validates the selected source tree has the wheel package paths, bake
       # targets, and NGC container overview files needed by later jobs.
       - name: Check out workflow revision
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -242,7 +242,7 @@ jobs:
             if (plan.sourceBranch) core.info(`Selected nightly source branch: ${plan.sourceBranch}`);
 
       - name: Checkout selected source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.plan.outputs.source_sha }}
           fetch-depth: 0
@@ -473,7 +473,7 @@ jobs:
     steps:
       # Load the dispatch helper from the workflow revision, not the selected release source.
       - name: Check out workflow revision
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -530,7 +530,7 @@ jobs:
     steps:
       # Load the dispatch helper from the workflow revision, not the selected release source.
       - name: Check out workflow revision
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -582,7 +582,7 @@ jobs:
     steps:
       # Load the dispatch helper from the workflow revision, not the selected release source.
       - name: Check out workflow revision
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -631,13 +631,13 @@ jobs:
       packages: write
     steps:
       - name: Check out selected source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan-release.outputs.source_sha }}
           persist-credentials: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.1
 
@@ -751,7 +751,7 @@ jobs:
     steps:
       # Load the dispatch helper from the workflow revision, not the selected release source.
       - name: Check out workflow revision
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -817,7 +817,7 @@ jobs:
         if: >-
           needs.plan-release.outputs.include_helm == 'true' &&
           needs.plan-release.outputs.dry_run != 'true'
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.1
 
@@ -1027,7 +1027,7 @@ jobs:
       contents: write
     steps:
       - name: Check out release history
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan-release.outputs.source_sha }}
           fetch-depth: 0
@@ -1115,7 +1115,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow revision
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
