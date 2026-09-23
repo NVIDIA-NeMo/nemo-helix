@@ -96,7 +96,7 @@ class OIDCConfig(BaseSettings):
 
     bearer_token_source: Literal["access_token", "id_token"] = Field(
         default="access_token",
-        description="OIDC user token Studio sends to NeMo Platform APIs. Use 'access_token' for standard OAuth "
+        description="OIDC user token Studio sends to NeMo Helix APIs. Use 'access_token' for standard OAuth "
         "resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer.",
     )
 

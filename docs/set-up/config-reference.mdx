@@ -97,7 +97,7 @@ auth:
     additional_issuers: []
     # OAuth client ID for this NeMo Helix deployment. Used for device flow and token audience validation. | default: ''
     client_id: ''
-    # OIDC user token Studio sends to NeMo Platform APIs. Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer. | default: 'access_token' | values: 'access_token' | 'id_token'
+    # OIDC user token Studio sends to NeMo Helix APIs. Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer. | default: 'access_token' | values: 'access_token' | 'id_token'
     bearer_token_source: access_token
     # Override authorization endpoint (defaults to discovery).
     authorization_endpoint:
