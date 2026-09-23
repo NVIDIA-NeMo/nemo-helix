@@ -3,18 +3,13 @@
 
 """Hello API endpoints."""
 
-from typing import TYPE_CHECKING
-
 from fastapi import APIRouter, Depends
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.config import HelixConfig
-from nhx.common.service.dependencies import get_platform_config, get_sdk_client, get_service_config_factory
+from nhx.common.service.dependencies import get_nemo_client, get_platform_config, get_service_config_factory
 from nhx.hello_world.api.v1.hello.schemas import ConfigInfoResponse, HelloResponse
 from nhx.hello_world.config import HelloWorldConfig
-
-if TYPE_CHECKING:
-    from nemo_helix import AsyncNeMoHelix
 
 router = APIRouter()
 
@@ -28,10 +23,10 @@ API_TAG = "Hello"
 )
 async def hello(
     workspace: str,
-    sdk: "AsyncNeMoHelix" = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> HelloResponse:
-    """Return a hello world message with workspace info from the SDK."""
-    workspace_info = (await client_from_platform(sdk, AsyncWorkspacesClient).get_workspace(name=workspace)).data()
+    """Return a hello world message with workspace info from the platform client."""
+    workspace_info = (await AsyncWorkspacesClient.from_client(client).get_workspace(name=workspace)).data()
     return HelloResponse(message=f"Hello World from workspace '{workspace_info.name}'")
 
 
