@@ -2534,6 +2534,63 @@ async def test_deployment_backed_does_not_link_lora_composite_ids(reconciler, mo
     assert any("&adapters/" in m.model_entity_id for m in served)
 
 
+def _shared_base_deployment_ctx() -> ModelContext:
+    config = MagicMock()
+    config.model_entity_id = "default/base-entity"
+    provider = MagicMock()
+    provider.workspace = "team-a"
+    provider.name = "deploy-provider"
+    provider.model_deployment_id = "team-a/my-deployment"
+    provider.enabled_models = None
+    provider.served_models = []
+    return ModelContext(
+        model_provider=provider,
+        model_deployment=MagicMock(),
+        model_deployment_config=config,
+        model_entity=None,
+    )
+
+
+_SHARED_BASE_DISCOVERED = [
+    {"id": "default/base-entity", "root": "default/base-entity", "parent": None},
+    {"id": "team-a--pirate-speak", "root": "/scratch/loras/x", "parent": "default/base-entity"},
+]
+
+
+def test_deployment_of_shared_base_routes_in_provider_workspace(reconciler):
+    ctx = _shared_base_deployment_ctx()
+    out = reconciler._generate_deployment_served_model_mappings(
+        ctx.model_provider, "team-a/deploy-provider", DiscoverySuccess(_SHARED_BASE_DISCOVERED), ctx
+    )
+
+    assert {m.model_entity_id: m.served_model_name for m in out} == {
+        "team-a/base-entity": "default/base-entity",
+        "team-a/base-entity&adapters/team-a/pirate-speak": "team-a--pirate-speak",
+    }
+
+
+@pytest.mark.asyncio
+async def test_deployment_of_shared_base_leaves_shared_model_untouched(reconciler, mock_models_sdk):
+    shared = _base_entity([])
+    shared.workspace = "default"
+    reconciler._models_sdk.models_client.list_models = AsyncMock(return_value=_AsyncPage([shared]))
+    await reconciler._entity_cache.refresh()
+
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_SHARED_BASE_DISCOVERED)):
+        await reconciler.reconcile_model_providers([_shared_base_deployment_ctx()])
+    await reconciler._entity_cache.flush()
+
+    reconciler._models_sdk.models_client.update_model.assert_not_awaited()
+    assert _request_body_call(mock_models_sdk.virtual_models_client.create_virtual_model) == {
+        "workspace": "team-a",
+        "name": "base-entity",
+        "default_model_entity": "team-a/base-entity",
+        "autoprovisioned": True,
+    }
+
+
 @pytest.mark.asyncio
 async def test_reconcile_creates_virtual_models_for_previously_served_models(reconciler, mock_models_sdk):
     """Back-fill: VirtualModels are created even for models already in served_models before this feature."""

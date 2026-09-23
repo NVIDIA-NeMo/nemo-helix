@@ -29,6 +29,7 @@ from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nmp.common.datetime_utils import ensure_utc
 from nmp.common.entities.constants import NAME_PATTERN
+from nmp.common.entities.global_workspace import is_global_workspace
 from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_entity_ref
 from nmp.core.models.app import (
     ModelWeightsType,
@@ -1002,7 +1003,11 @@ class ModelProviderReconciler:
             )
             return None
 
-        base_ws, _, _ = base_id.partition("/")
+        base_ws, _, base_name = base_id.partition("/")
+        # A deployment of a shared model routes in its own workspace, never on the shared model's routes.
+        route_base_id = base_id
+        if base_name and is_global_workspace(base_ws) and not is_global_workspace(workspace):
+            route_base_id = f"{workspace}/{base_name}"
 
         for obj in discovered_models:
             mid = obj.get("id")
@@ -1013,7 +1018,7 @@ class ModelProviderReconciler:
 
             # Base: parent is null and id equals our base
             if parent is None and mid == base_id:
-                served.append(ServedModelMapping(model_entity_id=base_id, served_model_name=mid))
+                served.append(ServedModelMapping(model_entity_id=route_base_id, served_model_name=mid))
                 continue
 
             # LoRA: parent equals our base. The sidecar writes adapter directories
@@ -1067,7 +1072,7 @@ class ModelProviderReconciler:
                 # do NOT parse it, because _resolve_base_backend_model_id may return an
                 # unqualified id and parsing would raise here, aborting the whole mapping
                 # loop where the old code produced an id later dropped by validation.
-                model_entity_id = f"{base_id}{ADAPTERS_INFIX}{adapter_ws}/{adapter_name}"
+                model_entity_id = f"{route_base_id}{ADAPTERS_INFIX}{adapter_ws}/{adapter_name}"
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
 
