@@ -21,7 +21,7 @@ harnesses:
     kind: hermes
     model:
       provider: openai
-      model: nvidia-nemotron-3-5-lightning-30b-a3b
+      model: nvidia-nemotron-3-super-120b-a12b
       base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
       api_key_env: NEMO_AGENTS_IGW_API_KEY
       temperature: 0.0
@@ -33,7 +33,7 @@ harnesses:
 models:
   judge:
     provider: openai
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    model: nvidia-nemotron-3-super-120b-a12b
     base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
     api_key_env: NEMO_AGENTS_IGW_API_KEY
     temperature: 0.0

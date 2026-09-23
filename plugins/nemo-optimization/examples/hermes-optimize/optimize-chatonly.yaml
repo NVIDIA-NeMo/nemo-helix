@@ -23,14 +23,14 @@ harness:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    model: nvidia-nemotron-3-super-120b-a12b
     base_url: ${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1
     api_key_env: NEMO_AGENTS_IGW_API_KEY
     temperature: 0.0
     top_p: 1.0
   judge:
     provider: nvidia
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    model: nvidia-nemotron-3-super-120b-a12b
     base_url: ${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1
     api_key_env: NEMO_AGENTS_IGW_API_KEY
     temperature: 0.0

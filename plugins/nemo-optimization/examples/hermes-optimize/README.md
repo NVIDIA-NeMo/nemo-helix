@@ -108,7 +108,7 @@ Confirm the agent's model answers through the gateway:
 ```bash
 curl -s "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H "Authorization: Bearer not-used" -H "Content-Type: application/json" \
-  -d '{"model": "nvidia-nemotron-3-5-lightning-30b-a3b", "messages": [{"role": "user", "content": "hi"}]}'
+  -d '{"model": "nvidia-nemotron-3-super-120b-a12b", "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
 The same model is the judge.
