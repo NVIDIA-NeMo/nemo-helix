@@ -29,6 +29,7 @@ from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
     DEFAULT_TASK_STORAGE_PATH,
@@ -158,7 +159,16 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
     )
     file_manager.validate_storage()
 
-    job = client_from_platform(sdk, JobsClient).get_job(name=job_id, workspace=workspace).data()
+    jobs_client = client_from_platform(sdk, JobsClient)
+    completion_tokens = result.summary.num_completion_tokens
+    if completion_tokens is not None:
+        HelixJobUsageReporter(
+            job_name=job_id,
+            workspace=workspace,
+            jobs_client=jobs_client,
+        ).report_totals(output_tokens=completion_tokens)
+
+    job = jobs_client.get_job(name=job_id, workspace=workspace).data()
     attempt_id = job.attempt_id
 
     with tempfile.TemporaryDirectory() as temp_dir:

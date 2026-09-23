@@ -179,3 +179,7 @@ crash-dumps/
 # it stays local. plugins/_temporary-scaled-evals/deploy/k8s/local.env.example is the
 # committed template.
 plugins/_temporary-scaled-evals/deploy/k8s/local.env
+
+# Renames
+sdk/python/nemo-helix/
+services/core/auth/src/nhx/
