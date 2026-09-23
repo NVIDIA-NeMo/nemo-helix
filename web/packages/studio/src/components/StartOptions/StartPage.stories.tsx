@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Banner, Flex, Spinner } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { Box, Plus, Sparkles, Upload } from 'lucide-react';
@@ -104,19 +103,7 @@ export const AccentedGroups: Story = {
   ),
 };
 
-/** Locked while the picked entry point is being acted on, with progress in the banner. */
+/** Locked while a pick is acted on; the picked tile stands in for its own progress. */
 export const Working: Story = {
-  render: () => (
-    <Demo
-      disabled
-      slotBanner={
-        <Banner kind="inline" status="info">
-          <Flex gap="density-md" align="center">
-            <Spinner size="small" aria-label="Setting up" />
-            Setting up…
-          </Flex>
-        </Banner>
-      }
-    />
-  ),
+  render: () => <Demo disabled busyId="a-Template Name" busyLabel="Registering model…" />,
 };
