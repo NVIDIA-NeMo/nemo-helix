@@ -84,6 +84,11 @@ platform secret, and optimize binds a placeholder key for gateway-routed models.
 
 [`optimize-chatonly.yaml`](optimize-chatonly.yaml) and
 [`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) are set up this way.
+`optimize-chatonly.yaml` writes the gateway address as `${NHX_BASE_URL}`, which
+the optimize job expands to the platform address reachable from wherever the job
+runs (subprocess, Docker or Kubernetes). `agent.yaml` is stored as-is when the
+agent is created, so it names `localhost:8080`; edit its `base_url` values first
+if your platform is elsewhere.
 Register a provider once:
 
 ```bash
