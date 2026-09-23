@@ -137,18 +137,24 @@ def filter_paths(paths: list[Path], include_globs: tuple[str, ...], exclude_glob
     return [path for path in paths if path_selected(path, include_globs, exclude_globs)]
 
 
-def tracked_paths(include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = ()) -> list[Path]:
-    return filter_paths(git_paths("ls-files", "-z"), include_globs, exclude_globs)
+def tracked_paths(
+    include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = (), paths: list[Path] | None = None
+) -> list[Path]:
+    candidates = git_paths("ls-files", "-z") if paths is None else paths
+    return filter_paths(candidates, include_globs, exclude_globs)
 
 
-def git_file_set(include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = ()) -> list[Path]:
-    return filter_paths(
-        git_paths("ls-files", "-z", "--cached", "--others", "--exclude-standard"), include_globs, exclude_globs
-    )
+def git_file_set(
+    include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = (), paths: list[Path] | None = None
+) -> list[Path]:
+    candidates = git_paths("ls-files", "-z", "--cached", "--others", "--exclude-standard") if paths is None else paths
+    return filter_paths(candidates, include_globs, exclude_globs)
 
 
-def content_paths(include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = ()) -> list[Path]:
-    return [path for path in git_file_set(include_globs, exclude_globs) if path not in IGNORE_PATHS]
+def content_paths(
+    include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = (), paths: list[Path] | None = None
+) -> list[Path]:
+    return [path for path in git_file_set(include_globs, exclude_globs, paths=paths) if path not in IGNORE_PATHS]
 
 
 def read_text(path: Path) -> str | None:

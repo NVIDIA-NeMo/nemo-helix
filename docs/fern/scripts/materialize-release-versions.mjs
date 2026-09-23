@@ -340,6 +340,7 @@ function materializeRelease(release) {
     rmSync(outputRoot, { recursive: true, force: true });
     cpSync(exportedDocs, outputRoot, { recursive: true });
     materializeGeneratedDocs(release, outputRoot);
+    pinStaleSnippetReferences(release, outputRoot);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -418,6 +419,61 @@ function materializeGeneratedDocs(release, outputRoot) {
     outputPath,
     buildHelmReferenceMdx(git(["show", helmReadmeRef]), git(["show", helmValuesRef])),
   );
+}
+
+// <Markdown src="/snippets/..."> references embed a page's own snippet includes at
+// build time from the *current* docs/fern/snippets tree, since that tree isn't
+// versioned per release. A rename or deletion of a still-referenced snippet leaves
+// old release snapshots pointing at a path that no longer exists. Pin those specific
+// references to the content the release tag actually shipped with, so a rename can't
+// retroactively break (or silently reword) a frozen release's docs.
+const MARKDOWN_SRC_PATTERN = /<Markdown\s+src="(\/snippets\/[^"]+)"/g;
+const SNIPPET_PIN_DIR = "_pinned-snippets";
+
+function pinStaleSnippetReferences(release, outputRoot) {
+  for (const filePath of walkMdxFiles(outputRoot)) {
+    const original = readFileSync(filePath, "utf8");
+    let rewritten = original;
+    let changed = false;
+
+    for (const match of original.matchAll(MARKDOWN_SRC_PATTERN)) {
+      const snippetRef = match[1];
+      const relSnippetPath = snippetRef.slice(1);
+      if (existsSync(join(fernDir, relSnippetPath))) {
+        continue;
+      }
+
+      const tagRef = `${release.ref}:docs/fern/${relSnippetPath}`;
+      if (!gitOk(["cat-file", "-e", tagRef])) {
+        continue;
+      }
+
+      const pinnedAbsPath = join(outputRoot, SNIPPET_PIN_DIR, relSnippetPath);
+      mkdirSync(dirname(pinnedAbsPath), { recursive: true });
+      writeFileSync(pinnedAbsPath, git(["show", tagRef]));
+
+      const pinnedRef = `/generated/release-versions/${release.dirName}/${pathPosix.join(SNIPPET_PIN_DIR, relSnippetPath)}`;
+      rewritten = rewritten.split(snippetRef).join(pinnedRef);
+      changed = true;
+    }
+
+    if (changed) {
+      writeFileSync(filePath, rewritten);
+    }
+  }
+}
+
+function walkMdxFiles(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...walkMdxFiles(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith(".mdx")) {
+      files.push(entryPath);
+    }
+  }
+  return files;
 }
 
 function rewriteNavPaths(navText, snapshotPrefix) {
