@@ -57,6 +57,7 @@ from nemo_helix_plugin.client.response import (
     NemoStreamResponse,
     SyncPageFetcher,
 )
+from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.client.types import (
     BinaryContent,
     OffsetPagination,
@@ -761,6 +762,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             headers=dict(default_headers) if default_headers else None,
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
             auth=TokenProviderAuth(self._auth) if self._auth else None,
+            verify=client_verify_from_env(),
         )
 
     @classmethod
@@ -1067,6 +1069,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             headers=dict(default_headers) if default_headers else None,
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
             auth=TokenProviderAuth(self._auth) if self._auth else None,
+            verify=client_verify_from_env(),
         )
 
     @classmethod
