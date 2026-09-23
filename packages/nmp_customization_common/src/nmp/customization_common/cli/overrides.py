@@ -47,6 +47,7 @@ from nmp.customization_common.cli.uploads import (
     UploadReport,
     create_resources,
     find_conflicts,
+    spec_parent,
     write_refs,
 )
 from pydantic import ValidationError
@@ -357,14 +358,7 @@ def _precheck(
 
 def _set_placeholder(spec: dict, path: tuple[str, ...]) -> None:
     """Fill *path* with a stand-in value, leaving a value the user supplied alone."""
-    node = spec
-    for key in path[:-1]:
-        child = node.get(key)
-        if not isinstance(child, dict):
-            child = {}
-            node[key] = child
-        node = child
-    node.setdefault(path[-1], _PLACEHOLDER_REF)
+    spec_parent(spec, path).setdefault(path[-1], _PLACEHOLDER_REF)
 
 
 def _validate(spec: dict, validate_job_spec: ValidateJobSpec) -> str:

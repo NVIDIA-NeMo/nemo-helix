@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,10 @@ import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
 from nmp.customization_common.cli.uploads import (
+    FilesUploadClient,
     SpecRefs,
     UploadError,
+    _upload_source,
     create_resources,
     fileset_name_for,
     find_conflicts,
@@ -33,10 +36,20 @@ class _Response:
 class _FakeFiles:
     """Records calls; `existing` names the filesets the platform already has."""
 
+    workspace = "default"
+
     def __init__(self, existing: set[str] | None = None) -> None:
         self.existing = existing or set()
         self.created: list[dict[str, Any]] = []
         self.uploaded: list[tuple[str, str]] = []
+        #: Per uploaded path: the blocks received, and the headers the call carried.
+        self.blocks: dict[str, list[bytes]] = {}
+        self.headers: dict[str, dict[str, str]] = {}
+        self._pending_headers: dict[str, str] = {}
+
+    def with_headers(self, headers: Mapping[str, str]) -> _FakeFiles:
+        self._pending_headers = dict(headers)
+        return self
 
     def get_fileset(self, *, workspace: str, name: str) -> _Response:
         if name not in self.existing:
@@ -47,8 +60,11 @@ class _FakeFiles:
         self.created.append({"name": body.name, "purpose": body.purpose, "storage": body.storage})
         return _Response({"name": body.name})
 
-    def upload_file(self, *, workspace: str, name: str, path: str, content: bytes) -> _Response:
+    def upload_file(self, *, workspace: str, name: str, path: str, content: Iterable[bytes]) -> _Response:
+        assert not isinstance(content, bytes), "file content must be streamed, not read into memory"
         self.uploaded.append((name, path))
+        self.blocks[path] = list(content)
+        self.headers[path], self._pending_headers = self._pending_headers, {}
         return _Response({"path": path})
 
 
@@ -82,7 +98,7 @@ def _Report(**kwargs: Any):
 
 def _run(
     *,
-    files: _FakeFiles,
+    files: FilesUploadClient,
     models: _FakeModels,
     model_source: str | None = None,
     dataset_source: str | None = None,
@@ -232,6 +248,71 @@ class TestDatasetUpload:
             _run(files=files, models=models, dataset_source="tau/commonsense_qa")
 
 
+class TestStreamedUpload:
+    """Files are streamed as ``nemo files upload`` streams them, never read whole."""
+
+    def test_file_is_sent_in_blocks_with_its_length(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from filesets import FilesetFileSystem
+
+        monkeypatch.setattr(FilesetFileSystem, "blocksize", 4)
+        shard = tmp_path / "weights"
+        shard.mkdir()
+        (shard / "model.safetensors").write_bytes(b"0123456789")
+
+        files = _FakeFiles()
+        _run(files=files, models=_FakeModels(), model_source=str(shard))
+
+        assert files.blocks["model.safetensors"] == [b"0123", b"4567", b"89"]
+        assert files.headers["model.safetensors"] == {"Content-Length": "10"}
+
+    def test_progress_goes_to_stderr_not_stdout(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """stdout carries the refs as JSON for scripts; the progress bars must not land there."""
+        data = tmp_path / "train.jsonl"
+        data.write_text("{}\n")
+
+        _run(files=_FakeFiles(), models=_FakeModels(), dataset_source=str(data))
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Uploading train" in captured.err
+
+    def test_the_real_files_client_sends_the_streamed_body(self, tmp_path: Path) -> None:
+        """The typed FilesClient satisfies the upload protocol, header included."""
+        from nemo_platform_plugin.files.client import FilesClient
+
+        seen: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["path"] = request.url.path
+            seen["length"] = request.headers.get("content-length")
+            seen["body"] = request.read()
+            return httpx.Response(
+                200,
+                json={
+                    "file_ref": "default/train#train.jsonl",
+                    "file_url": str(request.url),
+                    "path": "train.jsonl",
+                    "size": len(seen["body"]),
+                },
+            )
+
+        data = tmp_path / "train.jsonl"
+        data.write_bytes(b'{"a": 1}\n')
+        client = FilesClient(
+            base_url="http://nmp.test",
+            workspace="default",
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+        _upload_source(client, name="train", workspace="default", source=data)
+
+        assert seen == {
+            "path": "/apis/files/v2/workspaces/default/filesets/train/-/train.jsonl",
+            "length": "9",
+            "body": b'{"a": 1}\n',
+        }
+
+
 class TestEitherOrBoth:
     def test_model_only_leaves_the_dataset_alone(self) -> None:
         files, models = _FakeFiles(), _FakeModels()
@@ -287,6 +368,29 @@ class TestWriteRefs:
         spec: dict[str, Any] = {"model": "keep", "dataset": {"training": "keep"}}
         write_refs(spec, AUTOMODEL_REFS, _Report(dataset_ref="default/d"))
         assert spec["model"] == "keep"
+
+    @pytest.mark.parametrize(
+        ("refs", "spec", "expected"),
+        [
+            (UNSLOTH_REFS, {"model": None}, {"model": {"name": "default/m"}}),
+            (
+                AUTOMODEL_REFS,
+                {"dataset": "stale"},
+                {"dataset": {"training": "default/d", "validation": "default/d"}},
+            ),
+        ],
+        ids=["unsloth-null-model", "automodel-string-dataset"],
+    )
+    def test_a_non_object_on_the_path_is_replaced(
+        self, refs: SpecRefs, spec: dict[str, Any], expected: dict[str, Any]
+    ) -> None:
+        """The pre-upload check fills these paths the same way, so writing must not crash after upload."""
+        report = _Report(
+            model_ref="default/m" if "model" in expected else None,
+            dataset_ref="default/d" if "dataset" in expected else None,
+        )
+        write_refs(spec, refs, report)
+        assert spec == expected
 
 
 class TestExistOk:

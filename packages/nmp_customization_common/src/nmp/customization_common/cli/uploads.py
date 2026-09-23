@@ -25,13 +25,14 @@ explicitly, because silently training on stale data is worse than a slow upload.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
+from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 from nemo_platform_plugin.models.types import CreateModelEntityRequest
@@ -54,7 +55,12 @@ class FilesUploadClient(Protocol):
 
     def create_fileset(self, *, workspace: str, body: Any, exist_ok: bool) -> Any: ...
 
-    def upload_file(self, *, workspace: str, name: str, path: str, content: bytes) -> Any: ...
+    def upload_file(self, *, workspace: str, name: str, path: str, content: Iterable[bytes]) -> Any: ...
+
+    def with_headers(self, headers: Mapping[str, str]) -> FilesUploadClient: ...
+
+    @property
+    def workspace(self) -> str | None: ...
 
 
 class ModelsRegistryClient(Protocol):
@@ -369,9 +375,30 @@ def _create_model_entity(
 
 
 def _upload_source(files: FilesUploadClient, *, name: str, workspace: str, source: Path) -> None:
-    """Upload *source* into the fileset, one request per file, keeping local names."""
-    for local, remote in _files_to_upload(source):
-        files.upload_file(workspace=workspace, name=name, path=remote, content=local.read_bytes())
+    """Upload *source* into the fileset, keeping local names, as ``nemo files upload`` does.
+
+    Goes through the same ``FilesetFileSystem`` and progress bars as ``nemo files
+    upload``: each file is streamed in blocks with ``Content-Length`` set, so a
+    multi-GB model shard is never held in memory, and the user sees per-file
+    progress. Local and remote paths are passed as explicit pairs, so fsspec never
+    has to guess whether the fileset root is a directory.
+    """
+    # Imported here, as ``nemo files upload`` does: fsspec and Rich are only needed once a file is sent.
+    from filesets import FilesetFileSystem, RichProgressCallback, build_fileset_ref
+    from rich.console import Console
+
+    pairs = list(_files_to_upload(source))
+    # FilesetFileSystem is annotated with the concrete client; FilesUploadClient lists
+    # exactly what it calls. A fresh instance, because fsspec caches filesystems by
+    # their arguments and a cached one would be bound to an earlier client.
+    fs = FilesetFileSystem(client=cast(FilesClient, files), skip_instance_cache=True)
+    # Progress goes to stderr: stdout carries the JSON that scripts parse.
+    with RichProgressCallback(description=f"Uploading {name}", console=Console(stderr=True)) as callback:
+        fs.put(
+            [str(local) for local, _ in pairs],
+            [build_fileset_ref(remote, workspace=workspace, fileset=name) for _, remote in pairs],
+            callback=callback,
+        )
 
 
 def _files_to_upload(source: Path) -> Iterator[tuple[Path, str]]:
@@ -383,8 +410,22 @@ def _files_to_upload(source: Path) -> Iterator[tuple[Path, str]]:
         yield path, path.relative_to(source).as_posix()
 
 
-def _write_spec(spec: dict, path: tuple[str, ...], value: str) -> None:
+def spec_parent(spec: dict, path: tuple[str, ...]) -> dict:
+    """Return the dict that holds ``path[-1]``, creating it along the way.
+
+    A value on the way that is not a dict, such as ``"model": null``, is replaced.
+    The upload flag supplies that field, and the pre-upload check fills the same
+    path the same way, so what passed the check is what gets written after upload.
+    """
     node = spec
     for key in path[:-1]:
-        node = node.setdefault(key, {})
-    node[path[-1]] = value
+        child = node.get(key)
+        if not isinstance(child, dict):
+            child = {}
+            node[key] = child
+        node = child
+    return node
+
+
+def _write_spec(spec: dict, path: tuple[str, ...], value: str) -> None:
+    spec_parent(spec, path)[path[-1]] = value
