@@ -87,6 +87,40 @@ def _parse_model_and_workspace(
     return final_workspace, model_entity_id
 
 
+def _resolve_context_model(
+    state: CLIContext,
+    fast: bool,
+    workspace_flag: str | None,
+) -> tuple[str, str]:
+    """Resolve the workspace and model entity ID from the context's default or fast model.
+
+    ``nemo setup`` stores full ``workspace/name`` entity IDs, so the model's own
+    workspace wins over the configured one. An explicit --workspace that points
+    elsewhere is rejected rather than silently rewriting the entity ID.
+
+    Raises:
+        click.UsageError: If the context has no model configured, or --workspace
+                          conflicts with the configured model's workspace
+    """
+    ctx = state.get_sdk_context()
+    configured = ctx.fast_model if fast else ctx.default_model
+    if not configured:
+        env_var = "NEMO_FAST_MODEL" if fast else "NEMO_DEFAULT_MODEL"
+        raise click.UsageError(
+            f"No model specified and no {'fast' if fast else 'default'} model is configured. "
+            f"Pass --model, run 'nemo setup', or set {env_var}."
+        )
+
+    model_workspace, _, model_name = configured.rpartition("/")
+    if model_workspace and workspace_flag and model_workspace != workspace_flag:
+        raise click.UsageError(
+            f"Configured model '{configured}' is in workspace '{model_workspace}', "
+            f"but --workspace is '{workspace_flag}'. Pass --model to chat with a model in '{workspace_flag}'."
+        )
+
+    return _parse_model_and_workspace(model_name, model_workspace or workspace_flag, ctx.workspace)
+
+
 def _is_interactive_chat_session() -> bool:
     """Return whether the process can safely run the Rich chat REPL."""
     return is_interactive() and is_tty()
@@ -155,19 +189,31 @@ def _resolve_chat_output_format(
 @handle_errors
 def chat(
     ctx: typer.Context,
-    model: Annotated[
-        str,
-        typer.Argument(
-            help="Model entity name (from 'nemo models list') or model ID when using --provider",
-            autocompletion=autocomplete_model_entity,
-        ),
-    ],
     prompt: Annotated[
         str | None,
         typer.Argument(
             help="Prompt for one-shot mode. Takes precedence over piped stdin.",
         ),
     ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            "-m",
+            help=(
+                "Model entity name (from 'nemo models list') or model ID when using --provider. "
+                "Defaults to the context's default model set by 'nemo setup'."
+            ),
+            autocompletion=autocomplete_model_entity,
+        ),
+    ] = None,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help="Use the context's fast model instead of its default model.",
+        ),
+    ] = False,
     provider: Annotated[
         str | None,
         typer.Option(
@@ -220,11 +266,14 @@ def chat(
     """
     Start an interactive chat session with a model.
 
+    Without --model, chats with the default model chosen during 'nemo setup'
+    (or NEMO_DEFAULT_MODEL). Use --fast for the fast model (NEMO_FAST_MODEL).
+
     By default, uses model entity routing where the model name should match
     what's shown in 'nemo models list'.
 
-    Use --provider for direct provider routing, where the model argument is
-    passed directly to the provider's API.
+    Use --provider for direct provider routing, where --model is passed
+    directly to the provider's API. --provider requires --model.
 
     Passing PROMPT sends one message and exits unless --interactive is set.
     Omitting PROMPT in a TTY starts the interactive chat UI. In non-TTY
@@ -233,14 +282,23 @@ def chat(
     precedence.
 
     Examples:
-      nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5
-      nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 "What is machine learning?"
-      nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 "What is machine learning?" --interactive
-      echo "What is machine learning?" | nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5
-      nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 "What is machine learning?" -f json
-      nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 --provider nvidia-build
+      nemo chat
+      nemo chat "What is machine learning?"
+      nemo chat "What is machine learning?" --fast
+      nemo chat -m nvidia-llama-3-3-nemotron-super-49b-v1-5 "What is machine learning?"
+      nemo chat "What is machine learning?" --interactive
+      echo "What is machine learning?" | nemo chat
+      nemo chat "What is machine learning?" -f json
+      nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1.5 --provider nvidia-build
     """
     state: CLIContext = ctx.obj
+    if model is not None and fast:
+        raise click.UsageError("--model and --fast are mutually exclusive.")
+    if provider and model is None:
+        raise click.UsageError(
+            "--provider requires --model: provider routing passes the provider's own model ID, "
+            "not a model entity from the context."
+        )
     run_once, effective_prompt = _resolve_chat_mode(prompt, interactive)
     if run_once and not effective_prompt:
         raise click.UsageError("One-shot chat requires a prompt. Provide PROMPT or pipe text on stdin.")
@@ -272,11 +330,14 @@ def chat(
                 body=JsonBody(body),
             )
 
-        model_for_body = model
-        display_info = {"Provider": f"{resolved_workspace}/{provider}", "Model": model}
+        model_for_body = cast(str, model)  # UsageError above guarantees non-None.
+        display_info = {"Provider": f"{resolved_workspace}/{provider}", "Model": model_for_body}
     else:
         # Model entity routing (default): use OpenAI-compatible gateway
-        resolved_workspace, model_entity_id = _parse_model_and_workspace(model, workspace, workspace_from_config)
+        if model is None:
+            resolved_workspace, model_entity_id = _resolve_context_model(state, fast, workspace)
+        else:
+            resolved_workspace, model_entity_id = _parse_model_and_workspace(model, workspace, workspace_from_config)
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
             return client.stream_openai(

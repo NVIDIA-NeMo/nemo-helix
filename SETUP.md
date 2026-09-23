@@ -233,7 +233,7 @@ The platform is running. Don't leave the user with "you're good to go" — offer
 
 If the user's prompt doesn't already pin one down, ask: *"The platform is up. What would you like to do next — optimize an agent, deploy one, run inference, evaluate, generate data, or something else?"*
 
-If the user wants to **pick or swap the default/fast model pair**, don't guess — hand off to the `inference` skill. Step 2 there enumerates `served_models[].model_entity_id` and shows jq filters for picking by vendor / family. To pin the choices for subsequent runs, export `NEMO_DEFAULT_MODEL=<workspace>/<entity-id>` and `NEMO_FAST_MODEL=<workspace>/<entity-id>` before the next `nemo setup --auto`; fast falls back to default when omitted. For one-off commands, pass the entity ID positionally: `nemo chat <entity-id>`.
+If the user wants to **pick or swap the default/fast model pair**, don't guess — hand off to the `inference` skill. Step 2 there enumerates `served_models[].model_entity_id` and shows jq filters for picking by vendor / family. To pin the choices for subsequent runs, export `NEMO_DEFAULT_MODEL=<workspace>/<entity-id>` and `NEMO_FAST_MODEL=<workspace>/<entity-id>` before the next `nemo setup --auto`; fast falls back to default when omitted. `nemo chat` uses the default model (`--fast` for the fast one); for one-off commands with another model, pass `nemo chat --model <entity-id>`.
 
 ### Available skills
 
