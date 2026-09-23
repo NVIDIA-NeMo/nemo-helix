@@ -21,10 +21,11 @@ agent name. Feedback is attached at session level (no ``span_id``), which is
 both the realistic shape for an end-user thumbs-down and the id the Analyst
 correlates back to spans with.
 
-Re-running is safe for spans: Intake keys a logical span on
-``(workspace, source, trace_id, span_id)``, so a repeat post updates in place.
-Annotations have no natural key, so ``--skip-annotations`` avoids piling up
-duplicates on a reseed.
+Re-running is safe. Intake's span table sorts on ``start_time``, so a repeat
+post only updates in place when every span keeps its original timestamp; a
+reseed therefore reuses the origin of the corpus already in Intake instead of
+re-anchoring to now. Annotations have no natural key, so the script skips any
+whose ``(session_id, kind, name, value)`` already exists.
 """
 
 from __future__ import annotations
@@ -46,31 +47,91 @@ def main() -> None:
     args = _parse_args()
     spec = json.loads(args.spec.read_text(encoding="utf-8"))
     sessions = _expand_sessions(spec)
-    spans, annotations = _render(sessions, args.target_agent, args.started_at)
+    source = args.source or spec.get("source", "insights-demo")
 
-    payload = {"source": args.source or spec.get("source", "insights-demo"), "spans": spans}
     if args.dry_run:
-        print(json.dumps({"spans": payload, "annotations": annotations}, indent=2))
+        spans, annotations = _render(sessions, args.target_agent, args.started_at)
+        print(json.dumps({"spans": {"source": source, "spans": spans}, "annotations": annotations}, indent=2))
         return
 
     base_url = args.base_url.rstrip("/")
     workspace = args.workspace
     with httpx.Client(timeout=args.request_timeout) as client:
+        origin = args.started_at or _existing_origin(client, base_url, workspace, source, sessions)
+        spans, annotations = _render(sessions, args.target_agent, origin)
+
+        payload = {"source": source, "spans": spans}
         response = client.post(f"{base_url}/apis/intake/v2/workspaces/{workspace}/ingest/spans", json=payload)
         if response.status_code != 201:
             raise SystemExit(f"Span ingest failed ({response.status_code}): {response.text}")
-        print(f"Ingested {len(spans)} spans across {len(sessions)} sessions as source '{payload['source']}'.")
+        print(f"Ingested {len(spans)} spans across {len(sessions)} sessions as source '{source}'.")
 
         if args.skip_annotations:
             print("Skipped annotations (--skip-annotations).")
         else:
+            created_count = 0
             for annotation in annotations:
+                if _annotation_exists(client, base_url, workspace, annotation):
+                    continue
                 created = client.post(f"{base_url}/apis/intake/v2/workspaces/{workspace}/annotations", json=annotation)
                 if created.status_code != 201:
                     raise SystemExit(f"Annotation create failed ({created.status_code}): {created.text}")
-            print(f"Created {len(annotations)} annotations.")
+                created_count += 1
+            print(f"Created {created_count} annotations ({len(annotations) - created_count} already present).")
 
         _verify(client, base_url, workspace, args.target_agent, len(spans))
+
+
+def _existing_origin(
+    client: httpx.Client,
+    base_url: str,
+    workspace: str,
+    source: str,
+    sessions: list[dict[str, Any]],
+) -> datetime | None:
+    """Recover the origin of a previous seed so a reseed overwrites rather than duplicates.
+
+    Intake sorts spans on ``start_time``, so re-posting a span with a new
+    timestamp adds a second row with the same span id instead of replacing it,
+    and the Analyst rejects the resulting trace.
+    """
+    anchor = sessions[0]
+    root = next(template for template in anchor["span_templates"] if "parent_suffix" not in template)
+    root_span_id = f"{anchor['id_prefix']}-{root['suffix']}"
+    response = client.get(
+        f"{base_url}/apis/intake/v2/workspaces/{workspace}/spans",
+        params={
+            "filter[trace_id]": anchor["trace_id"],
+            "filter[source]": source,
+            "page_size": 100,
+            "mode": "summary",
+        },
+    )
+    response.raise_for_status()
+    starts = sorted(
+        datetime.fromisoformat(span["started_at"]).replace(tzinfo=timezone.utc)
+        for span in response.json()["data"]
+        if span["span_id"] == root_span_id
+    )
+    if not starts:
+        return None
+    if len(starts) > 1:
+        print(
+            f"Warning: span '{root_span_id}' already exists {len(starts)} times in Intake from earlier seeds; "
+            "the Analyst will reject these traces until the duplicates are removed. Reusing the newest origin."
+        )
+    origin = starts[-1] - timedelta(seconds=anchor["base_offset"] + root["start_offset_seconds"])
+    print(f"Reusing the existing corpus origin {origin.isoformat()} so spans update in place.")
+    return origin
+
+
+def _annotation_exists(client: httpx.Client, base_url: str, workspace: str, annotation: dict[str, Any]) -> bool:
+    params = {"filter[session_id]": annotation["session_id"], "filter[kind]": annotation["kind"], "page_size": 100}
+    if "name" in annotation:
+        params["filter[name]"] = annotation["name"]
+    response = client.get(f"{base_url}/apis/intake/v2/workspaces/{workspace}/annotations", params=params)
+    response.raise_for_status()
+    return any(existing.get("value") == annotation["value"] for existing in response.json()["data"])
 
 
 def _verify(client: httpx.Client, base_url: str, workspace: str, target_agent: str, expected_spans: int) -> None:
@@ -228,13 +289,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--started-at",
         type=_aware_datetime,
-        help="Timestamp the first span starts at (ISO-8601 with offset). Defaults to placing the newest span just before now.",
+        help=(
+            "Timestamp the first span starts at (ISO-8601 with offset). Defaults to the origin of a corpus already "
+            "in Intake, or else to placing the newest span just before now."
+        ),
     )
-    parser.add_argument(
-        "--skip-annotations",
-        action="store_true",
-        help="Post spans only. Annotations have no natural key, so reseeding duplicates them.",
-    )
+    parser.add_argument("--skip-annotations", action="store_true", help="Post spans only.")
     parser.add_argument("--request-timeout", type=float, default=30.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()

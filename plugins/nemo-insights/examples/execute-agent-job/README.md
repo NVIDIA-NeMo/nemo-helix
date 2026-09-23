@@ -12,64 +12,40 @@ backed by the generic `agents.execute` job.
   with relative time offsets so it never ages out of Intake's retention window.
 - `seed_intake.py`: expands the spec into spans and annotations, posts them to
   Intake, then reads them back.
-- `submit_analysis_run.py`: submits the run through the analysis-runs SDK
-  (`client.insights.analysis_runs`) and optionally waits for the job's
-  `analysis-report` result. `nemo insights analysis-runs create|list|get` is
-  the same surface from the CLI.
-
-The high-level Insights service route lives in
-`nemo_insights_plugin.analysis_runs.router`. It accepts an Insights-shaped
-request and creates the backing `agents.execute` job with the
-`insights.analysis` execute extension attached.
-
-There is no Analyst Agent entity to provision. The Analyst's config is derived
-per request — its models are chosen by the caller and its harness settings are
-scoped to one run — so `nemo_insights_plugin.analyst.agent_config` builds it and
-the route submits it as an inline agent definition. Nothing to seed, nothing to
-keep in sync with a shipped version.
+- `reset_intake.py`: deletes the demo source's spans and annotations so the
+  demo can start from a clean corpus.
 
 ## Prerequisites
 
 - A running local platform with Intake, Agents, Jobs, and Insights, and a
   running ClickHouse for Intake (see `services/intake/README.md`).
 - `nemo setup` completed, so a default/fast Model Entity pair exists. The
-  Analyst resolves its models as Platform Model Entities, so the refs must be
-  workspace-qualified entity names — not raw provider model ids.
+  Analyst resolves its models as Platform Model Entities. Each ref is a
+  workspace-qualified entity name such as
+  `default/nvidia-nemotron-3-super-120b-a12b`, not a raw provider model id.
+
+  `nemo setup` saves the pair to your CLI config. `nemo config view` prints the
+  refs as `default_model` and `fast_model`. To browse other candidates, list
+  entity names and prefix the one you want with its workspace:
+
+  ```bash
+  nemo config view
+  nemo models list --all-pages -f csv -c name | grep nemotron
+  ```
 
   A Model Entity existing locally does **not** mean its upstream provider still
-  serves it; auto-discovered catalogs go stale, and a dead entry surfaces as a
-  gateway `502` wrapping `Backend returned 404: Model not found`. Probe a
-  candidate before relying on it:
+  serves it. Auto-discovered catalogs go stale, and a dead entry surfaces as a
+  gateway `424` wrapping upstream provider errors. `nemo chat` takes the same
+  ref, so probe each model before relying on it:
 
   ```bash
-  ENT=nvidia-nemotron-3-nano-30b-a3b
-  SERVED=$(curl -s "$NHX_BASE_URL/apis/models/v2/workspaces/default/providers/nvidia-build" \
-    | python3 -c "import json,sys;print(next(m['served_model_name'] for m in json.load(sys.stdin)['served_models'] if m['model_entity_id']=='default/$ENT'))")
-  curl -s -X POST "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/$ENT/-/v1/chat/completions" \
-    -H 'Content-Type: application/json' \
-    -d "{\"model\":\"$SERVED\",\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}],\"max_tokens\":5}"
+  MODEL=default/nvidia-nemotron-3-super-120b-a12b  # a ref from the commands above
+  nemo chat "$MODEL" "Reply with just: ok"
   ```
 
-  A pair verified working against `integrate.api.nvidia.com` on 2026-08-26:
-
-  ```bash
-  --default-model default/nvidia-nemotron-3-super-120b-a12b \
-  --fast-model    default/nvidia-nemotron-3-nano-30b-a3b
-  ```
-- The `nemo-insights` package installed, so Fabric discovers the analyst
-  adapter under `<sys.prefix>/share/nemo-fabric/adapters/`.
-
-  That descriptor is *copied* into the venv at install time, not symlinked, and
-  a plain `uv sync` will not refresh it for an unchanged editable package. After
-  editing `insights-analyst.fabric-adapter.json`, run:
-
-  ```bash
-  uv sync --reinstall-package nemo-insights-plugin
-  ```
-
-```bash
-export NHX_BASE_URL=http://localhost:8080
-```
+  A live model replies. A stale one prints `API error: (424) Failed
+  Dependency`; pick another model and pass it to the run with
+  `--default-model` or `--fast-model`.
 
 The target agent (`demo-agent` below) does not need to exist as an Agent
 entity — the Analyst only matches it against each span's normalized
@@ -77,105 +53,154 @@ entity — the Analyst only matches it against each span's normalized
 
 ## Demo Flow
 
-1. Seed Intake with telemetry for the target agent:
+### 1. Seed Intake
 
-   ```bash
-   uv run plugins/nemo-insights/examples/execute-agent-job/seed_intake.py \
-     --base-url http://localhost:8080 \
-     --workspace default \
-     --target-agent demo-agent
-   ```
+Seed Intake with telemetry for the target agent:
 
-   This posts to `POST .../ingest/spans` and `POST .../annotations`, then reads
-   both back.
+```bash
+uv run plugins/nemo-insights/examples/execute-agent-job/seed_intake.py \
+  --base-url http://localhost:8080 \
+  --workspace default \
+  --target-agent demo-agent
+```
 
-   **The corpus is sized against the Analyst's own bar, not for brevity.** The
-   Analyst files an Insight only for patterns it can evidence with at least
-   three representative traces, and it ranks issues recurring across many
-   sessions above one-offs — so a handful of sessions reliably produces "no
-   high-impact failure patterns detected". The spec expands to 84 spans across
-   28 sessions spanning ~3.6 hours:
+This posts to `POST .../ingest/spans` and `POST .../annotations`, then reads
+both back.
 
-   | Scenario | Sessions | Failure |
-   |---|---|---|
-   | `retrieval` | 8 | `knowledge_search` returns zero documents; the agent answers anyway |
-   | `handoff` | 6 | `delegate_task` fires without the conversation summary |
-   | `billing` | 5 | `billing_lookup` times out at 30s |
-   | `healthy` | 9 | none — grounded, cited answers |
+**The corpus is sized against the Analyst's own bar, not for brevity.** The
+Analyst files an Insight only for patterns it can evidence with at least
+three representative traces, and it ranks issues recurring across many
+sessions above one-offs — so a handful of sessions reliably produces "no
+high-impact failure patterns detected". The spec expands to 84 spans across
+28 sessions spanning ~3.6 hours:
 
-   Plus 12 negative and 6 positive `feedback` annotations and 18 numeric
-   `helpfulness` labels. Feedback matters: the Analyst's method says to start
-   there, because it is the strongest signal of a real problem. Annotations are
-   attached at session level, which is both the realistic shape for an end-user
-   thumbs-down and the id the Analyst correlates back to spans with.
+| Scenario | Sessions | Failure |
+|---|---|---|
+| `retrieval` | 8 | `knowledge_search` returns zero documents; the agent answers anyway |
+| `handoff` | 6 | `delegate_task` fires without the conversation summary |
+| `billing` | 5 | `billing_lookup` times out at 30s |
+| `healthy` | 9 | none — grounded, cited answers |
 
-   Re-running is safe for spans — Intake keys a logical span on
-   `(workspace, source, trace_id, span_id)`, so a repeat post updates in place.
-   Annotations have no natural key, so pass `--skip-annotations` on a reseed to
-   avoid piling up duplicates. Intake has no public delete API, so sessions
-   seeded by an earlier version of the spec linger; use a fresh `--workspace` if
-   you need a clean corpus.
+Plus 12 negative and 6 positive `feedback` annotations and 18 numeric
+`helpfulness` labels. Feedback matters: the Analyst's method says to start
+there, because it is the strongest signal of a real problem. Annotations are
+attached at session level, which is both the realistic shape for an end-user
+thumbs-down and the id the Analyst correlates back to spans with.
 
-2. Submit the execute job and wait for its report:
+Re-running is safe. Intake's span table sorts on `start_time`, so a repeat
+post only updates a span in place when its timestamp is unchanged. The
+script therefore reuses the origin of the corpus already in Intake rather
+than re-anchoring to now, and skips annotations that already exist. Passing
+a different `--started-at` over an existing corpus writes a second copy of
+every span. The Analyst then fails with `trace ... contains duplicate span
+id`.
 
-   ```bash
-   uv run plugins/nemo-insights/examples/execute-agent-job/submit_analysis_run.py \
-     --base-url http://localhost:8080 \
-     --workspace default \
-     --target-agent demo-agent \
-     --default-model default/nvidia-nemotron-3-super-120b-a12b \
-     --fast-model default/nvidia-nemotron-3-nano-30b-a3b \
-     --wait
-   ```
+To start over, for example after changing the spec or seeding with a
+different `--started-at`, delete the demo corpus and reseed:
 
-   The model pair is **required** on the request. It lives only in the
-   operator's local CLI config (`~/.config/nhx/config.yaml`), which the
-   Platform process cannot read, so the request has to carry it. The CLI fills
-   it in from that config, which is why the equivalent one-liner needs no model
-   flags:
+```bash
+uv run plugins/nemo-insights/examples/execute-agent-job/reset_intake.py \
+  --base-url http://localhost:8080 \
+  --workspace default
+```
 
-   ```bash
-   nemo insights analysis-runs create --agent demo-agent --wait
-   ```
+Intake has no public span delete API, so this removes the demo source's
+spans directly in ClickHouse. It finds the ClickHouse container that Intake
+runs locally, or uses `NHX_INTAKE_CLICKHOUSE_URL` when that is set.
+Only spans and `trace_index` rows from the demo source are deleted there;
+spans from other sources are untouched. Annotations have no source, so the
+script deletes, through the Intake API, every annotation on a session that has
+demo spans. That includes any annotation someone else added to those sessions.
+Pass `--dry-run` to see the counts first.
 
-   The script and the CLI both go through `client.insights.analysis_runs`;
-   neither speaks raw HTTP.
+### 2. Submit an analysis run
 
-3. Inspect the run if you did not use `--wait`:
+Submit an analysis run and wait for it to finish:
 
-   ```bash
-   nemo insights analysis-runs list --agent demo-agent
-   nemo insights analysis-runs get <run-name>          # joined with its job
-   nemo insights analysis-runs get <run-name> --wait   # poll to a terminal state
-   ```
+```bash
+nemo insights analysis-runs create --agent demo-agent --wait
+```
 
-   A run and its backing job share one name, and `get` returns them together.
-   A `job` of `null` means submission never landed and the run can be
-   resubmitted.
+`--wait` reports each status change on stderr and prints the final run as
+JSON on stdout; the run's name is at `run.name`. The command exits non-zero
+if the backing job does not complete.
 
-   The durable comparison point is the `analysis-report` result saved by the
-   Insights execute extension. Job results are an Agents/Jobs surface, so they
-   are still fetched from there:
+The model pair is **required** on the request. It lives only in the
+operator's local CLI config (`~/.config/nhx/config.yaml`), which the
+Platform process cannot read, so the request has to carry it. The CLI fills
+it in from that config. Pass `--default-model` and `--fast-model` to override
+either one.
 
-   ```bash
-   curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results"
-   curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute/<run-name>/results/analysis-report/download"
-   ```
+The same run through the SDK. Unlike the CLI, the SDK does not read your CLI
+config, so both models are passed explicitly:
 
-   The report is what tells you which Insights the run created or updated:
-   insights carry no per-run provenance. The agent's current
-   insights are read with `client.insights.insights.list_insights(...)`, or
-   from a shell with
-   `GET /apis/insights/v2/workspaces/default/insights?agent=demo-agent`.
+```python
+from nemo_helix import NeMoHelix
 
-## Notes
+sdk = NeMoHelix()
+response = sdk.insights.analysis_runs.create(
+    workspace="default",
+    agent="demo-agent",
+    default_model="default/<default-model>",
+    fast_model="default/<fast-model>",
+)
+final = sdk.insights.analysis_runs.wait(workspace="default", name=response.run.name)
+print(final.job_status)
+```
 
-- There is no Analyst Agent entity in the database; the route delivers an inline
-  configuration to the agents service.
-- Dynamic read settings such as `since` and `evaluation_id` are request fields
-  that reach the Analyst's harness settings, not execute-extension config.
-- The analysis-runs route creates the backing job through the request-scoped
-  platform SDK (`sdk.agents.jobs.execute.create`), so the caller's auth headers,
-  base URL, and retry policy are applied. That SDK surface was added alongside
-  this demo: a `NemoJob` subclass gets CLI and HTTP routes for free but no SDK
-  method, so `agents.execute` had none.
+`NeMoHelix()` connects to your active CLI context's base URL with its
+credentials. Pass `base_url=` to target another instance.
+
+### 3. Inspect the run
+
+If you did not use `--wait`, check on the run:
+
+```bash
+nemo insights analysis-runs list --agent demo-agent
+nemo insights analysis-runs get <run-name>          # joined with its job
+nemo insights analysis-runs get <run-name> --wait   # poll to a terminal state
+```
+
+A run and its backing job share one name, and `get` returns them together.
+A `job` of `null` means submission never landed and the run can be
+resubmitted.
+
+### 4. Download the report
+
+The `analysis-report` result, saved by the Insights execute extension, is the
+durable record of what the run did:
+
+```bash
+nemo jobs results list <run-name>
+nemo jobs results download analysis-report --job <run-name> -o analysis-report.txt
+cat analysis-report.txt
+```
+
+A run against the demo corpus reports something like:
+
+```text
+Analyzed 28 traces: 2 new insights, 0 existing insights with new evidence.
+
+- created: delegate_task requires conversation_summary [insights-insight-542UamS99TFJTt8TMb5Fy9] (6 trace refs)
+- created: billing_lookup deadline exceeded [insights-insight-UjirgSpzwDmsF2TPgcsZi2] (5 trace refs)
+```
+
+The report is what tells you which Insights *this run* created or updated;
+insights carry no per-run provenance.
+
+### 5. List the agent's insights
+
+There is no CLI command for listing insights yet, so use the SDK. From the repo
+root, save this as a file and run it with `uv run python <file>`:
+
+```python
+from nemo_helix import NeMoHelix
+
+sdk = NeMoHelix()
+page = sdk.insights.insights.list_insights(workspace="default", agent="demo-agent")
+for insight in page.data:
+    print(f"[{insight.status}] {insight.title} ({len(insight.trace_refs)} traces)")
+```
+
+`list_insights` also accepts `status` (`open`, `resolved`, or `deleted`),
+`page`, `page_size`, and `sort`.
