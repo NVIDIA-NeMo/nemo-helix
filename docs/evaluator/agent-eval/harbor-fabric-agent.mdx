@@ -79,7 +79,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-        "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0b1",
+        "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
         "fabric_workspace": "/app",
     },
     agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -151,7 +151,7 @@ async def main() -> None:
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
         agent_kwargs={
             "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-            "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+            "fabric_package": "nemo-fabric[deepagents]==0.3.0",
             "fabric_workspace": "/app",  # the task image's working directory
         },
         agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -192,7 +192,7 @@ key travels through `agent_env_from_host` instead. Inspect the persisted agent e
   "model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "kwargs": {
     "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-    "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+    "fabric_package": "nemo-fabric[deepagents]==0.3.0",
     "fabric_workspace": "/app"
   },
   "env": {"NVIDIA_API_KEY": "${NVIDIA_API_KEY}"}
@@ -213,7 +213,7 @@ the job's environment at compile time, which the job then forwards exactly as ab
     "agent_model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-      "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+      "fabric_package": "nemo-fabric[deepagents]==0.3.0",
       "fabric_workspace": "/app"
     },
     "env_secrets": {
