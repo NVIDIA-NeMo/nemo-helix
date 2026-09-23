@@ -19,9 +19,9 @@ outputs:
   fabric:
     description: "'true' if the Fabric agent-eval runtime, its tests, or its dependency extra changed"
     value: ${{ steps.filter.outputs.fabric }}
-  harbor-e2e:
+  harbor-integration:
     description: "'true' if the Harbor runtime, its tests/fixtures, or its dependency extra changed"
-    value: ${{ steps.filter.outputs.harbor-e2e }}
+    value: ${{ steps.filter.outputs.harbor-integration }}
   evaluator-sdk-closure:
     description: "'true' if anything that can change the agent_eval import closure changed"
     value: ${{ steps.filter.outputs.evaluator-sdk-closure }}
@@ -115,9 +115,10 @@ runs:
             - 'packages/nemo_evaluator_sdk/pyproject.toml'
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
-          harbor-e2e:
+          harbor-integration:
             - 'plugins/nemo-evaluator/src/nemo_evaluator/harbor/**'
             - 'plugins/nemo-evaluator/src/nemo_evaluator/revisions.py'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/sdk/**'
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/runtimes/harbor_*.py'
             - 'packages/nemo_evaluator_sdk/tests/agent_eval/test_harbor_*.py'
             - 'packages/nemo_evaluator_sdk/pyproject.toml'
