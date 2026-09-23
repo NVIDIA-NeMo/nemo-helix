@@ -66,6 +66,21 @@ class TestTokenSet:
         assert ts.refresh_token == "r"
         assert ts.expires_at is None
 
+    def test_from_access_token_restores_persisted_expiry_for_opaque_token(self):
+        expires_at = time.time() + 3600
+
+        ts = TokenSet.from_access_token("opaque-token", refresh_token="r", expires_at=expires_at)
+
+        assert ts.expires_at == expires_at
+
+    def test_from_access_token_prefers_jwt_expiry_over_persisted_expiry(self):
+        jwt_expiry = int(time.time()) + 1800
+        token = _make_jwt({"sub": "user1", "exp": jwt_expiry})
+
+        ts = TokenSet.from_access_token(token, expires_at=time.time() + 3600)
+
+        assert ts.expires_at == float(jwt_expiry)
+
     def test_is_expired_when_past_expiry(self):
         ts = TokenSet(access_token="t", expires_at=time.time() - 100)
         assert ts.is_expired(margin_seconds=0) is True

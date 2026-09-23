@@ -763,6 +763,36 @@ class TestFromConfig:
         assert client._auth.client_id == "cli-client"
         assert client._auth.bearer_token_source == "id_token"
 
+    def test_from_config_restores_opaque_token_expiry(self, tmp_path):
+        expires_at = time.time() + 3600
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [
+                {
+                    "name": "test-user",
+                    "type": "oauth",
+                    "token": "opaque-access-token",
+                    "refresh_token": "refresh-token",
+                    "expires_at": expires_at,
+                }
+            ],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+
+        with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
+            mock_discover.return_value = NHXOIDCConfig(
+                auth_enabled=True,
+                client_id="cli-client",
+                token_endpoint="https://idp/token",
+            )
+            client = NemoClient.from_config(config_path=config_file)
+
+        assert isinstance(client._auth, OIDCTokenProvider)
+        assert client._auth.tokens.expires_at == expires_at
+
     def test_from_config_does_not_downgrade_discovery_validation_failure(self, tmp_path):
         token = _make_jwt()
         config_data = {

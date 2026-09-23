@@ -58,7 +58,10 @@ def _make_config_persister(context_name: str, config_path: Path | None = None) -
         from nemo_helix_plugin.client.config.config import Config
         from nemo_helix_plugin.client.config.models import ConfigParams
 
-        params: ConfigParams = {"access_token": tokens.access_token}
+        params: ConfigParams = {
+            "access_token": tokens.access_token,
+            "expires_at": tokens.expires_at,
+        }
         if tokens.refresh_token:
             params["refresh_token"] = tokens.refresh_token
         Config.write(params, context_name=context_name, config_path=config_path)
@@ -88,6 +91,7 @@ def _make_config_token_loader(context_name: str, config_path: Path) -> Callable[
         return TokenSet.from_access_token(
             resolved.user.token.get_secret_value(),
             resolved.user.refresh_token.get_secret_value() if resolved.user.refresh_token else None,
+            expires_at=resolved.user.expires_at,
         )
 
     return load_tokens
@@ -152,6 +156,7 @@ def resolve_oidc_provider(
     context_name: str,
     access_token: str,
     refresh_token: str | None,
+    expires_at: float | None,
     config_exists: bool,
     config_path: Path,
     explicit_access_token: bool = False,
@@ -161,7 +166,7 @@ def resolve_oidc_provider(
     This is the bridge between ``NemoClient.from_config()`` and the OIDC machinery.
     """
     oidc_config = _discover_oidc_client_settings(base_url)
-    tokens = TokenSet.from_access_token(access_token, refresh_token)
+    tokens = TokenSet.from_access_token(access_token, refresh_token, expires_at=expires_at)
 
     token_endpoint = oidc_config.token_endpoint or ""
     client_id = oidc_config.cli_client_id or oidc_config.client_id or ""

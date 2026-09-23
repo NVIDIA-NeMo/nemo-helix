@@ -429,22 +429,27 @@ class TokenSet:
         refresh_token: str | None = None,
         *,
         expires_in: int | float | None = None,
+        expires_at: float | None = None,
     ) -> TokenSet:
-        """Create a TokenSet, extracting expiry from the JWT's ``exp`` claim.
+        """Create a TokenSet, preferring JWT expiry over persisted or relative expiry metadata.
 
-        Falls back to ``expires_in`` (seconds from now) for opaque tokens
-        that don't contain a JWT ``exp`` claim.
+        Falls back to a persisted ``expires_at`` value and then ``expires_in``
+        (seconds from now) for opaque tokens that don't contain a JWT ``exp`` claim.
         """
-        expires_at = None
+        resolved_expires_at = None
         claims = decode_jwt_claims(access_token)
         if claims:
-            expires_at = claims.get("exp")
-        if expires_at is None and expires_in is not None:
-            expires_at = time.time() + float(expires_in)
+            claim_expires_at = claims.get("exp")
+            if not isinstance(claim_expires_at, bool) and isinstance(claim_expires_at, int | float):
+                resolved_expires_at = float(claim_expires_at)
+        if resolved_expires_at is None and not isinstance(expires_at, bool) and isinstance(expires_at, int | float):
+            resolved_expires_at = float(expires_at)
+        if resolved_expires_at is None and expires_in is not None:
+            resolved_expires_at = time.time() + float(expires_in)
         return TokenSet(
             access_token=access_token,
             refresh_token=refresh_token,
-            expires_at=float(expires_at) if expires_at is not None else None,
+            expires_at=resolved_expires_at,
         )
 
     def is_expired(self, margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS) -> bool:

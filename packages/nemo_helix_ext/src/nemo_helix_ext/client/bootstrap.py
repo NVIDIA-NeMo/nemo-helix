@@ -306,7 +306,10 @@ def _make_config_persister(context_name: str, config_path: Path | None = None):
     from nemo_helix_ext.config.config import Config, ConfigParams
 
     def persist(tokens: TokenSet) -> None:
-        params: ConfigParams = {"access_token": tokens.access_token}
+        params: ConfigParams = {
+            "access_token": tokens.access_token,
+            "expires_at": tokens.expires_at,
+        }
         if tokens.refresh_token:
             params["refresh_token"] = tokens.refresh_token
         Config.write(params, context_name=context_name, config_path=config_path)
@@ -341,6 +344,7 @@ def _make_config_token_loader(context_name: str, config_path: Path):
         return TokenSet.from_access_token(
             resolved.user.token.get_secret_value(),
             resolved.user.refresh_token.get_secret_value() if resolved.user.refresh_token else None,
+            expires_at=resolved.user.expires_at,
         )
 
     return load_tokens
@@ -545,6 +549,7 @@ def resolve_bootstrap(
     tokens = TokenSet.from_access_token(
         resolved.user.token.get_secret_value(),
         resolved.user.refresh_token.get_secret_value() if resolved.user.refresh_token else None,
+        expires_at=resolved.user.expires_at,
     )
 
     token_endpoint = oidc_config.token_endpoint or ""

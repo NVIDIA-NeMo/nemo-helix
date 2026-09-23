@@ -18,14 +18,14 @@ def test_oidc_user_auth_compatibility_defaults_are_standard() -> None:
 
 def test_oidc_user_auth_compatibility_accepts_provider_overrides() -> None:
     config = OIDCConfig(
-        cli_client_id="nmp-cli",
+        cli_client_id="nhx-cli",
         bearer_token_source="id_token",
         device_authorization_requires_device_id=True,
         device_authorization_display_name="NeMo Helix CLI",
         device_token_request_includes_scope=False,
     )
 
-    assert config.cli_client_id == "nmp-cli"
+    assert config.cli_client_id == "nhx-cli"
     assert config.bearer_token_source == "id_token"
     assert config.device_authorization_requires_device_id is True
     assert config.device_authorization_display_name == "NeMo Helix CLI"

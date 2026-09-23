@@ -69,7 +69,7 @@ paths:
         \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
         \ client ID to use\n  - `cli_client_id`: Optional OAuth client ID dedicated\
         \ to interactive CLI authentication\n  - `bearer_token_source`: Token response\
-        \ field clients send to NeMo Platform APIs\n  - `device_authorization_requires_device_id`:\
+        \ field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
         \ Whether CLI device requests must include a generated `device_id`\n  - `device_authorization_display_name`:\
         \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
         \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\

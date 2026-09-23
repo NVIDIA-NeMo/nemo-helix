@@ -169,6 +169,7 @@ def _config_backed_token_provider(
     client_id: str,
     access_token: str,
     refresh_token: str,
+    expires_at: float | None,
     refresh_scope: str | None,
     bearer_token_source: BearerTokenSource,
     certificate_authority: str | None,
@@ -185,7 +186,7 @@ def _config_backed_token_provider(
     return OIDCTokenProvider(
         token_endpoint=token_endpoint,
         client_id=client_id,
-        tokens=TokenSet.from_access_token(access_token, refresh_token),
+        tokens=TokenSet.from_access_token(access_token, refresh_token, expires_at=expires_at),
         refresh_scope=refresh_scope,
         bearer_token_source=bearer_token_source,
         refresh_margin_seconds=refresh_margin_seconds,
@@ -223,12 +224,10 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
     # Check if token is expired or about to expire
     token = context.user.token.get_secret_value()
     claims = decode_jwt_claims(token)
-    if not claims:
-        # Not a JWT, can't check expiry
-        return True
-
-    exp = claims.get("exp")
-    if not exp:
+    exp = claims.get("exp") if claims else None
+    if exp is None:
+        exp = context.user.expires_at
+    if exp is None:
         return True
 
     exp_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
@@ -261,6 +260,7 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
             client_id=client_id,
             access_token=context.user.token.get_secret_value(),
             refresh_token=context.user.refresh_token.get_secret_value(),
+            expires_at=context.user.expires_at,
             refresh_scope=effective_scope,
             bearer_token_source=nhx_config.bearer_token_source,
             refresh_margin_seconds=float(refresh_buffer_seconds),
@@ -422,16 +422,27 @@ def _login_with_oidc(
         raise AuthError(f"Authentication failed: {exc}") from exc
     claims = decode_jwt_claims(token)
     user_email = claims.get("upn") or claims.get("email") or claims.get("preferred_username")
-    raw_granted_scopes = claims.get("scp") or claims.get("scope")
+    raw_granted_scopes: object = token_response.scope
+    if raw_granted_scopes is None and bearer_token_source == "access_token":
+        raw_granted_scopes = claims.get("scp") or claims.get("scope") or []
     granted_scopes: list[str] = []
     if isinstance(raw_granted_scopes, str):
         granted_scopes = raw_granted_scopes.split()
     elif isinstance(raw_granted_scopes, list):
         granted_scopes = [item for item in raw_granted_scopes if isinstance(item, str)]
 
-    validate_requested_scopes_granted(effective_scope, granted_scopes, scope_prefix)
+    if raw_granted_scopes is not None:
+        validate_requested_scopes_granted(effective_scope, granted_scopes, scope_prefix)
 
-    config_params: ConfigParams = {"access_token": token}
+    tokens = TokenSet.from_access_token(
+        token,
+        token_response.refresh_token,
+        expires_in=token_response.expires_in,
+    )
+    config_params: ConfigParams = {
+        "access_token": token,
+        "expires_at": tokens.expires_at,
+    }
     if token_response.refresh_token:
         config_params["refresh_token"] = token_response.refresh_token
     if selected_context is not None:
@@ -860,6 +871,7 @@ def refresh(ctx: typer.Context) -> None:
         client_id=client_id,
         access_token=context.user.token.get_secret_value(),
         refresh_token=context.user.refresh_token.get_secret_value(),
+        expires_at=context.user.expires_at,
         refresh_scope=effective_scope,
         bearer_token_source=oidc_config.bearer_token_source,
         certificate_authority=context.cluster.certificate_authority,
