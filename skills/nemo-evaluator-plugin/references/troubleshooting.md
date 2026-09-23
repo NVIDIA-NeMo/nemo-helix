@@ -41,7 +41,7 @@ nemo evaluator agent-evaluate explain
 | Gym environment FileSet requires sandboxed execution | A `GymRunnerTarget.environment` was submitted to a deployment that runs Gym colocated | Enable `sandboxed_gym_default` and configure the sandbox prerequisites, or omit the environment FileSet |
 | Sandboxed Gym reports a missing capability, runtime image, PVC, or egress route | The Evaluator deployment cannot provision a usable Gym host | Configure `sandbox_cluster_capable`, `sandbox_runtime_image`, `sandbox_job_storage_pvc_claim`, and at least one model or additional egress destination |
 | FileSet-backed Gym reports a PVC mismatch | The Jobs execution profile stages onto a different claim from the OpenSandbox host | Set `sandbox_job_storage_pvc_claim` to the execution profile's job-storage PVC |
-| Sandboxed Gym rejects a credential-shaped `env_vars` entry | Plaintext credentials would be readable by environment code | Store the value in NeMo Platform Secrets and map it through `GymRunnerTarget.env_secrets` |
+| Sandboxed Gym rejects a credential-shaped `env_vars` entry | Plaintext credentials would be readable by environment code | Store the value in NeMo Helix Secrets and map it through `GymRunnerTarget.env_secrets` |
 | Gym environment FileSet is invalid | The FileSet has the wrong purpose, lacks a root `nemo-environment.yaml`, or violates the `native-v1` / `wheels-v1` layout | Use `purpose=environment`, upload the directory contents at the FileSet root, and fix the named manifest or package error |
 | Sandboxed Gym returns no rollout for the selected agent | The environment registers the agent under a different instance name | Set `GymRunnerTarget.agent_ref_name` to the registered instance |
 

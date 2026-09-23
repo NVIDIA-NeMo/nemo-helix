@@ -7,9 +7,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nmp.guardrails.app.utils.config_store import populate_config_store
-from nmp.guardrails.entities import GuardrailConfig
-from nmp.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.app.utils.config_store import populate_config_store
+from nhx.guardrails.entities import GuardrailConfig
+from nhx.guardrails.entities.values._private import Model, RailsConfig
 
 # Path used when config_store_path is required (populate_config_store no longer uses settings).
 MOCK_CONFIG_STORE_PATH = Path("/mock/config/store/path")
@@ -39,7 +39,7 @@ def mock_fs():
 @pytest.fixture
 def mock_fsspec(mock_fs):
     """Fixture to mock fsspec.filesystem."""
-    with patch("nmp.guardrails.app.utils.config_store.fsspec.filesystem", return_value=mock_fs):
+    with patch("nhx.guardrails.app.utils.config_store.fsspec.filesystem", return_value=mock_fs):
         yield mock_fs
 
 
@@ -47,14 +47,14 @@ def mock_fsspec(mock_fs):
 def mock_rails_config():
     """Fixture to mock RailsConfig.from_path."""
     config = RailsConfig()
-    with patch("nmp.guardrails.app.utils.config_store.RailsConfig.from_path", return_value=config):
+    with patch("nhx.guardrails.app.utils.config_store.RailsConfig.from_path", return_value=config):
         yield config
 
 
 @pytest.fixture
 def mock_entity_not_found():
     """Fixture to simulate EntityNotFoundError."""
-    from nmp.common.entities.client import EntityNotFoundError
+    from nhx.common.entities.client import EntityNotFoundError
 
     return EntityNotFoundError("Not found")
 
@@ -153,7 +153,7 @@ async def test_populate_config_store_deduplicates_models_from_symlinked_director
     mock_entities_client.get = AsyncMock(side_effect=mock_entity_not_found)
     mock_entities_client.create = AsyncMock()
 
-    with patch("nmp.guardrails.app.utils.config_store.RailsConfig.from_path", return_value=triplicated_config):
+    with patch("nhx.guardrails.app.utils.config_store.RailsConfig.from_path", return_value=triplicated_config):
         await populate_config_store(mock_entities_client, MOCK_CONFIG_STORE_PATH)
 
     assert mock_entities_client.create.call_count == 2

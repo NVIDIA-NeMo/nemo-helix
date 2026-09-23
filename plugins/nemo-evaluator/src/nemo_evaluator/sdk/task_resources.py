@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from nemo_evaluator.api.schemas import Revision, Task, TaskInput
 from nemo_evaluator.sdk.query_params import list_params, project_params, revision_selector
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.evaluator.types import CreateTaskRequest, ReplaceTaskRequest
-from nemo_platform_plugin.schema import Page
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evaluator.types import CreateTaskRequest, ReplaceTaskRequest
+from nemo_helix_plugin.schema import Page
 
 
 class EvaluatorTasksResource:

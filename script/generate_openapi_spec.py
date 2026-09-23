@@ -26,8 +26,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
-from nmp.common.api.utils import clear_query_param_schemas, register_query_param_schemas
-from nmp.common.version import platform_api_version
+from nhx.common.api.utils import clear_query_param_schemas, register_query_param_schemas
+from nhx.common.version import platform_api_version
 from uvicorn.importer import import_from_string
 
 from .openapi_helper.openapi_tools import (
@@ -193,9 +193,9 @@ class ServiceConfig:
 SERVICES = [
     ServiceConfig(
         name="platform",
-        app_import="nmp.platform_runner.server:create_platform_openapi_app",
+        app_import="nhx.platform_runner.server:create_platform_openapi_app",
         output_file="platform.openapi.yaml",
-        app_dir="/packages/nmp_platform_runner/src",
+        app_dir="/packages/nhx_platform_runner/src",
         # Aggregate platform OpenAPI is generated without plugin services by default.
         env_vars={"NEMO_PLUGIN_SERVICES_ALLOWLIST": ""},
     )
@@ -826,7 +826,7 @@ def add_examples_and_finalize() -> None:
     print_green("=== Adding examples and finalizing specs ===")
 
     example_files = list(sorted(Path("openapi/api-examples").glob("*.json")))
-    source_file = "openapi/nmp-common.openapi.yaml"
+    source_file = "openapi/nhx-common.openapi.yaml"
 
     # Load source spec once for tag copying
     source_spec = None
@@ -921,7 +921,7 @@ def can_process_single_platform_spec_in_memory(services: list[ServiceConfig]) ->
     # retain their existing semantics.
     return (
         not Path("openapi/ea/openapi.yaml").exists()
-        and not Path("openapi/nmp-common.openapi.yaml").exists()
+        and not Path("openapi/nhx-common.openapi.yaml").exists()
         and not any(Path("openapi/api-examples").glob("*.json"))
     )
 

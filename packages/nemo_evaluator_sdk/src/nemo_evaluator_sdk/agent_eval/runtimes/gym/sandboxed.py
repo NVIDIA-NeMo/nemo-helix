@@ -68,7 +68,7 @@ PROXY_AUTH_HEADER = "X-Sandboxed-Gym-Token"
 #: ``sandboxed_gym.runtime.gym_host_runtime.MODEL_CALLS_RESULT_KEY``, duplicated rather than
 #: imported so this runner carries no dependency on that package -- a caller with a session
 #: descriptor never needs it installed.
-MODEL_CALLS_RESULT_KEY = "_nmp_model_calls"
+MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 #: Where captures are written locally, matching the CLI runtime's ``model_call_capture_dir``.
 _CAPTURE_SUBDIR = "model_calls"
 

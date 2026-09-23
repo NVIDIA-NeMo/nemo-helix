@@ -16,9 +16,9 @@ from nemo_anonymizer_plugin.app.input import (
     prepare_anonymizer_input_async,
     validate_anonymizer_input_source,
 )
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.jobs.file_manager import TmpDirPath
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 
 FilesetClient = FilesClient | AsyncFilesClient
 

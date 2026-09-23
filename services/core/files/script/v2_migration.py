@@ -6,7 +6,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #   "huggingface_hub",
-#   "nemo-platform>=2.0.0.dev0,<2.1.0",
+#   "nemo-helix>=2.0.0.dev0,<2.1.0",
 # ]
 # ///
 """
@@ -19,7 +19,7 @@ This script follows a three-phase workflow:
    them into Files service filesets
 
 Usage examples:
-  nemo auth login --base-url <your-nmp-base-url>  # if auth is enabled
+  nemo auth login --base-url <your-nhx-base-url>  # if auth is enabled
   uv run v2_migration.py setup --check --repo-prefix <namespace/>
   uv run v2_migration.py plan --repo-id <namespace/repo-a> --repo-id <namespace/repo-b> --output plan.json
   uv run v2_migration.py plan --repo-prefix <namespace/> --output plan.json
@@ -44,14 +44,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from huggingface_hub import HfApi
-from nemo_platform import NeMoPlatform, NotFoundError
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError as ClientConflictError
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest, ListFilesetsQueryParams
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix import NeMoHelix, NotFoundError
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, ListFilesetsQueryParams
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def _resolve_runtime_config(args: argparse.Namespace) -> RuntimeConfig:
         os.environ.get("HF_DATASET_PREFIX") or os.environ.get("DATASET_PREFIX") or DEFAULT_HF_DATASET_PREFIX
     )
     files_base_url = (
-        args.files_base_url or os.environ.get("NEMO_MICROSERVICES_FILES_URL") or os.environ.get("NMP_BASE_URL")
+        args.files_base_url or os.environ.get("NEMO_MICROSERVICES_FILES_URL") or os.environ.get("NHX_BASE_URL")
     )
     files_workspace = args.files_workspace
 
@@ -152,13 +152,13 @@ def _get_datastore_api(cfg: RuntimeConfig) -> HfApi:
     return HfApi(endpoint=cfg.datastore_url, token=cfg.datastore_token)
 
 
-def _get_files_sdk(cfg: RuntimeConfig) -> NeMoPlatform:
+def _get_files_sdk(cfg: RuntimeConfig) -> NeMoHelix:
     kwargs: dict[str, Any] = {}
     if cfg.files_workspace:
         kwargs["workspace"] = cfg.files_workspace
     if cfg.files_base_url:
         kwargs["base_url"] = cfg.files_base_url
-    return NeMoPlatform(**kwargs)
+    return NeMoHelix(**kwargs)
 
 
 def _resolve_target_workspace(repo_id: str, explicit_files_workspace: str | None) -> str:
@@ -334,7 +334,7 @@ def create_plan(
 
 
 def _ensure_fileset(
-    sdk: NeMoPlatform, workspace: str, fileset: str, dry_run: bool
+    sdk: NeMoHelix, workspace: str, fileset: str, dry_run: bool
 ) -> Literal["dry_run", "exists", "created"]:
     """
     Ensure that the target fileset exists, and create it if it doesn't.
@@ -350,7 +350,7 @@ def _ensure_fileset(
         return "created"
 
 
-def _ensure_workspace(sdk: NeMoPlatform, workspace: str, dry_run: bool) -> Literal["dry_run", "exists", "created"]:
+def _ensure_workspace(sdk: NeMoHelix, workspace: str, dry_run: bool) -> Literal["dry_run", "exists", "created"]:
     """
     Ensure that the target workspace exists, and create it if it doesn't.
     """
@@ -369,7 +369,7 @@ def _ensure_workspace(sdk: NeMoPlatform, workspace: str, dry_run: bool) -> Liter
         return "created"
 
 
-def _get_existing_target_paths(sdk: NeMoPlatform, workspace: str, fileset: str) -> set[str]:
+def _get_existing_target_paths(sdk: NeMoHelix, workspace: str, fileset: str) -> set[str]:
     """
     Return existing file paths in the target fileset.
 
@@ -647,7 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--files-base-url",
         default=None,
-        help="Files service base URL (or NEMO_MICROSERVICES_FILES_URL / NMP_BASE_URL). If omitted, script uses active nemo context/config.",
+        help="Files service base URL (or NEMO_MICROSERVICES_FILES_URL / NHX_BASE_URL). If omitted, script uses active nemo context/config.",
     )
     common.add_argument(
         "--files-workspace",

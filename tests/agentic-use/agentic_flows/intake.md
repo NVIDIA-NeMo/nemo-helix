@@ -40,7 +40,7 @@ The Intake service is the front door for LLM data collection, storing interactio
 - Schema for entries
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 
 **Success Criteria**:

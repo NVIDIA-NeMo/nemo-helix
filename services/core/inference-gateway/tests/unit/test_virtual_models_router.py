@@ -21,15 +21,15 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError, NemoInferenceMiddleware
-from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
-from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, UpdateVirtualModelRequest
-from nmp.core.inference_gateway.api.dependencies import global_middleware_registry
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
-from nmp.core.inference_gateway.config import InferenceGatewayConfig
-from nmp.core.inference_gateway.service import InferenceGatewayService
-from nmp.testing import create_test_client
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError, NemoInferenceMiddleware
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, UpdateVirtualModelRequest
+from nhx.core.inference_gateway.api.dependencies import global_middleware_registry
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
+from nhx.core.inference_gateway.config import InferenceGatewayConfig
+from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.testing import create_test_client
 
 # Base URL prefix for the inference-gateway service
 BASE = "/apis/inference-gateway/v2/workspaces/default/virtual-models"
@@ -388,7 +388,7 @@ class TestCreateVirtualModel:
         validation failures (422). It also lines up with the same exception
         being the eviction trigger for IGW's resolved-middleware cache.
         """
-        from nemo_platform_plugin.inference_middleware import MiddlewareConfigNotFoundError
+        from nemo_helix_plugin.inference_middleware import MiddlewareConfigNotFoundError
 
         plugin = _make_plugin()
         plugin.get_middleware_config = AsyncMock(side_effect=MiddlewareConfigNotFoundError("default/missing"))

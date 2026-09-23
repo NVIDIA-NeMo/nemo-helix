@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nmp.core.entities.controllers.workspace_cleanup import WorkspaceCleanup, WorkspaceJobCleanupError
-from nmp.core.entities.entities import Workspace, WorkspaceDeletionStage
+from nhx.core.entities.controllers.workspace_cleanup import WorkspaceCleanup, WorkspaceJobCleanupError
+from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 
 
 def _make_workspace(name: str = "test-workspace") -> Workspace:
@@ -88,7 +88,7 @@ def _make_models_client(
     return models_client
 
 
-_CLIENT_FROM_PLATFORM_PATCH = "nmp.core.entities.controllers.workspace_cleanup.client_from_platform"
+_CLIENT_FROM_PLATFORM_PATCH = "nhx.core.entities.controllers.workspace_cleanup.client_from_platform"
 
 
 def _patch_jobs_client(jobs_client: MagicMock):
@@ -110,9 +110,9 @@ def _patch_clients(jobs_client: MagicMock, files_client: MagicMock, models_clien
     so it calls ``client_from_platform`` for ``AsyncJobsClient``,
     ``AsyncModelsClient``, and ``AsyncFilesClient`` — return the matching mock.
     """
-    from nemo_platform_plugin.files.client import AsyncFilesClient
-    from nemo_platform_plugin.jobs.client import AsyncJobsClient
-    from nemo_platform_plugin.models.client import AsyncModelsClient
+    from nemo_helix_plugin.files.client import AsyncFilesClient
+    from nemo_helix_plugin.jobs.client import AsyncJobsClient
+    from nemo_helix_plugin.models.client import AsyncModelsClient
 
     models = models_client if models_client is not None else _make_models_client([])
 
@@ -137,20 +137,20 @@ def _make_job(name: str, status: str = "completed") -> MagicMock:
 
 def _make_controller(
     workspace_repo: AsyncMock | None = None,
-    nmp_sdk: MagicMock | None = None,
+    nhx_sdk: MagicMock | None = None,
 ) -> WorkspaceCleanup:
     if workspace_repo is None:
         workspace_repo = AsyncMock()
-    if nmp_sdk is None:
-        nmp_sdk = MagicMock()
+    if nhx_sdk is None:
+        nhx_sdk = MagicMock()
 
     return WorkspaceCleanup(
-        nmp_sdk=nmp_sdk,
+        nhx_sdk=nhx_sdk,
         workspace_repository=workspace_repo,
     )
 
 
-_FILES_CLIENT_PATCH = "nmp.core.entities.controllers.workspace_cleanup.client_from_platform"
+_FILES_CLIENT_PATCH = "nhx.core.entities.controllers.workspace_cleanup.client_from_platform"
 
 
 class TestWorkspaceCleanupStep:
@@ -161,7 +161,7 @@ class TestWorkspaceCleanupStep:
         stop.set()
         repo = AsyncMock()
         controller = WorkspaceCleanup(
-            nmp_sdk=MagicMock(),
+            nhx_sdk=MagicMock(),
             workspace_repository=repo,
             stop_signal=stop,
         )
@@ -175,7 +175,7 @@ class TestWorkspaceCleanupStep:
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([], None)
         controller = WorkspaceCleanup(
-            nmp_sdk=MagicMock(),
+            nhx_sdk=MagicMock(),
             workspace_repository=repo,
             loop=loop,
         )
@@ -224,7 +224,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         sdk = MagicMock()
         mock_files = _make_mock_files_client([])
-        controller = _make_controller(workspace_repo=repo, nmp_sdk=sdk)
+        controller = _make_controller(workspace_repo=repo, nhx_sdk=sdk)
 
         with _patch_clients(_make_jobs_client([]), mock_files, _make_models_client([])):
             await controller._async_step()
@@ -374,7 +374,7 @@ class TestWorkspaceCleanupJobs:
 
     @pytest.mark.asyncio
     async def test_non_terminal_job_after_cancel_is_not_treated_as_deleted(self, monkeypatch: pytest.MonkeyPatch):
-        from nmp.core.entities.controllers import workspace_cleanup as workspace_cleanup_module
+        from nhx.core.entities.controllers import workspace_cleanup as workspace_cleanup_module
 
         monkeypatch.setattr(workspace_cleanup_module, "_JOB_TERMINAL_WAIT_TIMEOUT_SECONDS", 0.0)
         workspace = _make_workspace()
@@ -391,7 +391,7 @@ class TestWorkspaceCleanupJobs:
 
     @pytest.mark.asyncio
     async def test_wait_for_terminal_job_emits_heartbeat_between_polls(self, monkeypatch: pytest.MonkeyPatch):
-        from nmp.core.entities.controllers import workspace_cleanup as workspace_cleanup_module
+        from nhx.core.entities.controllers import workspace_cleanup as workspace_cleanup_module
 
         monkeypatch.setattr(workspace_cleanup_module, "_JOB_TERMINAL_WAIT_TIMEOUT_SECONDS", 60.0)
         monkeypatch.setattr(workspace_cleanup_module, "_JOB_TERMINAL_WAIT_POLL_SECONDS", 1.0)
@@ -409,7 +409,7 @@ class TestWorkspaceCleanupJobs:
 
         with (
             patch.object(controller, "emit_heartbeat") as emit_heartbeat,
-            patch("nmp.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=_mark_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=_mark_sleep),
         ):
             await controller._wait_for_terminal_job(jobs_client, "test-workspace", "active-job")
 

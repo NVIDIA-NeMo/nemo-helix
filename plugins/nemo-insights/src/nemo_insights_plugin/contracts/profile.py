@@ -107,8 +107,8 @@ def resolve_ethos_path(profile_dir: Path, configured: str | None) -> Path | None
 
 
 def resolve_base_url(explicit: str | None, env: Mapping[str, str] = os.environ) -> str:
-    """Apply explicit, NMP_BASE_URL, then localhost precedence."""
+    """Apply explicit, NHX_BASE_URL, then localhost precedence."""
     if explicit is not None:
         return explicit
-    env_url = env.get("NMP_BASE_URL")
+    env_url = env.get("NHX_BASE_URL")
     return env_url if env_url is not None else DEFAULT_BASE_URL

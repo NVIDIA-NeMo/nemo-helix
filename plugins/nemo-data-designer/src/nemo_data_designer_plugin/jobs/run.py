@@ -12,9 +12,9 @@ from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_data_designer_plugin._data_designer import create_data_designer
 from nemo_data_designer_plugin.jobs.result_manager import DataDesignerResultManager
 from nemo_data_designer_plugin.jobs.spec import DataDesignerStepConfig
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.job_results import ResultRef
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_results import ResultRef
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ BUFFER_SIZE = 500
 def run_step_config(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
 ) -> int:
     result = run_step_config_result(step_config, ctx, sdk)
     exit_code = result.get("exit_code")
@@ -34,7 +34,7 @@ def run_step_config(
 def run_step_config_result(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
 ) -> dict[str, object]:
     try:
         return _run_step_config(step_config, ctx, sdk)
@@ -51,7 +51,7 @@ def run_step_config_result(
 def _run_step_config(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
 ) -> dict[str, object]:
     # In dispatched-container mode the root logger has no handler;
     # attach our JSON-formatted stderr handler so the container's

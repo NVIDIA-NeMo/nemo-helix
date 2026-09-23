@@ -23,18 +23,18 @@ uv run python plugins/nemo-safe-synthesizer/scripts/setup_model_filesets.py --fi
 Prefer the released task image from NGC:
 
 ```bash
-export NMP_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-platform
-export NMP_IMAGE_TAG=<tag>  # match your installed NeMo Platform release
-export NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=safe-synthesizer-tasks
+export NHX_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-helix
+export NHX_IMAGE_TAG=<tag>  # match your installed NeMo Helix release
+export NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=nhx-safe-synthesizer-tasks
 ```
 
-This resolves platform job steps to `nvcr.io/nvidia/nemo-platform/safe-synthesizer-tasks:<tag>`.
+This resolves platform job steps to `nvcr.io/nvidia/nemo-helix/nhx-safe-synthesizer-tasks:<tag>`.
 
 For a local Docker-built image on a Docker executor, set a full image reference override:
 
 ```bash
-docker buildx bake safe-synthesizer-tasks-docker
-export NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF=safe-synthesizer-tasks:local
+docker buildx bake nhx-safe-synthesizer-tasks-docker
+export NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF=nhx-safe-synthesizer-tasks:local
 ```
 
 For Kubernetes, push the local build to a registry the cluster can pull, then set `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF` to that pushed image reference.

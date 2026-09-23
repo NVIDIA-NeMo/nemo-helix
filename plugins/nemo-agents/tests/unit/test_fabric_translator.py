@@ -133,8 +133,8 @@ class TestTranslateAgentConfig:
 
     def test_selected_harness_uses_default_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NEMO_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_WORKSPACE", raising=False)
+        monkeypatch.delenv("NHX_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
         config = AgentConfig.model_validate(_example_yaml_config())
 
         fabric_config = translate_agent_config(config, harness_name="codex")
@@ -157,8 +157,8 @@ class TestTranslateAgentConfig:
 
     def test_forwards_platform_runtime_environment_to_child_tools(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_BASE_URL", "http://command-platform:8080")
-        monkeypatch.setenv("NMP_BASE_URL", "http://shared-platform:8080")
-        monkeypatch.setenv("NMP_WORKSPACE", "request-workspace")
+        monkeypatch.setenv("NHX_BASE_URL", "http://shared-platform:8080")
+        monkeypatch.setenv("NHX_WORKSPACE", "request-workspace")
         config = AgentConfig.model_validate(_example_yaml_config())
 
         fabric_config = translate_agent_config(config, harness_name="codex")
@@ -167,8 +167,8 @@ class TestTranslateAgentConfig:
         assert environment is not None
         assert environment.env == {
             "NEMO_BASE_URL": "http://command-platform:8080",
-            "NMP_BASE_URL": "http://shared-platform:8080",
-            "NMP_WORKSPACE": "request-workspace",
+            "NHX_BASE_URL": "http://shared-platform:8080",
+            "NHX_WORKSPACE": "request-workspace",
             PLATFORM_IGW_API_KEY_ENV: PLATFORM_IGW_API_KEY_PLACEHOLDER,
         }
 
@@ -242,11 +242,11 @@ class TestTranslateAgentConfig:
         # Simulates a config after an EnvironmentSpec merge: environment.env holds
         # the spec's plaintext vars. Platform-injected runtime values win on key
         # collision.
-        monkeypatch.setenv("NMP_WORKSPACE", "runtime-ws")
+        monkeypatch.setenv("NHX_WORKSPACE", "runtime-ws")
         monkeypatch.delenv("NEMO_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_BASE_URL", raising=False)
         payload = copy.deepcopy(_example_yaml_config())
-        payload["environment"]["env"] = {"CUSTOM": "from-spec", "NMP_WORKSPACE": "spec-should-lose"}
+        payload["environment"]["env"] = {"CUSTOM": "from-spec", "NHX_WORKSPACE": "spec-should-lose"}
         config = AgentConfig.model_validate(payload)
 
         fabric_config = translate_agent_config(config, harness_name="codex")
@@ -254,7 +254,7 @@ class TestTranslateAgentConfig:
         environment = fabric_config.environment
         assert environment is not None
         assert environment.env["CUSTOM"] == "from-spec"
-        assert environment.env["NMP_WORKSPACE"] == "runtime-ws"
+        assert environment.env["NHX_WORKSPACE"] == "runtime-ws"
 
     def test_environment_mirror_fields_forwarded(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())

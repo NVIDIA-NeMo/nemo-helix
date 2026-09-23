@@ -23,12 +23,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.unsloth.app.jobs.compiler import platform_job_config_compiler
-from nmp.unsloth.schemas import (
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.deployment import DeploymentParams, ToolCallParams
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -126,13 +126,15 @@ def platform() -> MagicMock:
     clients = MagicMock()
     clients.models.get_deployment_config = AsyncMock(side_effect=_not_found())
     clients.models.get_model = AsyncMock(side_effect=_not_found())
+    # No adapter holds the output name yet, which is what every test here assumes.
+    clients.models.get_adapter = AsyncMock(side_effect=_not_found())
     return clients
 
 
 @pytest.fixture(autouse=True)
 def stub_fetch_model_entity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nmp.unsloth.app.jobs.compiler.fetch_model_entity",
+        "nhx.unsloth.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_base_model_entity()),
     )
 
@@ -143,7 +145,7 @@ def authorized(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     auth_client = AsyncMock()
     auth_client.has_permissions = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        "nmp.unsloth.app.jobs.compiler.auth_client_context",
+        "nhx.unsloth.app.jobs.compiler.auth_client_context",
         SimpleNamespace(get=lambda: auth_client),
     )
     return auth_client
@@ -169,7 +171,7 @@ async def test_no_deployment_config_resolves_nothing(platform: MagicMock) -> Non
 
 @pytest.mark.asyncio
 async def test_unresolvable_string_ref_is_rejected(platform: MagicMock) -> None:
-    with pytest.raises(PlatformJobCompilationError, match="does not exist in workspace 'default'"):
+    with pytest.raises(HelixJobCompilationError, match="does not exist in workspace 'default'"):
         await platform_job_config_compiler("default", _lora_job("missing-cfg"), platform)
 
 
@@ -193,7 +195,7 @@ async def test_lora_job_rejects_a_config_for_a_different_base_model(platform: Ma
         return_value=_response(_deployment_config(model_entity_id="default/unrelated", model_name="unrelated"))
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="different model entity than the base model"):
+    with pytest.raises(HelixJobCompilationError, match="different model entity than the base model"):
         await platform_job_config_compiler("default", _lora_job("other-cfg"), platform)
 
 
@@ -201,7 +203,7 @@ async def test_lora_job_rejects_a_config_for_a_different_base_model(platform: Ma
 async def test_lora_job_rejects_a_referenced_config_without_lora_enabled(platform: MagicMock) -> None:
     platform.models.get_deployment_config = AsyncMock(return_value=_response(_deployment_config(lora_enabled=False)))
 
-    with pytest.raises(PlatformJobCompilationError, match="lora_enabled=false"):
+    with pytest.raises(HelixJobCompilationError, match="lora_enabled=false"):
         await platform_job_config_compiler("default", _lora_job("existing-cfg"), platform)
 
 
@@ -225,7 +227,7 @@ async def test_lora_job_rejects_an_unbound_config_without_lora_enabled(platform:
         )
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="lora_enabled=false"):
+    with pytest.raises(HelixJobCompilationError, match="lora_enabled=false"):
         await platform_job_config_compiler("default", _lora_job("template-cfg"), platform)
 
 
@@ -234,7 +236,7 @@ async def test_lora_job_rejects_inline_lora_enabled_false(platform: MagicMock) -
     """UnslothJobInput rejects this too, but the compiler takes UnslothJobOutput."""
     job = _lora_job(DeploymentParams(gpu=1, lora_enabled=False))
 
-    with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
+    with pytest.raises(HelixJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler("default", job, platform)
 
 
@@ -268,7 +270,7 @@ async def test_merged_job_is_not_checked_against_the_base_model(platform: MagicM
     platform.models.get_deployment_config = AsyncMock(return_value=_response(_deployment_config()))
     platform.models.get_model = AsyncMock(side_effect=_not_found())
 
-    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
+    with pytest.raises(HelixJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", _merged_job("existing-cfg"), platform)
 
 
@@ -333,7 +335,7 @@ async def test_merged_retrain_rejects_a_config_for_a_different_model(platform: M
         return_value=_response(SimpleNamespace(workspace="default", name="my-merged"))
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
+    with pytest.raises(HelixJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", _merged_job("existing-cfg"), platform)
 
 
@@ -358,7 +360,7 @@ async def test_all_weights_job_rejects_a_config_naming_another_model(platform: M
     platform.models.get_deployment_config = AsyncMock(return_value=_response(_deployment_config()))
     platform.models.get_model = AsyncMock(side_effect=_not_found())
 
-    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
+    with pytest.raises(HelixJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", _all_weights_job("existing-cfg"), platform)
 
 
@@ -394,11 +396,11 @@ async def test_tool_call_plugin_without_the_permission_is_rejected(
     auth_client = AsyncMock()
     auth_client.has_permissions = AsyncMock(return_value=False)
     monkeypatch.setattr(
-        "nmp.unsloth.app.jobs.compiler.auth_client_context",
+        "nhx.unsloth.app.jobs.compiler.auth_client_context",
         SimpleNamespace(get=lambda: auth_client),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="models.tool-call-plugin.set"):
+    with pytest.raises(HelixJobCompilationError, match="models.tool-call-plugin.set"):
         await platform_job_config_compiler("default", _tool_call_job(), platform)
 
 
@@ -407,11 +409,11 @@ async def test_tool_call_plugin_without_an_auth_context_is_rejected(
     platform: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "nmp.unsloth.app.jobs.compiler.auth_client_context",
+        "nhx.unsloth.app.jobs.compiler.auth_client_context",
         SimpleNamespace(get=lambda: None),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="No auth context available"):
+    with pytest.raises(HelixJobCompilationError, match="No auth context available"):
         await platform_job_config_compiler("default", _tool_call_job(), platform)
 
 
@@ -421,7 +423,7 @@ async def test_inline_params_without_tool_call_plugin_need_no_auth_context(
 ) -> None:
     """Only the gated field consults auth; everything else must compile without it."""
     monkeypatch.setattr(
-        "nmp.unsloth.app.jobs.compiler.auth_client_context",
+        "nhx.unsloth.app.jobs.compiler.auth_client_context",
         SimpleNamespace(get=lambda: None),
     )
 
@@ -433,7 +435,7 @@ async def test_inline_params_without_tool_call_plugin_need_no_auth_context(
 @pytest.mark.asyncio
 async def test_string_ref_needs_no_auth_context(platform: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nmp.unsloth.app.jobs.compiler.auth_client_context",
+        "nhx.unsloth.app.jobs.compiler.auth_client_context",
         SimpleNamespace(get=lambda: None),
     )
     platform.models.get_deployment_config = AsyncMock(return_value=_response(_deployment_config()))

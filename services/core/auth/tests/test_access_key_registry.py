@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateResponse, AccessKeyEntityType
-from nmp.common.auth.token_claims import TokenClaims
-from nmp.common.entities import EntityConflictError, EntityNotFoundError
-from nmp.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyRegistry, AccessKeyStateConflictError
-from nmp.core.auth.entities import AccessKeyEntity
+from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse, AccessKeyEntityType
+from nhx.common.auth.token_claims import TokenClaims
+from nhx.common.entities import EntityConflictError, EntityNotFoundError
+from nhx.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyRegistry, AccessKeyStateConflictError
+from nhx.core.auth.entities import AccessKeyEntity
 
 NOW = datetime(2026, 8, 4, 18, 0, tzinfo=UTC)
 
@@ -34,7 +34,7 @@ def _record(
         expires_at=datetime(2030, 1, 1, tzinfo=UTC),
         status="REVOKED" if revoked else "ACTIVE",
         issuer="https://platform.example.com/apis/auth",
-        audiences=["nemo-platform-access-key"],
+        audiences=["nemo-helix-access-key"],
     )
 
 
@@ -62,7 +62,7 @@ def test_access_key_entity_migrates_legacy_revoked_at_to_status() -> None:
             "issued_at": NOW,
             "expires_at": datetime(2030, 1, 1, tzinfo=UTC),
             "issuer": "https://platform.example.com/apis/auth",
-            "audiences": ["nemo-platform-access-key"],
+            "audiences": ["nemo-helix-access-key"],
             "revoked_at": NOW,
         }
     )
@@ -79,7 +79,7 @@ def test_access_key_entity_defaults_unrevoked_legacy_record_to_active() -> None:
             "issued_at": NOW,
             "expires_at": datetime(2030, 1, 1, tzinfo=UTC),
             "issuer": "https://platform.example.com/apis/auth",
-            "audiences": ["nemo-platform-access-key"],
+            "audiences": ["nemo-helix-access-key"],
             "revoked_at": None,
         }
     )
@@ -110,7 +110,7 @@ def test_access_key_entity_rejects_inconsistent_identity_binding(
             entity_type=entity_type,
             issued_at=NOW,
             issuer="https://platform.example.com/apis/auth",
-            audiences=["nemo-platform-access-key"],
+            audiences=["nemo-helix-access-key"],
         )
 
 
@@ -127,7 +127,7 @@ async def test_registry_persists_created_key_metadata() -> None:
         description="CI build automation",
         status="ACTIVE",
         issuer="https://platform.example.com/apis/auth",
-        audiences=["nemo-platform-access-key"],
+        audiences=["nemo-helix-access-key"],
         scope=["intake", "entities"],
         token="secret-token",
         token_type="Bearer",
@@ -158,7 +158,7 @@ async def test_registry_separates_service_key_owner_from_token_subject() -> None
         description=None,
         status="ACTIVE",
         issuer="https://platform.example.com/apis/auth",
-        audiences=["nemo-platform-access-key"],
+        audiences=["nemo-helix-access-key"],
         token="secret-token",
         token_type="Bearer",
     )
@@ -201,7 +201,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
     entity_client = AsyncMock()
     active_record = _record().model_copy(
         update={
-            "audiences": ["nemo-platform-access-key", "nemo-platform-access-key"],
+            "audiences": ["nemo-helix-access-key", "nemo-helix-access-key"],
             "scope": ["intake", "intake"],
         }
     )
@@ -219,7 +219,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
 
     assert [key.jti for key in result.data] == ["ak_example", "ak_revoked"]
     assert [key.status for key in result.data] == ["ACTIVE", "REVOKED"]
-    assert result.data[0].audiences == ["nemo-platform-access-key"]
+    assert result.data[0].audiences == ["nemo-helix-access-key"]
     assert result.data[0].scope == ["intake"]
     assert result.has_more
     entity_client.list.assert_awaited_once()
@@ -611,14 +611,14 @@ async def test_registry_backfills_missing_legacy_access_key_from_validated_claim
         scopes=[],
         raw_claims={
             "iss": "https://platform.example.com/apis/auth",
-            "aud": ["nemo-platform-access-key", "nemo-platform-access-key"],
+            "aud": ["nemo-helix-access-key", "nemo-helix-access-key"],
             "sub": "alice@example.com",
             "iat": 1_785_280_000,
             "nbf": 1_785_280_000,
             "exp": 1_893_456_000,
             "jti": "ak_legacy",
-            "nmp_token_type": "access_key",
-            "nmp_access_key": {"version": 1, "name": "legacy-key"},
+            "nhx_token_type": "access_key",
+            "nhx_access_key": {"version": 1, "name": "legacy-key"},
         },
     )
 
@@ -630,7 +630,7 @@ async def test_registry_backfills_missing_legacy_access_key_from_validated_claim
     assert saved.description is None
     assert saved.principal == "alice@example.com"
     assert saved.issuer == "https://platform.example.com/apis/auth"
-    assert saved.audiences == ["nemo-platform-access-key"]
+    assert saved.audiences == ["nemo-helix-access-key"]
     assert saved.issued_at == datetime.fromtimestamp(1_785_280_000, tz=UTC)
     assert saved.expires_at == datetime.fromtimestamp(1_893_456_000, tz=UTC)
 
@@ -869,14 +869,14 @@ async def test_registry_rejects_missing_current_access_key_record() -> None:
         scopes=[],
         raw_claims={
             "iss": "https://platform.example.com/apis/auth",
-            "aud": ["nemo-platform-access-key"],
+            "aud": ["nemo-helix-access-key"],
             "sub": "alice@example.com",
             "iat": 1_785_280_000,
             "nbf": 1_785_280_000,
             "exp": 1_893_456_000,
             "jti": "ak_current",
-            "nmp_token_type": "access_key",
-            "nmp_access_key": {"version": 2, "name": "current-key"},
+            "nhx_token_type": "access_key",
+            "nhx_access_key": {"version": 2, "name": "current-key"},
         },
     )
 

@@ -3,7 +3,7 @@
 
 # Hugging Face dataset conversion
 
-Run from **nemo-platform** git root: `uv run python …` (plugin brings `datasets` + `transformers`).
+Run from **nemo-helix** git root: `uv run python …` (plugin brings `datasets` + `transformers`).
 
 Do **not** ask the user for local paths when they gave an HF dataset id — convert and upload in the same session.
 

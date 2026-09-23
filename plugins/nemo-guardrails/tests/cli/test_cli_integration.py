@@ -21,15 +21,15 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 from nemo_guardrails_plugin.cli import GuardrailCLI
-from nemo_platform_ext.cli.core.context import CLIContext
-from nemo_platform_plugin.client.client import NemoClient
-from nmp.testing import SDKTestClientAdapter, create_test_client
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_plugin.client.client import NemoClient
+from nhx.testing import SDKTestClientAdapter, create_test_client
 from typer.testing import CliRunner
 
 # Force offline before the service import so a developer shell with HF_HUB_OFFLINE=0 cannot hit the Hub.
 os.environ["HF_HUB_OFFLINE"] = "1"
 
-from nmp.guardrails.service import GuardrailsService  # noqa: E402
+from nhx.guardrails.service import GuardrailsService  # noqa: E402
 
 app = GuardrailCLI().get_cli()
 

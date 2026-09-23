@@ -19,9 +19,9 @@ pinned as documented divergences in the plugin's test_filter_matches.py.
 """
 
 import pytest
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nmp.common.api.in_memory_filter import InMemoryFilterRepository
-from nmp.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nhx.common.api.in_memory_filter import InMemoryFilterRepository
+from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from sqlalchemy import JSON, Column, Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Session
 

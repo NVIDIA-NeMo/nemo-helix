@@ -22,6 +22,12 @@ from typing import Any, ClassVar, TypeVar
 
 import httpx
 import typer
+from nemo_helix import AsyncNeMoHelix, NeMoHelixError
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.nooa_model_client import configured_model_refs
 from nemo_insights_plugin.analyst.run import ClientConstructionError, run_analyst
 from nemo_insights_plugin.contracts.checks import CheckResult, advisories, format_report, required_failures
 from nemo_insights_plugin.contracts.insights import InsightsFileError, validate_insights_file
@@ -48,12 +54,6 @@ from nemo_insights_plugin.sdk_resources.analysis_runs import (
     AnalysisRunNotSubmittedError,
     AnalysisRunTimeoutError,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatformError
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
-from nemo_platform_plugin.cli_state import resolve_cli_workspace
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.nooa_model_client import configured_model_refs
 from nooa import GenerationError
 
 _PREFLIGHT_PROBES: AnalysisProbes | None = None
@@ -125,7 +125,7 @@ def _run_command(coro: Coroutine[Any, Any, _T]) -> _T:
         ValueError,
         AnalysisRunNotSubmittedError,
         AnalysisRunTimeoutError,
-        NeMoPlatformError,
+        NeMoHelixError,
         httpx.HTTPError,
     ) as exc:
         typer.echo(f"Error: {_one_line_error(exc)}", err=True)
@@ -239,10 +239,10 @@ async def _run_analysis(analysis: _ResolvedAnalysis, *, verbose: bool) -> str:
             err=True,
         )
         raise typer.Exit(1) from None
-    except (ClientConstructionError, NeMoPlatformError, httpx.HTTPError) as exc:
+    except (ClientConstructionError, NeMoHelixError, httpx.HTTPError) as exc:
         detail = _one_line_error(exc).rstrip(".")
         typer.echo(
-            f"Error: analysis failed: {detail}. Check --base-url/NMP_BASE_URL, "
+            f"Error: analysis failed: {detail}. Check --base-url/NHX_BASE_URL, "
             "authentication, workspace, and Intake availability.",
             err=True,
         )
@@ -271,7 +271,7 @@ def analyze(
     base_url: str | None = typer.Option(
         None,
         "--base-url",
-        help="Base URL of the running NMP instance the analyst's tools should call.",
+        help="Base URL of the running NHX instance the analyst's tools should call.",
     ),
     profile_path: Path | None = typer.Option(
         None,
@@ -301,7 +301,7 @@ def analyze(
         ),
     ),
 ) -> None:
-    """Run the analyst agent against a running NMP instance.
+    """Run the analyst agent against a running NHX instance.
 
     Builds the analyst agent with ``--agent`` (and optional ``--ethos``)
     formatted into its instructions and tools scoped
@@ -339,7 +339,7 @@ def doctor(
     base_url: str | None = typer.Option(
         None,
         "--base-url",
-        help="Base URL of the running NMP instance to check.",
+        help="Base URL of the running NHX instance to check.",
     ),
 ) -> None:
     """Check whether the current profile is ready for analysis."""
@@ -413,10 +413,10 @@ class InsightsCLI(NemoCLI):
                 help=workspace_help("Workspace the agent belongs to."),
             ),
             base_url: str = typer.Option(
-                os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
+                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
                 "--base-url",
-                help="Base URL of the running NMP instance.",
-                envvar="NMP_BASE_URL",
+                help="Base URL of the running NHX instance.",
+                envvar="NHX_BASE_URL",
             ),
         ) -> None:
             """Enable periodic analysis for an agent."""
@@ -446,10 +446,10 @@ class InsightsCLI(NemoCLI):
                 help=workspace_help("Workspace the agent belongs to."),
             ),
             base_url: str = typer.Option(
-                os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
+                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
                 "--base-url",
-                help="Base URL of the running NMP instance.",
-                envvar="NMP_BASE_URL",
+                help="Base URL of the running NHX instance.",
+                envvar="NHX_BASE_URL",
             ),
         ) -> None:
             """Disable periodic analysis for an agent."""
@@ -479,10 +479,10 @@ class InsightsCLI(NemoCLI):
                 help=workspace_help("Workspace to inspect."),
             ),
             base_url: str = typer.Option(
-                os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
+                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
                 "--base-url",
-                help="Base URL of the running NMP instance.",
-                envvar="NMP_BASE_URL",
+                help="Base URL of the running NHX instance.",
+                envvar="NHX_BASE_URL",
             ),
         ) -> None:
             """Show periodic analysis opt-in state."""
@@ -518,10 +518,10 @@ class InsightsCLI(NemoCLI):
                 help=workspace_help("Workspace the agent belongs to."),
             ),
             base_url: str = typer.Option(
-                os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
+                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
                 "--base-url",
-                help="Base URL of the running NMP instance.",
-                envvar="NMP_BASE_URL",
+                help="Base URL of the running NHX instance.",
+                envvar="NHX_BASE_URL",
             ),
             default_model: str | None = typer.Option(
                 None,
@@ -609,10 +609,10 @@ class InsightsCLI(NemoCLI):
                 help=workspace_help("Workspace to inspect."),
             ),
             base_url: str = typer.Option(
-                os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
+                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
                 "--base-url",
-                help="Base URL of the running NMP instance.",
-                envvar="NMP_BASE_URL",
+                help="Base URL of the running NHX instance.",
+                envvar="NHX_BASE_URL",
             ),
             page: int = typer.Option(1, "--page", help="Page number (1-indexed)."),
             page_size: int = typer.Option(20, "--page-size", help="Items per page."),
@@ -647,10 +647,10 @@ class InsightsCLI(NemoCLI):
                 help=workspace_help("Workspace the run belongs to."),
             ),
             base_url: str = typer.Option(
-                os.environ.get("NMP_BASE_URL", DEFAULT_BASE_URL),
+                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
                 "--base-url",
-                help="Base URL of the running NMP instance.",
-                envvar="NMP_BASE_URL",
+                help="Base URL of the running NHX instance.",
+                envvar="NHX_BASE_URL",
             ),
             wait: bool = typer.Option(
                 False,
@@ -736,7 +736,7 @@ async def _analysis_config_command(
 
 
 @asynccontextmanager
-async def _client(base_url: str) -> AsyncIterator[AsyncNeMoPlatform]:
+async def _client(base_url: str) -> AsyncIterator[AsyncNeMoHelix]:
     """Open a platform client for one CLI command and always close it."""
     client = make_client(base_url)
     try:
@@ -883,7 +883,7 @@ async def _get_analysis_run(
 
 
 async def _wait_for_run(
-    client: AsyncNeMoPlatform,
+    client: AsyncNeMoHelix,
     *,
     workspace: str,
     name: str,
@@ -898,7 +898,7 @@ async def _wait_for_run(
         poll_interval=poll_interval,
         on_status=_status_reporter(),
     )
-    return _json(response.model_dump(mode="json")), response.job_status == PlatformJobStatus.COMPLETED.value
+    return _json(response.model_dump(mode="json")), response.job_status == HelixJobStatus.COMPLETED.value
 
 
 def _json(payload: object) -> str:

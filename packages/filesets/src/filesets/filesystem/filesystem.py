@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""FilesetFileSystem - fsspec filesystem for NeMo Platform fileset storage."""
+"""FilesetFileSystem - fsspec filesystem for NeMo Helix fileset storage."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from fsspec.callbacks import DEFAULT_CALLBACK, Callback
 from fsspec.implementations.local import LocalFileSystem, make_path_posix, trailing_sep
 from fsspec.spec import AbstractBufferedFile, AbstractFileSystem
 from fsspec.utils import other_paths
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import FilesetFileOutput, ListFilesQueryParams
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import FilesetFileOutput, ListFilesQueryParams
 
 T = TypeVar("T")
 
@@ -289,7 +289,7 @@ def build_fileset_ref(
 
 class FilesetFileSystem(AbstractFileSystem):
     """
-    Synchronous fsspec filesystem for NeMo Platform fileset storage.
+    Synchronous fsspec filesystem for NeMo Helix fileset storage.
 
     URL format: fileset://[workspace/]fileset_name[#path]
     """
@@ -791,7 +791,7 @@ class FilesetFileSystem(AbstractFileSystem):
 
 class AsyncFilesetFileSystem(AsyncFileSystem):
     """
-    Asynchronous fsspec filesystem for NeMo Platform fileset storage.
+    Asynchronous fsspec filesystem for NeMo Helix fileset storage.
 
     URL format: fileset://[workspace/]fileset_name[#path]
 
@@ -800,7 +800,7 @@ class AsyncFilesetFileSystem(AsyncFileSystem):
     uses the client's default workspace.
 
     Examples:
-        >>> from nemo_platform_plugin.files.client import AsyncFilesClient
+        >>> from nemo_helix_plugin.files.client import AsyncFilesClient
         >>> client = AsyncFilesClient(base_url="http://localhost:8000", workspace="default")
         >>> fs = AsyncFilesetFileSystem(client=client)
         >>> await fs._ls("my-fileset")  # root of fileset, workspace from client default

@@ -12,11 +12,11 @@ torch = pytest.importorskip("torch")
 onnxruntime = pytest.importorskip("onnxruntime")
 transformers = pytest.importorskip("transformers")
 
-from nmp.automodel.tasks.training.backends.checkpoints import (  # noqa: E402
+from nhx.automodel.tasks.training.backends.checkpoints import (  # noqa: E402
     ModelType,
     export_onnx,
 )
-from nmp.automodel.tasks.training.schemas import ExportConfig  # noqa: E402
+from nhx.automodel.tasks.training.schemas import ExportConfig  # noqa: E402
 from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer  # noqa: E402
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase  # noqa: E402
 

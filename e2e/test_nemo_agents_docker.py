@@ -21,13 +21,13 @@ config formats::
 
 How it runs, and where:
 
-- The deployed agent runs from an E2E-only ``nmp-agents-deepagents-e2e`` image, which
-  adds DeepAgents to the normal ``nmp-api`` contents. The
+- The deployed agent runs from an E2E-only ``nhx-agents-deepagents-e2e`` image, which
+  adds DeepAgents to the normal ``nhx-api`` contents. The
   deployments docker executor overrides the image entrypoint with the server
   for the selected config format, so the image's own entrypoint is irrelevant.
-- The image is supplied prebuilt via ``NMP_E2E_IMAGE_REGISTRY`` /
-  ``NMP_E2E_IMAGE_TAG`` (the existing e2e convention). Its dedicated CI job
-  (``python-e2e-image-test``) pulls ``nmp-agents-deepagents-e2e`` and sets these; the
+- The image is supplied prebuilt via ``NHX_E2E_IMAGE_REGISTRY`` /
+  ``NHX_E2E_IMAGE_TAG`` (the existing e2e convention). Its dedicated CI job
+  (``python-e2e-image-test``) pulls ``nhx-agents-deepagents-e2e`` and sets these; the
   ``needs_agents_e2e_image`` marker skips the test everywhere they are unset (the
   plain subprocess e2e job and local runs without them).
 - The agent is registered with a deterministic single-LLM ``chat_completion``
@@ -36,7 +36,7 @@ How it runs, and where:
 - The platform runs as a normal local process (subprocess harness). The
   ``container_base_url_host`` harness option makes the harness bind the platform
   on all interfaces (``--host 0.0.0.0``) and rewrite ``platform.base_url`` to the
-  docker bridge address; the runner seeds ``NMP_BASE_URL`` from that host paired
+  docker bridge address; the runner seeds ``NHX_BASE_URL`` from that host paired
   with the actual bind port, so the Inference Gateway URL injected into the agent
   container is reachable from *inside* the container while the platform's own
   in-process clients still reach it. This requires the Linux docker bridge,
@@ -49,7 +49,7 @@ import platform
 
 import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from e2e.agents_deploy_helpers import run_container_agent_deploy_and_invoke
 
@@ -61,18 +61,18 @@ from e2e.agents_deploy_helpers import run_container_agent_deploy_and_invoke
 _DOCKER_BRIDGE_HOST = "172.17.0.1"
 
 # E2E image name to deploy the agent from. Registry and tag come from
-# NMP_E2E_IMAGE_REGISTRY / NMP_E2E_IMAGE_TAG.
-_AGENT_IMAGE_NAME = "nmp-agents-deepagents-e2e"
+# NHX_E2E_IMAGE_REGISTRY / NHX_E2E_IMAGE_TAG.
+_AGENT_IMAGE_NAME = "nhx-agents-deepagents-e2e"
 
 # Runs the platform as a local process wired with a docker deployments executor
 # (see the config), and deploys the agent as a real docker container.
 #
 # Markers:
-# - ``needs_agents_e2e_image``: skips unless NMP_E2E_IMAGE_REGISTRY + NMP_E2E_IMAGE_TAG
-#   are set (its dedicated CI job pulls nmp-agents-deepagents-e2e and sets them).
+# - ``needs_agents_e2e_image``: skips unless NHX_E2E_IMAGE_REGISTRY + NHX_E2E_IMAGE_TAG
+#   are set (its dedicated CI job pulls nhx-agents-deepagents-e2e and sets them).
 # - ``subprocess_only``: this test drives its own subprocess-harness platform
 #   configured with a docker deployments executor. It must NOT run against an
-#   external cluster (``NMP_BASE_URL`` set, e.g. the Kind CPU e2e job), where the
+#   external cluster (``NHX_BASE_URL`` set, e.g. the Kind CPU e2e job), where the
 #   deployed Helm platform has no docker executor and the module's own
 #   ``e2e_config``/harness are ignored.
 pytestmark = [
@@ -94,13 +94,13 @@ pytestmark = [
 def agent_deployment_image() -> str:
     """Return the prebuilt platform image ref to deploy the agent from.
 
-    Composed from the e2e image convention (``NMP_E2E_IMAGE_REGISTRY`` /
-    ``NMP_E2E_IMAGE_TAG``) as ``{registry}/nmp-agents-deepagents-e2e:{tag}``. The
+    Composed from the e2e image convention (``NHX_E2E_IMAGE_REGISTRY`` /
+    ``NHX_E2E_IMAGE_TAG``) as ``{registry}/nhx-agents-deepagents-e2e:{tag}``. The
     ``needs_agents_e2e_image`` marker guarantees both env vars are set before this
     test runs; assert defensively.
     """
-    registry = os.environ.get("NMP_E2E_IMAGE_REGISTRY")
-    tag = os.environ.get("NMP_E2E_IMAGE_TAG")
+    registry = os.environ.get("NHX_E2E_IMAGE_REGISTRY")
+    tag = os.environ.get("NHX_E2E_IMAGE_TAG")
     assert registry and tag, "needs_agents_e2e_image marker should have skipped when registry/tag are unset"
     return f"{registry.rstrip('/')}/{_AGENT_IMAGE_NAME}:{tag}"
 
@@ -130,7 +130,7 @@ def _remove_agent_container_if_present(deployment_name: str) -> None:
 
 
 def test_nat_docker_agent_deploys_and_invokes_through_gateway(
-    sdk: NeMoPlatform, workspace: str, agent_deployment_image: str
+    sdk: NeMoHelix, workspace: str, agent_deployment_image: str
 ) -> None:
     """Deploy a NAT agent as a docker container and invoke it through the gateway."""
     run_container_agent_deploy_and_invoke(
@@ -144,7 +144,7 @@ def test_nat_docker_agent_deploys_and_invokes_through_gateway(
 
 
 def test_fabric_docker_agent_deploys_and_invokes_through_gateway(
-    sdk: NeMoPlatform, workspace: str, agent_deployment_image: str
+    sdk: NeMoHelix, workspace: str, agent_deployment_image: str
 ) -> None:
     """Exercise non-streaming, streaming, and session calls against a Docker Fabric agent."""
     run_container_agent_deploy_and_invoke(

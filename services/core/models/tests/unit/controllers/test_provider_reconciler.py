@@ -10,13 +10,13 @@ from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.errors import NemoHTTPError
-from nemo_platform_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
-from nmp.core.models.config import ControllerConfig
-from nmp.core.models.controllers.context import ModelContext
-from nmp.core.models.controllers.entity_cache import ModelEntityCache
-from nmp.core.models.controllers.provider_reconciler import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
+from nhx.core.models.config import ControllerConfig
+from nhx.core.models.controllers.context import ModelContext
+from nhx.core.models.controllers.entity_cache import ModelEntityCache
+from nhx.core.models.controllers.provider_reconciler import (
     PROVIDER_ERROR_RETRY_INTERVAL_SECONDS,
     PROVIDER_ERROR_THRESHOLD_SECONDS,
     PROVIDER_LOST_THRESHOLD_SECONDS,
@@ -141,8 +141,8 @@ def controller_config():
 
 @pytest.fixture
 def mock_models_sdk():
-    """Create a mock AsyncNeMoPlatform SDK."""
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    """Create a mock AsyncNeMoHelix SDK."""
+    sdk = MagicMock(spec=AsyncNeMoHelix)
     sdk.models_client = make_async_models_client()
     sdk.virtual_models_client = MagicMock()
     sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
@@ -171,11 +171,11 @@ def _patch_entity_cache_client_from_platform(mock_models_sdk):
 
     with (
         patch(
-            "nmp.core.models.controllers.entity_cache.client_from_platform",
+            "nhx.core.models.controllers.entity_cache.client_from_platform",
             side_effect=_client_from_platform,
         ),
         patch(
-            "nmp.core.models.controllers.provider_reconciler.client_from_platform",
+            "nhx.core.models.controllers.provider_reconciler.client_from_platform",
             side_effect=_client_from_platform,
         ),
     ):
@@ -630,8 +630,8 @@ async def test_get_artifact_details_external_provider(reconciler):
     provider = MagicMock()
     provider.host_url = "https://external-api.com"
 
-    with patch("nmp.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
-        from nmp.core.models.app import ModelWeightsType
+    with patch("nhx.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
+        from nhx.core.models.app import ModelWeightsType
 
         mock_get_location.return_value = ModelWeightsType.EXTERNAL_PROVIDER
 
@@ -661,8 +661,8 @@ async def test_get_artifact_details_huggingface(reconciler):
     config.model_spec.model_name = "llama-3.1-8b-instruct"
     config.model_spec.model_revision = "v1.0"
 
-    with patch("nmp.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
-        from nmp.core.models.app import ModelWeightsType
+    with patch("nhx.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
+        from nhx.core.models.app import ModelWeightsType
 
         mock_get_location.return_value = ModelWeightsType.HUGGINGFACE
 
@@ -688,8 +688,8 @@ async def test_get_artifact_details_huggingface_no_revision(reconciler):
     config.model_spec.model_name = "llama-3.1-8b-instruct"
     config.model_spec.model_revision = None
 
-    with patch("nmp.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
-        from nmp.core.models.app import ModelWeightsType
+    with patch("nhx.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
+        from nhx.core.models.app import ModelWeightsType
 
         mock_get_location.return_value = ModelWeightsType.HUGGINGFACE
 
@@ -714,8 +714,8 @@ async def test_get_artifact_details_files_service(reconciler):
     config.model_spec.model_name = "custom-model"
     config.model_spec.model_revision = "v2.1"
 
-    with patch("nmp.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
-        from nmp.core.models.app import ModelWeightsType
+    with patch("nhx.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
+        from nhx.core.models.app import ModelWeightsType
 
         mock_get_location.return_value = ModelWeightsType.FILES_SERVICE
 
@@ -737,7 +737,7 @@ async def test_get_artifact_details_handles_exception(reconciler):
     """Test handling exceptions gracefully in _get_artifact_details."""
     provider = MagicMock()
 
-    with patch("nmp.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
+    with patch("nhx.core.models.controllers.provider_reconciler.get_model_weights_type") as mock_get_location:
         mock_get_location.side_effect = Exception("Unexpected error")
 
         details = await reconciler._build_artifact_details(
@@ -3332,7 +3332,7 @@ async def test_dropped_model_unlinks_provider_from_entity(reconciler, mock_model
 
     Regression for the reconciler leaving a stale ``model_providers`` back-reference
     on a Model Entity after the model disappeared from its provider — the entity kept
-    advertising a provider that no longer served it (NMP-177: ``gliner`` lingered).
+    advertising a provider that no longer served it (NHX-177: ``gliner`` lingered).
     """
     # ``dropped`` was served last cycle (entity links this provider); ``kept`` stays.
     await seed_entity_cache(
@@ -3629,7 +3629,7 @@ async def test_dropped_lora_composite_id_is_not_unlinked(reconciler, mock_models
     )
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess([])):
-        with patch("nmp.core.models.controllers.provider_reconciler.parse_entity_ref") as mock_parse:
+        with patch("nhx.core.models.controllers.provider_reconciler.parse_entity_ref") as mock_parse:
             await reconcile_and_flush(reconciler, entity_cache, [ctx])
 
     # The composite id was skipped before any parse/unlink — no entity write, no parse.

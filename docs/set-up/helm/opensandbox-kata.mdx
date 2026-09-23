@@ -7,7 +7,7 @@ description: "Install Kata Containers and an OpenSandbox server that pins sandbo
 ---
 <a id="install-opensandbox-kata"></a>
 
-Use this path when **sandboxed GRPO / NeMo Gym** sandbox pods must be isolated from the host kernel. We document **Kata QEMU** (`RuntimeClass/kata-qemu`) because it runs each sandbox in a QEMU VM with its own guest kernel. Other kernel-isolated runtimes (for example Kata Firecracker, or a different hardware-isolated RuntimeClass) may work the same way, but they have **not been tested** with NeMo Platform. **Kata is optional**; most installs only need the [shared-kernel OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) path. This does **not** sandbox the rest of the platform (API, DPO, SFT, inference).
+Use this path when **sandboxed GRPO / NeMo Gym** sandbox pods must be isolated from the host kernel. We document **Kata QEMU** (`RuntimeClass/kata-qemu`) because it runs each sandbox in a QEMU VM with its own guest kernel. Other kernel-isolated runtimes (for example Kata Firecracker, or a different hardware-isolated RuntimeClass) may work the same way, but they have **not been tested** with NeMo Helix. **Kata is optional**; most installs only need the [shared-kernel OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) path. This does **not** sandbox the rest of the platform (API, DPO, SFT, inference).
 
 Complete the OpenSandbox namespace, Secret, and platform-values steps first; this page only adds virtualization prerequisites and the Kata server overlay.
 
@@ -81,11 +81,11 @@ For those nodes: cordon → drain → restart cri-o → uncordon. Fresh nodes th
 Use the same controller as the shared-kernel server. Install a second server only if you are comparing runtimes; production should run one:
 
 ```sh
-export NMP_NAMESPACE=nemo-platform
+export NHX_NAMESPACE=nemo-helix
 export OPENSANDBOX_DIR=/path/to/OpenSandbox
 export EXAMPLES=k8s/helm/examples/opensandbox
 
-sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NMP_NAMESPACE}/g" \
+sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NHX_NAMESPACE}/g" \
   "${EXAMPLES}/opensandbox-server-kata-qemu.yaml"
 
 # Adjust batchsandbox-template-kata-qemu.yaml nodeSelector to match kata-deploy.
@@ -98,7 +98,7 @@ kubectl create secret generic opensandbox-server-kata-api-key \
 kubectl get secret opensandbox-server-kata-api-key -n opensandbox-system -o json \
   | jq 'del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.namespace)
         | .metadata.name="opensandbox-server-api-key"' \
-  | kubectl apply -n "$NMP_NAMESPACE" -f -
+  | kubectl apply -n "$NHX_NAMESPACE" -f -
 
 helm upgrade --install opensandbox-server-kata \
   "${OPENSANDBOX_DIR}/kubernetes/charts/opensandbox-server" \
@@ -130,7 +130,7 @@ opensandbox:
 ## Verify
 
 ```sh
-export OPEN_SANDBOX_WORKLOAD_NS="$NMP_NAMESPACE"
+export OPEN_SANDBOX_WORKLOAD_NS="$NHX_NAMESPACE"
 ./k8s/helm/examples/opensandbox/verify/kata-qemu.sh
 ```
 

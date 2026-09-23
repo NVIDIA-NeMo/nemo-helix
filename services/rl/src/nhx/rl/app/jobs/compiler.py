@@ -1,0 +1,717 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Job compiler — transforms ``RlJobOutput`` into a 4-step ``HelixJobSpec``.
+
+Steps mirror unsloth/automodel:
+
+1. file_io download    — pull model fileset + dataset (+ environment for GRPO) to the PVC
+2. training            — Ray DPO/GRPO step (single-node GPU or multi-node distributed)
+3. file_io upload      — push the trained checkpoint to a new fileset
+4. model_entity        — create the output ``ModelEntity`` referencing it
+
+The training step's executor is selected by ``parallelism.num_nodes``:
+``num_nodes == 1`` means a single-node ``GPUExecutionProviderSpec``;
+``num_nodes > 1`` means a multi-node ``DistributedGPUExecutionProviderSpec``.
+Multi-node additionally requires a shared filesystem for Ray's
+cross-node ENDED/barrier coordination, enforced here with a fail-fast.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.deployment import (
+    LORA_ENABLED_REQUIRED_MESSAGE,
+    DeploymentParams,
+    is_unbound_deployment_config,
+)
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nemo_helix_plugin.jobs.api_factory import (
+    ContainerSpec,
+    CPUExecutionProviderSpec,
+    DistributedGPUExecutionProviderSpec,
+    EnvironmentVariable,
+    GPUExecutionProviderSpec,
+    HelixJobSpec,
+    HelixJobStep,
+    ResourcesLimitsSpec,
+    ResourcesRequestsSpec,
+    ResourcesSpec,
+)
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
+from nhx.common.auth import auth_client_context
+from nhx.common.entities.utils import parse_entity_ref
+from nhx.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nhx.customization_common.integrations import (
+    collect_integration_secret_envs,
+    warn_incomplete_integrations,
+)
+from nhx.customization_common.schemas.file_io import (
+    DownloadItem,
+    FileIOTaskConfig,
+    FileSetRef,
+    UploadItem,
+)
+from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
+    fetch_model_entity,
+    validate_adapter_base_model,
+    validate_output_name_not_in_flight,
+)
+from nhx.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
+from nhx.rl.app.constants import (
+    BASE_LOG_DIR_ENVVAR,
+    DEFAULT_DATASET_PATH,
+    DEFAULT_ENVIRONMENT_PATH,
+    DEFAULT_MODEL_PATH,
+    DEFAULT_OUTPUT_MODEL_PATH,
+    NHX_BROKER_HOST_ENVVAR,
+    NHX_BROKER_PORT_ENVVAR,
+    NHX_JOB_STORAGE_PVC_ENVVAR,
+    NHX_VLLM_HOST_ENVVAR,
+    NHX_VLLM_PORT_ENVVAR,
+    SANDBOX_DATASET_PATH,
+    SANDBOX_ENVIRONMENT_PATH,
+)
+from nhx.rl.app.jobs.training.schemas import (
+    DPOConfig,
+    GRPOConfig,
+    LoRAConfig,
+    MLflowConfig,
+    ModelConfig,
+    TrainingBackend,
+    TrainingStepConfig,
+    WandBConfig,
+)
+from nhx.rl.config import config, platform_config
+from nhx.rl.entities.values import FinetuningType, TrainingType
+from nhx.rl.images import (
+    FILE_IO_TASK_COMMAND,
+    MODEL_ENTITY_TASK_COMMAND,
+    RL_PYTHON_ENTRYPOINT,
+    get_tasks_image,
+    get_training_image,
+)
+from nhx.rl.schemas import DPOTraining, GRPOTraining, RlJobOutput
+
+logger = logging.getLogger(__name__)
+
+
+GPU_TRAINING_SHM_GIB_PER_GPU = 8
+
+
+def _get_cpu_resources() -> ResourcesSpec:
+    return ResourcesSpec(
+        limits=ResourcesLimitsSpec(
+            cpu=config.default_job_resource_cpu_limit,
+            memory=config.default_job_resource_memory_limit,
+        ),
+        requests=ResourcesRequestsSpec(
+            cpu=config.default_job_resource_cpu_request,
+            memory=config.default_job_resource_memory_request,
+        ),
+    )
+
+
+def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int) -> ResourcesSpec:
+    return ResourcesSpec(
+        num_nodes=num_nodes,
+        num_gpus=num_gpus,
+        shm_size=f"{GPU_TRAINING_SHM_GIB_PER_GPU * max(1, num_gpus)}Gi",
+    )
+
+
+def _base_environment() -> list[EnvironmentVariable]:
+    return [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
+
+
+def _require_fileset(name: str | None, *, label: str) -> str:
+    if not name or not str(name).strip():
+        raise HelixJobCompilationError(
+            f"{label} has no fileset attached. Attach a platform FileSet (workspace/name) before training.",
+        )
+    return str(name)
+
+
+def _build_download_config(job_spec: RlJobOutput, me: ModelEntity, *, workspace: str) -> FileIOTaskConfig:
+    model_fileset = _require_fileset(me.fileset, label=f"Model '{me.workspace}/{me.name}'")
+    dataset_ref = FileSetRef.model_validate(job_spec.dataset)
+    if dataset_ref.workspace is None:
+        dataset_ref = FileSetRef(workspace=workspace, name=dataset_ref.name)
+
+    downloads = [
+        DownloadItem(src=FileSetRef.model_validate(model_fileset), dest=DEFAULT_MODEL_PATH),
+        DownloadItem(src=dataset_ref, dest=DEFAULT_DATASET_PATH),
+    ]
+
+    if job_spec.training_type == TrainingType.GRPO:
+        env_ref = FileSetRef.model_validate(_require_fileset(job_spec.environment, label="Environment"))
+        if env_ref.workspace is None:
+            env_ref = FileSetRef(workspace=workspace, name=env_ref.name)
+        downloads.append(DownloadItem(src=env_ref, dest=DEFAULT_ENVIRONMENT_PATH))
+
+    return FileIOTaskConfig(download=downloads)
+
+
+def _build_upload_config(job_spec: RlJobOutput, me) -> FileIOTaskConfig:
+    return FileIOTaskConfig(
+        upload=[
+            UploadItem(
+                src=DEFAULT_OUTPUT_MODEL_PATH,
+                dest=FileSetRef(workspace=None, name=job_spec.output.fileset),
+                metadata=build_output_fileset_metadata_from_model_entity(me),
+            ),
+        ],
+    )
+
+
+def _build_model_entity_config(
+    workspace: str, job_spec: RlJobOutput, *, trust_remote_code: bool
+) -> ModelEntityTaskConfig:
+    method = job_spec.training_type.value.upper()
+    peft: PEFTConfig | None = None
+    if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora":
+        lora = job_spec.training.lora
+        assert lora is not None  # validated on GRPOTraining
+        peft = PEFTConfig(type=FinetuningType.LORA, rank=lora.rank, alpha=lora.alpha)
+        description = f"{method}-trained LoRA adapter from nhx-rl job ({job_spec.model})"
+    else:
+        description = f"{method}-trained model from nhx-rl job ({job_spec.model})"
+    return ModelEntityTaskConfig(
+        name=job_spec.output.name,
+        workspace=workspace,
+        description=description,
+        fileset=FileSetRef(workspace=None, name=job_spec.output.fileset),
+        model_entity=job_spec.model,
+        base_model=job_spec.model,
+        peft=peft,
+        trust_remote_code=trust_remote_code,
+        deployment_config=job_spec.deployment_config,
+    )
+
+
+async def _resolve_deployment_config_ref(
+    config_ref: str,
+    workspace: str,
+    platform: AsyncCustomizationHelixClients,
+) -> ModelDeploymentConfig:
+    """Resolve a ``name`` or ``workspace/name`` string to a ModelDeploymentConfig."""
+    ref = parse_entity_ref(config_ref, default_workspace=workspace)
+    try:
+        response = await platform.models.get_deployment_config(name=ref.name, workspace=ref.workspace)
+        return response.data()
+    except NotFoundError as e:
+        raise HelixJobCompilationError(
+            f"deployment_config references '{config_ref}' which does not exist in workspace '{ref.workspace}'."
+        ) from e
+    except Exception as e:
+        raise HelixJobCompilationError(f"Failed to resolve deployment_config '{config_ref}': {e}") from e
+
+
+async def _require_tool_call_plugin_permission(workspace: str) -> None:
+    """Gate ``tool_call_plugin``, the one deployment field that needs a permission check.
+
+    Auth is resolved here rather than up front: every other deployment_config
+    shape validates without it, so demanding an auth context for all of them
+    would fail compilation for jobs that never consult it.
+    """
+    auth_client = auth_client_context.get()
+    if auth_client is None:
+        raise HelixJobCompilationError(
+            "No auth context available; cannot validate the tool_call_plugin permission.",
+        )
+    if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
+        raise HelixJobCompilationError(
+            "Insufficient permissions to set tool_call_plugin. Requires the models.tool-call-plugin.set permission."
+        )
+
+
+def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
+    """Whether ``config`` can serve the model entity ``workspace/name``.
+
+    ``model_entity_id`` is the canonical link; older configs only carry the
+    name/namespace pair on ``model_spec``, so both are accepted. A config that
+    names no model at all serves any model: the model_entity task binds it to the
+    trained one at deploy time.
+    """
+    if is_unbound_deployment_config(config):
+        return True
+    model_spec = config.model_spec
+    return (config.model_entity_id == f"{workspace}/{name}") or (
+        model_spec.model_name == name and model_spec.model_namespace == workspace
+    )
+
+
+async def _validate_deployment_config(
+    workspace: str,
+    job_spec: RlJobOutput,
+    platform: AsyncCustomizationHelixClients,
+) -> None:
+    """Validate deployment_config consistency before training starts.
+
+    RL runs are long and expensive, so a contradictory deployment config must fail
+    at submit time rather than after the run completes.
+    """
+    dc = job_spec.deployment_config
+    if dc is None:
+        return
+
+    # Inline deployment params: check permission-gated fields.
+    if isinstance(dc, DeploymentParams):
+        # RlJobInput rejects this at submit, but the compiler is entered with an
+        # RlJobOutput, which carries no such validator -- re-assert it here.
+        if job_spec.trains_lora_adapter and not dc.lora_enabled:
+            raise HelixJobCompilationError(LORA_ENABLED_REQUIRED_MESSAGE)
+        tcc = dc.tool_call_config
+        if tcc and tcc.tool_call_plugin:
+            await _require_tool_call_plugin_permission(workspace)
+        return
+
+    resolved_config = await _resolve_deployment_config_ref(dc, workspace, platform)
+
+    # A LoRA adapter cannot be served by a base deployment that does not load adapters.
+    if job_spec.trains_lora_adapter and resolved_config.model_spec.lora_enabled is False:
+        raise HelixJobCompilationError(
+            f"deployment_config references '{dc}' which has lora_enabled=false, "
+            "but this is a LoRA training job. The deployment would not load LoRA adapters. "
+            "Use a deployment config with lora_enabled=true, or provide inline deployment parameters."
+        )
+
+    if job_spec.trains_lora_adapter:
+        # The adapter is served from its base model's deployment, so a referenced
+        # config is only usable if it deploys that base model.
+        base = parse_entity_ref(job_spec.model, workspace)
+        if not _config_targets_model(resolved_config, base.workspace, base.name):
+            raise HelixJobCompilationError(
+                f"deployment_config references '{dc}' which targets a different model entity than the base model "
+                f"'{base.workspace}/{base.name}'. A LoRA adapter is served from its base model's deployment, "
+                "so the config must target that base model, or use inline deployment parameters instead."
+            )
+        return
+
+    # Full-weight training registers its own model entity, so the config must be able to
+    # serve it. That entity usually does not exist yet, and two shapes are legitimate
+    # ahead of it -- a config created up front that points *forward* at the output model
+    # (Studio does this, so the deployment can start the moment training ends), and an
+    # unbound config that names no model at all and is bound to the trained model at
+    # deploy time. So validate the target rather than the entity's existence; the same
+    # comparison covers a retrain, where it already exists.
+    output_name = job_spec.output.name
+    if not _config_targets_model(resolved_config, workspace, output_name):
+        raise HelixJobCompilationError(
+            f"deployment_config references '{dc}' which targets a different model entity "
+            f"than the output model '{workspace}/{output_name}'. The deployment config must "
+            "target the model this run produces, name no model at all, or use inline "
+            'deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}) instead.'
+        )
+
+
+def _build_integrations_config(integrations: IntegrationsSpec | None) -> TrainingStepConfig.IntegrationsConfig:
+    """Map the public ``IntegrationsSpec`` onto the training step's ``IntegrationsConfig``.
+
+    Without this the step config carries the empty default and the driver's
+    ``build_wandb_config`` / ``build_mlflow_config`` (and the backend's MLFLOW_URI
+    setup) all see ``None`` — silently disabling W&B/MLflow even when the job
+    requested them. Field names line up except MLflow's run name (public ``name``
+    maps to the step's ``run_name``). Secrets (``api_key_secret``) are NOT copied
+    here; ``collect_integration_secret_envs`` injects them as env vars in
+    :func:`_build_training_step`.
+    """
+    if integrations is None:
+        return TrainingStepConfig.IntegrationsConfig()
+
+    wandb_cfg = None
+    if integrations.wandb is not None:
+        w = integrations.wandb
+        wandb_cfg = WandBConfig(
+            project=w.project,
+            name=w.name,
+            entity=w.entity,
+            tags=w.tags,
+            notes=w.notes,
+            base_url=w.base_url,
+        )
+
+    mlflow_cfg = None
+    if integrations.mlflow is not None:
+        m = integrations.mlflow
+        mlflow_cfg = MLflowConfig(
+            experiment_name=m.experiment_name,
+            run_name=m.name,
+            tags=m.tags,
+            description=m.description,
+            tracking_uri=m.tracking_uri,
+        )
+
+    return TrainingStepConfig.IntegrationsConfig(wandb=wandb_cfg, mlflow=mlflow_cfg)
+
+
+def _build_dpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code: bool) -> TrainingStepConfig:
+    """Map a DPO spec onto the backend-agnostic step config."""
+    t = job_spec.training
+    if not isinstance(t, DPOTraining):
+        raise HelixJobCompilationError(f"Expected a DPO training spec, got {type(t).__name__}.")
+    p = t.parallelism
+    return TrainingStepConfig(
+        backend=TrainingBackend.NEMO_RL,
+        model=ModelConfig(
+            path=DEFAULT_MODEL_PATH,
+            name=job_spec.model,
+            max_seq_length=t.max_seq_length,
+            trust_remote_code=trust_remote_code,
+        ),
+        dataset=TrainingStepConfig.DatasetConfig(path=DEFAULT_DATASET_PATH),
+        training=TrainingStepConfig.TrainingConfig(
+            training_type=TrainingType.DPO,
+            finetuning_type=FinetuningType.ALL_WEIGHTS,
+            dpo=DPOConfig(
+                ref_policy_kl_penalty=t.ref_policy_kl_penalty,
+                preference_average_log_probs=t.preference_average_log_probs,
+                sft_average_log_probs=t.sft_average_log_probs,
+                preference_loss_weight=t.preference_loss_weight,
+                sft_loss_weight=t.sft_loss_weight,
+                max_grad_norm=t.max_grad_norm,
+            ),
+        ),
+        schedule=TrainingStepConfig.ScheduleConfig(
+            epochs=t.epochs,
+            max_steps=t.max_steps,
+            val_check_interval=t.val_check_interval,
+            # DPO validation is a logprob pass with no generation, so dpo_config always
+            # runs it at step 0. The knob is GRPO-only, where a baseline costs a rollout pass.
+            val_at_end=t.val_at_end,
+            keep_top_k=t.keep_top_k,
+            progress_reporting=t.progress_reporting,
+        ),
+        batch=TrainingStepConfig.BatchConfig(global_batch_size=t.batch_size, micro_batch_size=t.micro_batch_size),
+        optimizer=TrainingStepConfig.OptimizerConfig(
+            optimizer_type=t.optimizer_type,
+            learning_rate=t.learning_rate,
+            min_learning_rate=t.min_learning_rate,
+            weight_decay=t.weight_decay,
+            beta1=t.adam_beta1,
+            beta2=t.adam_beta2,
+            eps=t.adam_eps,
+            warmup_steps=t.warmup_steps,
+        ),
+        parallelism=TrainingStepConfig.ParallelismConfig(
+            num_nodes=p.num_nodes,
+            num_gpus_per_node=p.num_gpus_per_node,
+            tensor_parallel_size=p.tensor_parallel_size,
+            pipeline_parallel_size=p.pipeline_parallel_size,
+            context_parallel_size=p.context_parallel_size,
+            sequence_parallel=p.sequence_parallel,
+            activation_checkpointing=t.activation_checkpointing,
+        ),
+        integrations=_build_integrations_config(job_spec.integrations),
+        output_model=job_spec.output.name,
+        seed=t.seed if t.seed is not None else 42,
+    )
+
+
+def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code: bool) -> TrainingStepConfig:
+    """Map a GRPO spec onto the backend-agnostic step config."""
+    t = job_spec.training
+    if not isinstance(t, GRPOTraining):
+        raise HelixJobCompilationError(f"Expected a GRPO training spec, got {type(t).__name__}.")
+    if t.policy_backend is None:
+        # GRPOTraining resolves it from finetuning_type, so only a hand-built spec gets here.
+        raise HelixJobCompilationError("policy_backend is unset; submit through GRPOTraining.")
+    p = t.parallelism
+    sandboxed = config.sandboxed_gym_default
+    if sandboxed and not platform_config.sandbox_cluster_capable:
+        raise HelixJobCompilationError(
+            "GRPO jobs with custom environment filesets require sandboxed Gym (platform default). "
+            "OpenSandbox is not yet available on this cluster (sandbox_cluster_capable=false). "
+            "Set sandboxClusterCapable=true (platform.sandbox_cluster_capable) once OpenSandbox "
+            "is installed, or NHX_RL_SANDBOXED_GYM_DEFAULT=false for trusted dev smoke tests only."
+        )
+    # The Gym host mounts the job-storage claim itself to read the environment and
+    # dataset, and the training container only ever learns the storage *path*. Without
+    # the claim name the sandbox config is unsatisfiable, so fail here rather than
+    # after the model download and vLLM startup.
+    if sandboxed and not config.job_storage_pvc_claim:
+        raise HelixJobCompilationError(
+            "Sandboxed GRPO requires the job-storage PVC claim name so the Gym sandbox can "
+            "mount the downloaded environment and dataset. Set NHX_RL_JOB_STORAGE_PVC_CLAIM "
+            "to the same claim the Jobs controller mounts for job storage."
+        )
+
+    return TrainingStepConfig(
+        backend=TrainingBackend.NEMO_RL,
+        model=ModelConfig(
+            path=DEFAULT_MODEL_PATH,
+            name=job_spec.model,
+            max_seq_length=t.max_seq_length,
+            trust_remote_code=trust_remote_code,
+            v4_compatible=t.v4_compatible,
+        ),
+        dataset=TrainingStepConfig.DatasetConfig(path=DEFAULT_DATASET_PATH),
+        gym=TrainingStepConfig.GymConfig(
+            environment_path=DEFAULT_ENVIRONMENT_PATH,
+            sandbox_environment_path=SANDBOX_ENVIRONMENT_PATH if sandboxed else None,
+            sandbox_dataset_path=SANDBOX_DATASET_PATH if sandboxed else None,
+            sandboxed=sandboxed,
+            gym_runtime_image=config.gym_runtime_image or get_training_image(),
+            allow_internet=config.sandbox_allow_internet,
+            public_dns_allow=config.sandbox_public_dns_allow,
+            sandbox_server_protocol=platform_config.sandbox_server_protocol,
+            sandbox_resources=config.sandbox_resources,
+            sandbox_ttl_s=config.sandbox_ttl_s,
+            sandbox_rollout_chunk_size=config.sandbox_rollout_chunk_size,
+            sandbox_rollout_max_in_flight=config.sandbox_rollout_max_in_flight,
+        ),
+        training=TrainingStepConfig.TrainingConfig(
+            training_type=TrainingType.GRPO,
+            finetuning_type=FinetuningType.LORA if t.finetuning_type == "lora" else FinetuningType.ALL_WEIGHTS,
+            grpo=GRPOConfig(
+                num_generations_per_prompt=t.num_generations_per_prompt,
+                num_prompts_per_step=t.num_prompts_per_step,
+                temperature=t.temperature,
+                max_new_tokens=t.max_new_tokens,
+                top_k=t.top_k,
+                normalize_rewards=t.normalize_rewards,
+                use_leave_one_out_baseline=t.use_leave_one_out_baseline,
+                advantage_clip_low=t.advantage_clip_low,
+                advantage_clip_high=t.advantage_clip_high,
+                overlong_filtering=t.overlong_filtering,
+                max_rollout_turns=t.max_rollout_turns,
+                ref_policy_kl_penalty=t.ref_policy_kl_penalty,
+                ratio_clip_min=t.ratio_clip_min,
+                ratio_clip_max=t.ratio_clip_max,
+                ratio_clip_c=t.ratio_clip_c,
+                use_on_policy_kl_approximation=t.use_on_policy_kl_approximation,
+                use_importance_sampling_correction=t.use_importance_sampling_correction,
+                max_grad_norm=t.max_grad_norm,
+                truncated_importance_sampling_type=t.truncated_importance_sampling_type,
+                truncated_importance_sampling_ratio=t.truncated_importance_sampling_ratio,
+                truncated_importance_sampling_ratio_min=t.truncated_importance_sampling_ratio_min,
+                use_dynamic_sampling=t.use_dynamic_sampling,
+                dynamic_sampling_max_gen_batches=t.dynamic_sampling_max_gen_batches,
+                batch_multiplier=t.batch_multiplier,
+                # exclude_none: RewardShapingConfig reads each penalty field independently, so a
+                # null would land as an explicit "no penalty" rather than leaving its default.
+                reward_shaping=(t.reward_shaping.model_dump(exclude_none=True) if t.reward_shaping else None),
+                reward_scaling=(t.reward_scaling.model_dump() if t.reward_scaling else None),
+                batching_strategy=t.batching_strategy,
+                train_mb_tokens=t.train_mb_tokens,
+                sequence_length_round=t.sequence_length_round,
+                automodel_kwargs=t.automodel_kwargs,
+                router_aux_loss_coef=t.router_aux_loss_coef,
+                hf_config_overrides=t.hf_config_overrides,
+                vllm_tensor_parallel_size=t.vllm_tensor_parallel_size,
+                vllm_gpu_memory_utilization=t.vllm_gpu_memory_utilization,
+            ),
+            lora=(
+                LoRAConfig(
+                    rank=t.lora.rank,
+                    alpha=t.lora.alpha,
+                    dropout=t.lora.dropout,
+                    target_modules=t.lora.target_modules,
+                    exclude_modules=t.lora.exclude_modules,
+                    use_triton=t.lora.use_triton,
+                )
+                if t.finetuning_type == "lora" and t.lora is not None
+                else None
+            ),
+        ),
+        schedule=TrainingStepConfig.ScheduleConfig(
+            epochs=t.epochs,
+            max_steps=t.max_steps,
+            val_check_interval=t.val_check_interval,
+            val_at_start=t.val_at_start,
+            val_at_end=t.val_at_end,
+            keep_top_k=t.keep_top_k,
+            progress_reporting=t.progress_reporting,
+        ),
+        batch=TrainingStepConfig.BatchConfig(global_batch_size=t.batch_size, micro_batch_size=t.micro_batch_size),
+        optimizer=TrainingStepConfig.OptimizerConfig(
+            optimizer_type=t.optimizer_type,
+            learning_rate=t.learning_rate,
+            min_learning_rate=t.min_learning_rate,
+            weight_decay=t.weight_decay,
+            beta1=t.adam_beta1,
+            beta2=t.adam_beta2,
+            eps=t.adam_eps,
+            warmup_steps=t.warmup_steps,
+        ),
+        parallelism=TrainingStepConfig.ParallelismConfig(
+            num_nodes=p.num_nodes,
+            num_gpus_per_node=p.num_gpus_per_node,
+            tensor_parallel_size=p.tensor_parallel_size,
+            pipeline_parallel_size=p.pipeline_parallel_size,
+            context_parallel_size=p.context_parallel_size,
+            expert_parallel_size=p.expert_parallel_size,
+            sequence_parallel=p.sequence_parallel,
+            activation_checkpointing=t.activation_checkpointing,
+            policy_backend=t.policy_backend,
+        ),
+        integrations=_build_integrations_config(job_spec.integrations),
+        output_model=job_spec.output.name,
+        seed=t.seed if t.seed is not None else 42,
+    )
+
+
+def _build_training_step_config(job_spec: RlJobOutput, *, trust_remote_code: bool) -> TrainingStepConfig:
+    if job_spec.training_type == TrainingType.GRPO:
+        return _build_grpo_training_step_config(job_spec, trust_remote_code=trust_remote_code)
+    return _build_dpo_training_step_config(job_spec, trust_remote_code=trust_remote_code)
+
+
+def _build_training_step(
+    job_spec: RlJobOutput,
+    base_env: list[EnvironmentVariable],
+    *,
+    trust_remote_code: bool,
+    profile: str | None,
+) -> HelixJobStep:
+    """Build the Ray DPO training step, selecting the executor by ``num_nodes``.
+
+    Multi-node (``num_nodes > 1``) requires shared storage for Ray's cross-node
+    ENDED/barrier coordination — fail fast when it is not configured.
+    """
+    p = job_spec.training.parallelism
+    num_nodes = p.num_nodes
+    num_gpus_per_node = p.num_gpus_per_node
+
+    step_config = _build_training_step_config(job_spec, trust_remote_code=trust_remote_code)
+    step_name = "grpo-training" if job_spec.training_type == TrainingType.GRPO else "dpo-training"
+
+    container = ContainerSpec(
+        image=get_training_image(),
+        entrypoint=RL_PYTHON_ENTRYPOINT,
+        command=["-m", "nhx.rl.tasks.training"],
+    )
+
+    warn_incomplete_integrations(job_spec.integrations)
+    environment = [*base_env, *collect_integration_secret_envs(job_spec.integrations)]
+
+    if job_spec.training_type == TrainingType.GRPO:
+        for name, value in (
+            (NHX_VLLM_HOST_ENVVAR, "127.0.0.1"),
+            (NHX_VLLM_PORT_ENVVAR, "8000"),
+            (NHX_BROKER_HOST_ENVVAR, "127.0.0.1"),
+            (NHX_BROKER_PORT_ENVVAR, "51234"),
+        ):
+            environment.append(EnvironmentVariable(name=name, value=value))
+        if config.job_storage_pvc_claim:
+            environment.append(EnvironmentVariable(name=NHX_JOB_STORAGE_PVC_ENVVAR, value=config.job_storage_pvc_claim))
+
+    executor: GPUExecutionProviderSpec | DistributedGPUExecutionProviderSpec
+    if num_nodes > 1:
+        shared_dir = config.multinode_shared_storage_path
+        if not shared_dir:
+            raise HelixJobCompilationError(
+                f"Multi-node NeMo-RL training (num_nodes={num_nodes}) requires a shared filesystem for Ray's "
+                "cross-node coordination. Set NHX_RL_MULTINODE_SHARED_STORAGE_PATH to a path mounted on every "
+                "node (e.g. an NFS mount) before submitting a multi-node job.",
+            )
+        # Ray's bootstrap writes the ENDED marker + barriers under BASE_LOG_DIR.
+        environment = [*environment, EnvironmentVariable(name=BASE_LOG_DIR_ENVVAR, value=shared_dir)]
+        resolved_profile = profile or config.default_distributed_execution_profile
+        executor = DistributedGPUExecutionProviderSpec(
+            provider="gpu_distributed",
+            container=container,
+            resources=_gpu_training_resources(num_nodes=num_nodes, num_gpus=num_gpus_per_node),
+            profile=resolved_profile if resolved_profile is not None else "default",
+        )
+    else:
+        resolved_profile = profile or config.default_training_execution_profile
+        executor = GPUExecutionProviderSpec(
+            provider="gpu",
+            container=container,
+            resources=_gpu_training_resources(num_gpus=num_gpus_per_node),
+            profile=resolved_profile if resolved_profile is not None else "default",
+        )
+
+    return HelixJobStep(
+        name=step_name,
+        executor=executor,
+        environment=environment,
+        config=step_config.model_dump(mode="json"),
+    )
+
+
+async def platform_job_config_compiler(
+    workspace: str,
+    job_spec: RlJobOutput,
+    platform: AsyncCustomizationHelixClients,
+    *,
+    job_name: str | None = None,
+    profile: str | None = None,
+) -> HelixJobSpec:
+    """Compile a canonical NeMo-RL job spec into a 4-step ``HelixJobSpec``."""
+    del job_name  # reserved for future scheduling decisions
+
+    # Log only non-sensitive, high-level context. The full spec embeds
+    # `integrations` (W&B / MLflow tokens and tracking URIs), so it must not be
+    # dumped at INFO.
+    p = job_spec.training.parallelism
+    method = job_spec.training_type.value.upper()
+    logger.info(
+        "Compiling NeMo-RL %s job to HelixJobSpec: model=%s, dataset=%s, output=%s, num_nodes=%d, num_gpus_per_node=%d",
+        method,
+        job_spec.model,
+        job_spec.dataset,
+        job_spec.output.name,
+        p.num_nodes,
+        p.num_gpus_per_node,
+    )
+
+    job_spec.validate_for_training()
+
+    me = await fetch_model_entity(job_spec.model, workspace, platform)
+    trust_remote_code = me.trust_remote_code or False
+
+    await validate_output_name_not_in_flight(job_spec.output.name, workspace, platform)
+    if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora":
+        await validate_adapter_base_model(job_spec.output.name, job_spec.model, workspace, platform)
+
+    if job_spec.deployment_config is not None:
+        await _validate_deployment_config(workspace, job_spec, platform)
+
+    cpu_resources = _get_cpu_resources()
+    base_env = _base_environment()
+
+    def _cpu_task_step(
+        name: str,
+        command: list[str],
+        task_config: FileIOTaskConfig | ModelEntityTaskConfig,
+    ) -> HelixJobStep:
+        return HelixJobStep(
+            name=name,
+            executor=CPUExecutionProviderSpec(
+                provider="cpu",
+                container=ContainerSpec(
+                    image=get_tasks_image(),
+                    entrypoint=RL_PYTHON_ENTRYPOINT,
+                    command=command,
+                ),
+                resources=cpu_resources,
+            ),
+            environment=base_env,
+            config=task_config.model_dump(mode="json"),
+        )
+
+    steps: list[HelixJobStep] = [
+        _cpu_task_step(
+            "model-dataset-environment-download"
+            if job_spec.training_type == TrainingType.GRPO
+            else "model-and-dataset-download",
+            FILE_IO_TASK_COMMAND,
+            _build_download_config(job_spec, me, workspace=workspace),
+        ),
+        _build_training_step(job_spec, base_env, trust_remote_code=trust_remote_code, profile=profile),
+        _cpu_task_step("model-upload", FILE_IO_TASK_COMMAND, _build_upload_config(job_spec, me)),
+        _cpu_task_step(
+            "model-entity-creation",
+            MODEL_ENTITY_TASK_COMMAND,
+            _build_model_entity_config(workspace, job_spec, trust_remote_code=trust_remote_code),
+        ),
+    ]
+
+    return HelixJobSpec(steps=steps)

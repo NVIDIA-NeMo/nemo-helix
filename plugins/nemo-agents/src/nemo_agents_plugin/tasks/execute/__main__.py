@@ -11,10 +11,10 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
+from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 

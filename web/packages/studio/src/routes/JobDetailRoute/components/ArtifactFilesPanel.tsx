@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import {
-  PlatformJobStatus,
-  type PlatformJobResultResponse,
-} from '@nemo/sdk/generated/platform/schema';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobStatus, type HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Spinner, Stack } from '@nvidia/foundations-react-core';
 import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPanel';
 import {
@@ -16,12 +13,12 @@ import {
 import { resolveArtifactItems } from '@studio/routes/JobDetailRoute/utils';
 import { useMemo, useState, type FC } from 'react';
 
-const ERROR_STATUSES: PlatformJobStatus[] = [PlatformJobStatus.error, PlatformJobStatus.cancelled];
+const ERROR_STATUSES: HelixJobStatus[] = [HelixJobStatus.error, HelixJobStatus.cancelled];
 
 const emptyArtifactStateCopy = (
-  jobStatus: PlatformJobStatus | undefined
+  jobStatus: HelixJobStatus | undefined
 ): { header: string; emptyMessage: string } => {
-  if (!jobStatus || !PlatformJobTerminalStatuses.includes(jobStatus)) {
+  if (!jobStatus || !HelixJobTerminalStatuses.includes(jobStatus)) {
     return {
       header: 'No artifacts yet',
       emptyMessage: 'Artifacts will appear once the job is complete.',
@@ -41,9 +38,9 @@ const emptyArtifactStateCopy = (
 
 export interface ArtifactFilesPanelProps {
   workspace: string;
-  results: ReadonlyArray<PlatformJobResultResponse>;
+  results: ReadonlyArray<HelixJobResultResponse>;
   isLoading: boolean;
-  jobStatus?: PlatformJobStatus;
+  jobStatus?: HelixJobStatus;
 }
 
 /**

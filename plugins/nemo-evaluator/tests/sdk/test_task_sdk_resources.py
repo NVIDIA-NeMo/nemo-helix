@@ -20,7 +20,7 @@ from nemo_evaluator.api.schemas import (
     TaskInputs,
 )
 from nemo_evaluator.sdk.task_resources import AsyncEvaluatorTasksResource, EvaluatorTasksResource
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 
 _BASE = "http://localhost:8080/apis/evaluator/v2/workspaces/default"
 

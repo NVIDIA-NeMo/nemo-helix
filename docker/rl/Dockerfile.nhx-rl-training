@@ -1,0 +1,118 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# nhx-rl training - DPO + GRPO training step, and the Gym environment runtime.
+#
+# FROM nhx-rl-base (NeMo-RL + NeMo-Gym built from source; venv /opt/nemo_rl_venv, Python 3.13).
+# Adds the pure-python nemo-helix glue editably into that venv, resolving the glue's deps while
+# freezing the base ML stack via --overrides so it never clobbers RL's pinned stack. The training
+# step runs `python -m nhx.rl.tasks.training`, which bootstraps a Ray cluster and runs the DPO/GRPO
+# driver against NeMo-RL.
+
+ARG SMOKE_MARKER=smoke_nhx_rl_training
+
+# Supplied by bake (target:nhx-rl-base-builder).
+FROM nhx-rl-base AS rl-base
+
+FROM rl-base AS runtime
+
+# The base is root here; the editable installs, chowns and symlink below need it. The stage drops
+# back to USER ${USER_UID} at the end so the published training image runs non-root.
+USER root
+
+ARG USERNAME=ubuntu
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# Platform glue is pinned to uv <0.10.0 (docker/rl/pyproject.workspace.toml required-version), while
+# the base ships RL's uv 0.11.18. Use a build-only uv 0.9.14 for the editable installs so uv does
+# not reject on required-version; the base's runtime uv is untouched.
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv-glue
+
+COPY --from=platform-workspace / /app
+WORKDIR /app
+
+RUN mkdir -p /home/${USERNAME}/.cache && \
+    chown -R ${USER_UID}:${USER_GID} /home/${USERNAME} /app/services/rl
+
+# Single RL_PYTHON_ENTRYPOINT the compiler stamps onto every step: /opt/venv/bin/python.
+RUN ln -sfn /opt/nemo_rl_venv /opt/venv
+
+RUN UV_CACHE_DIR=/root/.cache/uv \
+    uv-glue pip freeze --python /opt/nemo_rl_venv/bin/python --exclude-editable > /tmp/base-python-freeze.txt
+
+# Editable platform glue WITH dependency resolution. The [integrations] extra is
+# training-runtime only; nhx-api installs nhx-rl without extras. The from-source
+# base ships clean package metadata, so uv can resolve the glue's real deps
+# (typer, sniffio, ngcsdk, opentelemetry-*, sqlalchemy, kubernetes, fastapi, ...)
+# instead of us pinning them by hand.
+# To stop uv moving the pinned RL / vLLM / mcore / Gym stack while it does that, freeze the base venv
+# first and pass it as --overrides (base versions win over whatever the glue requests). Packages the
+# base doesn't have are still installed fresh. `| grep '==' ` drops git/URL installs (TE, flash-attn,
+# mamba) from the overrides — the glue never requests those, so they stay untouched anyway.
+#
+# UV_CACHE_DIR is overridden to the build-only mount here: the base sets it to /opt/uv_cache, which
+# this step must not write into (that cache is shipped read-only, see below).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    umask 022 && \
+    UV_CACHE_DIR=/root/.cache/uv \
+    uv-glue pip freeze --python /opt/nemo_rl_venv/bin/python --exclude-editable \
+        | grep -E '^[A-Za-z0-9._-]+==' > /tmp/base-overrides.txt && \
+    UV_CACHE_DIR=/root/.cache/uv \
+    uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache \
+        --overrides /tmp/base-overrides.txt \
+        -e /app/sdk/python/nemo-helix \
+        -e /app/packages/filesets \
+        -e /app/packages/models \
+        -e /app/packages/nemo_helix_plugin \
+        -e /app/packages/nhx_common \
+        -e /app/packages/nhx_customization_common \
+        -e "/app/services/rl[integrations]"
+
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_BIN=uv-glue uv-glue run --no-project --python /opt/nemo_rl_venv/bin/python \
+        /usr/local/bin/collect-python-sdists.py \
+        --python /opt/nemo_rl_venv/bin/python \
+        --output /usr/share/nemo-helix/source-distributions/nhx-rl-training \
+        --baseline-freeze /tmp/base-python-freeze.txt \
+        --label platform-glue
+
+# Late file cleanup for bundled or non-package-managed files.
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/final/customizer-codecs.txt,target=/tmp/file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/file-removals.txt
+
+# Runtime uv cache: the base's /opt/uv_cache ships READ-ONLY on purpose - the prefetched venvs
+# symlink their package files into it, so a writable cache would let code running in this container
+# (including user-authored NeMo-Gym environment code) rewrite the training stack's own packages.
+# Point runtime uv writes at the per-user cache instead, which is already owned by USER_UID above.
+# The prefetched venvs are unaffected: their symlinks are absolute /opt/uv_cache paths resolved at
+# build time, so changing UV_CACHE_DIR only redirects FUTURE uv operations.
+# HOME must follow the runtime user. The base sets HOME=/home/nhx-build for its build user
+# (uid 2000) and that value survives into the published image, but this stage runs as
+# ${USER_UID}, which cannot write there. Anything resolving `~` at import time then dies:
+# swanlab, which nemo_rl.utils.logger imports unconditionally, calls os.mkdir("~/.swanlab")
+# from its module body, so the GRPO driver fails before reading a config.
+ENV PATH="/opt/nemo_rl_venv/bin:${PATH}" \
+    HOME=/home/${USERNAME} \
+    UV_CACHE_DIR=/home/${USERNAME}/.cache/uv
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-m", "nhx.rl.tasks.training", "--help"]
+
+USER ${USER_UID}:${USER_GID}
+
+# Smoke-test stage: CPU-only import checks (tests/smoke_gpu/test_rl_training.py, pytest marker
+# `smoke_nhx_rl_training`). Wired into docker-bake.hcl as target `nhx-rl-training-smoke-test`; runs
+# on a CPU runner and catches missing-module / ABI errors before any GPU device is touched.
+FROM runtime AS smoke-test
+ARG SMOKE_MARKER
+USER 0
+COPY tests/smoke_gpu/ /smoke_test/
+RUN --mount=type=bind,source=docker/removals/files/final/customizer-codecs.txt,target=/smoke_test/removals/files/final/customizer-codecs.txt,readonly \
+    uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache --reinstall pytest && \
+    /opt/nemo_rl_venv/bin/pytest /smoke_test/ -m ${SMOKE_MARKER} -v
+
+FROM runtime

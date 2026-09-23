@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.job_context import JobContext
 
 
 @runtime_checkable
@@ -20,6 +20,6 @@ class OptimizationBackend(Protocol):
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> dict[str, Any]:
         """Execute one optimize study for the given Fabric-native payload."""

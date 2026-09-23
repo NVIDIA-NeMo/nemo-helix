@@ -57,17 +57,17 @@ from nemo_evaluator_sdk.values import Model, RunConfigOnline, RunConfigOnlineMod
 from nemo_evaluator_sdk.values.agents import NemoAgentToolkitAgent
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult  # noqa: F401
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_platform_plugin.client.errors import NemoTransportError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     AtifCreateRequest,
     EvaluationPatchRequest,
     EvaluatorResultCreateRequest,
     ListTracesQueryParams,
 )
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -401,7 +401,7 @@ def test_publishes_and_reports_what_landed() -> None:
     outcome = _publish(client)
 
     assert client.with_http_client_calls == 1
-    assert outcome.status == PlatformJobStatus.COMPLETED
+    assert outcome.status == HelixJobStatus.COMPLETED
     assert outcome.evaluation_id == "eval-1"
     assert outcome.trial_count == 1
     assert outcome.evaluator_result_count == 1
@@ -454,7 +454,7 @@ def test_a_failed_duration_stamp_does_not_fail_the_publish() -> None:
 
     # The durations are informational and the trials already landed, so losing them must not turn a
     # successful publish into a failed job — which is what every caller-side handler would do.
-    assert outcome.status == PlatformJobStatus.COMPLETED
+    assert outcome.status == HelixJobStatus.COMPLETED
     assert outcome.trial_count == 1
     assert outcome.error is None
 
@@ -477,7 +477,7 @@ def test_missing_evaluation_fails_before_any_ingest() -> None:
 
     assert client.atif_calls == []
     outcome = excinfo.value.outcome
-    assert outcome.status == PlatformJobStatus.ERROR
+    assert outcome.status == HelixJobStatus.ERROR
     assert "does not exist" in (outcome.error or "")
 
 
@@ -491,7 +491,7 @@ def test_required_failure_raises_with_partial_outcome() -> None:
         _publish(client)
 
     outcome = excinfo.value.outcome
-    assert outcome.status == PlatformJobStatus.ERROR
+    assert outcome.status == HelixJobStatus.ERROR
     assert outcome.trial_count == 0
 
 
@@ -503,7 +503,7 @@ def test_optional_failure_returns_outcome_instead_of_raising() -> None:
     )
     outcome = _publish(client, required=False)
 
-    assert outcome.status == PlatformJobStatus.ERROR
+    assert outcome.status == HelixJobStatus.ERROR
     assert outcome.error
 
 
@@ -514,7 +514,7 @@ def test_unexpected_failure_still_honours_required_false() -> None:
     client = _FakeClient(preflight_error=ValueError("something nobody planned for"))
     outcome = _publish(client, required=False)
 
-    assert outcome.status == PlatformJobStatus.ERROR
+    assert outcome.status == HelixJobStatus.ERROR
     assert "ValueError" in (outcome.error or "")
     assert "something nobody planned for" in (outcome.error or "")
 
@@ -524,12 +524,12 @@ def test_unexpected_failure_fails_the_job_when_required() -> None:
     with pytest.raises(PublicationFailedError) as excinfo:
         _publish(client)
 
-    assert excinfo.value.outcome.status == PlatformJobStatus.ERROR
+    assert excinfo.value.outcome.status == HelixJobStatus.ERROR
 
 
 def test_platformless_run_is_a_failure_not_a_crash() -> None:
     outcome = _publish(None, required=False)
-    assert outcome.status == PlatformJobStatus.ERROR
+    assert outcome.status == HelixJobStatus.ERROR
     assert "platformless" in (outcome.error or "")
 
 
@@ -616,7 +616,7 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
 
     # The evaluator drove a loop to completion first; publication then ran on a different one,
     # reusing the same injected SDK. That crossing is what raises "Event loop is closed" when the
-    # client is bound to a dead loop (cf. nmp-1hr.2). It does not distinguish `run_sync` from a bare
+    # client is bound to a dead loop (cf. nhx-1hr.2). It does not distinguish `run_sync` from a bare
     # `asyncio.run` — no loop is running at this point, so both behave the same here.
     ingest_loop = client.intake.ingest.atif.loop
     assert evaluator.loop is not None
@@ -624,9 +624,9 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
     assert ingest_loop is not None
     assert ingest_loop is not evaluator.loop
 
-    assert result["status"] == PlatformJobStatus.COMPLETED
+    assert result["status"] == HelixJobStatus.COMPLETED
     assert result["publication"] == {
-        "status": PlatformJobStatus.COMPLETED,
+        "status": HelixJobStatus.COMPLETED,
         "evaluation_id": "eval-1",
         "trial_count": 1,
         "evaluator_result_count": 0,
@@ -659,8 +659,8 @@ def test_job_completes_when_optional_publication_fails(tmp_path: Path, mocker: M
         async_client=client,
     )
 
-    assert result["status"] == PlatformJobStatus.COMPLETED
-    assert result["publication"]["status"] == PlatformJobStatus.ERROR
+    assert result["status"] == HelixJobStatus.COMPLETED
+    assert result["publication"]["status"] == HelixJobStatus.ERROR
     assert "does not exist" in result["publication"]["error"]
 
 
@@ -676,7 +676,7 @@ def test_job_publication_requires_a_run_start_time(tmp_path: Path, mocker: Mocke
         async_client=_FakeClient(),
     )
 
-    assert result["publication"]["status"] == PlatformJobStatus.ERROR
+    assert result["publication"]["status"] == HelixJobStatus.ERROR
     assert "started_at" in result["publication"]["error"]
 
 
@@ -776,7 +776,7 @@ def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path
     assert ingest_loop is not None
     assert ingest_loop is not evaluator.loop
 
-    assert result["publication"]["status"] == PlatformJobStatus.COMPLETED
+    assert result["publication"]["status"] == HelixJobStatus.COMPLETED
     assert result["publication"]["trial_count"] == 1
     assert len(client.atif_calls) == 1
     # The run identity is the job id, so re-publishing the same job replaces rather than duplicates.
@@ -812,7 +812,7 @@ def test_evaluate_job_without_a_job_id_cannot_publish(tmp_path: Path, mocker: Mo
         async_client=client,
     )
 
-    assert result["publication"]["status"] == PlatformJobStatus.ERROR
+    assert result["publication"]["status"] == HelixJobStatus.ERROR
     assert "job id" in result["publication"]["error"]
     assert client.atif_calls == []
 
@@ -827,7 +827,7 @@ def test_evaluate_job_reports_a_bad_test_case_id_column(tmp_path: Path, mocker: 
         async_client=client,
     )
 
-    assert result["publication"]["status"] == PlatformJobStatus.ERROR
+    assert result["publication"]["status"] == HelixJobStatus.ERROR
     assert "missing" in result["publication"]["error"]
     assert client.atif_calls == []
 

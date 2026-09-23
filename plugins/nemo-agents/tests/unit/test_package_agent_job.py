@@ -17,12 +17,12 @@ from nemo_agents_plugin.jobs.package_agent import (
     PackageAgentJob,
     PackageAgentSpec,
 )
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
@@ -93,7 +93,7 @@ class TestToSpec:
         assert spec.agent_config == FABRIC_CONFIG
 
     async def test_missing_agent_fails_at_submit(self) -> None:
-        with pytest.raises(PlatformJobCompilationError, match="not found in workspace"):
+        with pytest.raises(HelixJobCompilationError, match="not found in workspace"):
             await PackageAgentJob.to_spec(
                 PackageAgentInput(agent="ghost"),
                 workspace="default",
@@ -103,7 +103,7 @@ class TestToSpec:
             )
 
     async def test_nat_workflow_agent_is_rejected(self) -> None:
-        with pytest.raises(PlatformJobCompilationError, match="packaging supports"):
+        with pytest.raises(HelixJobCompilationError, match="packaging supports"):
             await PackageAgentJob.to_spec(
                 PackageAgentInput(agent="my-agent"),
                 workspace="default",
@@ -159,26 +159,26 @@ class TestCompile:
 
     async def test_non_subprocess_backend_is_rejected(self) -> None:
         with _patch_profiles([_docker_profile()]):
-            with pytest.raises(PlatformJobCompilationError, match="does not resolve to a subprocess backend"):
+            with pytest.raises(HelixJobCompilationError, match="does not resolve to a subprocess backend"):
                 await self._compile()
 
     async def test_rejection_names_the_local_fallback(self) -> None:
         with _patch_profiles([]):
-            with pytest.raises(PlatformJobCompilationError, match="nemo agents package"):
+            with pytest.raises(HelixJobCompilationError, match="nemo agents package"):
                 await self._compile()
 
     async def test_named_profile_must_match(self) -> None:
         with _patch_profiles([_subprocess_profile("other")]):
-            with pytest.raises(PlatformJobCompilationError):
+            with pytest.raises(HelixJobCompilationError):
                 await self._compile(profile="default")
 
     async def test_unreachable_jobs_service_is_retryable(self) -> None:
         with _patch_profiles(RuntimeError("connection refused")):
-            with pytest.raises(PlatformJobDependencyUnavailableError, match="Retry the submission"):
+            with pytest.raises(HelixJobDependencyUnavailableError, match="Retry the submission"):
                 await self._compile()
 
     async def test_missing_sdk_does_not_promise_a_retry(self) -> None:
-        with pytest.raises(PlatformJobDependencyUnavailableError, match="resubmitting will not help"):
+        with pytest.raises(HelixJobDependencyUnavailableError, match="resubmitting will not help"):
             await PackageAgentJob.compile(
                 workspace="default",
                 spec=PackageAgentSpec(agent="my-agent", workspace="default", agent_config=FABRIC_CONFIG),
@@ -430,7 +430,7 @@ class TestCliSurface:
 
 
 class TestPublishedPackagingContract:
-    """The generated `nemo-platform[nemo-agents-plugin]` extra mirrors this plugin's
+    """The generated `nemo-helix[nemo-agents-plugin]` extra mirrors this plugin's
     base dependencies only, so packaging deps declared as an extra would leave a
     PyPI install advertising `agents.package-agent` but unable to run it."""
 
@@ -447,9 +447,9 @@ class TestPublishedPackagingContract:
         import tomllib
 
         repo_root = Path(__file__).resolve().parents[4]
-        pyproject = repo_root / "packages" / "nemo_platform" / "pyproject.toml"
+        pyproject = repo_root / "packages" / "nemo_helix" / "pyproject.toml"
         if not pyproject.exists():
-            pytest.skip("vendored nemo-platform wrapper is not present in this checkout")
+            pytest.skip("vendored nemo-helix wrapper is not present in this checkout")
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
         assert any(spec.startswith(dependency) for spec in extras["nemo-agents-plugin"])
 
@@ -491,7 +491,7 @@ class TestTagNamespace:
     @pytest.mark.parametrize(
         "tag",
         [
-            "nvcr.io/nvidia/nemo-platform:latest",
+            "nvcr.io/nvidia/nemo-helix:latest",
             "other-workspace/my-agent:1.0",
             "../escape:1.0",
             "my-agent:1.0\nRUN echo pwned",
@@ -507,7 +507,7 @@ class TestTagNamespace:
 
     async def test_workspace_outside_the_docker_grammar_is_rejected(self) -> None:
         with _patch_profiles([_subprocess_profile()]):
-            with pytest.raises(PlatformJobCompilationError, match="cannot be used as an image namespace"):
+            with pytest.raises(HelixJobCompilationError, match="cannot be used as an image namespace"):
                 await PackageAgentJob.compile(
                     workspace="team+eng",
                     spec=PackageAgentSpec(agent="my-agent", workspace="team+eng", agent_config=FABRIC_CONFIG),

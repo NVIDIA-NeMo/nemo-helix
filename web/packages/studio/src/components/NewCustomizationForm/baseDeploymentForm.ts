@@ -21,7 +21,7 @@ import {
  * submit it creates the ModelDeploymentConfig and passes its name to the job as
  * `deployment_config`; the job's own model_entity task resolves that name once
  * training finishes and creates the ModelDeployment then — see `launch_model` in
- * `nmp.customization_common.tasks.model_entity.run`. So no GPU is claimed while
+ * `nhx.customization_common.tasks.model_entity.run`. So no GPU is claimed while
  * the run is in progress, and the up-front config still fails fast:
  * `_validate_engine_config` runs synchronously inside `create_deployment_config`,
  * so a bad engine or missing image is rejected before the job is submitted.

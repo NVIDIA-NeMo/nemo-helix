@@ -5,16 +5,16 @@ instances:
 - url: nemo-helix.docs.buildwithfern.com/nemo-helix
   custom-domain: docs.nvidia.com/nemo-helix
   multi-source: true
-title: NVIDIA NeMo Platform
+title: NVIDIA NeMo Helix
 global-theme: nvidia
 logo:
-  right-text: NeMo Platform
+  right-text: NeMo Helix
 css:
 - ./styles/notebook-viewer.css
 - ./styles/button.css
 navbar-links:
 - type: github
-  value: https://github.com/NVIDIA-NeMo/nemo-platform
+  value: https://github.com/NVIDIA-NeMo/nemo-helix
 experimental:
   mdx-components:
   - ./components

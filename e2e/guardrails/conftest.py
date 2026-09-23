@@ -6,7 +6,7 @@
 from collections.abc import Callable, Iterator
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 from e2e.guardrails.utils import (
     ChatOutcome,
@@ -22,7 +22,7 @@ from e2e.guardrails.utils import (
 
 @pytest.fixture
 def guardrails_chat_test_case(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
 ) -> Iterator[Callable[..., GuardrailsChatTestCase]]:
     created_configs: list[tuple[str, str]] = []
@@ -67,7 +67,7 @@ def guardrails_chat_test_case(
 
 @pytest.fixture
 def guardrails_check_test_case(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
 ) -> Iterator[Callable[..., tuple[GuardrailsChatTestCase, dict]]]:
     created_configs: list[tuple[str, str]] = []

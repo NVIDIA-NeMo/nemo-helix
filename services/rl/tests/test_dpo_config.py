@@ -14,16 +14,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from nmp.customization_common.service.context import NMPJobContext
-from nmp.rl.app.jobs.training.schemas import (
+from nhx.customization_common.service.context import NHXJobContext
+from nhx.rl.app.jobs.training.schemas import (
     DPOConfig,
     ModelConfig,
     OptimizerType,
     TrainingStepConfig,
     TrainingType,
 )
-from nmp.rl.tasks.training.backends.nemo_rl import dpo_config
-from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import (
+from nhx.rl.tasks.training.backends.nemo_rl import dpo_config
+from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _adapt_precision,
     _build_data_config,
     _build_logger_config,
@@ -32,7 +32,7 @@ from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _build_tokenizer_config,
     _megatron_cfg_disabled,
 )
-from nmp.rl.tasks.training.datasets.preparation import PreparedDataset
+from nhx.rl.tasks.training.datasets.preparation import PreparedDataset
 
 
 def _make_step_config(
@@ -69,8 +69,8 @@ def _write_preference_dataset(directory: Path, rows: int = 8) -> Path:
     return path
 
 
-def _job_ctx(tmp_path: Path) -> NMPJobContext:
-    return NMPJobContext(
+def _job_ctx(tmp_path: Path) -> NHXJobContext:
+    return NHXJobContext(
         workspace="default",
         job_id="rl-test",
         attempt_id="attempt-1",
@@ -265,8 +265,8 @@ def test_the_reporting_budget_rides_the_dpo_block(tmp_path: Path) -> None:
     driver would notice it being dropped -- the run would simply report at the
     default forever.
     """
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
-    from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
 
     _write_preference_dataset(tmp_path / "data")
     step_config = _make_step_config(
@@ -283,7 +283,7 @@ def test_the_reporting_budget_rides_the_dpo_block(tmp_path: Path) -> None:
 
 
 def test_the_dpo_block_carries_the_default_when_unstated(tmp_path: Path) -> None:
-    from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
+    from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
 
     _write_preference_dataset(tmp_path / "data")
     step_config = _make_step_config()

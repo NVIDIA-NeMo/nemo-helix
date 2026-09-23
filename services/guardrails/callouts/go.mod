@@ -1,4 +1,4 @@
-module github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts
+module github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts
 
 go 1.25.8
 

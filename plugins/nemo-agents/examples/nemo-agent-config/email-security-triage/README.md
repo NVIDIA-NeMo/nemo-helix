@@ -15,7 +15,7 @@ labeled data.
 
 **Prerequisites:**
 
-- NeMo Platform running locally (see [SETUP.md](../../../../../SETUP.md)); `export NMP_BASE_URL=http://localhost:8080`.
+- NeMo Helix running locally (see [SETUP.md](../../../../../SETUP.md)); `export NHX_BASE_URL=http://localhost:8080`.
 - `export NVIDIA_API_KEY=<your key>`.
 - Dependencies synced from the repo root: `uv sync --all-packages`.
 

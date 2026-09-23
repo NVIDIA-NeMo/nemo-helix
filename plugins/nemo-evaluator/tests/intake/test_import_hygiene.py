@@ -5,7 +5,7 @@
 
 The mapping is pure boundary code: it reads SDK types and returns plain dicts
 shaped for Intake's requests, but it must not depend on the Intake service
-(``nmp.intake.*``), an HTTP client, or the platform client. This keeps the
+(``nhx.intake.*``), an HTTP client, or the platform client. This keeps the
 translation isolated so D3/D4/D5 can build the wire calls on top of it without
 the mapping itself pulling in the service.
 """
@@ -21,7 +21,7 @@ INTAKE_ROOT = Path(next(iter(intake.__path__))).resolve()
 
 # Imports that would couple the pure mapping to the Intake service or transport.
 _FORBIDDEN = re.compile(
-    r"^\s*(?:from|import)\s+(nmp\.intake|nmp_intake|httpx)",
+    r"^\s*(?:from|import)\s+(nhx\.intake|nhx_intake|httpx)",
     re.MULTILINE,
 )
 

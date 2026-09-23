@@ -18,7 +18,7 @@ import os
 import re
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from trace_reader import get_session
 
 WORKSPACE = "default"
@@ -42,22 +42,22 @@ def _make_unsigned_jwt() -> str:
 
 
 @pytest.fixture
-def client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+def client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
 
 
 # --- Audit target checks ---
 
 
-def test_audit_target_exists(client: NeMoPlatform) -> None:
+def test_audit_target_exists(client: NeMoHelix) -> None:
     """Verify the audit target was created."""
     targets = client.auditor.targets.list(workspace=WORKSPACE)
     target_names = [t["name"] for t in targets["data"]]
     assert TARGET_NAME in target_names, f"Target '{TARGET_NAME}' not found. Found: {target_names}"
 
 
-def test_audit_target_model(client: NeMoPlatform) -> None:
+def test_audit_target_model(client: NeMoHelix) -> None:
     """Verify the audit target references the correct model."""
     target = client.auditor.targets.get(workspace=WORKSPACE, name=TARGET_NAME)
     assert target.model is not None and len(target.model) > 0, f"Target '{TARGET_NAME}' has no model configured"
@@ -67,13 +67,13 @@ def test_audit_target_model(client: NeMoPlatform) -> None:
 # --- Audit config checks ---
 
 
-def test_audit_config_exists(client: NeMoPlatform) -> None:
+def test_audit_config_exists(client: NeMoHelix) -> None:
     """Verify the audit config was created."""
     config = client.auditor.configs.get(workspace=WORKSPACE, name=CONFIG_NAME)
     assert config.name == CONFIG_NAME, f"Expected config '{CONFIG_NAME}', got '{config.name}'"
 
 
-def test_audit_config_has_probe_spec(client: NeMoPlatform) -> None:
+def test_audit_config_has_probe_spec(client: NeMoHelix) -> None:
     """Verify the audit config has probes configured."""
     config = client.auditor.configs.get(workspace=WORKSPACE, name=CONFIG_NAME)
     assert config.plugins.probe_spec, f"Config '{CONFIG_NAME}' has no probe_spec configured"

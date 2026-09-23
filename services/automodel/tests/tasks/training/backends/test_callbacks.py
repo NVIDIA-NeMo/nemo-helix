@@ -5,7 +5,7 @@
 
 from unittest.mock import MagicMock
 
-from nmp.customization_common.training.callbacks import TrainingProgressCallback
+from nhx.customization_common.training.callbacks import TrainingProgressCallback
 
 
 class TestTrainingProgressCallback:

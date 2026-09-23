@@ -23,9 +23,9 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_RUN_TYPE
 from nemo_agent_hardener_plugin.filesets import download_fileset
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import EntitiesClient
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_sdk() -> Any:
-    from nemo_platform_plugin.sdk_provider import get_platform_sdk
+    from nemo_helix_plugin.sdk_provider import get_platform_sdk
 
     return get_platform_sdk(as_service="agent-hardener", internal=True)
 

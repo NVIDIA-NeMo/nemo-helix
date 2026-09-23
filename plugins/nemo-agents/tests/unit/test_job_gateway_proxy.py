@@ -16,8 +16,8 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.invocation import AgentConfigInvocationRequest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs import execute, gateway_proxy
-from nemo_platform_plugin.client.auth import StaticToken
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.auth import StaticToken
+from nemo_helix_plugin.job_context import JobContext
 from pytest_httpserver import HTTPServer
 
 GATEWAY_PATH = "/apis/inference-gateway/v2/workspaces/test/openai/-/v1"
@@ -25,9 +25,9 @@ GATEWAY_PATH = "/apis/inference-gateway/v2/workspaces/test/openai/-/v1"
 
 @pytest.fixture(autouse=True)
 def isolate_job_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
-    monkeypatch.delenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
-    monkeypatch.delenv("NMP_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_AUTH_ENABLED", raising=False)
 
 
 def _config() -> AgentConfig:
@@ -46,8 +46,8 @@ def _config() -> AgentConfig:
 
 @pytest.fixture
 def workload(monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer) -> Mock:
-    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
-    monkeypatch.setenv("NMP_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     factory = Mock(return_value=StaticToken("job-access-token"))
     monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", factory)
     return factory
@@ -94,9 +94,9 @@ def test_a_job_with_no_identity_runs_without_a_proxy(
     monkeypatch: pytest.MonkeyPatch, workload: Mock, principal: str | None
 ) -> None:
     """Nothing to forward, so nothing is resolved and callers reach the platform directly."""
-    monkeypatch.delenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE")
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE")
     if principal is not None:
-        monkeypatch.setenv("NMP_PRINCIPAL", principal)
+        monkeypatch.setenv("NHX_PRINCIPAL", principal)
     principal_client = Mock(side_effect=AssertionError("Must not resolve principal headers"))
     monkeypatch.setattr(gateway_proxy, "get_platform_sdk", principal_client)
 
@@ -138,10 +138,10 @@ def test_bad_platform_url_fails_without_resolving_credentials(
     monkeypatch: pytest.MonkeyPatch, workload: Mock, identity_mode: str
 ) -> None:
     if identity_mode == "principal":
-        monkeypatch.delenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE")
-        monkeypatch.setenv("NMP_PRINCIPAL", '{"id":"job-user"}')
-    monkeypatch.delenv("NMP_BASE_URL")
-    with pytest.raises(ValueError, match="NMP_BASE_URL"):
+        monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE")
+        monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"job-user"}')
+    monkeypatch.delenv("NHX_BASE_URL")
+    with pytest.raises(ValueError, match="NHX_BASE_URL"):
         with gateway_proxy.platform_auth_proxy():
             pytest.fail("Must not invoke the agent")
     workload.assert_not_called()
@@ -151,7 +151,7 @@ def test_bad_platform_url_fails_without_resolving_credentials(
 def test_workload_identity_takes_precedence_without_fallback(
     monkeypatch: pytest.MonkeyPatch, workload: Mock, httpserver: HTTPServer, exchange_fails: bool
 ) -> None:
-    monkeypatch.setenv("NMP_PRINCIPAL", '{"id":"job-user"}')
+    monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"job-user"}')
     principal_client = Mock(side_effect=AssertionError("Must not resolve principal headers"))
     monkeypatch.setattr(gateway_proxy, "get_platform_sdk", principal_client)
     if exchange_fails:
@@ -183,15 +183,15 @@ def test_principal_headers_preserve_identity_and_replace_caller_headers(
         "on_behalf_of_groups": ["subject-group"],
     }
     headers = {
-        "X-NMP-Principal-Id": "job-user",
-        "X-NMP-Principal-Email": "actor@example.test",
-        "X-NMP-Principal-Groups": "actor-group",
-        "X-NMP-Principal-On-Behalf-Of": "delegated-user",
-        "X-NMP-Principal-On-Behalf-Of-Email": "subject@example.test",
-        "X-NMP-Principal-On-Behalf-Of-Groups": "subject-group",
+        "X-NHX-Principal-Id": "job-user",
+        "X-NHX-Principal-Email": "actor@example.test",
+        "X-NHX-Principal-Groups": "actor-group",
+        "X-NHX-Principal-On-Behalf-Of": "delegated-user",
+        "X-NHX-Principal-On-Behalf-Of-Email": "subject@example.test",
+        "X-NHX-Principal-On-Behalf-Of-Groups": "subject-group",
     }
-    monkeypatch.setenv("NMP_PRINCIPAL", json.dumps(principal))
-    monkeypatch.setenv("NMP_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(principal))
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     httpserver.expect_request(GATEWAY_PATH, headers=headers).respond_with_json({"ok": True})
     with gateway_proxy.platform_auth_proxy() as origin:
         runtime = gateway_proxy.rewrite_gateway_models(_config(), origin)
@@ -205,7 +205,7 @@ def test_principal_headers_preserve_identity_and_replace_caller_headers(
     httpserver.check_assertions()
     forwarded = httpserver.log[0][0].headers
     assert "Authorization" not in forwarded
-    assert "X-NMP-Internal" not in forwarded
+    assert "X-NHX-Internal" not in forwarded
     _assert_closed(proxy_url)
 
 
@@ -216,9 +216,9 @@ def test_principal_headers_preserve_identity_and_replace_caller_headers(
 def test_invalid_principal_fails_before_invocation(
     monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, auth_enabled: str, principal: str
 ) -> None:
-    monkeypatch.setenv("NMP_AUTH_ENABLED", auth_enabled)
-    monkeypatch.setenv("NMP_PRINCIPAL", principal)
-    monkeypatch.setenv("NMP_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setenv("NHX_AUTH_ENABLED", auth_enabled)
+    monkeypatch.setenv("NHX_PRINCIPAL", principal)
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     with pytest.raises(ValueError):
         with gateway_proxy.platform_auth_proxy():
             pytest.fail("Must not invoke the agent")
@@ -232,11 +232,11 @@ def test_anonymous_job_respects_platform_auth_configuration(
     value = str(auth_enabled).lower()
     config_file = tmp_path / "config.yaml"
     config_file.write_text(f"auth:\n  enabled: {value}\n" if source == "config-file" else "auth: {}\n")
-    monkeypatch.setenv("NMP_CONFIG_FILE_PATH", str(config_file))
+    monkeypatch.setenv("NHX_CONFIG_FILE_PATH", str(config_file))
     if source == "environment":
-        monkeypatch.setenv("NMP_AUTH_ENABLED", value)
-    monkeypatch.setenv("NMP_PRINCIPAL", '{"id":"","groups":[]}')
-    monkeypatch.setenv("NMP_BASE_URL", "http://localhost:8080")
+        monkeypatch.setenv("NHX_AUTH_ENABLED", value)
+    monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"","groups":[]}')
+    monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8080")
     if auth_enabled:
         with pytest.raises(ValueError, match="principal ID"):
             with gateway_proxy.platform_auth_proxy():

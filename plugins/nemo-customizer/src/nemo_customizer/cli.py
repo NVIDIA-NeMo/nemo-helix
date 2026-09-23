@@ -10,18 +10,18 @@ from collections.abc import Iterable
 from typing import ClassVar
 
 import typer
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_options import WorkspaceOption
-from nemo_platform_plugin.cli_state import resolve_cli_workspace
-from nemo_platform_plugin.customization_contributor import (
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.customization_contributor import (
     CustomizationCLISummaryProvider,
     CustomizationContributorDiscoveryError,
 )
-from nemo_platform_plugin.discovery import (
+from nemo_helix_plugin.discovery import (
     CUSTOMIZATION_CONTRIBUTORS_GROUP,
     discover_customization_contributors,
 )
-from nmp.customization_common.cli.uploads import UploadReport
+from nhx.customization_common.cli.uploads import UploadReport
 
 # The router is deliberately backend-neutral: it never names automodel, unsloth or
 # rl. Backend-specific text comes from each contributor's get_cli_summary().
@@ -202,10 +202,10 @@ def _create_customization_resources(
     exist_ok: bool,
     hf_token_secret: str | None,
 ) -> UploadReport:
-    from nemo_platform_plugin.commands import resolve_submit_auth_headers, resolve_submit_base_url
-    from nemo_platform_plugin.files.client import FilesClient
-    from nemo_platform_plugin.models.client import ModelsClient
-    from nmp.customization_common.cli.overrides import run_uploads
+    from nemo_helix_plugin.commands import resolve_submit_auth_headers, resolve_submit_base_url
+    from nemo_helix_plugin.files.client import FilesClient
+    from nemo_helix_plugin.models.client import ModelsClient
+    from nhx.customization_common.cli.overrides import run_uploads
 
     resolved_base_url = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
     headers = resolve_submit_auth_headers(typer_ctx) or None

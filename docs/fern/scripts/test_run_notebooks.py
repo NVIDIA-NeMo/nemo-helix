@@ -43,7 +43,7 @@ def test_resolve_mdx_notebook_uses_colab_link(tmp_path: Path) -> None:
     _write_notebook(notebook)
     mdx = repo_root / "page.mdx"
     mdx.write_text(
-        "[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/tutorial.ipynb)\n",
+        "[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/tutorial.ipynb)\n",
         encoding="utf-8",
     )
 
@@ -58,12 +58,12 @@ def test_resolve_mdx_notebook_accepts_slash_branch_refs(tmp_path: Path) -> None:
 
     colab_mdx = repo_root / "colab.mdx"
     colab_mdx.write_text(
-        "[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/release/2026.06/docs/customizer/tutorials/tutorial.ipynb)\n",
+        "[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/release/2026.06/docs/customizer/tutorials/tutorial.ipynb)\n",
         encoding="utf-8",
     )
     fern_mdx = repo_root / "fern.mdx"
     fern_mdx.write_text(
-        '<Notebook colabUrl="https://github.com/NVIDIA-NeMo/nemo-platform/blob/feature/docs-update/docs/customizer/tutorials/tutorial.ipynb" />\n',
+        '<Notebook colabUrl="https://github.com/NVIDIA-NeMo/nemo-helix/blob/feature/docs-update/docs/customizer/tutorials/tutorial.ipynb" />\n',
         encoding="utf-8",
     )
 

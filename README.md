@@ -1,18 +1,18 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform
+# NeMo Helix
 
-![NEMO Platform](docs/assets/nemo-wordmark.svg)
+![NEMO Helix](docs/assets/nemo-wordmark.svg)
 
-[![CI](https://github.com/NVIDIA-NeMo/nemo-platform/actions/workflows/ci.yaml/badge.svg)](https://github.com/NVIDIA-NeMo/nemo-platform/actions/workflows/ci.yaml)
+[![CI](https://github.com/NVIDIA-NeMo/nemo-helix/actions/workflows/ci.yaml/badge.svg)](https://github.com/NVIDIA-NeMo/nemo-helix/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-Apache_2.0-D22128?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12--3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Docs](https://img.shields.io/static/v1?label=docs&message=docs.nvidia.com%2Fnemo-platform&color=76B900&style=flat-square&logo=readthedocs&logoColor=white)](https://docs.nvidia.com/nemo-platform)
+[![Docs](https://img.shields.io/static/v1?label=docs&message=docs.nvidia.com%2Fnemo-helix&color=76B900&style=flat-square&logo=readthedocs&logoColor=white)](https://docs.nvidia.com/nemo-helix)
 
 Make the agents you ship faster, more accurate, and safer.
 
-NeMo Platform brings NVIDIA NeMo libraries together under one CLI, Python SDK, and web UI. Hardening, evaluation, and tuning for the agents you put in production.
+NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and web UI. Hardening, evaluation, and tuning for the agents you put in production.
 
 ## Get started
 
@@ -23,18 +23,18 @@ Quick install from PyPI:
 ```bash
 curl -LsSf https://astral.sh/uv/0.9.30/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
-uv tool install "nemo-platform[all]"
+uv tool install "nemo-helix[all]"
 
 nemo setup
 ```
 
-`uv tool install` gives you a global `nemo` command in its own isolated environment, with nothing to activate. The `all` extra adds the platform services, so `nemo services run` works; without it you get the SDK and CLI only. To import the SDK from your own code, `uv pip install "nemo-platform[all]"` into a virtual environment instead.
+`uv tool install` gives you a global `nemo` command in its own isolated environment, with nothing to activate. The `all` extra adds the platform services, so `nemo services run` works; without it you get the SDK and CLI only. To import the SDK from your own code, `uv pip install "nemo-helix[all]"` into a virtual environment instead.
 
 Source checkout for development:
 
 ```bash
-git clone https://github.com/NVIDIA-NeMo/nemo-platform.git
-cd nemo-platform
+git clone https://github.com/NVIDIA-NeMo/nemo-helix.git
+cd nemo-helix
 
 # Install Flox first: https://flox.dev/docs/install-flox/install
 make bootstrap
@@ -105,9 +105,9 @@ nemo setup --auto --start-services --install-skills --deploy-agent
 
 </details>
 
-## Use NeMo Platform from your coding agent
+## Use NeMo Helix from your coding agent
 
-After installation, launch your coding agent (Claude Code, Codex, Cursor, OpenCode, etc) from inside the `nemo-platform` directory. This is the primary way of interacting with the NeMo Platform.
+After installation, launch your coding agent (Claude Code, Codex, Cursor, OpenCode, etc) from inside the `nemo-helix` directory. This is the primary way of interacting with the NeMo Helix.
 
 Things you can ask it to do, once the platform is running:
 
@@ -129,11 +129,11 @@ Things you can ask it to do, once the platform is running:
 
 ## Release notes
 
-See the [current release notes](https://docs.nvidia.com/nemo-platform/documentation/reference/release-notes/current-release) for the latest features, improvements, and known limitations.
+See the [current release notes](https://docs.nvidia.com/nemo-helix/documentation/reference/release-notes/current-release) for the latest features, improvements, and known limitations.
 
 ## Skills
 
-`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. Platform-level skills live under `packages/nemo_platform_ext/src/nemo_platform_ext/skills/` and ship with the `nemo-platform` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
+`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. Platform-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
 
 To install or refresh skills for a built-in coding agent, use `--agent`. For another Agent Skills-compatible harness, point `--path` at that harness's skills directory.
 
@@ -194,12 +194,12 @@ The demo agent uses `${NEMO_DEFAULT_MODEL}` for both execution and the judge LLM
 
 ## Documentation
 
-Full documentation: [NeMo Platform docs](https://docs.nvidia.com/nemo-platform)
+Full documentation: [NeMo Helix docs](https://docs.nvidia.com/nemo-helix)
 
-- [Telemetry and privacy](https://docs.nvidia.com/nemo-platform/documentation/reference/telemetry-and-privacy): anonymous telemetry, data collection, and opt-out controls.
-- [Setup](https://docs.nvidia.com/nemo-platform/documentation/get-started): installation, providers, SDK.
-- [CLI reference](https://docs.nvidia.com/nemo-platform/documentation/reference/cli-reference): all commands.
-- [API reference](https://docs.nvidia.com/nemo-platform/documentation/reference/api-reference): REST endpoints.
+- [Telemetry and privacy](https://docs.nvidia.com/nemo-helix/documentation/reference/telemetry-and-privacy): anonymous telemetry, data collection, and opt-out controls.
+- [Setup](https://docs.nvidia.com/nemo-helix/documentation/get-started): installation, providers, SDK.
+- [CLI reference](https://docs.nvidia.com/nemo-helix/documentation/reference/cli-reference): all commands.
+- [API reference](https://docs.nvidia.com/nemo-helix/documentation/reference/api-reference): REST endpoints.
 
 ## Development
 
@@ -208,4 +208,4 @@ See [TESTING.md](TESTING.md) for testing strategy.
 
 ## License
 
-NeMo Platform is licensed under the Apache License 2.0. Third-party open-source dependencies have their own licenses; review them before use.
+NeMo Helix is licensed under the Apache License 2.0. Third-party open-source dependencies have their own licenses; review them before use.

@@ -58,12 +58,12 @@ def check_nat_runner(project_root: Path) -> Path:
     """Verify the NAT runner script is discoverable and return its path."""
     import os
 
-    env = os.environ.get("NMP_AGENTS_NAT_RUNNER")
+    env = os.environ.get("NHX_AGENTS_NAT_RUNNER")
     if env:
         p = Path(env)
         if not p.exists():
             raise PreflightError(
-                f"NMP_AGENTS_NAT_RUNNER points to {p} but the file does not exist. "
+                f"NHX_AGENTS_NAT_RUNNER points to {p} but the file does not exist. "
                 "Set it to the path of nat_runner.py (or unset it to use the default)."
             )
         return p
@@ -71,7 +71,7 @@ def check_nat_runner(project_root: Path) -> Path:
     if not p.exists():
         raise PreflightError(
             f"NAT runner not found at {p}. Either:\n"
-            "  - set NMP_AGENTS_NAT_RUNNER=<path-to-nat_runner.py>, or\n"
+            "  - set NHX_AGENTS_NAT_RUNNER=<path-to-nat_runner.py>, or\n"
             "  - place a NAT runner at tests/agentic-use/nat_runner.py, or\n"
             "  - use --runner harbor if your evals have task.toml files."
         )
@@ -118,7 +118,7 @@ def check_dockerfile(agent_root: Path, dockerfile_name: str = "Dockerfile.agenti
             f"{dockerfile_name} not found at {p}. The Harbor runner expects this file "
             f"in the agent root. Either:\n"
             f"  - add {dockerfile_name} to your agent repo\n"
-            f"  - or set --skip-build if you've pre-built the nmp-agentic-base:latest image."
+            f"  - or set --skip-build if you've pre-built the nhx-agentic-base:latest image."
         )
 
 

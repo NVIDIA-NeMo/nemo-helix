@@ -36,7 +36,7 @@ After writing the `.ts` module, register it in `fern/components/NotebookViewer.t
 ```mdx
 <NotebookViewer
   name="sft-customization-job"
-  colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/sft-customization-job.ipynb"
+  colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/sft-customization-job.ipynb"
 />
 ```
 

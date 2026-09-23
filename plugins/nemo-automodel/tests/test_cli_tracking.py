@@ -4,7 +4,7 @@
 """End-to-end tests for what ``submit`` reports after creating a job.
 
 These drive the real Typer command, so they cover the shared override in
-``nmp.customization_common.cli.overrides`` as the three backends use it.
+``nhx.customization_common.cli.overrides`` as the three backends use it.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import httpx
 import pytest
 from nemo_automodel_plugin.contributor import AutomodelContributor
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
-from nmp.customization_common.cli.tracking import FollowResult
+from nhx.customization_common.cli.tracking import FollowResult
 from typer.testing import CliRunner
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -43,11 +43,11 @@ def stub_submit(monkeypatch: pytest.MonkeyPatch) -> None:
         return {"name": "automodel-1a2b3c", "status": "created"}
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
         fake_submit_remote,
     )
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_jobs",
+        "nemo_helix_plugin.discovery.discover_jobs",
         lambda: {"customization.automodel.jobs": AutomodelJob},
     )
 
@@ -55,7 +55,7 @@ def stub_submit(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run(*args: str) -> Any:
     return CliRunner().invoke(
         AutomodelContributor().get_cli(),
-        ["submit", str(JOB_JSON), "--base-url", "https://nmp.test", *args],
+        ["submit", str(JOB_JSON), "--base-url", "https://nhx.test", *args],
     )
 
 
@@ -89,12 +89,12 @@ class TestWaitAndWatch:
             captured.update(kwargs)
             return FollowResult.SUCCEEDED
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.follow_job", fake_follow)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.follow_job", fake_follow)
         result = _run("--wait", "--workspace", "acme", "--poll-interval", "7")
         assert result.exit_code == 0, result.stderr
         assert captured["job_name"] == "automodel-1a2b3c"
         assert captured["workspace"] == "acme"
-        assert captured["base_url"] == "https://nmp.test"
+        assert captured["base_url"] == "https://nhx.test"
         assert captured["include_logs"] is False
         assert captured["poll_interval"] == 7
 
@@ -105,20 +105,20 @@ class TestWaitAndWatch:
             captured.update(kwargs)
             return FollowResult.SUCCEEDED
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.follow_job", fake_follow)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.follow_job", fake_follow)
         assert _run("--watch").exit_code == 0
         assert captured["include_logs"] is True
 
     def test_failed_job_exits_non_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.follow_job",
+            "nhx.customization_common.cli.overrides.follow_job",
             lambda **_: FollowResult.FAILED,
         )
         assert _run("--wait").exit_code == 1
 
     def test_interrupt_exits_130(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.follow_job",
+            "nhx.customization_common.cli.overrides.follow_job",
             lambda **_: FollowResult.INTERRUPTED,
         )
         assert _run("--wait").exit_code == 130
@@ -132,7 +132,7 @@ class TestWaitAndWatch:
         def _fail(**_: Any) -> FollowResult:
             raise AssertionError("submit must not block without --wait or --watch")
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.follow_job", _fail)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.follow_job", _fail)
         assert _run().exit_code == 0
 
 
@@ -144,11 +144,11 @@ def unnamed_job(monkeypatch: pytest.MonkeyPatch) -> None:
         return {"status": "created"}
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
         fake_submit_remote,
     )
     monkeypatch.setattr(
-        "nmp.customization_common.cli.overrides.follow_job",
+        "nhx.customization_common.cli.overrides.follow_job",
         lambda **_: pytest.fail("must not follow a job it cannot name"),
     )
 
@@ -177,11 +177,11 @@ def submitted_spec(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {"name": "automodel-1a2b3c"}
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        "nemo_helix_plugin.commands.NemoJobScheduler.submit_remote",
         fake_submit_remote,
     )
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_jobs",
+        "nemo_helix_plugin.discovery.discover_jobs",
         lambda: {"customization.automodel.jobs": AutomodelJob},
     )
     return captured
@@ -193,7 +193,7 @@ def stub_uploads(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {}
 
     def fake_create(**kwargs: Any) -> Any:
-        from nmp.customization_common.cli.uploads import UploadReport
+        from nhx.customization_common.cli.uploads import UploadReport
 
         seen.update(kwargs)
         report = UploadReport()
@@ -203,13 +203,13 @@ def stub_uploads(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             report.dataset_ref = "default/created-dataset"
         return report
 
-    monkeypatch.setattr("nmp.customization_common.cli.overrides.create_resources", fake_create)
+    monkeypatch.setattr("nhx.customization_common.cli.overrides.create_resources", fake_create)
     monkeypatch.setattr(
-        "nmp.customization_common.cli.overrides.resolve_submit_base_url",
-        lambda *a, **k: "https://nmp.test",
+        "nhx.customization_common.cli.overrides.resolve_submit_base_url",
+        lambda *a, **k: "https://nhx.test",
     )
     monkeypatch.setattr(
-        "nmp.customization_common.cli.overrides.resolve_submit_auth_headers",
+        "nhx.customization_common.cli.overrides.resolve_submit_auth_headers",
         lambda *a, **k: {},
     )
     return seen
@@ -229,7 +229,7 @@ def _write_job(tmp_path: Path, **fields: Any) -> Path:
 def _run_job(job: Path, *args: str) -> Any:
     return CliRunner().invoke(
         AutomodelContributor().get_cli(),
-        ["submit", str(job), "--base-url", "https://nmp.test", *args],
+        ["submit", str(job), "--base-url", "https://nhx.test", *args],
     )
 
 
@@ -283,25 +283,25 @@ class TestUploadFlags:
         def _fail(**_: Any) -> Any:
             raise AssertionError("nothing must be created without a flag")
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.create_resources", _fail)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.create_resources", _fail)
         assert _run().exit_code == 0
         assert "created" not in str(submitted_spec)
 
     def test_failure_reports_cleanly_and_does_not_submit(
         self, tmp_path: Path, submitted_spec: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from nmp.customization_common.cli.uploads import UploadError
+        from nhx.customization_common.cli.uploads import UploadError
 
         def _boom(**_: Any) -> Any:
             raise UploadError("Fileset default/train already exists. Pass --exist-ok to reuse it as it is.")
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.create_resources", _boom)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.create_resources", _boom)
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.resolve_submit_base_url",
-            lambda *a, **k: "https://nmp.test",
+            "nhx.customization_common.cli.overrides.resolve_submit_base_url",
+            lambda *a, **k: "https://nhx.test",
         )
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.resolve_submit_auth_headers",
+            "nhx.customization_common.cli.overrides.resolve_submit_auth_headers",
             lambda *a, **k: {},
         )
         result = _run_job(_write_job(tmp_path, model="default/keep"), "--upload-dataset", "./data")
@@ -324,7 +324,7 @@ class TestJobJsonMayOmitUploadedFields:
     def _run_minimal(self, job: Path, *args: str) -> Any:
         return CliRunner().invoke(
             AutomodelContributor().get_cli(),
-            ["submit", str(job), "--base-url", "https://nmp.test", *args],
+            ["submit", str(job), "--base-url", "https://nhx.test", *args],
         )
 
     def test_both_fields_can_be_omitted_when_both_are_uploaded(
@@ -353,13 +353,13 @@ class TestJobJsonMayOmitUploadedFields:
         def _fail(**_: Any) -> Any:
             raise AssertionError("must not create resources for a spec that cannot validate")
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.create_resources", _fail)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.create_resources", _fail)
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.resolve_submit_base_url",
-            lambda *a, **k: "https://nmp.test",
+            "nhx.customization_common.cli.overrides.resolve_submit_base_url",
+            lambda *a, **k: "https://nhx.test",
         )
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.resolve_submit_auth_headers",
+            "nhx.customization_common.cli.overrides.resolve_submit_auth_headers",
             lambda *a, **k: {},
         )
         result = self._run_minimal(job, "--upload-model", "Qwen/Qwen3-1.7B")
@@ -380,7 +380,7 @@ class TestConflictingReferences:
     def _run_with(self, job: Path, *args: str) -> Any:
         return CliRunner().invoke(
             AutomodelContributor().get_cli(),
-            ["submit", str(job), "--base-url", "https://nmp.test", *args],
+            ["submit", str(job), "--base-url", "https://nhx.test", *args],
         )
 
     def test_a_filled_job_json_plus_a_flag_is_refused(
@@ -389,7 +389,7 @@ class TestConflictingReferences:
         def _fail(**_: Any) -> Any:
             raise AssertionError("must not create resources when the reference already exists")
 
-        monkeypatch.setattr("nmp.customization_common.cli.overrides.create_resources", _fail)
+        monkeypatch.setattr("nhx.customization_common.cli.overrides.create_resources", _fail)
         result = self._run_with(JOB_JSON, "--upload-model", "Qwen/Qwen3-1.7B")
 
         assert result.exit_code == 2
@@ -410,7 +410,7 @@ class TestConflictingReferences:
             )
         )
         monkeypatch.setattr(
-            "nmp.customization_common.cli.overrides.create_resources",
+            "nhx.customization_common.cli.overrides.create_resources",
             lambda **_: pytest.fail("must not upload"),
         )
         result = self._run_with(job, "--upload-dataset", "./data")

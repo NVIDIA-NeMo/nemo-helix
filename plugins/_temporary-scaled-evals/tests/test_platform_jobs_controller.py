@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 pytest.importorskip("scaled_evals")
 
@@ -95,10 +95,10 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
         {"id": "vanished", "dispatch_job_name": "job-5", "backend_handle": None},
     ]
     statuses = {
-        "job-1": PlatformJobStatus.ACTIVE,
-        "job-2": PlatformJobStatus.ERROR,
-        "job-3": PlatformJobStatus.PENDING,
-        "job-4": PlatformJobStatus.COMPLETED,
+        "job-1": HelixJobStatus.ACTIVE,
+        "job-2": HelixJobStatus.ERROR,
+        "job-3": HelixJobStatus.PENDING,
+        "job-4": HelixJobStatus.COMPLETED,
     }
 
     async def _get_job_status(*, workspace: str, name: str) -> Any:
@@ -165,7 +165,7 @@ async def test_an_active_job_keeps_its_reconcile_lease_so_the_drain_advances(
 
     async def _get_job_status(*, workspace: str, name: str) -> Any:
         inspected.append(name)
-        return SimpleNamespace(data=lambda: SimpleNamespace(status=PlatformJobStatus.ACTIVE))
+        return SimpleNamespace(data=lambda: SimpleNamespace(status=HelixJobStatus.ACTIVE))
 
     repo = MagicMock()
     # Releasing really does make the row claimable again, which is the whole

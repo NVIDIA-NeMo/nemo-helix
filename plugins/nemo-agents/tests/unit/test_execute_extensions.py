@@ -42,7 +42,7 @@ def test_a_single_registration_resolves(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_the_same_extension_declared_twice_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The aggregate ``nemo-platform`` wheel re-declares every bundled plugin's
+    """The aggregate ``nemo-helix`` wheel re-declares every bundled plugin's
     entry points, so a standard install sees each kind twice — once from the
     plugin distribution, once from the aggregate. Two declarations of one
     implementation are not a conflict.

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Dev-only: install Hermes Agent and its Fabric adapter in an isolated environment.
-# Run from a NeMo Platform source checkout after `make bootstrap-python`.
+# Run from a NeMo Helix source checkout after `make bootstrap-python`.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,5 +59,5 @@ uv --no-config pip install --prerelease=allow --python "${HERMES_PY}" \
 uv --no-config pip check --python "${HERMES_PY}"
 
 echo "Hermes Agent 0.21.0 installed in ${HERMES_VENV}."
-echo "Set this before starting NeMo Platform:"
+echo "Set this before starting NeMo Helix:"
 echo "export ADAPTER_PYTHON=\"${HERMES_PY}\""

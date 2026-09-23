@@ -241,15 +241,15 @@ def test_verify_returns_503_when_provider_unavailable(monkeypatch: pytest.Monkey
     assert "sk-unavailable" not in response.text
 
 
-def test_verify_returns_inconclusive_for_nmp_yaml() -> None:
+def test_verify_returns_inconclusive_for_nhx_yaml() -> None:
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
     cur.fetchone.return_value = {
-        "id": "cred_nmp",
-        "provider": "nmp",
+        "id": "cred_nhx",
+        "provider": "nhx",
         "payload_kind": "yaml",
         "encrypted_payload": crypto.encrypt("workspace: ws-1\n"),
-        "fingerprint": "sha256:nmp",
+        "fingerprint": "sha256:nhx",
     }
 
     def _gen() -> Iterator[MagicMock]:
@@ -257,13 +257,13 @@ def test_verify_returns_inconclusive_for_nmp_yaml() -> None:
 
     v1.dependency_overrides[get_conn] = _gen
 
-    response = client.post("/v1/credentials/cred_nmp/verify")
+    response = client.post("/v1/credentials/cred_nhx/verify")
 
     assert response.status_code == 200
     assert response.json() == {
-        "id": "cred_nmp",
+        "id": "cred_nhx",
         "verified": None,
-        "reason": "provider verification unsupported for nmp",
+        "reason": "provider verification unsupported for nhx",
     }
     assert "workspace: ws-1" not in response.text
 

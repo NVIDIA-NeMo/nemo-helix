@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Telemetry and Privacy"
-description: "Anonymous telemetry collected by NeMo Platform and bundled NeMo libraries, and how to opt out."
+description: "Anonymous telemetry collected by NeMo Helix and bundled NeMo libraries, and how to opt out."
 ---
 
-NeMo Platform and its bundled library plugins include optional anonymous telemetry
+NeMo Helix and its bundled library plugins include optional anonymous telemetry
 to help NVIDIA improve reliability, usability, and product direction. No user
 content, credentials, prompts, model outputs, file contents, or personally
 identifiable information is collected by these telemetry events.
 
-You can opt out at any time. When you run components through NeMo Platform, the
+You can opt out at any time. When you run components through NeMo Helix, the
 platform telemetry controls are the recommended broad opt-out for the CLI and
 bundled plugins that share this telemetry system. When you use a library
 standalone, configure telemetry separately for that library.
@@ -29,7 +29,7 @@ fingerprints, hostnames, or machine-derived identifiers.
 
 | Component | Identifier | Data collected |
 | --- | --- | --- |
-| NeMo Platform | Random session identifier stored in local platform state and rotated every 30 days. If the state file has no creation date, an invalid creation date, or an expired creation date, NeMo Platform creates a new identifier. | Session identifier; onboarding step name, outcome, and invocation method; CLI command name, duration, and outcome; job type, duration, plugin references, model-data present/absent bucket, and token counts when available; CI flag; coding-agent flag; package version; CPU architecture. |
+| NeMo Helix | Random session identifier stored in local platform state and rotated every 30 days. If the state file has no creation date, an invalid creation date, or an expired creation date, NeMo Helix creates a new identifier. | Session identifier; onboarding step name, outcome, and invocation method; CLI command name, duration, and outcome; job type, duration, plugin references, model-data present/absent bucket, and token counts when available; CI flag; coding-agent flag; package version; CPU architecture. |
 | Anonymizer | Per-session rotating identifier, not persistent across sessions. | Job-level operational metrics, such as final run status, processing time, record counts, token counts, configuration parameters, deployment type, and model endpoint information. |
 | Data Designer | Per-session rotating identifier, not persistent across sessions. | Model names used and input/output token counts. |
 | Guardrails | Per-session rotating identifier, not persistent across sessions. | Configuration and environment metrics, such as library version, Python version, operating system, Colang version, LLM engine names, rail configuration, active features, and deployment context. |
@@ -41,9 +41,9 @@ improvements, not to track individual users.
 
 ## Opt Out
 
-### NeMo Platform
+### NeMo Helix
 
-Disable NeMo Platform telemetry with any one of these controls:
+Disable NeMo Helix telemetry with any one of these controls:
 
 ```bash
 export NEMO_TELEMETRY_ENABLED=false
@@ -59,20 +59,20 @@ nemo --no-telemetry workspaces list
 
 The environment variable disables telemetry for the CLI and bundled plugins that
 share the platform telemetry controls. The configuration file setting
-`telemetry_enabled: false` goes in `~/.config/nmp/config.yaml`. The
+`telemetry_enabled: false` goes in `~/.config/nhx/config.yaml`. The
 `--no-telemetry` flag disables telemetry for one CLI invocation.
 
 For CLI-specific behavior, see [CLI configuration](/documentation/reference/cli-reference/configuration#telemetry).
 
 ### Data Designer
 
-When you use Data Designer through NeMo Platform, use the platform controls
+When you use Data Designer through NeMo Helix, use the platform controls
 above. For standalone library usage, configure telemetry using the standalone
 Data Designer library's documented opt-out controls.
 
 ### Anonymizer
 
-When you use Anonymizer through NeMo Platform, use the platform controls above.
+When you use Anonymizer through NeMo Helix, use the platform controls above.
 Standalone Anonymizer configs can disable telemetry with the `emit_telemetry`
 field:
 
@@ -85,7 +85,7 @@ config = AnonymizerConfig(replace=Redact(), emit_telemetry=False)
 
 ### Safe Synthesizer
 
-When you use Safe Synthesizer through NeMo Platform, use the platform controls
+When you use Safe Synthesizer through NeMo Helix, use the platform controls
 above. Standalone Safe Synthesizer configs can disable telemetry with the
 `emit_telemetry` field:
 
@@ -115,12 +115,12 @@ the library has started does not stop an already-running heartbeat thread.
 
 ## Third-Party Endpoints
 
-NeMo Platform and bundled library plugins can use third-party inference endpoints
+NeMo Helix and bundled library plugins can use third-party inference endpoints
 such as NVIDIA Build, OpenRouter, or local model servers. If you configure one of
 these endpoints:
 
 - That endpoint's terms of service and privacy practices apply independently of
-  NeMo Platform.
+  NeMo Helix.
 - NeMo telemetry opt-out controls do not extend to data collection by your chosen
   inference endpoint.
 - NVIDIA Build is intended for evaluation and testing only and may not be used in

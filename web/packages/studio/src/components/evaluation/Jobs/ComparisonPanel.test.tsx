@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEvaluatorListEvaluateJobResultsQueryKey } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import { PlatformJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
 import { ComparisonPanel } from '@studio/components/evaluation/Jobs/ComparisonPanel';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -49,7 +49,7 @@ describe('ComparisonPanel', () => {
     it('should render spinner with message', async () => {
       const pendingJob = {
         ...metricEvaluationJob1,
-        status: PlatformJobStatus.active,
+        status: HelixJobStatus.active,
       };
 
       renderRoute(<ComparisonPanel job={pendingJob} workspace={workspace} jobName={jobName} />);
@@ -64,7 +64,7 @@ describe('ComparisonPanel', () => {
     it('should render error message', async () => {
       const failedJob = {
         ...metricEvaluationJob1,
-        status: PlatformJobStatus.error,
+        status: HelixJobStatus.error,
       };
 
       renderRoute(<ComparisonPanel job={failedJob} workspace={workspace} jobName={jobName} />);

@@ -15,7 +15,7 @@ import json
 import os
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from trace_reader import get_session
 
 WORKSPACE = "default"
@@ -44,22 +44,22 @@ def _make_unsigned_jwt() -> str:
 
 
 @pytest.fixture
-def client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+def client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
 
 
 # --- Provider setup checks (3/5 weight) ---
 
 
-def test_provider_exists(client: NeMoPlatform) -> None:
+def test_provider_exists(client: NeMoHelix) -> None:
     """Verify the nvidia-inference provider was registered."""
     response = client.inference.providers.list()
     provider_names = [p.name for p in response.data]
     assert PROVIDER_NAME in provider_names, f"Provider '{PROVIDER_NAME}' not found. Found providers: {provider_names}"
 
 
-def test_provider_host_url(client: NeMoPlatform) -> None:
+def test_provider_host_url(client: NeMoHelix) -> None:
     """Verify the provider points to an NVIDIA inference API endpoint."""
     response = client.inference.providers.retrieve(name=PROVIDER_NAME)
     host = response.host_url.rstrip("/") if response.host_url else ""
@@ -67,7 +67,7 @@ def test_provider_host_url(client: NeMoPlatform) -> None:
     assert host in accepted, f"Provider host URL '{response.host_url}' not in accepted URLs: {ACCEPTED_HOST_URLS}"
 
 
-def test_provider_has_api_key_secret(client: NeMoPlatform) -> None:
+def test_provider_has_api_key_secret(client: NeMoHelix) -> None:
     """Verify the provider references an API key secret."""
     response = client.inference.providers.retrieve(name=PROVIDER_NAME)
     assert response.api_key_secret_name is not None and response.api_key_secret_name != "", (
@@ -78,7 +78,7 @@ def test_provider_has_api_key_secret(client: NeMoPlatform) -> None:
 # --- Inference call checks (2/5 weight) ---
 
 
-def test_inference_through_igw(client: NeMoPlatform) -> None:
+def test_inference_through_igw(client: NeMoHelix) -> None:
     """Make an actual inference call through IGW and verify the response structure."""
     response = client.inference.gateway.provider.post(
         "v1/chat/completions",
@@ -97,7 +97,7 @@ def test_inference_through_igw(client: NeMoPlatform) -> None:
     print(f"Inference response (model={INFERENCE_MODEL}): {content}")
 
 
-def test_inference_response_has_usage(client: NeMoPlatform) -> None:
+def test_inference_response_has_usage(client: NeMoHelix) -> None:
     """Verify that the inference response includes token usage information."""
     response = client.inference.gateway.provider.post(
         "v1/chat/completions",

@@ -215,7 +215,7 @@ Gateway auto-discovered entity with only `api_endpoint` cannot be downloaded for
 training.
 
 Next after a successful job: `nemo-retrieval-recipes` or `nemo evaluator
-retrieve-eval submit` on the **frozen** `eval_beir` — not CHAT `evaluate`.
+retrieve-eval` on the **frozen** `eval_beir` — not CHAT `evaluate`.
 
 ```json
 {

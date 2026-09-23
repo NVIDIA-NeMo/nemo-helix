@@ -28,11 +28,11 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, Anonymizer
 from nemo_anonymizer_plugin.jobs import run as run_module
 from nemo_anonymizer_plugin.jobs.run import RunJob
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.job_usage import LocalJobUsageReporter
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def _make_job_context(tmp_path: Path, *, workspace: str = "team-a") -> JobContext:
@@ -91,7 +91,7 @@ async def test_run_job_rejects_selected_models_without_model_configs(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="selected_models requires model_configs"):
+    with pytest.raises(HelixJobCompilationError, match="selected_models requires model_configs"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -111,7 +111,7 @@ async def test_run_job_wraps_shared_provider_config_errors(
         AsyncMock(side_effect=NDDInvalidConfigError("bad provider")),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="bad provider"):
+    with pytest.raises(HelixJobCompilationError, match="bad provider"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -125,7 +125,7 @@ async def test_run_submit_requires_model_configs(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="model_configs are required"):
+    with pytest.raises(HelixJobCompilationError, match="model_configs are required"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
@@ -330,7 +330,7 @@ async def test_run_submit_rejects_local_file(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="local path"):
+    with pytest.raises(HelixJobCompilationError, match="local path"):
         await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 

@@ -12,7 +12,7 @@ from matrix import MATRIX, Case
 from report import ReportCollector, Row
 
 # subprocess_only: the harness spawns its own OIDC-configured ``nemo services`` platforms
-# (see conftest.py); it never targets a shared cluster, so it is skipped when NMP_BASE_URL
+# (see conftest.py); it never targets a shared cluster, so it is skipped when NHX_BASE_URL
 # is set (the Kubernetes/kind e2e job) rather than spawning subprocess platforms there and
 # timing out under that job's resource pressure.
 pytestmark = [pytest.mark.e2e, pytest.mark.subprocess_only]

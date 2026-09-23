@@ -16,8 +16,8 @@ from data_designer_nemo.fileset_filesystem_provider import (
     FilesetFileSystemProvider,
 )
 from data_designer_nemo.person_reader import FilesetsPersonReader
-from data_designer_nemo.secret_resolver import NMPSecretResolver
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
+from data_designer_nemo.secret_resolver import NHXSecretResolver
+from nemo_helix_plugin.client.adapter import SyncHelixClient
 
 
 class DataDesignerExecutionContext:
@@ -25,7 +25,7 @@ class DataDesignerExecutionContext:
 
     def __init__(
         self,
-        sdk: SyncPlatformClient,
+        sdk: SyncHelixClient,
         workspace: str,
         *,
         validated_roots: set[str] | None = None,
@@ -35,7 +35,7 @@ class DataDesignerExecutionContext:
         self._validated_filesystem_roots = set(validated_roots or ())
 
     def get_secret_resolver(self) -> SecretResolver:
-        return NMPSecretResolver(self._sdk, self._workspace)
+        return NHXSecretResolver(self._sdk, self._workspace)
 
     def get_seed_readers(self) -> list[SeedReader]:
         provider = FilesetFileSystemProvider(
@@ -55,7 +55,7 @@ class DataDesignerExecutionContext:
 
 
 def create_execution_context(
-    sdk: SyncPlatformClient,
+    sdk: SyncHelixClient,
     workspace: str,
     *,
     validated_roots: set[str] | None = None,

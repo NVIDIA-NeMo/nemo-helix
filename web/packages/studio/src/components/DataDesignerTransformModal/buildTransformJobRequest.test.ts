@@ -46,7 +46,7 @@ describe('buildTransformJobRequest', () => {
   it('seeds from the source file in order', () => {
     const { seed_config: seedConfig } = buildTransformJobRequest(input).spec.config;
     expect(seedConfig).toEqual({
-      source: { seed_type: 'nmp', path: 'default/support-evals-artifacts#dataset.parquet' },
+      source: { seed_type: 'nhx', path: 'default/support-evals-artifacts#dataset.parquet' },
       sampling_strategy: 'ordered',
     });
   });

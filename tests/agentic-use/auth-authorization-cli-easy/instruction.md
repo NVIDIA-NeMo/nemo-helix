@@ -3,7 +3,7 @@
 
 # Authorization Flow (CLI)
 
-You have access to the `nemo` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
 ## Task
 
@@ -39,7 +39,7 @@ All member commands operate on a workspace. Use `--workspace <name>` to specify 
 - `nemo workspaces members update <principal> --roles <role> --workspace <workspace>` - Update a member's role
 - `nemo workspaces members delete <principal> --workspace <workspace>` - Remove a member
 
-Note: The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+Note: The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Success Criteria
 

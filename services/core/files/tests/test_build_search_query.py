@@ -3,8 +3,8 @@
 
 """Unit tests for FilesetFilter entity field mapping."""
 
-from nmp.core.files.api.v2.filesets.schemas import FilesetFilter
-from nmp.core.files.entities import FilesetPurpose
+from nhx.core.files.api.v2.filesets.schemas import FilesetFilter
+from nhx.core.files.entities import FilesetPurpose
 
 
 def test_entity_field_map_contains_expected_mappings():

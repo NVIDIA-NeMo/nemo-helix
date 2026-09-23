@@ -10,9 +10,9 @@ from typing import ClassVar
 from fastapi import APIRouter
 from nemo_auditor.authz import scope
 from nemo_auditor.jobs.audit import AuditJob
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 
 class AuditorPluginService(NemoService):

@@ -7,7 +7,7 @@
 # `platform_egress` config + the sandbox filesystem defaults, so this
 # file is not required. It stays as (a) a readable reference for what the generator
 # emits, and (b) an OVERRIDE example: point the `openshell` executor's
-# `default_policy_path` at it in packages/nmp_platform/config/local.yaml to pin a
+# `default_policy_path` at it in packages/nhx_platform/config/local.yaml to pin a
 # hand-written policy instead. The mandatory platform egress rule is injected either
 # way, so a policy here can never sever the sandbox's path back to the platform.
 #

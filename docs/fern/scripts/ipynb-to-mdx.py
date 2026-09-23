@@ -23,7 +23,7 @@ from pathlib import Path
 
 from nemo_nb.converter import NotebookConverter
 
-COLAB_REPO = "https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main"
+COLAB_REPO = "https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main"
 
 DOWNLOAD_LINK_RE = re.compile(
     r'<a href="[^"]+\.ipynb" download="[^"]+\.ipynb">Download this tutorial as a Jupyter notebook</a>\s*',

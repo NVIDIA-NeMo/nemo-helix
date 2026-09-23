@@ -6,8 +6,8 @@
 import ast
 from pathlib import Path
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src" / "nmp" / "intake"
-_RAW_CLIENT_MODULE = "nmp.intake.spans.clickhouse_client"
+_SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src" / "nhx" / "intake"
+_RAW_CLIENT_MODULE = "nhx.intake.spans.clickhouse_client"
 # The plugin CLI talks to Intake over HTTP and never touches ClickHouse; its Typer
 # ``@app.command`` registrations would otherwise trip the ``.command(...)`` heuristic.
 _CLI_SOURCE_ROOT = _SOURCE_ROOT / "cli_commands"

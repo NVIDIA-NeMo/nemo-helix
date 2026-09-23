@@ -8,9 +8,9 @@ through the real platform subprocess, exercising content-safety input and
 output rails on non-streaming and streaming Inference Gateway chat-completion
 routes.
 
-Mock provider mode is enabled by the NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX
+Mock provider mode is enabled by the NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX
 env var set in e2e/conftest.py. Tests use ``add_mock_provider()`` from
-nmp.testing to create one provider serving both the backend chat model and the
+nhx.testing to create one provider serving both the backend chat model and the
 content-safety task model, so the full Guardrails path runs without a real
 inference backend.
 """
@@ -18,7 +18,7 @@ inference backend.
 from collections.abc import Callable
 from typing import Any
 
-import nemo_platform
+import nemo_helix
 import pytest
 
 from e2e.guardrails.utils import (
@@ -226,7 +226,7 @@ def test_chat_completions_rejects_unsupported_body_guardrails_config(
 ) -> None:
     test_case = guardrails_chat_test_case(config_mode="referenced", outcome="safe", rail_types=("input",))
 
-    with pytest.raises(nemo_platform.APIStatusError) as exc_info:
+    with pytest.raises(nemo_helix.APIStatusError) as exc_info:
         post_chat_completion(
             test_case,
             extra_body={"guardrails": {"config_id": test_case.config_ref}},

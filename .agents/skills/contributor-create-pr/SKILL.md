@@ -1,14 +1,14 @@
 ---
 name: contributor-create-pr
-description: Create, publish, or advance a GitHub pull request for NVIDIA-NeMo/nemo-platform with repository-aware branch checks, targeted validation, DCO sign-off enforcement, trusted PR-template completion and post-push description refresh, conventional titles, safe pushes, draft or ready-for-review creation, CI and CodeRabbit follow-up, and merge-conflict handling. Use when the user asks to commit and push work, create or open a PR, submit changes for review, mark a draft ready, monitor a PR, address automated review or CI feedback, or update a conflicted PR in nemo-platform.
+description: Create, publish, or advance a GitHub pull request for NVIDIA-NeMo/nemo-helix with repository-aware branch checks, targeted validation, DCO sign-off enforcement, trusted PR-template completion and post-push description refresh, conventional titles, safe pushes, draft or ready-for-review creation, CI and CodeRabbit follow-up, and merge-conflict handling. Use when the user asks to commit and push work, create or open a PR, submit changes for review, mark a draft ready, monitor a PR, address automated review or CI feedback, or update a conflicted PR in nemo-helix.
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Create a NeMo Platform pull request
+# Create a NeMo Helix pull request
 
-Create and follow up on pull requests for `NVIDIA-NeMo/nemo-platform`. Treat the refreshed default branch as the source of repository policy and use the host-authenticated `gh` session for GitHub operations.
+Create and follow up on pull requests for `NVIDIA-NeMo/nemo-helix`. Treat the refreshed default branch as the source of repository policy and use the host-authenticated `gh` session for GitHub operations.
 
 ## Non-negotiable rules
 
@@ -18,7 +18,7 @@ Create and follow up on pull requests for `NVIDIA-NeMo/nemo-platform`. Treat the
 - Preserve sign-offs during history updates with `git rebase --signoff` or `git merge --signoff`.
 - Audit every commit in the PR range for an appropriate `Signed-off-by:` trailer before every push and immediately before PR creation.
 - Do not forge another contributor's sign-off. Stop when a commit author must provide or correct their own DCO declaration.
-- Never use `git reset --soft "$NMP_BASE_REF"` or reset to any commit that is not an ancestor of `HEAD`.
+- Never use `git reset --soft "$NHX_BASE_REF"` or reset to any commit that is not an ancestor of `HEAD`.
 - Never use plain `--force`. Use an exact `--force-with-lease` only after the user approves rewriting a published branch.
 - Stop on GitHub authentication, authorization, SSO, remote-access, or push-permission failures. Do not search for tokens, change credentials, switch remote protocols, or try another identity.
 - Do not alter an unrelated branch or PR. Do not create a duplicate PR for a branch that already has one.
@@ -28,11 +28,11 @@ Create and follow up on pull requests for `NVIDIA-NeMo/nemo-platform`. Treat the
 Run these checks before a GitHub read or write:
 
 ```bash
-NMP_REPO=NVIDIA-NeMo/nemo-platform
+NHX_REPO=NVIDIA-NeMo/nemo-helix
 gh auth status
-gh repo view "$NMP_REPO" --json nameWithOwner,defaultBranchRef,url
+gh repo view "$NHX_REPO" --json nameWithOwner,defaultBranchRef,url
 
-nmp_repo_for_url() {
+nhx_repo_for_url() {
   case "$1" in
     https://github.com/*|git@github.com:*|ssh://git@github.com/*) ;;
     *) printf 'Unsupported or unencrypted Git remote URL: %s\n' "$1" >&2; return 1 ;;
@@ -40,53 +40,53 @@ nmp_repo_for_url() {
   gh repo view "$1" --json nameWithOwner --jq '.nameWithOwner'
 }
 
-nmp_require_url_repo() {
-  NMP_ACTUAL_REPO="$(nmp_repo_for_url "$1")" || return 1
-  if [ "$NMP_ACTUAL_REPO" != "$2" ]; then
-    printf 'Git URL resolves to %s, expected %s\n' "$NMP_ACTUAL_REPO" "$2" >&2
+nhx_require_url_repo() {
+  NHX_ACTUAL_REPO="$(nhx_repo_for_url "$1")" || return 1
+  if [ "$NHX_ACTUAL_REPO" != "$2" ]; then
+    printf 'Git URL resolves to %s, expected %s\n' "$NHX_ACTUAL_REPO" "$2" >&2
     return 1
   fi
 }
 
-NMP_PUSH_REMOTE=origin
-NMP_PUSH_REPO="$(nmp_repo_for_url "$(git remote get-url "$NMP_PUSH_REMOTE")")"
-while IFS= read -r NMP_URL; do
-  nmp_require_url_repo "$NMP_URL" "$NMP_PUSH_REPO" || exit 1
+NHX_PUSH_REMOTE=origin
+NHX_PUSH_REPO="$(nhx_repo_for_url "$(git remote get-url "$NHX_PUSH_REMOTE")")"
+while IFS= read -r NHX_URL; do
+  nhx_require_url_repo "$NHX_URL" "$NHX_PUSH_REPO" || exit 1
 done < <(
-  git remote get-url --all "$NMP_PUSH_REMOTE"
-  git remote get-url --push --all "$NMP_PUSH_REMOTE"
+  git remote get-url --all "$NHX_PUSH_REMOTE"
+  git remote get-url --push --all "$NHX_PUSH_REMOTE"
 )
-NMP_PUSH_URL="$(git remote get-url --push "$NMP_PUSH_REMOTE")"
-NMP_PUSH_PARENT="$(gh api "repos/$NMP_PUSH_REPO" --jq '.parent.full_name // ""')"
+NHX_PUSH_URL="$(git remote get-url --push "$NHX_PUSH_REMOTE")"
+NHX_PUSH_PARENT="$(gh api "repos/$NHX_PUSH_REPO" --jq '.parent.full_name // ""')"
 
-if [ "$NMP_PUSH_REPO" = "$NMP_REPO" ]; then
-  NMP_UPSTREAM_REMOTE=origin
-elif [ "$NMP_PUSH_PARENT" = "$NMP_REPO" ]; then
-  NMP_UPSTREAM_REMOTE=upstream
-  while IFS= read -r NMP_URL; do
-    nmp_require_url_repo "$NMP_URL" "$NMP_REPO" || exit 1
-  done < <(git remote get-url --all "$NMP_UPSTREAM_REMOTE")
+if [ "$NHX_PUSH_REPO" = "$NHX_REPO" ]; then
+  NHX_UPSTREAM_REMOTE=origin
+elif [ "$NHX_PUSH_PARENT" = "$NHX_REPO" ]; then
+  NHX_UPSTREAM_REMOTE=upstream
+  while IFS= read -r NHX_URL; do
+    nhx_require_url_repo "$NHX_URL" "$NHX_REPO" || exit 1
+  done < <(git remote get-url --all "$NHX_UPSTREAM_REMOTE")
 else
-  printf 'origin is neither %s nor its fork\n' "$NMP_REPO" >&2
+  printf 'origin is neither %s nor its fork\n' "$NHX_REPO" >&2
   exit 1
 fi
-NMP_HEAD_OWNER="${NMP_PUSH_REPO%%/*}"
+NHX_HEAD_OWNER="${NHX_PUSH_REPO%%/*}"
 ```
 
-Require a conventional checkout: `origin` is the validated push target; when `origin` is a fork of `NMP_REPO`, an `upstream` remote must fetch from the canonical repository. Require every used URL to resolve to its expected GitHub repository over encrypted HTTPS or SSH. Stop on custom or mismatched layouts rather than mutating remotes implicitly. Keep the `NMP_*` variables and helper functions available for later sections.
+Require a conventional checkout: `origin` is the validated push target; when `origin` is a fork of `NHX_REPO`, an `upstream` remote must fetch from the canonical repository. Require every used URL to resolve to its expected GitHub repository over encrypted HTTPS or SSH. Stop on custom or mismatched layouts rather than mutating remotes implicitly. Keep the `NHX_*` variables and helper functions available for later sections.
 
 If `gh` fails only because a sandbox blocks host or network access, retry the same command with narrowly scoped host/network approval. If authentication or authorization still fails outside the sandbox, report the command and error and stop.
 
 Resolve and refresh the default branch instead of assuming a stale local `main`:
 
 ```bash
-NMP_BASE_BRANCH="$(gh repo view "$NMP_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')"
-git fetch --prune "$NMP_UPSTREAM_REMOTE" "$NMP_BASE_BRANCH"
-NMP_BASE_REF="$NMP_UPSTREAM_REMOTE/$NMP_BASE_BRANCH"
-git show -s --format='%H %cs %s' "$NMP_BASE_REF"
+NHX_BASE_BRANCH="$(gh repo view "$NHX_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')"
+git fetch --prune "$NHX_UPSTREAM_REMOTE" "$NHX_BASE_BRANCH"
+NHX_BASE_REF="$NHX_UPSTREAM_REMOTE/$NHX_BASE_BRANCH"
+git show -s --format='%H %cs %s' "$NHX_BASE_REF"
 ```
 
-Never derive `NMP_BASE_REF` from a fork merely because that fork is named `origin`. Treat authentication or access errors from `git fetch` as hard stops.
+Never derive `NHX_BASE_REF` from a fork merely because that fork is named `origin`. Treat authentication or access errors from `git fetch` as hard stops.
 
 ## 2. Verify the branch and worktree
 
@@ -97,8 +97,8 @@ git rev-parse --show-toplevel
 git worktree list --porcelain
 git status --short --branch
 git branch --show-current
-git log --oneline "$NMP_BASE_REF..HEAD"
-git diff --stat "$NMP_BASE_REF...HEAD"
+git log --oneline "$NHX_BASE_REF..HEAD"
+git diff --stat "$NHX_BASE_REF...HEAD"
 ```
 
 Require all of the following:
@@ -112,7 +112,7 @@ Require all of the following:
 If the current worktree is on the default branch, an unrelated PR branch, or a protected worktree, leave it untouched and create an isolated worktree from the refreshed base:
 
 ```bash
-git worktree add -b "<description>/<username>" "<explicit-new-worktree-path>" "$NMP_BASE_REF"
+git worktree add -b "<description>/<username>" "<explicit-new-worktree-path>" "$NHX_BASE_REF"
 ```
 
 Do not carry changes across worktrees implicitly. Ask before moving uncommitted work.
@@ -122,25 +122,25 @@ Do not carry changes across worktrees implicitly. Ask before moving uncommitted 
 Read policy from the trusted base and compare it with the working tree when the PR changes policy itself:
 
 ```bash
-git show "$NMP_BASE_REF:AGENTS.md"
-git show "$NMP_BASE_REF:CONTRIBUTING.md"
-git show "$NMP_BASE_REF:.github/CI_README.md"
-git show "$NMP_BASE_REF:.github/workflows/ci.yaml"
-git show "$NMP_BASE_REF:.github/workflows/security.yaml"
-git show "$NMP_BASE_REF:.github/workflows/semantic-pull-requests.yaml"
-git show "$NMP_BASE_REF:.github/workflows/dco-war.yaml"
+git show "$NHX_BASE_REF:AGENTS.md"
+git show "$NHX_BASE_REF:CONTRIBUTING.md"
+git show "$NHX_BASE_REF:.github/CI_README.md"
+git show "$NHX_BASE_REF:.github/workflows/ci.yaml"
+git show "$NHX_BASE_REF:.github/workflows/security.yaml"
+git show "$NHX_BASE_REF:.github/workflows/semantic-pull-requests.yaml"
+git show "$NHX_BASE_REF:.github/workflows/dco-war.yaml"
 ```
 
-Also read changed-area workflows, build files, package scripts, existing repo-local skills, and nested instructions. Do not copy commands from another repository when nemo-platform provides its own command.
+Also read changed-area workflows, build files, package scripts, existing repo-local skills, and nested instructions. Do not copy commands from another repository when nemo-helix provides its own command.
 
 ## 4. Inspect the change and select validation
 
 Review both committed and uncommitted changes:
 
 ```bash
-git diff --name-status "$NMP_BASE_REF...HEAD"
-git diff "$NMP_BASE_REF...HEAD"
-git diff --check "$NMP_BASE_REF...HEAD"
+git diff --name-status "$NHX_BASE_REF...HEAD"
+git diff "$NHX_BASE_REF...HEAD"
+git diff --check "$NHX_BASE_REF...HEAD"
 git diff --check
 git diff --cached --check
 ```
@@ -149,7 +149,7 @@ Run the smallest checks that directly verify each changed behavior, plus the rep
 
 - **All changes before commit:** Run `uv run pre-commit run -a` as required by `AGENTS.md`. Rerun it after a hook modifies files.
 - **Python:** Run the directly affected `uv run --frozen pytest <path> -v`; use `make test-package PACKAGE=<name>` or `make test-service SERVICE=<name>` when a package or service boundary is the right scope. Run targeted `uv run ruff check <path>` and `uv run ruff format --check <path>`. Run `uv run --frozen ty check` when type behavior changes.
-- **Studio or other `web/` changes:** From `web/`, run the affected package test. Also use the PR-scoped commands that mirror CI when applicable: `pnpm --filter="...[$NMP_BASE_REF]" run --parallel --if-present typecheck` and `pnpm --filter="...[$NMP_BASE_REF]" run --parallel --if-present test:ci`. Run `pnpm lint` and `pnpm format` for broad web changes.
+- **Studio or other `web/` changes:** From `web/`, run the affected package test. Also use the PR-scoped commands that mirror CI when applicable: `pnpm --filter="...[$NHX_BASE_REF]" run --parallel --if-present typecheck` and `pnpm --filter="...[$NHX_BASE_REF]" run --parallel --if-present test:ci`. Run `pnpm lint` and `pnpm format` for broad web changes.
 - **Fern docs:** Follow `docs/AGENTS.md`. Run `make docs-check` and `make docs-broken-links`; run `make docs-check-python-snippets DOCS_PATH=<path>` or `make docs-run-notebook DOCS_PATH=<path>` when those surfaces change.
 - **API, schema, generated SDK, CLI, or config-reference changes:** Follow the regeneration rules in `AGENTS.md`, the applicable nested instructions, and the exact Make targets. Verify generated output is committed and stable after rerunning the generator.
 - **OPA, Helm, Docker, or workflow changes:** Use the relevant checks such as `make check-policy`, `tools/lint/lint-helm.sh`, Docker bake graph commands, or `actionlint`. Read the workflow before choosing a command.
@@ -188,48 +188,48 @@ Run this gate after any commit, amend, rebase, cherry-pick, conflict resolution,
 
 ```bash
 if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-  git fetch --unshallow "$NMP_PUSH_REMOTE"
+  git fetch --unshallow "$NHX_PUSH_REMOTE"
 fi
 if [ "$(git rev-parse --is-shallow-repository)" = true ] \
-  || ! git merge-base "$NMP_BASE_REF" HEAD >/dev/null; then
+  || ! git merge-base "$NHX_BASE_REF" HEAD >/dev/null; then
   printf 'DCO audit requires complete feature-branch ancestry\n' >&2
   exit 1
 fi
 
-NMP_BASE_REF="$NMP_BASE_REF" bash -euo pipefail <<'BASH'
-: "${NMP_BASE_REF:?set NMP_BASE_REF to the refreshed canonical upstream default branch}"
-NMP_DCO_FAILED=0
-NMP_COMMIT_COUNT=0
+NHX_BASE_REF="$NHX_BASE_REF" bash -euo pipefail <<'BASH'
+: "${NHX_BASE_REF:?set NHX_BASE_REF to the refreshed canonical upstream default branch}"
+NHX_DCO_FAILED=0
+NHX_COMMIT_COUNT=0
 
-while IFS= read -r NMP_SHA; do
-  NMP_COMMIT_COUNT=$((NMP_COMMIT_COUNT + 1))
-  NMP_AUTHOR_EMAIL="$(git show -s --format=%ae "$NMP_SHA")"
-  NMP_SIGNOFF_EMAILS="$(
-    git show -s --format=%B "$NMP_SHA" \
+while IFS= read -r NHX_SHA; do
+  NHX_COMMIT_COUNT=$((NHX_COMMIT_COUNT + 1))
+  NHX_AUTHOR_EMAIL="$(git show -s --format=%ae "$NHX_SHA")"
+  NHX_SIGNOFF_EMAILS="$(
+    git show -s --format=%B "$NHX_SHA" \
       | git interpret-trailers --parse \
       | awk -F '[<>]' 'tolower($1) ~ /^signed-off-by:[[:space:]]/ && NF >= 3 { print $2 }'
   )"
 
-  if ! printf '%s\n' "$NMP_SIGNOFF_EMAILS" \
-    | awk -v want="$NMP_AUTHOR_EMAIL" 'tolower($0) == tolower(want) { found=1 } END { exit(found ? 0 : 1) }'; then
-    printf 'DCO FAIL %s: no Signed-off-by trailer matches author email %s\n' "$NMP_SHA" "$NMP_AUTHOR_EMAIL" >&2
-    NMP_DCO_FAILED=1
+  if ! printf '%s\n' "$NHX_SIGNOFF_EMAILS" \
+    | awk -v want="$NHX_AUTHOR_EMAIL" 'tolower($0) == tolower(want) { found=1 } END { exit(found ? 0 : 1) }'; then
+    printf 'DCO FAIL %s: no Signed-off-by trailer matches author email %s\n' "$NHX_SHA" "$NHX_AUTHOR_EMAIL" >&2
+    NHX_DCO_FAILED=1
   else
-    printf 'DCO OK   %s\n' "$NMP_SHA"
+    printf 'DCO OK   %s\n' "$NHX_SHA"
   fi
-done < <(git rev-list --reverse "$NMP_BASE_REF..HEAD")
+done < <(git rev-list --reverse "$NHX_BASE_REF..HEAD")
 
-test "$NMP_COMMIT_COUNT" -gt 0
-test "$NMP_DCO_FAILED" -eq 0
+test "$NHX_COMMIT_COUNT" -gt 0
+test "$NHX_DCO_FAILED" -eq 0
 BASH
 ```
 
-Do not treat a PR-body declaration or GitHub's cryptographic `Verified` badge as a substitute for commit trailers. Nemo-platform's required gate is DCO sign-off.
+Do not treat a PR-body declaration or GitHub's cryptographic `Verified` badge as a substitute for commit trailers. Nemo-Helix's required gate is DCO sign-off.
 
 If the audit fails:
 
 - Amend the last unpushed, self-authored commit with `git commit --amend -s --no-edit`.
-- Repair multiple unpushed, self-authored commits with `git rebase --signoff --force-rebase "$NMP_BASE_REF"`; `--force-rebase` is required when Git would otherwise report an already-current branch and skip replaying the unsigned commits.
+- Repair multiple unpushed, self-authored commits with `git rebase --signoff --force-rebase "$NHX_BASE_REF"`; `--force-rebase` is required when Git would otherwise report an already-current branch and skip replaying the unsigned commits.
 - Stop before rewriting a published branch and request explicit approval.
 - Stop rather than adding a sign-off for a commit authored by someone else.
 - Rerun the entire audit after repair.
@@ -247,38 +247,38 @@ Use one of the conventional types accepted by the pinned title action: `feat`, `
 Locate the PR template in the trusted base, not in the feature branch and not in a recent PR body:
 
 ```bash
-NMP_TEMPLATE_PATHS="$(git ls-tree -r --name-only "$NMP_BASE_REF")"
-NMP_TEMPLATE_PATHS="$(
-  printf '%s\n' "$NMP_TEMPLATE_PATHS" \
+NHX_TEMPLATE_PATHS="$(git ls-tree -r --name-only "$NHX_BASE_REF")"
+NHX_TEMPLATE_PATHS="$(
+  printf '%s\n' "$NHX_TEMPLATE_PATHS" \
     | awk 'tolower($0) ~ /(^|\/)pull_request_template(\.md|\/.*\.md)$/'
 )"
-NMP_TEMPLATE_COUNT="$(printf '%s\n' "$NMP_TEMPLATE_PATHS" | sed '/^$/d' | wc -l | tr -d ' ')"
-if [ "$NMP_TEMPLATE_COUNT" -ne 1 ]; then
-  printf 'Expected one trusted PR template, found %s\n' "$NMP_TEMPLATE_COUNT" >&2
+NHX_TEMPLATE_COUNT="$(printf '%s\n' "$NHX_TEMPLATE_PATHS" | sed '/^$/d' | wc -l | tr -d ' ')"
+if [ "$NHX_TEMPLATE_COUNT" -ne 1 ]; then
+  printf 'Expected one trusted PR template, found %s\n' "$NHX_TEMPLATE_COUNT" >&2
   exit 1
 fi
-NMP_TEMPLATE_PATH="$NMP_TEMPLATE_PATHS"
-NMP_PR_BODY="$(mktemp /tmp/nemo-platform-pr-body.XXXXXX)"
-git show "$NMP_BASE_REF:$NMP_TEMPLATE_PATH" > "$NMP_PR_BODY"
+NHX_TEMPLATE_PATH="$NHX_TEMPLATE_PATHS"
+NHX_PR_BODY="$(mktemp /tmp/nemo-helix-pr-body.XXXXXX)"
+git show "$NHX_BASE_REF:$NHX_TEMPLATE_PATH" > "$NHX_PR_BODY"
 ```
 
 - If the trusted base does not have exactly one template, report the missing or ambiguous repository dependency and stop before `gh pr create`. Do not invent a template or silently reuse a branch-modified or historical body.
 - If the PR changes the template, still populate the trusted base version and explain the template change in that body.
 
-Preserve the template's section order, comments, and checkbox semantics. Complete every applicable section from `git diff "$NMP_BASE_REF...HEAD"`. Check only items backed by command, hook, or CI evidence. Use `Fixes #NNN` or `Closes #NNN` only for a real related issue. Do not add a PR-body sign-off unless the trusted template requests it; the commit-level DCO audit remains mandatory.
+Preserve the template's section order, comments, and checkbox semantics. Complete every applicable section from `git diff "$NHX_BASE_REF...HEAD"`. Check only items backed by command, hook, or CI evidence. Use `Fixes #NNN` or `Closes #NNN` only for a real related issue. Do not add a PR-body sign-off unless the trusted template requests it; the commit-level DCO audit remains mandatory.
 
 ## 8. Push safely and refresh an existing PR
 
 Immediately before pushing, rerun the DCO audit, confirm the branch and remote, and inspect the outgoing commits:
 
 ```bash
-NMP_BRANCH="$(git branch --show-current)"
-NMP_HEAD_SELECTOR="$NMP_BRANCH"
-if [ "$NMP_PUSH_REPO" != "$NMP_REPO" ]; then
-  NMP_HEAD_SELECTOR="$NMP_HEAD_OWNER:$NMP_BRANCH"
+NHX_BRANCH="$(git branch --show-current)"
+NHX_HEAD_SELECTOR="$NHX_BRANCH"
+if [ "$NHX_PUSH_REPO" != "$NHX_REPO" ]; then
+  NHX_HEAD_SELECTOR="$NHX_HEAD_OWNER:$NHX_BRANCH"
 fi
-git log --oneline "$NMP_BASE_REF..HEAD"
-git push --set-upstream "$NMP_PUSH_REMOTE" "HEAD:refs/heads/$NMP_BRANCH"
+git log --oneline "$NHX_BASE_REF..HEAD"
+git push --set-upstream "$NHX_PUSH_REMOTE" "HEAD:refs/heads/$NHX_BRANCH"
 ```
 
 Use the validated `origin` push target from section 1. On a non-fast-forward rejection, fetch the exact branch from its validated push URL and inspect both histories. Stop if the remote contains unexpected work.
@@ -286,25 +286,25 @@ Use the validated `origin` push target from section 1. On a non-fast-forward rej
 Only after the user approves rewriting a published branch, pin the lease to the fetched remote SHA:
 
 ```bash
-git fetch "$NMP_PUSH_URL" "refs/heads/$NMP_BRANCH:refs/remotes/nmp-push/$NMP_BRANCH"
-NMP_EXPECTED_REMOTE_SHA="$(git rev-parse "refs/remotes/nmp-push/$NMP_BRANCH")"
+git fetch "$NHX_PUSH_URL" "refs/heads/$NHX_BRANCH:refs/remotes/nhx-push/$NHX_BRANCH"
+NHX_EXPECTED_REMOTE_SHA="$(git rev-parse "refs/remotes/nhx-push/$NHX_BRANCH")"
 git push \
-  --force-with-lease="refs/heads/$NMP_BRANCH:$NMP_EXPECTED_REMOTE_SHA" \
-  "$NMP_PUSH_REMOTE" "HEAD:refs/heads/$NMP_BRANCH"
+  --force-with-lease="refs/heads/$NHX_BRANCH:$NHX_EXPECTED_REMOTE_SHA" \
+  "$NHX_PUSH_REMOTE" "HEAD:refs/heads/$NHX_BRANCH"
 ```
 
 Never bypass branch protection or required checks. Stop on any access error.
 
-After every successful push to a branch with an open PR, rebuild `NMP_PR_BODY` from the trusted template as in section 7 and update it from the current diff and validation results. Refresh the summary, change list, checklist evidence, limitations, and related issue; remove claims that are no longer true. Then update and verify the live description:
+After every successful push to a branch with an open PR, rebuild `NHX_PR_BODY` from the trusted template as in section 7 and update it from the current diff and validation results. Refresh the summary, change list, checklist evidence, limitations, and related issue; remove claims that are no longer true. Then update and verify the live description:
 
 ```bash
-NMP_PR_NUMBER="$(
-  gh pr list --repo "$NMP_REPO" --head "$NMP_HEAD_SELECTOR" \
+NHX_PR_NUMBER="$(
+  gh pr list --repo "$NHX_REPO" --head "$NHX_HEAD_SELECTOR" \
     --state open --limit 1 --json number --jq '.[0].number // empty'
 )"
-if [ -n "$NMP_PR_NUMBER" ]; then
-  gh pr edit "$NMP_PR_NUMBER" --repo "$NMP_REPO" --body-file "$NMP_PR_BODY"
-  gh pr view "$NMP_PR_NUMBER" --repo "$NMP_REPO" --json url,headRefOid,body
+if [ -n "$NHX_PR_NUMBER" ]; then
+  gh pr edit "$NHX_PR_NUMBER" --repo "$NHX_REPO" --body-file "$NHX_PR_BODY"
+  gh pr view "$NHX_PR_NUMBER" --repo "$NHX_REPO" --json url,headRefOid,body
 fi
 ```
 
@@ -315,7 +315,7 @@ Do not leave the PR body describing an older head after a review fix, conflict r
 Check for an existing open PR first:
 
 ```bash
-gh pr list --repo "$NMP_REPO" --head "$NMP_HEAD_SELECTOR" --state open --json number,title,url,isDraft
+gh pr list --repo "$NHX_REPO" --head "$NHX_HEAD_SELECTOR" --state open --json number,title,url,isDraft
 ```
 
 Rerun the DCO audit immediately before creation. Use explicit metadata; do not use `--fill` because it bypasses trusted-template completion.
@@ -323,11 +323,11 @@ Rerun the DCO audit immediately before creation. Use explicit metadata; do not u
 Create a draft when work, validation, or a required decision remains:
 
 ```bash
-gh pr create --repo "$NMP_REPO" \
-  --base "$NMP_BASE_BRANCH" \
-  --head "$NMP_HEAD_SELECTOR" \
+gh pr create --repo "$NHX_REPO" \
+  --base "$NHX_BASE_BRANCH" \
+  --head "$NHX_HEAD_SELECTOR" \
   --title "<validated title>" \
-  --body-file "$NMP_PR_BODY" \
+  --body-file "$NHX_PR_BODY" \
   --draft
 ```
 
@@ -336,30 +336,30 @@ Create a ready PR by omitting `--draft` only when the change and required local 
 For an existing draft, use `gh pr ready <number>` only after the user asks to make it ready and readiness gates pass. Verify the resulting PR:
 
 ```bash
-gh pr view <number> --repo "$NMP_REPO" \
+gh pr view <number> --repo "$NHX_REPO" \
   --json number,title,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus
 ```
 
 ## 10. Monitor CI and CodeRabbit
 
-Monitor both required and optional checks. `CI status` is nemo-platform's aggregate CI gate; DCO, semantic title, Security, Fern docs, and other workflows may appear separately.
+Monitor both required and optional checks. `CI status` is nemo-helix's aggregate CI gate; DCO, semantic title, Security, Fern docs, and other workflows may appear separately.
 
 ```bash
-gh pr checks <number> --repo "$NMP_REPO" --watch --interval 15
-gh pr checks <number> --repo "$NMP_REPO" \
+gh pr checks <number> --repo "$NHX_REPO" --watch --interval 15
+gh pr checks <number> --repo "$NHX_REPO" \
   --json name,workflow,state,bucket,link,startedAt,completedAt
-gh pr view <number> --repo "$NMP_REPO" \
+gh pr view <number> --repo "$NHX_REPO" \
   --json url,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,latestReviews
 ```
 
-Inspect a failed workflow with `gh run view <run-id> --repo "$NMP_REPO" --log-failed`. Connect the failure to the changed code before editing. Run the corresponding local check, commit the minimal fix with `-s`, rerun the DCO audit, push, and monitor again.
+Inspect a failed workflow with `gh run view <run-id> --repo "$NHX_REPO" --log-failed`. Connect the failure to the changed code before editing. Run the corresponding local check, commit the minimal fix with `-s`, rerun the DCO audit, push, and monitor again.
 
 Inspect CodeRabbit's issue comments, reviews, and inline comments:
 
 ```bash
-gh api "repos/$NMP_REPO/issues/<number>/comments" --paginate \
+gh api "repos/$NHX_REPO/issues/<number>/comments" --paginate \
   --jq '.[] | select(.user.login == "coderabbitai[bot]") | {author:.user.login,updated_at,body}'
-gh api "repos/$NMP_REPO/pulls/<number>/comments" --paginate \
+gh api "repos/$NHX_REPO/pulls/<number>/comments" --paginate \
   --jq '.[] | select(.user.login == "coderabbitai[bot]") | {author:.user.login,path,line,updated_at,body}'
 ```
 
@@ -372,9 +372,9 @@ Repeat until required CI passes and no actionable automated-review findings rema
 Check `mergeable` and `mergeStateStatus` before creation, after base changes, and after review fixes. If the branch conflicts with the refreshed base:
 
 1. Require a clean worktree and fetch the base again.
-2. For an unpushed branch, or after approval to rewrite a published branch, use `git rebase --signoff "$NMP_BASE_REF"`.
+2. For an unpushed branch, or after approval to rewrite a published branch, use `git rebase --signoff "$NHX_BASE_REF"`.
 3. Resolve each conflict from the intended behavior. Use `git add -- <resolved-paths>` and `git rebase --continue`; the original `--signoff` must remain in effect.
-4. When preserving published history instead, use `git merge --signoff "$NMP_BASE_REF"`. After resolving a conflicted merge, finish it with `git commit -s --no-edit` rather than an unsigned commit.
+4. When preserving published history instead, use `git merge --signoff "$NHX_BASE_REF"`. After resolving a conflicted merge, finish it with `git commit -s --no-edit` rather than an unsigned commit.
 5. Stop and ask when a conflict resolution changes behavior, contributor intent, API design, generated output, or documentation meaning.
 6. Rerun affected validation and the full DCO audit.
 7. Push normally after a merge. Use the exact force-with-lease workflow only for an approved rebase of a published branch.

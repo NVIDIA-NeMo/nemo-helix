@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
 
 
 def _page(data: list[dict], page: int = 1, total: int = 1) -> dict:

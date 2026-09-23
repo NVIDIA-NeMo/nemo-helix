@@ -50,16 +50,16 @@ from nemo_agent_hardener_plugin.jobs._common import resolve_model_key
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_agent_hardener_plugin.project_resolver import build_project_manifest_dict, inspect_project
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
-from nemo_platform_plugin.jobs.openapi_utils import generate_openapi_extra_params
-from nemo_platform_plugin.log_utils import sanitize_for_log
-from nemo_platform_plugin.sdk_provider import get_platform_sdk
+from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.sdk_provider import get_platform_sdk
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)

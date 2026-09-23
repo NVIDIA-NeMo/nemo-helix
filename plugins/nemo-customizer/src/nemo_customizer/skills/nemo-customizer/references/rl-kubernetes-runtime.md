@@ -43,12 +43,12 @@ be configured with all of:
    customizer stamps — `cpu` (download / upload / model-entity steps) and `gpu`
    (DPO training) — at the resolved profile.
 3. `platform.loopback_address` set to a platform address the **job pods can reach**
-   (the platform rewrites the `NMP_*_URL` it injects into pods to this, so the
+   (the platform rewrites the `NHX_*_URL` it injects into pods to this, so the
    download/upload steps can call the files/jobs APIs).
 4. The target GPU cluster has, available as pullable/loaded images: the job-step
-   images (`nmp-customizer-tasks`, `nmp-rl-training`), the **jobs-launcher** image (each
+   images (`nhx-customizer-tasks`, `nhx-rl-training`), the **jobs-launcher** image (each
    step runs a launcher init container), and a **job-storage PVC** the steps share.
-5. Multi-node only (`parallelism.num_nodes > 1`): `NMP_RL_MULTINODE_SHARED_STORAGE_PATH`
+5. Multi-node only (`parallelism.num_nodes > 1`): `NHX_RL_MULTINODE_SHARED_STORAGE_PATH`
    (a shared filesystem for Ray's cross-node coordination).
 
 If a job pod shows `ErrImagePull` / `ImagePullBackOff` on the launcher init
@@ -67,8 +67,8 @@ opt-in. Two settings gate it, and **both fail at submit, before any GPU is claim
 
 | Setting | Env var | Owner | Why |
 |---|---|---|---|
-| `platform.sandbox_cluster_capable` | `NMP_SANDBOX_CLUSTER_CAPABLE` (Helm: `sandboxClusterCapable`) | platform | Declares OpenSandbox is installed. The platform Helm chart does **not** install it. `false` → `OpenSandbox is not yet available on this cluster (sandbox_cluster_capable=false)` |
-| `rl.job_storage_pvc_claim` | `NMP_RL_JOB_STORAGE_PVC_CLAIM` | rl service | The sandbox re-mounts the job-storage PVC to read the downloaded environment and dataset, and only learns the claim by name. Unset → `Sandboxed GRPO requires the job-storage PVC claim name` |
+| `platform.sandbox_cluster_capable` | `NHX_SANDBOX_CLUSTER_CAPABLE` (Helm: `sandboxClusterCapable`) | platform | Declares OpenSandbox is installed. The platform Helm chart does **not** install it. `false` → `OpenSandbox is not yet available on this cluster (sandbox_cluster_capable=false)` |
+| `rl.job_storage_pvc_claim` | `NHX_RL_JOB_STORAGE_PVC_CLAIM` | rl service | The sandbox re-mounts the job-storage PVC to read the downloaded environment and dataset, and only learns the claim by name. Unset → `Sandboxed GRPO requires the job-storage PVC claim name` |
 
 DPO needs neither. Neither is settable per job — if a submit fails on one, it is a
 platform configuration gap, not a problem with the user's package. Say so and stop.
@@ -90,8 +90,8 @@ index needs the operator to open it:
 
 | Setting | Env var | Notes |
 |---|---|---|
-| `rl.sandbox_allow_internet` | `NMP_RL_SANDBOX_ALLOW_INTERNET` | Default `false`. Required for every `native-v1` and every `adapter-wheels-v1` job |
-| `rl.sandbox_public_dns_allow` | `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra suffixes/FQDNs, consulted only when the above is true. NeMo-RL's built-in list covers `*.com` and `*.org`, so e.g. `hub.primeintellect.ai` must be named here |
+| `rl.sandbox_allow_internet` | `NHX_RL_SANDBOX_ALLOW_INTERNET` | Default `false`. Required for every `native-v1` and every `adapter-wheels-v1` job |
+| `rl.sandbox_public_dns_allow` | `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra suffixes/FQDNs, consulted only when the above is true. NeMo-RL's built-in list covers `*.com` and `*.org`, so e.g. `hub.primeintellect.ai` must be named here |
 
 Cluster-private, node-local and metadata destinations stay denied either way. A
 complete `wheels-v1` closure avoids needing any of this — see
@@ -108,7 +108,7 @@ job fails in a way that matches:
 | `rl.sandbox_rollout_max_in_flight` | NeMo-RL's 8 | In-flight rollouts are chunk × this. Raise in proportion when lowering the chunk, or step throughput falls with it |
 | `rl.sandbox_ttl_s` | NeMo-RL's 14400 (4h) | A run outliving the reap timer loses its sandbox mid-rollout and fails with a proxy 502. Must exceed the longest accepted run; capped by the server's `max_sandbox_timeout_seconds` |
 | `rl.sandbox_resources` | `cpu: "2"`, `memory: 4Gi` | Sandbox OOMKilled mid-rollout, surfacing as a proxy 502 rather than a memory error. The pod runs one Gym server process per config entry plus its own Ray. The OpenSandbox SDK default (1 CPU / 2Gi) is too small for that |
-| `rl.gym_runtime_image` | the `nmp-rl-training` image | Only if the sandbox must run a different image |
+| `rl.gym_runtime_image` | the `nhx-rl-training` image | Only if the sandbox must run a different image |
 
 Reference (local platform config): `docs/set-up/manage-jobs.mdx` (execution
 backends — `kubernetes_job`), `docs/set-up/config-reference.mdx`

@@ -1,0 +1,338 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# License Overrides for osv-scanner
+#
+# This file provides manual license overrides for packages where osv-scanner
+# cannot automatically determine the correct license OR for licenses that
+# use formats not in our standard list:
+#    "MIT"  # https://opensource.org/licenses/MIT
+#    "BSD-3-CLAUSE"  # https://opensource.org/licenses/BSD-3-Clause
+#    "BSD-2-CLAUSE"  #  https://opensource.org/license/BSD-2-Clause
+#    "APACHE-2.0"  # (https://www.apache.org/licenses/LICENSE-2.0
+#    "ISC"  #  https://opensource.org/licenses/ISC
+#    "ZLIB"  # https://opensource.org/license/zlib/
+#    "NVIDIA PROPRIETARY SOFTWARE"  # Us
+#
+# Use SPDX identifiers: https://spdx.org/licenses/
+#
+# You can generate entries for this file by running:
+#   nemo-helix-sdk-tools license discover-overrides
+#
+# That script will fetch licenses from PyPI for packages with UNKNOWN or
+# NON-STANDARD licenses. Review all changes before committing.
+#
+# Format:
+#   package-name: SPDX-LICENSE  # Optional comment about source
+
+overrides:
+  # Machine Learning / AI Libraries
+  accelerate: Apache-2.0 # HuggingFace - https://github.com/huggingface/accelerate
+  bitsandbytes: MIT # https://github.com/TimDettmers/bitsandbytes
+  flash-attn: BSD-3-Clause # https://github.com/Dao-AILab/flash-attention
+  flashinfer-jit-cache: Apache-2.0 # https://github.com/flashinfer-ai/flashinfer/tree/main/flashinfer-jit-cache
+  huggingface-hub: Apache-2.0 # https://github.com/huggingface/huggingface_hub
+  peft: Apache-2.0 # HuggingFace Parameter-Efficient Fine-Tuning
+  safetensors: Apache-2.0 # HuggingFace safe tensor storage - https://github.com/safetensors/safetensors/blob/main/LICENSE — osv-scanner reports non-standard for 0.8.0rc1
+  tiktoken: MIT # OpenAI tokenizer
+  tokenizers: Apache-2.0 # HuggingFace tokenizers
+  trl: Apache-2.0
+  cffi: MIT-0
+  data-designer-retrieval-sdg: Apache-2.0 # NVIDIA-NeMo/DataDesignerPlugins — https://github.com/NVIDIA-NeMo/DataDesignerPlugins/blob/main/LICENSE
+  # PyTorch Ecosystem
+  torch: Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT # https://github.com/pytorch/pytorch
+  torchaudio: BSD-3-Clause # https://github.com/pytorch/audio
+  torchvision: BSD-3-Clause # https://github.com/pytorch/vision
+  xformers: BSD-3-Clause
+
+  # Apple MLX Framework
+
+  mlx: MIT
+  mlx-metal: MIT
+
+  # Scientific Computing
+  numpy: BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 # https://numpy.org/
+  scipy: BSD-3-Clause # https://scipy.org/
+  pandas: BSD-3-Clause # https://pandas.pydata.org/
+  scikit-learn: BSD-3-Clause # https://scikit-learn.org/
+  scikit-network: BSD-3-Clause # https://github.com/sknetwork-team/scikit-network
+  matplotlib: PSF-2.0 # https://matplotlib.org/
+  seaborn: BSD-3-Clause # Statistical data visualization
+  statsmodels: BSD-3-Clause # Statistical models
+  sympy: BSD-3-Clause # Symbolic mathematics
+
+  # Data Visualization
+  plotly: MIT # https://plotly.com/python/
+  contourpy: BSD-3-Clause # Contour line generation
+  cycler: BSD-3-Clause # Matplotlib color cycling
+  kiwisolver: BSD-3-Clause # Constraint solver for matplotlib
+
+  # NVIDIA Proprietary Libraries
+  cuda-bindings: LicenseRef-NVIDIA-SOFTWARE-LICENSE
+  cuda-python: LicenseRef-NVIDIA-SOFTWARE-LICENSE
+  cuda-toolkit: NVIDIA Proprietary Software
+  nvidia-cublas: NVIDIA Proprietary Software
+  nvidia-cublas-cu12: NVIDIA Proprietary Software
+  nvidia-cuda-cupti: NVIDIA Proprietary Software
+  nvidia-cuda-cupti-cu12: NVIDIA Proprietary Software
+  nvidia-cuda-nvrtc: NVIDIA Proprietary Software
+  nvidia-cuda-nvrtc-cu12: NVIDIA Proprietary Software
+  nvidia-cuda-runtime: NVIDIA Proprietary Software
+  nvidia-cuda-runtime-cu12: NVIDIA Proprietary Software
+  nvidia-cudnn-cu13: NVIDIA Proprietary Software
+  nvidia-cudnn-cu12: NVIDIA Proprietary Software
+  nvidia-cufft: NVIDIA Proprietary Software
+  nvidia-cufft-cu12: NVIDIA Proprietary Software
+  nvidia-cufile: NVIDIA Proprietary Software
+  nvidia-cufile-cu12: NVIDIA Proprietary Software
+  nvidia-curand: NVIDIA Proprietary Software
+  nvidia-curand-cu12: NVIDIA Proprietary Software
+  nvidia-cusolver: NVIDIA Proprietary Software
+  nvidia-cusolver-cu12: NVIDIA Proprietary Software
+  nvidia-cusparse: NVIDIA Proprietary Software
+  nvidia-cusparse-cu12: NVIDIA Proprietary Software
+  nvidia-cusparselt-cu13: NVIDIA Proprietary Software
+  nvidia-cusparselt-cu12: NVIDIA Proprietary Software
+  nvidia-nccl-cu13: BSD-3-Clause
+  nvidia-nvjitlink: NVIDIA Proprietary Software
+  nvidia-nvjitlink-cu12: NVIDIA Proprietary Software
+  nvidia-ml-py: BSD-3-Clause # Python bindings for NVML
+  nemollm: NVIDIA Proprietary Software
+  nvidia-cudnn-frontend: NVIDIA Proprietary Software
+  nvidia-nvshmem-cu13: NVIDIA Proprietary Software
+  nvidia-nvshmem-cu12: NVIDIA Proprietary Software
+  nvidia-nat-config-optimizer: Apache-2.0 # NVIDIA NeMo Agent Toolkit config optimizer
+  triton: MIT
+  # NeMo Fabric — Apache-2.0 per PyPI (`license_expression`) and deps.dev, but osv-scanner reports
+  # UNKNOWN for the 0.1.x rc series, the same way it does for safetensors 0.8.0rc1 above. Revisit
+  # once Fabric cuts a non-prerelease 0.1.0.
+  nemo-fabric: Apache-2.0 # https://pypi.org/project/nemo-fabric/
+  nemo-fabric-runtime: Apache-2.0 # https://pypi.org/project/nemo-fabric-runtime/
+
+  # ONNX Runtime
+  onnxruntime: MIT # https://github.com/microsoft/onnxruntime
+
+  # Jupyter Ecosystem
+
+  # Web/HTTP Libraries
+  h2: MIT # HTTP/2 protocol
+  hpack: MIT # HTTP/2 header compression
+  hyperframe: MIT # HTTP/2 framing layer
+
+  # Database / Message Queue
+  amqp: BSD-3-Clause # AMQP protocol implementation
+  billiard: BSD-3-Clause # Multiprocessing pool (used by Celery)
+  flower: BSD-3-Clause # Celery monitoring tool
+  psycopg2-binary: LGPL-3.0-or-later WITH openvpn-openssl-exception # PostgreSQL adapter
+  pyarrow: Apache-2.0 # Apache Arrow Python bindings
+  vine: BSD-3-Clause # Promises/futures library for Celery
+
+  # Configuration / Parsing
+  antlr4-python3-runtime: BSD-3-Clause # ANTLR 4 runtime; via latex2sympy2-extended <- math-verify
+  expandvars: MIT # Shell-style env var expansion
+  ply: BSD-3-Clause # Python Lex-Yacc (parsing)
+
+  # CLI / Terminal
+  click-plugins: BSD-3-Clause # Click plugin system
+  colorama: BSD-3-Clause # Cross-platform colored terminal text
+  libcst: MIT # Parser used by vendor_package
+  prompt-toolkit: BSD-3-Clause # Library for building interactive CLIs
+  shellingham: ISC # Detect shell type
+
+  # Date/Time
+  dateparser: BSD-3-Clause # Parse human-readable dates
+  python-dateutil: Apache-2.0 # Extensions to datetime module
+  isodate: BSD-3-Clause
+
+  # Testing
+
+  # Text Processing
+  chardet: LGPL-2.1-or-later # Character encoding detection
+  defusedxml: PSF-2.0 # PyPI metadata reports PSFL / Python Software Foundation License
+  flashtext: MIT # Fast keyword extraction
+  json-repair: MIT # Repair invalid JSON
+  python-stdnum: LGPL-2.1-or-later # Validate/format standard numbers
+
+  # Template Engines
+  jinja2: BSD-3-Clause # Template engine
+  markupsafe: BSD-3-Clause # HTML escaping for Jinja2
+  itsdangerous: BSD-3-Clause # Token signing — Flask/Jinja ecosystem
+
+  # Validation
+
+  # Data Formats
+  jsonpatch: BSD-3-Clause # Apply JSON patches
+  jsonpointer: BSD-3-Clause # Resolve JSON pointers
+  python-json-logger: BSD-2-Clause # JSON logging formatter
+
+  # Compression / Hashing
+  lz4: BSD-3-Clause # https://github.com/python-lz4/python-lz4
+  mmh3: MIT # MurmurHash3 hashing
+  xxhash: BSD-2-Clause # xxHash hashing algorithm
+
+  # Async / Concurrency
+  cloudpickle: BSD-3-Clause # https://github.com/cloudpipe/cloudpickle/blob/master/LICENSE
+  nest-asyncio: BSD-3-Clause # Patch asyncio to allow nested event loops
+  nest-asyncio2: BSD-3-Clause # Forked nest-asyncio used by nvidia-nat-core
+
+  # Git
+  gitdb: BSD-3-Clause # Git object database
+
+  # Monitoring / Logging
+  wandb: MIT # https://github.com/wandb/wandb/blob/main/LICENSE
+
+  # Networking / Encoding
+  idna: BSD-3-Clause # Internationalized domain names
+  oci: UPL-1.0 OR Apache-2.0 # Oracle Cloud Infrastructure SDK
+  oci-openai: UPL-1.0 # Oracle OpenAI-compatible OCI SDK
+  pyasn1-modules: BSD-3-Clause # ASN.1 data structures
+  pyzmq: BSD-3-Clause # ZeroMQ bindings
+
+  # NLP / AI Evaluation
+  fastembed: Apache-2.0 # Fast text embedding
+  langchain-oci: UPL-1.0 # LangChain Oracle Cloud Infrastructure integration
+  ragas: Apache-2.0 # RAG evaluation framework
+  range-regex: BSD-3-Clause # Regex for ranges
+  ratelimit: MIT # API rate limiting
+  rouge-score: Apache-2.0 # ROUGE metric for text summarization
+  sacrebleu: Apache-2.0 # Machine translation metrics
+
+  # Python Compilation / Optimization
+  llvmlite: BSD-3-Clause # Lightweight LLVM Python binding
+  numba: BSD-3-Clause # JIT compiler for Python
+  ninja: Apache-2.0 # Small build system
+
+  # System / OS
+  cached-property: BSD-3-Clause # Decorator for caching properties
+  importlib-metadata: Apache-2.0 # Read metadata from Python packages
+  importlib-resources: Apache-2.0 # Read resources from Python packages
+  mpmath: BSD-3-Clause # Python library for arbitrary-precision arithmetic
+  packaging: Apache-2.0 OR BSD-2-Clause # Core utilities for Python packages
+  patsy: BSD-3-Clause # Statistical model formulas
+  sqlfluff: MIT # SQL linter
+  wrapt: BSD-2-Clause # Module for decorators and wrappers
+  python-on-whales: MIT # Docker SDK for Python
+
+  # Go
+  stdlib: BSD-3-Clause # Go standard library - https://go.dev/LICENSE
+
+  # Specialized
+  betterproto: MIT # Better protobuf support
+  cut-cross-entropy: APSL-2.0 # https://github.com/unslothai/cut-cross-entropy/blob/main/LICENSE; license text and acknowledgements in LICENSES/cut-cross-entropy-25.1.1.txt
+
+  # Miscellaneous
+  hf-transfer: Apache-2.0 # HuggingFace transfer library https://github.com/huggingface/hf_transfer/blob/main/LICENSE
+  jsonpath-rust-bindings: MIT # See https://github.com/besok/jsonpath-rust/blob/main/LICENSE
+  milvus-lite: Apache-2.0 # https://github.com/milvus-io/milvus-lite/blob/main/LICENSE
+  opensandbox: Apache-2.0 # https://github.com/opensandbox-group/OpenSandbox/blob/main/LICENSE
+  pymilvus: Apache-2.0 # https://github.com/milvus-io/pymilvus/blob/master/LICENSE
+  openai-harmony: Apache-2.0 # https://github.com/openai/harmony/blob/main/LICENSE
+  prv-accountant: MIT # https://github.com/microsoft/prv_accountant/blob/main/LICENSE
+  py-rust-stemmers: MIT # https://github.com/qdrant/py-rust-stemmers/blob/master/LICENSE
+  sentencepiece: Apache-2.0 # https://github.com/google/sentencepiece/blob/master/LICENSE
+  torchao: BSD-3-Clause # https://github.com/pytorch/ao?tab=readme-ov-file#-citation
+  ujson: BSD-3-Clause # https://github.com/ultrajson/ultrajson/blob/main/LICENSE.txt
+
+  # garak specific licenses
+  ecoji: Apache-2.0
+  fsspec: BSD-3-Clause
+  langdetect: Apache-2.0
+  mistralai: Apache-2.0 # https://github.com/mistralai/client-python/blob/main/LICENSE
+  networkx: BSD-3-Clause
+  pyperclip: BSD-3-Clause
+  pyreadline3: BSD-3-Clause
+  python-magic-bin: MIT
+  rapidfuzz: MIT
+  replicate: Apache-2.0
+  uritemplate: BSD 3-Clause OR Apache-2.0
+  wavedrom: MIT
+  zalgolib: MIT
+
+  # Licenses not automatically approved
+  aiohappyeyeballs: PSF-2.0
+  certifi: MPL-2.0
+  datetime: ZPL-2.0
+  email-validator: Unlicense
+  filelock: MIT
+  nvidia-cutlass-dsl: NVIDIA-Software-End-User-License-Agreement
+  pathspec: MPL-2.0
+  pillow: MIT-CMU
+  pycountry: LGPL-2.1
+  python-gitlab: LGPL-3.0
+  supervisor: BSD-3-Clause
+  typing-extensions: PSF-2.0
+  unsloth-zoo: LGPL-3.0-or-later
+  wget: Public Domain # Declares "License: Public Domain" (no SPDX id); via verifiers <- NeMo Gym
+  zope-interface: ZPL-2.0
+
+  # Files service
+  types-awscrt: MIT
+
+  backports-zstd: PSF-2.0
+  dspy: MIT
+  greenlet: MIT AND PSF-2.0
+  narwhals: MIT
+  regex: Apache-2.0 AND CNRI-Python
+  rpds-py: MIT
+  sqlite-vec: Apache-2.0 OR MIT # https://pypi.org/project/sqlite-vec/
+  tqdm: MIT AND MPL-2.0
+  uuid-utils: BSD-3-Clause
+
+  # Auth service
+  wasmtime: APACHE-2.0 WITH LLVM-EXCEPTION
+
+  # MCP Server
+  beartype: MIT
+  docutils: BSD-3-Clause
+  lupa: MIT
+  py-key-value-aio: Apache-2.0
+  py-key-value-shared: Apache-2.0
+  pydocket: MIT
+
+  nemo-safe-synthesizer: Apache-2.0
+  nemo-relay: Apache-2.0  # https://github.com/NVIDIA/NeMo-Relay (ships Apache-2.0 LICENSE; osv reports UNKNOWN)
+  nemoguardrails: Apache-2.0
+  fastuuid: BSD-3-Clause
+  orjson: MPL-2.0 AND (Apache-2.0 OR MIT)
+  prettytable: BSD-3-Clause
+  nvidia-cutlass-dsl-libs-base: BSD-3-Clause
+  fastmcp: Apache-2.0
+  caio: Apache-2.0 # https://github.com/mosquito/caio/?tab=Apache-2.0-1-ov-file
+  pyleak: Apache-2.0 # https://github.com/deepankarm/pyleak
+  uncalled-for: MIT # https://pypi.org/project/uncalled-for/
+  torch-c-dlpack-ext: Apache-2.0
+  quack-kernels: Apache-2.0 # https://github.com/Dao-AILab/quack/blob/main/LICENSE
+  crc32c: LGPL-2.1-or-later # https://pypi.org/project/crc32c/
+  detect-installer: 0BSD # https://pypi.org/project/detect-installer/
+
+  # Shared agent framework used by Insights.
+  nooa: Apache-2.0 # https://github.com/NVIDIA-NeMo/labs-OO-Agents
+
+  databricks-sdk: Apache-2.0  # https://github.com/databricks/databricks-sdk-py/blob/main/LICENSE
+  mlflow-skinny: Apache-2.0  # https://github.com/mlflow/mlflow/blob/master/LICENSE.txt
+  sqlparse: BSD-3-Clause  # https://github.com/andialbrecht/sqlparse/blob/master/LICENSE
+
+  # Generated by nhx-tracker from authoritative license lookup
+  aiohttp: APACHE-2.0 AND MIT
+  cryptography: APACHE-2.0 OR BSD-3-CLAUSE
+  go.opentelemetry.io/contrib/bridges/otelslog: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/otlp/otlptrace: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/stdout/stdoutlog: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/stdout/stdoutmetric: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/exporters/stdout/stdouttrace: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/log: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/metric: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/sdk: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/sdk/log: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/sdk/metric: Apache-2.0 AND BSD-3-Clause
+  go.opentelemetry.io/otel/trace: Apache-2.0 AND BSD-3-Clause
+  gopkg.in/yaml.v3: MIT AND Apache-2.0
+  ormsgpack: Apache-2.0 OR MIT
+  prometheus-client: APACHE-2.0 AND BSD-2-CLAUSE
+  sigs.k8s.io/yaml: Apache-2.0 AND BSD-3-Clause AND MIT
+  sniffio: APACHE-2.0 OR MIT
+  structlog: APACHE-2.0 OR MIT

@@ -3,7 +3,7 @@
 
 # Integrations setup (W&B + MLflow, local / Docker platform)
 
-Use this when job JSON includes `integrations.wandb` and/or `integrations.mlflow` on a **local or single-node Docker** NeMo Platform (`platform.runtime: docker`) — i.e. **automodel / unsloth**. Field reference: `hyperparameters.md` § **Integrations (all backends)**. rl (DPO) accepts the same `integrations` block but runs on **Kubernetes / Ray**: reuse the field reference, but point `tracking_uri` / self-hosted W&B `base_url` at an endpoint reachable from the cluster (the `docker0` recipe below is Docker-runtime only).
+Use this when job JSON includes `integrations.wandb` and/or `integrations.mlflow` on a **local or single-node Docker** NeMo Helix (`platform.runtime: docker`) — i.e. **automodel / unsloth**. Field reference: `hyperparameters.md` § **Integrations (all backends)**. rl (DPO) accepts the same `integrations` block but runs on **Kubernetes / Ray**: reuse the field reference, but point `tracking_uri` / self-hosted W&B `base_url` at an endpoint reachable from the cluster (the `docker0` recipe below is Docker-runtime only).
 
 ## MLflow — local tracking server
 
@@ -52,7 +52,7 @@ Substitute `${DOCKER_HOST_IP}` with the value from step 1 (JSON does not expand 
 
 W&B (and other `from_secret` env vars) are injected by **jobs-launcher** before the training entrypoint runs. If launcher is missing or misconfigured, training starts without `WANDB_API_KEY` even when `integrations.wandb.api_key_secret` is set.
 
-On the **platform host**, from the nemo-platform git root:
+On the **platform host**, from the nemo-helix git root:
 
 ```bash
 cd services/core/jobs/jobs-launcher
@@ -66,7 +66,7 @@ Point platform config at the built binary (absolute path), e.g. in `~/.nemo/conf
 jobs:
   executors:
     docker:
-      launcher_tool_path: /path/to/nemo-platform/services/core/jobs/jobs-launcher/jobs-launcher
+      launcher_tool_path: /path/to/nemo-helix/services/core/jobs/jobs-launcher/jobs-launcher
 ```
 
 Restart platform services after changing launcher path:
@@ -99,8 +99,8 @@ Job JSON references the secret by name:
 Store the API key in the **platform** secret store. A local `wandb login` cache on your laptop is **not** used by training containers.
 
 ```bash
-export NMP_BASE_URL=http://<platform-host>:8080   # omit when using default localhost
-cd /path/to/nemo-platform
+export NHX_BASE_URL=http://<platform-host>:8080   # omit when using default localhost
+cd /path/to/nemo-helix
 
 # Create (first time)
 uv run nemo secrets create wandb-api-key \
@@ -123,7 +123,7 @@ Get a key from https://wandb.ai/authorize (User settings → API keys).
 
 ## Unsloth image note
 
-`nmp-unsloth-training` must include the `[integrations]` extra (`wandb`, `mlflow-skinny`) or HF `WandbCallback` / MLflow callbacks fail at trainer init. Rebuild and set `NMP_UNSLOTH_TRAINING_IMAGE` on the platform host after Dockerfile changes.
+`nhx-unsloth-training` must include the `[integrations]` extra (`wandb`, `mlflow-skinny`) or HF `WandbCallback` / MLflow callbacks fail at trainer init. Rebuild and set `NHX_UNSLOTH_TRAINING_IMAGE` on the platform host after Dockerfile changes.
 
 ## Verify end-to-end
 

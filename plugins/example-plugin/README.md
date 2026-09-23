@@ -3,7 +3,7 @@
 
 # Example Plugin
 
-The `nemo-example-plugin` is a reference implementation that demonstrates NeMo Platform plugin surfaces in a single installable package.
+The `nemo-example-plugin` is a reference implementation that demonstrates NeMo Helix plugin surfaces in a single installable package.
 
 ## What this demonstrates
 
@@ -13,7 +13,7 @@ The `nemo-example-plugin` is a reference implementation that demonstrates NeMo P
 - **NemoJob** — `SayHelloJob` registered under `"example.say-hello"`, showing the entry-point key convention
 - **NemoController** — `ExampleController` showing config loading in `on_startup()` and the reconcile loop pattern
 - **Plugin seed job** — `ExampleSeedJob` registered under `nemo.seed`, creating a default example entity during platform seeding
-- **NemoConfig** — `ExampleConfig` with two typed fields, driven by `NMP_EXAMPLE_*` env vars
+- **NemoConfig** — `ExampleConfig` with two typed fields, driven by `NHX_EXAMPLE_*` env vars
 - **NemoInferenceMiddleware** — `ExampleInferenceMiddleware` (keyword content filter) demonstrating the full middleware interface: inline config, `config_id` entity references, `ImmediateResponse` to short-circuit the proxy, and response redaction
 
 ## Running the example
@@ -42,7 +42,7 @@ PATCH /apis/example/v2/workspaces/{workspace}/middleware-configs/{name}  (requir
 DELETE /apis/example/v2/workspaces/{workspace}/middleware-configs/{name} (requires running platform)
 ```
 
-The `/hello/{name}` route works standalone. Entity (`/items`) routes require a running platform with `NMP_BASE_URL` set.
+The `/hello/{name}` route works standalone. Entity (`/items`) routes require a running platform with `NHX_BASE_URL` set.
 
 ## Running tests
 
@@ -70,7 +70,7 @@ Tests run entirely without a platform — the entity client is replaced with an 
 | `middleware.py` | `NemoInferenceMiddleware` full implementation: inline config, `config_id` entity fetching, `ImmediateResponse` short-circuit, response redaction, `ExampleMiddlewareConfigData` working type separation |
 | `middleware_service.py` | CRUD router for `ExampleMiddlewareConfig` — required when using `config_id` in VirtualModel configs |
 | `tests/test_service.py` | `_make_app(mock_client)` pattern; `dependency_overrides`; `TestClient`; all 5 CRUD routes tested; 404 and 409 error paths verified |
-| `tests/test_inference_middleware.py` | Cache mock via `MagicMock(spec=InferenceMiddlewareCacheAccessor)`; entity client patching at `nemo_platform_plugin.entity_client`; all middleware hooks tested |
+| `tests/test_inference_middleware.py` | Cache mock via `MagicMock(spec=InferenceMiddlewareCacheAccessor)`; entity client patching at `nemo_helix_plugin.entity_client`; all middleware hooks tested |
 
 ## Key patterns to study
 
@@ -83,12 +83,12 @@ Tests run entirely without a platform — the entity client is replaced with an 
 
 ## Full documentation
 
-- [QUICKSTART.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/QUICKSTART.md)
-- [SERVICE.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/SERVICE.md)
-- [CLI.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/CLI.md)
-- [JOB.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/JOB.md)
-- [CONTROLLER.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/CONTROLLER.md)
-- [CONFIG.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/CONFIG.md)
-- [ENTITY.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/ENTITY.md)
-- [ARCHITECTURE.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/ARCHITECTURE.md)
-- [INFERENCE_MIDDLEWARE.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/INFERENCE_MIDDLEWARE.md)
+- [QUICKSTART.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/QUICKSTART.md)
+- [SERVICE.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/SERVICE.md)
+- [CLI.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/CLI.md)
+- [JOB.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/JOB.md)
+- [CONTROLLER.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/CONTROLLER.md)
+- [CONFIG.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/CONFIG.md)
+- [ENTITY.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/ENTITY.md)
+- [ARCHITECTURE.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/ARCHITECTURE.md)
+- [INFERENCE_MIDDLEWARE.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/INFERENCE_MIDDLEWARE.md)

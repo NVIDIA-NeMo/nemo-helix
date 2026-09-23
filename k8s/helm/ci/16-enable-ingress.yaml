@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/16-enable-ingress.yaml
+# CI validates by running: helm template nemo-helix . -f ci/16-enable-ingress.yaml
 # Tests that enabling ingress renders a valid Ingress resource (path-only by default).
 
 ingress:

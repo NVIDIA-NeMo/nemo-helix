@@ -14,7 +14,7 @@ rm -rf services/core/files/devstorage; mkdir services/core/files/devstorage
 To run the service:
 ```bash
 export ENVFILE="services/core/files/config/local.env" && \
-  uv run --frozen --env-file "$ENVFILE" nemo-platform run --services files entities secrets
+  uv run --frozen --env-file "$ENVFILE" nemo-helix run --services files entities secrets
 ```
 
 This will run `files` using entity store for persistence and a local storage backend.

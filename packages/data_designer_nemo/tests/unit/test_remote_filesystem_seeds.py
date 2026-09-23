@@ -12,8 +12,8 @@ from data_designer_nemo.context.execution import DataDesignerExecutionContext
 from data_designer_nemo.errors import NDDInvalidConfigError
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.seed import _validate_seed_from_files_service, validate_seed
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.files.types import ListFilesQueryParams
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
 
 
 def _list_files_response(paths: list[str]) -> Mock:

@@ -22,9 +22,9 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from nemo_auditor.api.v2 import artifacts as artifacts_module
 from nemo_auditor.service import AuditorPluginService
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.dependencies import get_sdk_client
-from nemo_platform_plugin.jobs.file_manager import TmpDirPath
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 
 # ---------------------------------------------------------------------------
 # Helpers

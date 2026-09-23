@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# The war-game victim, as a NeMo Platform agent.
+# The war-game victim, as a NeMo Helix agent.
 #
 #   nemo agents create --name ledger --agent-config examples/relay-victim/agent.yaml
 #   nemo agent-hardener init --agent ledger --name ledger

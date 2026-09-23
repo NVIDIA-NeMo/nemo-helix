@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="auditor-targets-schema"></a>
 
-This page lists every field on `AuditTarget`. Defaults match the pydantic definition in `nemo_auditor.entities`; the NeMo Platform entity store validates writes against this schema.
+This page lists every field on `AuditTarget`. Defaults match the pydantic definition in `nemo_auditor.entities`; the NeMo Helix entity store validates writes against this schema.
 
 ## `AuditTarget`
 
@@ -26,4 +26,4 @@ The entity store adds the standard `NemoEntity` fields on retrieval: `id`, `enti
 
 `options` is intentionally opaque to the plugin — its contents are passed through to garak as the generator's `--generator_option_file` payload. Refer to garak's [generator documentation](https://reference.garak.ai/en/latest/generators.html) for the options each generator class accepts.
 
-The plugin recognizes one sentinel inside `options.<generator>`: an `nmp_uri_spec` block is resolved at run time to a concrete `uri` value via the NeMo Platform Inference Gateway. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for the resolution rules and conflict semantics.
+The plugin recognizes one sentinel inside `options.<generator>`: an `nhx_uri_spec` block is resolved at run time to a concrete `uri` value via the NeMo Helix Inference Gateway. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for the resolution rules and conflict semantics.

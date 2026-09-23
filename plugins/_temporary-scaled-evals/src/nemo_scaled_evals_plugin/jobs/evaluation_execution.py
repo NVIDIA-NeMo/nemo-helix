@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.api_factory import (
-    PlatformJobSpec,
-    PlatformJobStep,
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.api_factory import (
+    HelixJobSpec,
+    HelixJobStep,
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
@@ -40,13 +40,13 @@ class EvaluationExecutionJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile an evaluation execution into one Platform Jobs step."""
         del workspace, entity_client, job_name, async_sdk
         canonical = EvaluationExecutionSpec.model_validate(spec)
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="evaluation-execution",
                     executor=resolve_executor(
                         options,

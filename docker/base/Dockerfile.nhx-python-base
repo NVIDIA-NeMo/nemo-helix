@@ -1,0 +1,87 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+#######
+# NHX Python Base Images
+#
+# Two builder stages:
+#
+# nhx-python-base-builder     - minimal runtime base (API, CPU tasks)
+# nhx-python-dev-base-builder - runtime base + dev tools for building native extensions
+#######
+
+ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
+FROM ${NHX_PYTHON_IMAGE} AS nhx-python-base-builder
+
+COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-cpython-source.py \
+    docker/scripts/collect-python-sdists.py \
+    docker/scripts/collect-workspace-sdists.py \
+    /usr/local/bin/
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    g++ \
+    gcc \
+    git \
+    libcurl4 \
+    libcurl3-gnutls \
+    libffi-dev \
+    libpq-dev \
+    libssl-dev \
+    postgresql-client \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip uninstall --yes setuptools wheel
+
+COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /bin/uv
+
+WORKDIR /app
+
+RUN uv venv --seed --python=3.13 /app/.venv
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/app/.venv \
+    PATH=/app/.venv/bin:$PATH
+
+FROM nhx-python-base-builder AS nhx-python-dev-base-builder
+ARG TARGETARCH
+ARG RUSTUP_VERSION=1.28.2
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
+    g++ \
+    gcc \
+    libisl23 \
+    libgmp10 \
+    libmpc3 \
+    libmpfr6 \
+    libpython3-dev \
+    libzstd1 \
+    unzip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CARGO_HOME="/etc/cargo" \
+    RUSTUP_HOME="/etc/rustup"
+RUN set -eux; \
+    case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) rustup_target="x86_64-unknown-linux-gnu" ;; \
+        arm64|aarch64) rustup_target="aarch64-unknown-linux-gnu" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH:-unknown}" >&2; exit 1 ;; \
+    esac; \
+    rustup_url="https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${rustup_target}/rustup-init"; \
+    curl -fsSL -o /tmp/rustup-init "${rustup_url}"; \
+    curl -fsSL -o /tmp/rustup-init.sha256 "${rustup_url}.sha256"; \
+    rustup_sha256="$(cut -d ' ' -f 1 /tmp/rustup-init.sha256)"; \
+    echo "${rustup_sha256}  /tmp/rustup-init" | sha256sum -c -; \
+    chmod +x /tmp/rustup-init; \
+    /tmp/rustup-init -y; \
+    rm -f /tmp/rustup-init /tmp/rustup-init.sha256
+ENV PATH="$CARGO_HOME/bin:$PATH"

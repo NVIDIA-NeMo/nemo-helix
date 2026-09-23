@@ -10,21 +10,21 @@ from collections.abc import Iterator
 from nemo_evaluator.jobs.evaluate import EvaluateSpec
 from nemo_evaluator.jobs.secret_env import build_task_environment
 from nemo_evaluator_sdk.values import AgentBase, Model, RunConfig, RunConfigOnline, RunConfigOnlineModel
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.image import get_qualified_image
 
 EVALUATE_STEP_NAME = "evaluate"
 
 
-def compile_evaluate_job(spec: EvaluateSpec, *, profile: str | None = None) -> PlatformJobSpec:
+def compile_evaluate_job(spec: EvaluateSpec, *, profile: str | None = None) -> HelixJobSpec:
     """Compile a bundle-native evaluator plugin job."""
     _validate_evaluate_spec(spec)
-    return PlatformJobSpec(steps=[_evaluate_step(spec, profile)])
+    return HelixJobSpec(steps=[_evaluate_step(spec, profile)])
 
 
 def _validate_evaluate_spec(spec: EvaluateSpec) -> None:
@@ -56,14 +56,14 @@ def _secret_refs(spec: EvaluateSpec) -> Iterator[tuple[str, str]]:
         yield spec.target.api_key_env, spec.target.api_key_secret.root
 
 
-def _evaluate_step(spec: EvaluateSpec, profile: str | None) -> PlatformJobStep:
-    return PlatformJobStep(
+def _evaluate_step(spec: EvaluateSpec, profile: str | None) -> HelixJobStep:
+    return HelixJobStep(
         name=EVALUATE_STEP_NAME,
         executor=CPUExecutionProviderSpec(
             profile=profile or "default",
             provider="cpu",
             container=ContainerSpec(
-                image=get_qualified_image("nmp-cpu-tasks"),
+                image=get_qualified_image("nhx-cpu-tasks"),
                 entrypoint=["python", "-m"],
                 command=["nemo_evaluator.tasks.evaluate"],
             ),

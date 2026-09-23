@@ -43,12 +43,12 @@ from nemo_guardrails_plugin.middleware import (
 )
 from nemo_guardrails_plugin.requests import parse_guardrails_request
 from nemo_guardrails_plugin.streaming import close_async_iterator
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.guardrail.client import AsyncGuardrailClient
-from nemo_platform_plugin.guardrail.types import GuardrailConfig
-from nemo_platform_plugin.guardrail.types import RailsConfig as SDKRailsConfig
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
+from nemo_helix_plugin.guardrail.types import GuardrailConfig
+from nemo_helix_plugin.guardrail.types import RailsConfig as SDKRailsConfig
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
@@ -397,7 +397,7 @@ class TestGetMiddlewareConfig:
         ``NotFoundError`` is chained as ``__cause__`` so debug traces preserve the
         request ID / status info the SDK exception carries.
         """
-        from nemo_platform_plugin.inference_middleware import MiddlewareConfigNotFoundError
+        from nemo_helix_plugin.inference_middleware import MiddlewareConfigNotFoundError
 
         assert middleware._client is not None
         not_found = _not_found_error()
@@ -565,7 +565,7 @@ class TestValidateMiddlewareConfig:
     ) -> None:
         """Back-compat for envelope-style inline payloads: a dict that includes
         a top-level ``name`` (e.g. legacy config-as-envelope shape) must not
-        fail :class:`PlatformRailsConfig` validation. ``name`` is consumed as
+        fail :class:`HelixRailsConfig` validation. ``name`` is consumed as
         the diagnostic label and the remaining payload validates as rails.
 
         Pinning this prevents a future ``payload.pop("name", None)`` removal
@@ -1932,7 +1932,7 @@ class TestStreamingLeaseLifecycle:
         request_body = self._streaming_request()
         request_headers = {
             "traceparent": "00-stream-request-trace",
-            "X-NMP-Principal-On-Behalf-Of": "user:bob",
+            "X-NHX-Principal-On-Behalf-Of": "user:bob",
         }
         ctx = _make_ctx(request_body)
         ctx.request_nemo_client = _request_scoped_client(middleware, request_headers)
@@ -2271,7 +2271,7 @@ def _make_virtual_model(
     workspace: str = "ws",
     name: str = "vm-1",
 ) -> Any:
-    from nemo_platform_plugin.inference_middleware_models import MiddlewareCall, VirtualModel
+    from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModel
 
     return VirtualModel(
         workspace=workspace,
@@ -2664,7 +2664,7 @@ class TestProcessRequestErrorSurfacing:
         }
         request_headers = {
             "traceparent": "00-request-trace",
-            "X-NMP-Principal-On-Behalf-Of": "user:alice",
+            "X-NHX-Principal-On-Behalf-Of": "user:alice",
         }
         ctx = _make_ctx(request_body)
         ctx.request_nemo_client = _request_scoped_client(middleware, request_headers)

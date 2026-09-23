@@ -20,9 +20,9 @@ string is genuinely built, sent, parsed and honoured.
 """
 
 import pytest
-from nmp.common.entities import EntityBase
-from nmp.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nmp.testing import create_test_client
+from nhx.common.entities import EntityBase
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.testing import create_test_client
 
 
 class VersionedWidget(EntityBase):

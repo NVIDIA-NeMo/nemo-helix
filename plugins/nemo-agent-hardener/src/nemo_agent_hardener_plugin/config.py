@@ -5,7 +5,7 @@
 
 Declares :attr:`plugin_name` / :attr:`plugin_description` as ``ClassVar`` strings and
 plugin-specific fields with defaults, following the
-:class:`~nemo_platform_plugin.config.NemoConfig` pattern.
+:class:`~nemo_helix_plugin.config.NemoConfig` pattern.
 
 Operators set values via environment variables (``NEMO_AGENT_HARDENER_*``) or the Helm
 ``platformConfig.agent_hardener`` key. agent-hardener runs in its own isolated venv (:attr:`venv_path`)
@@ -25,7 +25,7 @@ from typing import ClassVar
 from urllib.parse import urlsplit
 
 import yaml
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 from pydantic import Field, field_validator
 
 # Env var agent-hardener reads to locate the garak venv its agent_breaker attacker spawns. The plugin
@@ -132,14 +132,14 @@ def _non_empty_keys(values: Mapping[str, str]) -> set[str]:
 
 
 class AgentHardenerConfig(NemoConfig):
-    """Configuration for the NeMo Platform Agent Hardener plugin.
+    """Configuration for the NeMo Helix Agent Hardener plugin.
 
     All fields have defaults so the plugin loads without operator configuration; the
     agent-hardener venv itself is provisioned on demand by ``nemo agent-hardener setup``.
     """
 
     plugin_name: ClassVar[str] = "agent_hardener"
-    plugin_description: ClassVar[str] = "Configuration for the NeMo Platform Agent Hardener plugin."
+    plugin_description: ClassVar[str] = "Configuration for the NeMo Helix Agent Hardener plugin."
 
     default_workspace: str = Field(
         default="default",

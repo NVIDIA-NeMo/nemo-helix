@@ -21,7 +21,7 @@ from sandboxed_gym.host.models import GymHostEgressRule, GymHostSpec, GymHostVol
 def spec(**overrides) -> GymHostSpec:
     fields = {
         "job_id": "job-1",
-        "runtime_image": "nmp-gym-host:dev",
+        "runtime_image": "nhx-gym-host:dev",
         "environment_mount": GymHostVolumeMount(
             pvc_claim="job-storage", sub_path="environment", mount_path="/job/environment", read_only=True
         ),
@@ -97,7 +97,7 @@ def test_egress_is_recorded_rather_than_applied(tmp_path: Path) -> None:
     assert provider._egress["stub"] == (("model.example", 443),)
 
 
-@pytest.mark.parametrize("network", [None, "nmp-gym-net"])
+@pytest.mark.parametrize("network", [None, "nhx-gym-net"])
 def test_the_network_option_is_optional(tmp_path: Path, network: str | None) -> None:
     provider = DockerGymHostProvider(root_dir=str(tmp_path), network=network)
 

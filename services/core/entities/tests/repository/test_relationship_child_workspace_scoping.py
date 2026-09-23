@@ -8,9 +8,9 @@ Mirrors the API: ``relationship_child_workspaces`` matches
 """
 
 import pytest
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
-from nmp.core.entities.utils.filter import RelationshipFilterOperation, _parse_json_filter
-from nmp.core.entities.utils.relationships import Relationship
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.core.entities.utils.filter import RelationshipFilterOperation, _parse_json_filter
+from nhx.core.entities.utils.relationships import Relationship
 
 pytestmark = pytest.mark.asyncio
 

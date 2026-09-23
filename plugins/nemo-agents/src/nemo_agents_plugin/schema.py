@@ -6,7 +6,7 @@
 This module contains only API-layer Pydantic models.  Entity definitions
 (classes stored in the entity store) live in :mod:`nemo_agents_plugin.entities`.
 
-Entity objects (subclasses of :class:`~nemo_platform_plugin.entity.NemoEntity`) are
+Entity objects (subclasses of :class:`~nemo_helix_plugin.entity.NemoEntity`) are
 returned directly from route handlers as the API response — no separate
 response model is needed.  Use ``NemoListResponse[Agent]`` /
 ``NemoListResponse[AgentDeployment]`` for list endpoints.
@@ -14,7 +14,7 @@ response model is needed.  Use ``NemoListResponse[Agent]`` /
 Naming conventions:
 - ``CreateXRequest`` / ``UpdateXRequest`` — plain :class:`~pydantic.BaseModel`
   for request bodies.
-- ``XFilter`` — extends :class:`~nemo_platform_plugin.schema.NemoFilter` to inherit
+- ``XFilter`` — extends :class:`~nemo_helix_plugin.schema.NemoFilter` to inherit
   ``extra="forbid"``.
 """
 
@@ -29,25 +29,25 @@ from nemo_agents_plugin.entities import (
     AgentSession,
     DeploymentStatus,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateAgentRequest as CreateAgentRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateComputeSpecRequest as CreateComputeSpecRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateDeploymentRequest as CreateDeploymentRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateEnvironmentRequest as CreateEnvironmentRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateEnvironmentSpecRequest as CreateEnvironmentSpecRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
 )
-from nemo_platform_plugin.schema import NemoFilter, NemoListResponse
+from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import Field
 
 # ---------------------------------------------------------------------------

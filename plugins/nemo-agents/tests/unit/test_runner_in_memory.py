@@ -15,7 +15,7 @@ CLI) rely on:
   so the controller can mark deployments failed without waiting for the
   health-check timeout.
 - The system dir lives under the configured ``workspace_dir`` (default:
-  ``nmp_user_data_dir() / "agents"``), not the plugin source tree.
+  ``nhx_user_data_dir() / "agents"``), not the plugin source tree.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ from nemo_agents_plugin.config import AgentsConfig, ControllerConfig
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
-from nemo_platform_plugin.config import Configuration, nmp_user_data_dir
-from nemo_platform_plugin.files.storage_config import GithubStorageConfig
+from nemo_helix_plugin.config import Configuration, nhx_user_data_dir
+from nemo_helix_plugin.files.storage_config import GithubStorageConfig
 
 STAGED_SHA = "1" * 40
 
@@ -68,32 +68,32 @@ def _without_telemetry(config: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Default workspace_dir resolves through nmp_user_data_dir()
+# Default workspace_dir resolves through nhx_user_data_dir()
 # ---------------------------------------------------------------------------
 
 
 def test_default_workspace_dir_is_under_user_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The default workspace_dir resolves to ``nmp_user_data_dir() / 'agents'``.
+    """The default workspace_dir resolves to ``nhx_user_data_dir() / 'agents'``.
 
     Earlier versions defaulted to the plugin source root, which leaked
     runtime state into the source tree (and was undocumented).  Artifacts
-    now route through the standard NMP user-data location so they survive
+    now route through the standard NHX user-data location so they survive
     ``/tmp/`` cleanup and live in a well-known place.
     """
-    monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path))
     Configuration.clear_cache()
     try:
         cfg = AgentsConfig.get()
         # workspace_dir is computed relative to the user-data root.
-        assert cfg.controller.workspace_dir == nmp_user_data_dir() / "agents"
+        assert cfg.controller.workspace_dir == nhx_user_data_dir() / "agents"
         assert cfg.controller.workspace_dir == tmp_path / "agents"
     finally:
         Configuration.clear_cache()
 
 
 def test_workspace_dir_follows_xdg_data_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``XDG_DATA_HOME`` shifts the workspace_dir alongside the rest of NMP state."""
-    monkeypatch.delenv("NMP_DATA_DIR", raising=False)
+    """``XDG_DATA_HOME`` shifts the workspace_dir alongside the rest of NHX state."""
+    monkeypatch.delenv("NHX_DATA_DIR", raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     Configuration.clear_cache()
     try:
@@ -527,7 +527,7 @@ def test_resolve_nat_bin_uses_path(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_resolve_nat_bin_uses_sibling_of_sys_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When `nat` is not on PATH, look next to `sys.executable`.
 
-    This is the `uv tool install nemo-platform` case: the tool venv contains
+    This is the `uv tool install nemo-helix` case: the tool venv contains
     `nat` (it's co-installed with `nemo` via the `[services]` chain), but the
     venv's `bin/` is not prepended to PATH, so `shutil.which` returns None.
     """
@@ -771,7 +771,7 @@ async def _deploy_and_read_staged_config(
 def platform_base_url(monkeypatch: pytest.MonkeyPatch) -> str:
     """Pin the platform URL the wired endpoint must be built from."""
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
-    monkeypatch.setenv("NMP_BASE_URL", "http://platform.test:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform.test:8080")
     return "http://platform.test:8080"
 
 

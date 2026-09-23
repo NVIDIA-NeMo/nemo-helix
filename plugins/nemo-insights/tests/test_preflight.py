@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from nemo_helix import NeMoHelixError
 from nemo_insights_plugin import preflight
 from nemo_insights_plugin.contracts.checks import format_report, required_failures
 from nemo_insights_plugin.preflight import (
@@ -16,7 +17,6 @@ from nemo_insights_plugin.preflight import (
     check_profile,
 )
 from nemo_insights_plugin.profile import AnalysisProfile
-from nemo_platform import NeMoPlatformError
 
 
 async def always_queryable(base_url: str, workspace: str, agent: str) -> bool:
@@ -102,8 +102,8 @@ def test_workspace_query_failure_is_advisory(tmp_path: Path) -> None:
     "error",
     [
         httpx.ConnectError("OIDC discovery failed", request=httpx.Request("GET", "https://platform.example")),
-        NeMoPlatformError("SDK initialization failed"),
-        RuntimeError("NeMoPlatform client initialization failed: invalid context"),
+        NeMoHelixError("SDK initialization failed"),
+        RuntimeError("NeMoHelix client initialization failed: invalid context"),
         ValueError("invalid remote configuration"),
         OSError("could not read SDK configuration"),
     ],

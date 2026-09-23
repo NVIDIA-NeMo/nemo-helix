@@ -24,8 +24,8 @@ import httpx
 import pytest
 import yaml
 from _pytest.nodes import Node
-from nmp.testing.e2e import Docker as DockerE2EBackend
-from nmp.testing.e2e.config import deep_merge
+from nhx.testing.e2e import Docker as DockerE2EBackend
+from nhx.testing.e2e.config import deep_merge
 
 from e2e.backends.docker_compose import DockerComposeE2EBackend
 
@@ -37,17 +37,17 @@ _HEALTH_POLL_INTERVAL = 1.0
 _AUTH_READY_TIMEOUT = 60
 _E2E_ADMIN_EMAIL = "admin@example.com"
 _E2E_REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_E2E_PLATFORM_CONFIG = _E2E_REPO_ROOT / "packages/nmp_platform/config/local.yaml"
+_DEFAULT_E2E_PLATFORM_CONFIG = _E2E_REPO_ROOT / "packages/nhx_platform/config/local.yaml"
 # Layered on the default config so pooled platforms that are not testing
 # deployments orphan cleanup cannot delete peer platforms' docker containers.
 _DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP = _E2E_REPO_ROOT / "e2e/configs/disable-deployments-orphan-cleanup.yaml"
-_E2E_COMPOSE_LIFECYCLE_ENV = "NMP_E2E_COMPOSE_LIFECYCLE"
+_E2E_COMPOSE_LIFECYCLE_ENV = "NHX_E2E_COMPOSE_LIFECYCLE"
 
 
 def admin_headers() -> dict[str, str]:
     return {
-        "X-NMP-Principal-Id": _E2E_ADMIN_EMAIL,
-        "X-NMP-Principal-Email": _E2E_ADMIN_EMAIL,
+        "X-NHX-Principal-Id": _E2E_ADMIN_EMAIL,
+        "X-NHX-Principal-Email": _E2E_ADMIN_EMAIL,
     }
 
 
@@ -155,7 +155,7 @@ class E2EServicesPool:
         return self._acquire_for_registered_owner(owner_id, state)
 
     def _acquire_for_registered_owner(self, owner_id: str, state: ModuleConfigState) -> RunningServices:
-        external_url = os.environ.get("NMP_BASE_URL")
+        external_url = os.environ.get("NHX_BASE_URL")
         if external_url:
             return RunningServices(
                 url=external_url,
@@ -204,7 +204,7 @@ class E2EServicesPool:
 
     def _release_for_registered_owner(self, owner_id: str) -> None:
         self._active_service_key_by_module.pop(owner_id, None)
-        if os.environ.get("NMP_BASE_URL"):
+        if os.environ.get("NHX_BASE_URL"):
             return
         state = self._module_states.get(owner_id)
         if state is None:
@@ -666,8 +666,8 @@ class DockerBackendOverrides(TypedDict, total=False):
 
 
 def _docker_backend_overrides() -> DockerBackendOverrides:
-    registry = os.environ.get("NMP_E2E_IMAGE_REGISTRY") or os.environ.get("IMAGE_REGISTRY")
-    tag = os.environ.get("NMP_E2E_IMAGE_TAG") or os.environ.get("BAKE_TAG")
+    registry = os.environ.get("NHX_E2E_IMAGE_REGISTRY") or os.environ.get("IMAGE_REGISTRY")
+    tag = os.environ.get("NHX_E2E_IMAGE_TAG") or os.environ.get("BAKE_TAG")
     overrides: DockerBackendOverrides = {}
     if registry:
         overrides["registry"] = registry
@@ -679,11 +679,11 @@ def _docker_backend_overrides() -> DockerBackendOverrides:
 def e2e_services_env(config_path: Path, data_dir: Path) -> dict[str, str]:
     """Environment for the ``nemo services run`` child process."""
     env = os.environ.copy()
-    env["NMP_SEED_ON_STARTUP"] = "true"
-    env["NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX"] = "igw-mock-"
-    env["NMP_CONFIG_FILE_PATH"] = str(config_path)
-    env["NMP_CONFIG_WARNINGS_DISABLED"] = "1"
-    env["NMP_DATA_DIR"] = str(data_dir)
+    env["NHX_SEED_ON_STARTUP"] = "true"
+    env["NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX"] = "igw-mock-"
+    env["NHX_CONFIG_FILE_PATH"] = str(config_path)
+    env["NHX_CONFIG_WARNINGS_DISABLED"] = "1"
+    env["NHX_DATA_DIR"] = str(data_dir)
     allowlist = _real_service_plugin_allowlist()
     if allowlist is not None:
         env.setdefault("NEMO_PLUGIN_SERVICES_ALLOWLIST", allowlist)
@@ -793,7 +793,7 @@ def _request_verify_from_env(env: Mapping[str, str] | None = None) -> str | bool
     if env:
         source.update(env)
     return (
-        source.get("NMP_CLIENT_SSL_CERT_FILE")
+        source.get("NHX_CLIENT_SSL_CERT_FILE")
         or source.get("REQUESTS_CA_BUNDLE")
         or source.get("SSL_CERT_FILE")
         or True
@@ -888,7 +888,7 @@ def _start_services_subprocess(
     #      (e.g. the docker bridge 172.17.0.1) as well as loopback.
     #   2. Rewrite platform.base_url on disk to http://<host>:<this port>. The
     #      free port is only known here, after the config file was materialized.
-    #      The platform seeds NMP_BASE_URL from this, so both the platform's own
+    #      The platform seeds NHX_BASE_URL from this, so both the platform's own
     #      in-process clients and the injected agent LLM base_url point at a
     #      host the agent container can reach.
     container_host = harness_config.get("container_base_url_host")

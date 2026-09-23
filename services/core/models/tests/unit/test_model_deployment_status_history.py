@@ -8,14 +8,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import EntityClient
-from nmp.core.models.api.service.model_deployment_service import (
+from nhx.common.entities.client import EntityClient
+from nhx.core.models.api.service.model_deployment_service import (
     ModelDeploymentService,
     _compact_adjacent_status_history,
     _entity_to_schema,
 )
-from nmp.core.models.entities import ModelDeployment as ModelDeploymentEntity
-from nmp.core.models.schemas import (
+from nhx.core.models.entities import ModelDeployment as ModelDeploymentEntity
+from nhx.core.models.schemas import (
     ModelDeploymentStatus,
     UpdateModelDeploymentStatusRequest,
 )
@@ -99,13 +99,13 @@ def mock_entity_client() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_nmp_sdk() -> AsyncMock:
+def mock_nhx_sdk() -> AsyncMock:
     return AsyncMock()
 
 
 @pytest.fixture
-def deployment_service(mock_entity_client: AsyncMock, mock_nmp_sdk: AsyncMock) -> ModelDeploymentService:
-    return ModelDeploymentService(mock_entity_client, mock_nmp_sdk)
+def deployment_service(mock_entity_client: AsyncMock, mock_nhx_sdk: AsyncMock) -> ModelDeploymentService:
+    return ModelDeploymentService(mock_entity_client, mock_nhx_sdk)
 
 
 def test_entity_to_schema_status_history_empty():

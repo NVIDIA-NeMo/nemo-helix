@@ -83,10 +83,10 @@ use to track it.
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -202,7 +202,7 @@ print(run["status"], run["response"])
 ```
 
 `download_result` returns bytes rather than writing a file, so results can be
-read in memory. The same calls exist on `AsyncNeMoPlatform`.
+read in memory. The same calls exist on `AsyncNeMoHelix`.
 
 </Tab>
 
@@ -346,7 +346,7 @@ execute jobs, its own commands set this for you.
   rather than hanging.
 - **Reserved environment variables.** A secret cannot be bound to an environment
   variable name the platform injects itself (the `NEMO_JOB_*` family,
-  `NMP_BASE_URL`, `AGENT_CONFIG_PATH`, and similar). The collision is rejected
+  `NHX_BASE_URL`, `AGENT_CONFIG_PATH`, and similar). The collision is rejected
   at submission.
 
 ## Clean Up

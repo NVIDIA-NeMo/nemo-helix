@@ -34,7 +34,7 @@ The Inference Gateway (IGW) provides unified access to model inference, supporti
 3. List providers to verify registration
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 - Valid API key for provider (e.g., build.nvidia.com)
 
@@ -62,7 +62,7 @@ The Inference Gateway (IGW) provides unified access to model inference, supporti
 - Deploy LLM-specific NIM with LoRAs (adapters in Files Service)
 
 **Prerequisites**:
-- NeMo Platform with GPU resources
+- NeMo Helix with GPU resources
 - Workspace exists
 - Model weights accessible
 
@@ -90,7 +90,7 @@ The Inference Gateway (IGW) provides unified access to model inference, supporti
 - `nemo chat <model> "<prompt>" --provider <provider>`
 
 **Prerequisites**:
-- NeMo Platform running (quickstart)
+- NeMo Helix running (quickstart)
 - Valid API key for NVIDIA inference API (passed as `ANTHROPIC_API_KEY` env var)
 
 **Verifier Tests** (6 tests, weighted):
@@ -147,7 +147,7 @@ The Inference Gateway (IGW) provides unified access to model inference, supporti
 - Reproducible test scenarios
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - MockLLM configuration
 
 **Success Criteria**:

@@ -18,15 +18,15 @@ Customization jobs are submitted to one of two backends. Choose the backend that
 
 Before you can create a customization job, make sure that you have:
 
-- Obtained the base URL of your NeMo Platform.
+- Obtained the base URL of your NeMo Helix.
 - Created a [FileSet and Model Entity](/documentation/customizer-reference/manage-model-entities/overview) for your base model.
 - [Uploaded a dataset](/documentation/get-started/core-concepts/manage-files) as a FileSet.
 - Determined the [training configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration) you want to use for the customization job.
 - Verified that the platform has sufficient storage for the job. Budget against the downloaded base checkpoint size: Full SFT jobs require approximately 3× in free disk space, and LoRA jobs require approximately 1.5×. See [ft-tut-understand-models](/documentation/customizer-reference/tutorials/understanding-models-and-training) for details. Include any retained deployment copies separately.
-- Set the `NMP_BASE_URL` environment variable to your NeMo Platform endpoint.
+- Set the `NHX_BASE_URL` environment variable to your NeMo Helix endpoint.
 
 ```bash
-export NMP_BASE_URL="https://your-nemo-platform-url"
+export NHX_BASE_URL="https://your-nemo-helix-url"
 ```
 
 ---
@@ -37,12 +37,12 @@ Build an `AutomodelJobInput` spec and submit it to the `automodel` backend. The 
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 # Initialize the client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -113,11 +113,11 @@ The Unsloth backend runs on a single GPU and supports 4-bit / 8-bit quantized lo
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_unsloth_plugin.schema import UnslothJobInput
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -144,11 +144,11 @@ Knowledge distillation is an Automodel feature. Set `training.training_type` to 
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

@@ -6,8 +6,8 @@
 These tests verify the full deployment -> inference flow through the
 Inference Gateway using real Docker containers running the mock NIM.
 
-Note: These tests require Docker to be running and the nmp-core image
-to be built (make docker/nmp-core).
+Note: These tests require Docker to be running and the nhx-core image
+to be built (make docker/nhx-core).
 """
 
 from __future__ import annotations
@@ -19,15 +19,15 @@ import pytest
 from docker.errors import NotFound
 from nemo_deployments_plugin.backends.labels import container_name as plugin_container_name
 from nemo_deployments_plugin.backends.labels import docker_volume_name
-from nemo_platform import ConflictError, NeMoPlatform, NotFoundError
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_platform.types.inference.model_provider import ModelProvider
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nmp.core.inference_gateway.api.dependencies import global_virtual_model_cache
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
-from nmp.core.models.controllers.backends.deployments_plugin.naming import entity_names
-from nmp.core.models.controllers.models_controller import ModelsController
+from nemo_helix import ConflictError, NeMoHelix, NotFoundError
+from nemo_helix.types.inference.model_deployment import ModelDeployment
+from nemo_helix.types.inference.model_deployment_config import ModelDeploymentConfig
+from nemo_helix.types.inference.model_provider import ModelProvider
+from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nhx.core.inference_gateway.api.dependencies import global_virtual_model_cache
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
+from nhx.core.models.controllers.backends.deployments_plugin.naming import entity_names
+from nhx.core.models.controllers.models_controller import ModelsController
 from tenacity import retry, stop_after_delay, wait_fixed
 
 DEFAULT_WORKSPACE = "default"
@@ -35,7 +35,7 @@ DEFAULT_WORKSPACE = "default"
 
 def _wait_for_deployment_ready(
     controller: ModelsController,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     deployment_name: str,
     max_wait: float = 30,
     poll_interval: float = 0.1,
@@ -73,7 +73,7 @@ def _wait_for_deployment_ready(
 
 def _wait_for_deployment_deleted(
     controller: ModelsController,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     deployment_name: str,
     max_wait: float = 30,
     poll_interval: float = 0.1,
@@ -103,7 +103,7 @@ def _wait_for_deployment_deleted(
 
 
 def _create_deployment_with_config(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     config_name: str,
     deployment_name: str,
     mock_nim_image: str,
@@ -120,7 +120,7 @@ def _create_deployment_with_config(
         Tuple of (config, deployment)
     """
     # Use rsplit to handle registry URLs with port numbers
-    # e.g., "registry.example.com/nemo-platform/mock-nim:1.0.0"
+    # e.g., "registry.example.com/nemo-helix/mock-nim:1.0.0"
     image_name, image_tag = mock_nim_image.rsplit(":", 1)
     config = sdk.inference.deployment_configs.create(
         workspace=DEFAULT_WORKSPACE,
@@ -144,7 +144,7 @@ def _create_deployment_with_config(
 
 
 def _configure_served_models(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     provider_name: str,
     model_entity_name: str,
     served_model_name: str,
@@ -186,7 +186,7 @@ def _assert_chat_response(response_data: dict[str, Any], route_name: str) -> Non
 
 def _manually_add_provider_to_cache(
     model_cache: ModelCache,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     provider_name: str,
     rebuild_model_entity_map: bool = False,
 ) -> bool:

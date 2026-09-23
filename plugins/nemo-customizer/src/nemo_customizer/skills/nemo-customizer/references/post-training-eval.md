@@ -86,8 +86,8 @@ The model-entity proxy path **always** resolves to the base VirtualModel. Settin
 
 | Target | Gateway route | URL pattern | Request `model` field |
 |--------|---------------|-------------|------------------------|
-| Base entity | **Model entity** | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| LoRA adapter | **Provider** | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>` |
+| Base entity | **Model entity** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
+| LoRA adapter | **Provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>` |
 
 `eval_helpers.py` auto-discovers a READY provider that serves the base entity (or pass `--provider <name>`). LoRA adapter weights hot-reload on that deployment — no provider update per adapter. (Full SFT / merged outputs need a separate deployment — see above.)
 
@@ -121,7 +121,7 @@ Resolve adapter names from completed job specs instead of guessing:
 import os
 from eval_helpers import list_completed_job_adapters, compare_adapters, build_eval_payload
 
-base_url = os.environ.get("NMP_BASE_URL") or "http://127.0.0.1:8080"
+base_url = os.environ.get("NHX_BASE_URL") or "http://127.0.0.1:8080"
 
 jobs = list_completed_job_adapters(
     base_url=base_url,
@@ -177,12 +177,12 @@ Val loss from training is **not** accuracy — always run a generation eval for 
 
 ## Helper script
 
-From **nemo-platform** git root:
+From **nemo-helix** git root:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080   # user platform URL when not localhost
+export NHX_BASE_URL=http://127.0.0.1:8080   # user platform URL when not localhost
 
-# Base vs one adapter (--base-url optional when NMP_BASE_URL is set)
+# Base vs one adapter (--base-url optional when NHX_BASE_URL is set)
 uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \
   --model-entity <model-entity> \
   --adapter <adapter-name> \

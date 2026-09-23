@@ -3,7 +3,7 @@
 
 # NeMo Deployments Plugin
 
-Backend-agnostic deployment lifecycle for the NeMo Platform: entity schemas,
+Backend-agnostic deployment lifecycle for the NeMo Helix: entity schemas,
 CRUD APIs, a `DeploymentBackend` ABC, an executor registry, and a background
 reconcile controller (`DeploymentsController`).
 
@@ -62,7 +62,7 @@ Docker container and volume names use a readable prefix plus a deterministic
 8-character hash suffix. The hash is computed from ``{workspace}/{name}``, not
 from the hyphen-joined string, so pairs like ``foo``/``bar-baz`` and
 ``foo-bar``/``baz`` cannot collide. Naming logic is shared via
-``nemo_platform_plugin.k8s_naming`` (same module used by the models service).
+``nemo_helix_plugin.k8s_naming`` (same module used by the models service).
 Orphan cleanup matches identity labels, not names alone; existing containers
 keep their old names after upgrade.
 
@@ -91,7 +91,7 @@ RBAC in (see below).
 
 ### RBAC
 
-The `DeploymentsController` runs inside the `nmp-core` controller pod
+The `DeploymentsController` runs inside the `nhx-core` controller pod
 (registered via the `nemo.controllers` entry point), so it reuses that pod's
 existing ServiceAccount and Role rather than a dedicated one. The deploy
 chart's `k8s/helm/templates/core/controller-role.yaml` grants that Role the
@@ -142,12 +142,12 @@ uv run pytest plugins/nemo-deployments/tests/integration/test_reconcile_k8s.py -
 
 ```bash
 kubectl config use-context <dev-blue>
-export NMP_K8S_ITEST_NAMESPACE=<your-namespace>  # defaults to "default"
+export NHX_K8S_ITEST_NAMESPACE=<your-namespace>  # defaults to "default"
 uv run pytest plugins/nemo-deployments/tests/integration/backends/k8s -v
 ```
 
 Tests authenticate with whatever kubeconfig identity is currently active in
-your shell, not the restricted `nmp-core` controller ServiceAccount, so they
+your shell, not the restricted `nhx-core` controller ServiceAccount, so they
 validate backend behavior against a real API server but do **not** exercise
 the RBAC scope granted by the deploy chart's `controller-role.yaml`. That
 still needs a manual smoke test of the deployed platform pod.

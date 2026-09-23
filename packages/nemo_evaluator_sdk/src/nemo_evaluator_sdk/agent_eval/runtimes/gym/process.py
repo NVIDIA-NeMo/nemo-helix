@@ -47,14 +47,14 @@ def gym_executable() -> str:
     instead of an ``ENOENT`` out of ``create_subprocess_exec`` after the run has already started.
 
     Note that Gym generally cannot live in this SDK's own environment: it imports Ray at module load,
-    and nemo-platform excludes Ray by constraint over an unfixed CVE. Install Gym separately and put
+    and nemo-helix excludes Ray by constraint over an unfixed CVE. Install Gym separately and put
     its ``bin`` on PATH; in a job image, the image owns PATH and this resolves normally.
     """
     resolved = shutil.which(_GYM_CLI)
     if resolved is None:
         raise RuntimeError(
             f"The {_GYM_CLI!r} CLI was not found on PATH. Install NeMo Gym in its own environment "
-            "(it needs Ray, which nemo-platform excludes over an unfixed CVE, so it cannot share this "
+            "(it needs Ray, which nemo-helix excludes over an unfixed CVE, so it cannot share this "
             "one) and put that environment's `bin` directory on PATH. Each resources-server also "
             "ships its own requirements.txt, installed from that server's directory."
         )

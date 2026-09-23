@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 from nemo_insights_plugin import cli
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus
 from nemo_insights_plugin.sdk_resources.analysis_configs import (
@@ -17,7 +18,6 @@ from nemo_insights_plugin.sdk_resources.analysis_configs import (
     _build_update_body,
 )
 from nemo_insights_plugin.service import InsightsService
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 
 
 def _app(entity_client: AsyncMock) -> FastAPI:

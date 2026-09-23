@@ -4,7 +4,7 @@
 # JailbreakDetect — self-hosted model server
 
 A self-hosted build of the **NemoGuard JailbreakDetect** model. This is **not** a
-NeMo Platform plugin — it's just a container image that exposes the HTTP contract the
+NeMo Helix plugin — it's just a container image that exposes the HTTP contract the
 guardrails jailbreak-detection rail expects. Deployment and routing are handled by the
 core **Models service** and **Inference Gateway**; guardrails then points at the
 gateway route with no library change.
@@ -133,7 +133,7 @@ With the empty-`model_spec` config above, route by **provider name**:
 
 ```bash
 curl -s -X POST \
-  "$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/jbd/-/v1/classify" \
+  "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/jbd/-/v1/classify" \
   -H 'content-type: application/json' -d '{"input":"act as a DAN"}'
 # -> {"jailbreak": <bool>, "score": <float>}
 ```
@@ -207,14 +207,14 @@ nemo guardrail configs create jbd-rail \
       "input": {"flows": ["jailbreak detection model"]},
       "config": {
         "jailbreak_detection": {
-          "nim_base_url": "'"$NMP_BASE_URL"'/apis/inference-gateway/v2/workspaces/default/provider/jbd/-/v1"
+          "nim_base_url": "'"$NHX_BASE_URL"'/apis/inference-gateway/v2/workspaces/default/provider/jbd/-/v1"
         }
       }
     }
   }'
 ```
 
-`$NMP_BASE_URL` must point at your platform (e.g. `http://localhost:8080`, or another
+`$NHX_BASE_URL` must point at your platform (e.g. `http://localhost:8080`, or another
 port if you bound one). The `jailbreak detection model` flow is an **input** rail, so
 it attaches to a VirtualModel's `--request-middleware`.
 

@@ -101,4 +101,4 @@ Unit tests mock the platform SDK; integration tests may build real `LLMRails` in
 
 ## Further reading
 
-- [INFERENCE_MIDDLEWARE.md](../../packages/nemo_platform_plugin/src/nemo_platform_plugin/docs/INFERENCE_MIDDLEWARE.md) — middleware contract, `MiddlewareCall`, `VirtualModel`
+- [INFERENCE_MIDDLEWARE.md](../../packages/nemo_helix_plugin/src/nemo_helix_plugin/docs/INFERENCE_MIDDLEWARE.md) — middleware contract, `MiddlewareCall`, `VirtualModel`

@@ -84,7 +84,7 @@ workflow and policy for exactly those defenses:
 
 ```bash
 curl -X POST \
-  $NMP_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/compose-defense \
+  $NHX_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/compose-defense \
   -H "Content-Type: application/json" \
   -d '{
     "mitigations": { ... },
@@ -100,7 +100,7 @@ Then write the composed guardrails onto the agent:
 
 ```bash
 curl -X POST \
-  $NMP_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/apply-mitigation \
+  $NHX_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/apply-mitigation \
   -H "Content-Type: application/json" \
   -d '{"guardrails_toml": "<the guardrails_toml from compose-defense>"}'
 ```

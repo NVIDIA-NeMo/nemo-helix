@@ -169,8 +169,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No evaluation jobs yet',
     subheading:
       'Apply a model_optimization suggestion or submit an evaluate-agent job to see results here.',
-    cliCommand:
-      'nemo evaluator agent-evaluate submit --spec-file <spec>.json --workspace <workspace>',
+    cliCommand: 'nemo evaluator agent-evaluate --spec-file <spec>.json --workspace <workspace>',
     skillPrompt:
       'Help me create my first agent evaluation with the nemo-nemo-evaluator-plugin skill',
   },
@@ -178,7 +177,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No evaluations yet',
     subheading: 'Submit an evaluation job to score a model or agent against a benchmark.',
     createAction: { label: 'Create Evaluation' },
-    cliCommand: 'nemo evaluator evaluate submit --spec-file <spec>.json --workspace <workspace>',
+    cliCommand: 'nemo evaluator evaluate --spec-file <spec>.json --workspace <workspace>',
     skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evaluator-plugin skill',
   },
   evaluationSessions: {

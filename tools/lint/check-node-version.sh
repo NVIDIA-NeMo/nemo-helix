@@ -47,4 +47,4 @@ assert_setup_node_uses_nvmrc() {
 }
 
 assert_setup_node_uses_nvmrc .github/workflows/ci.yaml .nvmrc
-assert_setup_node_uses_nvmrc .github/actions/build-nemo-platform-wheel/action.yaml '${{ inputs.source-root }}/.nvmrc'
+assert_setup_node_uses_nvmrc .github/actions/build-nemo-helix-wheel/action.yaml '${{ inputs.source-root }}/.nvmrc'

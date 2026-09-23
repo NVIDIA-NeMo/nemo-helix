@@ -12,7 +12,7 @@
 import {
   EvaluateJob,
   EvaluateJobsPage,
-  PlatformJobStatus as JobStatus,
+  HelixJobStatus as JobStatus,
   EvaluatorListEvaluateJobsParams,
 } from '@nemo/sdk/generated/evaluator/schema';
 import { EvaluationApiError } from '@studio/api/evaluation/EvaluationApiError';

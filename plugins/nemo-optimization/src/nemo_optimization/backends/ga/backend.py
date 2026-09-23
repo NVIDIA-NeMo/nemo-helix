@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.client.adapter import SyncPlatformClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.job_context import JobContext
 
 
 class GaBackendError(RuntimeError):
@@ -23,7 +23,7 @@ class GaBackend:
         payload: dict[str, Any],
         *,
         ctx: JobContext,
-        sdk: SyncPlatformClient | None = None,
+        sdk: SyncHelixClient | None = None,
     ) -> dict[str, Any]:
         del payload, ctx, sdk
         raise GaBackendError(

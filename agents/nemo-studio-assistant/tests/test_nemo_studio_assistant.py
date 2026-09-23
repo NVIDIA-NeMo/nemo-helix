@@ -87,8 +87,8 @@ def test_agent_config_translates_to_fabric_deepagents() -> None:
     assert translated.mcp is not None
     assert translated.mcp.servers["nemo_studio"].url == "nemo-studio-assistant-mcp"
     assert translated.mcp.servers["nemo_studio"].env == {
-        "NMP_BASE_URL": "http://host.docker.internal:8080",
-        "NMP_WORKSPACE": "default",
+        "NHX_BASE_URL": "http://host.docker.internal:8080",
+        "NHX_WORKSPACE": "default",
     }
     assert translated.skills is not None
     assert translated.skills.paths == ["/skills"]
@@ -228,8 +228,8 @@ def test_fabric_absolute_skill_source_is_virtualized_under_workspace() -> None:
 def test_fabric_stdio_mcp_inherits_platform_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_fabric_adapters.deepagents import adapter
 
-    monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
-    monkeypatch.setenv("NMP_WORKSPACE", "default")
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
+    monkeypatch.setenv("NHX_WORKSPACE", "default")
     apply_deepagents_mcp_env_compatibility()
 
     connection = adapter._mcp_connection(
@@ -242,8 +242,8 @@ def test_fabric_stdio_mcp_inherits_platform_environment(monkeypatch: pytest.Monk
         ),
     )
 
-    assert connection["env"]["NMP_BASE_URL"] == "http://platform:8080"
-    assert connection["env"]["NMP_WORKSPACE"] == "default"
+    assert connection["env"]["NHX_BASE_URL"] == "http://platform:8080"
+    assert connection["env"]["NHX_WORKSPACE"] == "default"
     assert connection["env"]["CUSTOM"] == "value"
 
 
@@ -1188,7 +1188,7 @@ def test_nemo_api_uses_request_workspace_for_each_client(monkeypatch: pytest.Mon
         return SimpleNamespace(models=SimpleNamespace(list=lambda: [workspace]))
 
     monkeypatch.setattr(register, "_clients", {})
-    monkeypatch.setattr(register, "NeMoPlatform", create_client)
+    monkeypatch.setattr(register, "NeMoHelix", create_client)
 
     first = json.loads(register.nemo_api("models", "list", workspace="first"))
     second = json.loads(register.nemo_api("models", "list", workspace="second"))
@@ -1211,9 +1211,9 @@ def test_get_client_prefers_platform_base_url(monkeypatch: pytest.MonkeyPatch) -
         created_with.update(kwargs)
         return object()
 
-    monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
     monkeypatch.setenv("NEMO_BASE_URL", "http://model-gateway:8000")
-    monkeypatch.setattr(register, "NeMoPlatform", fake_client)
+    monkeypatch.setattr(register, "NeMoHelix", fake_client)
     monkeypatch.setattr(register, "_clients", {})
 
     register._get_client("default")
@@ -1279,14 +1279,14 @@ def test_check_status_uses_service_job_resource(
 
 
 def test_studio_callback_url_validates_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
 
     with pytest.raises(ValueError, match="valid Studio session"):
         register._studio_callback_url("../../bad")
 
 
 def test_studio_callback_url_uses_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
     session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
 
     url = register._studio_callback_url(session_id, workspace="demo")

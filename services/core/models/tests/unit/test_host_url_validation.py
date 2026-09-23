@@ -17,7 +17,7 @@ turn a provider stored before this check landed into an unreadable 500.
 from datetime import datetime, timezone
 
 import pytest
-from nmp.core.models.schemas import (
+from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     ModelProvider,
     UpsertModelProviderRequest,

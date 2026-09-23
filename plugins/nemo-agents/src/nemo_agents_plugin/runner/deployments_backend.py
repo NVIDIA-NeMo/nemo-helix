@@ -59,18 +59,18 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
     WorkloadIdentitySpec,
 )
-from nemo_platform_plugin.auth import AuthContext, platform_auth_enabled
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
+from nemo_helix_plugin.auth.workload_identity import (
     get_workload_identity_token_audience,
     is_workload_identity_token_exchange_enabled,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.config import LOOPBACK_ADDRESSES
-from nemo_platform_plugin.entities.base import parse_qualified_name
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
+from nemo_helix_plugin.entities.base import parse_qualified_name
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +93,9 @@ _AUTH_PROXY_IDENTITY = "agents"
 # depend on the deployment mode.
 _RESERVED_ENV_VAR_NAMES = frozenset(
     {
-        "NMP_WORKSPACE",
-        "NMP_AGENT_NAME",
-        "NMP_BASE_URL",
+        "NHX_WORKSPACE",
+        "NHX_AGENT_NAME",
+        "NHX_BASE_URL",
         "PYTHONPATH",
         _AGENT_CONFIG_PATH_ENV,
         _NAT_CONFIG_ENV,
@@ -170,7 +170,7 @@ def resolve_agent_gateway_url(
         raise UnreachableGatewayURLError(
             f"No container-reachable inference base URL for k8s deployment: platform base URL "
             f"{base_url!r} is not usable from an agent pod and no internal API Service URL is set. "
-            "Set NEMO_INTERNAL_BASE_URL / NMP_INTERNAL_BASE_URL (or deployments.k8s_internal_base_url), "
+            "Set NEMO_INTERNAL_BASE_URL / NHX_INTERNAL_BASE_URL (or deployments.k8s_internal_base_url), "
             "or deployments.gateway_url_override."
         )
 
@@ -451,7 +451,7 @@ def build_deployment_config(
     *agent_config* to a container-reachable gateway before calling this helper.
 
     ``platform_base_url`` is the container-reachable platform origin used to
-    build the Inference Gateway URL. It is also exported as ``NMP_BASE_URL`` so
+    build the Inference Gateway URL. It is also exported as ``NHX_BASE_URL`` so
     SDK calls from inside the agent use the same platform instead of falling
     back to a baked or host CLI context.
     """
@@ -460,9 +460,9 @@ def build_deployment_config(
     config_path = _fabric_config_mount_path(config_mount_path) if is_fabric else config_mount_path
     resolved_config_files = config_files or [ConfigFile(path=config_path, content=config_yaml)]
     env = [
-        EnvVar(name="NMP_WORKSPACE", value=workspace),
-        EnvVar(name="NMP_AGENT_NAME", value=name),
-        EnvVar(name="NMP_BASE_URL", value=platform_base_url.rstrip("/")),
+        EnvVar(name="NHX_WORKSPACE", value=workspace),
+        EnvVar(name="NHX_AGENT_NAME", value=name),
+        EnvVar(name="NHX_BASE_URL", value=platform_base_url.rstrip("/")),
     ]
     if is_fabric:
         env.append(EnvVar(name=_AGENT_CONFIG_PATH_ENV, value=config_path))

@@ -41,7 +41,7 @@ The Auditor service provides model safety testing, bias detection, and adversari
 - Custom model endpoints
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 - Model endpoint accessible
 
@@ -70,7 +70,7 @@ The Auditor service provides model safety testing, bias detection, and adversari
 - Output format
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 
 **Success Criteria**:

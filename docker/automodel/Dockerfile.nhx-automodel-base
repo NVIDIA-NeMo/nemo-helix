@@ -1,0 +1,191 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# nhx-automodel base - PyTorch NGC image + Automodel + CUDA extension wheels.
+#
+# PyTorch NGC base + Automodel + CUDA extension wheels for nhx-automodel images.
+# Publish target: nhx-automodel-base (slim image; builder is build-only).
+
+# Pin to the tip of the Automodel release branch (origin/r0.5.0), not main.
+# Re-pin AUTOMODEL_COMMIT when cutting to a new r0.x.y.
+ARG AUTOMODEL_COMMIT=84e85792e34a240f09194a919c1e62c9d3e47938
+ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.07-py3
+
+FROM causal-conv1d-wheel-image AS causal-conv1d-wheel-src
+FROM mamba-ssm-wheel-image AS mamba-ssm-wheel-src
+
+FROM alpine/git AS automodel-clone
+ARG AUTOMODEL_COMMIT
+RUN git clone --branch main https://github.com/NVIDIA-NeMo/Automodel.git /opt/Automodel && \
+    cd /opt/Automodel && \
+    git checkout ${AUTOMODEL_COMMIT} && \
+    rm -rf /opt/Automodel/.git
+
+FROM ${PYTORCH_BASE} AS nhx-automodel-base-builder
+ARG PYTORCH_BASE
+
+WORKDIR /opt
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY docker/scripts/collect-python-sdists.py /usr/local/bin/
+
+ENV VIRTUAL_ENV=/opt/venv \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+ENV PATH="/opt/venv/bin:/root/.local/bin:$PATH"
+
+RUN uv venv ${UV_PROJECT_ENVIRONMENT} --system-site-packages
+
+COPY --from=automodel-clone /opt/Automodel /opt/Automodel
+COPY docker/automodel/cherry-picks /opt/cherry-picks
+
+RUN cd /opt/Automodel && \
+    bash docker/common/update_pyproject_pytorch.sh /opt/Automodel && \
+    patch -p1 < /opt/cherry-picks/3d98f6e3.diff
+
+# Sync the Automodel extras used by text training. The cherry-pick removes OpenCV
+# from base deps, including mistral-common's image extra; skipping VLM/media extras
+# keeps FFmpeg wheels out. We'll need to re-examine when Customizer supports VLM
+# and FFmpeg 8.xx only releases every 6 months
+RUN --mount=type=cache,target=/root/.cache/uv \
+    cd /opt/Automodel && \
+    UV_HTTP_TIMEOUT=120 uv sync --locked \
+    --extra extra \
+    --extra delta-databricks \
+    --all-groups
+
+# cuda extra deps not covered above (onnxscript) plus prebuilt / compiled extensions.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install "onnxscript>=0.5.6"
+
+
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     cd /opt/Automodel && \
+#     UV_HTTP_TIMEOUT=120 uv sync --locked --extra all --all-groups
+
+# Install AFTER Automodel sync - uv sync drops packages not in its lockfile.
+RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,readonly \
+    --mount=from=mamba-ssm-wheel-src,target=/tmp/mamba-ssm-wheel-src,readonly \
+    uv pip install --no-cache-dir --no-deps \
+    /tmp/causal-conv1d-wheel-src/wheels/cu13.3/causal_conv1d-*cp312*.whl \
+    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone https://github.com/fanshiqing/grouped_gemm.git /tmp/grouped_gemm && \
+    cd /tmp/grouped_gemm && \
+    git checkout v1.1.4 && \
+    git submodule update --init --recursive && \
+    mkdir -p /source-distributions/nhx-automodel-base/git && \
+    tar --exclude-vcs --create --gzip \
+      --file /source-distributions/nhx-automodel-base/git/grouped_gemm-v1.1.4.tar.gz . && \
+    uv pip install --no-build-isolation --no-deps . && \
+    rm -rf /tmp/grouped_gemm
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && \
+    cd bitsandbytes && \
+    git checkout 0.49.2 && \
+    mkdir -p /source-distributions/nhx-automodel-base/git && \
+    git archive --format=tar.gz --output /source-distributions/nhx-automodel-base/git/bitsandbytes-0.49.2.tar.gz HEAD && \
+    cmake -DCOMPUTE_CAPABILITY="75;80;86;87;89;90;100;103;110;120;121" -DCOMPUTE_BACKEND=cuda -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -S . && \
+    make -j"$(nproc)" && \
+    uv pip install scikit-build-core --no-deps && \
+    uv pip install --no-build-isolation --no-deps --force-reinstall . && \
+    uv pip uninstall scikit-build-core
+
+RUN if [ -f /usr/local/bin/torchrun ]; then \
+    sed -i '1c\#!/opt/venv/bin/python' /usr/local/bin/torchrun; \
+    fi
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install "hf-transfer>=0.1.8,<0.2"
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    rm -rf /opt/venv/lib/python*/site-packages/vllm \
+    /opt/venv/lib/python*/site-packages/vllm-*.dist-info && \
+    uv pip uninstall -y mlflow || true && \
+    rm -rf /opt/venv/lib/python*/site-packages/mlflow-3.11.1.dist-info && \
+    uv pip install \
+    --reinstall-package mlflow-skinny \
+    --reinstall-package sqlparse \
+    --reinstall-package wandb \
+    "aiohttp>=3.13.3,<4" \
+    "black>=26.3.1,<27" \
+    "GitPython>=3.1.62,<4" \
+    "jaraco-context>=6.1.0,<7" \
+    "jupyter-server>=2.20.0,<3" \
+    "jupyterlab>=4.6.1,<5" \
+    "mistune>=3.3.3,<4" \
+    "notebook>=7.5.6,<8" \
+    "onnx>=1.21.0,<2" \
+    "pillow>=12.3.0,<13" \
+    "pyasn1>=0.6.4,<1" \
+    "pyarrow>=23.0.1,<24" \
+    "soupsieve>=2.8.4,<3" \
+    "msgpack>=1.2.1,<2" \
+    "cryptography>=50.0.0,<51" \
+    "tornado>=6.5.5,<7" \
+    "urllib3>=2.7.0,<3" \
+    "mlflow-skinny>=3.15.0,<3.16.0" \
+    "sqlparse>=0.6.0,<0.7" \
+    "grpcio>=1.81.1,<2" \
+    "thrift>=0.24.0" \
+    "wandb>=0.29.0"
+
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python /usr/local/bin/collect-python-sdists.py \
+        --python /opt/venv/bin/python \
+        --output /source-distributions/nhx-automodel-base \
+        --lock-file /opt/Automodel/uv.lock \
+        --label base-venv
+
+# Published base image (same filesystem as builder).
+FROM ${PYTORCH_BASE} AS nhx-automodel-base
+ARG PYTORCH_BASE
+COPY --from=nhx-automodel-base-builder /opt/venv /opt/venv
+COPY --from=nhx-automodel-base-builder /opt/Automodel /opt/Automodel
+COPY --from=nhx-automodel-base-builder /source-distributions/nhx-automodel-base/ /usr/share/nemo-helix/source-distributions/nhx-automodel-base/
+# Builder pins uv 0.9.14 but does not ship it in the venv layer; PyTorch base may ship 0.10.x.
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-python-sdists.py \
+    /usr/local/bin/
+
+RUN dpkg-query -W -f='${binary:Package}\t${Version}\n' > /tmp/base-dpkg-packages.txt
+
+# CVE scanners read dist-packages even when --system-site-packages resolves imports from /opt/venv.
+# Targeted file cleanup (not pip uninstall) avoids corrupted dist-info RECORDs on the NGC base image.
+RUN --mount=type=bind,source=docker/scripts/remove-listed-apt-packages.sh,target=/tmp/remove-listed-apt-packages.sh,readonly \
+    --mount=type=bind,source=docker/removals/apt/nhx-automodel-base.txt,target=/tmp/apt-package-removals.txt,readonly \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade openssl libssl3t64 && \
+    bash /tmp/remove-listed-apt-packages.sh /tmp/apt-package-removals.txt && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# NGC ships Nsight Systems (~585 MB); not used by nhx-automodel training.
+# Cleanup stale NGC image files and shadowed system packages.
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/tmp/common-file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/common-file-removals.txt
+
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN bash /usr/local/bin/collect-apt-sources.sh \
+    /usr/share/nemo-helix/source-distributions/nhx-automodel-base/apt \
+    --changed-from /tmp/base-dpkg-packages.txt
+
+ENV VIRTUAL_ENV=/opt/venv \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    HF_HUB_ENABLE_HF_TRANSFER=1
+ENV PATH="/bin:/opt/venv/bin:/root/.local/bin:$PATH"
+WORKDIR /opt
+
+# duplicated to preserve torchrun in published image
+RUN if [ -f /usr/local/bin/torchrun ]; then \
+    sed -i '1c\#!/opt/venv/bin/python' /usr/local/bin/torchrun; \
+    fi
