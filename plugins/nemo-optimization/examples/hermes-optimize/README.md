@@ -52,9 +52,10 @@ python -c "import hermes_cli; print('ok')"
 export NVIDIA_API_KEY=...   # required for inference-api.nvidia.com
 ```
 
-The example YAMLs call `https://inference-api.nvidia.com/v1` with full model ids
-such as `nvidia/nvidia/nemotron-3-nano-30b-a3b`. Confirm your key can list those
-models (`GET /v1/models`).
+The MCP example YAMLs call `https://inference-api.nvidia.com/v1` with full model
+ids such as `nvidia/nvidia/nemotron-3-nano-30b-a3b`. Confirm your key can list
+those models (`GET /v1/models`). The chat-only examples go through the platform
+gateway instead (step 5).
 
 ### 4. Shell env used by every example
 
@@ -81,7 +82,8 @@ every trial with `NVIDIA_API_KEY is required for Hermes mode`. Route models
 through the platform inference gateway instead: the gateway holds the key as a
 platform secret, and optimize binds a placeholder key for gateway-routed models.
 
-[`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) is set up this way.
+[`optimize-chatonly.yaml`](optimize-chatonly.yaml) and
+[`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) are set up this way.
 Register a provider once:
 
 ```bash
@@ -128,7 +130,9 @@ one, pick a `model_entity_id` that answers from
 
 ## Example 1 — Chat-only
 
-No MCP, no extra checkouts. Good first smoke for optimize.
+No MCP, no extra checkouts. Good first smoke for optimize. Register the gateway
+provider first (setup step 5); both models in `optimize-chatonly.yaml` route
+through it.
 
 ```bash
 source "$REPO_ROOT/.venv/bin/activate"   # if not already
@@ -285,10 +289,10 @@ nemo agents optimize \
 
 For the overlay example, add `--agent hermes-optimize-chatonly`.
 
-The inline configs (`optimize-chatonly.yaml`, `optimize-mcp*.yaml`) call
-`inference-api.nvidia.com` directly, which only works for local runs where your
-shell holds the key. To submit one to the platform, point its models at the
-gateway first, as in setup step 5.
+The MCP configs (`optimize-mcp*.yaml`) call `inference-api.nvidia.com`
+directly, so as written their trials fail on the platform with
+`NVIDIA_API_KEY is required for Hermes mode`. To submit one, route its models
+through the gateway first, as `optimize-chatonly.yaml` does (setup step 5).
 
 ### 3. Watch it
 
