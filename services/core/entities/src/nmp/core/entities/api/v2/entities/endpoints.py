@@ -50,7 +50,6 @@ from nmp.core.entities.app.repository.exceptions import (
 from nmp.core.entities.entities import Entity
 from nmp.core.entities.utils.filter import FilterDep
 from nmp.core.entities.utils.identifiers import generate_entity_name
-from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE
 from sqlalchemy.exc import IntegrityError
 
 
@@ -102,17 +101,10 @@ async def _validate_parent_access(
     request. Here we only ensure the **parent row's** workspace is in
     ``get_accessible_workspaces`` (same role-binding / OBO logic as list filters), so a child in W1
     cannot point at a parent in W2 unless the effective user has access to W2.
-
-    Referencing is a read of the parent, so a globally shareable parent in the global workspace
-    is allowed — this is the case where a workspace fine-tunes an adapter against a shared base
-    model. The child still lands in the request workspace.
     """
 
     parent = await repository.get_entity_by_id(entity_id=parent_id)
-    allowed = accessible
-    if parent and accessible is not None and can_read_global_workspace(accessible, parent.entity_type):
-        allowed = accessible | {GLOBAL_WORKSPACE}
-    if not parent or (allowed is not None and parent.workspace not in allowed):
+    if not parent or (accessible is not None and parent.workspace not in accessible):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Parent entity '{parent_id}' not found or not in accessible workspaces",
@@ -373,9 +365,7 @@ async def list_entities(
         # Check if workspace is being deleted (404 for user requests)
         await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
-        # Listing a workspace returns that workspace only. Shared entities resolve by name
-        # (see get_entity_by_name) but are deliberately not folded into listings: doing so
-        # would redefine what this endpoint returns for every existing caller.
+        # Shared entities resolve by name only; folding them into listings would change this endpoint for every caller.
         query_workspace = workspace
         effective_filter = filter
 
@@ -450,8 +440,7 @@ async def get_entity_by_name(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
 
-    # Shareable types also resolve out of the global workspace. Local wins, so a
-    # same-named entity in the request workspace always shadows the global one.
+    # Local wins: a same-named entity in the request workspace shadows the global one.
     candidates = (
         workspace_lookup_order(workspace) if can_read_global_workspace(accessible, entity_type) else (workspace,)
     )

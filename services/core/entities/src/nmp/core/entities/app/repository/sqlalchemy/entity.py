@@ -203,18 +203,6 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
 
             return entities, total
 
-    async def distinct_child_workspaces(
-        self,
-        *,
-        parent_id: str,
-        session: AsyncSession | None = None,
-    ) -> set[str]:
-        """Return every distinct workspace holding a child of *parent_id*."""
-        async with self._get_session(session) as sess:
-            query = select(DBEntity.workspace).where(DBEntity.parent == parent_id).distinct()
-            rows = (await sess.execute(query)).scalars().all()
-            return {w for w in rows if w}
-
     async def count_entities_by(
         self,
         *,
@@ -381,13 +369,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         refuse_children_outside: str | None = None,
         session: AsyncSession | None = None,
     ) -> int:
-        """Delete an entity by name.
-
-        When *refuse_children_outside* is a workspace name, the delete is refused with
-        :class:`ForeignChildEntitiesError` if the entity has children in any other
-        workspace. The check runs inside this transaction with the row locked, so it
-        cannot be raced by a child created after the check.
-        """
+        """Delete an entity by name, refusing with ForeignChildEntitiesError per *refuse_children_outside*."""
         async with self._get_session(session, for_write=True) as sess:
             query = select(DBEntity).where(
                 DBEntity.workspace == workspace,
@@ -400,12 +382,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 query = query.where(DBEntity.parent == parent)
 
             if refuse_children_outside is not None:
-                # Lock the row we are about to delete. Inserting a child takes a FOR KEY
-                # SHARE lock on its parent, which conflicts with FOR UPDATE, so a concurrent
-                # child insert either lands before this select and is seen below, or blocks
-                # until this transaction ends and then fails the foreign key. Without the
-                # lock the check and the delete are separate transactions and a child
-                # created between them is cascaded away unseen.
+                # Child inserts take FOR KEY SHARE on the parent, so this blocks them until the delete commits.
                 query = query.with_for_update()
 
             result = await sess.execute(query)
@@ -414,15 +391,8 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 return 0
 
             if refuse_children_outside is not None:
-                child_workspaces = set(
-                    (
-                        await sess.execute(
-                            select(DBEntity.workspace).where(DBEntity.parent == existing_entity.id).distinct()
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
+                child_workspaces_query = select(DBEntity.workspace).where(DBEntity.parent == existing_entity.id)
+                child_workspaces = (await sess.execute(child_workspaces_query.distinct())).scalars().all()
                 foreign = {w for w in child_workspaces if w and w != refuse_children_outside}
                 if foreign:
                     raise ForeignChildEntitiesError(foreign)

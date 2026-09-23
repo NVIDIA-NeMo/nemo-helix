@@ -102,18 +102,7 @@ async def _on_behalf_of_has_permission(auth_client: AuthClient, workspace: str, 
 
 
 async def may_use_from_workspace(request_workspace: str, entity_workspace: str, permission: str) -> bool:
-    """Whether the caller may use an entity that lives in another workspace than the request's.
-
-    The route gate authorizes a request against the workspace in its path only. A lookup
-    that falls back to the global workspace, or a LoRA adapter living in another workspace,
-    reaches an entity outside that workspace, so the caller must also hold *permission*
-    where the entity lives: sharing resolves names, it does not grant access. Callers that
-    cannot use such an entity should be answered exactly as if it did not exist.
-
-    Always True for an entity in the request workspace, with auth off, or for a
-    non-delegated service principal (the same bypass the route gate applies). A delegated
-    service principal is checked as its on-behalf-of user.
-    """
+    """Whether the caller holds *permission* where an entity outside the request workspace lives."""
     if entity_workspace == request_workspace:
         return True
     auth_client = auth_client_context.get()

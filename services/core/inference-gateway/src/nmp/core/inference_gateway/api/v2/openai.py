@@ -134,9 +134,7 @@ async def resolve_vm_for_request(
     model_name: str,
     permission: str,
 ) -> "SDKVirtualModel | None":
-    """:func:`resolve_vm_for_model` for a caller: a VirtualModel shared in from another
-    workspace resolves only if the caller holds *permission* where it lives, and is
-    otherwise indistinguishable from a missing one."""
+    """:func:`resolve_vm_for_model`, hiding a shared VirtualModel the caller may not use."""
     virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
     if virtual_model is not None and not await may_use_from_workspace(workspace, virtual_model.workspace, permission):
         return None
@@ -181,10 +179,7 @@ async def openai_get_models(
     validate_entity_name(workspace, field_name="workspace")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
 
-    # The catalog lists this workspace only. A VirtualModel shared from the global
-    # workspace is still routable by name (see resolve_vm_for_model) but is deliberately
-    # not listed here, matching the entity store: sharing resolves names, it does not
-    # fold shared entities into a workspace's listings.
+    # Shared VirtualModels are routable by name but not listed, matching the entity store.
     all_oai_models = [
         OpenAIModelResp(id=f"{vm_workspace}/{vm_name}", owned_by=vm_workspace)
         for vm_workspace, vm_name in virtual_model_cache.virtual_model_map

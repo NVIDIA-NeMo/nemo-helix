@@ -416,8 +416,7 @@ async def update_virtual_model(
     the request body retain their current values.
     """
     try:
-        # local_only: an update must never reach a VirtualModel shared in from the global
-        # workspace, which the caller may be able to read but not write.
+        # local_only: the caller may be able to read a shared VirtualModel but not write it.
         existing = await entity_client.get(VirtualModel, name=name, workspace=workspace, local_only=True)
     except EntityNotFoundError as exc:
         raise HTTPException(

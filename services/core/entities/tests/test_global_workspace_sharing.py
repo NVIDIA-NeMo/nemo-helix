@@ -5,18 +5,14 @@
 
 import pytest
 from nmp.core.entities.api.v2.utils import can_read_global_workspace
-from nmp.core.entities.utils.sharing import (
-    GLOBAL_WORKSPACE,
-    globally_shareable_entity_types,
-    is_globally_shareable,
-)
+from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE, is_globally_shareable
 
 
 def test_global_workspace_is_default() -> None:
     assert GLOBAL_WORKSPACE == "default"
 
 
-@pytest.mark.parametrize("entity_type", sorted(globally_shareable_entity_types()))
+@pytest.mark.parametrize("entity_type", ["model", "adapter", "model_provider", "virtual_model"])
 def test_registered_types_are_shareable(entity_type: str) -> None:
     assert is_globally_shareable(entity_type)
 

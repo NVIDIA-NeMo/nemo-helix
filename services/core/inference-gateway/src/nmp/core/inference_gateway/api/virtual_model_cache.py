@@ -105,12 +105,7 @@ class VirtualModelCache:
     config_ref_versions: dict[MiddlewareConfigRef, datetime | None] = field(default_factory=dict)
 
     def get(self, workspace: str, name: str) -> VirtualModel | None:
-        """Return the VirtualModel for ``workspace/name``, or ``None`` if not cached.
-
-        Falls back to the global workspace so a VirtualModel shared from ``default`` is
-        routable from every workspace. Local wins: a same-named VirtualModel in
-        *workspace* always shadows the global one.
-        """
+        """Return the VirtualModel for ``workspace/name``, falling back to the global workspace (local wins)."""
         for candidate in workspace_lookup_order(workspace):
             virtual_model = self.virtual_model_map.get((candidate, name))
             if virtual_model is not None:

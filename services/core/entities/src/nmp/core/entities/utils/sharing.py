@@ -29,7 +29,3 @@ _GLOBALLY_SHAREABLE: frozenset[str] = frozenset(
 def is_globally_shareable(entity_type: str | None) -> bool:
     """True when *entity_type* is readable from any workspace once it lives in ``default``."""
     return entity_type is not None and entity_type in _GLOBALLY_SHAREABLE
-
-
-def globally_shareable_entity_types() -> frozenset[str]:
-    return _GLOBALLY_SHAREABLE
