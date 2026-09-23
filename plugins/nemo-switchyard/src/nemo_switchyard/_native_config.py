@@ -116,6 +116,7 @@ def validate_stage_router_config(config: dict[str, Any]) -> dict[str, Any]:
     if classifier is not None:
         classifier_config = _require_mapping(classifier, "classifier")
         _require_unit_interval(classifier_config.get("base_threshold", 0.5), "classifier.base_threshold")
+        category_models(config, "judge", required=True)
     models_map_from_config(config, required=("capable", "efficient"))
     return {**config, "picker": picker, "confidence_threshold": threshold}
 

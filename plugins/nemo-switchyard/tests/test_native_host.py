@@ -97,6 +97,7 @@ class RecordingTransport:
     def __init__(self, error: InferenceMiddlewareError | None = None) -> None:
         self.error = error
         self.models: list[str] = []
+        self.bodies: list[dict[str, Any]] = []
 
     async def complete(
         self,
@@ -104,8 +105,9 @@ class RecordingTransport:
         body: dict[str, Any],
         headers: dict[str, str],
     ) -> dict[str, Any]:
-        del body, headers
+        del headers
         self.models.append(model_entity_id)
+        self.bodies.append(deepcopy(body))
         if self.error is not None:
             raise self.error
         return {"id": "judge", "choices": []}
@@ -163,6 +165,7 @@ def _vm(
 async def test_run_stream_serves_judge_then_routes_user_request() -> None:
     transport = RecordingTransport()
     request = _request()
+    request.body["stream"] = True
 
     result = await run_native_stream(
         algorithm=FakeAlgorithm(judge=True),
@@ -174,7 +177,9 @@ async def test_run_stream_serves_judge_then_routes_user_request() -> None:
 
     assert result is request
     assert request.body["model"] == "ws/strong"
+    assert request.body["stream"] is True
     assert transport.models == ["ws/judge"]
+    assert transport.bodies[0]["stream"] is False
 
 
 @pytest.mark.asyncio
@@ -443,6 +448,15 @@ def test_models_any_excludes_judge() -> None:
                 "models": {"capable": ["ws/s"], "efficient": ["ws/w"]},
             },
             "classifier.base_threshold",
+        ),
+        (
+            validate_stage_router_config,
+            {
+                "confidence_threshold": 0.5,
+                "classifier": {"base_threshold": 0.5},
+                "models": {"capable": ["ws/s"], "efficient": ["ws/w"]},
+            },
+            "models.judge is required",
         ),
         (
             validate_llm_classifier_config,

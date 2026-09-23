@@ -157,6 +157,9 @@ async def _serve_call(call: Any, transport: JudgeTransport, headers: dict[str, s
         call.fail(error)
         return
     chat_body = llm_request_to_openai_chat(dict(call.request))
+    # CallModel responses are consumed as one JSON object below. Never inherit
+    # streaming from the user request, even when the final routed call streams.
+    chat_body["stream"] = False
     last_error: Exception | None = None
     for model_id in models:
         try:
