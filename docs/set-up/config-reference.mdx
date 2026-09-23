@@ -345,6 +345,8 @@ jobs:
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # How long a pod may spend in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 600
+      ttl_seconds_image_pull: 600
       # Kubernetes namespace to submit the job to. If not set, it will be determined from the environment.
       namespace:
       # Kubernetes service account name for job pods. Uses the Kubernetes default service account when set to 'default'. | default: 'default'
@@ -425,6 +427,8 @@ jobs:
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # How long a pod may spend in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 600
+      ttl_seconds_image_pull: 600
       # Kubernetes namespace to submit the job to. If not set, it will be determined from the environment.
       namespace:
       # Kubernetes service account name for job pods. Uses the Kubernetes default service account when set to 'default'. | default: 'default'

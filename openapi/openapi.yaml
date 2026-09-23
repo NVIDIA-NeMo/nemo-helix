@@ -15478,6 +15478,14 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        ttl_seconds_image_pull:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Image Pull
+          description: How long a pod may spend in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 600
         namespace:
           title: Namespace
           description: Kubernetes namespace to submit the job to. If not set, it will
@@ -20798,6 +20806,14 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        ttl_seconds_image_pull:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Image Pull
+          description: How long a pod may spend in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 600
         namespace:
           title: Namespace
           description: Kubernetes namespace to submit the job to. If not set, it will
