@@ -21,6 +21,7 @@ workspace must hold inference permission in that workspace too.
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import HTTPException, status
 from nmp.common.auth.client import AuthClient
@@ -40,6 +41,42 @@ PROVIDER_EXEC_PERMISSION = "inference.gateway.provider.exec"
 PROVIDER_READ_PERMISSION = "inference.providers.read"
 
 _LORA_ADAPTER_SEPARATOR = "&adapters/"
+_DECISION_TTL_SECONDS = 10.0
+_DECISION_CACHE_MAX_ENTRIES = 4096
+
+_DecisionKey = tuple[object, ...]
+
+
+class _DecisionCache:
+    def __init__(self, ttl_seconds: float, max_entries: int) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._max_entries = max_entries
+        self._entries: dict[_DecisionKey, tuple[float, bool]] = {}
+
+    def get(self, key: _DecisionKey) -> bool | None:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        expires_at, allowed = entry
+        if expires_at <= time.monotonic():
+            self._entries.pop(key, None)
+            return None
+        return allowed
+
+    def put(self, key: _DecisionKey, allowed: bool) -> None:
+        if key not in self._entries and len(self._entries) >= self._max_entries:
+            self._entries.pop(next(iter(self._entries)))
+        self._entries[key] = (time.monotonic() + self._ttl_seconds, allowed)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+_decision_cache = _DecisionCache(_DECISION_TTL_SECONDS, _DECISION_CACHE_MAX_ENTRIES)
+
+
+def clear_decision_cache() -> None:
+    _decision_cache.clear()
 
 
 def _enabled_auth_client() -> AuthClient | None:
@@ -53,11 +90,33 @@ def _is_delegated_service(principal: Principal) -> bool:
     return principal.is_privileged and principal.is_delegated
 
 
+def _decision_key(principal: Principal, workspace: str, permission: str) -> _DecisionKey:
+    return (
+        principal.id,
+        principal.email,
+        tuple(principal.groups),
+        principal.on_behalf_of,
+        principal.on_behalf_of_email,
+        tuple(principal.on_behalf_of_groups or ()),
+        workspace,
+        permission,
+    )
+
+
 async def _caller_has_permission(auth_client: AuthClient, workspace: str, permission: str) -> bool:
+    principal = auth_client.principal
+    key = _decision_key(principal, workspace, permission)
+    cached = _decision_cache.get(key)
+    if cached is not None:
+        return cached
+
     # A delegated service principal would pass any check as itself via the ServiceSystem wildcard.
-    if _is_delegated_service(auth_client.principal):
-        return await auth_client.on_behalf_of_has_permissions(workspace, [permission])
-    return await auth_client.has_permissions(workspace, [permission])
+    if _is_delegated_service(principal):
+        allowed = await auth_client.on_behalf_of_has_permissions(workspace, [permission])
+    else:
+        allowed = await auth_client.has_permissions(workspace, [permission])
+    _decision_cache.put(key, allowed)
+    return allowed
 
 
 async def enforce_delegated_workspace_access(workspace: str, permission: str) -> None:

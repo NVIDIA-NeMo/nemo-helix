@@ -16,6 +16,7 @@ from nmp.common.entities.utils import ParsedEntityRef
 from nmp.core.inference_gateway.api.authz import (
     MODEL_EXEC_PERMISSION,
     OPENAI_EXEC_PERMISSION,
+    can_run_inference_in,
     enforce_delegated_workspace_access,
     enforce_model_ref_access,
     model_ref_workspaces,
@@ -167,3 +168,17 @@ async def test_model_ref_lora_adapter_workspace_is_checked() -> None:
 )
 def test_model_ref_workspaces(name: str, expected: list[str]) -> None:
     assert model_ref_workspaces(ParsedEntityRef(workspace="base-ws", name=name)) == expected
+
+
+@pytest.mark.asyncio
+async def test_permission_decisions_are_cached_per_principal() -> None:
+    client = _auth_client(Principal(id="user:alice", email="alice@example.com"), allowed=True)
+    auth_client_context.set(client)
+    assert await can_run_inference_in("carol-ws", "default")
+    assert await can_run_inference_in("carol-ws", "default")
+    client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+
+    other_client = _auth_client(Principal(id="user:bob", email="bob@example.com"), allowed=False)
+    auth_client_context.set(other_client)
+    assert not await can_run_inference_in("carol-ws", "default")
+    other_client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from multidict import CIMultiDict, CIMultiDictProxy
 from nemo_platform.types.inference import ModelProvider, ServedModelMapping
 from nemo_platform.types.inference.virtual_model import VirtualModel
+from nmp.core.inference_gateway.api.authz import clear_decision_cache
 from nmp.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
@@ -79,6 +80,13 @@ def new_model_infos() -> list[ModelProviderInfo]:
             ),
         ),
     ]
+
+
+@pytest.fixture(autouse=True)
+def _clear_authz_decision_cache() -> Iterator[None]:
+    clear_decision_cache()
+    yield
+    clear_decision_cache()
 
 
 @pytest.fixture
