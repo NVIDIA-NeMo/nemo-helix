@@ -12,6 +12,7 @@ import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { fireEvent } from '@testing-library/react';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
@@ -38,6 +39,16 @@ describe('AgentDetailRoute optimizations tab', () => {
       },
       { timeout: LG_SELECTOR_TIMEOUT }
     );
+  });
+
+  it('opens the launch modal from the Optimize button', async () => {
+    renderDetail();
+
+    const optimize = await screen.findByRole('button', { name: 'Optimize' });
+    await waitFor(() => expect(optimize).toBeEnabled());
+    fireEvent.click(optimize);
+
+    expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
   });
 
   it('scopes the list server-side with a spec.agent filter', async () => {

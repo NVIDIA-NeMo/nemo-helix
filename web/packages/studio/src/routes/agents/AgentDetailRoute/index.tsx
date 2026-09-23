@@ -33,6 +33,7 @@ import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/Deploymen
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
+import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
@@ -63,6 +64,7 @@ export const AgentDetailRoute: FC = () => {
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
+  const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
@@ -222,6 +224,7 @@ export const AgentDetailRoute: FC = () => {
               deployButtonRef={deployButtonRef}
               onDeploy={() => setCreateDeploymentOpen(true)}
               onRunEvaluation={() => setSubmitEvalOpen(true)}
+              onOptimize={() => setLaunchOptimizeOpen(true)}
               onImportTraces={() => setImportTracesOpen(true)}
             />
           }
@@ -341,6 +344,14 @@ export const AgentDetailRoute: FC = () => {
           onClose={() => setImportTracesOpen(false)}
           workspace={workspace}
           agent={agentName}
+        />
+      )}
+      {agentName && launchOptimizeOpen && (
+        <LaunchOptimizeModal
+          open
+          onClose={() => setLaunchOptimizeOpen(false)}
+          workspace={workspace}
+          agentName={agentName}
         />
       )}
       {createDeploymentOpen && (
