@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError, raise_for_status
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -46,7 +47,8 @@ def _controller(job_status: HelixJobStatus = HelixJobStatus.COMPLETED):
     jobs.get_job.return_value = MagicMock(data=lambda: job)
     controller._entities = entities
     controller._jobs = jobs
-    controller._sdk = MagicMock()
+    # The controller only adapts this into typed clients; an idle typed client satisfies the adapter.
+    controller._sdk = AsyncNemoClient(base_url="http://insights.test")  # ty: ignore[invalid-assignment]
     controller._config = InsightsConfig()
     return controller, entities, jobs
 
