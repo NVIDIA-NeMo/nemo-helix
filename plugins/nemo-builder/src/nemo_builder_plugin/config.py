@@ -70,10 +70,10 @@ class BuilderConfig(NemoConfig):
     runtime_class: str | None = Field(
         default=None,
         description=(
-            "`gvisor` where the cluster offers a sandboxed runtime. Unset here: gVisor exists on "
-            "the lab cluster but its nodes are tainted and in separate pools, which fights the "
-            "single-node pinning the ReadWriteOnce work volume requires. Measured to work with "
-            "kaniko, so this is a scheduling constraint rather than a capability one."
+            "`gvisor` where the cluster offers a sandboxed runtime. Unset by default: where gVisor "
+            "nodes are tainted and in separate pools, as on GKE, that fights the single-node "
+            "pinning the ReadWriteOnce work volume requires. Measured to work with kaniko, so "
+            "this is a scheduling constraint rather than a capability one."
         ),
     )
     registry_mirror: str | None = Field(
@@ -87,8 +87,8 @@ class BuilderConfig(NemoConfig):
     node_selector: dict[str, str] = Field(
         default_factory=lambda: {"nmp.nvidia.com/build-node": "true"},
         description=(
-            "Pins every build pod to one node. Required only because this cluster has no RWX "
-            "StorageClass; see deploy/40-work-volume.yaml. Empty it once the work volume is RWX."
+            "Pins every build pod to one node. Required only while the work volume is "
+            "ReadWriteOnce; see deploy/40-work-volume.yaml. Empty it once the work volume is RWX."
         ),
     )
     sandbox_cpu: str = Field(
@@ -106,8 +106,8 @@ class BuilderConfig(NemoConfig):
     sandbox_dns_nameservers: list[str] = Field(
         default_factory=lambda: ["8.8.8.8", "1.1.1.1"],
         description=(
-            "The sandbox resolves against these, not cluster DNS. See deploy/README.md for the "
-            "measurement: cluster DNS here is link-local, and re-allowing it reopens the Pod CIDR."
+            "The sandbox resolves against these, not cluster DNS. See deploy/30-networkpolicy.yaml: "
+            "where cluster DNS is link-local, re-allowing it reopens the Pod CIDR."
         ),
     )
 

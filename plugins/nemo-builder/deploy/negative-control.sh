@@ -9,7 +9,7 @@
 # posture rootless BuildKit requires and watch admission refuse it. If this script reports
 # ADMITTED, every other result in this PoC is void.
 #
-# Adapted from scratch/builderlab/11-baseline-rejects-buildkit.sh, which measured on this cluster:
+# What a refusal looks like (measured on GKE and on minikube):
 #   violates PodSecurity "baseline:latest": forbidden AppArmor profile ...,
 #   seccompProfile (container "c" must not set securityContext.seccompProfile.type to "Unconfined")
 set -uo pipefail

@@ -4,8 +4,7 @@
 # Platform config for the local minikube verification. Becomes the `nemo-platform-config`
 # ConfigMap; see ../deploy/local/platform.yaml.
 #
-# Differs from ../config/platform-config.example.yaml in exactly the ways a local cluster
-# differs, and each one is a thing this environment therefore cannot verify:
+# Local-only in these ways, and each one is a thing this environment therefore cannot verify:
 #
 #   - the registry is in-cluster, anonymous and plain HTTP, so `push`'s credential handling and
 #     the reconciler's Bearer-challenge path never execute

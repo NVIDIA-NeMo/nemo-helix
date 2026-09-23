@@ -186,8 +186,7 @@ JSON or `user:password`. A `user:password` credential is only ever sent to `defa
 
 The platform also needs three Jobs execution profiles, one per step: `build-fetch`,
 `build-control` and `build-push`, each naming its ServiceAccount. `config/platform-config.minikube.yaml`
-is a complete, working config. `config/platform-config.example.yaml` shows the settings for GKE with
-Artifact Registry.
+is a complete, working config.
 
 The remaining settings are `sandbox_cpu`, `sandbox_memory`, `sandbox_dns_nameservers`,
 `runtime_class` (for example `gvisor`), `registry_mirror`, `node_selector`, `registry_insecure`
@@ -215,7 +214,8 @@ The cluster needs:
 - **One labelled build node.** The work volume is `ReadWriteOnce`, so every build pod runs on the
   node labelled `nmp.nvidia.com/build-node=true`.
 
-`deploy/README.md` records what was measured on GKE.
+`30-networkpolicy.yaml` blocks every private range by default. If your cluster's Pod or Service
+addresses fall outside them, add them to its `except` list.
 
 ## Quickstart (minikube)
 
@@ -377,7 +377,7 @@ The tests need no cluster, registry or running platform.
 | `run/` | The step programs: `fetch.py`, `supervise.py`, `push.py` |
 | `docker/` | The `nmp-build` step image, and the platform image with this plugin added |
 | `deploy/` | The build namespace; `deploy/local/` adds the minikube platform and registry |
-| `config/` | Platform configs for minikube and for GKE |
+| `config/` | The platform config for the minikube quickstart |
 
 ## Constraints
 

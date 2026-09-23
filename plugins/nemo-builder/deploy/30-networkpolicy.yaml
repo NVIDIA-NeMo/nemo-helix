@@ -23,8 +23,8 @@
 # WHY THERE IS NO DNS RULE HERE. The obvious companion to a policy like this is an allow for
 # kube-dns, and the first draft of this file had one. Two measurements removed it:
 #
-#   1. This cluster runs GKE's NodeLocal DNSCache addon, so pods do not resolve against the
-#      kube-dns Service at all -- they resolve against 169.254.20.10, a LINK-LOCAL address.
+#   1. With GKE's NodeLocal DNSCache addon, pods do not resolve against the kube-dns Service
+#      at all -- they resolve against 169.254.20.10, a LINK-LOCAL address.
 #      The `169.254.0.0/16` deny that closes the metadata server closes node-local DNS with it,
 #      and a build dies at `lookup index.docker.io: i/o timeout`. Measured.
 #   2. Adding a kube-dns allow back made the Pod CIDR reachable again -- measured, `nc` to a
@@ -42,9 +42,9 @@
 # plus a `hostAliases` entry, and add that ONE address back as its own narrow egress rule. That
 # is a deliberate, single-address hole -- not a restored DNS rule.
 #
-# Enforcement is a cluster fact, not a manifest fact: this cluster runs Calico
-# (networkPolicy.provider: CALICO, verified). On a cluster with no NetworkPolicy controller this
-# file is decorative and the sandbox is unconstrained.
+# Enforcement is a cluster fact, not a manifest fact: the CNI must enforce NetworkPolicy (Calico,
+# for example). On a cluster with no NetworkPolicy controller this file is decorative and the
+# sandbox is unconstrained -- which is why sandbox-egress-probe.sh exists.
 ---
 # 1. Default-deny, both directions, for anything wearing the sandbox label.
 #    An empty spec with both policyTypes is the deny. Everything below only ever adds back.
@@ -83,21 +83,19 @@ spec:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
-              # RFC1918. Covers this cluster's Pod and Service CIDRs, which are both inside
-              # 10/8 -- they are named again below anyway, because the RFC requires the
-              # cluster's own ranges to be stated rather than assumed to fall inside a wider
-              # block. A cluster whose CIDRs sit outside RFC1918 would silently lose the
-              # denial if this list were trimmed to the three RFC1918 blocks.
+              # RFC1918. Covers most clusters' Pod and Service CIDRs.
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
-              # Link-local. This is the node metadata server, 169.254.169.254 -- measured in
-              # the lab as reachable from a build and good for 1,436 bytes of token response.
+              # Link-local. This is the node metadata server, 169.254.169.254 -- measured as
+              # reachable from a build without this, and good for 1,436 bytes of token response.
               # It is also node-local DNS, 169.254.20.10; see the header for why that is fine.
               - 169.254.0.0/16
               # Carrier-grade NAT. GKE uses this range for some managed endpoints.
               - 100.64.0.0/10
-              # This cluster's own Pod CIDR and Service CIDR, stated explicitly.
-              # log2-gke-lab: clusterIpv4Cidr 10.1.0.0/19, servicesIpv4Cidr 10.2.0.0/22.
-              - 10.1.0.0/19
-              - 10.2.0.0/22
+              # ADD YOUR CLUSTER'S OWN Pod and Service CIDRs here if either falls outside the
+              # ranges above -- this list is the whole control, and a range missing from it is
+              # reachable. GKE reports them as `clusterIpv4Cidr` and `servicesIpv4Cidr` in
+              # `gcloud container clusters describe`; kubeadm-style clusters as the controller
+              # manager's `--cluster-cidr` and `--service-cluster-ip-range`.
+              # sandbox-egress-probe.sh checks the result against the cluster's real addresses.

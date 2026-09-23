@@ -170,8 +170,8 @@ class SandboxSpec(BaseModel):
     node_selector: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "PoC-only in practice: the work volume is ReadWriteOnce on this cluster, so every "
-            "build pod must land on one node. Production wants RWX and an empty selector."
+            "PoC-only in practice: while the work volume is ReadWriteOnce, every build pod must "
+            "land on one node. Production wants RWX and an empty selector."
         ),
     )
     dns_nameservers: list[str] = Field(

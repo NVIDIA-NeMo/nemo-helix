@@ -129,8 +129,8 @@ class TestMounts:
 
 class TestDns:
     def test_public_resolvers_not_cluster_dns(self) -> None:
-        """Cluster DNS here answers on a link-local address the egress policy denies, and
-        re-allowing it reopens the Pod CIDR. Measured; see deploy/README.md."""
+        """Where cluster DNS answers on a link-local address, the egress policy denies it, and
+        re-allowing it reopens the Pod CIDR. See deploy/30-networkpolicy.yaml."""
         spec = _pod().spec
         assert spec.dns_policy == "None"
         assert spec.dns_config.nameservers == ["8.8.8.8", "1.1.1.1"]

@@ -7,9 +7,9 @@
 #
 # ACCESS MODE -- a PoC deviation worth reading before copying this file.
 #
-# The design wants ReadWriteMany: three pods, possibly three nodes, one volume. This cluster has
-# no RWX StorageClass -- `kubectl get csidrivers` shows only pd.csi.storage.gke.io, and the
-# Filestore CSI driver is not installed. All four StorageClasses are RWO.
+# The design wants ReadWriteMany: three pods, possibly three nodes, one volume. Many clusters
+# have no RWX StorageClass out of the box -- on GKE, for example, only while the Filestore CSI
+# driver is not installed.
 #
 # RWO survives here only because the steps are strictly sequential and the `build` step mounts
 # nothing at all, so the volume is attached to one node at a time by construction. To make that
