@@ -349,7 +349,6 @@ override-dependencies = [
   "jsonpath-ng>=1.6.1",
   "grpcio>=1.71.0",
   "huggingface-hub>=1.0.1,<2.0.0",
-  "pydantic[email]>=2.9.2",             # pinned historically (openai-harmony pulls a later pydantic); verify before removing
   "ray; sys_platform == 'never'",       # ray has an unfixed critical CVE, as for why we're removing it this way see https://github.com/astral-sh/uv/issues/9174
   "fschat; sys_platform == 'never'",    # fschat is unmaintained with unfixed High/Medium CVEs; transitive via garak but never imported
   "diskcache; sys_platform == 'never'", # unfixed CVE-2025-69872; transitive via ragas but not imported
