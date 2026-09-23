@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -150,11 +150,16 @@ class IgwJudgeTransport:
         return data
 
 
-async def _serve_call(call: Any, transport: JudgeTransport, headers: dict[str, str]) -> None:
+async def _serve_call(
+    call: Any,
+    transport: JudgeTransport,
+    headers: dict[str, str],
+    lock: asyncio.Lock | None,
+) -> None:
     models = list(getattr(call, "models", ()) or ())
     if not models:
         error = InferenceMiddlewareError("Switchyard CallModel listed no models", status_code=500)
-        call.fail(error)
+        await _finish_call(call.fail, error, lock)
         return
     chat_body = llm_request_to_openai_chat(dict(call.request))
     # CallModel responses are consumed as one JSON object below. Never inherit
@@ -164,7 +169,7 @@ async def _serve_call(call: Any, transport: JudgeTransport, headers: dict[str, s
     for model_id in models:
         try:
             payload = await transport.complete(model_id, chat_body, headers)
-            call.respond(wrap_llm_response(payload))
+            await _finish_call(call.respond, wrap_llm_response(payload), lock)
             return
         except InferenceMiddlewareError as exc:
             last_error = exc
@@ -173,7 +178,15 @@ async def _serve_call(call: Any, transport: JudgeTransport, headers: dict[str, s
             last_error = InferenceMiddlewareError(str(exc), status_code=502)
             continue
     assert last_error is not None
-    call.fail(last_error)
+    await _finish_call(call.fail, last_error, lock)
+
+
+async def _finish_call(callback: Any, value: Any, lock: asyncio.Lock | None) -> None:
+    if lock is None:
+        callback(value)
+        return
+    async with lock:
+        callback(value)
 
 
 def _immediate_not_wired() -> None:
@@ -198,7 +211,7 @@ async def run_native_stream(
     require_openai_chat_path(request.path)
     try:
         return await asyncio.wait_for(
-            _run_native_stream_with_lock(
+            _run_native_stream(
                 algorithm=algorithm,
                 request=request,
                 models=models,
@@ -215,31 +228,11 @@ async def run_native_stream(
         ) from exc
 
 
-async def _run_native_stream_with_lock(
-    *,
-    algorithm: Any,
-    request: InferenceRequest,
-    models: Mapping[str, Sequence[str]],
-    headers: dict[str, str],
-    transport: JudgeTransport,
-    lock: asyncio.Lock | None,
-) -> InferenceRequest:
+async def _next_stream_step(stream: AsyncIterator[Any], lock: asyncio.Lock | None) -> Any:
     if lock is None:
-        return await _run_native_stream(
-            algorithm=algorithm,
-            request=request,
-            models=models,
-            headers=headers,
-            transport=transport,
-        )
+        return await anext(stream)
     async with lock:
-        return await _run_native_stream(
-            algorithm=algorithm,
-            request=request,
-            models=models,
-            headers=headers,
-            transport=transport,
-        )
+        return await anext(stream)
 
 
 async def _run_native_stream(
@@ -249,16 +242,26 @@ async def _run_native_stream(
     models: Mapping[str, Sequence[str]],
     headers: dict[str, str],
     transport: JudgeTransport,
+    lock: asyncio.Lock | None,
 ) -> InferenceRequest:
     request_dict = native_request_dict(request.body)
     original_llm_request = deepcopy(request_dict)
     categories = {key: list(value) for key, value in models.items()}
     libsy_headers = routing_headers(headers)
     outcome: Any = None
-    async for step in algorithm.run_stream(request_dict, categories, headers=libsy_headers or None):
+    if lock is None:
+        stream = aiter(algorithm.run_stream(request_dict, categories, headers=libsy_headers or None))
+    else:
+        async with lock:
+            stream = aiter(algorithm.run_stream(request_dict, categories, headers=libsy_headers or None))
+    while True:
+        try:
+            step = await _next_stream_step(stream, lock)
+        except StopAsyncIteration:
+            break
         call = getattr(step, "call", None)
         if call is not None:
-            await _serve_call(call, transport, libsy_headers)
+            await _serve_call(call, transport, libsy_headers, lock)
             continue
         done = getattr(step, "outcome", None)
         if done is not None:

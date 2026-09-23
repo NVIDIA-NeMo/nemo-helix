@@ -87,10 +87,14 @@ class FakeAlgorithm:
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         await asyncio.sleep(0)
+        self.active -= 1
         if self.judge:
             yield FakeCallModel(FakeCall(["ws/judge"], request))
-        yield FakeDone(FakeOutcome(self.selected, request))
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(0)
         self.active -= 1
+        yield FakeDone(FakeOutcome(self.selected, request))
 
 
 class RecordingTransport:
@@ -110,6 +114,26 @@ class RecordingTransport:
         self.bodies.append(deepcopy(body))
         if self.error is not None:
             raise self.error
+        return {"id": "judge", "choices": []}
+
+
+class BlockingTransport:
+    def __init__(self) -> None:
+        self.started = 0
+        self.both_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def complete(
+        self,
+        model_entity_id: str,
+        body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        del model_entity_id, body, headers
+        self.started += 1
+        if self.started == 2:
+            self.both_started.set()
+        await self.release.wait()
         return {"id": "judge", "choices": []}
 
 
@@ -376,6 +400,32 @@ async def test_binding_lock_serializes_algorithm_state() -> None:
             for _ in range(3)
         ]
     )
+
+    assert algorithm.max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_binding_lock_does_not_serialize_judge_io() -> None:
+    algorithm = FakeAlgorithm(judge=True)
+    transport = BlockingTransport()
+    lock = asyncio.Lock()
+    tasks = [
+        asyncio.create_task(
+            run_native_stream(
+                algorithm=algorithm,
+                request=_request(),
+                models={"judge": ["ws/judge"], "any": ["ws/strong"]},
+                headers={},
+                transport=transport,
+                lock=lock,
+            )
+        )
+        for _ in range(2)
+    ]
+
+    await asyncio.wait_for(transport.both_started.wait(), timeout=1.0)
+    transport.release.set()
+    await asyncio.gather(*tasks)
 
     assert algorithm.max_active == 1
 

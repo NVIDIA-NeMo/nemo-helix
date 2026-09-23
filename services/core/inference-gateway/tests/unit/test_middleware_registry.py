@@ -218,6 +218,31 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         assert target.missing_secret_name is None
         assert accessor.get_backend_format("ws/smart-router", "ws/llama") is BackendFormat.ANTHROPIC_MESSAGES
 
+    def test_get_inference_url_and_model_merges_headers_case_insensitively(self):
+        model_cache = ModelCache()
+        provider_info = _make_model_provider_info("ws", "nim-provider")
+        provider_info.model_provider.default_extra_headers = {
+            "x-shared": "default",
+            "X-Default": "yes",
+        }
+        provider_info.model_provider.required_extra_headers = {
+            "X-Shared": "required",
+            "X-Required": "yes",
+        }
+        entity_info = ModelEntityInfo(workspace="ws", name="llama")
+        entity_info.model_providers.append(("llama-v1", provider_info))
+        model_cache.model_entity_info_map[("ws", "llama")] = entity_info
+
+        target = self._make_accessor(model_cache=model_cache).get_inference_url_and_model("ws/llama")
+        normalized = {key.lower(): value for key, value in target.outbound_headers.items()}
+
+        assert normalized == {
+            "x-default": "yes",
+            "x-required": "yes",
+            "x-shared": "required",
+        }
+        assert len(target.outbound_headers) == 3
+
     def test_get_backend_format_uses_virtual_model_override(self):
         model_cache = ModelCache()
         virtual_model_cache = VirtualModelCache()

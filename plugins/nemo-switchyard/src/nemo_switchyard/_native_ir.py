@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from difflib import SequenceMatcher
 from typing import Any
 
 _OPENAI_CHAT = "openai_chat"
@@ -157,13 +158,124 @@ def apply_llm_request_to_openai_body(
     if llm_request.get("instructions") != original.get("instructions") or llm_request.get("messages") != original.get(
         "messages"
     ):
-        merged["messages"] = rewritten["messages"]
+        merged["messages"] = _merge_rewritten_messages(openai_body, original, llm_request)
     if llm_request.get("tools") != original.get("tools"):
         if "tools" in rewritten:
             merged["tools"] = rewritten["tools"]
         else:
             merged.pop("tools", None)
     return merged
+
+
+def _merge_rewritten_messages(
+    openai_body: dict[str, Any],
+    original: dict[str, Any],
+    rewritten: dict[str, Any],
+) -> list[Any]:
+    """Apply changed IR entries without round-tripping unchanged OpenAI messages."""
+    raw_messages = openai_body.get("messages")
+    if not isinstance(raw_messages, list):
+        return llm_request_to_openai_chat(rewritten, model=openai_body.get("model"))["messages"]
+
+    slots = deepcopy(raw_messages)
+    insertions: dict[int, list[dict[str, Any]]] = {}
+    instruction_entries, message_entries = _original_message_entries(raw_messages, original)
+    _overlay_message_group(slots, insertions, instruction_entries, rewritten.get("instructions"), instruction=True)
+    _overlay_message_group(slots, insertions, message_entries, rewritten.get("messages"), instruction=False)
+
+    merged: list[Any] = []
+    for index in range(len(slots) + 1):
+        merged.extend(insertions.get(index, []))
+        if index < len(slots) and slots[index] is not None:
+            merged.append(slots[index])
+    return merged
+
+
+def _original_message_entries(
+    raw_messages: list[Any],
+    original: dict[str, Any],
+) -> tuple[list[tuple[int, dict[str, Any]]], list[tuple[int, dict[str, Any]]]]:
+    instructions = [entry for entry in original.get("instructions") or [] if isinstance(entry, dict)]
+    messages = [entry for entry in original.get("messages") or [] if isinstance(entry, dict)]
+    instruction_entries: list[tuple[int, dict[str, Any]]] = []
+    message_entries: list[tuple[int, dict[str, Any]]] = []
+    instruction_index = 0
+    message_index = 0
+    for index, raw in enumerate(raw_messages):
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("role") in {"system", "developer"}:
+            if instruction_index < len(instructions):
+                instruction_entries.append((index, instructions[instruction_index]))
+            instruction_index += 1
+        else:
+            if message_index < len(messages):
+                message_entries.append((index, messages[message_index]))
+            message_index += 1
+    return instruction_entries, message_entries
+
+
+def _overlay_message_group(
+    slots: list[Any],
+    insertions: dict[int, list[dict[str, Any]]],
+    original_entries: list[tuple[int, dict[str, Any]]],
+    rewritten_value: Any,
+    *,
+    instruction: bool,
+) -> None:
+    rewritten_entries = [entry for entry in rewritten_value or [] if isinstance(entry, dict)]
+    matcher = SequenceMatcher(
+        None,
+        [_message_match_key(entry) for _, entry in original_entries],
+        [_message_match_key(entry) for entry in rewritten_entries],
+        autojunk=False,
+    )
+    for tag, original_start, original_end, rewritten_start, rewritten_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        for global_index, _entry in original_entries[original_start:original_end]:
+            slots[global_index] = None
+        if rewritten_start == rewritten_end:
+            continue
+        boundary = _message_insertion_boundary(
+            original_entries,
+            original_start,
+            prepend_instruction=instruction and tag == "insert",
+            message_count=len(slots),
+        )
+        insertions.setdefault(boundary, []).extend(
+            _llm_entry_to_openai(entry, instruction=instruction)
+            for entry in rewritten_entries[rewritten_start:rewritten_end]
+        )
+
+
+def _message_insertion_boundary(
+    original_entries: list[tuple[int, dict[str, Any]]],
+    group_index: int,
+    *,
+    prepend_instruction: bool,
+    message_count: int,
+) -> int:
+    if prepend_instruction and group_index == 0:
+        return 0
+    if group_index < len(original_entries):
+        return original_entries[group_index][0]
+    if original_entries:
+        return original_entries[-1][0] + 1
+    return 0 if prepend_instruction else message_count
+
+
+def _llm_entry_to_openai(entry: dict[str, Any], *, instruction: bool) -> dict[str, Any]:
+    if not instruction:
+        return _llm_message_to_openai(entry)
+    return {
+        "role": entry.get("role") or "system",
+        "content": _blocks_to_openai_content(entry.get("content") or []),
+    }
+
+
+def _message_match_key(entry: dict[str, Any]) -> str:
+    return json.dumps(entry, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def _looks_like_llm_request(body: dict[str, Any]) -> bool:

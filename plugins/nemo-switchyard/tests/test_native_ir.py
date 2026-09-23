@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from nemo_switchyard._native_ir import (
     apply_llm_request_to_openai_body,
     llm_request_to_openai_chat,
@@ -100,3 +102,54 @@ def test_outcome_request_overlay_rewrites_messages() -> None:
     merged = apply_llm_request_to_openai_body(original, ir)
     assert merged["messages"][0]["role"] == "system"
     assert merged["messages"][0]["content"] == "handoff"
+
+
+def test_instruction_rewrite_preserves_message_order_and_metadata() -> None:
+    original = {
+        "model": "ws/router",
+        "messages": [
+            {"role": "user", "name": "customer", "content": "hello"},
+            {"role": "system", "content": "late instruction"},
+            {
+                "role": "assistant",
+                "content": None,
+                "refusal": "cannot comply",
+                "reasoning_content": "private reasoning",
+            },
+        ],
+    }
+    original_ir = openai_chat_to_llm_request(original)
+    rewritten_ir = deepcopy(original_ir)
+    rewritten_ir["instructions"].insert(
+        0,
+        {"role": "system", "content": [{"type": "text", "text": "tier prompt"}]},
+    )
+
+    merged = apply_llm_request_to_openai_body(original, rewritten_ir, original_ir)
+
+    assert merged["messages"] == [
+        {"role": "system", "content": "tier prompt"},
+        original["messages"][0],
+        original["messages"][1],
+        original["messages"][2],
+    ]
+
+
+def test_instruction_replacement_stays_at_original_position() -> None:
+    original = {
+        "model": "ws/router",
+        "messages": [
+            {"role": "user", "name": "customer", "content": "hello"},
+            {"role": "system", "content": "late instruction"},
+        ],
+    }
+    original_ir = openai_chat_to_llm_request(original)
+    rewritten_ir = deepcopy(original_ir)
+    rewritten_ir["instructions"][0]["content"] = [{"type": "text", "text": "rewritten instruction"}]
+
+    merged = apply_llm_request_to_openai_body(original, rewritten_ir, original_ir)
+
+    assert merged["messages"] == [
+        original["messages"][0],
+        {"role": "system", "content": "rewritten instruction"},
+    ]

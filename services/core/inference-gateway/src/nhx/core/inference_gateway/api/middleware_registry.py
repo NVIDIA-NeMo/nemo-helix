@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, NamedTuple
 
 from fastapi import HTTPException
+from multidict import CIMultiDict
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix.types.inference.middleware_call import MiddlewareCall as SDKMiddlewareCall
 from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
@@ -162,10 +163,9 @@ class InferenceMiddlewareCacheAccessorImpl:
         if append_v1_suffix and not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
 
-        outbound_headers = {
-            **(provider.default_extra_headers or {}),
-            **(provider.required_extra_headers or {}),
-        }
+        outbound_headers = CIMultiDict(provider.default_extra_headers or {})
+        for key, value in (provider.required_extra_headers or {}).items():
+            outbound_headers[key] = value
         if provider_info.secret_value:
             header_name, header_value = render_auth_header(provider_info.secret_value, provider.auth_header_format)
             outbound_headers[header_name] = header_value
@@ -175,7 +175,7 @@ class InferenceMiddlewareCacheAccessorImpl:
             served_model_name=served_name,
             default_extra_body=dict(provider.default_extra_body or {}),
             required_extra_body=dict(provider.required_extra_body or {}),
-            outbound_headers=outbound_headers,
+            outbound_headers=dict(outbound_headers.items()),
             missing_secret_name=provider.api_key_secret_name
             if provider.api_key_secret_name and not provider_info.secret_value
             else None,
