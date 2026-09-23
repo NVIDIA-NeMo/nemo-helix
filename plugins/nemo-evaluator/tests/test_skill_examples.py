@@ -489,7 +489,7 @@ def test_multiple_metric_platform_submission_uses_cli() -> None:
 
     assert "Python SDK" not in section
     assert "client.evaluator.submit" not in section
-    assert "nemo evaluator evaluate submit --spec-file multi-metric.json" in section
+    assert "nemo evaluator evaluate --spec-file multi-metric.json" in section
 
 
 class _RecordingResource:
@@ -663,7 +663,7 @@ def test_agent_evaluation_shows_how_to_retrieve_stored_trials() -> None:
     assert callable(read_trials)
 
 
-def test_authored_skill_guidance_uses_submit_for_plugin_jobs() -> None:
+def test_authored_skill_guidance_uses_job_commands_for_plugin_jobs() -> None:
     root = _repo_root() / "skills/nemo-evaluator-plugin"
     markdown = {
         path: path.read_text(encoding="utf-8")
@@ -692,8 +692,11 @@ def test_authored_skill_guidance_uses_submit_for_plugin_jobs() -> None:
     assert "Evaluator().run_sync(" in guidance
     assert "AgentEvaluator().run(" in guidance
     assert "client.evaluator.submit(" in guidance
-    assert "nemo evaluator evaluate submit" in guidance
-    assert "nemo evaluator agent-evaluate submit" in guidance
+    assert "nemo evaluator evaluate" in guidance
+    assert "nemo evaluator agent-evaluate" in guidance
+    # The asserts above are substring matches, so they also pass on the broken `... submit` form.
+    assert "nemo evaluator evaluate submit" not in guidance
+    assert "nemo evaluator agent-evaluate submit" not in guidance
 
 
 def test_generator_documents_cli_contract_and_named_limits() -> None:

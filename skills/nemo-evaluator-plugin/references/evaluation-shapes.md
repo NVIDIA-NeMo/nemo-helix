@@ -10,7 +10,7 @@ shared scorers; the input and evidence differ.
 | What is scored? | One output per row | One or more trials per task | Ranked corpus IDs for every query |
 | Which metrics apply? | The same metric set applies to every row | Each task can define its own metrics | Per-query nDCG, recall, precision, and MAP |
 | What evidence is available? | Row fields, row scores, and aggregates | Final output, trajectory, tool calls, other trial evidence, per-task rewards, and summary | Per-query rankings and Range-averaged scores |
-| Platform job | `evaluate submit` | `agent-evaluate submit` | `retrieve-eval submit` |
+| Platform job | `evaluate` | `agent-evaluate` | `retrieve-eval` |
 
 ## Dataset-driven evaluation
 
@@ -58,7 +58,7 @@ literal values as Automodel bi-encoder training and Stage 1 mining. Set them on
 Submit the fileset and embedding target as references:
 
 ```bash
-uv run nemo evaluator retrieve-eval submit --spec \
+uv run nemo evaluator retrieve-eval --spec \
   '{"dataset":"default/eval-beir","target":"default/embed-nim","k":[1,5,10,100]}'
 ```
 
@@ -71,7 +71,7 @@ output.
 | Direction | Skill or job | Artifact |
 |---|---|---|
 | Previous | Data Designer `retrieval-prepare` (frozen) and customizer output model entity or embed/ranking NIM | `eval_beir` fileset; tuned + base model refs |
-| This stage | `nemo evaluator retrieve-eval submit` | `eval_results.json` |
+| This stage | `nemo evaluator retrieve-eval` | `eval_results.json` |
 | Next | `nemo-retrieval-recipes` deploy step, or stop after metrics | Optional NIM deploy (embed and rerank ONNX from Automodel) |
 
 End-to-end domain recipes live in `nemo-retrieval-recipes`. Do not use an LLM judge for qrels.

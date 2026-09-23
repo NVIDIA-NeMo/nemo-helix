@@ -96,11 +96,11 @@ uv pip install --python .venv/bin/python \
 # The default codex harness authenticates via your ~/.codex login (real OpenAI); the judge runs on NVIDIA.
 # Keep the two credential paths separate — do NOT point OPENAI_API_KEY/OPENAI_BASE_URL at NVIDIA, or codex
 # would send the agent to the NVIDIA endpoint. Pass the judge endpoint explicitly instead.
-export NVIDIA_API_KEY=...                                    # judge only (NVIDIA gpt-oss-120b)
+export NVIDIA_API_KEY=...                                    # judge only (NVIDIA nemotron-3-super-120b-a12b)
 
 .venv/bin/python -m packages.nemo_evaluator_sdk.examples.legal_agent_bench_fabric.run_legal_agent_bench_fabric \
     --runtime host --harness codex-cli --model gpt-5.5 \
-    --judge-model openai/gpt-oss-120b \
+    --judge-model nvidia/nemotron-3-super-120b-a12b \
     --judge-base-url https://integrate.api.nvidia.com/v1 --judge-api-key-env NVIDIA_API_KEY \
     --source-dir ./data/lab-source --output-dir ./results/lab-fabric \
     --limit 1 --parallelism 1 --no-trajectory
@@ -165,9 +165,9 @@ are also *much* faster than reasoning models on LAB's huge redline prompts — s
 
 | Harness | Runs LAB? | Notes |
 |---|---|---|
-| **`codex`** (default) | ✅ | The **only** harness whose shell tool actually runs LAB's docx/pptx/xlsx skill scripts under Fabric. OpenAI-provider-locked (auth via your `~/.codex` login, `CODEX_HOME`); configured **closed-book** here (web search off, `sandbox=workspace-write`). Agent runs on OpenAI; the judge still runs on NVIDIA. |
+| **`codex-cli`** (default) | ✅ | The **only** harness whose shell tool actually runs LAB's docx/pptx/xlsx skill scripts under Fabric. OpenAI-provider-locked (auth via your `~/.codex` login, `CODEX_HOME`); configured **closed-book** here (web search off, `sandbox=workspace-write`). Agent runs on OpenAI; the judge still runs on NVIDIA. |
 | `deepagents` | ❌ for LAB | NVIDIA-native LangChain Deep Agents, but its `execute` shell tool is **inert** with Fabric's host `FilesystemBackend` — so it can't run the skill scripts or produce document deliverables (it emitted an empty stub for LAB). Fine for non-document agents. |
-| `hermes` | ⚠️ | Provider-agnostic, but blocked today by a `requests==2.33.0` pin conflict (PR #778). Usable once resolved. |
+| `hermes-sdk` | ⚠️ | Provider-agnostic, but blocked today by a `requests==2.33.0` pin conflict (PR #778). Usable once resolved. |
 
 ## Gotchas we hit (so you don't)
 

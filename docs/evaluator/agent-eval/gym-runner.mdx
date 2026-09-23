@@ -35,16 +35,28 @@ Gym owns execution **and** scoring through either interface. Both produce the sa
 
 For a local SDK run, this runner is **not** zero-dependency — it shells out to the `gym` CLI:
 
+- **CPython 3.13.14** — `nemo-gym` declares `Requires-Python: >=3.13.14`
 - **NeMo Gym**, installed into its own `uv` environment (below)
 - **The target environment's own dependencies** — each resources-server ships its own
   `requirements.txt` (the `mcqa` example needs `tiktoken`)
 - **Model credentials** for the collector, in an `env.yaml` (below)
 
 ```bash
-uv venv ~/gym-env --python 3.12
+uv venv ~/gym-env --python 3.13.14
 uv pip install --python ~/gym-env/bin/python nemo-gym tiktoken
 export PATH="$HOME/gym-env/bin:$PATH"
 ```
+
+<Note>
+
+`uv` downloads CPython 3.13.14 on demand, so no separate install is needed. A `uv` older than that
+build carries no 3.13.14 in its embedded list and fails with `No interpreter found for Python
+3.13.14`; upgrade `uv` rather than dropping to an earlier Python.
+
+Gym starts each component server with `uv run` at the same floor, so a missing interpreter surfaces
+later as `Process <name> finished unexpectedly!`, with the real error only in the environment log.
+
+</Note>
 
 Install Gym into **its own environment** and put that environment's `bin` on `PATH`. Gym imports Ray
 at module load, and `nemo-helix` excludes Ray by constraint, so the two generally cannot share a
@@ -186,9 +198,28 @@ for score in result.summary.scores.scores:
 # runner.gym.input_tokens
 ```
 
-Gym reports accuracy on a **0–100** scale where the SDK uses **0–1**, so `runner.gym.pass@1/accuracy`
-of `50.0` corresponds to a `gym_reward.reward` mean of `0.5`. Trials, scores, and the run bundle are
-otherwise read exactly as in
+Aggregates arrive in more than one shape, and `.mean` is empty on some of them. A `scalar` aggregate
+is a single number the runner already computed, held in `.value`; a `range` aggregate is a
+distribution, with `.mean` plus `.min`, `.max`, `.median` and `sample_std_dev`. Gym produces both —
+metrics that arrive with a complete mean/min/max/median/std family become `range`, and every
+remaining key becomes `scalar` — so the shape does not follow the name prefix.
+
+Read **`headline_value`** rather than `.mean`, and the distinction stops mattering: it returns the
+one number each aggregate reports, whatever its shape.
+
+```python
+for aggregate in result.summary.scores.scores:
+    print(f"{aggregate.name}: {aggregate.headline_value}")
+# gym_reward.reward: 0.8
+# runner.gym.input_tokens: 216.4
+# runner.gym.pass@1/accuracy: 80.0
+```
+
+Compute on `gym_reward.reward`. The SDK derives it from the same rollouts on its own **0–1** scale,
+and drops Gym's duplicate of it. Treat `runner.gym.*` as Gym's own reporting, kept in Gym's units so
+it can be checked against Gym's output: accuracy there is **0–100**, so
+`runner.gym.pass@1/accuracy` of `80.0` is the same result as a `gym_reward.reward` mean of `0.8`.
+Trials, scores, and the run bundle are otherwise read exactly as in
 [Reading Results](/documentation/evaluate-models/agent-eval/reading-results).
 
 ## Output directories
@@ -346,8 +377,10 @@ adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment
   Rows that are already complete, like the bundled `example.jsonl`, are faithful; an environment
   whose rows need templating would need that step run first.
 - **Custom environments require platform support.** Package the environment as a FileSet and use
-  sandboxed execution; a live `GymAgentTaskRunner` cannot carry `environment`, `agent_ref_name`, or
-  `env_secrets`.
+  sandboxed execution; `environment` and `agent_ref_name` are `GymPlacement` fields supplied at
+  submission, so a live `GymAgentTaskRunner` cannot carry them. `env_secrets` is *not* in that
+  group — it lives on `GymRuntimeConfig` and resolves locally from your environment, so it works
+  the same way in both places.
 
 ## Next steps
 

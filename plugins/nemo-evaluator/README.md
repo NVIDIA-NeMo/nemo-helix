@@ -69,7 +69,7 @@ uv run nemo evaluator evaluate explain
 Submit the checked offline example as a durable job:
 
 ```bash
-uv run nemo evaluator evaluate submit \
+uv run nemo evaluator evaluate \
   --spec-file skills/nemo-evaluator-plugin/assets/specs/exact_match_metric.json
 ```
 
@@ -136,7 +136,7 @@ provider/model identifier, then submit the copy as a durable platform job:
 cp skills/nemo-evaluator-plugin/assets/specs/fabric_agent_eval.json \
   fabric_agent_eval.local.json
 # Edit target.model in fabric_agent_eval.local.json before submitting.
-uv run nemo evaluator agent-evaluate submit \
+uv run nemo evaluator agent-evaluate \
   --spec-file fabric_agent_eval.local.json
 ```
 

@@ -172,13 +172,14 @@ so for the one-task example above the verifier reward is `1.0`:
 
 ```
 harbor_reward.reward: 1.0
+harbor_reward.reward.pass@1: 1.0
 ```
 
 Swap `agent_name` (or `agent_import_path`) for your own agent to get a real score.
 
 <Note>
 
-Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
+Evaluator plugin submissions (`nemo evaluator agent-evaluate`) support the Harbor runner only
 through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
 `HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
 
@@ -248,7 +249,7 @@ config = HarborRuntimeConfig(
 ```
 
 The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
-`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate submit`. Instead of
+`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate`. Instead of
 `agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
 to NeMo Helix secret reference. The service resolves each reference into the job's environment at
 compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
