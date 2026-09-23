@@ -152,9 +152,6 @@ def run_ga_prompt_optimization(
             config=ga_config,
         )
 
-        if generation == ga_config.generations - 1:
-            break
-
         population = _next_generation(
             population,
             generation=generation + 1,
@@ -169,6 +166,35 @@ def run_ga_prompt_optimization(
             trial_count=next_phase_trial_number,
             optimized_payload=_optimized_payload_for_best(base_payload, best_so_far, ga_config),
         )
+
+    logger.info("Evaluating prompt GA final offspring generation %d", ga_config.generations + 1)
+    next_phase_trial_number = _evaluate_population(
+        base_payload,
+        population,
+        config=ga_config,
+        evaluator=evaluator,
+        output_dir=output_dir,
+        next_phase_trial_number=next_phase_trial_number,
+        trial_number_offset=trial_number_offset,
+    )
+    try:
+        assign_generation_fitness(
+            population,
+            metrics=ga_config.metrics,
+            mode=ga_config.multi_objective_mode,
+            diversity_lambda=ga_config.diversity_lambda,
+        )
+    except GaFitnessError as exc:
+        optimized_payload = _optimized_payload_for_best(base_payload, best_so_far, ga_config)
+        _write_history_artifacts(output_dir, history=(*history, *population))
+        raise GaPromptOptimizerError(
+            str(exc),
+            optimized_payload=optimized_payload,
+            trial_count=next_phase_trial_number,
+        ) from exc
+
+    history.extend(copy.deepcopy(population))
+    best_so_far = rank_valid_individuals(population)[0]
 
     if best_so_far is None:
         message = "Prompt GA did not produce a valid individual."

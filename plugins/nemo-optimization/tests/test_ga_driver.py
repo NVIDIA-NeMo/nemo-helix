@@ -45,9 +45,10 @@ def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Pat
         trial_number_offset=10,
     )
 
-    assert result.executed_trials == 6
+    assert result.executed_trials == 9
     assert result.generations_completed == 2
-    assert result.best_individual.global_trial_number in {13, 14, 15}
+    assert result.best_individual.global_trial_number in {16, 17, 18}
+    assert result.best_individual.generation == 2
     assert "[system_prompt:" in result.optimized_payload["instructions"]["system"]["content"]
     assert "optimizer" in result.optimized_payload
     assert (tmp_path / "optimized_config.yml").is_file()
@@ -64,6 +65,9 @@ def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Pat
         13,
         14,
         15,
+        16,
+        17,
+        18,
     ]
     assert {call["metadata"]["nemo.optimizer.phase"] for call in evaluator.calls} == {"prompt"}
     assert any(individual.carried_from for individual in result.history)
@@ -107,6 +111,34 @@ def test_ga_uses_explicit_initial_prompt_and_preserves_required_variables(tmp_pa
     )
 
     assert "Seed prompt {question}." in result.optimized_payload["instructions"]["system"]["content"]
+
+
+def test_one_generation_evaluates_the_evolved_population(tmp_path: Path) -> None:
+    payload = _payload(
+        optimizer={"reps_per_param_set": 1},
+        prompt={
+            "population_size": 2,
+            "generations": 1,
+            "mutation_rate": 1.0,
+            "crossover_rate": 0.0,
+            "elitism": 0,
+            "seed": 11,
+        },
+    )
+    evaluator = RecordingEvaluator()
+
+    result = run_ga_prompt_optimization(
+        payload,
+        tmp_path,
+        evaluator,
+        DeterministicTransformer(),
+    )
+
+    assert result.executed_trials == 4
+    assert result.generations_completed == 1
+    assert result.best_individual.generation == 1
+    assert {individual.generation for individual in result.history} == {0, 1}
+    assert [call["trial_number"] for call in evaluator.calls] == [0, 1, 2, 3]
 
 
 def test_ga_rejects_transform_that_drops_required_variables(tmp_path: Path) -> None:
@@ -454,9 +486,9 @@ def test_final_winner_comes_from_last_generation(tmp_path: Path) -> None:
         DeterministicTransformer(),
     )
 
-    assert result.executed_trials == 4
+    assert result.executed_trials == 6
     assert result.generations_completed == 2
-    assert result.best_individual.generation == 1
+    assert result.best_individual.generation == 2
 
 
 def test_adaptive_feedback_trigger_matches_nat_stagnation_window() -> None:
