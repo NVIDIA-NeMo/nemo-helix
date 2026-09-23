@@ -5,17 +5,52 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
 });
 
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { mockOptimizeJobs } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
-import { fireEvent } from '@testing-library/react';
+import { fireEvent, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
+
+const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/optimize`;
+const OPTIMIZE_JOB_URL = `${OPTIMIZE_JOBS_URL}/:name`;
+
+const listOnly = (studyName: string) => {
+  const data = mockOptimizeJobs.filter((job) => job.name === studyName);
+  server.use(
+    http.get(OPTIMIZE_JOBS_URL, () =>
+      HttpResponse.json({
+        data,
+        pagination: {
+          page: 1,
+          page_size: 20,
+          current_page_size: 1,
+          total_pages: 1,
+          total_results: 1,
+        },
+      })
+    )
+  );
+};
+
+const openRowActions = async (user: ReturnType<typeof userEvent.setup>, studyName: string) => {
+  const row = await screen.findByRole(
+    'row',
+    { name: new RegExp(studyName) },
+    { timeout: LG_SELECTOR_TIMEOUT }
+  );
+  await user.click(within(row).getByRole('button', { name: /actions/i }));
+  return screen.findByRole('menuitem', { name: 'Delete' });
+};
 
 const renderDetail = (search = '?tab=optimizations') =>
   renderRoute(undefined, {
@@ -72,5 +107,32 @@ describe('AgentDetailRoute optimizations tab', () => {
     } finally {
       server.events.removeListener('request:start', capture);
     }
+  });
+
+  it('deletes a finished study from its row actions', async () => {
+    const user = userEvent.setup();
+    const deleted: string[] = [];
+    server.use(
+      http.delete(OPTIMIZE_JOB_URL, ({ params }) => {
+        deleted.push(String(params.name));
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    listOnly('brevity-sweep-3');
+    renderDetail();
+
+    await user.click(await openRowActions(user, 'brevity-sweep-3'));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Optimization Study' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(deleted).toEqual(['brevity-sweep-3']));
+  });
+
+  it('does not offer delete while a study is still running', async () => {
+    const user = userEvent.setup();
+    listOnly('accuracy-sweep-1');
+    renderDetail();
+
+    expect(await openRowActions(user, 'accuracy-sweep-1')).toBeDisabled();
   });
 });

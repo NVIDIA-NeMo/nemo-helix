@@ -3,19 +3,24 @@
 
 import type { FilterOperators, WithFilterOperators } from '@nemo/common/src/api/filterOperators';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useAgentsListOptimizeJobs } from '@nemo/sdk/generated/agents/agents';
+import {
+  getAgentsListOptimizeJobsQueryKey,
+  useAgentsDeleteOptimizeJob,
+  useAgentsListOptimizeJobs,
+} from '@nemo/sdk/generated/agents/agents';
 import type { OptimizeJob, OptimizeJobsListFilter } from '@nemo/sdk/generated/agents/schema';
-import { Banner, Text } from '@nvidia/foundations-react-core';
+import { Banner, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
-import { keepPreviousData } from '@tanstack/react-query';
-import { type ComponentProps, type FC, useCallback } from 'react';
+import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { type ComponentProps, type FC, useCallback, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_STATUSES = new Set(['completed', 'error', 'cancelled']);
@@ -88,38 +93,61 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
 
   const resetFilters = useCallback(() => dataViewState.resetFilters(), [dataViewState]);
 
-  const makeColumns: ComponentProps<typeof StudioDataView<OptimizeJob>>['makeColumns'] = (
-    { accessor },
-    { rowActionsColumn }
-  ) => [
-    accessor('name', {
-      header: 'Name',
-      cell: ({ row }) => <Text title={row.original.name}>{row.original.name}</Text>,
-    }),
-    accessor((row) => row.spec?.optimize_config, {
-      id: 'optimize_config',
-      header: 'Config',
-      cell: ({ row }) => (
-        <Text className="text-secondary max-w-[280px] truncate" kind="body/regular/sm">
-          {row.original.spec?.optimize_config ?? '—'}
-        </Text>
-      ),
-    }),
-    accessor('status', {
-      header: 'Status',
-      size: 125,
-      cell: ({ row }) =>
-        row.original.status ? <StatusBadge status={row.original.status} /> : null,
-    }),
-    accessor('created_at', {
-      id: 'created_at',
-      header: 'Created',
-      size: 150,
-      cell: ({ row }) =>
-        row.original.created_at ? <RelativeTime datetime={row.original.created_at} /> : null,
-    }),
-    rowActionsColumn({ size: 70, enableResizing: false }),
-  ];
+  const queryClient = useQueryClient();
+  const [deleteTarget, setDeleteTarget] = useState<OptimizeJob | null>(null);
+  const { mutateAsync: deleteStudy } = useAgentsDeleteOptimizeJob({
+    mutation: {
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: getAgentsListOptimizeJobsQueryKey(workspace) }),
+    },
+  });
+
+  const makeColumns = useCallback<
+    ComponentProps<typeof StudioDataView<OptimizeJob>>['makeColumns']
+  >(
+    ({ accessor }, { rowActionsColumn }) => [
+      accessor('name', {
+        header: 'Name',
+        cell: ({ row }) => <Text title={row.original.name}>{row.original.name}</Text>,
+      }),
+      accessor((row) => row.spec?.optimize_config, {
+        id: 'optimize_config',
+        header: 'Config',
+        cell: ({ row }) => (
+          <Text className="text-secondary max-w-[280px] truncate" kind="body/regular/sm">
+            {row.original.spec?.optimize_config ?? '—'}
+          </Text>
+        ),
+      }),
+      accessor('status', {
+        header: 'Status',
+        size: 125,
+        cell: ({ row }) =>
+          row.original.status ? <StatusBadge status={row.original.status} /> : null,
+      }),
+      accessor('created_at', {
+        id: 'created_at',
+        header: 'Created',
+        size: 150,
+        cell: ({ row }) =>
+          row.original.created_at ? <RelativeTime datetime={row.original.created_at} /> : null,
+      }),
+      rowActionsColumn({
+        size: 70,
+        enableResizing: false,
+        rowActions: (job): DropdownEntry[] => [
+          {
+            children: 'Delete',
+            danger: true,
+            // The jobs service refuses to delete a study that has not finished.
+            disabled: !TERMINAL_STATUSES.has(job.status ?? ''),
+            onSelect: () => setDeleteTarget(job),
+          },
+        ],
+      }),
+    ],
+    []
+  );
 
   return (
     <>
@@ -161,6 +189,25 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
           },
         }}
       />
+
+      {deleteTarget ? (
+        <DeleteConfirmationModal
+          open
+          title="Delete Optimization Study"
+          description={`Delete "${deleteTarget.name}" and its trial results? This cannot be undone.`}
+          successText="Optimization study deleted."
+          onDelete={async () => {
+            try {
+              await deleteStudy({ workspace, name: deleteTarget.name });
+              return true;
+            } catch {
+              return false;
+            }
+          }}
+          onClose={() => setDeleteTarget(null)}
+          simpleConfirm
+        />
+      ) : null}
     </>
   );
 };
