@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Platform agent for --agent optimize (nemo-agents-spec-v1).
-# Defaults match optimize-chatonly.yaml (inference-api). For a local IGW, edit
-# model + base_url before `nemo agents create` — see README.md.
+# Models route through the local platform inference gateway: optimize jobs do not
+# inherit provider keys, so the gateway holds the key. See README.md setup step 5.
 config_format: nemo-agents-spec-v1
 name: hermes-optimize-chatonly
 description: Hermes chat-only agent for optimize --agent demos.
@@ -21,10 +21,9 @@ harnesses:
     kind: hermes
     model:
       provider: openai
-      # inference-api.nvidia.com model ids are often prefixed (e.g. nvidia/meta/...).
-      model: nvidia/nvidia/nemotron-3-nano-30b-a3b
-      base_url: https://inference-api.nvidia.com/v1
-      api_key_env: NVIDIA_API_KEY
+      model: nvidia-nemotron-3-5-lightning-30b-a3b
+      base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
+      api_key_env: NEMO_AGENTS_IGW_API_KEY
       temperature: 0.0
     settings:
       max_tokens: 256
@@ -34,9 +33,10 @@ harnesses:
 models:
   judge:
     provider: openai
-    model: nvidia/nvidia/nemotron-3-nano-30b-a3b
-    base_url: https://inference-api.nvidia.com/v1
-    api_key_env: NVIDIA_API_KEY
+    # A reasoning model spends its reply thinking and never reaches the JSON the judge parses.
+    model: nvidia-nemotron-3-super-120b-a12b
+    base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
+    api_key_env: NEMO_AGENTS_IGW_API_KEY
     temperature: 0.0
     settings:
       max_tokens: 512

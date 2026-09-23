@@ -72,6 +72,49 @@ export NEMO_BASE_URL="${NEMO_BASE_URL:-$NHX_BASE_URL}"
 export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
 ```
 
+### 5. Route models through the platform gateway (platform submissions)
+
+A study submitted to the platform runs as a job, and jobs do **not** inherit
+provider keys such as `NVIDIA_API_KEY` from the platform process. A model that
+calls `inference-api.nvidia.com` or `integrate.api.nvidia.com` directly fails
+every trial with `NVIDIA_API_KEY is required for Hermes mode`. Route models
+through the platform inference gateway instead: the gateway holds the key as a
+platform secret, and optimize binds a placeholder key for gateway-routed models.
+
+[`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) is set up this way.
+Register a provider once:
+
+```bash
+printf '%s' "$NVIDIA_API_KEY" | nemo secrets create nvidia-build-key \
+  --from-file - --workspace default
+
+nemo inference providers create nvidia-build \
+  --workspace default \
+  --host-url "https://integrate.api.nvidia.com" \
+  --api-key-secret-name "nvidia-build-key"
+
+nemo wait inference provider nvidia-build --workspace default
+```
+
+Confirm the agent's model answers through the gateway:
+
+```bash
+curl -s "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+  -H "Authorization: Bearer not-used" -H "Content-Type: application/json" \
+  -d '{"model": "nvidia-nemotron-3-5-lightning-30b-a3b", "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+Repeat with `nvidia-nemotron-3-super-120b-a12b`, the judge. The judge must answer
+with plain JSON: a reasoning model spends its reply thinking, runs out of
+tokens, and every trial scores 0 with `Error in evaluator from parsing judge LLM
+response`.
+
+The gateway lists every model in the provider catalog, but a key can only call
+some of them; others return an upstream 404 or 410. If yours cannot call these,
+pick a `model_entity_id` that answers from
+`nemo inference providers get nvidia-build --workspace default` and set it in
+`agent.yaml`.
+
 ### Common bundle rules
 
 - **`prepare-fileset` reads the bundle from your filesystem; `optimize` reads it
@@ -150,13 +193,9 @@ fail the fileset size check).
 ```bash
 source "$REPO_ROOT/.venv/bin/activate"
 
-# Optional: retarget models to your platform IGW before create, e.g.
-#   model: <your-igw-model-id>
-#   base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
-#   api_key_env: NEMO_AGENTS_IGW_API_KEY
-# (Replace host/model with your NHX_BASE_URL and IGW model id; values are
-# stored as-is at create time — no ${...} expansion for this path.)
-# Defaults in agent.yaml use inference-api (same as optimize-chatonly.yaml).
+# agent.yaml routes both models through the gateway at localhost:8080 (setup step 5).
+# Values are stored as-is at create time — no ${...} expansion — so edit
+# base_url before create if your NHX_BASE_URL differs.
 
 nemo agents create \
   --name hermes-optimize-chatonly \
@@ -248,6 +287,11 @@ nemo agents optimize \
 ```
 
 For the overlay example, add `--agent hermes-optimize-chatonly`.
+
+The inline configs (`optimize-chatonly.yaml`, `optimize-mcp*.yaml`) call
+`inference-api.nvidia.com` directly, which only works for local runs where your
+shell holds the key. To submit one to the platform, point its models at the
+gateway first, as in setup step 5.
 
 ### 3. Watch it
 
