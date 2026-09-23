@@ -1853,14 +1853,22 @@ def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> boo
     return True
 
 
-def _print_sample_setup_complete(base_url: str) -> None:
+def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
     """Print the sample workspace completion card."""
     studio_url = f"{base_url.rstrip('/')}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
     remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
+    if complete:
+        status = f"{CHECK} [green bold]Sample workspace ready[/green bold]"
+        message = "Explore the sample agent, dataset, and evaluation configuration in Studio."
+        border_style = "green"
+    else:
+        status = f"{WARN} [yellow bold]Sample workspace setup incomplete[/yellow bold]"
+        message = "Review the warnings above, then run [cyan]nemo setup[/cyan] again to retry."
+        border_style = "yellow"
     lines = [
-        f"{CHECK} [green bold]Sample workspace ready[/green bold]",
+        status,
         "",
-        "Explore the sample agent, dataset, and evaluation configuration in Studio.",
+        message,
         "",
         f"[bold]Studio:[/bold] [link={studio_url}]{studio_url}[/link]",
         f"[bold]Remove:[/bold] [cyan]{remove_command}[/cyan]",
@@ -1870,7 +1878,7 @@ def _print_sample_setup_complete(base_url: str) -> None:
             "\n".join(lines),
             title="[bold]Sample agent[/bold]",
             title_align="left",
-            border_style="green",
+            border_style=border_style,
             box=box.ROUNDED,
             padding=(1, 1),
         )
@@ -3078,13 +3086,18 @@ def _run_interactive_mode(
         selected_path = _prompt_post_setup_path()
         if selected_path == "sample":
             workspaces_client = cli_context.typed_client(WorkspacesClient)
-            if _ensure_workspace_exists(
-                workspaces_client,
-                _SAMPLE_WORKSPACE_NAME,
-                description=_SAMPLE_WORKSPACE_DESCRIPTION,
-            ):
+            try:
+                workspace_created = _ensure_workspace_exists(
+                    workspaces_client,
+                    _SAMPLE_WORKSPACE_NAME,
+                    description=_SAMPLE_WORKSPACE_DESCRIPTION,
+                )
+            except Exception as exc:
+                console.print(f"  {WARN} Could not create workspace '{_SAMPLE_WORKSPACE_NAME}': {exc}")
+                return selected_path
+            if workspace_created:
                 console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
-            _maybe_deploy_sample_agent(
+            agent_ready = _maybe_deploy_sample_agent(
                 base_url,
                 _SAMPLE_WORKSPACE_NAME,
                 default_model,
@@ -3092,9 +3105,12 @@ def _run_interactive_mode(
                 certificate_authority=certificate_authority,
             )
             files_client = cli_context.typed_client(FilesClient)
-            if _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME):
-                _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
-            _print_sample_setup_complete(base_url)
+            dataset_ready = _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME)
+            eval_config_ready = dataset_ready and _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
+            _print_sample_setup_complete(
+                base_url,
+                complete=all((agent_ready, dataset_ready, eval_config_ready)),
+            )
         return selected_path
 
     except UserCancelled:
