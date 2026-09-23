@@ -255,7 +255,6 @@ class EntityGetterProtocol(Protocol[EntityT]):
         name: str,
         workspace: str,
         parent: Optional[str] = None,
-        local_only: bool = False,
     ) -> EntityT: ...
 
 
@@ -754,10 +753,7 @@ class EntityClient:
             name: Entity name (can be workspace-qualified like "prod/my-model")
             parent: Optional parent entity ID for nested entities
             workspace: Optional workspace override (ignored if name is qualified)
-            local_only: Only return an entity that lives in the requested workspace. A
-                globally shareable type otherwise also resolves out of the global
-                workspace; pass True before any write, so a request against one
-                workspace can never modify or delete the shared entity it resolved to.
+            local_only: Skip the global-workspace fallback; pass True before any write.
 
         Returns:
             Entity matching the name

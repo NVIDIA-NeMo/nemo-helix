@@ -1,19 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolution order for the global workspace.
-
-The ``default`` workspace doubles as the installation-wide GLOBAL workspace: entities of
-a shared type that live there are visible from every workspace, so teams do not duplicate
-expensive resources per workspace.
-
-A bare name can therefore match in two places. The precedence rule is **local wins**: a
-name is resolved in the request workspace first and only then in the global workspace, so
-adding a global entity can never silently redirect a workspace's existing reference. Every
-lookup that participates in global sharing must iterate :func:`workspace_lookup_order`
-rather than rolling its own fallback, otherwise the services disagree about which entity a
-name refers to.
-"""
+"""The ``default`` workspace doubles as the global workspace; lookups try the local workspace first."""
 
 from nmp.common.entities.constants import DEFAULT_WORKSPACE
 

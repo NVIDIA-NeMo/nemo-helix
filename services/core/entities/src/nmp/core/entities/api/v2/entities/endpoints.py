@@ -350,7 +350,6 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
-    # Reads of a globally shareable type also see the global workspace; writes do not.
     accessible_workspaces = await get_accessible_workspaces(repository)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
