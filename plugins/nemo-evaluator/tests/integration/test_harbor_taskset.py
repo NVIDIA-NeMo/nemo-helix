@@ -1,34 +1,36 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Harbor taskset E2E with real services/Docker and the deterministic example agent.
+"""Harbor taskset integration test with a local platform, Docker, and the deterministic example agent.
 
 Run from the repository root with Python 3.12+ and Docker running::
 
-    uv sync --frozen --package nemoplatform --package nemo-evaluator-plugin --extra harbor
+    uv sync --frozen --package nemohelix --package nemo-evaluator-plugin --extra harbor
     NEMO_PLUGIN_SERVICES_ALLOWLIST=evaluator \\
     NEMO_PLUGIN_CONTROLLERS_ALLOWLIST='' \\
     RUN_AGENT_EVAL_INTEGRATION=1 UV_NO_SYNC=1 uv run --frozen --no-sync pytest \\
-      plugins/nemo-evaluator/tests/integration/test_harbor_taskset_e2e.py -v -s -n 0
+      plugins/nemo-evaluator/tests/integration/test_harbor_taskset.py -v -s -n 0
 
-CI runs this serially after the general integration suite when the Harbor E2E
-path filter or dependency filter matches, and on manual workflow dispatch.
-Without RUN_AGENT_EVAL_INTEGRATION=1 it skips before starting any fixtures.
-Once opted in, missing Harbor or unavailable Docker FAILS rather than skips.
+CI runs this serially after the general integration suite when the Harbor
+integration path filter or dependency filter matches, and on manual workflow
+dispatch. Without RUN_AGENT_EVAL_INTEGRATION=1 it skips before starting any
+fixtures. Once opted in, missing Harbor or unavailable Docker FAILS rather than skips.
 
 The shared fixture starts an isolated platform on port 8090 (override with
-NMP_AGENT_BASE_URL); the port must be free. Database, files, and job storage are
+NHX_AGENT_BASE_URL); the port must be free. Database, files, and job storage are
 temporary. Plugin allowlists exclude unrelated plugins while keeping core
 services/controllers. UV_NO_SYNC preserves the Harbor extra in child processes.
 The deterministic agent needs no API key or OpenAI calls; Docker image builds
 may need network access.
 
-Repeat publication must return identical revision pins. The three saved trials
-and scores distinguish a correct greeting (reward=1), a completed wrong answer
+Publication follows the Harbor runner guide: discover the dataset, replace each
+task, replace the taskset from the returned IDs, and submit a HarborAgentTaskRunner.
+Repeat publication must reuse the same revisions. The three saved trials and
+scores distinguish a correct greeting (reward=1), a completed wrong answer
 (reward=0, format_ok=1), and an AgentTimeoutError (partial, reward=0). The summary
 must count the error; raw Harbor output must show only the first step executed.
-The typed submit API has no profile selector, so the fixture's default subprocess
-profile is used; it has the same configuration as harbor-test.
+Runner submission uses the fixture's default subprocess profile, which has the
+same configuration as harbor-test.
 
 Polling is bounded to 5 minutes; the overall test timeout is 8 minutes, within
 the CI step's 10-minute limit (including dependency installation). Job
@@ -46,15 +48,18 @@ import json
 import os
 import subprocess
 import tarfile
-import time
 import uuid
 from pathlib import Path
 
 import pytest
-from nemo_evaluator.sdk.harbor import publish_harbor_tasks
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.evaluator.client import EvaluatorClient
-from nemo_platform_plugin.evaluator.types import SubmitAgentEvalJobRequest
+from nemo_evaluator.api.schemas import TasksetRef
+from nemo_evaluator.sdk.resources import Evaluator
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+    HarborAgentTaskRunner,
+    HarborRuntimeConfig,
+    discover_harbor_tasks,
+)
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
 
 pytestmark = [
     pytest.mark.integration,
@@ -73,81 +78,63 @@ EXPECTED = {
 }
 
 
-def test_harbor_taskset_e2e(request: pytest.FixtureRequest, tmp_path: Path) -> None:
+def test_harbor_taskset(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     importlib.import_module("harbor")
     try:
         docker = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
-        pytest.fail(f"Docker daemon is required for the opted-in E2E test: {exc}")
+        pytest.fail(f"Docker daemon is required for the opted-in integration test: {exc}")
     if docker.returncode:
         pytest.fail(f"Docker daemon is required: {docker.stderr.decode(errors='replace')}")
 
     # Resolve only after prerequisite checks, so skipped tests never launch services.
     base_url = request.getfixturevalue("subprocess_platform")
-    client = NemoClient(base_url=base_url, workspace="default")
-    evaluator = EvaluatorClient.from_client(client)
-    name = f"harbor-e2e-{uuid.uuid4().hex[:12]}"
-    member_names = {task_id.split("/")[1]: f"{name}-{task_id.split('/')[1]}" for task_id in EXPECTED}
+    evaluator_client = EvaluatorClient(base_url=base_url, workspace="default")
+    evaluator = Evaluator(client=evaluator_client)
+    name = f"harbor-taskset-{uuid.uuid4().hex[:12]}"
 
     def publish():
-        return publish_harbor_tasks(
-            DATASET,
-            client=client,
-            workspace="default",
-            taskset_name=name,
-            fileset_ref=f"default/{name}",
-            member_names=member_names,
-            register=True,
-            replace=False,
-        )
+        tasks = [
+            evaluator.tasks.replace(f"{name}-{task.id.split('/')[1]}", task=task)
+            for task in discover_harbor_tasks(DATASET)
+        ]
+        return tasks, evaluator.tasksets.replace(name, tasks=[task.id for task in tasks])
 
-    upload_details = publish()
-    repeated = publish()
-    assert upload_details.taskset_ref is not None
-    assert "#" in upload_details.taskset_ref.root
-    assert repeated.taskset_ref == upload_details.taskset_ref
-    pins = {member_details.native_name: member_details.task_ref for member_details in upload_details.members}
-    assert len(pins) == 3
-    assert all(pin is not None and "#" in pin.root for pin in pins.values())
-    assert {member_details.native_name: member_details.task_ref for member_details in repeated.members} == pins
-    (tmp_path / "publication.json").write_text(upload_details.model_dump_json(indent=2))
+    tasks, taskset = publish()
+    repeated_tasks, repeated_taskset = publish()
+    assert {task.spec.native_task_id for task in tasks} == EXPECTED.keys()
+    assert [task.revision for task in repeated_tasks] == [task.revision for task in tasks]
+    assert repeated_taskset.revision == taskset.revision
+    assert len(taskset.tasks) == 3
+    assert all("#" in ref.root for ref in taskset.tasks)
+    assert repeated_taskset.tasks == taskset.tasks
+    (tmp_path / "publication.json").write_text(
+        json.dumps([task.model_dump(mode="json") for task in tasks] + [taskset.model_dump(mode="json")], indent=2)
+    )
 
-    # The typed submit request exposes only spec. The fixture's default profile
-    # uses the same subprocess executor configuration as harbor-test.
-    job = evaluator.submit_agent_eval_job(
-        workspace="default",
-        body=SubmitAgentEvalJobRequest(
-            spec={
-                "tasks": upload_details.taskset_ref.root,
-                "target": {
-                    "kind": "harbor",
-                    "agent_import_path": "nemo_evaluator.examples.harbor_test_agent:WrappedAgent",
-                    "n_attempts": 1,
-                    "n_concurrent_trials": 1,
-                    "max_retries": 0,
-                },
-            }
+    # The runner has no profile selector, so the fixture's default subprocess profile is used.
+    job = evaluator.submit(
+        tasks=TasksetRef(f"default/{name}"),
+        target=HarborAgentTaskRunner(
+            config=HarborRuntimeConfig(
+                agent_import_path="nemo_evaluator.examples.harbor_test_agent:WrappedAgent",
+                n_attempts=1,
+                n_concurrent_trials=1,
+                max_retries=0,
+            ),
         ),
-    ).data()
-    (tmp_path / "job.json").write_text(job.model_dump_json(indent=2))
-    deadline = time.monotonic() + 300
+    )
+    (tmp_path / "job.json").write_text(job.job.model_dump_json(indent=2))
     try:
-        while True:
-            status = evaluator.get_agent_eval_job_status(workspace="default", name=job.name).data()
-            (tmp_path / "status.json").write_text(status.model_dump_json(indent=2))
-            if status.status.value in {"completed", "error", "failed", "cancelled"}:
-                break
-            if time.monotonic() >= deadline:
-                pytest.fail(f"Job {job.name} timed out: {status.model_dump_json()}; diagnostics: {tmp_path}")
-            time.sleep(2)
-        assert status.status.value == "completed", (
-            f"Job {job.name}: {status.model_dump_json()}; diagnostics: {tmp_path}"
-        )
+        job.wait_until_done(poll_interval_seconds=2, job_timeout_seconds=300, pending_timeout_seconds=300)
     finally:
+        (tmp_path / "status.json").write_text(job.get_job_status().model_dump_json(indent=2))
         # Failure to retrieve logs must not obscure the original polling failure.
         try:
             logs = (
-                evaluator.list_agent_eval_job_logs(workspace="default", name=job.name, query_params={"tail": 100})
+                evaluator_client.list_agent_eval_job_logs(
+                    workspace="default", name=job.name, query_params={"tail": 100}
+                )
                 .page()
                 .items
             )
@@ -157,7 +144,7 @@ def test_harbor_taskset_e2e(request: pytest.FixtureRequest, tmp_path: Path) -> N
         (tmp_path / "job-logs.jsonl").write_text(log_text)
         print(f"Job {job.name}; diagnostics: {tmp_path}\nRecent logs:\n{log_text}")
 
-    payload = evaluator.download_agent_eval_job_result(
+    payload = evaluator_client.download_agent_eval_job_result(
         workspace="default", job=job.name, name="agent-eval-results"
     ).read()
     (tmp_path / "agent-eval-results.tar.gz").write_bytes(payload)
