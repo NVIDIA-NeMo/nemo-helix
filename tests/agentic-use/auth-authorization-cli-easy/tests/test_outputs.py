@@ -11,21 +11,20 @@ a separate binding with granted_at and revoked_at timestamps.
 
 import os
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.iam.client import IAMClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 
 
-def _get_client() -> NeMoHelix:
+def _get_client() -> NemoClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url)
+    return NemoClient(base_url=nhx_base_url)
 
 
 def test_workspace_exists() -> None:
     """Test that the harbor-auth-test workspace was created."""
     client = _get_client()
-    response = client_from_platform(client, WorkspacesClient).list_workspaces()
+    response = WorkspacesClient.from_client(client).list_workspaces()
     workspace_names = [ws.name for ws in response.items()]
 
     assert "harbor-auth-test" in workspace_names, (
@@ -36,9 +35,7 @@ def test_workspace_exists() -> None:
 def test_current_members() -> None:
     """Test that the current member list matches expected final state."""
     client = _get_client()
-    response = (
-        client_from_platform(client, WorkspacesClient).list_workspace_members(workspace="harbor-auth-test").data()
-    )
+    response = WorkspacesClient.from_client(client).list_workspace_members(workspace="harbor-auth-test").data()
     members = {m.principal: m.roles for m in response.data}
 
     # viewer@test.com should now be Editor (was promoted from Viewer)
@@ -64,7 +61,7 @@ def test_role_binding_history() -> None:
     giving us an audit trail of every grant and revocation.
     """
     client = _get_client()
-    response = client_from_platform(client, IAMClient).list_role_bindings(query_params={"page_size": 100})
+    response = IAMClient.from_client(client).list_role_bindings(query_params={"page_size": 100})
 
     # Filter to our workspace
     bindings = [b for b in response.items() if b.workspace == "harbor-auth-test"]
