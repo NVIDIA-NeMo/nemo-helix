@@ -5,13 +5,12 @@
 
 Verifies the route's custom-field filter actually works end-to-end: ``metric_type`` is a ``data.*``
 entity field, so without the ``DataFilter`` translation the entity store 500s. Pure CRUD (create +
-list) — no online target or IGW — so it only needs the host subprocess backend. Shares the evaluator-plugin
-integration opt-in (``RUN_AGENT_EVAL_INTEGRATION``) and the session-scoped ``subprocess_platform``.
+list) — no online target or IGW — so it only needs the host subprocess backend, through conftest's
+session-scoped ``subprocess_platform``.
 """
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -22,13 +21,7 @@ from nemo_helix_plugin.sdk import NeMoHelix
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 WORKSPACE = "default"
 
@@ -39,7 +32,7 @@ def _unique(prefix: str) -> str:
 
 @pytest.mark.timeout(300)
 def test_metric_type_filter_narrows_listing(subprocess_platform: str) -> None:
-    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()

@@ -23,7 +23,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent import
 )
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
-_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0b1"
+_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0"
 
 
 class _ExecResult:

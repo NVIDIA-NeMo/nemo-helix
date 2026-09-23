@@ -49,7 +49,6 @@ from nemo_helix_plugin.sdk import NeMoHelix
 
 WORKSPACE = "default"
 
-#: Runs in CI, unlike the ``RUN_AGENT_EVAL_INTEGRATION`` siblings in this directory.
 pytestmark = pytest.mark.integration
 
 

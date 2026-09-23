@@ -80,6 +80,7 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing.e2e.jobs import wait_budget
 
 from e2e.services_pool_fixtures import (  # noqa: F401
     _services,
@@ -136,6 +137,46 @@ def ngc_secret(sdk: NeMoHelix, workspace: str, ngc_api_key: str) -> Iterator[str
         secrets.delete_secret(workspace=workspace, name=secret_name)
     except Exception:
         pass  # Best-effort cleanup; the workspace is deleted anyway
+
+
+# ---- Job wait budget --------------------------------------------------------
+
+# Share of a test's pytest-timeout budget that job waits may consume. The rest
+# covers the call phase's other work: setup before the wait, the diagnostics a
+# failed wait collects, and ``finally`` cleanup.
+_JOB_WAIT_BUDGET_FRACTION = 0.8
+
+
+def _effective_pytest_timeout(item: pytest.Item) -> float | None:
+    """Return the pytest-timeout budget in force for *item*, in seconds."""
+    marker = item.get_closest_marker("timeout")
+    if marker is not None:
+        value = marker.kwargs.get("timeout")
+        if value is None and marker.args:
+            value = marker.args[0]
+        if value is not None:
+            return float(value)
+    try:
+        configured = item.config.getini("timeout")
+    except (ValueError, KeyError):  # pytest-timeout not installed
+        return None
+    try:
+        return float(configured)
+    except (TypeError, ValueError):
+        return None
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item):
+    """Cap job waits below this test's own pytest-timeout budget.
+
+    Wraps the call phase because that is the phase pytest-timeout arms. See the
+    module docstring of ``nhx/testing/e2e/jobs.py`` for why the order matters.
+    """
+    timeout = _effective_pytest_timeout(item)
+    budget = timeout * _JOB_WAIT_BUDGET_FRACTION if timeout else None
+    with wait_budget(budget):
+        yield
 
 
 # ---- Services log tail on failure ------------------------------------------
