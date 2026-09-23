@@ -233,6 +233,8 @@ class S3StorageImpl(StorageImpl):
         path: str,
         fstream: AsyncIterator[bytes],
         content_length: int | None = None,
+        *,
+        if_absent: bool = False,
     ) -> FileInfo:
         """Upload a file to S3 using a presigned URL with aiohttp streaming.
 
@@ -258,9 +260,21 @@ class S3StorageImpl(StorageImpl):
                 _raise_for_s3_error(e, f"generating presigned URL for {path}")
 
         headers = {"Content-Length": str(content_length)}
-        await upload_url_streaming(url, fstream, headers=headers)
+        if if_absent:
+            headers["If-None-Match"] = "*"
+        try:
+            await upload_url_streaming(url, fstream, headers=headers)
+        except aiohttp.ClientResponseError as exc:
+            if if_absent and exc.status == 412:
+                raise FileExistsError(path) from exc
+            raise
 
         return FileInfo(path=path, size=content_length)
+
+    async def upload_if_absent(
+        self, path: str, fstream: AsyncIterator[bytes], content_length: int | None = None
+    ) -> FileInfo:
+        return await self.upload(path, fstream, content_length, if_absent=True)
 
     async def validate_storage(self):
         """Validate that we can access the S3 bucket."""

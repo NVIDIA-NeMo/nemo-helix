@@ -11,6 +11,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -878,6 +879,7 @@ async def upload_file(
     name: str,
     path: str,
     request: Request,
+    if_none_match: str | None = Header(default=None, description="Use * to atomically create without replacing."),
     entity_store: EntityClient = Depends(get_entity_client),
     sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
     auth_client: AuthClient = Depends(get_auth_client),
@@ -887,6 +889,9 @@ async def upload_file(
     fileset = await get_fileset(workspace, name, entity_store)
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
+
+    if if_none_match not in {None, "*"}:
+        raise HTTPException(status_code=400, detail="Only If-None-Match: * is supported")
 
     # Determine chunk processor based on Content-Type
     content_type = request.headers.get("content-type", "application/octet-stream").lower()
@@ -912,12 +917,19 @@ async def upload_file(
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
         try:
             async with streaming_file_upload(request, chunk_processor) as upload:
-                file_info = await storage.upload(path, upload, content_length=content_length)
+                if if_none_match == "*":
+                    file_info = await storage.upload_if_absent(path, upload, content_length=content_length)
+                else:
+                    file_info = await storage.upload(path, upload, content_length=content_length)
             return fileset_file_output_from_info(
                 workspace=workspace,
                 name=name,
                 file_info=file_info,
             )
+        except FileExistsError as e:
+            raise HTTPException(status_code=412, detail="Object already exists") from e
+        except NotImplementedError as e:
+            raise HTTPException(status_code=501, detail=str(e)) from e
         except InvalidPathError as e:
             logger.warning(f"Invalid path for upload attempt: {workspace}/{name}/-/{path}")
             raise HTTPException(
