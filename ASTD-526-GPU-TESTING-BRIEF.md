@@ -40,17 +40,15 @@ pointed at `default`; the platform log shows every weight-file read (96) against
 and none against the caller's workspace; and every job on a backend ended at the same loss,
 consistent with all of them training from the same real weights.
 
-**Open design question found in Priority 2.** A LoRA job registers its adapter on the base
-model entity (`tasks/model_entity/run.py`, `create_model_adapter(workspace=base_me.workspace)`),
-so a job in `marcus` writes an adapter onto the shared model in `default`, with the adapter's
-weights in `marcus`. Consequences, none yet tested: with auth on, a caller who can read but
-not write `default` likely fails at the final step after training; adapter names from
-different workspaces collide, and on conflict the task *updates* the existing adapter, so one
-workspace can silently replace another's; adapter names and fileset refs are visible to every
-workspace that sees the shared model; and a `lora_enabled` deployment in `default` hot-loads
-weights from `marcus`. With auth off that **works**: the adapter sidecar read each adapter's
-fileset from `marcus` (`200`) and vLLM served it. Whether the sidecar may do so with auth on
-is untested; filesets are not shared (ASTD-640), so expect a denial there.
+**Adapter placement — decided and implemented.** Originally a LoRA job registered its
+adapter on the base model entity, so a job in `marcus` wrote into the shared model in
+`default` (name collisions across workspaces, and a write the job may not be allowed).
+Now, when the base resolves through the global fallback, the adapter is created **in the
+job's workspace** against the qualified base, and any requested deployment goes there too.
+A reference naming another workspace explicitly keeps the original behaviour, so no
+existing request changes. An existing LoRA-enabled deployment of the base still hot-loads
+the adapter: the sidecar reads its weights from the adapter's own workspace. Verified with
+auth on below.
 
 **Customized models actually work.** On prompts outside the training set, all four
 adapters on the `default` LoRA deployment answered in the trained `a + b = c.` format,
@@ -58,8 +56,8 @@ correctly (including 3-digit sums not seen in training), where the base model wo
 step by step; general answers were unchanged. The bare-fileset model's adapters were not
 chatted with (the GPU fits one vLLM deployment).
 
-**Customized model owned by `marcus`, end to end.** A LoRA adapter cannot live in `marcus`
-today (see above), but a merged checkpoint can: unsloth with `save_method: merged_16bit`,
+**Customized model owned by `marcus`, end to end.** Before the placement change a LoRA
+adapter could not live in `marcus`, but a merged checkpoint could: unsloth with `save_method: merged_16bit`,
 run from `marcus` against the shared base, registered `marcus/p2-us-merged` with its
 weights in `marcus` and `base_model: default/qwen3-p1-180943`, and added nothing to
 `default`. Deployed in `marcus` with vLLM, it is listed in `marcus`'s gateway catalogue and
@@ -94,6 +92,40 @@ entity's own workspace. Per-plugin detail is in the coverage doc. Smaller findin
   `NEMO_EXPERIMENTALIST_API_BASE` and `INFERENCE_API_KEY`, which no code reads. It actually
   uses `NEMO_DEFAULT_MODEL` / `NEMO_FAST_MODEL` (two tiers, `workspace/name` form).
 
+**Auth-on pass (2026-09-23) — passed after two fixes in this PR.** Auth enabled with unsigned
+test tokens. alice: Editor on `default` and a team workspace; bob: Editor on the team
+workspace only; carol: Editor on a third workspace. Three setups, varying only everyone's
+(`*`) binding on `default`:
+
+| | Out of the box (`*` Editor) | Curated (`*` Viewer) | Locked (no `*` binding) |
+| --- | --- | --- | --- |
+| bob resolves / calls a shared model from his workspace | ✓ | ✓ | ✗ `404` |
+| bob writes into `default` | ✓ | ✗ `403` | ✗ `403` |
+| create a local model under a shared name | ✓ | ✓ | ✓ |
+| update a shared model *through* another workspace | `404` | `404` | `404` |
+| bob submits a LoRA job on the shared base | — | ✓ adapter in his workspace | ✗ `422` at submit |
+
+Two defects surfaced here, both introduced by this PR and both fixed in it:
+
+1. **Writes through another workspace reached the shared entity.** Update, upsert and
+   provider delete looked their target up with the global fallback and acted on the entity in
+   `default` — including for a caller who was only a Viewer there — and creating a local
+   entity under a shared name was refused as a conflict. Write paths now use
+   `EntityClient.get(..., local_only=True)`, which refuses an entity resolved from another
+   workspace.
+2. **Gateway fallbacks ignored the caller's access to `default`.** The routing caches fell
+   back for every caller, so inference on a shared entity worked from any workspace. A
+   fallback now requires the route's permission where the entity lives (and a LoRA adapter's
+   own workspace likewise); otherwise the caller gets the same `404` as for a missing name.
+
+LoRA under auth, curated setup: bob's job with a bare base reference registered
+`<team>/auth-bob-lora` (base `default/qwen3-p1-180943`, weights in his workspace) and wrote
+nothing to `default`. A LoRA-enabled deployment of the base in `default` hot-loaded it (the
+sidecar read the weights from bob's workspace, `200`). Call boundary through that deployment:
+bob → his adapter `200` in the trained format; carol → bob's adapter `404`, from her workspace
+and via `default`; carol → the shared base `200`. In the locked setup bob can use neither the
+shared base nor his adapter served from `default`.
+
 **Local setup that is not in SETUP.md** — each cost a failed run:
 
 1. Build `my-registry/nmp-api:local` (the deployment weights puller runs in it) and, for
@@ -118,6 +150,18 @@ entity's own workspace. Per-plugin detail is in the coverage doc. Smaller findin
    3.13 pin makes plain `uv run` (e.g. the copyright pre-commit hook) rebuild `.venv` for
    3.13, deleting files out from under a running platform — guardrails then failed with
    `FileNotFoundError: …/nemoguardrails/rails/llm/llm_flows.co`.
+7. **Auth on from a source checkout needs `NMP_SEED_ON_STARTUP=true`.** Role bindings are
+   created by the platform-seed task, which `nemo services run` does not run otherwise: with
+   auth on and no seeding there are no bindings at all and every user gets `403`. Seeding
+   runs on every start and re-creates the `*` bindings, so re-apply a curated or locked
+   setup after a restart.
+8. **Copy the auth settings from `e2e/authz_oidc/conftest.py`**: a non-zero
+   `NMP_AUTH_BUNDLE_CACHE_SECONDS` and `NMP_AUTH_EMBEDDED_PDP_CPU_LIMIT=2000`, or policy
+   evaluation fails platform-wide.
+9. **Allow the plugin service principals.** Job containers and gateway middleware call as
+   `service:unsloth`, `service:nemo-guardrails` and so on, which the auth service does not
+   know by default; their calls then fail with `502 Authorization service error`. Add them:
+   `NMP_AUTH_ALLOWED_SERVICE_PRINCIPALS='["unsloth","automodel","rl","customizer","customization","nemo-guardrails"]'`.
 
 ## Priority 1 — the headline case (needs GPU)
 

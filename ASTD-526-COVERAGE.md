@@ -18,7 +18,9 @@ the first two, so a consumer inherits it by using them — it does not need its 
 | **3. Customization** | `fetch_model_entity(ref, workspace, platform)` at submission; `model_weights_ref(model)` for the compiled download | Path 1 plus a weights-fileset check against the model's **own** workspace; the download is pinned to that workspace too | submission: all three backends; real training runs: automodel and unsloth |
 
 All three require the caller to be entitled to the global workspace. A caller scoped to
-their own workspace resolves nothing from it.
+their own workspace resolves nothing from it. Verified with auth on (brief, "Auth-on pass"):
+the gateway path did not enforce this until it was fixed in this PR, and writes addressed
+to another workspace no longer reach a shared entity.
 
 ## Status legend
 
@@ -37,7 +39,7 @@ their own workspace resolves nothing from it.
 | Entity store (`services/core/entities`) | 1 | **Verified** | 21/21 on SQLite and PostgreSQL; resolution, shadowing, pure listings, cascade guard |
 | Models service (`services/core/models`) | 1 | **Verified** | Shared model resolves via the caller's workspace (`R7`) |
 | Inference gateway (`services/core/inference-gateway`) | 2 | **Verified** | Catalogue stays workspace-pure; shared VirtualModel routable by name (`G1`–`G4`). Also against a real vLLM deployment on GPU: a call from another workspace is served by the one `default` deployment and no second deployment appears (brief, Priority 1) |
-| Auth / OPA (`services/core/auth`) | — | **Verified** | Unchanged by this PR; 19/19 authorization scenarios, `opa test` at main's baseline |
+| Auth / OPA (`services/core/auth`) | — | **Verified** | Unchanged by this PR; 19/19 authorization scenarios, `opa test` at main's baseline. Live auth-on pass across out-of-box, curated and locked `default` setups (brief) |
 | Files (`services/core/files`) | — | **Deferred** | Filesets are not shared — ASTD-640 |
 
 ## Customization / training backends
@@ -58,9 +60,10 @@ All three resolve through `fetch_model_entity`, and all three are confirmed to r
 shared base model. automodel and unsloth are also confirmed to **load the weights** and train;
 `nemo-rl` still needs a Kubernetes + Ray cluster for that.
 
-**Open design question:** a LoRA job registers its adapter on the base model entity, so a job
-in `marcus` writes an adapter onto the shared model in `default`. See the brief's results
-section.
+**Adapter placement:** a LoRA job whose base is shared in from `default` now registers its
+adapter, and any requested deployment, in the job's own workspace; a shared LoRA deployment
+of the base still serves it. Verified with auth on, including that only callers entitled to
+the adapter's workspace can call it (brief, "Auth-on pass").
 
 Note for reading `nemo-rl` results: a `422` alone proves nothing there, because it cannot
 compile a spec locally at all. The error text distinguishes a resolution failure
@@ -114,8 +117,8 @@ with a model shared from `default`.
 | S14 | `JudgeModelSelect.tsx:62`, `useEvaluationModels.tsx:65`, `ModelChatPanel/index.tsx:159`, `ModelConfigPanel/index.tsx:136`, `AddModelPalette/index.tsx:40`, `InsightsModelPairFields.tsx:54,66`, `AnalysisConfigPanel.tsx:168,187`, `GuardrailConfigurationPanel.tsx:48`, `CreateGuardrailModal/index.tsx:51`, `CreateExampleAgentModal/index.tsx:68`, `CloneAgentModal/index.tsx:47`, `MetricRunSidePanel/index.tsx:165`, `DescribeWithAiPanel.tsx:30`, `NewDeploymentRoute/WorkspaceSourceFields.tsx:112` | Every other model picker lists the current workspace only | Shared models cannot be selected anywhere except by typing a reference. `common/src/api/models/useModelsFromDefaultAndWorkspace.ts` exists but nothing uses it; only the Base Models page queries `default` too. (The deployment picker is arguably correct, since deployments are not shared.) |
 
 S1, S4, S5, S6 and S8 are the PR's bug class on the Studio side — a related entity resolved in
-the wrong workspace. S2–S4 depend on the adapter-placement question raised on the PR; their
-fix follows from whichever option is chosen there.
+the wrong workspace. S2–S4 predate the adapter-placement change: adapters trained on a shared
+base now live in the job's workspace, which their fix should build on.
 
 ## What to do on GPU, in order
 
