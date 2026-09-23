@@ -1890,6 +1890,30 @@ def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> boo
     return True
 
 
+def _print_sample_setup_complete(base_url: str) -> None:
+    """Print the sample workspace completion card."""
+    studio_url = f"{base_url.rstrip('/')}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
+    remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
+    lines = [
+        f"{CHECK} [green bold]Sample workspace ready[/green bold]",
+        "",
+        "Explore the sample agent, dataset, and evaluation configuration in Studio.",
+        "",
+        f"[bold]Studio:[/bold] [link={studio_url}]{studio_url}[/link]",
+        f"[bold]Remove:[/bold] [cyan]{remove_command}[/cyan]",
+    ]
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Sample agent[/bold]",
+            title_align="left",
+            border_style="green",
+            box=box.ROUNDED,
+            padding=(1, 1),
+        )
+    )
+
+
 def _agent_exists(
     base_url: str,
     workspace: str,
@@ -3104,6 +3128,7 @@ def _run_interactive_mode(
             files_client = cli_context.typed_client(FilesClient)
             if _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME):
                 _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
+            _print_sample_setup_complete(base_url)
         return selected_path
 
     except UserCancelled:

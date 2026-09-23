@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+import yaml
 from nemo_helix_ext.cli.commands.setup import (
     KeyValidationResult,
     ModelPair,
@@ -27,6 +28,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _get_all_model_choices,
     _get_all_model_entity_ids,
     _register_provider_interactive,
+    _run_interactive_mode,
     _select_usable_model_pair,
     _wait_for_models,
 )
@@ -111,13 +113,20 @@ class Recorder:
 
 def make_clients(recorder: Callable[[httpx.Request], httpx.Response]) -> SetupClients:
     """Build the typed-client bundle exactly as ``setup_command`` does, over a recording transport."""
+    return make_context_and_clients(recorder)[1]
+
+
+def make_context_and_clients(
+    recorder: Callable[[httpx.Request], httpx.Response],
+) -> tuple[CLIContext, SetupClients]:
+    """Build the CLI context and typed-client bundle over one recording transport."""
     client = NemoClient(
         base_url="http://test",
         workspace="default",
         http_client=httpx.Client(transport=httpx.MockTransport(recorder)),
     )
     state = CLIContext(overrides={"base_url": "http://test"}, _client=client)
-    return SetupClients.from_context(state)
+    return state, SetupClients.from_context(state)
 
 
 def body_of(request: httpx.Request) -> dict:
@@ -222,6 +231,110 @@ class TestAutoSetupWire:
             _auto_setup(clients, "default")
 
         assert b"nvapi-secret" not in recorder.requests[3].content
+
+
+class TestSampleSetupWire:
+    def test_complete_sample_path_creates_workspace_and_uploads_runnable_assets(self) -> None:
+        workspace = {
+            "id": "workspace-sample",
+            "name": "sample",
+            "description": "Sample workspace created by the NeMo setup flow.",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+        fileset = {
+            "id": "fileset-esec",
+            "name": "esec-eval-data",
+            "workspace": "sample",
+            "description": "Evaluation dataset for the NeMo setup sample email security agent.",
+            "purpose": "dataset",
+            "storage": {"type": "local", "path": "/data/esec-eval-data"},
+            "metadata": {},
+            "custom_fields": {},
+            "project": "",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+
+        def uploaded_file(path: str) -> dict:
+            return {
+                "file_ref": f"sample/esec-eval-data#{path}",
+                "file_url": f"/apis/files/v2/workspaces/sample/filesets/esec-eval-data/-/{path}",
+                "path": path,
+                "size": 1,
+                "cache_status": None,
+            }
+
+        recorder = Recorder(
+            [
+                httpx.Response(404, json={"detail": "not found"}),
+                httpx.Response(201, json=workspace),
+                httpx.Response(201, json=fileset),
+                httpx.Response(200, json=uploaded_file("dataset.jsonl")),
+                httpx.Response(200, json=uploaded_file("eval-config.yaml")),
+            ]
+        )
+        state, clients = make_context_and_clients(recorder)
+        model_pair = ModelPair(default="default/model", fast="default/fast-model")
+
+        with (
+            patch(
+                f"{SETUP_MOD}._interactive_collect_provider",
+                return_value=("provider", "https://provider.example.com", None, None, None),
+            ),
+            patch(f"{SETUP_MOD}._register_provider_interactive"),
+            patch(f"{SETUP_MOD}._wait_for_models", return_value=[model_pair.default]),
+            patch(f"{SETUP_MOD}._select_model_pair", return_value=model_pair),
+            patch(f"{SETUP_MOD}._save_model_pair"),
+            patch(f"{SETUP_MOD}._maybe_install_skills"),
+            patch(f"{SETUP_MOD}._print_setup_complete"),
+            patch(f"{SETUP_MOD}._prompt_post_setup_path", return_value="sample"),
+            patch(f"{SETUP_MOD}._maybe_deploy_sample_agent", return_value=True) as deploy_agent,
+            patch(f"{SETUP_MOD}.console") as console,
+        ):
+            selected_path = _run_interactive_mode(
+                state,
+                clients,
+                "default",
+                "http://test",
+                install_skills=False,
+                deploy_agent=False,
+            )
+
+        assert selected_path == "sample"
+        deploy_agent.assert_called_once_with(
+            "http://test",
+            "sample",
+            model_pair.default,
+            headers=None,
+            certificate_authority=None,
+        )
+        assert recorder.calls() == [
+            ("GET", "/apis/entities/v2/workspaces/sample"),
+            ("POST", "/apis/entities/v2/workspaces"),
+            ("POST", "/apis/files/v2/workspaces/sample/filesets"),
+            ("PUT", "/apis/files/v2/workspaces/sample/filesets/esec-eval-data/-/dataset.jsonl"),
+            ("PUT", "/apis/files/v2/workspaces/sample/filesets/esec-eval-data/-/eval-config.yaml"),
+        ]
+        assert body_of(recorder.requests[1]) == {
+            "name": "sample",
+            "description": "Sample workspace created by the NeMo setup flow.",
+        }
+        assert body_of(recorder.requests[2]) == {
+            "name": "esec-eval-data",
+            "description": "Evaluation dataset for the NeMo setup sample email security agent.",
+            "purpose": "dataset",
+        }
+        dataset = [json.loads(line) for line in recorder.requests[3].content.splitlines() if line]
+        assert dataset
+        assert all("user_message" in row and "emails" in row for row in dataset)
+        eval_config = yaml.safe_load(recorder.requests[4].content)
+        assert eval_config["dataset"] == "sample/esec-eval-data#dataset.jsonl"
+        assert eval_config["metrics"]
+
+        completion_panel = console.print.call_args.args[0]
+        assert "http://test/studio/workspaces/sample/dashboard" in completion_panel.renderable
+        assert "nemo workspaces delete sample" in completion_panel.renderable
 
 
 class TestRegisterProviderWire:

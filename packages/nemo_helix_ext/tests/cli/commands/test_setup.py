@@ -69,6 +69,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _parse_csv_flag,
     _pick_default_chat_entity,
     _print_onboarding,
+    _print_sample_setup_complete,
     _print_setup_complete,
     _probe_model_entity,
     _prompt_custom_provider,
@@ -2393,6 +2394,10 @@ class TestInteractiveModelPairSelection:
                 f"{self._MOD}._upload_sample_eval_config",
                 side_effect=lambda *args, **kwargs: event_order.append("evaluation") or True,
             ) as upload_sample_eval_config,
+            patch(
+                f"{self._MOD}._print_sample_setup_complete",
+                side_effect=lambda *args, **kwargs: event_order.append("sample_complete"),
+            ) as print_sample_setup_complete,
         ):
             selected_path = _run_interactive_mode(
                 cli_context,
@@ -2421,7 +2426,17 @@ class TestInteractiveModelPairSelection:
         )
         upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
         upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        assert event_order == ["skills", "complete", "post_setup", "workspace", "agent", "dataset", "evaluation"]
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080")
+        assert event_order == [
+            "skills",
+            "complete",
+            "post_setup",
+            "workspace",
+            "agent",
+            "dataset",
+            "evaluation",
+            "sample_complete",
+        ]
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
         """When the new provider is still syncing, setup should not show a misleading picker."""
@@ -2488,6 +2503,7 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._maybe_deploy_sample_agent") as deploy_sample_agent,
             patch(f"{self._MOD}._upload_sample_dataset", return_value=True) as upload_sample_dataset,
             patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
+            patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
             patch(f"{self._MOD}.console") as mock_console,
         ):
             _run_interactive_mode(
@@ -2509,6 +2525,7 @@ class TestInteractiveModelPairSelection:
         )
         upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
         upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080")
         printed_lines = [call.args[0] for call in mock_console.print.call_args_list if call.args]
         assert any(
             "Models from existing providers are available, but not from 'my-ollama-custom' yet." in line
@@ -5054,6 +5071,19 @@ class TestPrintSetupComplete:
             pytest.raises((typer.Exit, SystemExit)),
         ):
             _print_setup_complete("http://localhost:8080", "nvidia-build", None)
+
+
+class TestPrintSampleSetupComplete:
+    def test_shows_studio_link_and_workspace_removal_command(self):
+        with patch(f"{SETUP_MOD}.console") as mock_console:
+            _print_sample_setup_complete("http://localhost:8080/")
+
+        panel = mock_console.print.call_args.args[0]
+        assert panel.title == "[bold]Sample agent[/bold]"
+        assert "Sample workspace ready" in panel.renderable
+        assert "http://localhost:8080/studio/workspaces/sample/dashboard" in panel.renderable
+        assert "nemo workspaces delete sample" in panel.renderable
+        assert "optimization" not in panel.renderable.lower()
 
 
 class TestPromptPostSetupPath:
