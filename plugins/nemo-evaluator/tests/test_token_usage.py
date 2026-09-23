@@ -23,7 +23,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
 )
 from nemo_evaluator_sdk.inference import requests_log_var
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_platform_plugin.job_usage import LocalJobUsageReporter
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 
 
 def _request(input_tokens: object = 10, output_tokens: object = 4) -> dict:
