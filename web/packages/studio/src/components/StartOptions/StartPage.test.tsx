@@ -192,7 +192,8 @@ describe('StartPage selection', () => {
           templateGroups={[group()]}
           onSelect={onSelect}
           disabled
-          slotBanner={<div>Registering model</div>}
+          busyId="t1"
+          busyLabel="Registering model"
         />
       </TestProviders>
     );
@@ -202,5 +203,28 @@ describe('StartPage selection', () => {
 
     expect(onSelect).not.toHaveBeenCalled();
     expect(screen.getByText('Registering model')).toBeInTheDocument();
+  });
+
+  it('swaps the busy tile own content for the status', () => {
+    render(
+      <TestProviders>
+        <StartPage
+          heading="Page Title"
+          headingDescription="Page Description"
+          options={OPTIONS}
+          templateGroups={[group()]}
+          onSelect={() => undefined}
+          disabled
+          busyId="t1"
+          busyLabel="Registering model"
+        />
+      </TestProviders>
+    );
+
+    // The name goes, so the tile reads as the status rather than as a thing to pick.
+    expect(screen.queryByText('Template One')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Registering model');
+    // Untouched tiles keep theirs.
+    expect(screen.getByText('Build from scratch')).toBeInTheDocument();
   });
 });

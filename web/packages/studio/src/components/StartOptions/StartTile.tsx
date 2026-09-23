@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isDefined } from '@nemo/common/src/utils/isDefined';
-import { Card, Flex, Text } from '@nvidia/foundations-react-core';
+import { Card, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
 import type { StartTileProps } from '@studio/components/StartOptions/types';
 import cn from 'classnames';
 import type { FC } from 'react';
@@ -21,6 +21,8 @@ export const StartTile: FC<StartTileProps> = ({
   slotEnd,
   onSelect,
   disabled = false,
+  busy = false,
+  busyLabel,
   labelKind,
   descriptionKind,
   className,
@@ -43,6 +45,7 @@ export const StartTile: FC<StartTileProps> = ({
       <Card
         className={cn(
           'w-full',
+          busy && 'border-interaction-selected',
           !disabled && 'cursor-pointer hover:bg-interaction-hover',
           contentClass,
           className
@@ -53,19 +56,23 @@ export const StartTile: FC<StartTileProps> = ({
           aria-hidden
           className="col-start-1 row-span-2 row-start-1 shrink-0 self-start pt-0.5 text-base-foreground"
         >
-          {icon}
+          {busy ? <Spinner size="small" className="size-4" aria-label="Loading" /> : icon}
         </Flex>
 
         <Flex gap="density-md" align="center" className="col-start-2 row-start-1 w-full min-h-0">
-          <Text kind={labelKind}>{label}</Text>
-          {slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
+          <Text kind={labelKind} role={busy ? 'status' : undefined}>
+            {busy ? (busyLabel ?? 'Working…') : label}
+          </Text>
+          {!busy && slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
         </Flex>
 
         {hasDescription && (
+          // Held in place while busy so swapping in the status does not resize the tile.
           <Text
             kind={descriptionKind}
             color="secondary"
-            className="col-start-2 row-start-2 text-left"
+            aria-hidden={busy || undefined}
+            className={cn('col-start-2 row-start-2 text-left', busy && 'invisible')}
           >
             {description}
           </Text>
