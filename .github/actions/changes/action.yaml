@@ -129,8 +129,8 @@ runs:
             # when the suite starts calling something new.
             - 'plugins/nemo-evaluator/**'
             - 'packages/nemo_evaluator_sdk/**'
-            - 'packages/nemo_platform_plugin/**'
-            - 'packages/nmp_common/**'  # shared contracts every service above is built on
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'  # shared contracts every service above is built on
             - 'services/core/entities/**'
             - 'services/core/jobs/**'
             - 'services/core/files/**'

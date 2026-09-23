@@ -144,15 +144,15 @@ def test_the_generated_sdk_is_skipped_but_first_party_sdk_tooling_is_not(tmp_pat
     """The exclusion is the generated tree, not every directory that happens to be called ``sdk``.
 
     ``sdk/python`` is Stainless output -- a gate there would not be ours to set. But
-    ``tools/nemo-platform-sdk-tools/tests/sdk`` is first-party, and a component-name match would
+    ``tools/nemo-helix-sdk-tools/tests/sdk`` is first-party, and a component-name match would
     exempt it too.
     """
-    generated = tmp_path / "sdk" / "python" / "nemo-platform" / "tests"
+    generated = tmp_path / "sdk" / "python" / "nemo-helix" / "tests"
     generated.mkdir(parents=True)
     (generated / "test_generated.py").write_text(
         GATED.format(read=ENV_READS[0].format(var="RUN_GENERATED")), encoding="utf-8"
     )
-    first_party = tmp_path / "tools" / "nemo-platform-sdk-tools" / "tests" / "sdk"
+    first_party = tmp_path / "tools" / "nemo-helix-sdk-tools" / "tests" / "sdk"
     first_party.mkdir(parents=True)
     (first_party / "thing_test.py").write_text(
         GATED.format(read=ENV_READS[0].format(var="RUN_FIRST_PARTY")), encoding="utf-8"
@@ -174,6 +174,26 @@ def test_a_file_that_does_not_parse_does_not_fail_the_check(tmp_path: Path) -> N
     tests.mkdir(parents=True)
     (tests / "test_broken.py").write_text("def (:\n", encoding="utf-8")
     (tests / "test_binary.py").write_bytes(b"\xa4\xa4\xa4")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")
+
+    assert check_test_gates.orphaned_gates(tmp_path, workflows) == {}
+
+
+def test_an_ordinary_mapping_lookup_is_not_a_gate(tmp_path: Path) -> None:
+    """``.get`` is only an environment read when it is ``os.environ``'s.
+
+    A false positive here fails the build over a variable nobody was ever meant to set, which is
+    worse than the miss it would be guarding against -- and unlike a miss, there is no fix available
+    to whoever hits it.
+    """
+    tests = tmp_path / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_mapping.py").write_text(
+        'import pytest\n\nflags = {}\n\npytestmark = pytest.mark.skipif(not flags.get("RUN_FAST"), reason="off")\n',
+        encoding="utf-8",
+    )
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
     (workflows / "ci.yaml").write_text("jobs: {}\n", encoding="utf-8")

@@ -31,7 +31,7 @@ from pathlib import Path
 ALLOWED_UNSET = {
     "RUN_EXTERNAL_STORAGE_TESTS": "needs real NGC storage credentials",
     "NVIDIA_API_KEY": "needs a real build.nvidia.com key",
-    "NMP_INSIGHTS_E2E": "needs a live Insights deployment",
+    "NHX_INSIGHTS_E2E": "needs a live Insights deployment",
     "TRACE_FIXTURE_LIVE_CODEX": "regenerates fixtures against a live Codex CLI",
     "SCALED_EVALS_TEST_DATABASE_URL": "needs a live Postgres for the scaled-evals migration tests",
 }
@@ -43,7 +43,7 @@ NOT_OURS = frozenset({".venv", ".flox", "node_modules", "site-packages", ".git"}
 
 #: Generated trees, excluded by path prefix rather than by component name. The Stainless-generated
 #: SDK lives under `sdk/python`; a gate it emitted would not be ours to set, and failing the build
-#: over one would leave no fix available. `tools/nemo-platform-sdk-tools/tests/sdk` is *not* this --
+#: over one would leave no fix available. `tools/nemo-helix-sdk-tools/tests/sdk` is *not* this --
 #: it is first-party, which is why a bare "sdk" component match would be wrong.
 VENDORED_ROOTS = ("sdk/python",)
 
@@ -94,16 +94,28 @@ def _env_reads(node: ast.AST, constants: dict[str, str]) -> set[str]:
                 name = _env_name(inner.slice, constants)
                 if name:
                     found.add(name)
-        elif isinstance(inner, ast.Call):
-            func = inner.func
-            reads_env = (isinstance(func, ast.Attribute) and func.attr in {"get", "getenv"}) or (
-                isinstance(func, ast.Name) and func.id == "getenv"
-            )
-            if reads_env and inner.args:
-                name = _env_name(inner.args[0], constants)
-                if name:
-                    found.add(name)
+        elif isinstance(inner, ast.Call) and _reads_os_environ(inner.func) and inner.args:
+            name = _env_name(inner.args[0], constants)
+            if name:
+                found.add(name)
     return found
+
+
+def _reads_os_environ(func: ast.AST) -> bool:
+    """Whether a call target is ``os.environ.get`` or ``os.getenv``, and not something else's.
+
+    Anchored to ``os`` on purpose. Matching any ``.get`` would read an ordinary mapping lookup --
+    ``flags.get("RUN_FAST")`` inside a ``skipif`` -- as an environment gate, and report it as an
+    orphan. A false positive here fails the build over a variable nobody was ever meant to set,
+    which is worse than the miss it would be guarding against.
+    """
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr == "getenv":
+        return isinstance(func.value, ast.Name) and func.value.id == "os"
+    if func.attr == "get":
+        return isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
+    return False
 
 
 def gate_variables(tree: ast.AST) -> set[str]:
