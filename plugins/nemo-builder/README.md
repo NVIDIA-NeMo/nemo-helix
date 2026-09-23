@@ -3,7 +3,7 @@
 
 # NeMo Builder Plugin
 
-In-cluster container image builds for the NeMo Platform. A caller submits Dockerfiles whose build
+In-cluster container image builds for the NeMo Helix. A caller submits Dockerfiles whose build
 context is already in a Files fileset. The plugin builds them with kaniko in a locked-down
 namespace, pushes them to a registry, signs them with cosign, and records the digest the registry
 serves as a `ContainerImage` entity that consumers can pin.
@@ -18,8 +18,8 @@ not in the Helm chart, and has the limitations listed under [Constraints](#const
 - **Entity:** `ContainerImage` (`entity_type="container_image"`), one row per image.
 - **Controller:** `BuilderController`, registered under `nemo.controllers`. It moves each row from
   `pending` to `ready` or `failed`.
-- **Step program:** `nmp-build {fetch|supervise|push}`, which the build job's steps run. It ships
-  in the `nmp-build` image (`docker/Dockerfile`).
+- **Step program:** `nhx-build {fetch|supervise|push}`, which the build job's steps run. It ships
+  in the `nhx-build` image (`docker/Dockerfile`).
 
 There is no CLI or SDK accessor yet; use the REST API.
 
@@ -31,10 +31,10 @@ nothing:
 
 | | Runs as | Holds | Work volume | Runs caller code |
 |---|---|---|---|---|
-| `fetch` | `nmp-build-fetch` | a Files client, acting as the submitter | yes | no |
-| `build` (runs `nmp-build supervise`) | `nmp-build-control` | permission to manage pods in `nmp-builds` | no | no |
+| `fetch` | `nhx-build-fetch` | a Files client, acting as the submitter | yes | no |
+| `build` (runs `nhx-build supervise`) | `nhx-build-control` | permission to manage pods in `nhx-builds` | no | no |
 | sandbox (kaniko) | no ServiceAccount token | nothing | its own context read-only, and the output directory | yes |
-| `push` | `nmp-build-push` | the registry credential and the signing key | yes | no |
+| `push` | `nhx-build-push` | the registry credential and the signing key | yes | no |
 
 1. **Submit.** The request is resolved against the deployment's config into a plan: a job name,
    plus a row name, destination and system tag for each image. Every check that can reject the
@@ -166,13 +166,13 @@ variables. Callers can't set any of them.
 
 ```yaml
 builder:
-  namespace: nmp-builds
-  work_pvc: nmp-build-work
+  namespace: nhx-builds
+  work_pvc: nhx-build-work
   sandbox_image: gcr.io/kaniko-project/executor:debug
   default_registry: us-central1-docker.pkg.dev   # a host only, never host/path
   repository_prefix: my-project/my-repo          # prepended to output.repository
   push_secret: registry-credential               # a Secrets entry, looked up in the submitter's workspace
-  signing_key: k8s://nmp-builds/cosign-key       # a cosign key reference
+  signing_key: k8s://nhx-builds/cosign-key       # a cosign key reference
   registry_username: oauth2accesstoken           # read-only, for the reconciler
   registry_password: <token>
   reconcile_interval_seconds: 10
@@ -199,9 +199,9 @@ directory with `kubectl apply -f`:
 
 | File | What it does |
 |---|---|
-| `00-namespace.yaml` | Creates `nmp-builds`, enforcing the `baseline` Pod Security Standard |
+| `00-namespace.yaml` | Creates `nhx-builds`, enforcing the `baseline` Pod Security Standard |
 | `10-serviceaccounts.yaml` | The three step identities |
-| `20-rbac.yaml` | Pod management for `nmp-build-control` only, and read access to the signing key for `nmp-build-push` only |
+| `20-rbac.yaml` | Pod management for `nhx-build-control` only, and read access to the signing key for `nhx-build-push` only |
 | `30-networkpolicy.yaml` | Sandbox egress: the public internet, minus private, link-local and cluster ranges |
 | `40-work-volume.yaml` | The shared work volume |
 | `negative-control.sh` | Checks that the namespace still refuses a pod with BuildKit's privileges |
@@ -212,7 +212,7 @@ The cluster needs:
 - **A CNI that enforces NetworkPolicy**, such as Calico. On one that doesn't, the sandbox's egress
   is unrestricted, and nothing reports it.
 - **One labelled build node.** The work volume is `ReadWriteOnce`, so every build pod runs on the
-  node labelled `nmp.nvidia.com/build-node=true`.
+  node labelled `nhx.nvidia.com/build-node=true`.
 
 `30-networkpolicy.yaml` blocks every private range by default. If your cluster's Pod or Service
 addresses fall outside them, add them to its `except` list.
@@ -227,7 +227,7 @@ of memory.
 
 ```bash
 minikube start --driver=docker --cni=calico --cpus=3 --memory=5500
-kubectl label node minikube nmp.nvidia.com/build-node=true
+kubectl label node minikube nhx.nvidia.com/build-node=true
 
 kubectl apply -f plugins/nemo-builder/deploy/
 plugins/nemo-builder/deploy/negative-control.sh       # must print PASS
@@ -240,47 +240,47 @@ plugins/nemo-builder/deploy/sandbox-egress-probe.sh   # must print PASS
 mkdir -p keys && chmod 777 keys
 docker run --rm -v "$PWD/keys:/work" -w /work -e COSIGN_PASSWORD= \
   ghcr.io/sigstore/cosign/cosign:v2.5.3 generate-key-pair
-kubectl -n nmp-builds create secret generic cosign-key --from-file=cosign.key=keys/cosign.key
+kubectl -n nhx-builds create secret generic cosign-key --from-file=cosign.key=keys/cosign.key
 ```
 
 **3. Images.** Build the platform image with this plugin added, and the image the build steps run
 in. Use `linux/amd64` instead of `linux/arm64` on an x86 machine.
 
 ```bash
-# nmp-api, with the Studio UI stubbed out; the builder doesn't use it
+# nhx-api, with the Studio UI stubbed out; the builder doesn't use it
 mkdir -p /tmp/empty-studio/artifacts && touch /tmp/empty-studio/artifacts/.keep
-docker buildx bake -f docker-bake.hcl nmp-api-docker --load \
+docker buildx bake -f docker-bake.hcl nhx-api-docker --load \
   --allow=fs.read=/tmp/empty-studio --set '*.platform=linux/arm64' \
-  --set nmp-api-docker.contexts.nmp-studio-ui=/tmp/empty-studio
+  --set nhx-api-docker.contexts.nhx-studio-ui=/tmp/empty-studio
 
 docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile.platform \
-  --build-arg NMP_API_IMAGE=my-registry/nmp-api:local -t nmp-api-builder:local --load .
+  --build-arg NHX_API_IMAGE=my-registry/nhx-api:local -t nhx-api-builder:local --load .
 docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile \
-  -t nmp-build:local --load .
+  -t nhx-build:local --load .
 
-minikube image load nmp-api-builder:local
-minikube image load nmp-build:local
+minikube image load nhx-api-builder:local
+minikube image load nhx-build:local
 ```
 
 `minikube image load` doesn't reliably replace an image already loaded under the same tag. When
 you rebuild, use a new tag, and update `deploy/local/platform.yaml` and the config to match.
 
 **4. Platform.** `deploy/local/` runs the platform services the builder needs in one pod with
-SQLite. It also runs an anonymous registry at `registry.nmp-builds.svc.cluster.local:5000`, which
+SQLite. It also runs an anonymous registry at `registry.nhx-builds.svc.cluster.local:5000`, which
 is the config's `default_registry`.
 
 ```bash
 kubectl apply -f plugins/nemo-builder/deploy/local/
-kubectl -n nmp-platform create configmap nemo-platform-config \
+kubectl -n nhx-platform create configmap nemo-helix-config \
   --from-file=config.yaml=plugins/nemo-builder/config/platform-config.minikube.yaml
-kubectl -n nmp-platform rollout status deploy/nemo-platform
-kubectl -n nmp-platform port-forward svc/nemo-platform 8080:8080
+kubectl -n nhx-platform rollout status deploy/nemo-helix
+kubectl -n nhx-platform port-forward svc/nemo-helix 8080:8080
 ```
 
 In another terminal:
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
 **5. Push credential and build context.** The minikube config names its push secret
@@ -301,7 +301,7 @@ nemo files upload ./hello/ hello-context --workspace default
 **6. Build.**
 
 ```bash
-curl -s -X POST "$NMP_BASE_URL/apis/builder/v2/workspaces/default/builds" \
+curl -s -X POST "$NHX_BASE_URL/apis/builder/v2/workspaces/default/builds" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "hello",
@@ -316,11 +316,11 @@ curl -s -X POST "$NMP_BASE_URL/apis/builder/v2/workspaces/default/builds" \
   }' | jq '{job, images: [.images[] | {name, status}]}'
 ```
 
-`kubectl -n nmp-builds get pods -w` shows the `fetch` pod, then `build` with its sandbox, then
+`kubectl -n nhx-builds get pods -w` shows the `fetch` pod, then `build` with its sandbox, then
 `push`. Poll the image until it leaves `pending`, which takes a minute or two:
 
 ```bash
-curl -s "$NMP_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello-1-0" \
+curl -s "$NHX_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello-1-0" \
   | jq '{status, digest, tag, status_detail}'
 ```
 
@@ -340,10 +340,10 @@ steps fail; set `platform` to match the nodes.
 contain the Dockerfile's output:
 
 ```bash
-kubectl -n nmp-builds run check --rm -i --restart=Never --image=nmp-build:local --command -- sh -c '
+kubectl -n nhx-builds run check --rm -i --restart=Never --image=nhx-build:local --command -- sh -c '
   sleep 2
-  crane digest --insecure registry.nmp-builds.svc.cluster.local:5000/demo/hello:v1
-  crane export --insecure registry.nmp-builds.svc.cluster.local:5000/demo/hello:v1 - | tar -xO hello.txt'
+  crane digest --insecure registry.nhx-builds.svc.cluster.local:5000/demo/hello:v1
+  crane export --insecure registry.nhx-builds.svc.cluster.local:5000/demo/hello:v1 - | tar -xO hello.txt'
 ```
 
 To build again, submit with `"revision": 2`.
@@ -366,7 +366,7 @@ The tests need no cluster, registry or running platform.
 | `service.py` | The REST routes |
 | `schema.py` | The request models: `BuildSet`, `BuildSpec`, `FileSetSource`, `BuildOutput` |
 | `plan.py` | `BuildPlan`: a request resolved against the deployment, with every submit-time check |
-| `compile.py` | Turns a plan into the three-step `PlatformJobSpec`, as a pure function |
+| `compile.py` | Turns a plan into the three-step `HelixJobSpec`, as a pure function |
 | `submit.py` | The submit sequence: plan, then rows, then the job |
 | `steps.py` | What each step's config contains, and `WorkLayout` |
 | `entities.py` | `ContainerImage` |
@@ -375,7 +375,7 @@ The tests need no cluster, registry or running platform.
 | `identity.py` | Image reference parsing and the system tag |
 | `config.py` | `BuilderConfig` |
 | `run/` | The step programs: `fetch.py`, `supervise.py`, `push.py` |
-| `docker/` | The `nmp-build` step image, and the platform image with this plugin added |
+| `docker/` | The `nhx-build` step image, and the platform image with this plugin added |
 | `deploy/` | The build namespace; `deploy/local/` adds the minikube platform and registry |
 | `config/` | The platform config for the minikube quickstart |
 

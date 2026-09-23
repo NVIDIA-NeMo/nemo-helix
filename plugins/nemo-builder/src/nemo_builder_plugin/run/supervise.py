@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nmp-build supervise`` -- step 2. The trusted control plane for an untrusted pod.
+"""``nhx-build supervise`` -- step 2. The trusted control plane for an untrusted pod.
 
 It holds RBAC to create, watch and delete Pods in the build namespace, and **nothing else**: no
 Files client, no registry credential, no signing key. It creates the sandbox, watches it, records
@@ -33,7 +33,7 @@ from kubernetes import config as k8s_config
 from kubernetes import watch as k8s_watch
 from nemo_builder_plugin.run.context import job_identity, read_step_config
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
-from nemo_platform_plugin.jobs.constants import job_storage_subpath
+from nemo_helix_plugin.jobs.constants import job_storage_subpath
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 #: `_volume_mounts` -- and they appear at the same layout paths every other step uses, under
 #: this root. An unusual name on purpose: a Dockerfile that touches this directory in a `RUN`
 #: touches the mounted volume, so it should not be one a Dockerfile would plausibly use.
-SANDBOX_ROOT = PurePosixPath("/nmp-work")
+SANDBOX_ROOT = PurePosixPath("/nhx-work")
 
 #: The five capabilities kaniko needs out of containerd's default fourteen. Measured by ablation:
 #: dropping all of them fails at `chown /etc/gshadow: operation not permitted`, because extracting
@@ -51,7 +51,7 @@ KANIKO_CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"]
 
 #: Printed by the sandbox after each build so this step can attribute a result without reading
 #: the volume the sandbox wrote to.
-RESULT_MARKER = "NMP_IMAGE_RESULT"
+RESULT_MARKER = "NHX_IMAGE_RESULT"
 
 #: The executor inside the kaniko `:debug` image. A constant so the script's shell semantics can
 #: be tested by running it against a stand-in, rather than only by reading it.
@@ -75,7 +75,7 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     *immediately* after kaniko so ``$?`` is kaniko's status. An earlier version appended
     ``|| true`` to each invocation "to keep going" -- after which ``$?`` is the status of
     ``true``, so every image reported 0 and ``supervise`` logged a failed build as built. Found on
-    the cluster, where a Dockerfile written to fail printed ``NMP_IMAGE_RESULT ... 0``.
+    the cluster, where a Dockerfile written to fail printed ``NHX_IMAGE_RESULT ... 0``.
     """
     view = WorkLayout(SANDBOX_ROOT)
     lines = ["set -u"]
@@ -143,7 +143,7 @@ def _pod_manifest(
             name=name,
             namespace=sandbox.namespace,
             # What the NetworkPolicy selects on. Without this label the pod is unconstrained.
-            labels={"nmp.nvidia.com/sandbox": "true", "app.kubernetes.io/managed-by": "nemo-builder"},
+            labels={"nhx.nvidia.com/sandbox": "true", "app.kubernetes.io/managed-by": "nemo-builder"},
         ),
         spec=k8s.V1PodSpec(
             restart_policy="Never",
@@ -287,7 +287,7 @@ def main() -> int:
     total = sum(len(group.images) for group in config.groups)
     failures = 0
     for index, group in enumerate(config.groups):
-        pod_name = f"nmp-sbx-{job_id}-g{index}"[:63]
+        pod_name = f"nhx-sbx-{job_id}-g{index}"[:63]
         manifest = _pod_manifest(
             name=pod_name,
             group=group,

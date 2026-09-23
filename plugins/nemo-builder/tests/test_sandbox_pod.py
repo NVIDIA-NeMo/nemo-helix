@@ -30,9 +30,9 @@ from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage,
 def _sandbox(**overrides: object) -> SandboxSpec:
     base: dict[str, object] = {
         "image": "gcr.io/kaniko-project/executor:debug",
-        "namespace": "nmp-builds",
-        "work_pvc": "nmp-build-work",
-        "node_selector": {"nmp.nvidia.com/build-node": "true"},
+        "namespace": "nhx-builds",
+        "work_pvc": "nhx-build-work",
+        "node_selector": {"nhx.nvidia.com/build-node": "true"},
     }
     base.update(overrides)
     return SandboxSpec.model_validate(base)
@@ -47,10 +47,10 @@ def _group(n: int = 2, *, source: ContextSource | None = None) -> SandboxGroup:
 
 def _pod():
     return _pod_manifest(
-        name="nmp-sbx-abc-g0",
+        name="nhx-sbx-abc-g0",
         group=_group(),
         sandbox=_sandbox(),
-        pvc="nmp-build-work",
+        pvc="nhx-build-work",
         job_sub_path="jobs/default/abc",
     )
 
@@ -71,7 +71,7 @@ class TestTheSandboxHoldsNothing:
     def test_it_wears_the_label_the_networkpolicy_selects_on(self) -> None:
         """Without this label the policy does not apply and the pod is unconstrained -- which is
         a silent failure, because the build still succeeds."""
-        assert _pod().metadata.labels["nmp.nvidia.com/sandbox"] == "true"
+        assert _pod().metadata.labels["nhx.nvidia.com/sandbox"] == "true"
 
 
 class TestThePostureTheNamespaceAdmits:
@@ -95,24 +95,24 @@ class TestThePostureTheNamespaceAdmits:
 class TestMounts:
     def test_context_is_read_only_and_output_is_not(self) -> None:
         mounts = {m.mount_path: m for m in _pod().spec.containers[0].volume_mounts}
-        assert mounts["/nmp-work/context/fs-a"].read_only is True
-        assert not mounts["/nmp-work/out"].read_only
+        assert mounts["/nhx-work/context/fs-a"].read_only is True
+        assert not mounts["/nhx-work/out"].read_only
 
     def test_subpaths_are_scoped_to_this_job_and_this_group(self) -> None:
         """A Dockerfile sees its own context and no other source in the set, and no other job."""
         mounts = {m.mount_path: m for m in _pod().spec.containers[0].volume_mounts}
-        assert mounts["/nmp-work/context/fs-a"].sub_path == "jobs/default/abc/context/fs-a"
-        assert mounts["/nmp-work/out"].sub_path == "jobs/default/abc/out"
+        assert mounts["/nhx-work/context/fs-a"].sub_path == "jobs/default/abc/context/fs-a"
+        assert mounts["/nhx-work/out"].sub_path == "jobs/default/abc/out"
 
     def test_each_mount_is_the_same_layout_path_under_the_sandbox_root(self) -> None:
         """The sandbox has no path scheme of its own: what it builds from and writes to are the
         layout's paths, re-rooted. A subtree context is the case where a second scheme would
         show."""
         pod = _pod_manifest(
-            name="nmp-sbx-abc-g0",
+            name="nhx-sbx-abc-g0",
             group=_group(source=ContextSource(fileset="fs-a", context_path="env/tests")),
             sandbox=_sandbox(),
-            pvc="nmp-build-work",
+            pvc="nhx-build-work",
             job_sub_path="jobs/default/abc",
         )
         for mount in pod.spec.containers[0].volume_mounts:
@@ -123,8 +123,8 @@ class TestMounts:
         script = _build_script(_group(1), _sandbox())
         mounts = {m.mount_path for m in _pod().spec.containers[0].volume_mounts}
         assert f"--context=dir://{WorkLayout(SANDBOX_ROOT).context(ContextSource(fileset='fs-a'))}" in script
-        assert "--oci-layout-path=/nmp-work/out/demo-1-0" in script
-        assert {"/nmp-work/context/fs-a", "/nmp-work/out"} == mounts
+        assert "--oci-layout-path=/nhx-work/out/demo-1-0" in script
+        assert {"/nhx-work/context/fs-a", "/nhx-work/out"} == mounts
 
 
 class TestDns:
@@ -152,8 +152,8 @@ class TestTheBuildScript:
     def test_a_mirror_disables_fallback_past_it(self) -> None:
         """Without this, a mirror is decorative: with public egress available the fallback would
         succeed silently and no error would appear anywhere."""
-        script = _build_script(_group(1), _sandbox(registry_mirror="mirror.nmp-builds.svc"))
-        assert "--registry-mirror=mirror.nmp-builds.svc" in script
+        script = _build_script(_group(1), _sandbox(registry_mirror="mirror.nhx-builds.svc"))
+        assert "--registry-mirror=mirror.nhx-builds.svc" in script
         assert "--skip-default-registry-fallback" in script
 
     def test_no_mirror_means_no_fallback_flag(self) -> None:

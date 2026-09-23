@@ -20,9 +20,9 @@
 # It is a real assertion only on a cloud cluster. Nothing here distinguishes "denied" from
 # "absent", and pretending otherwise would be worse than saying so.
 set -uo pipefail
-NS="${NS:-nmp-builds}"
-POD="nmp-sandbox-egress-probe"
-NODE_SELECTOR="${NODE_SELECTOR:-nmp.nvidia.com/build-node}"
+NS="${NS:-nhx-builds}"
+POD="nhx-sandbox-egress-probe"
+NODE_SELECTOR="${NODE_SELECTOR:-nhx.nvidia.com/build-node}"
 
 # Derived from the cluster, not hardcoded. The policy's `except` list is written in terms of
 # RFC1918 and link-local, which are universal -- but *which* addresses that actually denies is a
@@ -46,7 +46,7 @@ metadata:
   name: $POD
   namespace: $NS
   labels:
-    nmp.nvidia.com/sandbox: "true"
+    nhx.nvidia.com/sandbox: "true"
 spec:
   restartPolicy: Never
   automountServiceAccountToken: false

@@ -5,14 +5,14 @@
 
 Note what is *not* here: a permission to choose an execution profile. RFC 001 records that
 ``validate_job_spec`` checks only that a `(provider, profile)` pair resolves, with no per-workspace
-authorization -- so anyone able to submit a raw ``CreatePlatformJobRequest`` can name any profile,
+authorization -- so anyone able to submit a raw ``CreateHelixJobRequest`` can name any profile,
 including ``build-control``. That is a residual this plugin does not close, and closing it is an
 authorization control in front of Jobs rather than a permission here.
 """
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class BuildPerms(PermissionSet, namespace="builder.builds"):

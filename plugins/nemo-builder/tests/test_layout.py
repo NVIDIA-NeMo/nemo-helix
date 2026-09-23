@@ -41,7 +41,7 @@ class TestWhereThingsLive:
         """The property every step relies on: fetch, supervise and push root the layout
         differently, and agree on everything beneath the root."""
         source = ContextSource(fileset="fs-a", context_path="tests")
-        roots = [PurePosixPath("/var/run/scratch/job"), PurePosixPath("jobs/default/abc"), PurePosixPath("/nmp-work")]
+        roots = [PurePosixPath("/var/run/scratch/job"), PurePosixPath("jobs/default/abc"), PurePosixPath("/nhx-work")]
         relative = {
             (WorkLayout(r).context(source).relative_to(r), WorkLayout(r).output("x").relative_to(r)) for r in roots
         }

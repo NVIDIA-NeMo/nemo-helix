@@ -15,7 +15,7 @@ job that dies in a pod twenty minutes later. The fields that cannot have a safe 
 therefore ``None`` here and checked by the compiler.
 
 Env prefix is ``NEMO_BUILDER_`` -- note that plugin ``NemoConfig`` uses ``NEMO_``, while core
-services use ``NMP_``. Some prose in the repo says ``NMP_`` for plugins; the code is the
+services use ``NHX_``. Some prose in the repo says ``NHX_`` for plugins; the code is the
 authority and it computes ``NEMO_<SAFE_NAME>_``.
 """
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Literal
 
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 from pydantic import Field, field_validator
 
 
@@ -31,7 +31,7 @@ class BuilderConfig(NemoConfig):
     """Configuration for in-cluster container image builds."""
 
     plugin_name: ClassVar[str] = "builder"
-    plugin_description: ClassVar[str] = "In-cluster container image builds for NeMo Platform."
+    plugin_description: ClassVar[str] = "In-cluster container image builds for NeMo Helix."
 
     # --- The kill switch -------------------------------------------------
 
@@ -49,11 +49,11 @@ class BuilderConfig(NemoConfig):
     # --- Where builds run ------------------------------------------------
 
     namespace: str = Field(
-        default="nmp-builds",
+        default="nhx-builds",
         description="The `baseline`-enforcing namespace. See plugins/nemo-builder/deploy/.",
     )
     work_pvc: str = Field(
-        default="nmp-build-work",
+        default="nhx-build-work",
         description="Work volume claim. fetch writes it, the sandbox reads and writes it, push reads it.",
     )
     sandbox_image: str = Field(
@@ -85,7 +85,7 @@ class BuilderConfig(NemoConfig):
         ),
     )
     node_selector: dict[str, str] = Field(
-        default_factory=lambda: {"nmp.nvidia.com/build-node": "true"},
+        default_factory=lambda: {"nhx.nvidia.com/build-node": "true"},
         description=(
             "Pins every build pod to one node. Required only while the work volume is "
             "ReadWriteOnce; see deploy/40-work-volume.yaml. Empty it once the work volume is RWX."

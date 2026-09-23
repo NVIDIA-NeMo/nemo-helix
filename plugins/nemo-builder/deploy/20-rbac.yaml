@@ -3,7 +3,7 @@
 #
 # The one new privilege in the design.
 #
-# `nmp-build-control` -- the `supervise` step -- is the control plane for an untrusted pod. It
+# `nhx-build-control` -- the `supervise` step -- is the control plane for an untrusted pod. It
 # creates the sandbox, watches it, reads its log, and deletes it. That is all it may do, and this
 # Role is deliberately the shortest file here: pods in this namespace, and nothing else.
 #
@@ -12,8 +12,8 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: nmp-build-pod-control
-  namespace: nmp-builds
+  name: nhx-build-pod-control
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 rules:
@@ -27,30 +27,30 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: nmp-build-pod-control
-  namespace: nmp-builds
+  name: nhx-build-pod-control
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: nmp-build-pod-control
+  name: nhx-build-pod-control
 subjects:
-  # `nmp-build-control` ONLY. Binding `fetch` or `push` here would hand pod creation to an
+  # `nhx-build-control` ONLY. Binding `fetch` or `push` here would hand pod creation to an
   # identity that also holds a credential, which is the confused deputy the step split exists
   # to remove.
   - kind: ServiceAccount
-    name: nmp-build-control
-    namespace: nmp-builds
+    name: nhx-build-control
+    namespace: nhx-builds
 ---
 # The signing key, readable by the one step that signs.
 #
 # `builder.signing_key` is a `k8s://<namespace>/<secret>` reference, which cosign resolves
-# through the Kubernetes API using the pod's own ServiceAccount. So `nmp-build-push` needs `get`
+# through the Kubernetes API using the pod's own ServiceAccount. So `nhx-build-push` needs `get`
 # on exactly that Secret and nothing else -- not `list`, which would let it enumerate every
 # secret in the namespace including the registry credential's Kubernetes copy.
 #
-# `nmp-build-fetch` and `nmp-build-control` get no such binding. A caller cannot choose whether
+# `nhx-build-fetch` and `nhx-build-control` get no such binding. A caller cannot choose whether
 # its image is signed, and the steps that run closest to caller input cannot reach the key that
 # does the signing.
 #
@@ -59,8 +59,8 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: nmp-build-read-signing-key
-  namespace: nmp-builds
+  name: nhx-build-read-signing-key
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 rules:
@@ -72,15 +72,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: nmp-build-read-signing-key
-  namespace: nmp-builds
+  name: nhx-build-read-signing-key
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: nmp-build-read-signing-key
+  name: nhx-build-read-signing-key
 subjects:
   - kind: ServiceAccount
-    name: nmp-build-push
-    namespace: nmp-builds
+    name: nhx-build-push
+    namespace: nhx-builds

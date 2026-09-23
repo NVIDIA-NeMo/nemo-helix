@@ -4,7 +4,7 @@
 #
 # The control that makes a green build mean something.
 #
-# A successful kaniko build in `nmp-builds` proves nothing on its own -- it is equally consistent
+# A successful kaniko build in `nhx-builds` proves nothing on its own -- it is equally consistent
 # with the namespace not enforcing at all. So before trusting any positive result, submit the
 # posture rootless BuildKit requires and watch admission refuse it. If this script reports
 # ADMITTED, every other result in this PoC is void.
@@ -13,8 +13,8 @@
 #   violates PodSecurity "baseline:latest": forbidden AppArmor profile ...,
 #   seccompProfile (container "c" must not set securityContext.seccompProfile.type to "Unconfined")
 set -uo pipefail
-NS="${NS:-nmp-builds}"
-POD="nmp-build-negative-control"
+NS="${NS:-nhx-builds}"
+POD="nhx-build-negative-control"
 
 kubectl -n "$NS" delete pod "$POD" --ignore-not-found >/dev/null 2>&1
 

@@ -31,8 +31,8 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from nemo_builder_plugin.identity import DIGEST_PATTERN
-from nemo_platform_plugin.entity import NemoEntity
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
+from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from pydantic import BaseModel, Field
 
 
@@ -70,7 +70,7 @@ class JobOrigin(BaseModel):
         ge=1,
         description=(
             "The caller's ordinal for `build_set`. The only place a resubmission precondition "
-            "can read that outlives the job: a PlatformJob disappears on explicit delete and "
+            "can read that outlives the job: a HelixJob disappears on explicit delete and "
             "goes invisible to the non-terminal query the moment it completes, so a precondition "
             "read against jobs is blind in two ways that a read against this row is not."
         ),

@@ -3,28 +3,28 @@
 
 [project]
 name = "nemo-builder-plugin"
-description = "In-cluster container image builds for NeMo Platform (RFC 001)."
+description = "In-cluster container image builds for NeMo Helix (RFC 001)."
 requires-python = ">=3.11,<3.15"
 version = "0.1.0"
-# Runtime dependencies of the THREE STEP BINARIES, which is what the nmp-build image installs:
+# Runtime dependencies of the THREE STEP BINARIES, which is what the nhx-build image installs:
 # a platform client, the Kubernetes client, pydantic. Nothing else runs in a build pod.
-dependencies = ["nemo-platform-plugin", "pydantic>=2.0.0", "kubernetes>=29.0.0"]
+dependencies = ["nemo-helix-plugin", "pydantic>=2.0.0", "kubernetes>=29.0.0"]
 
 [project.optional-dependencies]
-# The API-process half. `service.py` annotates a FastAPI dependency as `AsyncNeMoPlatform`, and
+# The API-process half. `service.py` annotates a FastAPI dependency as `AsyncNeMoHelix`, and
 # FastAPI evaluates that annotation at runtime, so the full SDK is a real requirement *there*.
 # It is not one in a build pod -- no step binary imports it. Splitting it keeps the step image
 # small and keeps the dependency graph honest about what actually runs in a job.
-service = ["nemo-platform"]
+service = ["nemo-helix"]
 
 [tool.uv.sources]
-nemo-platform = { path = "../../packages/nemo_platform", editable = true }
-nemo-platform-plugin = { path = "../../packages/nemo_platform_plugin", editable = true }
+nemo-helix = { path = "../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
 
 [project.scripts]
-# What the three job steps run as. The compiler emits `["nmp-build", "<step>"]` as each step's
+# What the three job steps run as. The compiler emits `["nhx-build", "<step>"]` as each step's
 # container command; the launcher execs it.
-nmp-build = "nemo_builder_plugin.run.main:main"
+nhx-build = "nemo_builder_plugin.run.main:main"
 
 [project.entry-points."nemo.services"]
 builder = "nemo_builder_plugin.service:BuilderService"

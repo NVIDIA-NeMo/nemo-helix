@@ -19,7 +19,7 @@ import pytest
 from nemo_builder_plugin.run.fetch import fetch_source
 from nemo_builder_plugin.run.supervise import _volume_mounts
 from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, WorkLayout
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.client import FilesClient
 
 JOB_SLICE = "jobs/default/abc"
 
@@ -104,7 +104,7 @@ class TestWhatTheSandboxSees:
         layout = WorkLayout(PurePosixPath(tmp_path))
         digest = fetch_source(_client(FILESET), layout, source, workspace="default")
         assert Path(layout.context_hash_file(source)).read_text() == digest
-        assert not any(p.name.endswith(".nmp-context-hash") for p in _sandbox_context(tmp_path, source).rglob("*"))
+        assert not any(p.name.endswith(".nhx-context-hash") for p in _sandbox_context(tmp_path, source).rglob("*"))
 
 
 class TestHostileListings:

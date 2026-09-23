@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nmp-build fetch`` -- step 1. Trusted. Holds a Files client and nothing else.
+"""``nhx-build fetch`` -- step 1. Trusted. Holds a Files client and nothing else.
 
 **This step is the whole control against a caller naming another tenant's fileset.** It resolves
 every source **as the submitting principal**, so a request for a fileset the submitter cannot read
@@ -29,10 +29,10 @@ from nemo_builder_plugin.run.context import (
     work_mount,
 )
 from nemo_builder_plugin.steps import ContextSource, FetchStepConfig, WorkLayout
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client_provider import get_task_nemo_client
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import ListFilesQueryParams
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client_provider import get_task_nemo_client
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
 
 logger = logging.getLogger(__name__)
 

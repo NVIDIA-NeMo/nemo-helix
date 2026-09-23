@@ -16,8 +16,8 @@ import pytest
 from nemo_builder_plugin.controller import MAX_ATTEMPTS, BuilderController, _JobOutcome
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance, RegisteredOrigin
 from nemo_builder_plugin.registry import ReferenceNotFound, RegistryError, ResolvedImage, signature_tag
-from nemo_platform_plugin.client.errors import InternalServerError, NotFoundError
-from nemo_platform_plugin.entities import ListResponse, PaginationInfo
+from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError
+from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 
 DIGEST = "sha256:" + "c" * 64
 

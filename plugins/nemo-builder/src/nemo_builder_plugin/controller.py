@@ -37,10 +37,10 @@ from nemo_builder_plugin.registry import (
     ResolvedImage,
     signature_tag,
 )
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entities import ListResponse
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entities import ListResponse
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +134,10 @@ class BuilderController(NemoController):
         return self._interval_seconds
 
     async def on_startup(self) -> None:
-        from nemo_platform_plugin.client.adapter import client_from_platform
-        from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-        from nemo_platform_plugin.jobs.client import AsyncJobsClient
-        from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+        from nemo_helix_plugin.client.adapter import client_from_platform
+        from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+        from nemo_helix_plugin.jobs.client import AsyncJobsClient
+        from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
         config = BuilderConfig.get()
         # `internal=True` keeps a loop that polls every few seconds out of the access log.

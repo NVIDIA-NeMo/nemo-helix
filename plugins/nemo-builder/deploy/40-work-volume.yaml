@@ -21,8 +21,8 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: nmp-build-work
-  namespace: nmp-builds
+  name: nhx-build-work
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 spec:

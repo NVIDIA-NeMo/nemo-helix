@@ -30,12 +30,12 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.schema import BuildSet
-from nemo_platform_plugin.entities import EntityConflictError
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
+from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 logger = logging.getLogger(__name__)
 
-#: ``CreatePlatformJobRequest.source`` -- how the reconciler recognises its own jobs.
+#: ``CreateHelixJobRequest.source`` -- how the reconciler recognises its own jobs.
 JOB_SOURCE = "builder.build"
 
 
@@ -54,7 +54,7 @@ class _EntityWriter(Protocol):
 
 #: Injected so the submit path stays testable without a platform; it is the one piece that must
 #: talk to Jobs.
-CreateJob = Callable[[CreatePlatformJobRequest], Awaitable[object]]
+CreateJob = Callable[[CreateHelixJobRequest], Awaitable[object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +120,7 @@ async def submit_build_set(
             images.append(await entity_client.get(ContainerImage, name=row.name, workspace=workspace))
 
     await create_job(
-        CreatePlatformJobRequest(
+        CreateHelixJobRequest(
             name=plan.job_name,
             description=f"Container image build for {build_set.name} revision {build_set.revision}",
             source=JOB_SOURCE,

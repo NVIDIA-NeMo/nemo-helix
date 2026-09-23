@@ -25,17 +25,17 @@ from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.plan import BuildCompileError
 from nemo_builder_plugin.schema import BuildSet
 from nemo_builder_plugin.submit import submit_build_set
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.dependencies import get_sdk_client
-from nemo_platform_plugin.entity_client import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityNotFoundError,
     get_entity_client,
 )
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.service import NemoService, RouterSpec
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def _build_router() -> APIRouter:
         workspace: str,
         body: BuildSet,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
-        sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+        sdk: AsyncNeMoHelix = Depends(get_sdk_client),
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 

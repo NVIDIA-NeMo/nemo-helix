@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nmp-build`` -- the entry point the three job steps run as.
+"""``nhx-build`` -- the entry point the three job steps run as.
 
 One binary, three subcommands, three identities. Which one runs is decided by the compiler, and
 the identity it runs under is decided by the execution profile the compiler named -- so this
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = sys.argv[1:] if argv is None else argv
     if not args or args[0] in ("-h", "--help"):
-        print("usage: nmp-build {fetch|supervise|push}", file=sys.stderr)
+        print("usage: nhx-build {fetch|supervise|push}", file=sys.stderr)
         return 2
     try:
         command = _load(args[0])

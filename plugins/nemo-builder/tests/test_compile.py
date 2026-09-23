@@ -16,16 +16,16 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
 from nemo_builder_plugin.steps import CREDENTIAL_ENVVAR, ContextSource, PushStepConfig, SuperviseStepConfig
-from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.providers import CPUExecutionProvider
-from nemo_platform_plugin.jobs.spec import PlatformJobSpec
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 
 WORKSPACE = "default"
 #: The system tag of the first image of the default `_set()`. Tags are per IMAGE, not per set.
 SYSTEM_TAG = "default--demo-1-0"
 
 
-def _compile(build_set: BuildSet, *, config: BuilderConfig) -> PlatformJobSpec:
+def _compile(build_set: BuildSet, *, config: BuilderConfig) -> HelixJobSpec:
     return compile_build_set(BuildPlan.resolve(build_set, config=config, workspace=WORKSPACE), config=config)
 
 
@@ -36,7 +36,7 @@ def _config(
     sandbox_cpu: str = "2",
     sandbox_memory: str = "8Gi",
     push_secret: str | None = "my-reg-secret",
-    signing_key: str | None = "k8s://nmp-builds/cosign-key",
+    signing_key: str | None = "k8s://nhx-builds/cosign-key",
     execution_enabled: bool = True,
 ) -> BuilderConfig:
     return BuilderConfig(
@@ -81,9 +81,9 @@ class TestShape:
         # container at all, and a build step landing on that arm would be a real bug.
         assert all(isinstance(e, CPUExecutionProvider) for e in executors)
         assert [e.container.command for e in executors if isinstance(e, CPUExecutionProvider)] == [
-            ["nmp-build", "fetch"],
-            ["nmp-build", "supervise"],
-            ["nmp-build", "push"],
+            ["nhx-build", "fetch"],
+            ["nhx-build", "supervise"],
+            ["nhx-build", "push"],
         ]
 
 
@@ -107,7 +107,7 @@ class TestItSurvivesTheWire:
             )
 
         # And it round-trips back into the type the Jobs API validates against.
-        PlatformJobSpec.model_validate(on_the_wire)
+        HelixJobSpec.model_validate(on_the_wire)
 
 
 class TestTheCredentialAppearsOnce:

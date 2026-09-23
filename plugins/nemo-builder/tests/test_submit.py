@@ -15,8 +15,8 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, JobOrigin
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
 from nemo_builder_plugin.submit import JOB_SOURCE, SubmitResult, submit_build_set
-from nemo_platform_plugin.entities import EntityConflictError
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
+from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 
 class FakeEntityClient:
@@ -43,7 +43,7 @@ def _config() -> BuilderConfig:
     return BuilderConfig(
         default_registry="reg.example.com",
         push_secret="my-reg-secret",
-        signing_key="k8s://nmp-builds/cosign-key",
+        signing_key="k8s://nhx-builds/cosign-key",
     )
 
 
@@ -63,7 +63,7 @@ def _set(n: int = 2) -> BuildSet:
 
 
 async def _submit(entity_client: FakeEntityClient, events: list[str]) -> SubmitResult:
-    async def create_job(request: CreatePlatformJobRequest) -> CreatePlatformJobRequest:
+    async def create_job(request: CreateHelixJobRequest) -> CreateHelixJobRequest:
         events.append("create_job")
         return request
 
@@ -124,9 +124,9 @@ class TestTheJobRequest:
     @pytest.mark.asyncio
     async def test_the_job_names_this_service_so_the_reconciler_finds_its_own(self) -> None:
         client = FakeEntityClient()
-        captured: list[CreatePlatformJobRequest] = []
+        captured: list[CreateHelixJobRequest] = []
 
-        async def create_job(request: CreatePlatformJobRequest) -> CreatePlatformJobRequest:
+        async def create_job(request: CreateHelixJobRequest) -> CreateHelixJobRequest:
             captured.append(request)
             return request
 
@@ -151,9 +151,9 @@ class TestTheJobRequest:
         row resolved the same string, so two images in one repository recorded one digest.
         """
         client = FakeEntityClient()
-        captured: list[CreatePlatformJobRequest] = []
+        captured: list[CreateHelixJobRequest] = []
 
-        async def create_job(request: CreatePlatformJobRequest) -> CreatePlatformJobRequest:
+        async def create_job(request: CreateHelixJobRequest) -> CreateHelixJobRequest:
             captured.append(request)
             return request
 

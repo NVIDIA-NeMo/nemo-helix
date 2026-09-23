@@ -3,8 +3,8 @@
 
 """Request schemas: what a caller submits to ``POST /builds``.
 
-These are validated at submit, compiled into a ``PlatformJobSpec``, and never stored by us --
-Jobs keeps the compiled spec immutably on ``PlatformJobAttempt.platform_spec``, which is what
+These are validated at submit, compiled into a ``HelixJobSpec``, and never stored by us --
+Jobs keeps the compiled spec immutably on ``HelixJobAttempt.platform_spec``, which is what
 ``ContainerImage.provenance.built_by`` resolves against. Plain ``BaseModel``s, deliberately:
 the only thing this design stores as an entity is ``ContainerImage``.
 

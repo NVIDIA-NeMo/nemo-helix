@@ -51,14 +51,14 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: nmp-build-sandbox-default-deny
-  namespace: nmp-builds
+  name: nhx-build-sandbox-default-deny
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 spec:
   podSelector:
     matchLabels:
-      nmp.nvidia.com/sandbox: "true"
+      nhx.nvidia.com/sandbox: "true"
   policyTypes:
     - Ingress
     - Egress
@@ -67,14 +67,14 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: nmp-build-sandbox-egress
-  namespace: nmp-builds
+  name: nhx-build-sandbox-egress
+  namespace: nhx-builds
   labels:
     app.kubernetes.io/managed-by: nemo-builder
 spec:
   podSelector:
     matchLabels:
-      nmp.nvidia.com/sandbox: "true"
+      nhx.nvidia.com/sandbox: "true"
   policyTypes:
     - Egress
   egress:

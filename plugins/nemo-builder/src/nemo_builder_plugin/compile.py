@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The build compiler: one :class:`BuildPlan` in, one three-step ``PlatformJobSpec`` out.
+"""The build compiler: one :class:`BuildPlan` in, one three-step ``HelixJobSpec`` out.
 
 **A pure function.** No I/O, no writes, no clients. That is not stylistic -- it is what makes
 the entire submit path testable without a cluster, a registry, or a database, which in a project
@@ -9,7 +9,7 @@ whose end-to-end loop costs minutes is the only fast feedback loop there is. It 
 either: the plan it is handed has already been checked, so compiling is a projection.
 
 **It synthesizes the whole spec, ``executor`` included, and accepts none of it from the
-request.** ``PlatformJobStepSpec.executor`` is a caller-facing field in Jobs, so a compiler that
+request.** ``HelixJobStepSpec.executor`` is a caller-facing field in Jobs, so a compiler that
 passed one through would undo the property the entire design rests on: that *how* a build runs is
 the system's decision. A caller picks a Dockerfile and a fileset.
 
@@ -45,17 +45,17 @@ from nemo_builder_plugin.steps import (
     SigningConfig,
     SuperviseStepConfig,
 )
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix_plugin.jobs.constants import (
     DEFAULT_JOB_STORAGE_PATH,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nemo_platform_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
-from nemo_platform_plugin.jobs.spec import (
-    PlatformJobEnvironmentVariable,
-    PlatformJobSecret,
-    PlatformJobSecretEnvironmentVariableRef,
-    PlatformJobSpec,
-    PlatformJobStepSpec,
+from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
+from nemo_helix_plugin.jobs.spec import (
+    HelixJobEnvironmentVariable,
+    HelixJobSecret,
+    HelixJobSecretEnvironmentVariableRef,
+    HelixJobSpec,
+    HelixJobStepSpec,
 )
 
 #: Where the work volume is mounted in `fetch` and `push`, and therefore the root of their
@@ -86,9 +86,9 @@ def _fetch_sources(plan: BuildPlan) -> list[ContextSource]:
     return sources
 
 
-def _fetch_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
+def _fetch_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
     """Trusted. Holds a Files client. No registry credential, no pod RBAC, runs no caller code."""
-    return PlatformJobStepSpec(
+    return HelixJobStepSpec(
         name="fetch",
         executor=CPUExecutionProvider(
             # `provider` is explicit even though "cpu" is its default. The Jobs client serializes
@@ -97,15 +97,15 @@ def _fetch_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
             # discriminator 'provider'". `test_the_compiled_spec_survives_exclude_unset` guards it.
             provider="cpu",
             profile=config.fetch_profile,
-            container=ContainerSpec(command=["nmp-build", "fetch"]),
+            container=ContainerSpec(command=["nhx-build", "fetch"]),
         ),
         # Declaring this is what asks for the work volume.
-        environment=[PlatformJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT)],
+        environment=[HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT)],
         config=FetchStepConfig(sources=_fetch_sources(plan)).model_dump(),
     )
 
 
-def _build_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
+def _build_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
     """Trusted control plane for an untrusted pod. Holds NO credential of any kind.
 
     Note what is absent: no ``environment`` entry requesting the work volume, and no registry,
@@ -123,12 +123,12 @@ def _build_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
         for source, images in plan.groups()
     ]
 
-    return PlatformJobStepSpec(
+    return HelixJobStepSpec(
         name="build",
         executor=CPUExecutionProvider(
             provider="cpu",  # see _fetch_step
             profile=config.control_profile,
-            container=ContainerSpec(command=["nmp-build", "supervise"]),
+            container=ContainerSpec(command=["nhx-build", "supervise"]),
         ),
         config=SuperviseStepConfig(
             sandbox=SandboxSpec(
@@ -147,7 +147,7 @@ def _build_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
     )
 
 
-def _push_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
+def _push_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
     """Trusted. Holds the registry credential and the signing key. Runs no caller code."""
     images = [
         PushImage(
@@ -160,19 +160,19 @@ def _push_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
         for image in plan.images
     ]
 
-    return PlatformJobStepSpec(
+    return HelixJobStepSpec(
         name="push",
         executor=CPUExecutionProvider(
             provider="cpu",  # see _fetch_step
             profile=config.push_profile,
-            container=ContainerSpec(command=["nmp-build", "push"]),
+            container=ContainerSpec(command=["nhx-build", "push"]),
         ),
         environment=[
-            PlatformJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT),
+            HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT),
             # The credential appears exactly once in the whole document, on the last step.
-            PlatformJobEnvironmentVariable(
+            HelixJobEnvironmentVariable(
                 name=CREDENTIAL_ENVVAR,
-                from_secret=PlatformJobSecretEnvironmentVariableRef(name=plan.push_secret),
+                from_secret=HelixJobSecretEnvironmentVariableRef(name=plan.push_secret),
             ),
         ],
         config=PushStepConfig(
@@ -185,10 +185,10 @@ def _push_step(plan: BuildPlan, config: BuilderConfig) -> PlatformJobStepSpec:
     )
 
 
-def compile_build_set(plan: BuildPlan, *, config: BuilderConfig) -> PlatformJobSpec:
+def compile_build_set(plan: BuildPlan, *, config: BuilderConfig) -> HelixJobSpec:
     """Compile a resolved plan into the job that builds it."""
-    return PlatformJobSpec(
+    return HelixJobSpec(
         steps=[_fetch_step(plan, config), _build_step(plan, config), _push_step(plan, config)],
         # Declared on the job, consumed by exactly one step.
-        secrets=[PlatformJobSecret(name=plan.push_secret)],
+        secrets=[HelixJobSecret(name=plan.push_secret)],
     )

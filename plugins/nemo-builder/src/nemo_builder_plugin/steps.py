@@ -8,9 +8,9 @@ them. Freezing it here means the step binaries can be written without waiting fo
 path, which is the single highest-leverage thing in the plan: those two workstreams share a data
 structure and nothing else.
 
-**How a step actually receives this.** The jobs controller serialises ``PlatformJobStepSpec.config``
+**How a step actually receives this.** The jobs controller serialises ``HelixJobStepSpec.config``
 to a ConfigMap, mounts it, and points ``NEMO_JOB_STEP_CONFIG_FILE_PATH`` at the file. In the pod,
-``nmp.common.jobs.config.get_task_config()`` reads that path and returns the dict. So a step does
+``nhx.common.jobs.config.get_task_config()`` reads that path and returns the dict. So a step does
 ``FetchStepConfig.model_validate(get_task_config())`` and nothing else.
 
 **Read these by what each one does not carry.**
@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 
 #: The environment variable `push` reads the registry credential from. The compiler wires it with
 #: `from_secret`, so the jobs launcher resolves the value in-pod and it never enters a job spec.
-CREDENTIAL_ENVVAR = "NMP_REGISTRY_AUTH"
+CREDENTIAL_ENVVAR = "NHX_REGISTRY_AUTH"
 
 
 class ContextSource(BaseModel):
@@ -103,7 +103,7 @@ class WorkLayout:
     def context_hash_file(self, source: ContextSource) -> PurePosixPath:
         """Beside the context rather than in it, where it would become part of the build."""
         context = self.context(source)
-        return context.with_name(f"{context.name}.nmp-context-hash")
+        return context.with_name(f"{context.name}.nhx-context-hash")
 
     @property
     def outputs(self) -> PurePosixPath:

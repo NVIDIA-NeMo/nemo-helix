@@ -23,7 +23,7 @@ def _config(**overrides: object) -> BuilderConfig:
     settings: dict[str, object] = {
         "default_registry": "reg.example.com",
         "push_secret": "my-reg-secret",
-        "signing_key": "k8s://nmp-builds/cosign-key",
+        "signing_key": "k8s://nhx-builds/cosign-key",
     }
     settings.update(overrides)
     return BuilderConfig.model_validate(settings)

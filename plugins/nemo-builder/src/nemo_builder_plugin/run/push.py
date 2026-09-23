@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nmp-build push`` -- step 3. Trusted. Holds the registry credential and the signing key.
+"""``nhx-build push`` -- step 3. Trusted. Holds the registry credential and the signing key.
 
 **It publishes bytes it did not produce.** That is the point of the step split, and it is also
 exactly why this file is the most defensive one in the plugin: it is the only thing standing
@@ -85,7 +85,7 @@ def _materialize_credential(registry: str | None) -> str | None:
         auth = base64.b64encode(f"{username}:{password}".encode()).decode()
         config = json.dumps({"auths": {registry: {"auth": auth}}})
 
-    directory = tempfile.mkdtemp(prefix="nmp-docker-")
+    directory = tempfile.mkdtemp(prefix="nhx-docker-")
     path = Path(directory) / "config.json"
     path.write_text(config)
     path.chmod(0o600)

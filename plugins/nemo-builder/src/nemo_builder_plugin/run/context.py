@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix_plugin.jobs.constants import (
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,

@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Proves the console script resolves and each step module imports, at BUILD time rather than
 # twenty minutes into a job. A missing transitive dependency is otherwise discovered by a pod.
-RUN nmp-build --help 2>&1 | grep -q 'fetch|supervise|push' \
+RUN nhx-build --help 2>&1 | grep -q 'fetch|supervise|push' \
  && python -c "import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push" \
  && crane version && cosign version 2>&1 | head -3
 
