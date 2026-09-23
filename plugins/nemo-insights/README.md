@@ -8,6 +8,13 @@ NeMo Helix plugin for analyzing agent telemetry and persisting actionable insigh
 Analysis uses [trace-intel](https://github.com/NVIDIA-NeMo/labs-trace-intel).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
 
+## Prerequisites
+
+Use a running NeMo Helix with Intake, Insights, Jobs, and a configured
+`agents.execute` runtime. The target agent must already have traces in Intake.
+Run `nemo setup` to select default and fast Platform models, or supply
+`--default-model` and `--fast-model` when submitting analysis.
+
 ## Install from the monorepo
 
 ```bash
@@ -18,98 +25,43 @@ The plugin is installed by default through the root workspace's `enabled-plugins
 
 ## CLI
 
-From an agent directory, Insights discovers `optimizer.yaml` in the current
-directory or its parents. Start by checking the profile and its environment,
-then run the analyst:
+Submit analysis through NeMo Helix. Replace `<run-name>` with the name
+returned by `create`:
 
 ```bash
-cd <agent-directory>
-uv run nemo agents analyst doctor
-uv run nemo agents analyst run
+uv run nemo insights analysis-runs create --agent research-agent --workspace default --wait
+uv run nemo insights analysis-runs list --agent research-agent
+uv run nemo insights analysis-runs get "<run-name>"
 ```
 
-Run `nemo setup` first to select the default and fast NeMo Helix Model Entities.
-The NeMo Analyst uses the default model to compile insights and the fast model for
-evidence streams; an existing context without `fast_model` reuses `default_model`.
-Provider credentials remain in NeMo Helix Secrets.
+AnalysisRuns execute through `agents.execute`; the Insights plugin stores the
+resulting insights in NeMo Helix. `--wait` exits non-zero unless the job
+completes successfully. A run and its backing job share one name.
 
-The profile contract consumed by Insights is deliberately small:
+`create` uses those configured models unless you pass `--default-model` and
+`--fast-model`. Add `--ethos ETHOS.md` to supply the agent's intended behavior,
+`--since <ISO-8601 timestamp>` to set a lower time bound, or
+`--evaluation-id <id>` to select one evaluation.
 
-```yaml
-agent: research-agent
-ethos: ETHOS.md  # optional
-workspace: default         # optional; defaults to "default"
-```
-
-Only `agent`, `ethos`, and `workspace` are consumed by Insights.
-Unknown experiment-owned fields are ignored, while the reserved `profile_dir`
-field is rejected. `agent` is required. Relative `ethos` paths are
-resolved relative to the profile. When it is omitted, Insights looks for
-`ETHOS.md`, then `README.md`, beside the profile.
-
-An adjacent `.env` is loaded when a profile is found, without replacing
-variables already set in the shell. For this shared profile workflow,
-`NHX_BASE_URL` is the only base-URL environment variable. Resolution order is
-explicit command-line flags, then profile values (for `agent`, `ethos`,
-and `workspace`) or `NHX_BASE_URL` (for the base URL), then the built-in
-defaults. `--base-url` takes precedence over `NHX_BASE_URL`.
+Provide `--agent` and pass the workspace and Ethos explicitly when needed.
+`--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
 
 ### Telemetry requirement
 
-The analyst scopes Intake span queries to the configured `agent`. The normalized
-`agent_name` on each span must therefore match `agent` in `optimizer.yaml` or
-`--agent`. For OTLP, always set `gen_ai.agent.name` on every span; Intake also
-normalizes `llm.agent.name` and `agent.name` from instrumentation that emits
-those conventions. ATIF maps its required `agent.name` automatically.
+The normalized `agent_name` on the agent's traces must match `--agent`.
+For OTLP, set `gen_ai.agent.name` on every span. Intake also normalizes
+`llm.agent.name` and `agent.name`; ATIF maps its required `agent.name` automatically.
 
-### Where insights are written
-
-Insights always go to the platform, through the Insights plugin API.
-
-Pass `--insights-file-output <path>` to also keep a local copy: the platform is
-written first and the file mirrors what it stored, platform ids included, so a
-later run's updates land in both stores. Each run merges into the file rather
-than overwriting it. Because the platform is the source of truth, a file that
-cannot be written is reported as a warning on the run report instead of failing
-the run.
+### Periodic analysis
 
 ```bash
-uv run nemo agents analyst run                                  # platform only
-uv run nemo agents analyst run --insights-file-output out.yaml  # platform + local mirror
-```
-
-```bash
-uv run nemo agents analyst run \
-  --agent research-agent \
-  --workspace default \
-  --base-url http://localhost:8080
-
 uv run nemo insights analysis enable --agent research-agent
 uv run nemo insights analysis status
 uv run nemo insights analysis disable --agent research-agent
 ```
 
-`nemo agents analyst run` runs the NeMo Analyst locally, in your shell. To have the
-platform run it as a job instead, submit an *analysis run*:
-
-```bash
-uv run nemo insights analysis-runs create --agent research-agent --wait
-uv run nemo insights analysis-runs list --agent research-agent
-uv run nemo insights analysis-runs get <run-name>
-```
-
-A run and the `agents.execute` job backing it share one name, so `get` returns
-both together. `--wait` polls to a terminal job state and exits non-zero unless
-the job completed. `create` fills the default/fast model pair from your CLI
-config unless you pass `--default-model` / `--fast-model`; the request must
-carry it because the NeMo Helix process cannot read that file.
-
-`analysis enable` stores the effective default/fast pair in the server-side
-analysis config so scheduled jobs do not depend on the operator's local CLI
-file. Re-run `enable` after changing the pair with `nemo setup`. Existing
-enabled records created before model-pair persistence must also be re-enabled.
-
-`--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
+`analysis enable` stores the effective default/fast model pair for scheduled
+jobs. Re-run `enable` after changing the pair with `nemo setup`.
 
 ## API and SDK
 
@@ -182,4 +134,4 @@ uv run ruff check plugins/nemo-insights
 ## Evaluation
 
 The analyst-only evaluation is in [`evaluation/`](evaluation/). It can replay pinned
-Intake traces or run Tau2 benchmarks before invoking `nemo agents analyst run`.
+Intake traces or run Tau2 benchmarks before invoking the shared Python analysis runner.

@@ -689,10 +689,6 @@ intake = "nhx.intake.cli:IntakeCLI"
 experiments = "nhx.intake.cli:ExperimentsCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.cli.agents"]
-analyst = "nemo_insights_plugin.analyst.cli:AnalystCLI"
-
-# Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.client_provider"]
 platform = "nhx.common.client_factory:HelixNemoClientProvider"
 

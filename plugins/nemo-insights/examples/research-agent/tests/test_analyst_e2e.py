@@ -10,7 +10,7 @@ This exercises the whole loop against *real* services and *real* LLM APIs:
 3. Clear all spans for the test project.
 4. Run the research agent on three questions (concurrently) so it logs
    traces to Intake.
-5. Run the analyst agent (``nemo agents analyst run``).
+5. Run the analyst agent (``nemo insights analysis-runs create --wait``).
 6. Assert the analyst created at least one Insight.
 
 Required setup (the test is **opt-in** because it costs real tokens and needs
@@ -460,9 +460,10 @@ def test_analyst_creates_insight_end_to_end(platform_server: str) -> None:  # no
     result = subprocess.run(
         _cli_cmd(
             "nemo",
-            "agents",
-            "analyst",
-            "run",
+            "insights",
+            "analysis-runs",
+            "create",
+            "--wait",
             "--agent",
             TEST_AGENT,
             "--workspace",

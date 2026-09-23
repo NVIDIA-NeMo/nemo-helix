@@ -1,20 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Insights CLI and contributed subcommands.
-
-The module-level :func:`analyze` and :func:`doctor` callbacks are the verb bodies for
-:class:`nemo_insights_plugin.analyst.cli.AnalystCLI` (``nemo agents analyst run`` /
-``nemo agents analyst doctor``). This module's ``InsightsCLI`` keeps the periodic
-``analysis`` surface and does not mount those agent verbs.
-"""
+"""Insights scheduling and AnalysisRun CLI."""
 
 import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from datetime import datetime
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -28,78 +21,16 @@ from nemo_helix_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.nooa_model_client import configured_model_refs
-from nemo_insights_plugin.analyst.run import ClientConstructionError, run_analyst
-from nemo_insights_plugin.contracts.checks import CheckResult, advisories, format_report, required_failures
-from nemo_insights_plugin.contracts.insights import InsightsFileError, validate_insights_file
 from nemo_insights_plugin.contracts.profile import (
     DEFAULT_BASE_URL,
-    EnvFileError,
-    ProfileError,
-    discover_profile,
-    load_env_file,
-    resolve_base_url,
 )
 from nemo_insights_plugin.platform_client import make_client
-from nemo_insights_plugin.preflight import (
-    AnalysisProbes,
-    check_environment,
-    check_models,
-    check_profile,
-    read_ethos,
-)
-from nemo_insights_plugin.profile import AnalysisProfile, load_profile, pick_ethos
 from nemo_insights_plugin.sdk_resources.analysis_runs import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_WAIT_TIMEOUT,
     AnalysisRunNotSubmittedError,
     AnalysisRunTimeoutError,
 )
-from nooa import GenerationError
-
-_PREFLIGHT_PROBES: AnalysisProbes | None = None
-
-
-@dataclass(frozen=True)
-class _ResolvedAnalysis:
-    agent: str
-    ethos: str | None
-    workspace: str
-    base_url: str
-    insights_output: Path | None
-    profile_dir: Path | None
-    ethos_checks: tuple[CheckResult, ...]
-
-
-def _load_profile_or_error(profile_path: Path | None) -> tuple[AnalysisProfile | None, str | None]:
-    """Load an explicit or discovered profile, preserving non-explicit failures."""
-    found = profile_path or discover_profile()
-    if found is None:
-        return None, None
-    try:
-        profile = load_profile(found)
-    except ProfileError as exc:
-        if profile_path is not None:
-            raise
-        loaded = load_env_file(found.parent / ".env")
-        if loaded:
-            typer.echo(f"Loaded .env from {found.parent / '.env'} ({len(loaded)} vars)", err=True)
-        return None, str(exc)
-    if profile_path is None:
-        typer.echo(f"Using profile: {found} (agent: {profile.agent})", err=True)
-    loaded = load_env_file(found.parent / ".env")
-    if loaded:
-        typer.echo(f"Loaded .env from {found.parent / '.env'} ({len(loaded)} vars)", err=True)
-    return profile, None
-
-
-def _preflight_or_exit(checks: list[CheckResult]) -> None:
-    """Print blockers and stop before an analyst run."""
-    if required_failures(checks):
-        typer.echo(format_report(checks), err=True)
-        raise typer.Exit(code=1)
-    warnings = advisories(checks)
-    if warnings:
-        typer.echo(format_report(warnings), err=True)
 
 
 def _one_line_error(exc: BaseException) -> str:
@@ -130,254 +61,6 @@ def _run_command(coro: Coroutine[Any, Any, _T]) -> _T:
     ) as exc:
         typer.echo(f"Error: {_one_line_error(exc)}", err=True)
         raise typer.Exit(1) from None
-
-
-def _resolve_analysis(
-    *,
-    typer_ctx: typer.Context,
-    agent: str | None,
-    ethos: Path | None,
-    workspace: str | None,
-    base_url: str | None,
-    profile_path: Path | None,
-    insights_output: Path | None,
-) -> _ResolvedAnalysis:
-    profile, profile_error = _load_profile_or_error(profile_path)
-    if profile_error is not None:
-        if agent is None:
-            raise ProfileError(profile_error)
-        typer.echo(f"warning: ignoring discovered profile: {profile_error}", err=True)
-
-    resolved_agent = agent if agent is not None else (profile.agent if profile is not None else None)
-    if resolved_agent is None:
-        raise ProfileError(
-            "No --agent given and no optimizer.yaml profile found. Pass --agent or run from a directory with a profile."
-        )
-    if workspace is not None:
-        resolved_workspace = workspace
-    else:
-        # Precedence: --workspace > the profile's pinned workspace > the
-        # active CLI context > "default". The profile wins over the context
-        # because it is a deliberate per-project setting; the context beats
-        # the bare literal so `analyze` targets the workspace the user
-        # selected instead of silently acting on "default".
-        profile_workspace = profile.workspace if profile is not None else None
-        resolved_workspace = profile_workspace or resolve_cli_workspace(typer_ctx)
-
-    ethos_path = ethos
-    ethos_error: str | None = None
-    if ethos_path is None and profile is not None:
-        try:
-            ethos_path = pick_ethos(profile)
-        except ProfileError as exc:
-            ethos_error = str(exc)
-    ethos_content, ethos_checks = read_ethos(ethos_path, ethos_error)
-
-    resolved_base_url = resolve_base_url(base_url)
-    validate_insights_file(insights_output)
-
-    return _ResolvedAnalysis(
-        agent=resolved_agent,
-        ethos=ethos_content,
-        workspace=resolved_workspace,
-        base_url=resolved_base_url,
-        insights_output=insights_output,
-        profile_dir=profile.profile_dir if profile is not None else None,
-        ethos_checks=tuple(ethos_checks),
-    )
-
-
-def _prepare_mirror(insights_output: Path | None) -> Path | None:
-    """Ready the mirror's directory, dropping the mirror if that fails.
-
-    The mirror is a convenience beside the platform, which is the source of
-    truth, so an unusable local path must not cost the user the analysis. This
-    matches how a failed mirror *write* is reported — a warning on the run
-    report rather than a failed run.
-    """
-    if insights_output is None:
-        return None
-    try:
-        insights_output.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        typer.echo(
-            f"warning: insights mirror disabled — could not create {insights_output.parent}: "
-            f"{_one_line_error(exc)}. Insights are still written to the platform.",
-            err=True,
-        )
-        return None
-    typer.echo(f"Insights file (mirror of the platform): {insights_output}", err=True)
-    return insights_output
-
-
-async def _run_analysis(analysis: _ResolvedAnalysis, *, verbose: bool) -> str:
-    checks = list(analysis.ethos_checks)
-    checks.extend(check_models())
-    _preflight_or_exit(checks)
-
-    insights_output = _prepare_mirror(analysis.insights_output)
-    try:
-        try:
-            client = make_client(analysis.base_url)
-        except (RuntimeError, ValueError) as exc:
-            raise ClientConstructionError(str(exc)) from None
-        return await run_analyst(
-            agent=analysis.agent,
-            ethos=analysis.ethos,
-            workspace=analysis.workspace,
-            base_url=analysis.base_url,
-            client=client,
-            insights_output=insights_output,
-            verbose=verbose,
-        )
-    except GenerationError as exc:
-        detail = _one_line_error(exc).rstrip(".")
-        typer.echo(
-            f"Error: analyst run failed: {detail}. "
-            "Check inference model access and credentials, "
-            "then retry or adjust usage limits.",
-            err=True,
-        )
-        raise typer.Exit(1) from None
-    except (ClientConstructionError, NeMoHelixError, httpx.HTTPError) as exc:
-        detail = _one_line_error(exc).rstrip(".")
-        typer.echo(
-            f"Error: analysis failed: {detail}. Check --base-url/NHX_BASE_URL, "
-            "authentication, workspace, and Intake availability.",
-            err=True,
-        )
-        raise typer.Exit(1) from None
-
-
-def analyze(
-    typer_ctx: typer.Context,
-    agent: str | None = typer.Option(
-        None,
-        "--agent",
-        help="Name of the agent (agent under test) the analyst should focus on.",
-    ),
-    ethos: Path | None = typer.Option(
-        None,
-        "--ethos",
-        help="Path to a markdown file describing the agent under test (its Ethos).",
-        exists=True,
-        readable=True,
-    ),
-    workspace: str | None = typer.Option(
-        None,
-        *WORKSPACE_FLAGS,
-        help=workspace_help("Workspace the analyst should operate in."),
-    ),
-    base_url: str | None = typer.Option(
-        None,
-        "--base-url",
-        help="Base URL of the running NHX instance the analyst's tools should call.",
-    ),
-    profile_path: Path | None = typer.Option(
-        None,
-        "--profile",
-        help="Path to optimizer.yaml. Default: discovered by walking up from cwd.",
-        exists=True,
-        dir_okay=False,
-        readable=True,
-    ),
-    insights_output: Path | None = typer.Option(
-        None,
-        "--insights-file-output",
-        help=(
-            "Also write insights to this local YAML file. Insights always go "
-            "to the platform first; the file mirrors what was stored, "
-            "platform ids included, and each run merges into it."
-        ),
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help=(
-            "Stream the analyst's tool calls and reasoning to stderr "
-            "while it runs. Off by default so that stdout stays clean "
-            "for piping the final answer."
-        ),
-    ),
-) -> None:
-    """Run the analyst agent against a running NHX instance.
-
-    Builds the analyst agent with ``--agent`` (and optional ``--ethos``)
-    formatted into its instructions and tools scoped
-    to ``--agent`` / ``--workspace`` / ``--base-url``, runs it, and
-    prints whatever the agent returns. Insights are written to the
-    platform, and mirrored to ``--insights-file-output`` when given.
-    """
-    try:
-        analysis = _resolve_analysis(
-            typer_ctx=typer_ctx,
-            agent=agent,
-            ethos=ethos,
-            workspace=workspace,
-            base_url=base_url,
-            profile_path=profile_path,
-            insights_output=insights_output,
-        )
-        output = asyncio.run(_run_analysis(analysis, verbose=verbose))
-    except (ProfileError, EnvFileError, InsightsFileError, OSError, UnicodeError) as exc:
-        typer.echo(f"Error: {_one_line_error(exc)}", err=True)
-        raise typer.Exit(1) from None
-    typer.echo(output)
-
-
-def doctor(
-    typer_ctx: typer.Context,
-    profile_path: Path | None = typer.Option(
-        None,
-        "--profile",
-        help="Path to optimizer.yaml. Default: discovered by walking up from cwd.",
-        exists=True,
-        dir_okay=False,
-        readable=True,
-    ),
-    base_url: str | None = typer.Option(
-        None,
-        "--base-url",
-        help="Base URL of the running NHX instance to check.",
-    ),
-) -> None:
-    """Check whether the current profile is ready for analysis."""
-    try:
-        try:
-            profile, profile_error = _load_profile_or_error(profile_path)
-        except ProfileError as exc:
-            profile, profile_error = None, str(exc)
-        ethos_path: Path | None = None
-        ethos_error: str | None = None
-        if profile is not None:
-            try:
-                ethos_path = pick_ethos(profile)
-            except ProfileError as exc:
-                ethos_error = str(exc)
-        _, ethos_results = read_ethos(ethos_path, ethos_error)
-
-        async def _flow() -> list[CheckResult]:
-            results = check_profile(profile, profile_error)
-            results.extend(ethos_results)
-            results.extend(
-                await check_environment(
-                    agent=profile.agent if profile is not None else None,
-                    workspace=(profile.workspace if profile is not None else None) or resolve_cli_workspace(typer_ctx),
-                    base_url=resolve_base_url(base_url),
-                    profile_dir=profile.profile_dir if profile is not None else None,
-                    probes=_PREFLIGHT_PROBES,
-                )
-            )
-            return results
-
-        results = asyncio.run(_flow())
-    except (EnvFileError, OSError, UnicodeError) as exc:
-        typer.echo(f"Error: {_one_line_error(exc)}", err=True)
-        raise typer.Exit(1) from None
-    typer.echo(format_report(results))
-    if required_failures(results):
-        raise typer.Exit(code=1)
 
 
 class InsightsCLI(NemoCLI):
@@ -776,7 +459,7 @@ def _read_ethos_file(ethos: Path | None) -> str | None:
 def _resolve_model_refs(default_model: str | None, fast_model: str | None) -> tuple[str, str]:
     """Fill either model ref from the operator's CLI config when not given.
 
-    The Platform process cannot read that config, so the request has to carry
+    The Helix process cannot read that config, so the request has to carry
     the pair; the CLI is where it is known.
     """
     if default_model and fast_model:
