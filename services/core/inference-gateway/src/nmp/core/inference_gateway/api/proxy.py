@@ -30,8 +30,8 @@ from nemo_platform_plugin.inference_middleware import (
 )
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
-from nmp.common.entities.utils import parse_model_entity_ref
-from nmp.core.inference_gateway.api.authz import enforce_model_ref_access
+from nmp.common.entities.utils import ParsedEntityRef, parse_model_entity_ref
+from nmp.core.inference_gateway.api.authz import can_run_inference_in, enforce_model_ref_access
 from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
 from nmp.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -50,7 +50,7 @@ from nmp.core.inference_gateway.api.typed_request import build_inference_request
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from nmp.core.inference_gateway.api.model_cache import ModelCache
+    from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
 
 ResponseResult = Union[dict[str, Any], AsyncIterator[dict[str, Any]]]
 """Either a fully-buffered JSON response (``dict``) or a lazy SSE stream
@@ -841,6 +841,23 @@ async def stream_response_result(
         )
 
 
+async def _select_authorized_provider(
+    request_workspace: str,
+    model_ref: ParsedEntityRef,
+    model_providers: list[tuple[str, "ModelProviderInfo"]],
+) -> tuple[str, "ModelProviderInfo"]:
+    same_workspace_first = sorted(
+        model_providers, key=lambda entry: entry[1].model_provider.workspace != request_workspace
+    )
+    for served_model_name, provider_info in same_workspace_first:
+        if await can_run_inference_in(request_workspace, provider_info.model_provider.workspace):
+            return served_model_name, provider_info
+    raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail=f"Not authorized to use any provider serving model entity '{model_ref.workspace}/{model_ref.name}'.",
+    )
+
+
 async def virtual_model_proxy(
     *,
     request: Request,
@@ -970,7 +987,9 @@ async def virtual_model_proxy(
             or BackendFormat.OPENAI_CHAT
         )
         ctx.backend_format = backend_format
-        resolved_served_model_name, resolved_model_provider_info = resolved_model_entity.model_providers[0]
+        resolved_served_model_name, resolved_model_provider_info = await _select_authorized_provider(
+            workspace, modified_model_ref, resolved_model_entity.model_providers
+        )
 
         if (
             resolved_model_provider_info.model_provider.api_key_secret_name

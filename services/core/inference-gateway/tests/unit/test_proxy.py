@@ -1139,6 +1139,47 @@ async def test_virtual_model_proxy_denies_lora_adapter_from_inaccessible_workspa
 
 
 @pytest.mark.asyncio
+async def test_virtual_model_proxy_denies_provider_from_inaccessible_workspace(mock_proxy_client):
+    model_entity_id = "carol-ws/gpt"
+    model_cache = _model_cache_with(_serving_provider("secret-ws", "secret-nim", model_entity_id))
+
+    with _caller_with_access_to(), pytest.raises(HTTPException) as exc_info:
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert exc_info.value.status_code == 403
+    assert model_entity_id in exc_info.value.detail
+    mock_proxy_client.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_skips_provider_from_inaccessible_workspace(mock_proxy_client):
+    model_entity_id = "shared-ws/gpt"
+    model_cache = _model_cache_with(
+        _serving_provider("secret-ws", "secret-nim", model_entity_id),
+        _serving_provider("bob-ws", "bob-nim", model_entity_id),
+    )
+
+    with _caller_with_access_to("shared-ws", "bob-ws"):
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert mock_proxy_client.request.call_args.kwargs["url"].startswith("http://bob-nim.local")
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_prefers_provider_in_request_workspace(mock_proxy_client):
+    model_entity_id = "shared-ws/gpt"
+    model_cache = _model_cache_with(
+        _serving_provider("bob-ws", "bob-nim", model_entity_id),
+        _serving_provider("carol-ws", "carol-nim", model_entity_id),
+    )
+
+    with _caller_with_access_to("shared-ws", "bob-ws"):
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert mock_proxy_client.request.call_args.kwargs["url"].startswith("http://carol-nim.local")
+
+
+@pytest.mark.asyncio
 async def test_proxy_request_client_error(mock_proxy_client, next_request_info):
     mock_proxy_client.request = AsyncMock(side_effect=ClientError("Connection failed"))
 
