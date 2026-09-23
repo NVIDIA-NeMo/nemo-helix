@@ -17,8 +17,7 @@ import {
 } from '@nemo/sdk/generated/agents/agents';
 import type { OptimizeJob, OptimizeJobsListFilter } from '@nemo/sdk/generated/agents/schema';
 import { Banner, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
-import { rollbackFileset } from '@studio/api/agents/agentSpecFileset';
-import { studioBundleFileset } from '@studio/api/agents/useLaunchOptimizeStudy';
+import { deleteStudioBundleFileset } from '@studio/api/agents/useLaunchOptimizeStudy';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -201,14 +200,12 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
           description={`Delete "${deleteTarget.name}" and its trial results? This cannot be undone.`}
           successText="Optimization study deleted."
           onDelete={async () => {
-            try {
-              await deleteStudy({ workspace, name: deleteTarget.name });
-              const bundle = studioBundleFileset(deleteTarget);
-              if (bundle) await rollbackFileset(workspace, bundle);
-              return true;
-            } catch {
-              return false;
-            }
+            // Bundle first: the study is the only record of its fileset name, so a cleanup that
+            // failed after the study was gone would orphan the bundle with nothing to retry from.
+            // Either failure throws, so the modal reports it instead of claiming success.
+            await deleteStudioBundleFileset(workspace, deleteTarget);
+            await deleteStudy({ workspace, name: deleteTarget.name });
+            return true;
           }}
           onClose={() => setDeleteTarget(null)}
           simpleConfirm

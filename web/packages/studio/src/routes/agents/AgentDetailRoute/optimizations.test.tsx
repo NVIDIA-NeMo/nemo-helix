@@ -135,6 +135,29 @@ describe('AgentDetailRoute optimizations tab', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
   };
 
+  const BUNDLE = 'react-agent-optimize-abc123';
+
+  /** A study as Studio launches it: its marker names the bundle the study actually runs from. */
+  const launchedByStudio = (bundle = BUNDLE) => ({
+    spec: {
+      optimize_config: 'optimize-brevity.yaml',
+      agent: agentName,
+      optimize_config_fileset: `${workspace}/${bundle}`,
+    },
+    custom_fields: { studio_bundle_fileset: bundle },
+  });
+
+  /** The files service's view of that bundle, carrying the stamp Studio wrote when it staged it. */
+  const serveStampedBundle = () =>
+    server.use(
+      http.get(FILESET_URL, ({ params }) =>
+        HttpResponse.json({
+          name: String(params.name),
+          custom_fields: { studio_optimize_bundle: agentName },
+        })
+      )
+    );
+
   it('deletes a finished study from its row actions and leaves filesets alone', async () => {
     const user = userEvent.setup();
     const deleted = captureDeletes();
@@ -150,15 +173,49 @@ describe('AgentDetailRoute optimizations tab', () => {
   it('deletes the bundle fileset Studio created for the study', async () => {
     const user = userEvent.setup();
     const deleted = captureDeletes();
+    serveStampedBundle();
+    listOnly('brevity-sweep-3', launchedByStudio());
+    renderDetail();
+
+    await deleteFromRow(user, 'brevity-sweep-3');
+
+    await waitFor(() => expect(deleted.filesets).toEqual([BUNDLE]));
+    expect(deleted.studies).toEqual(['brevity-sweep-3']);
+  });
+
+  it('leaves a fileset the study does not run from alone, however the study marks it', async () => {
+    const user = userEvent.setup();
+    const deleted = captureDeletes();
+    serveStampedBundle();
+    // A marker aimed at someone else's fileset: the study's own spec points somewhere else.
     listOnly('brevity-sweep-3', {
-      custom_fields: { studio_bundle_fileset: 'react-agent-optimize-abc123' },
+      ...launchedByStudio(),
+      custom_fields: { studio_bundle_fileset: 'shared-eval-data' },
     });
     renderDetail();
 
     await deleteFromRow(user, 'brevity-sweep-3');
 
-    await waitFor(() => expect(deleted.filesets).toEqual(['react-agent-optimize-abc123']));
-    expect(deleted.studies).toEqual(['brevity-sweep-3']);
+    await waitFor(() => expect(deleted.studies).toEqual(['brevity-sweep-3']));
+    expect(deleted.filesets).toEqual([]);
+  });
+
+  it('keeps the study and names the bundle when the fileset cannot be deleted', async () => {
+    const user = userEvent.setup();
+    const deleted = captureDeletes();
+    serveStampedBundle();
+    // Registered after captureDeletes, so this failing handler wins.
+    server.use(http.delete(FILESET_URL, () => new HttpResponse(null, { status: 500 })));
+    listOnly('brevity-sweep-3', launchedByStudio());
+    renderDetail();
+
+    await deleteFromRow(user, 'brevity-sweep-3');
+
+    expect(
+      await screen.findByText(new RegExp(BUNDLE), undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    ).toBeInTheDocument();
+    expect(deleted.studies).toEqual([]);
+    expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
   });
 
   it('does not offer delete while a study is still running', async () => {
