@@ -11,6 +11,7 @@ import { findTemplate } from '@studio/components/CreateFilesetStart/templates';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import { getCloneJobRequestFromState } from '@studio/components/NewDataDesignerJobForm/utils';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import {
   getGeneratedJobRequestFromState,
@@ -48,7 +49,6 @@ import {
 } from '@studio/routes/utils';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
-import { useAuth } from 'react-oidc-context';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 
 /**
@@ -58,7 +58,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router';
 export const DataDesignerJobBuildRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const bearerToken = useOidcBearerToken();
   const [searchParams] = useSearchParams();
   const { state: locationState } = useLocation();
 
@@ -147,7 +147,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
   }, [builder, servedModelNames]);
   const { previewLogs, isPreviewing, runPreview, stopPreview } = usePreview({
     workspace,
-    accessToken: user?.access_token ?? undefined,
+    accessToken: bearerToken,
     getCurrentConfig,
   });
 

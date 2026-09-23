@@ -15,9 +15,9 @@ import type {
   PluginSdk,
   PluginTelemetry,
 } from '@studio/plugins/types';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
-import { useAuth } from 'react-oidc-context';
 import { useNavigate, useParams } from 'react-router';
 
 // Module-scope for stable identity; plugins run these on Studio's axios + cache.
@@ -37,16 +37,15 @@ export const PluginRenderer = (): ReactElement => {
   const plugins = usePlugins();
   const isLoaded = usePluginsLoaded();
   const workspace = useWorkspaceFromPath();
-  const { user } = useAuth();
+  const bearerToken = useOidcBearerToken() ?? '';
   const navigate = useNavigate();
   const toast = useToast();
 
   const plugin = plugins.find((p) => p.name === pluginName);
-  const accessToken = user?.access_token ?? '';
-  // Keep the latest token in a ref so getAccessToken has a stable identity but
-  // still returns the current token after OIDC silent renew.
-  const accessTokenRef = useRef(accessToken);
-  accessTokenRef.current = accessToken;
+  // Keep the latest configured bearer in a ref so getAccessToken has a stable
+  // identity but still returns the current token after OIDC silent renew.
+  const accessTokenRef = useRef(bearerToken);
+  accessTokenRef.current = bearerToken;
   const getAccessToken = useCallback(() => accessTokenRef.current, []);
 
   const { setBreadcrumbs } = useBreadcrumbs();
@@ -64,14 +63,14 @@ export const PluginRenderer = (): ReactElement => {
     () => ({
       workspaceId: workspace,
       apiBaseUrl: PLATFORM_BASE_URL ?? '',
-      auth: { accessToken, getAccessToken },
+      auth: { accessToken: bearerToken, getAccessToken },
       sdk: STUDIO_SDK,
       navigation: { navigate: (to) => navigate(to), back: () => navigate(-1) },
       notifications: { notify: (message, type = 'info', options) => toast[type](message, options) },
       telemetry: makeTelemetry(pluginName ?? 'unknown'),
       breadcrumbs: { set: setPluginBreadcrumbs },
     }),
-    [workspace, accessToken, getAccessToken, navigate, toast, pluginName, setPluginBreadcrumbs]
+    [workspace, bearerToken, getAccessToken, navigate, toast, pluginName, setPluginBreadcrumbs]
   );
 
   if (!isLoaded) {
