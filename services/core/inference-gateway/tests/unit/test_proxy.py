@@ -1109,6 +1109,7 @@ async def test_virtual_model_proxy_broken_vm_returns_503_without_running_middlew
 
 
 def _serving_provider(workspace: str, name: str, model_entity_id: str) -> ModelProviderInfo:
+    served_models = [ServedModelMapping(model_entity_id=model_entity_id, served_model_name="served-model")]
     return ModelProviderInfo(
         model_provider=ModelProvider(
             workspace=workspace,
@@ -1116,7 +1117,7 @@ def _serving_provider(workspace: str, name: str, model_entity_id: str) -> ModelP
             host_url=f"http://{name}.local",
             created_at=datetime.now(),
             updated_at=datetime.now(),
-            served_models=[ServedModelMapping(model_entity_id=model_entity_id, served_model_name="served-model")],
+            served_models=served_models,
             status="READY",
         )
     )
