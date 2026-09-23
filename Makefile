@@ -75,19 +75,12 @@ docker-push: ## Build and push Docker bake TARGET, default docker-cpu
 refresh-openapi:  ## Generate the OpenAPI specification
 	$(UV) run --frozen script/generate-openapi-spec.sh
 
-.PHONY: stainless
-stainless: ## Run Stainless to generate the OpenAPI spec and sync it with the SDK
-	SDK_RELEASE_TIER=ga $(FLOX_EXEC) ./sdk/stainless.sh sync
-
-.PHONY: generate
-generate: stainless ## Alias for SDK generation via Stainless
-
 .PHONY: update-web-sdk
 update-web-sdk: verify-toolchain ## Regenerate the TypeScript web SDK (web/packages/sdk) from the OpenAPI spec via Orval
 	cd web && $(PNPM) gen
 
 .PHONY: update-sdk
-update-sdk: build-policy refresh-openapi stainless update-web-sdk update-cli ## Update the SDK by regenerating the OpenAPI spec and syncing it with Stainless
+update-sdk: build-policy refresh-openapi update-web-sdk update-cli ## Update the SDK by regenerating the OpenAPI spec
 
 .PHONY: vendor-nemo-helix-ext
 vendor-nemo-helix-ext:

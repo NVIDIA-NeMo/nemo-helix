@@ -117,7 +117,7 @@ ONLINE_CHAT_PROMPT_TEMPLATE = {"messages": [{"role": "user", "content": "{{item.
 
 model = Model(
     url="https://integrate.api.nvidia.com/v1/chat/completions",
-    name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3-nano-30b-a3b"),
+    name=os.getenv("NEMO_DEFAULT_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
     # looks up NVIDIA_API_KEY by default - override via NHX_EVALUATOR_DEFAULT_API_KEY_SECRET
     api_key_secret=SecretRef(root=DEFAULT_API_KEY_SECRET),
 )

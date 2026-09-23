@@ -256,6 +256,31 @@ silence validation errors by moving unknown fields into `settings`.
 
 ## Deploy and invoke
 
+The base NeMo Agents plugin supplies the adapter implementations, not the
+third-party harness runtimes. Config authoring and `nemo agents create` can
+proceed with the selected adapter alone; do not treat a successful create as
+proof that the harness can execute.
+
+Before local invocation, `nemo agents run`, or subprocess deployment, verify
+the selected harness in the runtime environment. A missing harness is a valid
+adapter-only installation, not a broken plugin install. Use the corresponding
+extra when the user approves changing that environment:
+
+| Harness | Published NeMo Helix extra | Source checkout extra |
+|---|---|---|
+| Claude | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` |
+| Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` |
+| DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` |
+| Hermes | Separate Hermes environment | No plugin extra; set `ADAPTER_PYTHON` to the Hermes environment |
+
+For a published install, use `uv tool install --force` when NeMo Helix is a
+managed tool or `uv pip install` in its activated virtual environment. For a
+source checkout, use `uv sync --package nemo-agents-plugin --extra <harness>`.
+Do not mutate a `uv tool` environment with `uv pip install`. Follow the Hermes
+installation documentation for its isolated environment. A packaged Docker or
+Kubernetes image can provide the harness independently; verify the packaged
+image instead of requiring the harness in the host environment.
+
 After create succeeds, show the `nemo agents deploy` command to the user, ask
 for explicit confirmation, and wait for approval before running it.
 
@@ -304,7 +329,8 @@ accessible host only when the user explicitly asks to expose the server:
 | `default_harness must reference one of harnesses` | `default_harness` does not match a key under `harnesses` | Rename one side so they match |
 | `Unsupported harness kind` | Harness kind is not supported by the Platform translator | Pick `codex`, `hermes`, `deepagents`, or `claude` |
 | Local file path missing in deployment | Referenced prompts, skills, or assets were not staged | Keep paths relative and package the complete agent bundle into the deployed image |
-| Adapter import or binary missing | Selected harness dependency is not installed in the runtime | Install the selected adapter/runtime dependency or choose a harness already available |
+| Adapter import missing | The base Agents plugin installation is incomplete | Reinstall the base plugin through the existing NeMo Helix installation method |
+| Harness import or binary missing | The adapter is installed but its optional third-party harness is absent | Add the corresponding published or source-checkout harness extra; use the separate Hermes environment for Hermes |
 
 ## Hard rules
 

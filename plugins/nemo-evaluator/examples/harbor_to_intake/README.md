@@ -30,11 +30,10 @@ pipeline smoke test, not an evaluation.
 
 ## Prerequisites
 
-- **Python >= 3.12** with the Harbor extra. Harbor requires 3.12 while `nemo-evaluator-sdk` itself
-  supports 3.11, so it is a marker-gated optional dependency, imported lazily and never installed
-  by default:
+- **Python >= 3.12** with the Harbor extra. The SDK's own floor now matches Harbor's `>=3.12`, so
+  Harbor is a plain optional dependency — imported lazily and never installed by default:
   ```bash
-  uv pip install "harbor>=0.16.1"
+  uv pip install "harbor>=0.20,<0.21"
   ```
 - **Docker**, running. Harbor needs it for the task containers, and Intake needs it for ClickHouse.
 - **The platform**, running at least `auth,entities,intake`.
@@ -114,7 +113,7 @@ through LiteLLM, so a `nvidia_nim/` model reads `NVIDIA_NIM_API_KEY`:
 
 ```bash
 export NVIDIA_NIM_API_KEY=...
-uv run plugins/nemo-evaluator/examples/harbor_to_intake/run_harbor_to_intake.py --agent terminus-2 --model nvidia_nim/nvidia/nemotron-3-nano-30b-a3b
+uv run plugins/nemo-evaluator/examples/harbor_to_intake/run_harbor_to_intake.py --agent terminus-2 --model nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
 ```
 
 Only agents that emit ATIF produce a full trajectory in Intake — `codex` does, and so does

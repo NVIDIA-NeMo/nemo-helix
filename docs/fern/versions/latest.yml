@@ -58,7 +58,7 @@ navigation:
         slug: evaluate-models
         path: ../../evaluator/index.mdx
         contents:
-          - page: Dataset-Driven vs Task-Driven Evaluation
+          - page: Evaluation Approaches
             slug: dataset-driven-vs-task-driven-evaluation
             path: ../../evaluator/evaluation-approaches.mdx
           - section: Agent Evaluation

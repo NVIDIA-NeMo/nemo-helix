@@ -9,7 +9,7 @@ description: "The task-driven evaluation model — define tasks, run an agent to
 <a id="nemo-evaluator-agent-eval"></a>
 
 Agent evaluation is the **task-driven** shape of NeMo Evaluator (see
-[Dataset-Driven vs Task-Driven Evaluation](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation)
+[Evaluation Approaches](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation)
 for how it compares to metrics). You define **tasks**, an **agent** performs each one,
 and you score the resulting **trial** — not just whether the final answer is right, but *how the agent
 got there*. Each task carries its own metrics, so a single suite can grade heterogeneous work.
@@ -19,7 +19,7 @@ got there*. Each task carries its own metrics, so a single suite can grade heter
 **Local interfaces and durable platform interfaces are available.**
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
 that do not require running nemo-helix.
-- Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
+- Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate` job for durable runs with inline
 tasks or stored tasksets. For a `GymAgentTaskRunner` that you have already validated locally,
 `client.evaluator.submit(tasks=TasksetRef(...), target=runner)` provides a high-level submission
 path; build other runner targets in an agent-evaluate spec.
@@ -50,15 +50,17 @@ One run flows through five pieces:
   `compute_scores(input) -> MetricResult`. A metric can read the final output **and** the evidence, so
   it can grade the outcome (did it answer correctly?) or the trajectory (did it use the expected tool?).
 - **Result** (`AgentEvaluator` → `AgentEvalResult`) — the evaluator orchestrates the run and returns
-  the trials, per-trial scores, and an aggregated `summary`. Point it at an output directory and it
-  also writes a run **bundle**: `run.json`, `trials.jsonl`, `scores.jsonl`, `summary.json`, and a
-  browsable `report.html`.
+  the trials, per-trial scores, and an aggregated `summary`. Call `result.persist()` and it also
+  writes a run **bundle**: `run.json`, `tasks.jsonl`, `trials.jsonl`, `scores.jsonl`, `summary.json`,
+  `metadata.json`, and a browsable `report.html`.
 
 ## A minimal example
 
 <Note>
 
-Conceptual — for a runnable, end-to-end version see the quickstart (coming in this section).
+Conceptual — `OutcomeMetric` below stands in for a metric you supply. For a runnable, end-to-end
+version see the [quickstart](/documentation/evaluate-models/agent-eval/quickstart), which defines a
+real `KeywordMatchMetric`.
 
 </Note>
 
@@ -118,10 +120,14 @@ for how to describe an HTTP agent target.
   — point a run at an agent behind an HTTP endpoint.
 - [Evaluate a Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner) — run an
   existing Harbor dataset in Docker and score its verifier reward.
+- [Run a Fabric Agent on Harbor](/documentation/evaluate-models/agent-eval/harbor-fabric-agent) —
+  drive a Fabric harness as the agent inside a Harbor task container.
 - [Evaluate a NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner) — collect
   and score Gym rollouts locally or as a platform job.
 - [Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment)
   — package a Gym environment as a FileSet and evaluate it in OpenSandbox.
+- [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration) —
+  deployment settings that govern sandboxed Gym execution.
 - [Evaluate with a NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner) —
   drive a supported agent harness and capture its trajectory.
 - [Score by Component](/documentation/evaluate-models/agent-eval/score-by-component) — score the
@@ -136,7 +142,7 @@ for how to describe an HTTP agent target.
 ## Related
 
 <Cards>
-  <Card title="Dataset-Driven vs Task-Driven Evaluation" href="/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation" />
+  <Card title="Evaluation Approaches" href="/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation" />
   <Card title="Evaluate a Deployed Agent over HTTP" href="/documentation/evaluate-models/agent-eval/evaluate-deployed-agent" />
   <Card title="Evaluation Metrics" href="/documentation/evaluate-models/metrics" />
 </Cards>

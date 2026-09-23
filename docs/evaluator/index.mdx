@@ -19,9 +19,9 @@ metrics for RAG and agentic behavior.
 
 ---
 
-## Two shapes of evaluation
+## Three shapes of evaluation
 
-Evaluation comes in two shapes, told apart by what produces the thing you score:
+Evaluation comes in three shapes, told apart by what produces the thing you score:
 
 - **Dataset-driven evaluation** — score a model or pipeline over a fixed dataset. Metrics compare each
   output against a reference, and the same metric set applies to every row. Reach for it for model
@@ -32,17 +32,23 @@ Evaluation comes in two shapes, told apart by what produces the thing you score:
   and other evidence) — and carries its own metrics, so one suite can grade heterogeneous work. Reach
   for it when the system under test *acts* and the process matters as much as the outcome. Entry
   point: [Agent Evaluation](/documentation/evaluate-models/agent-eval).
+- **Retrieval-driven evaluation** — score how well a retriever ranks documents. A `Retrieval` target
+  ranks a BEIR corpus against queries and relevance judgments, and retrieval metrics score the
+  rankings. Reach for it when tuning embeddings or a reranker. Entry point: the `retrieve-eval` job,
+  described in
+  [Evaluation Approaches](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation).
 
 <Note>
 
-**Metrics are the shared scorer, not a third mode.** The same deterministic and LLM-as-a-judge
-scorers work in either shape — what changes is the input being scored, not the scorer.
+**Metrics are the shared scorer, not a shape of their own.** The same deterministic and
+LLM-as-a-judge scorers work in any of the three — what changes is the input being scored, not the
+scorer.
 
 </Note>
 
 For how the two shapes differ in detail — the evidence each exposes, an at-a-glance comparison, and
 guidance on choosing — see
-[Dataset-Driven vs Task-Driven Evaluation](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation).
+[Evaluation Approaches](/documentation/evaluate-models/dataset-driven-vs-task-driven-evaluation).
 
 ---
 
@@ -86,7 +92,7 @@ dataset = [
 config = RunConfig(limit_samples=100, parallelism=8)
 ```
 
-### 2. Run it — three dataset-driven modes
+### 2. Run it — two dataset-driven modes
 
 The same `metric`, `dataset`, and `config` run in two places. What changes is the **caller** — a
 bare SDK evaluator for local iteration, or the platform's `client.evaluator` resource for durable
@@ -122,7 +128,7 @@ result = job.get_result()
 **Agent evaluation has local interfaces and durable platform interfaces.**
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
 that do not require running nemo-helix.
-- Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
+- Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate` job for durable runs with inline
 tasks or stored tasksets. A locally validated `GymAgentTaskRunner` can also be submitted with
 `client.evaluator.submit(tasks=TasksetRef(...), target=runner)`; other runner targets use an
 agent-evaluate spec.

@@ -72,10 +72,11 @@ remote agent, stop and report the adapter gap.
 ## Version boundary
 
 Read the installed Fabric Deep Agents adapter descriptor and the NeMo Agents
-config model before emitting adapter settings. The optional NeMo Agents plugin
-supplies the adapter and its Deep Agents runtime dependency. Reuse the installed
-versions and let the plugin dependency metadata select compatible versions. Do
-not add a separate harness constraint to the generated customer project unless
-its own code directly imports that API.
+config model before emitting adapter settings. The base NeMo Agents plugin
+supplies the adapter, while its Deep Agents extra supplies the compatible
+harness runtime. Reuse the installed versions and let the extra's dependency
+metadata select compatible versions. Do not add a separate harness constraint
+to the generated customer project unless its own code directly imports that
+API.
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->

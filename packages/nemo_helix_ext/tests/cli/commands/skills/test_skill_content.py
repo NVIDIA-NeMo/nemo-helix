@@ -129,19 +129,34 @@ class TestLoadHelixSkills:
 
     def test_build_agent_uses_agents_plugin_harness_dependency(self):
         skill = load_skills()["nemo-build-agent"]
-        assert "optional NeMo Agents plugin supplies the selected harness adapter" in skill.content
-        assert "Do not add a separate Deep Agents version constraint" in skill.content
-        assert "If the NeMo Agents plugin and Deep Agents harness are already available" in skill.content
-        assert 'uv pip install "nemo-helix[nemo-agents-plugin]"' in skill.content
-        assert "uv pip install -e plugins/nemo-agents/" in skill.content
+        content = " ".join(skill.content.split())
+        assert "base NeMo Agents plugin supplies the selected harness adapter" in content
+        assert "corresponding extra supplies its runtime dependencies" in content
+        assert "Do not add a separate Deep Agents version constraint" in content
+        assert "If the NeMo Agents plugin, adapter and Deep Agents harness are already" in content
+        assert 'uv tool install --force "nemo-helix[nemo-agents-plugin-deepagents]"' in content
+        assert 'uv pip install "nemo-helix[nemo-agents-plugin-deepagents]"' in content
+        assert "uv sync --package nemo-agents-plugin --extra deepagents" in content
 
     def test_build_agent_covers_plugin_dependency_failure_paths(self):
         skill = load_skills()["nemo-build-agent"]
-        assert "If the plugin is absent" in skill.content
-        assert "ask for approval before" in skill.content
-        assert "If the plugin is present" in skill.content
-        assert "its Deep Agents adapter or runtime is absent" in skill.content
-        assert "Do not install the harness independently" in skill.content
+        content = " ".join(skill.content.split())
+        assert "If the plugin is absent" in content
+        assert "ask for approval before" in content
+        assert "valid adapter-only installation" in content
+        assert "If the adapter is absent while the plugin imports successfully" in content
+        assert "Do not install the harness independently" in content
+
+    def test_agent_config_distinguishes_adapters_from_harness_runtimes(self):
+        content = " ".join(load_skills()["nemo-agent-config"].content.split())
+        assert "supplies the adapter implementations, not the third-party harness runtimes" in content
+        assert "A missing harness is a valid adapter-only installation" in content
+        assert "nemo-helix[nemo-agents-plugin-claude]" in content
+        assert "nemo-helix[nemo-agents-plugin-codex]" in content
+        assert "nemo-helix[nemo-agents-plugin-deepagents]" in content
+        assert "No plugin extra; set `ADAPTER_PYTHON`" in content
+        assert "Do not mutate a `uv tool` environment with `uv pip install`" in content
+        assert "packaged Docker or Kubernetes image can provide the harness independently" in content
 
     def test_build_agent_defers_registration_until_after_local_gates(self):
         content = load_skills()["nemo-build-agent"].content

@@ -39,7 +39,7 @@ Submit the plugin job when platform execution is required:
 
 ```bash
 nemo evaluator agent-evaluate explain
-nemo evaluator agent-evaluate submit \
+nemo evaluator agent-evaluate \
   --spec-file skills/nemo-evaluator-plugin/assets/specs/fabric_agent_eval.json
 ```
 
@@ -304,11 +304,12 @@ A standalone run returns an `AgentEvalResult`:
   metric outputs, status, and diagnostics.
 - `result.trials` contains each agent output, its evidence, and its
   `completed`, `partial`, or `failed` status.
-- `result.run_id` identifies the run; `result.benchmark` contains its grouping
-  metadata.
+- `result.run_id` identifies the run; `result.metadata` contains its run
+  provenance — labels, target identity, timings, and SDK version.
 
-When standalone `AgentEvalRunConfig.output_dir` is set, the same information is
-written as a run bundle:
+Call `result.persist()` to write the same information as a run bundle. It
+defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
+`output_dir=` to choose another location:
 
 | File | Contents |
 | --- | --- |
@@ -317,7 +318,7 @@ written as a run bundle:
 | `trials.jsonl` | Trial outputs, evidence, metadata, and status |
 | `tasks.jsonl` | Tasks included in the run |
 | `run.json` | Run ID and artifact manifest |
-| `benchmark.json` | Benchmark-grouping metadata |
+| `metadata.json` | Run provenance — labels, target identity, timings, and SDK version |
 | `report.html` | Browsable dashboard when dashboard generation is enabled |
 
 Use the in-memory result for programmatic follow-up and the bundle for

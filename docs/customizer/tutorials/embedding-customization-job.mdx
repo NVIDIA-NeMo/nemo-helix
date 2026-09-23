@@ -524,7 +524,7 @@ print("dim", len(resp["data"][0]["embedding"]))
 Equivalent CLI:
 
 ```bash
-nemo evaluator retrieve-eval submit --workspace default --spec '{
+nemo evaluator retrieve-eval --workspace default --spec '{
   "dataset": "default/nvdocs-embed-artifacts",
   "target": "default/nemotron-3-embed-1b-tuned",
   "baseline": "default/nemotron-3-embed-1b",
@@ -551,7 +551,6 @@ cmd = [
     shutil.which("nemo") or "nemo",
     "evaluator",
     "retrieve-eval",
-    "submit",
     "--workspace",
     "default",
     "--spec",
@@ -559,7 +558,7 @@ cmd = [
 ]
 proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
 if proc.returncode != 0:
-    raise RuntimeError(f"retrieve-eval submit failed:\n{proc.stderr}")
+    raise RuntimeError(f"retrieve-eval failed:\n{proc.stderr}")
 
 eval_job_name = json.loads(proc.stdout[proc.stdout.index("{") :])["name"]
 print("retrieve-eval job:", eval_job_name)
