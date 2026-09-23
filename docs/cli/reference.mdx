@@ -5952,7 +5952,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Packaging (no platform required):*
 
-* `package`: Package a NAT agent -- render -> validate -> build ->...
+* `package`: Package a Fabric or NAT agent -- render -> validate ->...
 
 *Platform agents:*
 
@@ -7430,7 +7430,7 @@ nemo agents usage show [OPTIONS] <PATH | FILESET_REF>
 
 #### nemo agents package
 
-Package a NAT agent -- render -> validate -> build -> publish.
+Package a Fabric or NAT agent -- render -> validate -> build -> publish.
 
 
 Progressive pipeline controlled by flags:
@@ -7454,7 +7454,7 @@ nemo agents package [OPTIONS]
 
 **Options:**
 
-* `--agent, -c <FILE>`: Path to a NAT workflow YAML config file.
+* `--agent, -c <FILE>`: Path to an agent YAML config file: a Fabric agent spec ('config_format: nemo-agents-spec-v1') or a NAT workflow ('config_format: nat-workflow-v1', the default when omitted).
 * `--pyproject <FILE>`: Path to pyproject.toml (enables project mode).
 * `--no-build`: Stop after render — emit Dockerfile + .dockerignore only (no image built).
 * `--publish`: After building, tag and push to --registry.
@@ -7468,7 +7468,7 @@ nemo agents package [OPTIONS]
 * `--base-image-url`: [env: NEMO_AGENTS_BASE_IMAGE_URL=]
 * `--base-image-tag`: [env: NEMO_AGENTS_BASE_IMAGE_TAG=]
 * `--python-version`: [env: NEMO_AGENTS_PYTHON_VERSION=]
-* `--nat-version`: NAT release to install (e.g. '1.7.0').  Strongly recommended: pin explicitly so image tags/labels/deps are reproducible.  When omitted, a baked-in default is used and a warning is printed.
+* `--nat-version`: NAT release to install (e.g. '1.7.0').  NAT workflow configs only; rejected for Fabric agent specs.  Strongly recommended: pin explicitly so image tags/labels/deps are reproducible.  When omitted, a baked-in default is used and a warning is printed.
 * `--uv-version`: [env: NEMO_AGENTS_UV_VERSION=]
 * `--allow-root`: Disable non-root USER hardening in the rendered Dockerfile.
 * `--sandbox-runtime`: Render an image compatible with a sandbox runtime (e.g. 'openshell'). Discovers the runtime's image profile and bakes in its required apt packages + users so the image can run inside that sandbox supervisor.
