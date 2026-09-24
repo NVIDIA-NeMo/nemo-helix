@@ -434,7 +434,7 @@ the uv cache + venv prefetch rather than via wheel images:
   (uv's catalog has no linux-gnu 3.13.15 build; bookworm's OpenSSL 3.0 matches Ubuntu
   24.04 on cuda-dl-base, while trixie _ssl needs OPENSSL_3.3.0 and does not import).
   `UV_PYTHON=/opt/cpython/bin/python3.13` overrides `.python-version` so worker venvs
-  cannot silently stay on 3.13.14.
+  cannot silently stay on older versions.
 
 ## Layering for fast CI rebuilds
 

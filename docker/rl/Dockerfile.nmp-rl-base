@@ -36,7 +36,7 @@ ARG NEMO_RL_REF=nmp/customizer
 # cpython-3.13.15-linux-*-gnu download; do not use `uv python install` for this patch.
 # Donor must be bookworm (OpenSSL 3.0), not trixie: cuda-dl-base is Ubuntu 24.04
 # (OpenSSL 3.0.13). Trixie-built _ssl needs OPENSSL_3.3.0 and fails to import.
-# UV_PYTHON must still point at the copied binary so RL's `.python-version` cannot pin 3.13.14.
+# UV_PYTHON must still point at the copied binary so RL's `.python-version` cannot pin older versions.
 ARG UV_VERSION=0.11.33
 ARG PYTHON_VERSION=3.13.15
 ARG CPYTHON_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
@@ -96,7 +96,7 @@ RUN chmod -R a+rX /opt/cpython
 ARG UV_VERSION
 # UV_PYTHON must be this path. A bare 3.13.15 string would send uv to a catalog that lacks
 # linux-gnu 3.13.15 and would ignore the copied tree. RL's `.python-version` still needs this
-# override or worker venvs silently stay on 3.13.14.
+# override or worker venvs silently stay on older versions.
 # Raise uv's HTTP retry budget and cap concurrent downloads for large GitHub-hosted wheels like vLLM,
 # which can hit transient HTTP/2 refused-stream failures under BuildKit.
 ENV UV_PYTHON=/opt/cpython/bin/python3.13 \
