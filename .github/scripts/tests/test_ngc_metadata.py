@@ -84,9 +84,10 @@ def test_default_display_name_preserves_known_names() -> None:
     assert default_display_name("nhx-safe-synthesizer-tasks") == "Safe Synthesizer Tasks"
 
 
-def test_load_asset_uses_defaults(tmp_path: Path) -> None:
+@pytest.mark.parametrize("front_matter", ["", "\n", "# Copyright comment\n", "{}\n"])
+def test_load_asset_uses_defaults(tmp_path: Path, front_matter: str) -> None:
     path = tmp_path / "nhx-auditor-tasks.md"
-    path.write_text("# Overview\n", encoding="utf-8")
+    path.write_text(f"---\n{front_matter}---\n# Overview\n", encoding="utf-8")
 
     asset = load_asset(path, "container")
 
@@ -99,8 +100,7 @@ def test_load_asset_uses_defaults(tmp_path: Path) -> None:
 
 
 def test_load_chart_uses_deployment_description(tmp_path: Path) -> None:
-    path = tmp_path / "nemo-helix.md"
-    path.write_text("# Overview\n", encoding="utf-8")
+    path = _write_overview(tmp_path / "nemo-helix.md")
 
     asset = load_asset(path, "chart")
 
@@ -129,11 +129,76 @@ def test_load_asset_applies_front_matter_overrides(tmp_path: Path) -> None:
     assert asset.overview == "# Overview\n"
 
 
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("", "must start with '---' on the first line"),
+        ("# Overview\n", "must start with '---' on the first line"),
+        ("\n---\n---\n# Overview\n", "must start with '---' on the first line"),
+        (
+            "<!-- Copyright comment -->\n\n---\ndescription: Gym host\n---\n# Overview\n",
+            "must start with '---' on the first line",
+        ),
+        ("---\ndescription: Gym host\n# Overview\n", "must end with '---'"),
+        ("---\ndescription: [\n---\n# Overview\n", "expected"),
+        ("---\n[]\n---\n# Overview\n", "must be a mapping"),
+        ("---\n- NeMo\n---\n# Overview\n", "must be a mapping"),
+        ("---\nfalse\n---\n# Overview\n", "must be a mapping"),
+        ("---\n0\n---\n# Overview\n", "must be a mapping"),
+        ("---\nnull\n---\n# Overview\n", "must be a mapping"),
+        ("---\nGym host\n---\n# Overview\n", "must be a mapping"),
+    ],
+)
+def test_load_asset_rejects_invalid_front_matter(tmp_path: Path, content: str, message: str) -> None:
+    path = tmp_path / "nhx-gym-host.md"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        load_asset(path, "container")
+
+    assert str(path) in str(error.value)
+    assert message in str(error.value)
+
+
+@pytest.mark.parametrize("field", ["display_name", "description", "logo"])
+@pytest.mark.parametrize("value", ['""', '"   "', "null", "false", "42", "[]", "{}"])
+def test_load_asset_rejects_invalid_string_fields(tmp_path: Path, field: str, value: str) -> None:
+    path = tmp_path / "nhx-api.md"
+    path.write_text(f"---\n{field}: {value}\n---\n# Overview\n", encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        load_asset(path, "container")
+
+    assert str(path) in str(error.value)
+    assert f"{field} must be a nonblank string" in str(error.value)
+
+
+@pytest.mark.parametrize("value", ["null", "NeMo", "{}", "[]", "[42]", "[null]", '[""]', '[NeMo, "   "]'])
+def test_load_asset_rejects_invalid_labels(tmp_path: Path, value: str) -> None:
+    path = tmp_path / "nhx-api.md"
+    path.write_text(f"---\nlabels: {value}\n---\n# Overview\n", encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        load_asset(path, "container")
+
+    assert str(path) in str(error.value)
+    assert "labels must be a nonempty list of nonblank strings" in str(error.value)
+
+
+def test_load_asset_preserves_overview_with_markdown_separators(tmp_path: Path) -> None:
+    path = tmp_path / "nhx-api.md"
+    overview = "\n# Overview\n\n---\n\nMore details\n"
+    content = f"---\n# Copyright\n---\n{overview}"
+    path.write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+
+    assert load_asset(path, "container").overview == overview
+
+
 def test_discover_assets_infers_type_and_name(tmp_path: Path) -> None:
     (tmp_path / "charts").mkdir()
     (tmp_path / "containers").mkdir()
-    (tmp_path / "charts" / "nemo-helix.md").write_text("chart", encoding="utf-8")
-    (tmp_path / "containers" / "nhx-api.md").write_text("container", encoding="utf-8")
+    _write_overview(tmp_path / "charts" / "nemo-helix.md")
+    _write_overview(tmp_path / "containers" / "nhx-api.md")
 
     assets = discover_assets(tmp_path)
 
@@ -221,13 +286,50 @@ def test_cli_dry_run_lists_assets(tmp_path: Path) -> None:
     (tmp_path / "containers").mkdir()
     _write_overview(tmp_path / "containers" / "nhx-api.md")
 
-    result = CliRunner().invoke(
-        app,
-        ["--org", "org", "--team", "team", "--assets-dir", str(tmp_path), "--dry-run"],
-    )
+    with patch("ngc_metadata.Client") as client:
+        result = CliRunner().invoke(
+            app,
+            ["--org", "org", "--team", "team", "--assets-dir", str(tmp_path), "--dry-run"],
+            env={"NGC_API_KEY": None},
+        )
 
     assert result.exit_code == 0
     assert result.stdout == "Would sync container org/team/nhx-api\n"
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("# Overview\n", "must start with '---' on the first line"),
+        (
+            "<!-- Copyright comment -->\n\n---\ndescription: Gym host\n---\n# Overview\n",
+            "must start with '---' on the first line",
+        ),
+        ("---\ndescription: [\n---\n# Overview\n", "expected"),
+        ("---\nlabels: []\n---\n# Overview\n", "labels must be a nonempty list of nonblank strings"),
+    ],
+)
+def test_cli_validates_all_assets_before_sync(tmp_path: Path, dry_run: bool, content: str, message: str) -> None:
+    (tmp_path / "containers").mkdir()
+    _write_overview(tmp_path / "containers" / "a-valid.md")
+    invalid_path = tmp_path / "containers" / "z-invalid.md"
+    invalid_path.write_text(content, encoding="utf-8")
+    args = ["--org", "org", "--team", "team", "--assets-dir", str(tmp_path)]
+    args.extend(["--dry-run"] if dry_run else ["--api-key", "service-key"])
+
+    with patch("ngc_metadata.Client") as client:
+        result = CliRunner().invoke(app, args, env={"NGC_API_KEY": None})
+
+    # Typer wraps errors in a Rich panel; compare the message independently of wrapping.
+    error_output = " ".join(result.stderr.replace("│", "").split())
+    assert result.exit_code != 0
+    assert invalid_path.name in error_output
+    assert message in error_output
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
+    client.assert_not_called()
 
 
 def test_cli_configures_org_auth_for_team_target(tmp_path: Path) -> None:
@@ -281,7 +383,7 @@ def test_cli_can_match_authentication_team(tmp_path: Path) -> None:
 
 
 def _write_overview(path: Path) -> Path:
-    path.write_text("# Overview\n", encoding="utf-8")
+    path.write_text("---\n---\n# Overview\n", encoding="utf-8")
     return path
 
 
