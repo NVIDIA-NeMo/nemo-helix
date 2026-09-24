@@ -68,7 +68,7 @@ def default_display_name(name: str) -> str:
 
 
 def split_front_matter(content: str) -> tuple[dict[str, object], str]:
-    """Split required YAML front matter from Markdown content."""
+    """Split required, nonempty YAML front matter from Markdown content."""
     lines = content.split("\n")
     if lines[0] != "---":
         raise ValueError("Markdown front matter must start with '---' on the first line")
@@ -80,12 +80,9 @@ def split_front_matter(content: str) -> tuple[dict[str, object], str]:
 
     front_matter = "\n".join(lines[1:end])
     overview = "\n".join(lines[end + 1 :])
-    if all(not line.strip() or line.lstrip().startswith("#") for line in lines[1:end]):
-        return {}, overview
-
     metadata = yaml.safe_load(front_matter)
-    if not isinstance(metadata, dict):
-        raise ValueError("Markdown front matter must be a mapping")
+    if not isinstance(metadata, dict) or not metadata:
+        raise ValueError("Markdown front matter must be a nonempty mapping")
     return metadata, overview
 
 
@@ -220,7 +217,7 @@ def main(
     """Synchronize Markdown metadata with NGC.
 
     The parent directory selects the asset type and the filename selects its
-    NGC name. Every file must start with a YAML front matter block. Fields
+    NGC name. Every file must start with a nonempty YAML front matter block. Fields
     display_name, description, labels, and logo are optional overrides.
     """
     try:

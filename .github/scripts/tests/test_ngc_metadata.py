@@ -84,7 +84,7 @@ def test_default_display_name_preserves_known_names() -> None:
     assert default_display_name("nhx-safe-synthesizer-tasks") == "Safe Synthesizer Tasks"
 
 
-@pytest.mark.parametrize("front_matter", ["", "\n", "# Copyright comment\n", "{}\n"])
+@pytest.mark.parametrize("front_matter", ["labels: [NeMo]\n", "display_name: Auditor Tasks\n"])
 def test_load_asset_uses_defaults(tmp_path: Path, front_matter: str) -> None:
     path = tmp_path / "nhx-auditor-tasks.md"
     path.write_text(f"---\n{front_matter}---\n# Overview\n", encoding="utf-8")
@@ -141,12 +141,16 @@ def test_load_asset_applies_front_matter_overrides(tmp_path: Path) -> None:
         ),
         ("---\ndescription: Gym host\n# Overview\n", "must end with '---'"),
         ("---\ndescription: [\n---\n# Overview\n", "expected"),
-        ("---\n[]\n---\n# Overview\n", "must be a mapping"),
-        ("---\n- NeMo\n---\n# Overview\n", "must be a mapping"),
-        ("---\nfalse\n---\n# Overview\n", "must be a mapping"),
-        ("---\n0\n---\n# Overview\n", "must be a mapping"),
-        ("---\nnull\n---\n# Overview\n", "must be a mapping"),
-        ("---\nGym host\n---\n# Overview\n", "must be a mapping"),
+        ("---\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n# Copyright comment\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n{}\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n[]\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n- NeMo\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\nfalse\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n0\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\nnull\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\nGym host\n---\n# Overview\n", "must be a nonempty mapping"),
     ],
 )
 def test_load_asset_rejects_invalid_front_matter(tmp_path: Path, content: str, message: str) -> None:
@@ -188,7 +192,7 @@ def test_load_asset_rejects_invalid_labels(tmp_path: Path, value: str) -> None:
 def test_load_asset_preserves_overview_with_markdown_separators(tmp_path: Path) -> None:
     path = tmp_path / "nhx-api.md"
     overview = "\n# Overview\n\n---\n\nMore details\n"
-    content = f"---\n# Copyright\n---\n{overview}"
+    content = f"---\n# Copyright\nlabels: [NeMo]\n---\n{overview}"
     path.write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
 
     assert load_asset(path, "container").overview == overview
@@ -309,6 +313,9 @@ def test_cli_dry_run_lists_assets(tmp_path: Path) -> None:
         ),
         ("---\ndescription: [\n---\n# Overview\n", "expected"),
         ("---\nlabels: []\n---\n# Overview\n", "labels must be a nonempty list of nonblank strings"),
+        ("---\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n# Copyright comment\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n{}\n---\n# Overview\n", "must be a nonempty mapping"),
     ],
 )
 def test_cli_validates_all_assets_before_sync(tmp_path: Path, dry_run: bool, content: str, message: str) -> None:
@@ -381,7 +388,7 @@ def test_cli_can_match_authentication_team(tmp_path: Path) -> None:
 
 
 def _write_overview(path: Path) -> Path:
-    path.write_text("---\n---\n# Overview\n", encoding="utf-8")
+    path.write_text("---\nlabels: [NeMo]\n---\n# Overview\n", encoding="utf-8")
     return path
 
 
