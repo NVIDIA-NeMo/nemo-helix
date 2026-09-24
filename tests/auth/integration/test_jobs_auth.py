@@ -13,9 +13,8 @@ from contextlib import ExitStack
 from uuid import uuid4
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_ext.auth.helpers import generate_unsigned_jwt
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.api_factory import (
@@ -29,10 +28,11 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.jobs.controllers.diagnostics import collect_job_diagnostics
-from nhx.testing import TEST_ADMIN_EMAIL, grant_workspace_role, short_unique_name, unique_email
+from nhx.testing import TEST_ADMIN_EMAIL, short_unique_name, unique_email
 from nhx.testing.e2e import wait_for_platform_job
 
 from tests.auth.integration.jobs_auth_helpers import job_exists_in_pages, managed_admin_workspace
+from tests.auth_idp.helpers import grant_workspace_role
 
 JOB_SOURCE = "integration-auth-test"
 logger = logging.getLogger(__name__)
@@ -47,18 +47,19 @@ pytestmark = [
 
 
 def _as_bearer_user(
-    sdk: NeMoHelix,
+    client: NemoClient,
     email: str,
     *,
     principal_id: str | None = None,
     groups: list[str] | None = None,
-) -> NeMoHelix:
+) -> NemoClient:
     token = generate_unsigned_jwt(
         principal_id=principal_id or email,
         email=email,
         groups=groups,
     )
-    return sdk.with_options(set_default_headers={"Authorization": f"Bearer {token}"})
+    # A fresh client so the pooled admin principal headers do not ride along with the bearer token.
+    return NemoClient(base_url=client.base_url, auth=token)
 
 
 def _oidc_subject() -> str:
@@ -67,7 +68,7 @@ def _oidc_subject() -> str:
 
 
 def _log_auth_job_diagnostics(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     job_name: str,
@@ -82,7 +83,7 @@ def _log_auth_job_diagnostics(
             "job_name": job_name,
             "step_name": step_name,
             "job_diagnostics": collect_job_diagnostics(
-                sdk,
+                client,  # ty: ignore[invalid-argument-type]
                 workspace=workspace,
                 job_name=job_name,
                 step_name=step_name,
@@ -92,17 +93,17 @@ def _log_auth_job_diagnostics(
     )
 
 
-def test_job_principal_propagation(services_pool_sdk: NeMoHelix):
-    admin_sdk = _as_bearer_user(services_pool_sdk, TEST_ADMIN_EMAIL, groups=["admin"])
+def test_job_principal_propagation(services_pool_client: NemoClient):
+    admin_client = _as_bearer_user(services_pool_client, TEST_ADMIN_EMAIL, groups=["admin"])
     user_email = unique_email("job-creator")
     workspace_name = short_unique_name("job-auth-test")
 
-    with managed_admin_workspace(admin_sdk, workspace_name):
-        grant_workspace_role(admin_sdk, workspace=workspace_name, principal=user_email, roles=["Editor"])
+    with managed_admin_workspace(admin_client, workspace_name):
+        grant_workspace_role(admin_client, workspace=workspace_name, principal=user_email, roles=["Editor"])
 
-        user_sdk = _as_bearer_user(services_pool_sdk, user_email, principal_id=_oidc_subject())
+        user_client = _as_bearer_user(services_pool_client, user_email, principal_id=_oidc_subject())
         job = (
-            client_from_platform(user_sdk, JobsClient)
+            JobsClient.from_client(user_client)
             .create_job(
                 workspace=workspace_name,
                 body=CreateHelixJobRequest(
@@ -129,24 +130,20 @@ def test_job_principal_propagation(services_pool_sdk: NeMoHelix):
             .data()
         )
 
-        completed_job = wait_for_platform_job(user_sdk, job.name, workspace_name)
+        completed_job = wait_for_platform_job(user_client, job.name, workspace_name)
         assert completed_job.status == "completed"
 
         fileset_name = f"hello-world-{job.name}"
-        files = client_from_platform(user_sdk, FilesClient)
+        files = FilesClient.from_client(user_client)
         fileset = files.get_fileset(workspace=workspace_name, name=fileset_name).data()
         assert fileset is not None
 
-        file_content = user_sdk.files.download_content(
-            remote_path="message.txt",
-            fileset=fileset_name,
-            workspace=workspace_name,
-        )
+        file_content = files.download_file(workspace=workspace_name, name=fileset_name, path="message.txt").read()
         assert file_content == b"auth propagation test"
 
 
-def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
-    admin_sdk = _as_bearer_user(services_pool_sdk, TEST_ADMIN_EMAIL, groups=["admin"])
+def test_job_cannot_access_unauthorized_workspace(services_pool_client: NemoClient):
+    admin_client = _as_bearer_user(services_pool_client, TEST_ADMIN_EMAIL, groups=["admin"])
     owner_email = unique_email("owner")
     other_email = unique_email("other")
 
@@ -154,20 +151,20 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
     runner_workspace = short_unique_name("runner")
 
     with ExitStack() as stack:
-        stack.enter_context(managed_admin_workspace(admin_sdk, restricted_workspace))
-        stack.enter_context(managed_admin_workspace(admin_sdk, runner_workspace))
-        grant_workspace_role(admin_sdk, workspace=restricted_workspace, principal=owner_email, roles=["Editor"])
-        grant_workspace_role(admin_sdk, workspace=runner_workspace, principal=other_email, roles=["Editor"])
+        stack.enter_context(managed_admin_workspace(admin_client, restricted_workspace))
+        stack.enter_context(managed_admin_workspace(admin_client, runner_workspace))
+        grant_workspace_role(admin_client, workspace=restricted_workspace, principal=owner_email, roles=["Editor"])
+        grant_workspace_role(admin_client, workspace=runner_workspace, principal=other_email, roles=["Editor"])
 
-        owner_sdk = _as_bearer_user(services_pool_sdk, owner_email, principal_id=_oidc_subject())
-        other_sdk = _as_bearer_user(services_pool_sdk, other_email, principal_id=_oidc_subject())
+        owner_client = _as_bearer_user(services_pool_client, owner_email, principal_id=_oidc_subject())
+        other_client = _as_bearer_user(services_pool_client, other_email, principal_id=_oidc_subject())
 
         fileset_name = "private-data"
-        files = client_from_platform(owner_sdk, FilesClient)
+        files = FilesClient.from_client(owner_client)
         files.create_fileset(workspace=restricted_workspace, body=CreateFilesetRequest(name=fileset_name))
 
         job = (
-            client_from_platform(other_sdk, JobsClient)
+            JobsClient.from_client(other_client)
             .create_job(
                 workspace=runner_workspace,
                 body=CreateHelixJobRequest(
@@ -196,10 +193,10 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
             .data()
         )
 
-        completed_job = wait_for_platform_job(other_sdk, job.name, runner_workspace)
+        completed_job = wait_for_platform_job(other_client, job.name, runner_workspace)
         if completed_job.status != "error":
             _log_auth_job_diagnostics(
-                other_sdk,
+                other_client,
                 workspace=runner_workspace,
                 job_name=job.name,
                 step_name="access-test-step",
@@ -208,13 +205,13 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
         assert completed_job.status == "error"
 
         tasks_response = (
-            client_from_platform(other_sdk, JobsClient)
+            JobsClient.from_client(other_client)
             .list_job_step_tasks(name="access-test-step", job=job.name, workspace=runner_workspace)
             .data()
         )
         if not tasks_response.data:
             _log_auth_job_diagnostics(
-                other_sdk,
+                other_client,
                 workspace=runner_workspace,
                 job_name=job.name,
                 step_name="access-test-step",
@@ -224,7 +221,7 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
         task = tasks_response.data[0]
         if not task.error_stack or "403" not in task.error_stack or "Forbidden" not in task.error_stack:
             _log_auth_job_diagnostics(
-                other_sdk,
+                other_client,
                 workspace=runner_workspace,
                 job_name=job.name,
                 step_name="access-test-step",
@@ -234,17 +231,17 @@ def test_job_cannot_access_unauthorized_workspace(services_pool_sdk: NeMoHelix):
         assert "403" in task.error_stack and "Forbidden" in task.error_stack
 
 
-def test_job_admin_can_list_jobs_in_all_workspaces(services_pool_sdk: NeMoHelix):
-    admin_sdk = _as_bearer_user(services_pool_sdk, TEST_ADMIN_EMAIL, groups=["admin"])
+def test_job_admin_can_list_jobs_in_all_workspaces(services_pool_client: NemoClient):
+    admin_client = _as_bearer_user(services_pool_client, TEST_ADMIN_EMAIL, groups=["admin"])
     user_email = unique_email("member")
     workspace_name = short_unique_name("admin-list-jobs")
 
-    with managed_admin_workspace(admin_sdk, workspace_name):
-        grant_workspace_role(admin_sdk, workspace=workspace_name, principal=user_email, roles=["Editor"])
+    with managed_admin_workspace(admin_client, workspace_name):
+        grant_workspace_role(admin_client, workspace=workspace_name, principal=user_email, roles=["Editor"])
 
-        user_sdk = _as_bearer_user(services_pool_sdk, user_email, principal_id=_oidc_subject())
+        user_client = _as_bearer_user(services_pool_client, user_email, principal_id=_oidc_subject())
         job = (
-            client_from_platform(user_sdk, JobsClient)
+            JobsClient.from_client(user_client)
             .create_job(
                 workspace=workspace_name,
                 body=CreateHelixJobRequest(
@@ -268,8 +265,8 @@ def test_job_admin_can_list_jobs_in_all_workspaces(services_pool_sdk: NeMoHelix)
             .data()
         )
 
-        completed_job = wait_for_platform_job(user_sdk, job.name, workspace_name)
+        completed_job = wait_for_platform_job(user_client, job.name, workspace_name)
         assert completed_job.status == "completed"
 
-        jobs = client_from_platform(admin_sdk, JobsClient).list_jobs(workspace=ALL_WORKSPACES)
+        jobs = JobsClient.from_client(admin_client).list_jobs(workspace=ALL_WORKSPACES)
         assert job_exists_in_pages(jobs.items(), job.name)

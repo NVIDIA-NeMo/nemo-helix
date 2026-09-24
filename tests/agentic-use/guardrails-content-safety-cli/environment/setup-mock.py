@@ -15,29 +15,31 @@ import json
 import sys
 import time
 
-from nemo_helix import (
-    APIConnectionError,
-    APITimeoutError,
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import (
+    ConflictError,
     InternalServerError,
-    NeMoHelix,
+    NemoTransportError,
     NotFoundError,
     UnprocessableEntityError,
 )
-from nemo_helix import (
-    ConflictError as SDKConflictError,
-)
-from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
-from nemo_helix_plugin.models.types import CreateModelEntityRequest
+from nemo_helix_plugin.models.types import (
+    CreateModelEntityRequest,
+    CreateModelProviderRequest,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+    UpsertModelProviderRequest,
+)
 
 # Exceptions we treat as transient readiness errors during setup polling.
 # Anything outside this set (auth errors, bad-request, schema validation
 # failures) gets re-raised so misconfiguration fails fast instead of
 # silently burning the whole timeout budget.
 _TRANSIENT_ROUTING_ERRORS = (
-    APIConnectionError,
-    APITimeoutError,
+    NemoTransportError,
     NotFoundError,
     UnprocessableEntityError,
     InternalServerError,
@@ -81,24 +83,23 @@ MOCK_RESPONSE_MAP = {
 }
 
 
-def _register_served_model(sdk: NeMoHelix, workspace: str, provider_name: str, model_name: str) -> None:
+def _register_served_model(client: NemoClient, workspace: str, provider_name: str, model_name: str) -> None:
     """Register provider served-model mapping for IGW model discovery."""
-    sdk.inference.providers.update_status(
+    ModelsClient.from_client(client).update_provider_status(
         name=provider_name,
         workspace=workspace,
-        served_models=[
-            {
-                "model_entity_id": f"{workspace}/{model_name}",
-                "served_model_name": model_name,
-            }
-        ],
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(model_entity_id=f"{workspace}/{model_name}", served_model_name=model_name)
+            ]
+        ),
     )
 
 
-def _ensure_model_entity(sdk: NeMoHelix, workspace: str, model_name: str) -> None:
+def _ensure_model_entity(client: NemoClient, workspace: str, model_name: str) -> None:
     """Create model entity if missing; ignore already-exists conflicts."""
     try:
-        client_from_platform(sdk, ModelsClient).create_model(
+        ModelsClient.from_client(client).create_model(
             workspace=workspace,
             body=CreateModelEntityRequest(
                 name=model_name,
@@ -110,7 +111,7 @@ def _ensure_model_entity(sdk: NeMoHelix, workspace: str, model_name: str) -> Non
 
 
 def wait_for_model(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     provider_name: str,
     model_name: str,
@@ -124,9 +125,9 @@ def wait_for_model(
     while time.time() - start < timeout:
         attempts += 1
         if attempts == 1 or attempts % 5 == 0:
-            _register_served_model(sdk, workspace, provider_name, model_name)
+            _register_served_model(client, workspace, provider_name, model_name)
         try:
-            models_response = sdk.inference.gateway.openai.v1.models.list(workspace=workspace)
+            models_response = InferenceGatewayClient.from_client(client).list_openai_models(workspace=workspace).data()
             if any(model.id == full_model_name for model in models_response.data):
                 return
         except _TRANSIENT_ROUTING_ERRORS as exc:
@@ -139,7 +140,7 @@ def wait_for_model(
 
 
 def wait_for_openai_routing(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     model_name: str,
     timeout: float = 60.0,
@@ -157,16 +158,18 @@ def wait_for_openai_routing(
     last_routing_error: Exception | None = None
     while time.time() - start < timeout:
         try:
-            sdk.inference.gateway.openai.post(
-                "v1/chat/completions",
+            InferenceGatewayClient.from_client(client).openai_post(
+                trailing_uri="v1/chat/completions",
                 workspace=workspace,
-                body={
-                    "model": full_model_name,
-                    "messages": [{"role": "user", "content": "healthcheck"}],
-                    "max_tokens": 1,
-                    "temperature": 0,
-                },
-            )
+                body=JsonBody(
+                    {
+                        "model": full_model_name,
+                        "messages": [{"role": "user", "content": "healthcheck"}],
+                        "max_tokens": 1,
+                        "temperature": 0,
+                    }
+                ),
+            ).data()
             return
         except _TRANSIENT_ROUTING_ERRORS as exc:
             last_routing_error = exc
@@ -178,7 +181,7 @@ def wait_for_openai_routing(
 
 
 def setup() -> None:
-    sdk = NeMoHelix(base_url=NHX_BASE_URL)
+    client = NemoClient(base_url=NHX_BASE_URL)
 
     # Step 1: Create or update mock provider with static "Yes" response.
     # AGENT and VERIFY run in separate containers against the same DB state,
@@ -188,37 +191,42 @@ def setup() -> None:
     # effect rather than silently routing through stale state.
     desired_headers = {MOCK_RESPONSE_MAP_HEADER: json.dumps(MOCK_RESPONSE_MAP)}
     print(f"Creating mock provider: {MOCK_PROVIDER_NAME}")
+    models = ModelsClient.from_client(client)
     try:
-        sdk.inference.providers.create(
+        models.create_provider(
             workspace=WORKSPACE,
-            name=MOCK_PROVIDER_NAME,
-            host_url=MOCK_PROVIDER_HOST_URL,
-            default_extra_headers=desired_headers,
+            body=CreateModelProviderRequest(
+                name=MOCK_PROVIDER_NAME,
+                host_url=MOCK_PROVIDER_HOST_URL,
+                default_extra_headers=desired_headers,
+            ),
         )
-    except SDKConflictError:
+    except ConflictError:
         print(f"Provider already exists, reconciling headers: {MOCK_PROVIDER_NAME}")
-        sdk.inference.providers.update(
+        models.upsert_provider(
             name=MOCK_PROVIDER_NAME,
             workspace=WORKSPACE,
-            host_url=MOCK_PROVIDER_HOST_URL,
-            default_extra_headers=desired_headers,
+            body=UpsertModelProviderRequest(
+                host_url=MOCK_PROVIDER_HOST_URL,
+                default_extra_headers=desired_headers,
+            ),
         )
 
     # Ensure model entity exists so provider served_models mapping stays stable.
     print(f"Ensuring model entity exists: {MOCK_MODEL_NAME}")
-    _ensure_model_entity(sdk, WORKSPACE, MOCK_MODEL_NAME)
+    _ensure_model_entity(client, WORKSPACE, MOCK_MODEL_NAME)
 
     # Step 2: Register served models via provider status update
     # This tells IGW that this provider serves the 'mock-llm' model entity
     print(f"Registering model entity: {MOCK_MODEL_NAME}")
-    _register_served_model(sdk, WORKSPACE, MOCK_PROVIDER_NAME, MOCK_MODEL_NAME)
+    _register_served_model(client, WORKSPACE, MOCK_PROVIDER_NAME, MOCK_MODEL_NAME)
 
     # Step 3: Wait for model entity to become available in IGW's cache
     print(f"Waiting for model '{MOCK_MODEL_NAME}' to become available...")
-    wait_for_model(sdk, WORKSPACE, MOCK_PROVIDER_NAME, MOCK_MODEL_NAME)
+    wait_for_model(client, WORKSPACE, MOCK_PROVIDER_NAME, MOCK_MODEL_NAME)
     print(f"Model '{WORKSPACE}/{MOCK_MODEL_NAME}' is available.")
     print(f"Waiting for model '{WORKSPACE}/{MOCK_MODEL_NAME}' to be routable...")
-    wait_for_openai_routing(sdk, WORKSPACE, MOCK_MODEL_NAME)
+    wait_for_openai_routing(client, WORKSPACE, MOCK_MODEL_NAME)
     print(f"Model '{WORKSPACE}/{MOCK_MODEL_NAME}' is routable via IGW OpenAI.")
     # Allow downstream services a brief window to observe IGW model registration.
     # This avoids intermittent verify-time races where model lookup is briefly stale.

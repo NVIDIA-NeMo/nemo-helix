@@ -20,8 +20,6 @@ from typing import Generator
 from unittest.mock import patch
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.core.auth.app.bundle import build_authorization_data as _real_build_authorization_data
@@ -61,44 +59,46 @@ def ctx() -> Generator[ClientContext, None, None]:
         yield ctx
 
 
-@pytest.fixture(scope="module")
-def sdk(ctx: ClientContext) -> NeMoHelix:
-    return ctx.sdk
+def _admin_workspaces(ctx: ClientContext) -> WorkspacesClient:
+    """Typed workspaces client acting as the platform admin."""
+    return WorkspacesClient(base_url="http://testserver", http_client=ctx.test_client).with_headers(
+        {"X-NHX-Principal-Id": TEST_ADMIN_EMAIL, "X-NHX-Principal-Email": TEST_ADMIN_EMAIL}
+    )
 
 
 @pytest.mark.integration
 class TestIGWUnauthenticated:
     """Unauthenticated requests should be rejected for all gateway route types."""
 
-    def test_openai_proxy_without_auth_fails(self, sdk: NeMoHelix):
-        response = sdk._client.post(
+    def test_openai_proxy_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
         )
         assert response.status_code == 401
 
-    def test_openai_list_models_without_auth_fails(self, sdk: NeMoHelix):
-        response = sdk._client.get(
+    def test_openai_list_models_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get(
             "/apis/inference-gateway/v2/workspaces/default/openai/-/v1/models",
         )
         assert response.status_code == 401
 
-    def test_model_proxy_without_auth_fails(self, sdk: NeMoHelix):
-        response = sdk._client.post(
+    def test_model_proxy_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/inference-gateway/v2/workspaces/default/model/test-model/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
         )
         assert response.status_code == 401
 
-    def test_provider_proxy_without_auth_fails(self, sdk: NeMoHelix):
-        response = sdk._client.post(
+    def test_provider_proxy_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/inference-gateway/v2/workspaces/default/provider/test-provider/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
         )
         assert response.status_code == 401
 
-    def test_provider_ready_without_auth_fails(self, sdk: NeMoHelix):
-        response = sdk._client.get(
+    def test_provider_ready_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get(
             "/apis/inference-gateway/v2/workspaces/default/provider/test-provider/ready",
         )
         assert response.status_code == 401
@@ -115,23 +115,19 @@ MOCK_CHAT_RESPONSE = {
 class TestIGWViewerAccess:
     """Viewer role should be able to access all gateway routes."""
 
-    def test_viewer_can_list_openai_models(self, sdk: NeMoHelix):
+    def test_viewer_can_list_openai_models(self, ctx: ClientContext):
         workspace = short_unique_name("igw-vl")
         viewer_email = unique_email("viewer")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
             admin_sdk,
             workspace=workspace,
             principal=viewer_email,
             roles=["Viewer"],
         )
-
-        viewer_sdk = as_user(sdk, viewer_email)
-        response = viewer_sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers={
                 "X-NHX-Principal-Id": viewer_email,
@@ -140,15 +136,13 @@ class TestIGWViewerAccess:
         )
         assert response.status_code == 200
 
-    def test_viewer_can_call_openai_chat_completions(self, sdk: NeMoHelix):
+    def test_viewer_can_call_openai_chat_completions(self, ctx: ClientContext):
         workspace = short_unique_name("igw-vc")
         viewer_email = unique_email("viewer")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -161,9 +155,7 @@ class TestIGWViewerAccess:
             principal=viewer_email,
             roles=["Viewer"],
         )
-
-        viewer_sdk = as_user(sdk, viewer_email)
-        response = viewer_sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
             json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -173,15 +165,13 @@ class TestIGWViewerAccess:
         )
         assert response.status_code == 200
 
-    def test_viewer_can_call_model_proxy(self, sdk: NeMoHelix):
+    def test_viewer_can_call_model_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-vm")
         viewer_email = unique_email("viewer")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -194,9 +184,7 @@ class TestIGWViewerAccess:
             principal=viewer_email,
             roles=["Viewer"],
         )
-
-        viewer_sdk = as_user(sdk, viewer_email)
-        response = viewer_sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/model/{model_name}/-/v1/chat/completions",
             json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -206,14 +194,12 @@ class TestIGWViewerAccess:
         )
         assert response.status_code == 200
 
-    def test_viewer_can_call_provider_proxy(self, sdk: NeMoHelix):
+    def test_viewer_can_call_provider_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-vp")
         viewer_email = unique_email("viewer")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -226,9 +212,7 @@ class TestIGWViewerAccess:
             principal=viewer_email,
             roles=["Viewer"],
         )
-
-        viewer_sdk = as_user(sdk, viewer_email)
-        response = viewer_sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -238,14 +222,12 @@ class TestIGWViewerAccess:
         )
         assert response.status_code == 200
 
-    def test_viewer_can_check_provider_ready(self, sdk: NeMoHelix):
+    def test_viewer_can_check_provider_ready(self, ctx: ClientContext):
         workspace = short_unique_name("igw-vr")
         viewer_email = unique_email("viewer")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -258,9 +240,7 @@ class TestIGWViewerAccess:
             principal=viewer_email,
             roles=["Viewer"],
         )
-
-        viewer_sdk = as_user(sdk, viewer_email)
-        response = viewer_sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/ready",
             headers={
                 "X-NHX-Principal-Id": viewer_email,
@@ -275,23 +255,19 @@ class TestIGWViewerAccess:
 class TestIGWEditorAccess:
     """Editor role should be able to access all gateway routes (same as Viewer for exec)."""
 
-    def test_editor_can_list_openai_models(self, sdk: NeMoHelix):
+    def test_editor_can_list_openai_models(self, ctx: ClientContext):
         workspace = short_unique_name("igw-el")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
             admin_sdk,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
-
-        editor_sdk = as_user(sdk, editor_email)
-        response = editor_sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers={
                 "X-NHX-Principal-Id": editor_email,
@@ -300,15 +276,13 @@ class TestIGWEditorAccess:
         )
         assert response.status_code == 200
 
-    def test_editor_can_call_openai_chat_completions(self, sdk: NeMoHelix):
+    def test_editor_can_call_openai_chat_completions(self, ctx: ClientContext):
         workspace = short_unique_name("igw-ec")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -321,9 +295,7 @@ class TestIGWEditorAccess:
             principal=editor_email,
             roles=["Editor"],
         )
-
-        editor_sdk = as_user(sdk, editor_email)
-        response = editor_sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
             json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -333,15 +305,13 @@ class TestIGWEditorAccess:
         )
         assert response.status_code == 200
 
-    def test_editor_can_call_model_proxy(self, sdk: NeMoHelix):
+    def test_editor_can_call_model_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-em")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -354,9 +324,7 @@ class TestIGWEditorAccess:
             principal=editor_email,
             roles=["Editor"],
         )
-
-        editor_sdk = as_user(sdk, editor_email)
-        response = editor_sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/model/{model_name}/-/v1/chat/completions",
             json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -366,14 +334,12 @@ class TestIGWEditorAccess:
         )
         assert response.status_code == 200
 
-    def test_editor_can_call_provider_proxy(self, sdk: NeMoHelix):
+    def test_editor_can_call_provider_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-ep")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -386,9 +352,7 @@ class TestIGWEditorAccess:
             principal=editor_email,
             roles=["Editor"],
         )
-
-        editor_sdk = as_user(sdk, editor_email)
-        response = editor_sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -398,14 +362,12 @@ class TestIGWEditorAccess:
         )
         assert response.status_code == 200
 
-    def test_editor_can_check_provider_ready(self, sdk: NeMoHelix):
+    def test_editor_can_check_provider_ready(self, ctx: ClientContext):
         workspace = short_unique_name("igw-er")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -418,9 +380,7 @@ class TestIGWEditorAccess:
             principal=editor_email,
             roles=["Editor"],
         )
-
-        editor_sdk = as_user(sdk, editor_email)
-        response = editor_sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/ready",
             headers={
                 "X-NHX-Principal-Id": editor_email,
@@ -435,17 +395,13 @@ class TestIGWEditorAccess:
 class TestIGWUnauthorizedWorkspace:
     """Users without a role in the workspace should be denied (403) on all gateway route types."""
 
-    def test_no_role_denied_openai_list_models(self, sdk: NeMoHelix):
+    def test_no_role_denied_openai_list_models(self, ctx: ClientContext):
         workspace = short_unique_name("igw-nl")
         norole_email = unique_email("norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-
-        norole_sdk = as_user(sdk, norole_email)
-        response = norole_sdk._client.get(
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers={
                 "X-NHX-Principal-Id": norole_email,
@@ -454,17 +410,13 @@ class TestIGWUnauthorizedWorkspace:
         )
         assert response.status_code == 403
 
-    def test_no_role_denied_openai_proxy(self, sdk: NeMoHelix):
+    def test_no_role_denied_openai_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-no")
         norole_email = unique_email("norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-
-        norole_sdk = as_user(sdk, norole_email)
-        response = norole_sdk._client.post(
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -474,17 +426,13 @@ class TestIGWUnauthorizedWorkspace:
         )
         assert response.status_code == 403
 
-    def test_no_role_denied_model_proxy(self, sdk: NeMoHelix):
+    def test_no_role_denied_model_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-nm")
         norole_email = unique_email("norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-
-        norole_sdk = as_user(sdk, norole_email)
-        response = norole_sdk._client.post(
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/model/any-model/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -494,17 +442,13 @@ class TestIGWUnauthorizedWorkspace:
         )
         assert response.status_code == 403
 
-    def test_no_role_denied_provider_proxy(self, sdk: NeMoHelix):
+    def test_no_role_denied_provider_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-np")
         norole_email = unique_email("norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-
-        norole_sdk = as_user(sdk, norole_email)
-        response = norole_sdk._client.post(
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/any-provider/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
             headers={
@@ -514,17 +458,13 @@ class TestIGWUnauthorizedWorkspace:
         )
         assert response.status_code == 403
 
-    def test_no_role_denied_provider_ready(self, sdk: NeMoHelix):
+    def test_no_role_denied_provider_ready(self, ctx: ClientContext):
         workspace = short_unique_name("igw-nr")
         norole_email = unique_email("norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-
-        norole_sdk = as_user(sdk, norole_email)
-        response = norole_sdk._client.get(
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/any-provider/ready",
             headers={
                 "X-NHX-Principal-Id": norole_email,
@@ -604,15 +544,13 @@ class TestIGWScopeChecks:
     - POST (chat completions, etc.): requires inference:write, platform:write
     """
 
-    def test_read_only_scopes_allow_get_list_models(self, sdk: NeMoHelix):
+    def test_read_only_scopes_allow_get_list_models(self, ctx: ClientContext):
         with patched_authz_data(_build_authorization_data_igw_scope_explicit):
             workspace = short_unique_name("igw-sr")
             viewer_email = unique_email("viewer")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-                body=CreateWorkspaceRequest(name=workspace)
-            ).data()
+            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             grant_workspace_role(
                 admin_sdk,
                 workspace=workspace,
@@ -620,22 +558,20 @@ class TestIGWScopeChecks:
                 roles=["Viewer"],
             )
 
-            response = sdk._client.get(
+            response = ctx.test_client.get(
                 f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
                 headers=_auth_headers(viewer_email, SCOPES_READ_ONLY),
             )
             assert response.status_code == 200
 
-    def test_read_only_scopes_deny_post_chat_completions(self, sdk: NeMoHelix):
+    def test_read_only_scopes_deny_post_chat_completions(self, ctx: ClientContext):
         with patched_authz_data(_build_authorization_data_igw_scope_explicit):
             workspace = short_unique_name("igw-sw")
             viewer_email = unique_email("viewer")
             model_name = short_unique_name("mdl")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-                body=CreateWorkspaceRequest(name=workspace)
-            ).data()
+            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             add_mock_provider(
                 admin_sdk,
                 workspace=workspace,
@@ -649,23 +585,21 @@ class TestIGWScopeChecks:
                 roles=["Viewer"],
             )
 
-            response = sdk._client.post(
+            response = ctx.test_client.post(
                 f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
                 json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
                 headers=_auth_headers(viewer_email, SCOPES_READ_ONLY),
             )
             assert response.status_code == 403
 
-    def test_read_write_scopes_allow_post_chat_completions(self, sdk: NeMoHelix):
+    def test_read_write_scopes_allow_post_chat_completions(self, ctx: ClientContext):
         with patched_authz_data(_build_authorization_data_igw_scope_explicit):
             workspace = short_unique_name("igw-srw")
             viewer_email = unique_email("viewer")
             model_name = short_unique_name("mdl")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-                body=CreateWorkspaceRequest(name=workspace)
-            ).data()
+            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             add_mock_provider(
                 admin_sdk,
                 workspace=workspace,
@@ -679,22 +613,20 @@ class TestIGWScopeChecks:
                 roles=["Viewer"],
             )
 
-            response = sdk._client.post(
+            response = ctx.test_client.post(
                 f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
                 json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
                 headers=_auth_headers(viewer_email, SCOPES_READ_WRITE),
             )
             assert response.status_code == 200
 
-    def test_read_only_scopes_allow_provider_ready(self, sdk: NeMoHelix):
+    def test_read_only_scopes_allow_provider_ready(self, ctx: ClientContext):
         with patched_authz_data(_build_authorization_data_igw_scope_explicit):
             workspace = short_unique_name("igw-spr")
             viewer_email = unique_email("viewer")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-                body=CreateWorkspaceRequest(name=workspace)
-            ).data()
+            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             provider = add_mock_provider(
                 admin_sdk,
                 workspace=workspace,
@@ -708,7 +640,7 @@ class TestIGWScopeChecks:
                 roles=["Viewer"],
             )
 
-            response = sdk._client.get(
+            response = ctx.test_client.get(
                 f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/ready",
                 headers=_auth_headers(viewer_email, SCOPES_READ_ONLY),
             )
@@ -727,29 +659,25 @@ class TestIGWServicePrincipalAccess:
 
     SERVICE_PRINCIPAL_EVALUATOR = "service:evaluator"
 
-    def test_service_principal_can_list_openai_models(self, sdk: NeMoHelix):
+    def test_service_principal_can_list_openai_models(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-l")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         # Intentionally no workspace membership granted to service:evaluator
 
-        response = sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers={"X-NHX-Principal-Id": self.SERVICE_PRINCIPAL_EVALUATOR},
         )
         assert response.status_code == 200
 
-    def test_service_principal_can_call_openai_proxy(self, sdk: NeMoHelix):
+    def test_service_principal_can_call_openai_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-o")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -758,21 +686,19 @@ class TestIGWServicePrincipalAccess:
         )
         # Intentionally no workspace membership granted to service:evaluator
 
-        response = sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
             json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
             headers={"X-NHX-Principal-Id": self.SERVICE_PRINCIPAL_EVALUATOR},
         )
         assert response.status_code == 200
 
-    def test_service_principal_can_call_model_proxy(self, sdk: NeMoHelix):
+    def test_service_principal_can_call_model_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-m")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -780,20 +706,18 @@ class TestIGWServicePrincipalAccess:
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
 
-        response = sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/model/{model_name}/-/v1/chat/completions",
             json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
             headers={"X-NHX-Principal-Id": self.SERVICE_PRINCIPAL_EVALUATOR},
         )
         assert response.status_code == 200
 
-    def test_service_principal_can_call_provider_proxy(self, sdk: NeMoHelix):
+    def test_service_principal_can_call_provider_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-p")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -801,24 +725,22 @@ class TestIGWServicePrincipalAccess:
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
 
-        response = sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/-/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hi"}]},
             headers={"X-NHX-Principal-Id": self.SERVICE_PRINCIPAL_EVALUATOR},
         )
         assert response.status_code == 200
 
-    def test_regular_user_without_role_is_still_denied(self, sdk: NeMoHelix):
+    def test_regular_user_without_role_is_still_denied(self, ctx: ClientContext):
         """Contrast test: a non-service principal without workspace role is still denied."""
         workspace = short_unique_name("igw-svc-d")
         norole_email = unique_email("norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
 
-        response = sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers={
                 "X-NHX-Principal-Id": norole_email,
@@ -848,15 +770,13 @@ class TestIGWDelegatedServicePrincipalAccess:
             "X-NHX-Principal-On-Behalf-Of-Email": on_behalf_of,
         }
 
-    def test_delegated_denied_when_obo_user_lacks_role(self, sdk: NeMoHelix):
+    def test_delegated_denied_when_obo_user_lacks_role(self, ctx: ClientContext):
         # The OBO user has NO role in the workspace: the service bypass must not apply.
         workspace = short_unique_name("igw-obo-d")
         obo_email = unique_email("obo-norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -864,38 +784,34 @@ class TestIGWDelegatedServicePrincipalAccess:
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
 
-        response = sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers=self._delegated_headers(obo_email),
         )
         assert response.status_code == 403
 
-    def test_delegated_allowed_when_obo_user_has_role(self, sdk: NeMoHelix):
+    def test_delegated_allowed_when_obo_user_has_role(self, ctx: ClientContext):
         # The OBO user is granted a role in the workspace: the delegated call is allowed.
         workspace = short_unique_name("igw-obo-a")
         obo_email = unique_email("obo-viewer")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(admin_sdk, workspace=workspace, principal=obo_email, roles=["Viewer"])
 
-        response = sdk._client.get(
+        response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
             headers=self._delegated_headers(obo_email),
         )
         assert response.status_code == 200
 
-    def test_delegated_openai_proxy_denied_when_obo_user_lacks_role(self, sdk: NeMoHelix):
+    def test_delegated_openai_proxy_denied_when_obo_user_lacks_role(self, ctx: ClientContext):
         workspace = short_unique_name("igw-obo-po")
         model_name = short_unique_name("mdl")
         obo_email = unique_email("obo-norole")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -903,22 +819,20 @@ class TestIGWDelegatedServicePrincipalAccess:
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
 
-        response = sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
             json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
             headers=self._delegated_headers(obo_email),
         )
         assert response.status_code == 403
 
-    def test_delegated_openai_proxy_allowed_when_obo_user_has_role(self, sdk: NeMoHelix):
+    def test_delegated_openai_proxy_allowed_when_obo_user_has_role(self, ctx: ClientContext):
         workspace = short_unique_name("igw-obo-pa")
         model_name = short_unique_name("mdl")
         obo_email = unique_email("obo-editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
             admin_sdk,
             workspace=workspace,
@@ -927,7 +841,7 @@ class TestIGWDelegatedServicePrincipalAccess:
         )
         grant_workspace_role(admin_sdk, workspace=workspace, principal=obo_email, roles=["Editor"])
 
-        response = sdk._client.post(
+        response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
             json={"model": f"{workspace}/{model_name}", "messages": [{"role": "user", "content": "hi"}]},
             headers=self._delegated_headers(obo_email),

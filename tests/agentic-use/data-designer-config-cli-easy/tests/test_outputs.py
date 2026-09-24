@@ -11,18 +11,18 @@ This test checks:
 
 import os
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.secrets.client import SecretsClient
 
 
 def test_secret_created() -> None:
     """Test that the dd-test-api-key secret was successfully created."""
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    client = NeMoHelix(base_url=nhx_base_url, workspace="default")
+    client = NemoClient(base_url=nhx_base_url, workspace="default")
 
     # List secrets and check for our test secret
-    secrets = client_from_platform(client, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     secret_names = [s.name for s in secrets.list_secrets().items()]
 
     assert "dd-test-api-key" in secret_names, f"Secret 'dd-test-api-key' was not created! Found secrets: {secret_names}"
@@ -32,11 +32,11 @@ def test_secret_created() -> None:
 def test_provider_created() -> None:
     """Test that the dd-test-provider model provider was successfully created."""
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    client = NeMoHelix(base_url=nhx_base_url, workspace="default")
+    client = NemoClient(base_url=nhx_base_url, workspace="default")
 
     # List providers and check for our test provider
-    response = client.inference.providers.list()
-    provider_names = [p.name for p in response.data]
+    response = ModelsClient.from_client(client).list_providers()
+    provider_names = [p.name for p in response.items()]
 
     assert "dd-test-provider" in provider_names, (
         f"Provider 'dd-test-provider' was not created! Found providers: {provider_names}"
@@ -47,10 +47,10 @@ def test_provider_created() -> None:
 def test_provider_configuration() -> None:
     """Test that the provider has the correct configuration."""
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    client = NeMoHelix(base_url=nhx_base_url, workspace="default")
+    client = NemoClient(base_url=nhx_base_url, workspace="default")
 
     # Get the specific provider
-    provider = client.inference.providers.retrieve(name="dd-test-provider")
+    provider = ModelsClient.from_client(client).get_provider(name="dd-test-provider").data()
 
     # Verify host URL
     assert provider.host_url == "https://integrate.api.nvidia.com", (

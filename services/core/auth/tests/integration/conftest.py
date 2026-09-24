@@ -14,8 +14,8 @@ from typing import Generator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_helix import NeMoHelix
-from nhx.testing.client import SDKTestClientAdapter, create_test_client
+from nemo_helix_plugin.client.client import NemoClient
+from nhx.testing.client import create_test_client
 
 # Test principal for authenticated requests (service-level access)
 SERVICE_PRINCIPAL = "service:integration-test"
@@ -40,12 +40,12 @@ def test_client() -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture(scope="module")
-def sdk(test_client: TestClient) -> Iterator[NeMoHelix]:
-    """SDK client backed by the test client.
+def client(test_client: TestClient) -> Iterator[NemoClient]:
+    """Typed platform client backed by the test client.
 
     Module-scoped because it shares the TestClient.
     """
-    yield NeMoHelix(base_url="http://testserver", http_client=SDKTestClientAdapter(test_client))
+    yield NemoClient(base_url="http://testserver", http_client=test_client)
 
 
 @pytest.fixture

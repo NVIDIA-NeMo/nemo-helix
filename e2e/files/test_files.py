@@ -13,8 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, ListFilesQueryParams
 from nemo_helix_plugin.files.types import FilesetOutput as Fileset
@@ -32,7 +31,7 @@ def fileset(files_client: FilesClient, workspace: str) -> Iterator[Fileset]:
         pass
 
 
-def test_file_upload_download(sdk: NeMoHelix, workspace: str, fileset: Fileset):
+def test_file_upload_download(client: NemoClient, workspace: str, fileset: Fileset):
     """Test uploading and downloading a file.
 
     This test verifies the files system works end-to-end:
@@ -42,7 +41,7 @@ def test_file_upload_download(sdk: NeMoHelix, workspace: str, fileset: Fileset):
     test_content = b"Hello from e2e test! This is test file content."
 
     # Upload file using high-level API
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     files.upload_file(
         name=fileset.name,
         workspace=workspace,
@@ -65,18 +64,18 @@ def test_file_upload_download(sdk: NeMoHelix, workspace: str, fileset: Fileset):
     assert downloaded == test_content
 
 
-def test_file_list_cache_status_for_default_storage(sdk: NeMoHelix, workspace: str, fileset: Fileset):
+def test_file_list_cache_status_for_default_storage(client: NemoClient, workspace: str, fileset: Fileset):
     """Test cache status reporting for files stored in the default backend."""
     test_content = b"cache status coverage"
 
-    client_from_platform(sdk, FilesClient).upload_file(
+    FilesClient.from_client(client).upload_file(
         name=fileset.name,
         workspace=workspace,
         path="cache-status.txt",
         content=test_content,
     )
 
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     files_without_cache_check = files.list_files(name=fileset.name, workspace=workspace).data().data
     assert len(files_without_cache_check) == 1
     assert files_without_cache_check[0].cache_status == "not_cacheable"
@@ -94,7 +93,7 @@ def test_file_list_cache_status_for_default_storage(sdk: NeMoHelix, workspace: s
     assert files_with_cache_check[0].cache_status == "not_cacheable"
 
 
-def test_file_upload_nested_path(sdk: NeMoHelix, workspace: str, fileset: Fileset):
+def test_file_upload_nested_path(client: NemoClient, workspace: str, fileset: Fileset):
     """Test uploading a file with a nested path.
 
     Verifies that files can be uploaded to nested directories
@@ -104,7 +103,7 @@ def test_file_upload_nested_path(sdk: NeMoHelix, workspace: str, fileset: Filese
     test_path = "folder/subfolder/nested.txt"
 
     # Upload file to nested path
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     files.upload_file(
         name=fileset.name,
         workspace=workspace,
@@ -126,7 +125,7 @@ def test_file_upload_nested_path(sdk: NeMoHelix, workspace: str, fileset: Filese
     assert downloaded == test_content
 
 
-def test_file_delete(sdk: NeMoHelix, workspace: str, fileset: Fileset):
+def test_file_delete(client: NemoClient, workspace: str, fileset: Fileset):
     """Test deleting a file from a fileset.
 
     Verifies that files can be deleted and are no longer
@@ -136,7 +135,7 @@ def test_file_delete(sdk: NeMoHelix, workspace: str, fileset: Fileset):
     test_path = "delete-me.txt"
 
     # Upload file
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     files.upload_file(
         name=fileset.name,
         workspace=workspace,
@@ -160,7 +159,7 @@ def test_file_delete(sdk: NeMoHelix, workspace: str, fileset: Fileset):
     assert not any(f.path == test_path for f in files_list)
 
 
-def test_directory_upload_and_download(sdk: NeMoHelix, workspace: str, fileset: Fileset):
+def test_directory_upload_and_download(client: NemoClient, workspace: str, fileset: Fileset):
     """Test uploading and downloading a directory.
 
     Verifies that directory contents can be uploaded and downloaded
@@ -174,7 +173,7 @@ def test_directory_upload_and_download(sdk: NeMoHelix, workspace: str, fileset: 
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Upload each file, preserving its relative path
-        files = client_from_platform(sdk, FilesClient)
+        files = FilesClient.from_client(client)
         for remote_path, content in test_files.items():
             files.upload_file(
                 name=fileset.name,

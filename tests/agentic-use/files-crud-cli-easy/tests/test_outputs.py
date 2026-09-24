@@ -14,8 +14,7 @@ Checks:
 import os
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from trace_reader import get_session
 
@@ -23,14 +22,14 @@ WORKSPACE = "default"
 
 
 @pytest.fixture
-def client() -> NeMoHelix:
+def client() -> NemoClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE)
+    return NemoClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 @pytest.fixture
-def files_client(client: NeMoHelix) -> FilesClient:
-    return client_from_platform(client, FilesClient)
+def files_client(client: NemoClient) -> FilesClient:
+    return FilesClient.from_client(client)
 
 
 def test_harbor_test_fileset_deleted(files_client: FilesClient) -> None:
@@ -52,16 +51,16 @@ def test_harbor_final_fileset_exists(files_client: FilesClient) -> None:
     )
 
 
-def test_verify_file_uploaded(client: NeMoHelix) -> None:
+def test_verify_file_uploaded(client: NemoClient) -> None:
     """Test that verify.txt was uploaded to harbor-final-fileset with correct content."""
-    files = client.files.list(fileset="harbor-final-fileset")
+    files = FilesClient.from_client(client).list_files(name="harbor-final-fileset").data()
     file_paths = [f.path for f in files.data]
     assert any("verify.txt" in p for p in file_paths), (
         f"File 'verify.txt' not found in harbor-final-fileset! Found files: {file_paths}"
     )
 
     # Download and check file content
-    content = client.files.download_content(remote_path="verify.txt", fileset="harbor-final-fileset")
+    content = FilesClient.from_client(client).download_file(name="harbor-final-fileset", path="verify.txt").read()
     content_str = content.decode("utf-8").strip()
     assert content_str == "harbor-verification-content", (
         f"Expected file content 'harbor-verification-content', got '{content_str}'"

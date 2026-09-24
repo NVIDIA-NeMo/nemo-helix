@@ -7,7 +7,6 @@ import uuid
 
 import httpx
 import pytest
-from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import (
     managed_workload_workspace_get_command,
@@ -15,6 +14,7 @@ from tests.auth_idp.common import (
     require_capability,
     runtime_tls_config,
 )
+from tests.auth_idp.helpers import grant_workspace_role
 from tests.auth_idp.runtime_contract import AuthIdpRuntime, JsonObject
 
 pytestmark = [
@@ -164,10 +164,10 @@ def test_provider_workload_deployment_runs_with_managed_obo(
     require_capability(auth_idp_case, "workload_deployment")
     require_capability(auth_idp_case, "managed_workload_deployment_obo")
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     for principal in auth_idp_runtime.workload_role_principals():
         grant_workspace_role(
-            e2e_setup_sdk,
+            e2e_setup_client,
             workspace=auth_idp_workspace,
             principal=principal,
             roles=["Viewer", "Editor", "JobRunner"],

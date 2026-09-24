@@ -5,8 +5,6 @@ import os
 
 import pytest
 from fastapi import status
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NemoHTTPError as APIStatusError
 from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.entities.types import EntityCreateInput, EntityUpdate
@@ -15,22 +13,20 @@ from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.core.entities.utils.identifiers import generate_entity_id
 
 base_url = os.getenv("BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(base_url=base_url, max_retries=0)
+workspaces_client = WorkspacesClient(base_url=base_url)
+entities_client = EntitiesClient.from_client(workspaces_client)
 
 
 @pytest.fixture(scope="module")
 def workspace():
-    workspace = (
-        client_from_platform(sdk, WorkspacesClient)
-        .create_workspace(body=CreateWorkspaceRequest(name=generate_entity_id("workspace")))
-        .data()
-    )
+    workspace = workspaces_client.create_workspace(
+        body=CreateWorkspaceRequest(name=generate_entity_id("workspace"))
+    ).data()
     yield workspace
-    client_from_platform(sdk, WorkspacesClient).delete_workspace(name=workspace.name).data()
+    workspaces_client.delete_workspace(name=workspace.name).data()
 
 
 def test_crud_entity(workspace):
-    entities_client = client_from_platform(sdk, EntitiesClient)
 
     entity = entities_client.create_entity(
         entity_type="test-type",
@@ -66,7 +62,6 @@ def test_crud_entity(workspace):
 
 
 def test_list_entities(workspace):
-    entities_client = client_from_platform(sdk, EntitiesClient)
     for i in range(10):
         entities_client.create_entity(
             entity_type="test-type",

@@ -13,7 +13,7 @@ wiring.
 
 What it proves — the deployments reconcile chain end to end, on Kubernetes::
 
-    sdk._client POST /apis/deployments/v2/...   (config / deployment)
+    client._client POST /apis/deployments/v2/...   (config / deployment)
       -> deployments reconcile controller
       -> k8s executor creates the Deployment+Service / Job
       -> Deployment.status converges (READY for the service, SUCCEEDED for the job)
@@ -56,7 +56,7 @@ How it runs, and where:
 from __future__ import annotations
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 from e2e.deployments_helpers import (
     run_job_deployment_lifecycle,
@@ -70,20 +70,20 @@ _K8S_TIMEOUT_SECONDS = 420
 pytestmark = [pytest.mark.container_only]
 
 
-def test_k8s_service_deployment_reaches_ready(sdk: NeMoHelix, workspace: str) -> None:
+def test_k8s_service_deployment_reaches_ready(client: NemoClient, workspace: str) -> None:
     """A restart_policy=Always nginx service reconciles to a k8s Deployment+Service (READY)."""
     run_service_deployment_lifecycle(
-        sdk,
+        client,
         workspace=workspace,
         backend_key="k8s",
         running_timeout_seconds=_K8S_TIMEOUT_SECONDS,
     )
 
 
-def test_k8s_job_deployment_reaches_succeeded(sdk: NeMoHelix, workspace: str) -> None:
+def test_k8s_job_deployment_reaches_succeeded(client: NemoClient, workspace: str) -> None:
     """A restart_policy=Never alpine job reconciles to a k8s Job that completes (SUCCEEDED)."""
     run_job_deployment_lifecycle(
-        sdk,
+        client,
         workspace=workspace,
         backend_key="k8s",
         running_timeout_seconds=_K8S_TIMEOUT_SECONDS,

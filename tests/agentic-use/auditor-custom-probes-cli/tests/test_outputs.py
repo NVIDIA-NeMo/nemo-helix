@@ -19,7 +19,8 @@ import json
 import os
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.auditor.client import AuditorClient
+from nemo_helix_plugin.auditor.types import AuditConfig
 from trace_reader import get_session
 
 WORKSPACE = "default"
@@ -42,24 +43,24 @@ def _make_unsigned_jwt() -> str:
 
 
 @pytest.fixture
-def client() -> NeMoHelix:
+def client() -> AuditorClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+    return AuditorClient(base_url=nhx_base_url, workspace=WORKSPACE, auth=_make_unsigned_jwt())
 
 
 # --- Audit target checks ---
 
 
-def test_audit_target_exists(client: NeMoHelix) -> None:
+def test_audit_target_exists(client: AuditorClient) -> None:
     """Verify the audit target was created."""
-    targets = client.auditor.targets.list(workspace=WORKSPACE)
-    target_names = [t["name"] for t in targets["data"]]
+    targets = client.list_audit_targets(workspace=WORKSPACE)
+    target_names = [t.name for t in targets.items()]
     assert TARGET_NAME in target_names, f"Target '{TARGET_NAME}' not found. Found: {target_names}"
 
 
-def test_audit_target_model(client: NeMoHelix) -> None:
+def test_audit_target_model(client: AuditorClient) -> None:
     """Verify the audit target references a model."""
-    target = client.auditor.targets.get(workspace=WORKSPACE, name=TARGET_NAME)
+    target = client.get_audit_target(workspace=WORKSPACE, name=TARGET_NAME).data()
     assert isinstance(target.model, str) and len(target.model) > 0, f"Target '{TARGET_NAME}' has no model configured"
     print(f"Target model: {target.model}, type: {target.type}")
 
@@ -67,41 +68,41 @@ def test_audit_target_model(client: NeMoHelix) -> None:
 # --- Custom audit config checks ---
 
 
-def test_custom_config_exists(client: NeMoHelix) -> None:
+def test_custom_config_exists(client: AuditorClient) -> None:
     """Verify the custom audit config was created."""
-    configs = client.auditor.configs.list(workspace=WORKSPACE)
-    config_names = [c["name"] for c in configs["data"]]
+    configs = client.list_audit_configs(workspace=WORKSPACE)
+    config_names = [c.name for c in configs.items()]
     assert CONFIG_NAME in config_names, f"Config '{CONFIG_NAME}' not found. Found: {config_names}"
 
 
-def test_custom_config_description(client: NeMoHelix) -> None:
+def test_custom_config_description(client: AuditorClient) -> None:
     """Verify the custom config has the correct description."""
-    config = client.auditor.configs.get(workspace=WORKSPACE, name=CONFIG_NAME)
+    config = client.get_audit_config(workspace=WORKSPACE, name=CONFIG_NAME).data()
     assert config.description == "Custom config with selected probes", (
         f"Expected description 'Custom config with selected probes', got '{config.description}'"
     )
 
 
-def _get_probes_from_config(config: object) -> list[str]:
+def _get_probes_from_config(config: AuditConfig) -> list[str]:
     """Extract probe names from a config, checking both probes dict and probe_spec string."""
     plugins = config.plugins
 
     # Check plugins.probes dict first (keys are probe names)
-    probes_dict = plugins.probes if hasattr(plugins, "probes") else {}
+    probes_dict = plugins.get("probes", {})
     if isinstance(probes_dict, dict) and probes_dict:
         return list(probes_dict.keys())
 
     # Fall back to probe_spec (comma-separated string like "dan.DanInTheWild,dan.AutoDANCached")
-    probe_spec = plugins.probe_spec if hasattr(plugins, "probe_spec") else ""
+    probe_spec = plugins.get("probe_spec", "")
     if isinstance(probe_spec, str) and probe_spec and probe_spec != "all":
         return [p.strip() for p in probe_spec.split(",")]
 
     return []
 
 
-def test_custom_config_has_selected_probes(client: NeMoHelix) -> None:
+def test_custom_config_has_selected_probes(client: AuditorClient) -> None:
     """Verify the custom config uses the three specified probes."""
-    config = client.auditor.configs.get(workspace=WORKSPACE, name=CONFIG_NAME)
+    config = client.get_audit_config(workspace=WORKSPACE, name=CONFIG_NAME).data()
     # Probes may be in plugins.probes dict (keys) or in probe_spec (comma-separated string)
     probe_names = _get_probes_from_config(config)
 

@@ -13,8 +13,17 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix.types.inference.model_provider import ModelProvider
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    CreateModelProviderRequest,
+    ModelProvider,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+    UpsertModelProviderRequest,
+)
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 from nhx.core.inference_gateway.api.dependencies import global_model_cache, global_virtual_model_cache
 from nhx.core.inference_gateway.api.model_cache import ModelCache, model_provider_getter_from_sdk, refresh_model_cache
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache, refresh_virtual_model_cache
@@ -23,17 +32,21 @@ from nhx.testing import ClientContext
 DEFAULT_WORKSPACE = "default"
 
 
+def _models(ctx: ClientContext) -> ModelsClient:
+    """Typed models client for the in-process app."""
+    return ModelsClient(base_url="http://testserver", http_client=ctx.test_client)
+
+
 def _create_provider(
-    sdk: NeMoHelix,
+    models: ModelsClient,
     provider_name: str,
     host_url: str,
 ) -> ModelProvider:
-    """Create a provider via the SDK."""
-    return sdk.inference.providers.create(
+    """Create a provider via the typed client."""
+    return models.create_provider(
         workspace=DEFAULT_WORKSPACE,
-        name=provider_name,
-        host_url=host_url,
-    )
+        body=CreateModelProviderRequest(name=provider_name, host_url=host_url),
+    ).data()
 
 
 def _run_cache_refresh(
@@ -72,7 +85,7 @@ def test_cache_syncs_providers_from_models_service(test_clients: ClientContext):
     assert model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name) is None
 
     # Create provider
-    provider = _create_provider(test_clients.sdk, provider_name, host_url)
+    provider = _create_provider(_models(test_clients), provider_name, host_url)
     assert provider.name == provider_name
 
     # Refresh the cache
@@ -97,19 +110,21 @@ def test_cache_includes_served_models_mapping(test_clients: ClientContext):
     served_model_name = "gpt-test"
 
     # Create provider
-    provider = _create_provider(test_clients.sdk, provider_name, "http://localhost:9001")
+    provider = _create_provider(_models(test_clients), provider_name, "http://localhost:9001")
     assert provider.name == provider_name
 
     # Update provider with served_models
-    test_clients.sdk.inference.providers.update_status(
-        provider_name,
+    _models(test_clients).update_provider_status(
+        name=provider_name,
         workspace=DEFAULT_WORKSPACE,
-        served_models=[
-            {
-                "model_entity_id": f"{DEFAULT_WORKSPACE}/{model_entity_name}",
-                "served_model_name": served_model_name,
-            }
-        ],
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(
+                    model_entity_id=f"{DEFAULT_WORKSPACE}/{model_entity_name}",
+                    served_model_name=served_model_name,
+                )
+            ]
+        ),
     )
 
     # Refresh cache
@@ -144,7 +159,7 @@ def test_cache_invalidates_deleted_providers(test_clients: ClientContext):
     provider_name = f"test-delete-cache-{test_uuid}"
 
     # Create provider
-    provider = _create_provider(test_clients.sdk, provider_name, "http://localhost:9002")
+    provider = _create_provider(_models(test_clients), provider_name, "http://localhost:9002")
     assert provider.name == provider_name
 
     # Refresh cache to pick up the provider
@@ -152,7 +167,7 @@ def test_cache_invalidates_deleted_providers(test_clients: ClientContext):
     assert model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name) is not None
 
     # Delete the provider
-    test_clients.sdk.inference.providers.delete(provider_name, workspace=DEFAULT_WORKSPACE)
+    _models(test_clients).delete_provider(name=provider_name, workspace=DEFAULT_WORKSPACE)
 
     # Refresh cache again
     _run_cache_refresh(model_cache, test_clients.async_sdk)
@@ -172,7 +187,7 @@ def test_cache_updates_provider_host_url_on_refresh(test_clients: ClientContext)
     provider_name = f"test-update-cache-{test_uuid}"
 
     # Create provider
-    provider = _create_provider(test_clients.sdk, provider_name, "http://localhost:9003")
+    provider = _create_provider(_models(test_clients), provider_name, "http://localhost:9003")
     assert provider.name == provider_name
 
     # Refresh cache
@@ -183,10 +198,10 @@ def test_cache_updates_provider_host_url_on_refresh(test_clients: ClientContext)
     assert cached.model_provider.host_url == "http://localhost:9003"
 
     # Update provider host_url using update (PUT)
-    test_clients.sdk.inference.providers.update(
-        provider_name,
+    _models(test_clients).upsert_provider(
+        name=provider_name,
         workspace=DEFAULT_WORKSPACE,
-        host_url="http://localhost:9999",
+        body=UpsertModelProviderRequest(host_url="http://localhost:9999"),
     )
 
     # Refresh cache again
@@ -227,10 +242,9 @@ def test_virtual_model_cache_syncs_from_entity_store(test_clients: ClientContext
     assert vm_cache.get(DEFAULT_WORKSPACE, vm_name) is None
 
     # Create a VirtualModel via the IGW CRUD API
-    test_clients.sdk.inference.virtual_models.create(
+    VirtualModelsClient(base_url="http://testserver", http_client=test_clients.test_client).create_virtual_model(
         workspace=DEFAULT_WORKSPACE,
-        name=vm_name,
-        default_model_entity=f"{DEFAULT_WORKSPACE}/some-model",
+        body=CreateVirtualModelRequest(name=vm_name, default_model_entity=f"{DEFAULT_WORKSPACE}/some-model"),
     )
 
     # Refresh the VM cache
@@ -258,7 +272,7 @@ def test_cache_handles_multiple_providers(test_clients: ClientContext):
         provider_name = f"test-multi-{test_uuid}-{i}"
         provider_names.append(provider_name)
 
-        provider = _create_provider(test_clients.sdk, provider_name, f"http://localhost:900{i}")
+        provider = _create_provider(_models(test_clients), provider_name, f"http://localhost:900{i}")
         assert provider.name == provider_name
 
     # Refresh cache

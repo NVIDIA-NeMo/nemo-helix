@@ -18,7 +18,7 @@ import os
 import re
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.auditor.client import AuditorClient
 from trace_reader import get_session
 
 WORKSPACE = "default"
@@ -42,24 +42,24 @@ def _make_unsigned_jwt() -> str:
 
 
 @pytest.fixture
-def client() -> NeMoHelix:
+def client() -> AuditorClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+    return AuditorClient(base_url=nhx_base_url, workspace=WORKSPACE, auth=_make_unsigned_jwt())
 
 
 # --- Audit target checks ---
 
 
-def test_audit_target_exists(client: NeMoHelix) -> None:
+def test_audit_target_exists(client: AuditorClient) -> None:
     """Verify the audit target was created."""
-    targets = client.auditor.targets.list(workspace=WORKSPACE)
-    target_names = [t["name"] for t in targets["data"]]
+    targets = client.list_audit_targets(workspace=WORKSPACE)
+    target_names = [t.name for t in targets.items()]
     assert TARGET_NAME in target_names, f"Target '{TARGET_NAME}' not found. Found: {target_names}"
 
 
-def test_audit_target_model(client: NeMoHelix) -> None:
+def test_audit_target_model(client: AuditorClient) -> None:
     """Verify the audit target references the correct model."""
-    target = client.auditor.targets.get(workspace=WORKSPACE, name=TARGET_NAME)
+    target = client.get_audit_target(workspace=WORKSPACE, name=TARGET_NAME).data()
     assert target.model is not None and len(target.model) > 0, f"Target '{TARGET_NAME}' has no model configured"
     print(f"Target model: {target.model}, type: {target.type}")
 
@@ -67,17 +67,17 @@ def test_audit_target_model(client: NeMoHelix) -> None:
 # --- Audit config checks ---
 
 
-def test_audit_config_exists(client: NeMoHelix) -> None:
+def test_audit_config_exists(client: AuditorClient) -> None:
     """Verify the audit config was created."""
-    config = client.auditor.configs.get(workspace=WORKSPACE, name=CONFIG_NAME)
+    config = client.get_audit_config(workspace=WORKSPACE, name=CONFIG_NAME).data()
     assert config.name == CONFIG_NAME, f"Expected config '{CONFIG_NAME}', got '{config.name}'"
 
 
-def test_audit_config_has_probe_spec(client: NeMoHelix) -> None:
+def test_audit_config_has_probe_spec(client: AuditorClient) -> None:
     """Verify the audit config has probes configured."""
-    config = client.auditor.configs.get(workspace=WORKSPACE, name=CONFIG_NAME)
-    assert config.plugins.probe_spec, f"Config '{CONFIG_NAME}' has no probe_spec configured"
-    print(f"Config probe_spec: {config.plugins.probe_spec}")
+    config = client.get_audit_config(workspace=WORKSPACE, name=CONFIG_NAME).data()
+    assert config.plugins["probe_spec"], f"Config '{CONFIG_NAME}' has no probe_spec configured"
+    print(f"Config probe_spec: {config.plugins['probe_spec']}")
 
 
 # --- Agent trajectory checks ---

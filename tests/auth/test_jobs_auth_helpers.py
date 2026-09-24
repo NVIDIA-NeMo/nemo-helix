@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 
 from tests.auth.integration.jobs_auth_helpers import job_exists_in_pages, managed_admin_workspace
 
@@ -27,11 +28,9 @@ class _StubWorkspaces:
         return SimpleNamespace(data=lambda: None)
 
 
-def _stub_client_from_platform(monkeypatch: pytest.MonkeyPatch) -> _StubWorkspaces:
-    from tests.auth.integration import jobs_auth_helpers
-
+def _stub_workspaces_client(monkeypatch: pytest.MonkeyPatch) -> _StubWorkspaces:
     stub = _StubWorkspaces()
-    monkeypatch.setattr(jobs_auth_helpers, "client_from_platform", lambda *args, **kwargs: stub)
+    monkeypatch.setattr(WorkspacesClient, "from_client", classmethod(lambda cls, client: stub))
     return stub
 
 
@@ -52,9 +51,9 @@ class _StubJobsResponse:
 def test_managed_admin_workspace_deletes_workspace_after_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stub = _stub_client_from_platform(monkeypatch)
+    stub = _stub_workspaces_client(monkeypatch)
 
-    with managed_admin_workspace(cast(NeMoHelix, object()), "workspace-a") as workspace_name:
+    with managed_admin_workspace(cast(NemoClient, object()), "workspace-a") as workspace_name:
         assert workspace_name == "workspace-a"
 
     assert stub.created == ["workspace-a"]
@@ -64,10 +63,10 @@ def test_managed_admin_workspace_deletes_workspace_after_success(
 def test_managed_admin_workspace_deletes_workspace_after_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stub = _stub_client_from_platform(monkeypatch)
+    stub = _stub_workspaces_client(monkeypatch)
 
     with pytest.raises(RuntimeError, match="boom"):
-        with managed_admin_workspace(cast(NeMoHelix, object()), "workspace-b"):
+        with managed_admin_workspace(cast(NemoClient, object()), "workspace-b"):
             raise RuntimeError("boom")
 
     assert stub.created == ["workspace-b"]

@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_deployments_plugin.config import ControllerConfig, DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.controller import DeploymentsController
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.config import Runtime
 from nhx.core.inference_gateway.api.dependencies import global_model_cache
 from nhx.core.inference_gateway.api.model_cache import ModelCache, model_provider_getter_from_sdk, refresh_model_cache
@@ -135,17 +136,22 @@ def test_clients() -> Generator[ClientContext, None, None]:
         yield clients
 
 
+def sync_client(test_clients: ClientContext) -> NemoClient:
+    """Typed sync platform client backed by the in-process test app."""
+    return NemoClient(base_url="http://testserver", http_client=test_clients.test_client)
+
+
 @pytest.fixture
 def controller_with_mock_backend(
     test_clients: ClientContext,
-) -> Generator[tuple[ModelsController, MockServiceBackend, NeMoHelix, ModelCache, AsyncNeMoHelix], None, None]:
+) -> Generator[tuple[ModelsController, MockServiceBackend, NemoClient, ModelCache, AsyncNeMoHelix], None, None]:
     """Create ModelsController with mock backend and access to IGW cache.
 
     Note: The ProviderReconciler's autodiscovery is mocked to avoid event loop
     conflicts when calling through the IGW proxy.
 
     Yields:
-        Tuple of (controller, mock_backend, sync_sdk, model_cache, async_sdk)
+        Tuple of (controller, mock_backend, client, model_cache, async_sdk)
     """
     mock_backend = MockServiceBackend(nhx_sdk=test_clients.async_sdk, config={})
     backend_registry = BackendRegistry(registry={"mock": mock_backend})
@@ -172,7 +178,7 @@ def controller_with_mock_backend(
         # Access the global model cache
         model_cache = global_model_cache()
 
-        yield controller, mock_backend, test_clients.sdk, model_cache, test_clients.async_sdk
+        yield controller, mock_backend, sync_client(test_clients), model_cache, test_clients.async_sdk
 
         # Clean up controller resources (event loop, backend registry, etc.)
         controller.shutdown()
@@ -287,8 +293,8 @@ def controller_with_docker_and_igw(
     models_controller_container_cleanup,
     deployments_plugin_backend_config,
     worker_id: str,
-) -> Generator[tuple[ModelsController, ModelCache, NeMoHelix, str, DockerTestContext, AsyncNeMoHelix], None, None]:
-    """Create ModelsController with Docker backend and IGW with shared SDK.
+) -> Generator[tuple[ModelsController, ModelCache, NemoClient, str, DockerTestContext, AsyncNeMoHelix], None, None]:
+    """Create ModelsController with Docker backend and IGW sharing one in-process app.
 
     Creates:
     - In-memory test client with Models + IGW services
@@ -300,7 +306,7 @@ def controller_with_docker_and_igw(
     conflicts when calling through the IGW proxy.
 
     Yields:
-        Tuple of (controller, model_cache, sdk, mock_nim_image, docker_test_context, async_sdk)
+        Tuple of (controller, model_cache, client, mock_nim_image, docker_test_context, async_sdk)
     """
     from nemo_helix_plugin.jobs.image import get_qualified_image as real_get_qualified_image
 
@@ -383,7 +389,14 @@ def controller_with_docker_and_igw(
 
         model_cache = global_model_cache()
 
-        yield controller, model_cache, test_clients.sdk, mock_nim_image, docker_test_context, test_clients.async_sdk
+        yield (
+            controller,
+            model_cache,
+            sync_client(test_clients),
+            mock_nim_image,
+            docker_test_context,
+            test_clients.async_sdk,
+        )
 
         try:
             controller._loop.run_until_complete(deployments_controller.on_shutdown())
