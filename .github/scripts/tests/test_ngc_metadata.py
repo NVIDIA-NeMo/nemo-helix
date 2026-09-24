@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from ngcbase.errors import ResourceNotFoundException
+from typer import unstyle
 from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -322,8 +323,8 @@ def test_cli_validates_all_assets_before_sync(tmp_path: Path, dry_run: bool, con
     with patch("ngc_metadata.Client") as client:
         result = CliRunner().invoke(app, args, env={"NGC_API_KEY": None})
 
-    # Typer wraps errors in a Rich panel; compare the message independently of wrapping.
-    error_output = " ".join(result.stderr.replace("│", "").split())
+    # Typer wraps errors in a Rich panel; ignore wrapping and terminal color codes.
+    error_output = " ".join(unstyle(result.stderr).replace("│", "").split())
     assert result.exit_code != 0
     assert invalid_path.name in error_output
     assert message in error_output
