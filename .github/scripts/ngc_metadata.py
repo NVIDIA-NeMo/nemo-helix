@@ -226,7 +226,8 @@ def main(
     try:
         assets = discover_assets(assets_dir)
     except ValueError as error:
-        raise typer.BadParameter(str(error)) from error
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
     if not assets:
         raise typer.BadParameter(f"no Markdown assets found in {assets_dir}")
 
