@@ -16,7 +16,7 @@ from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntit
 from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
 from nemo_evaluator.revisions import publish_revision
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
-from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.routes import add_job_routes
 
@@ -103,12 +103,12 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     monkeypatch.setattr(FilesClient, "download_file", forbidden)
 
     jobs = Jobs()
-    monkeypatch.setattr("nemo_helix_plugin.jobs.api_factory.client_from_platform", lambda *args: jobs)
+    monkeypatch.setattr("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", lambda *args: jobs)
     monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate.client_from_platform", lambda *args: jobs)
     app = FastAPI()
     app.include_router(add_job_routes(AgentEvalJob), prefix="/apis/evaluator/v2/workspaces/{workspace}")
     app.dependency_overrides[get_entity_client] = lambda: entity_store
-    app.dependency_overrides[get_sdk_client] = lambda: MagicMock()
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
     public_tasks = ["default/checkout"] if direct else "default/suite"
     response = TestClient(app).post(
         "/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs",

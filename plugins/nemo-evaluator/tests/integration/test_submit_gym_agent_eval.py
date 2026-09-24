@@ -39,13 +39,20 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator.sdk.job_resources import AgentEvaluatorJobResource
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import SecretRef
 from nemo_helix_plugin.client.errors import UnprocessableEntityError
-from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from pydantic import SecretStr
 
 WORKSPACE = "default"
 
@@ -81,10 +88,14 @@ def _inline_metric() -> MetricInline:
     return MetricInline.model_validate(bundle.model_dump(mode="json"))
 
 
-def _stored_taskset(client: NeMoHelix) -> str:
+def _evaluator(base_url: str) -> Evaluator:
+    return Evaluator(EvaluatorClient(base_url=base_url, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2)))
+
+
+def _stored_taskset(client: Evaluator) -> str:
     """A one-task taskset with valid Gym row content for submission validation."""
     task_name = _unique("gym-submit-task")
-    client.evaluator.tasks.create(
+    client.tasks.create(
         task_name,
         task=TaskInput(
             spec=EvaluatorTaskDefinition(
@@ -97,7 +108,7 @@ def _stored_taskset(client: NeMoHelix) -> str:
         ),
     )
     taskset_name = _unique("gym-submit-suite")
-    client.evaluator.tasksets.create(
+    client.tasksets.create(
         taskset_name,
         taskset=TasksetInput(tasks=[TaskRef(f"{WORKSPACE}/{task_name}")]),
     )
@@ -105,7 +116,7 @@ def _stored_taskset(client: NeMoHelix) -> str:
 
 
 def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subprocess_platform: str) -> None:
-    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = _evaluator(subprocess_platform)
     taskset_name = _stored_taskset(client)
 
     # Non-default values throughout: a field dropped anywhere along runner -> target -> wire ->
@@ -125,7 +136,7 @@ def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subproces
         )
     )
 
-    job = client.evaluator.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner)
+    job = client.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner)
 
     assert isinstance(job, AgentEvaluatorJobResource), (
         "a taskset submission must return the agent job resource, not the row-evaluation one"
@@ -169,9 +180,11 @@ def test_a_secret_reference_and_agent_ref_name_survive_submission(subprocess_pla
     The secret is created for real, so the reference names something the service can resolve rather
     than a string that happens to parse.
     """
-    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = _evaluator(subprocess_platform)
     secret_name = _unique("gym-model-key")
-    client.secrets.create(name=secret_name, value="sk-not-a-real-key")
+    SecretsClient.from_client(client._client).create_secret(
+        body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("sk-not-a-real-key"))
+    )
     taskset_name = _stored_taskset(client)
 
     runner = GymAgentTaskRunner(
@@ -183,7 +196,7 @@ def test_a_secret_reference_and_agent_ref_name_survive_submission(subprocess_pla
         )
     )
 
-    job = client.evaluator.submit(
+    job = client.submit(
         tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"),
         target=runner,
         placement=GymPlacement(agent_ref_name="mcqa_simple_agent"),
@@ -209,9 +222,11 @@ def test_an_environment_fileset_reaches_the_compiler_from_a_runner(subprocess_pl
     the placement through ``runner_to_target`` onto the spec. A dropped field would compile cleanly
     as an ordinary colocated Gym run, which is the silent wrong answer this guards.
     """
-    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = _evaluator(subprocess_platform)
     fileset_name = _unique("gym-env")
-    client.files.filesets.create(name=fileset_name, purpose="environment")
+    FilesClient.from_client(client._client).create_fileset(
+        body=CreateFilesetRequest(name=fileset_name, purpose=FilesetPurpose.ENVIRONMENT)
+    )
     taskset_name = _stored_taskset(client)
 
     runner = GymAgentTaskRunner(
@@ -224,7 +239,7 @@ def test_an_environment_fileset_reaches_the_compiler_from_a_runner(subprocess_pl
     placement = GymPlacement(environment=FilesetRef(root=f"{WORKSPACE}/{fileset_name}"))
 
     with pytest.raises(UnprocessableEntityError) as excinfo:
-        client.evaluator.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner, placement=placement)
+        client.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner, placement=placement)
 
     message = str(excinfo.value)
     assert fileset_name in message or "FileSet" in message, (

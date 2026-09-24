@@ -13,7 +13,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.capabilities import reset_capability_cache
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import ContainerSpec as FactoryContainerSpec
@@ -590,7 +589,7 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
     # Mock the config.executors to have the test execution profiles, including
     # subprocess/default for cpu/default to subprocess/default translation.
     from nhx.common.auth.middleware import AuthorizationMiddleware
-    from nhx.common.service.dependencies import get_nemo_client, get_sdk_client
+    from nhx.common.service.dependencies import get_nemo_client
 
     with subprocess_job_executor_patch(job_config_with_many_profiles.executors):
         app = FastAPI()
@@ -606,14 +605,11 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
             def override_get_entity_client():
                 return mock_store
 
-            # Clients for dependency injection: job_route_factory still resolves
-            # get_sdk_client, the jobs routes resolve get_nemo_client.
-            test_sdk = AsyncNeMoHelix(base_url=ac.base_url, http_client=ac)
+            # The jobs routes and job_route_factory routes both resolve get_nemo_client.
             test_nemo_client = AsyncNemoClient(base_url=str(ac.base_url), http_client=ac)
 
             app.dependency_overrides[dep_dispatcher] = override_get_dispatcher
             app.dependency_overrides[get_entity_client] = override_get_entity_client
-            app.dependency_overrides[get_sdk_client] = lambda: test_sdk
             app.dependency_overrides[get_nemo_client] = lambda: test_nemo_client
 
             # Mount under /apis/jobs so SDK requests (e.g. /apis/jobs/v2/workspaces/default/jobs) hit the app

@@ -146,7 +146,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
             return FabricRuntimeResult(status="succeeded", response="done")
 
         with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
-            result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.sdk)
+            result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=client_from_platform(ctx.sdk, NemoClient))
         assert result["status"] == "completed"
         assert result["input_workdir"]["name"] == "input_workdir"
 
@@ -262,7 +262,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
             patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
             pytest.raises(RuntimeError, match="fabric exploded"),
         ):
-            ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.sdk)
+            ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=client_from_platform(ctx.sdk, NemoClient))
 
         results_response = ctx.test_client.get(f"/apis/agents/v2/workspaces/default/jobs/execute/{job_name}/results")
         assert results_response.status_code == 200, results_response.text

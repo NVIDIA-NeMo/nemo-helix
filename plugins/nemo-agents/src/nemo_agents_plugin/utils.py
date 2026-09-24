@@ -16,8 +16,8 @@ from typing import Any, Iterator
 from urllib.parse import urlsplit
 
 import yaml
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.entities import parse_qualified_name
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
@@ -364,7 +364,7 @@ def validate_llm_models(
     config: dict[str, Any],
     *,
     workspace: str,
-    sdk: NeMoHelix,
+    sdk: NemoClient,
 ) -> None:
     """Pre-flight check that every IGW-routed LLM in *config* exists as a VirtualModel.
 
@@ -397,7 +397,7 @@ def validate_llm_models(
         config: A NAT workflow / eval / optimize config dict, post env-var
             expansion.  Not mutated.
         workspace: Workspace name passed to the VirtualModels SDK call.
-        sdk: Sync platform SDK handle.
+        sdk: Sync platform client.
     """
     llms = config.get("llms")
     if not isinstance(llms, dict):
@@ -470,7 +470,7 @@ def preflight_validate_llm_models(
     config_path: Path,
     *,
     workspace: str,
-    sdk: NeMoHelix | None,
+    sdk: NemoClient | None,
     agent_config: dict[str, Any] | None = None,
 ) -> None:
     """Load *config_path*, expand env vars, optionally merge an agent config, and validate.
@@ -494,7 +494,7 @@ def preflight_validate_llm_models(
     Args:
         config_path: Path to the eval or optimize NAT YAML config.
         workspace: Workspace passed to :func:`validate_llm_models`.
-        sdk: Sync platform SDK handle.  ``None`` is a no-op.
+        sdk: Sync platform client.  ``None`` is a no-op.
         agent_config: Optional agent NAT config dict to merge under the
             YAML's contents before validation.  Used by the optimize job
             so an agent-fetched LLM gets validated alongside the

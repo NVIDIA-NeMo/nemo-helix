@@ -65,7 +65,6 @@ from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.models.client import AsyncModelsClient
-from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -220,8 +219,8 @@ register_metric_bundle_kind(
 )
 
 
-def _generated_async_sdk() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(
+def _async_sdk() -> AsyncNemoClient:
+    return AsyncNemoClient(
         base_url="http://platform.test",
         workspace="default",
         http_client=AsyncMock(spec=httpx.AsyncClient),
@@ -312,7 +311,7 @@ async def test_checked_in_example_spec_transforms_and_compiles(spec_path: Path) 
         input_spec,
         workspace="default",
         entity_client=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
         is_local=False,
     )
     assert isinstance(spec, EvaluateSpec)
@@ -321,7 +320,7 @@ async def test_checked_in_example_spec_transforms_and_compiles(spec_path: Path) 
         spec=spec,
         entity_client=None,
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
 
     assert "metric" not in payload
@@ -564,7 +563,7 @@ async def test_evaluate_job_resolves_metric_model_refs_before_sdk_run(
         ),
         workspace="default",
         entity_client=object(),
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
         is_local=True,
     )
     run_result = EvaluateJob().run(
@@ -585,7 +584,7 @@ async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
     job_spec = HelixJobSpec.model_validate(compiled)
     assert len(job_spec.steps) == 1
@@ -621,7 +620,7 @@ async def test_evaluate_job_to_spec_resolves_bundled_metric_model_refs_before_co
         ),
         workspace="default",
         entity_client=object(),
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
         is_local=False,
     )
     assert isinstance(canonical, EvaluateSpec)
@@ -637,7 +636,7 @@ async def test_evaluate_job_to_spec_resolves_bundled_metric_model_refs_before_co
         spec=canonical,
         entity_client=object(),
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -674,7 +673,7 @@ async def test_evaluate_job_to_spec_preserves_metric_without_model_refs() -> Non
         ),
         workspace="default",
         entity_client=object(),
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
         is_local=False,
     )
 
@@ -699,7 +698,7 @@ async def test_evaluate_job_compile_produces_online_model_job() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -726,7 +725,7 @@ async def test_evaluate_job_compile_normalizes_generic_online_model_params() -> 
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -756,7 +755,7 @@ async def test_evaluate_job_compile_produces_online_agent_job() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -806,7 +805,7 @@ async def test_evaluate_job_compile_injects_metric_and_target_secrets() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_generated_async_sdk(),
+        async_sdk=_async_sdk(),
     )
 
     step = HelixJobSpec.model_validate(compiled).steps[0]
@@ -838,7 +837,7 @@ async def test_evaluate_job_compile_rejects_secret_reserved_env_names() -> None:
             spec=spec,
             entity_client=object(),
             job_name=None,
-            async_sdk=_generated_async_sdk(),
+            async_sdk=_async_sdk(),
         )
 
 
@@ -972,7 +971,7 @@ class TestEvaluateJobCompile:
             spec=EquivalentSpec.model_validate(_exact_match_spec()),
             entity_client=object(),
             job_name=None,
-            async_sdk=_generated_async_sdk(),
+            async_sdk=_async_sdk(),
         )
 
         job_spec = HelixJobSpec.model_validate(compiled)
@@ -999,7 +998,7 @@ class TestEvaluateJobCompile:
             spec=spec,
             entity_client=object(),
             job_name=None,
-            async_sdk=_generated_async_sdk(),
+            async_sdk=_async_sdk(),
         )
 
         config = cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)
@@ -1041,7 +1040,7 @@ class TestEvaluateJobCompile:
                 spec=spec,
                 entity_client=object(),
                 job_name=None,
-                async_sdk=_generated_async_sdk(),
+                async_sdk=_async_sdk(),
             )
 
     @pytest.mark.parametrize(
@@ -1089,7 +1088,7 @@ class TestEvaluateJobCompile:
             spec=EvaluateSpec.model_validate({**_exact_match_spec(), "dataset": dataset}),
             entity_client=object(),
             job_name=None,
-            async_sdk=_generated_async_sdk(),
+            async_sdk=_async_sdk(),
         )
 
         job_spec = HelixJobSpec.model_validate(compiled)
@@ -1357,15 +1356,16 @@ class TestEvaluateJobRun:
 class TestEvaluateTask:
     """Coverage for the compiled container task entrypoint."""
 
-    def test_main_dispatches_evaluate_job_with_task_sdk(self, mocker: MockerFixture) -> None:
-        sdk = NeMoHelix(base_url="http://platform.test", workspace="default")
+    def test_main_dispatches_evaluate_job_with_task_client(self, mocker: MockerFixture) -> None:
+        client = NemoClient(
+            base_url="http://platform.test", workspace="default", http_client=MagicMock(spec=httpx.Client)
+        )
         async_client = AsyncNemoClient(
             base_url="http://platform.test", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
         )
         ctx = MagicMock()
-        get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", return_value=sdk)
         build_ctx = mocker.patch("nemo_evaluator.tasks.runner.build_ctx_from_env", return_value=ctx)
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
+        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client", return_value=client)
         get_async_task_client = mocker.patch(
             "nemo_evaluator.tasks.runner.get_async_task_nemo_client", return_value=async_client
         )
@@ -1374,20 +1374,21 @@ class TestEvaluateTask:
         exit_code = evaluate_task_main()
 
         assert exit_code == 0
-        get_platform_sdk.assert_called_once_with("evaluator")
-        build_ctx.assert_called_once_with(sdk)
-        get_task_client.assert_not_called()
+        get_task_client.assert_called_once_with("evaluator")
+        build_ctx.assert_called_once_with(client)
         get_async_task_client.assert_called_once_with("evaluator")
         run_task.assert_called_once_with(AsyncEvaluateJob, async_client=async_client, ctx=ctx)
 
-    def test_main_returns_setup_exit_code_when_task_sdk_fails(self, mocker: MockerFixture) -> None:
-        get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", side_effect=RuntimeError("boom"))
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
+    def test_main_returns_setup_exit_code_when_task_client_fails(self, mocker: MockerFixture) -> None:
+        get_task_client = mocker.patch(
+            "nemo_evaluator.tasks.runner.get_task_nemo_client", side_effect=RuntimeError("boom")
+        )
+        get_async_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_async_task_nemo_client")
         run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client")
 
         exit_code = evaluate_task_main()
 
         assert exit_code == SDK_INITIALIZATION_EXIT_CODE
-        get_platform_sdk.assert_called_once_with("evaluator")
-        get_task_client.assert_not_called()
+        get_task_client.assert_called_once_with("evaluator")
+        get_async_task_client.assert_not_called()
         run_task.assert_not_called()
