@@ -63,6 +63,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
 from nemo_evaluator_sdk.enums import AgentFormat
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
@@ -257,9 +258,48 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     assert (bundle / "trials.jsonl").exists()
     assert (bundle / "scores.jsonl").exists()
     assert (bundle / "summary.json").exists()
+    assert fake.received_config is not None
+    assert fake.received_config.work_dir == bundle
     assert (ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME).exists()
     assert (ctx.storage.persistent / "results" / SUMMARY_RESULT_NAME).exists()
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
+
+
+def test_agent_eval_job_keeps_runtime_evidence_inside_downloadable_bundle(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    class EvidenceWritingEvaluator(_FakeEvaluator):
+        def run_sync(
+            self,
+            *,
+            tasks: Sequence[AgentEvalTask],
+            trials: Sequence[AgentEvalTrial] | None = None,
+            target: AgentEvalTarget | None = None,
+            config: AgentEvalRunConfig | None = None,
+        ) -> AgentEvalResult:
+            assert config is not None and config.work_dir is not None
+            capture = Path(config.work_dir) / "gym_run" / "model_calls" / "0-0.capture.jsonl"
+            capture.parent.mkdir(parents=True)
+            capture.write_text('{"model_call_id":"call-1"}\n', encoding="utf-8")
+            result = super().run_sync(tasks=tasks, trials=trials, target=target, config=config)
+            result.trials[0].evidence = CandidateEvidence(
+                descriptors={"ng_trajectory": EvidenceDescriptor(kind="filesystem", format="file", ref=str(capture))}
+            )
+            return result
+
+    fake = EvidenceWritingEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx)
+
+    bundle = ctx.storage.persistent / AGENT_BUNDLE_DIR
+    capture_rel = Path("gym_run/model_calls/0-0.capture.jsonl")
+    assert (bundle / capture_rel).read_text(encoding="utf-8") == '{"model_call_id":"call-1"}\n'
+    persisted_trial = json.loads((bundle / "trials.jsonl").read_text(encoding="utf-8"))
+    assert persisted_trial["evidence"]["descriptors"]["ng_trajectory"]["ref"] == capture_rel.as_posix()
+    assert (ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME / capture_rel).exists()
 
 
 def test_agent_eval_job_survives_result_persistence_failure(tmp_path: Path, mocker: MockerFixture) -> None:
