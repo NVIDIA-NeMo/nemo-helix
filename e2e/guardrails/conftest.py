@@ -4,9 +4,11 @@
 """Fixtures for Guardrails plugin e2e tests."""
 
 from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 
 from e2e.guardrails.utils import (
     ChatOutcome,
@@ -15,6 +17,7 @@ from e2e.guardrails.utils import (
     RailType,
     content_safety_config,
     create_guarded_virtual_model,
+    guardrail_client_from_sdk,
     setup_mock_provider,
     unique_name,
 )
@@ -26,6 +29,7 @@ def guardrails_chat_test_case(
     workspace: str,
 ) -> Iterator[Callable[..., GuardrailsChatTestCase]]:
     created_configs: list[tuple[str, str]] = []
+    guardrail_client = guardrail_client_from_sdk(sdk)
 
     def _factory(
         *,
@@ -60,7 +64,7 @@ def guardrails_chat_test_case(
 
     for config_workspace, config_name in created_configs:
         try:
-            sdk.guardrail.configs.delete(workspace=config_workspace, name=config_name)
+            guardrail_client.delete_guardrail_config(workspace=config_workspace, name=config_name)
         except Exception:
             pass
 
@@ -69,15 +73,16 @@ def guardrails_chat_test_case(
 def guardrails_check_test_case(
     sdk: NeMoHelix,
     workspace: str,
-) -> Iterator[Callable[..., tuple[GuardrailsChatTestCase, dict]]]:
+) -> Iterator[Callable[..., tuple[GuardrailsChatTestCase, dict[str, Any]]]]:
     created_configs: list[tuple[str, str]] = []
+    guardrail_client = guardrail_client_from_sdk(sdk)
 
     def _factory(
         *,
         config_mode: ConfigMode,
         outcome: ChatOutcome,
         rail_types: tuple[RailType, ...],
-    ) -> tuple[GuardrailsChatTestCase, dict]:
+    ) -> tuple[GuardrailsChatTestCase, dict[str, Any]]:
         test_case = GuardrailsChatTestCase(
             sdk=sdk,
             workspace=workspace,
@@ -98,11 +103,13 @@ def guardrails_check_test_case(
         setup_mock_provider(sdk, test_case)
 
         if config_mode == "referenced":
-            sdk.guardrail.configs.create(
+            guardrail_client.create_guardrail_config(
                 workspace=workspace,
-                name=test_case.config_name,
-                description="E2E content-safety Guardrails checks config",
-                data=config_data,
+                body=CreateGuardrailConfigRequest(
+                    name=test_case.config_name,
+                    description="E2E content-safety Guardrails checks config",
+                    data=config_data,
+                ),
             )
             created_configs.append((workspace, test_case.config_name))
 
@@ -112,6 +119,6 @@ def guardrails_check_test_case(
 
     for config_workspace, config_name in created_configs:
         try:
-            sdk.guardrail.configs.delete(workspace=config_workspace, name=config_name)
+            guardrail_client.delete_guardrail_config(workspace=config_workspace, name=config_name)
         except Exception:
             pass

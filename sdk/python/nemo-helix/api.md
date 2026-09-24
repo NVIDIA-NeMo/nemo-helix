@@ -38,8 +38,6 @@ from nemo_helix.types import (
 
 # [Files](src/nemo_helix/resources/files/api.md)
 
-# [Guardrail](src/nemo_helix/resources/guardrail/api.md)
-
 # [Inference](src/nemo_helix/resources/inference/api.md)
 
 # [Models](src/nemo_helix/resources/models/api.md)

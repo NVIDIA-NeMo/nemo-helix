@@ -234,9 +234,12 @@ When the assistant has the Python platform SDK rather than a generic HTTP tool, 
 
 ```python
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.guardrail.client import GuardrailClient
 
 client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
-configs = client.guardrail.configs.list()
+guardrails = client_from_platform(client, GuardrailClient)
+configs = guardrails.list_guardrail_configs().data()
 ```
 
-Create configs through `client.guardrail.configs` and VirtualModels through `client.inference.virtual_models`. Preserve the same validation gates and read-back verification described above.
+Create configs through `GuardrailClient` and VirtualModels through `client.inference.virtual_models`. Preserve the same validation gates and read-back verification described above.
