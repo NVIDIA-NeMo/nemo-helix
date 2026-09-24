@@ -244,7 +244,7 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
     base_url = str(context.cluster.base_url).rstrip("/")
     try:
         nhx_config = discover_nhx_config(base_url, certificate_authority=context.cluster.certificate_authority)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return exp_dt > now
 
     client_id = nhx_config.cli_client_id or nhx_config.client_id

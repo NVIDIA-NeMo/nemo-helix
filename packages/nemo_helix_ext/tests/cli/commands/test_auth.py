@@ -477,6 +477,32 @@ def test_ensure_valid_token_refreshes_expired_opaque_token_from_config(
     assert persisted_foo["expires_at"] > time.time()
 
 
+def test_ensure_valid_token_rejects_expired_token_when_discovery_is_invalid(
+    oauth_config_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemo_helix_ext.cli.commands.auth import ensure_valid_token
+    from nemo_helix_ext.config.config import Config
+
+    with open(oauth_config_file) as f:
+        data = yaml.safe_load(f)
+    foo_user = next(user for user in data["users"] if user["name"] == "foo")
+    foo_user["token"] = "opaque-expired-access"
+    foo_user["refresh_token"] = "opaque-refresh"
+    foo_user["expires_at"] = time.time() - 60
+    with open(oauth_config_file, "w") as f:
+        yaml.safe_dump(data, f)
+
+    context = Config.load(config_path=oauth_config_file, overrides={"current_context": "foo"}).resolve()
+
+    def invalid_discovery(*_args, **_kwargs):
+        raise ValueError("invalid bearer token source")
+
+    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", invalid_discovery)
+
+    assert ensure_valid_token(context, refresh_buffer_seconds=300) is False
+
+
 def test_ensure_valid_token_uses_fresh_shared_token_instead_of_stale_refresh(
     oauth_config_file: Path,
     monkeypatch: pytest.MonkeyPatch,

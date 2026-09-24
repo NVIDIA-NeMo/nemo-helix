@@ -59,6 +59,18 @@ class TestTokenSet:
 
         assert ts.expires_at is None
 
+    @pytest.mark.parametrize(
+        ("token", "kwargs", "field"),
+        [
+            (_make_jwt({"sub": "user1", "exp": float("nan")}), {}, "JWT exp"),
+            (_make_jwt({"sub": "user1"}), {"expires_at": float("inf")}, "expires_at"),
+            (_make_jwt({"sub": "user1"}), {"expires_in": float("-inf")}, "expires_in"),
+        ],
+    )
+    def test_from_access_token_rejects_non_finite_expiry(self, token, kwargs, field):
+        with pytest.raises(ValueError, match=rf"{field} must be finite"):
+            TokenSet.from_access_token(token, **kwargs)
+
     def test_from_access_token_non_jwt(self):
         ts = TokenSet.from_access_token("not-a-jwt", refresh_token="r")
 
@@ -96,6 +108,12 @@ class TestTokenSet:
     def test_is_not_expired_when_no_expiry(self):
         ts = TokenSet(access_token="t", expires_at=None)
         assert ts.is_expired() is False
+
+    @pytest.mark.parametrize("expires_at", [float("nan"), float("inf"), float("-inf")])
+    def test_is_expired_when_expiry_is_non_finite(self, expires_at):
+        ts = TokenSet(access_token="t", expires_at=expires_at)
+
+        assert ts.is_expired() is True
 
 
 class TestOIDCTokenProvider:

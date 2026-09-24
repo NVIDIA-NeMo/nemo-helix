@@ -309,6 +309,32 @@ class TestOIDCTokenProvider:
             with pytest.raises(ValueError, match="bearer_token_source"):
                 discover_nhx_config("https://nemo.example.com")
 
+    @pytest.mark.parametrize(
+        ("token", "kwargs", "field"),
+        [
+            (
+                generate_unsigned_jwt("user", expires_in_seconds=None, extra_claims={"exp": float("nan")}),
+                {},
+                "JWT exp",
+            ),
+            (generate_unsigned_jwt("user", expires_in_seconds=None), {"expires_at": float("inf")}, "expires_at"),
+            (
+                generate_unsigned_jwt("user", expires_in_seconds=None),
+                {"expires_in": float("-inf")},
+                "expires_in",
+            ),
+        ],
+    )
+    def test_token_set_rejects_non_finite_expiry(self, token, kwargs, field):
+        with pytest.raises(ValueError, match=rf"{field} must be finite"):
+            TokenSet.from_access_token(token, **kwargs)
+
+    @pytest.mark.parametrize("expires_at", [float("nan"), float("inf"), float("-inf")])
+    def test_token_set_treats_non_finite_expiry_as_expired(self, expires_at):
+        tokens = TokenSet(access_token="token", expires_at=expires_at)
+
+        assert tokens.is_expired() is True
+
     def test_returns_token_when_not_expired(self):
         token = _make_jwt(exp=time.time() + 3600)
         provider = OIDCTokenProvider(

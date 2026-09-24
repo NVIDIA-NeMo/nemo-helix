@@ -406,6 +406,15 @@ def _expires_in_from_response(token_data: dict[str, object]) -> int | float | No
     return expires_in if isinstance(expires_in, int | float) else None
 
 
+def _validate_expiry(value: object, field_name: str) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    resolved = float(value)
+    if not math.isfinite(resolved):
+        raise ValueError(f"{field_name} must be finite")
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # TokenSet
 # ---------------------------------------------------------------------------
@@ -436,16 +445,17 @@ class TokenSet:
         Falls back to a persisted ``expires_at`` value and then ``expires_in``
         (seconds from now) for opaque tokens that don't contain a JWT ``exp`` claim.
         """
-        resolved_expires_at = None
         claims = decode_jwt_claims(access_token)
-        if claims:
-            claim_expires_at = claims.get("exp")
-            if not isinstance(claim_expires_at, bool) and isinstance(claim_expires_at, int | float):
-                resolved_expires_at = float(claim_expires_at)
-        if resolved_expires_at is None and not isinstance(expires_at, bool) and isinstance(expires_at, int | float):
-            resolved_expires_at = float(expires_at)
-        if resolved_expires_at is None and expires_in is not None:
-            resolved_expires_at = time.time() + float(expires_in)
+
+        jwt_expires_at = _validate_expiry(claims.get("exp"), "JWT exp") if claims else None
+        persisted_expires_at = _validate_expiry(expires_at, "expires_at")
+        validated_expires_in = _validate_expiry(expires_in, "expires_in")
+
+        resolved_expires_at = jwt_expires_at
+        if resolved_expires_at is None:
+            resolved_expires_at = persisted_expires_at
+        if resolved_expires_at is None and validated_expires_in is not None:
+            resolved_expires_at = time.time() + validated_expires_in
         return TokenSet(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -456,7 +466,7 @@ class TokenSet:
         """Check if the access token is expired or about to expire."""
         if self.expires_at is None:
             return False
-        return time.time() >= (self.expires_at - margin_seconds)
+        return not math.isfinite(self.expires_at) or time.time() >= (self.expires_at - margin_seconds)
 
 
 # ---------------------------------------------------------------------------

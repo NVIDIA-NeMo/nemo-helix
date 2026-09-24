@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -40,13 +41,20 @@ class TokenPersistenceError(RuntimeError):
 def _validate_expires_in(expires_in: object) -> int | float | None:
     if isinstance(expires_in, bool):
         return None
-    return expires_in if isinstance(expires_in, int | float) else None
+    if not isinstance(expires_in, int | float):
+        return None
+    if not math.isfinite(expires_in):
+        raise ValueError("expires_in must be finite")
+    return expires_in
 
 
-def _validate_expires_at(expires_at: object) -> float | None:
+def _validate_expires_at(expires_at: object, *, field_name: str = "expires_at") -> float | None:
     if isinstance(expires_at, bool) or not isinstance(expires_at, int | float):
         return None
-    return float(expires_at)
+    value = float(expires_at)
+    if not math.isfinite(value):
+        raise ValueError(f"{field_name} must be finite")
+    return value
 
 
 def _select_bearer_token(token_data: dict, source: BearerTokenSource) -> str:
@@ -117,13 +125,14 @@ class TokenSet:
         expires_at: object = None,
     ) -> Self:
         """Create a TokenSet, preferring JWT expiry over persisted or relative expiry metadata."""
-        resolved_expires_at = None
         claims = decode_jwt_claims(access_token)
-        if claims:
-            resolved_expires_at = _validate_expires_at(claims.get("exp"))
-        if resolved_expires_at is None:
-            resolved_expires_at = _validate_expires_at(expires_at)
+        jwt_expires_at = _validate_expires_at(claims.get("exp"), field_name="JWT exp") if claims else None
+        persisted_expires_at = _validate_expires_at(expires_at)
         validated_expires_in = _validate_expires_in(expires_in)
+
+        resolved_expires_at = jwt_expires_at
+        if resolved_expires_at is None:
+            resolved_expires_at = persisted_expires_at
         if resolved_expires_at is None and validated_expires_in is not None:
             resolved_expires_at = time.time() + float(validated_expires_in)
         return cls(
@@ -136,7 +145,7 @@ class TokenSet:
         """Check if the access token is expired or about to expire."""
         if self.expires_at is None:
             return False
-        return time.time() >= (self.expires_at - margin_seconds)
+        return not math.isfinite(self.expires_at) or time.time() >= (self.expires_at - margin_seconds)
 
 
 @dataclass
