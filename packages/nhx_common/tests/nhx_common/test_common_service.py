@@ -24,7 +24,7 @@ from nhx.common.observability.otel import scoped_otel_headers
 from nhx.common.service import DependencyProvider, RouterConfig, Service
 from nhx.common.service import __all__ as service_exports
 from nhx.common.service import get_nemo_client as facade_get_nemo_client
-from nhx.common.service.dependencies import get_nemo_client
+from nhx.common.service.dependencies import get_nemo_client, get_sync_nemo_client
 
 
 class MockService(Service):
@@ -292,6 +292,8 @@ class TestDependencyProvider:
         provider.setup_dependencies(app, MockService())
 
         assert app.dependency_overrides[get_nemo_client] == provider.get_request_scoped_nemo_client
+        assert app.dependency_overrides[get_sync_nemo_client] == provider.get_request_scoped_sync_nemo_client
+        assert "get_sync_nemo_client" in service_exports
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("first_client", ["sdk", "nemo"], ids=["sdk-first", "nemo-first"])

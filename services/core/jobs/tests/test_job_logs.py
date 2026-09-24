@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -58,7 +58,6 @@ class TestJobLogsAPI:
         """Create a real dispatcher with test entity store and mock SDK."""
         projects = ["default/test-project"]
         with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-            mock_nhx_client = MagicMock()
             mock_files = AsyncMock()
             mock_fileset_obj = MagicMock()
             mock_fileset_obj.name = "test-fileset-id"
@@ -66,9 +65,8 @@ class TestJobLogsAPI:
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp
 
-            with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-                dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
-                yield dispatcher
+            dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+            yield dispatcher
 
     @pytest.fixture
     def test_client(self, dispatcher, mock_logs_client):

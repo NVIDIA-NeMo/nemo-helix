@@ -94,7 +94,7 @@ async def test_delete_fileset_rejects_references_before_deleting_storage() -> No
                 workspace="default",
                 name="weights",
                 entity_store=entity_store,
-                sdk=MagicMock(),
+                client=MagicMock(),
                 auth_client=MagicMock(),
             )
 
@@ -140,7 +140,7 @@ async def test_delete_fileset_fails_closed_when_references_cannot_be_checked(
                 workspace="default",
                 name="weights",
                 entity_store=entity_store,
-                sdk=MagicMock(),
+                client=MagicMock(),
                 auth_client=MagicMock(),
             )
 
@@ -185,7 +185,7 @@ async def test_delete_unreferenced_fileset_deletes_storage_and_entity() -> None:
             workspace="default",
             name="weights",
             entity_store=entity_store,
-            sdk=MagicMock(),
+            client=MagicMock(),
             auth_client=MagicMock(),
         )
 

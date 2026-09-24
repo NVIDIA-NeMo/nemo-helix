@@ -17,7 +17,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import FileResponse
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
 from nhx.common.api.common import GenericSortField, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -35,7 +35,7 @@ from nhx.common.observability import BaseContext, scoped_app_ctx
 from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.common.service.dependencies import (
     get_entity_client,
-    get_sdk_client,
+    get_nemo_client,
     get_service_config_factory,
 )
 from nhx.core.files.api.endpoint_helpers import (
@@ -248,7 +248,7 @@ async def create_fileset(
     create_request: CreateFilesetRequest,
     background_tasks: BackgroundTasks,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetOutput:
@@ -278,7 +278,7 @@ async def create_fileset(
         else:
             _validate_user_storage_config(create_request.storage, config)
             storage = create_request.storage
-            secrets = await resolve_storage_secrets_for_user(storage, workspace, sdk, auth_client)
+            secrets = await resolve_storage_secrets_for_user(storage, workspace, client, auth_client)
 
         storage_impl = storage_impl_factory(storage, secrets)
         await storage_impl.validate_storage()
@@ -456,7 +456,7 @@ async def delete_fileset(
     workspace: str,
     name: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetOutput:
     """
@@ -510,7 +510,7 @@ async def delete_fileset(
     # Delete underlying source storage data. This is a no-op for external backends
     # like NGC/HuggingFace, and removes files for backends we own (local/S3).
     try:
-        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
         storage = storage_impl_factory(fileset.storage, secrets)
         await storage.delete_all()
     except (SecretNotFoundError, SecretAccessDeniedError) as exc:
@@ -610,7 +610,7 @@ async def refresh_fileset(
     workspace: str,
     name: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetOutput:
     """
@@ -643,7 +643,7 @@ async def refresh_fileset(
         )
 
     try:
-        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
         storage_impl = storage_impl_factory(fileset.storage, secrets)
         tracked_impl = storage_impl_factory(storage_impl.config_at_tracked_revision(), secrets)
         # The host allowlist is enforced at create time; re-check it here so a host
@@ -700,7 +700,7 @@ async def list_fileset_files(
     ),
     entity_store: EntityClient = Depends(get_entity_client),
     config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> ListFilesetFilesResponse:
     """
@@ -718,7 +718,7 @@ async def list_fileset_files(
     """
     logger.info(f"GET /filesets/{name}/files - workspace={workspace}, path={path}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
     files = await list_storage_files(storage, path)
 
@@ -751,7 +751,7 @@ async def head_file(
     path: str,
     entity_store: EntityClient = Depends(get_entity_client),
     config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> Response:
     """
@@ -763,7 +763,7 @@ async def head_file(
     """
     logger.info(f"HEAD /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     cache_ctx: CacheContext | None = None
@@ -810,7 +810,7 @@ async def download_file(
     background_tasks: BackgroundTasks,
     entity_store: EntityClient = Depends(get_entity_client),
     config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> Response:
     """
@@ -823,7 +823,7 @@ async def download_file(
     logger.info(f"GET /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
-        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
         storage = storage_impl_factory(fileset.storage, secrets)
 
         cache_ctx: CacheContext | None = None
@@ -879,13 +879,13 @@ async def upload_file(
     path: str,
     request: Request,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetFileOutput:
     """Upload file content to a fileset."""
     logger.info(f"PUT /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     # Determine chunk processor based on Content-Type
@@ -952,7 +952,7 @@ async def delete_file(
     name: str,
     path: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> FilesetFileOutput:
     """
@@ -963,7 +963,7 @@ async def delete_file(
     """
     logger.info(f"DELETE /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     try:

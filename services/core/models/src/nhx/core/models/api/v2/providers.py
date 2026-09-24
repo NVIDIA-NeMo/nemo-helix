@@ -4,14 +4,13 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
-from nhx.common.service.dependencies import get_sdk_client
-from nhx.core.models.api.dependencies import get_model_provider_service
+from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 from nhx.core.models.api.permissions import check_deployment_access, check_secret_access
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
 from nhx.core.models.schemas import (
@@ -86,7 +85,7 @@ async def create_provider(
     request: CreateModelProviderRequest,
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    secrets: AsyncSecretsClient = Depends(get_secrets_client),
 ) -> ModelProvider:
     """
     Create a new model provider.
@@ -96,7 +95,7 @@ async def create_provider(
 
     try:
         if request.api_key_secret_name:
-            await check_secret_access(nhx_sdk, request.api_key_secret_name, workspace)
+            await check_secret_access(secrets, request.api_key_secret_name, workspace)
         if request.model_deployment_id:
             await check_deployment_access(auth_client, request.model_deployment_id, workspace)
         provider = await service.create_model_provider(request, workspace, auth_context=auth_context)
@@ -139,7 +138,7 @@ async def upsert_provider(
     request: UpsertModelProviderRequest,
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    secrets: AsyncSecretsClient = Depends(get_secrets_client),
 ) -> ModelProvider:
     """
     Create or update a model provider.
@@ -149,7 +148,7 @@ async def upsert_provider(
 
     try:
         if request.api_key_secret_name:
-            await check_secret_access(nhx_sdk, request.api_key_secret_name, workspace)
+            await check_secret_access(secrets, request.api_key_secret_name, workspace)
         if request.model_deployment_id:
             await check_deployment_access(auth_client, request.model_deployment_id, workspace)
         provider = await service.upsert_model_provider(workspace, name, request, auth_context=auth_context)

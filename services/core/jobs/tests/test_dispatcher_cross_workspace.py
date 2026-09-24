@@ -37,11 +37,12 @@ def multi_workspace_store():
 
 
 @pytest_asyncio.fixture()
-async def multi_workspace_dispatcher(multi_workspace_store, mock_nhx_client) -> JobDispatcher:
+async def multi_workspace_dispatcher(multi_workspace_store, mock_files_client, mock_secrets_client) -> JobDispatcher:
     """Create a JobDispatcher with multi-workspace EntityStore."""
     return JobDispatcher(
         store=multi_workspace_store,
-        sdk=mock_nhx_client,
+        files=mock_files_client,
+        secrets=mock_secrets_client,
     )
 
 
