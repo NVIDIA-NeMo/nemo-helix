@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { useAuth } from 'react-oidc-context';
 
 const ID_TOKEN_RENEWAL_LEAD_TIME_MS = 90_000;
+const ID_TOKEN_RENEWAL_RETRY_MS = 15_000;
 
 export const OidcIdTokenRenewal = (): null => {
   const { signinSilent, user } = useAuth();
@@ -20,13 +21,19 @@ export const OidcIdTokenRenewal = (): null => {
     const expiresAt = getOidcIdTokenExpiresAt(idToken);
     if (expiresAt === undefined) return;
 
+    let disposed = false;
+    let timeoutId: number | undefined;
+
     const renew = () => {
-      if (renewalInFlightForToken.current === idToken) return;
+      if (disposed || renewalInFlightForToken.current === idToken) return;
       renewalInFlightForToken.current = idToken;
 
       void signinSilent()
         .catch((error: unknown) => {
           logger.warn('Failed to renew the OIDC ID token before expiry', error);
+          if (!disposed) {
+            timeoutId = window.setTimeout(renew, ID_TOKEN_RENEWAL_RETRY_MS);
+          }
         })
         .finally(() => {
           if (renewalInFlightForToken.current === idToken) {
@@ -38,11 +45,14 @@ export const OidcIdTokenRenewal = (): null => {
     const delayMs = expiresAt * 1000 - Date.now() - ID_TOKEN_RENEWAL_LEAD_TIME_MS;
     if (delayMs <= 0) {
       renew();
-      return;
+    } else {
+      timeoutId = window.setTimeout(renew, delayMs);
     }
 
-    const timeoutId = window.setTimeout(renew, delayMs);
-    return () => window.clearTimeout(timeoutId);
+    return () => {
+      disposed = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
   }, [signinSilent, user?.id_token]);
 
   return null;

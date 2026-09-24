@@ -40,6 +40,7 @@ describe('OidcIdTokenRenewal', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -65,5 +66,40 @@ describe('OidcIdTokenRenewal', () => {
     render(<OidcIdTokenRenewal />);
 
     expect(signinSilent).toHaveBeenCalledOnce();
+  });
+
+  it('retries after a silent renewal failure', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const signinSilent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('transient failure'))
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const expiresAt = Math.floor(frozenNow.getTime() / 1000) + 30;
+    mockAuth(createIdToken(expiresAt), signinSilent);
+
+    render(<OidcIdTokenRenewal />);
+    await act(async () => undefined);
+
+    act(() => vi.advanceTimersByTime(14_999));
+    expect(signinSilent).toHaveBeenCalledOnce();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(signinSilent).toHaveBeenCalledTimes(2);
+    expect(consoleWarn).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending renewal retry when unmounted', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const signinSilent = vi.fn().mockRejectedValue(new Error('transient failure'));
+    const expiresAt = Math.floor(frozenNow.getTime() / 1000) + 30;
+    mockAuth(createIdToken(expiresAt), signinSilent);
+
+    const { unmount } = render(<OidcIdTokenRenewal />);
+    await act(async () => undefined);
+    unmount();
+
+    act(() => vi.advanceTimersByTime(15_000));
+    expect(signinSilent).toHaveBeenCalledOnce();
+    expect(consoleWarn).toHaveBeenCalledOnce();
   });
 });
