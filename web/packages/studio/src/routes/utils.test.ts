@@ -12,6 +12,7 @@ import {
   getFilesetRoute,
   getIntakeSessionRoute,
   getIntakeSessionTraceRoute,
+  getIntakeTracesRoute,
   getWorkspaceBaseModelsRoute,
   getWorkspaceInferenceProvidersRoute,
 } from '@studio/routes/utils';
@@ -204,5 +205,22 @@ describe('getFilesetDetailsRoute', () => {
     expect(getFilesetDetailsRoute('my-workspace', 'default/set', 'nested/folder 1')).toBe(
       '/workspaces/my-workspace/filesets/default%2Fset?filesetFolder=nested%2Ffolder+1'
     );
+  });
+});
+
+describe('getIntakeTracesRoute', () => {
+  it('links to the unfiltered traces list by default', () => {
+    expect(getIntakeTracesRoute('default')).toBe('/workspaces/default/intake/traces');
+  });
+
+  it('encodes an agent filter the traces table reads back', () => {
+    const url = new URL(
+      getIntakeTracesRoute('ws-a', { agentName: 'email-security-triage' }),
+      'http://x'
+    );
+    expect(url.pathname).toBe('/workspaces/ws-a/intake/traces');
+    expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters') ?? ''))).toEqual([
+      { id: 'agent_name', value: 'email-security-triage' },
+    ]);
   });
 });

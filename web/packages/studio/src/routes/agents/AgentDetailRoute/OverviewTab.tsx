@@ -94,7 +94,9 @@ export const OverviewTab: FC<OverviewTabProps> = ({
             buckets={buckets}
             range={range}
             onRangeChange={setRange}
-            onViewTraces={() => navigate(getIntakeTracesRoute(workspace))}
+            onViewTraces={() =>
+              navigate(getIntakeTracesRoute(workspace, { agentName: agent?.name }))
+            }
             onRunAgent={onRunAgent}
             isPending={isPending}
             caption={bucketAdverbForRange(range)}

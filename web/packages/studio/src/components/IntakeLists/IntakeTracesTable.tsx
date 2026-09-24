@@ -99,6 +99,7 @@ const SeededIntakeTracesTable: FC<
         traceIdFilter: true,
         sessionIdFilter: true,
         statusFilter: true,
+        agentNameFilter: true,
         startedAtSort: true,
         startedAtFilter: true,
       })}

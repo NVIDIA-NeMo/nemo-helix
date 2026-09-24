@@ -545,8 +545,11 @@ export const getFilesetFileRoute = (workspace: string, fileset: string, filePath
   });
 };
 
-export const getIntakeTracesRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.intakeTraces, { workspace });
+export const getIntakeTracesRoute = (workspace: string, options: { agentName?: string } = {}) => {
+  const path = generatePath(ROUTES.workspace.intakeTraces, { workspace });
+  if (!options.agentName) return path;
+  const filters = [{ id: 'agent_name', value: options.agentName }];
+  return `${path}?filters=${encodeURIComponent(encodeURIComponent(JSON.stringify(filters)))}`;
 };
 
 export const getIntakeSpansRoute = (workspace: string) => {
