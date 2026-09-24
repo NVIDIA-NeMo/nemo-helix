@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from .models import ModelsResource, AsyncModelsResource
     from .resources import (
         files,
-        intake,
         models,
         adapters,
         projects,
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
         experiments,
     )
     from .filesets.resources import FilesResource, AsyncFilesResource
-    from .resources.intake.intake import IntakeResource, AsyncIntakeResource
     from .resources.adapters.adapters import AdaptersResource, AsyncAdaptersResource
     from .resources.projects.projects import ProjectsResource, AsyncProjectsResource
     from .resources.guardrail.guardrail import GuardrailResource, AsyncGuardrailResource
@@ -313,12 +311,6 @@ class NeMoHelix(SyncAPIClient):
         from .resources.adapters import AdaptersResource
 
         return AdaptersResource(self)
-
-    @cached_property
-    def intake(self) -> IntakeResource:
-        from .resources.intake import IntakeResource
-
-        return IntakeResource(self)
 
     @cached_property
     def evaluations(self) -> EvaluationsResource:
@@ -697,12 +689,6 @@ class AsyncNeMoHelix(AsyncAPIClient):
         return AsyncAdaptersResource(self)
 
     @cached_property
-    def intake(self) -> AsyncIntakeResource:
-        from .resources.intake import AsyncIntakeResource
-
-        return AsyncIntakeResource(self)
-
-    @cached_property
     def evaluations(self) -> AsyncEvaluationsResource:
         from .resources.evaluations import AsyncEvaluationsResource
 
@@ -917,12 +903,6 @@ class NeMoHelixWithRawResponse:
         return AdaptersResourceWithRawResponse(self._client.adapters)
 
     @cached_property
-    def intake(self) -> intake.IntakeResourceWithRawResponse:
-        from .resources.intake import IntakeResourceWithRawResponse
-
-        return IntakeResourceWithRawResponse(self._client.intake)
-
-    @cached_property
     def evaluations(self) -> evaluations.EvaluationsResourceWithRawResponse:
         from .resources.evaluations import EvaluationsResourceWithRawResponse
 
@@ -982,12 +962,6 @@ class AsyncNeMoHelixWithRawResponse:
         from .resources.adapters import AsyncAdaptersResourceWithRawResponse
 
         return AsyncAdaptersResourceWithRawResponse(self._client.adapters)
-
-    @cached_property
-    def intake(self) -> intake.AsyncIntakeResourceWithRawResponse:
-        from .resources.intake import AsyncIntakeResourceWithRawResponse
-
-        return AsyncIntakeResourceWithRawResponse(self._client.intake)
 
     @cached_property
     def evaluations(self) -> evaluations.AsyncEvaluationsResourceWithRawResponse:
@@ -1051,12 +1025,6 @@ class NeMoHelixWithStreamedResponse:
         return AdaptersResourceWithStreamingResponse(self._client.adapters)
 
     @cached_property
-    def intake(self) -> intake.IntakeResourceWithStreamingResponse:
-        from .resources.intake import IntakeResourceWithStreamingResponse
-
-        return IntakeResourceWithStreamingResponse(self._client.intake)
-
-    @cached_property
     def evaluations(self) -> evaluations.EvaluationsResourceWithStreamingResponse:
         from .resources.evaluations import EvaluationsResourceWithStreamingResponse
 
@@ -1116,12 +1084,6 @@ class AsyncNeMoHelixWithStreamedResponse:
         from .resources.adapters import AsyncAdaptersResourceWithStreamingResponse
 
         return AsyncAdaptersResourceWithStreamingResponse(self._client.adapters)
-
-    @cached_property
-    def intake(self) -> intake.AsyncIntakeResourceWithStreamingResponse:
-        from .resources.intake import AsyncIntakeResourceWithStreamingResponse
-
-        return AsyncIntakeResourceWithStreamingResponse(self._client.intake)
 
     @cached_property
     def evaluations(self) -> evaluations.AsyncEvaluationsResourceWithStreamingResponse:

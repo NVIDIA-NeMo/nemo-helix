@@ -52,8 +52,6 @@ from nemo_helix.types import (
 
 # [Adapters](src/nemo_helix/resources/adapters/api.md)
 
-# [Intake](src/nemo_helix/resources/intake/api.md)
-
 # [Evaluations](src/nemo_helix/resources/evaluations/api.md)
 
 # [Experiments](src/nemo_helix/resources/experiments/api.md)
