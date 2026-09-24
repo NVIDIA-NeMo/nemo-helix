@@ -28,4 +28,18 @@ describe('columnFiltersParam', () => {
       expect(decodeColumnFiltersParam(value)).toEqual([]);
     }
   );
+
+  it('drops entries that are not column filters', () => {
+    const value = encodeURIComponent(
+      JSON.stringify([
+        null,
+        'agent_name',
+        { id: 7, value: 'x' },
+        { id: 'status' },
+        { id: 'agent_name', value: 'a' },
+      ])
+    );
+
+    expect(decodeColumnFiltersParam(value)).toEqual([{ id: 'agent_name', value: 'a' }]);
+  });
 });

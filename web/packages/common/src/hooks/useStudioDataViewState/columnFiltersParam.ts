@@ -10,14 +10,20 @@ export const FILTERS_SEARCH_PARAM = 'filters';
 export const encodeColumnFiltersParam = (filters: TanstackTable.ColumnFiltersState): string =>
   encodeURIComponent(JSON.stringify(filters));
 
-/** Column filters from a `filters` param value; malformed input yields none. */
+const isColumnFilter = (entry: unknown): entry is TanstackTable.ColumnFilter =>
+  typeof entry === 'object' &&
+  entry !== null &&
+  typeof (entry as { id?: unknown }).id === 'string' &&
+  'value' in entry;
+
+/** Column filters from a `filters` param value; malformed input and malformed entries are dropped. */
 export const decodeColumnFiltersParam = (
   value: string | null
 ): TanstackTable.ColumnFiltersState => {
   if (!value) return [];
   try {
     const parsed: unknown = JSON.parse(decodeURIComponent(value));
-    return Array.isArray(parsed) ? (parsed as TanstackTable.ColumnFiltersState) : [];
+    return Array.isArray(parsed) ? parsed.filter(isColumnFilter) : [];
   } catch {
     return [];
   }
