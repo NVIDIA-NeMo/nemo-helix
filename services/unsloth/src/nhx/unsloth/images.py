@@ -23,13 +23,13 @@ FILE_IO_TASK_COMMAND = [
     "--service-source",
     "unsloth",
     "--service-name",
-    "unsloth",
+    "customization",
 ]
 MODEL_ENTITY_TASK_COMMAND = [
     "-m",
     "nhx.customization_common.tasks.model_entity",
     "--service-name",
-    "unsloth",
+    "customization",
 ]
 
 

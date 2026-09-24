@@ -24,13 +24,13 @@ FILE_IO_TASK_COMMAND = [
     "--service-source",
     "automodel",
     "--service-name",
-    "customizer",
+    "customization",
 ]
 MODEL_ENTITY_TASK_COMMAND = [
     "-m",
     "nhx.customization_common.tasks.model_entity",
     "--service-name",
-    "customizer",
+    "customization",
 ]
 
 

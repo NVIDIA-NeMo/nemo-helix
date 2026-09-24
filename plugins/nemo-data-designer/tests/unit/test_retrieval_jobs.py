@@ -142,7 +142,7 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
         "--service-source",
         "automodel",
         "--service-name",
-        "customizer",
+        "customization",
     ]
     providers = [dd.ModelProvider(name="default/nvidia-build", endpoint="http://igw")]
     dd_ctx = AsyncMock()

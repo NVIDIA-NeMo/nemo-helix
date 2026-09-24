@@ -28,13 +28,13 @@ FILE_IO_TASK_COMMAND = [
     "--service-source",
     "rl",
     "--service-name",
-    "rl",
+    "customization",
 ]
 MODEL_ENTITY_TASK_COMMAND = [
     "-m",
     "nhx.customization_common.tasks.model_entity",
     "--service-name",
-    "rl",
+    "customization",
 ]
 
 
