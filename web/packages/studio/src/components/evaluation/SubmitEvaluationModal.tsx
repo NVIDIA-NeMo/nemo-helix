@@ -70,6 +70,7 @@ import {
   bareName,
   buildAgentEvalRequestBody,
   buildDatasetEvalRequestBody,
+  DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   type EvalConfigFormat,
   type EvalSpec,
@@ -141,6 +142,8 @@ const startItems = (rerunDisabled: boolean) => [
 /** Stem the dataset is stored under in the run's fileset; the extension follows its content. */
 const DATASET_BASENAME = 'dataset';
 
+const MAX_PARALLELISM = 16;
+
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
 
@@ -157,6 +160,11 @@ const submitEvaluationBaseSchema = z.object({
   evaluationRecordName: entityNameField(),
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
+  parallelism: z.coerce
+    .number()
+    .int('Use a whole number')
+    .min(1, 'At least 1')
+    .max(MAX_PARALLELISM, `At most ${MAX_PARALLELISM}`),
   ...experimentSettingsSchemaShape,
 });
 
@@ -211,6 +219,7 @@ const makeDefaultValues = (
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
+  parallelism: DEFAULT_PARALLELISM,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
 
@@ -739,6 +748,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
           filesetName,
           experimentName: nameStem,
           evaluationId,
+          parallelism: formData.parallelism,
         };
         const created = isDatasetEvalSpec(spec)
           ? await evaluatorCreateEvaluateJob(
@@ -1084,6 +1094,18 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                   )}
                 </>
               )}
+
+              <ControlledTextInput
+                useControllerProps={{ control, name: 'parallelism' }}
+                name="parallelism"
+                label="Parallel requests"
+                type="number"
+                formFieldProps={{
+                  slotInfo:
+                    'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
+                  slotError: errors.parallelism?.message,
+                }}
+              />
             </>
           )}
 
