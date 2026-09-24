@@ -139,6 +139,20 @@ describe('SubmitEvaluationModal', () => {
     expect(await screen.findByLabelText<HTMLInputElement>('Evaluation Name')).toHaveValue('');
   });
 
+  it('offers a parallel-requests setting that defaults to 4', async () => {
+    mockLists();
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByRole('spinbutton', { name: 'Parallel requests' })).toHaveValue(4);
+  });
+
   it('will not advance past the experiment step without a name', async () => {
     mockLists();
     const user = userEvent.setup();

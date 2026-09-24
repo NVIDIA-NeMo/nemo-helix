@@ -7,6 +7,7 @@ import {
   buildAgentTarget,
   buildDatasetAgentTarget,
   buildDatasetEvalRequestBody,
+  DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   buildEvalJobName,
   buildPersistedSpec,
@@ -117,6 +118,17 @@ describe('buildPersistedSpec', () => {
 describe('buildAgentEvalRequestBody', () => {
   const persisted = (): PersistedEvalSpec => buildPersistedSpec(config, 'ws-a/judge');
 
+  it('puts the requested parallelism on the agent target', () => {
+    const byDefault = buildAgentEvalRequestBody(persisted(), { workspace: 'ws-a', agent: 'a' });
+    const throttled = buildAgentEvalRequestBody(persisted(), {
+      workspace: 'ws-a',
+      agent: 'a',
+      parallelism: 2,
+    });
+    expect(byDefault.spec.target.params.parallelism).toBe(DEFAULT_PARALLELISM);
+    expect(throttled.spec.target.params.parallelism).toBe(2);
+  });
+
   it('assembles a {spec:{tasks,target,max_concurrent_tasks}} body and injects the target', () => {
     const body = buildAgentEvalRequestBody(persisted(), {
       workspace: 'ws-a',
@@ -186,6 +198,21 @@ describe('buildDatasetEvalRequestBody', () => {
     metrics: [metric],
     prompt_template: '{{item.prompt}}',
   };
+
+  it('sends the default parallelism unless the run asks for another', () => {
+    const byDefault = buildDatasetEvalRequestBody(
+      datasetConfig,
+      { workspace: 'ws-a', agent: 'a' },
+      null
+    );
+    const throttled = buildDatasetEvalRequestBody(
+      datasetConfig,
+      { workspace: 'ws-a', agent: 'a', parallelism: 1 },
+      null
+    );
+    expect(byDefault.spec.params.parallelism).toBe(DEFAULT_PARALLELISM);
+    expect(throttled.spec.params).toMatchObject({ parallelism: 1, max_retries: 5 });
+  });
 
   it('carries publication through the dataset path too, and omits it otherwise', () => {
     const withPublication = buildDatasetEvalRequestBody(
