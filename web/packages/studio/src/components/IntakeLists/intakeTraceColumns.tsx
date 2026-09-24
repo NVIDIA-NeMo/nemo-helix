@@ -8,6 +8,7 @@ import { Badge } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryStatusBadge } from '@studio/components/IntakeDetail/IntakeComponents/IntakeTelemetryStatusBadge';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import type { IntakeTelemetryDataView } from '@studio/components/IntakeLists/IntakeTelemetryDataView';
+import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   formatCost,
   formatDurationMs,
@@ -73,7 +74,7 @@ export const makeIntakeTraceColumns =
     ...(agentNameFilter
       ? [
           accessor('agent_name', {
-            id: 'agent_name',
+            id: AGENT_NAME_FILTER_ID,
             header: 'Agent',
             size: 200,
             enableSorting: false,

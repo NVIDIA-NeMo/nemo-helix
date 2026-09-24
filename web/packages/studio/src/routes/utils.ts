@@ -6,6 +6,7 @@ import {
   FILTERS_SEARCH_PARAM,
 } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
+import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   AGENTS_ENABLED,
   ANONYMIZER_ENABLED,
@@ -554,7 +555,7 @@ export const getIntakeTracesRoute = (workspace: string, options: { agentName?: s
   if (!options.agentName) return path;
   const search = createSearchParams({
     [FILTERS_SEARCH_PARAM]: encodeColumnFiltersParam([
-      { id: 'agent_name', value: options.agentName },
+      { id: AGENT_NAME_FILTER_ID, value: options.agentName },
     ]),
   });
   return `${path}?${search}`;
