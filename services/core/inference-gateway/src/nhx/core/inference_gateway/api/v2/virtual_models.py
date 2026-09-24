@@ -149,6 +149,11 @@ async def _validate_middleware_call(
         raise _middleware_validation_error(
             f"VirtualModel {vm_id} references unknown plugin {call.name!r} in {phase}_middleware[{index}]."
         )
+    if plugin.supports_middleware_phase(phase) is False:
+        raise _middleware_validation_error(
+            f"Plugin {call.name!r} does not support {phase}_middleware "
+            f"(VirtualModel {vm_id} {phase}_middleware[{index}])."
+        )
 
     config_type = call.config_type or ""
     raw_config = await _load_raw_middleware_config(vm_id, phase, index, call, plugin)

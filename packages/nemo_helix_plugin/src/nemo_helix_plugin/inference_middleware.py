@@ -396,11 +396,11 @@ class InferenceMiddlewareContext:
 
 @dataclass
 class ModelProviderInferenceTarget:
-    """Provider gateway URL and served model name for a direct inference call.
+    """Provider URL, model name, and request policy for a direct inference call.
 
     Returned by :meth:`NemoInferenceMiddleware.get_inference_url_and_model`.
-    Both values are resolved from the same provider selection, guaranteeing
-    they are mutually consistent.
+    All values come from the same provider selection, so URL, model, body
+    policy, headers, and credentials remain mutually consistent.
 
     Use ``model_provider_gateway_url`` as the OpenAI client base URL and
     ``served_model_name`` as the value for ``body["model"]``::
@@ -419,6 +419,18 @@ class ModelProviderInferenceTarget:
     served_model_name: str
     """The raw model ID the backend expects in ``body["model"]``
     (e.g. ``"meta/llama-3.1-70b-instruct"``)."""
+
+    default_extra_body: dict[str, Any] = field(default_factory=dict)
+    """Provider body defaults that caller values may override."""
+
+    required_extra_body: dict[str, Any] = field(default_factory=dict)
+    """Provider body values that must override caller values."""
+
+    outbound_headers: dict[str, str] = field(default_factory=dict)
+    """Rendered provider headers, including cached authentication."""
+
+    missing_secret_name: str | None = None
+    """Required provider secret missing from the cache, if any."""
 
 
 @dataclass
@@ -753,6 +765,16 @@ class NemoInferenceMiddleware(ABC):
     :meth:`on_startup` is called. Calling them before injection raises
     ``RuntimeError``.
     """
+
+    def supports_middleware_phase(self, phase: str) -> bool:
+        """Return whether this plugin may be configured in ``phase``.
+
+        Plugins support all middleware phases by default for backward
+        compatibility. Request-only or response-only plugins should override
+        this method so VirtualModel validation can reject invalid placement
+        before persisting the resource.
+        """
+        return phase in {"request", "response", "post_response"}
 
     def __init__(self) -> None:
         self._cache: InferenceMiddlewareCacheAccessor | None = None
