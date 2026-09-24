@@ -105,6 +105,29 @@ def compile_automodel_config(
     return cfg
 
 
+_BACKEND_CONFIG_TARGET = "nemo_automodel.components.models.common.utils.BackendConfig"
+
+# MTPConfig field -> key Automodel reads off the model block.
+_MTP_MODEL_KEYS = {
+    "num_nextn_predict_layers": "num_nextn_predict_layers",
+    "use_repeated_layer": "mtp_use_repeated_layer",
+    "loss_scaling_factor": "mtp_loss_scaling_factor",
+}
+
+
+def _explicit_backend_settings(customizer_config: TrainingStepConfig) -> dict[str, Any]:
+    """The backend fields the caller actually set.
+
+    Automodel's own BackendConfig defaults depend on what the node provides (Transformer
+    Engine, DeepEP, CUDA), so emitting our own value for an unset field would override a
+    hardware-aware choice with a blind one.
+    """
+    backend = customizer_config.training.backend
+    if backend is None:
+        return {}
+    return {key: value for key, value in backend.model_dump(mode="python").items() if value is not None}
+
+
 def _compile_retrieval_config(
     customizer_config: TrainingStepConfig,
     workspace_dir: Path,
@@ -165,7 +188,9 @@ def _compile_retrieval_config(
     _build_distributed(
         cfg,
         customizer_config,
-        activation_checkpointing=retrieval_config.do_gradient_checkpointing,
+        activation_checkpointing=(
+            retrieval_config.do_gradient_checkpointing or customizer_config.training.activation_checkpointing
+        ),
     )
 
     prepared = _prepare_and_validate_dataset(customizer_config, workspace_dir)
@@ -226,7 +251,11 @@ def _compile_llm_config(
         }
     )
 
-    _build_distributed(cfg, customizer_config)
+    _build_distributed(
+        cfg,
+        customizer_config,
+        activation_checkpointing=customizer_config.training.activation_checkpointing,
+    )
 
     prepared = _prepare_and_validate_dataset(customizer_config, workspace_dir)
 
@@ -253,7 +282,7 @@ def _compile_llm_config(
     cfg["dataloader"] = {
         "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
         "collate_fn": "nemo_automodel.components.datasets.utils.default_collater",
-        "shuffle": True,
+        "shuffle": customizer_config.dataset.shuffle,
     }
     cfg["validation_dataloader"] = {
         "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
@@ -304,6 +333,19 @@ def _build_base_model(cfg: dict[str, Any], customizer_config: TrainingStepConfig
     }
     if customizer_config.model.override_custom_impl:
         cfg["model"]["force_hf"] = True
+    mtp = customizer_config.training.mtp
+    if mtp is not None:
+        # Automodel reads these off the model block as model constructor arguments, and
+        # support differs per model (``mtp_use_repeated_layer`` is Nemotron-H only in
+        # r0.6.0). Forward only what the caller set, so an unset field keeps the
+        # checkpoint's own value instead of reaching a model that does not accept it.
+        for field_name, model_key in _MTP_MODEL_KEYS.items():
+            value = getattr(mtp, field_name)
+            if value is not None:
+                cfg["model"][model_key] = value
+    backend = _explicit_backend_settings(customizer_config)
+    if backend:
+        cfg["model"]["backend"] = {"_target_": _BACKEND_CONFIG_TARGET, **backend}
 
 
 def _build_distributed(
@@ -333,11 +375,14 @@ def _build_distributed(
     if activation_checkpointing:
         cfg["distributed"]["activation_checkpointing"] = True
     if p.pipeline_parallel_size > 1:
-        cfg["distributed"]["pipeline"] = {
+        pipeline: dict[str, Any] = {
             "pp_schedule": "interleaved1f1b",
             "pp_microbatch_size": 1,
             "scale_grads_in_schedule": False,
         }
+        if p.pipeline is not None:
+            pipeline.update({k: v for k, v in p.pipeline.model_dump(mode="python").items() if v is not None})
+        cfg["distributed"]["pipeline"] = pipeline
 
 
 def _prepare_and_validate_dataset(
@@ -389,6 +434,21 @@ def _configure_sequence_packing(
         seed=customizer_config.seed,
         trust_remote_code=trust_remote_code,
     )
+
+    explicit_pack_size = customizer_config.batch.packed_sequence_size
+    if explicit_pack_size is not None:
+        # The caller pinned the length, but the schedule still has to count packs rather
+        # than raw samples: an inflated max_steps stretches the val/ckpt interval and lets
+        # a warmup through that Automodel's lr_warmup_steps < lr_decay_steps assert rejects.
+        packing_factor = None
+        if packing_estimate is not None and packing_estimate.avg_seq_length > 0:
+            packing_factor = round(explicit_pack_size / packing_estimate.avg_seq_length, 2)
+        logger.info(
+            f"Sequence packing enabled with caller-supplied pack_size={explicit_pack_size}, "
+            f"packing_factor={packing_factor}"
+        )
+        cfg["packed_sequence"] = {"packed_sequence_size": explicit_pack_size}
+        return explicit_pack_size, packing_factor
 
     if packing_estimate is not None:
         optimal_pack_size = packing_estimate.pack_size
@@ -555,10 +615,17 @@ def _build_peft(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> N
         "alpha": lora.alpha,
         "dropout": lora.dropout,
         "use_triton": lora.use_triton,
-        "target_modules": lora.target_modules,
     }
+    # Mutually exclusive in Automodel's PeftConfig, and the compiler guarantees at most
+    # one is populated.
+    if lora.target_modules:
+        peft_cfg["target_modules"] = lora.target_modules
     if lora.exclude_modules:
         peft_cfg["exclude_modules"] = lora.exclude_modules
+    # Automodel defaults this to on; forward the caller's choice either way, so an
+    # explicit False actually turns it off instead of being dropped.
+    if lora.use_memory_efficient_lora is not None:
+        peft_cfg["use_memory_efficient_lora"] = lora.use_memory_efficient_lora
     cfg["peft"] = peft_cfg
 
 
@@ -634,7 +701,7 @@ def _configure_moe_backend(
 
     This function:
     1. Detects if the model is an MoE model via config attributes
-    2. Only for MoE: Configures the backend (with deepep disabled for stability)
+    2. Only for MoE: Configures the backend (torch dispatcher, i.e. DeepEP off, for stability)
     3. Only for MoE: Configures the parallelizer for expert distribution
     """
     # Import here to avoid ModuleNotFoundError in environments where
@@ -685,11 +752,17 @@ def _configure_moe_backend(
                             f"is {ep or 'not set'}. Multi-GPU MoE training requires expert_parallel_size > 1."
                         )
 
-                # Backend configuration for MoE models
-                # DeepEP is disabled for stability - it's a newer feature that can cause issues
-                cfg.setdefault("model", {})["backend"] = {
-                    "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
-                    "enable_deepep": False,
+                # Backend configuration for MoE models. DeepEP is disabled by default for
+                # stability by routing tokens with the torch dispatcher; Automodel no longer
+                # honors ``enable_deepep`` (it is ignored with a warning, and
+                # ``enable_deepep=False`` used to mean ``dispatcher="torch"``). Anything the job
+                # spec asked for explicitly wins -- this runs after _build_base_model, which
+                # already wrote the requested settings.
+                requested = cfg.setdefault("model", {}).get("backend", {})
+                cfg["model"]["backend"] = {
+                    "_target_": _BACKEND_CONFIG_TARGET,
+                    "dispatcher": "torch",
+                    **{k: v for k, v in requested.items() if k != "_target_"},
                 }
 
             else:
@@ -958,10 +1031,12 @@ def _configure_retrieval_dataset(
             "data_type": "train",
             "n_passages": retrieval_config.train_n_passages,
             "seed": seed,
-            "do_shuffle": True,
+            # Automodel's do_shuffle reorders the training examples once up front and the
+            # dataloader reorders them every epoch; shuffle=false must turn off both.
+            "do_shuffle": customizer_config.dataset.shuffle,
         },
         "collate_fn": collator_config(),
-        "shuffle": True,
+        "shuffle": customizer_config.dataset.shuffle,
         "num_workers": 0,
     }
 

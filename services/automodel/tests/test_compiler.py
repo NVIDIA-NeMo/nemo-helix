@@ -932,3 +932,82 @@ async def test_full_weight_job_rejects_an_output_name_a_running_job_will_registe
 
     with pytest.raises(HelixJobCompilationError, match=r"Job 'automodel-job-1' \(active\) is already producing"):
         await platform_job_config_compiler(job, "default", platform_clients)
+
+
+class TestLoraModuleFilters:
+    """target_modules / exclude_modules reach Automodel's PeftConfig, which takes one or the other."""
+
+    @staticmethod
+    def _model_entity(checkpoint_model_name: str | None = None) -> Mock:
+        me = Mock()
+        me.spec = (
+            Mock(checkpoint_model_name=checkpoint_model_name, linear_layers=None) if checkpoint_model_name else None
+        )
+        return me
+
+    def test_exclude_modules_alone_is_not_overwritten_by_the_default(self) -> None:
+        """The backfill used to fire here, sending both filters and failing at training time."""
+        from nhx.automodel.app.jobs.training.compiler import _translate_lora_config
+
+        lora = _translate_lora_config(LoRAParams(exclude_modules=["*.out_proj"]), self._model_entity())
+
+        assert lora.exclude_modules == ["*.out_proj"]
+        assert not lora.target_modules
+
+    def test_nemotron_h_exclude_modules_alone_skips_the_derived_target_list(self) -> None:
+        from nhx.automodel.app.jobs.training.compiler import _translate_lora_config
+
+        lora = _translate_lora_config(
+            LoRAParams(exclude_modules=["*.out_proj"]), self._model_entity("NemotronHForCausalLM")
+        )
+
+        assert lora.exclude_modules == ["*.out_proj"]
+        assert not lora.target_modules
+
+    @pytest.mark.parametrize(
+        ("checkpoint_model_name", "expected"),
+        [(None, ["*proj"]), ("NemotronHForCausalLM", ["*proj"])],
+    )
+    def test_neither_filter_still_backfills_target_modules(
+        self, checkpoint_model_name: str | None, expected: list[str]
+    ) -> None:
+        """PeftConfig needs at least one filter, so the default still applies when both are absent."""
+        from nhx.automodel.app.jobs.training.compiler import _translate_lora_config
+
+        lora = _translate_lora_config(LoRAParams(), self._model_entity(checkpoint_model_name))
+
+        assert lora.target_modules == expected
+        assert not lora.exclude_modules
+
+    def test_target_modules_alone_is_preserved(self) -> None:
+        from nhx.automodel.app.jobs.training.compiler import _translate_lora_config
+
+        lora = _translate_lora_config(LoRAParams(target_modules=["*.q_proj"]), self._model_entity())
+
+        assert lora.target_modules == ["*.q_proj"]
+        assert not lora.exclude_modules
+
+    def test_both_filters_are_rejected_at_the_api_boundary(self) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            LoRAParams(target_modules=["*.q_proj"], exclude_modules=["*.out_proj"])
+
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_use_memory_efficient_lora_reaches_the_internal_config(value: bool | None) -> None:
+    """An explicit False has to survive: Automodel's PeftConfig turns the path on by default."""
+    from nhx.automodel.app.jobs.training.compiler import _translate_lora_config
+
+    lora = _translate_lora_config(
+        LoRAParams(target_modules=["*.q_proj"], use_memory_efficient_lora=value),
+        TestLoraModuleFilters._model_entity(),
+    )
+
+    assert lora.use_memory_efficient_lora is value
+
+
+def test_packed_sequence_size_requires_sequence_packing() -> None:
+    """Automodel ignores the size with packing off, so the API rejects it like the plugin does."""
+    with pytest.raises(ValueError, match="requires sequence_packing=true"):
+        SFTTraining(packed_sequence_size=2048)
+
+    assert SFTTraining(sequence_packing=True, packed_sequence_size=2048).packed_sequence_size == 2048

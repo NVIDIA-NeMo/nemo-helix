@@ -145,6 +145,14 @@ class GRPOConfig(BaseModel):
     hf_config_overrides: dict[str, Any] | None = None
     vllm_tensor_parallel_size: int | None = Field(default=None, gt=0)
     vllm_gpu_memory_utilization: float = Field(default=0.5, gt=0.0, le=1.0)
+    # Lands in NeMo-RL's ``logger.wandb``, not ``policy``.
+    log_nemo_gym_full_result_tables: bool = False
+    # Passed through verbatim to the vLLM rollout engine.
+    vllm_kwargs: dict[str, Any] | None = None
+    # Merged over policy.dtensor_cfg.moe_parallelizer, on top of the platform's own keys.
+    moe_parallelizer: dict[str, Any] | None = None
+    # None keeps the platform default (2048).
+    logprob_chunk_size: int | None = Field(default=None, gt=0)
 
 
 class LoRAConfig(BaseModel):
@@ -236,6 +244,10 @@ class TrainingStepConfig(BaseModel):
 
     class OptimizerConfig(BaseModel):
         optimizer_type: OptimizerType | None = Field(default=None)
+        # Overrides the class implied by optimizer_type; the schedule still follows the type.
+        optimizer_name: str | None = None
+        # Merged over the kwargs we build, so caller keys win.
+        optimizer_kwargs: dict[str, Any] | None = None
         learning_rate: float = 1e-4
         min_learning_rate: float | None = None
         eps: float = 1e-5
@@ -256,6 +268,8 @@ class TrainingStepConfig(BaseModel):
         # GRPO only; default matches GRPOTraining so a hand-built config compiles the
         # same YAML. DPO ignores it -- its dtensor_cfg is a literal with no ``_v2``.
         policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL
+        # Merged over the platform's own dtensor_cfg.env_vars.
+        env_vars: dict[str, str] | None = None
 
     class IntegrationsConfig(BaseModel):
         wandb: WandBConfig | None = None

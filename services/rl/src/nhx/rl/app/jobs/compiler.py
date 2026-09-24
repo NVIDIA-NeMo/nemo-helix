@@ -397,6 +397,8 @@ def _build_dpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code:
             beta2=t.adam_beta2,
             eps=t.adam_eps,
             warmup_steps=t.warmup_steps,
+            optimizer_name=t.optimizer_name,
+            optimizer_kwargs=t.optimizer_kwargs,
         ),
         parallelism=TrainingStepConfig.ParallelismConfig(
             num_nodes=p.num_nodes,
@@ -406,6 +408,7 @@ def _build_dpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code:
             context_parallel_size=p.context_parallel_size,
             sequence_parallel=p.sequence_parallel,
             activation_checkpointing=t.activation_checkpointing,
+            env_vars=t.env_vars,
         ),
         integrations=_build_integrations_config(job_spec.integrations),
         output_model=job_spec.output.name,
@@ -501,10 +504,14 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
                 train_mb_tokens=t.train_mb_tokens,
                 sequence_length_round=t.sequence_length_round,
                 automodel_kwargs=t.automodel_kwargs,
+                vllm_kwargs=t.vllm_kwargs,
+                moe_parallelizer=t.moe_parallelizer,
+                logprob_chunk_size=t.logprob_chunk_size,
                 router_aux_loss_coef=t.router_aux_loss_coef,
                 hf_config_overrides=t.hf_config_overrides,
                 vllm_tensor_parallel_size=t.vllm_tensor_parallel_size,
                 vllm_gpu_memory_utilization=t.vllm_gpu_memory_utilization,
+                log_nemo_gym_full_result_tables=t.log_nemo_gym_full_result_tables,
             ),
             lora=(
                 LoRAConfig(
@@ -538,6 +545,8 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
             beta2=t.adam_beta2,
             eps=t.adam_eps,
             warmup_steps=t.warmup_steps,
+            optimizer_name=t.optimizer_name,
+            optimizer_kwargs=t.optimizer_kwargs,
         ),
         parallelism=TrainingStepConfig.ParallelismConfig(
             num_nodes=p.num_nodes,
@@ -549,6 +558,7 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
             sequence_parallel=p.sequence_parallel,
             activation_checkpointing=t.activation_checkpointing,
             policy_backend=t.policy_backend,
+            env_vars=t.env_vars,
         ),
         integrations=_build_integrations_config(job_spec.integrations),
         output_model=job_spec.output.name,

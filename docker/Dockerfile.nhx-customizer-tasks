@@ -48,8 +48,9 @@ RUN mkdir -p /home/${USERNAME}/.cache && \
 
 # HF stack for model_spec + Nemotron configs. preserve_base_torch.txt blocks uv from
 # pulling PyPI torch (same idea as Automodel update_pyproject_pytorch.sh /
-# docker/common/uv-pytorch.toml). TRANSFORMERS_VERSION matches Automodel r0.5.0 pin.
-ARG TRANSFORMERS_VERSION=5.8.1
+# docker/common/uv-pytorch.toml). TRANSFORMERS_VERSION matches the Automodel r0.6.0 pin
+# (AUTOMODEL_COMMIT in docker/automodel/Dockerfile.nhx-automodel-base); bump them together.
+ARG TRANSFORMERS_VERSION=5.12.1
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /app/docker/customizer/preserve_base_torch.txt \

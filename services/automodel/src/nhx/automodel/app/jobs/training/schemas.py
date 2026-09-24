@@ -59,6 +59,43 @@ class LoRAConfig(BaseModel):
 
     # Implementation details (not in API)
     use_triton: bool = Field(default=True, description="Use optimized Triton LoRA kernel")
+    use_memory_efficient_lora: Optional[bool] = Field(
+        default=None, description="Use Automodel's lower-memory LoRA path. None keeps Automodel's default (on)."
+    )
+
+
+class BackendConfig(BaseModel):
+    """Kernel selection per model component. ``None`` means "leave it to Automodel"."""
+
+    attn: Optional[str] = None
+    linear: Optional[str] = None
+    rms_norm: Optional[str] = None
+    rope: Optional[str] = None
+    rope_fusion: Optional[bool] = None
+    experts: Optional[str] = None
+    dispatcher: Optional[str] = None
+    fake_balanced_gate: Optional[bool] = None
+    enable_hf_state_dict_adapter: Optional[bool] = None
+    enable_fsdp_optimizations: Optional[bool] = None
+
+
+class PipelineConfig(BaseModel):
+    """Pipeline schedule settings; read only when pipeline_parallel_size > 1."""
+
+    pp_schedule: Optional[str] = None
+    pp_microbatch_size: Optional[int] = None
+    round_virtual_stages_to_pp_multiple: Optional[str] = None
+    scale_grads_in_schedule: Optional[bool] = None
+    patch_inner_model: Optional[bool] = None
+    patch_causal_lm_model: Optional[bool] = None
+
+
+class MTPConfig(BaseModel):
+    """Multi-Token Prediction settings for checkpoints trained with MTP heads."""
+
+    num_nextn_predict_layers: Optional[int] = Field(default=None, description="How many tokens ahead to predict")
+    use_repeated_layer: Optional[bool] = Field(default=None, description="Share one weight-tied layer across depths")
+    loss_scaling_factor: Optional[float] = Field(default=None, description="Weight of the MTP loss term")
 
 
 class ModelConfig(BaseModel):
@@ -218,6 +255,7 @@ class TrainingStepConfig(BaseModel):
         prompt_template: Optional[str] = None
         add_bos: Optional[bool] = None
         add_eos: Optional[bool] = None
+        shuffle: bool = True
 
     class TrainingConfig(BaseModel):
         training_type: TrainingType
@@ -225,6 +263,9 @@ class TrainingStepConfig(BaseModel):
         finetuning_type: Optional[FinetuningType] = None
         lora: Optional[LoRAConfig] = None
         kd: Optional[DistillationConfig] = None
+        activation_checkpointing: bool = False
+        mtp: Optional[MTPConfig] = None
+        backend: Optional[BackendConfig] = None
 
     class ScheduleConfig(BaseModel):
         epochs: int = 1
@@ -242,6 +283,7 @@ class TrainingStepConfig(BaseModel):
         micro_batch_size: int = Field(default=1, gt=0)
         sequence_packing: bool = False
         sequence_packing_max_samples: int = 1000
+        packed_sequence_size: Optional[int] = None
 
     class OptimizerConfig(BaseModel):
         optimizer_type: Optional[OptimizerType] = Field(default=None)
@@ -263,6 +305,7 @@ class TrainingStepConfig(BaseModel):
         context_parallel_size: int = 1
         expert_parallel_size: Optional[int] = None
         sequence_parallel: bool = False
+        pipeline: Optional[PipelineConfig] = None
 
     # === Main Config Fields ===
     model: ModelConfig
