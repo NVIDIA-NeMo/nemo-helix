@@ -3,11 +3,10 @@
 
 """Every customization backend must authenticate as a service name the auth
 service actually recognizes, or its job pods fail with a 502 the moment they
-try to touch the Files or Jobs API (see ASTD-648 / NMP-238).
+try to touch the Files or Jobs API (see ASTD-648).
 """
 
 import pytest
-
 from nhx.automodel.images import FILE_IO_TASK_COMMAND as AUTOMODEL_FILE_IO
 from nhx.automodel.images import MODEL_ENTITY_TASK_COMMAND as AUTOMODEL_MODEL_ENTITY
 from nhx.core.auth.app.account_resolution import _available_service_names
