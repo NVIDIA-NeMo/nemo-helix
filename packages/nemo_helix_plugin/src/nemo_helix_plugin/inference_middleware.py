@@ -766,6 +766,16 @@ class NemoInferenceMiddleware(ABC):
     ``RuntimeError``.
     """
 
+    def supports_middleware_phase(self, phase: str) -> bool:
+        """Return whether this plugin may be configured in ``phase``.
+
+        Plugins support all middleware phases by default for backward
+        compatibility. Request-only or response-only plugins should override
+        this method so VirtualModel validation can reject invalid placement
+        before persisting the resource.
+        """
+        return phase in {"request", "response", "post_response"}
+
     def __init__(self) -> None:
         self._cache: InferenceMiddlewareCacheAccessor | None = None
         self._platform_sdk: AsyncNeMoHelix | None = None

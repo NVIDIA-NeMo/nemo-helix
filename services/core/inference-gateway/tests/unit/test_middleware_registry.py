@@ -76,6 +76,7 @@ def _make_sdk_call(
 
 def _make_mock_plugin() -> NemoInferenceMiddleware:
     plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.supports_middleware_phase.return_value = True
     plugin.on_startup = AsyncMock()
     plugin.on_shutdown = AsyncMock()
     plugin.on_virtual_model_upserted = AsyncMock()
@@ -478,6 +479,20 @@ class TestResolveConfigsForVirtualModel:
 
         assert ("ws", "vm") not in registry.request_middleware_calls
         assert ("ws", "vm") in registry.broken_vms
+
+    @pytest.mark.asyncio
+    async def test_unsupported_response_phase_marks_vm_broken(self):
+        plugin = _make_mock_plugin()
+        plugin.supports_middleware_phase.side_effect = lambda phase: phase == "request"
+        registry = MiddlewareRegistry(plugins={"request-only": plugin})
+
+        call = _make_sdk_call("request-only", config={})
+        vm = _make_sdk_vm("ws", "vm", response_middleware=[call])
+        await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
+
+        assert ("ws", "vm") not in registry.response_middleware_calls
+        assert ("ws", "vm") in registry.broken_vms
+        plugin.validate_middleware_config.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_post_response_failure_does_not_mark_vm_broken(self):

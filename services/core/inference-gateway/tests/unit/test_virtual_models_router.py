@@ -70,6 +70,7 @@ def _create(client: TestClient, name: str, **kwargs) -> dict:
 
 def _make_plugin() -> NemoInferenceMiddleware:
     plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.supports_middleware_phase.return_value = True
     plugin.get_middleware_config = AsyncMock(return_value={"stored": True})
     plugin.validate_middleware_config = AsyncMock(side_effect=lambda _config_type, config: config)
     return plugin
@@ -257,6 +258,25 @@ class TestCreateVirtualModel:
         plugin.validate_middleware_config.assert_any_await("req", {"phase": "request"})
         plugin.validate_middleware_config.assert_any_await("resp", {"phase": "response"})
         plugin.validate_middleware_config.assert_any_await("post", {"phase": "post"})
+
+    def test_create_rejects_unsupported_middleware_phase(self, client: TestClient):
+        plugin = _make_plugin()
+        plugin.supports_middleware_phase.side_effect = lambda phase: phase == "request"
+        _install_registry(client, {"request-only": plugin})
+
+        response = client.post(
+            BASE,
+            json={
+                "name": "vm-invalid-phase",
+                "response_middleware": [
+                    {"name": "request-only", "config_type": "route", "config": {}},
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert "does not support response_middleware" in response.text
+        plugin.validate_middleware_config.assert_not_awaited()
 
     def test_create_resolves_config_id_before_validation(self, client: TestClient):
         """POST resolves config_id through the plugin and validates the returned config."""

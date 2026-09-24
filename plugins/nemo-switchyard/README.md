@@ -113,3 +113,12 @@ Run the native wheel integration tests in an isolated environment:
 ```bash
 plugins/nemo-switchyard/scripts/run_native_tests.sh
 ```
+
+Run all native routing types through a live local Inference Gateway and write
+a shareable Markdown report:
+
+```bash
+uv run --frozen python plugins/nemo-switchyard/scripts/smoke_native_routing.py \
+  --nemo .venv/bin/nemo \
+  --output plugins/nemo-switchyard/scripts/switchyard-routing-smoke-report.md
+```

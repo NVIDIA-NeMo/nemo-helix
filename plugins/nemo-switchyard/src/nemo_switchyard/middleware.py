@@ -32,6 +32,10 @@ _MIDDLEWARE_NAME = "nemo-switchyard"
 class SwitchyardMiddleware(NemoInferenceMiddleware):
     """Route OpenAI Chat requests with native Switchyard algorithms."""
 
+    def supports_middleware_phase(self, phase: str) -> bool:
+        """Allow Switchyard only in request middleware."""
+        return phase == "request"
+
     async def on_startup(self) -> None:
         logger.info("Switchyard middleware loaded with config types: %s", sorted(NATIVE_CONFIG_TYPES))
 

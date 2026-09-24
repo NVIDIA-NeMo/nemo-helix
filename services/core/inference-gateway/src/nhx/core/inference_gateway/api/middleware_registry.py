@@ -546,6 +546,14 @@ class MiddlewareRegistry:
                     phase,
                 )
                 return False, []
+            if plugin.supports_middleware_phase(phase) is False:
+                logger.warning(
+                    "Plugin %r does not support %s_middleware in VirtualModel %s",
+                    plugin_name,
+                    phase,
+                    vm_id,
+                )
+                return False, []
 
             if call.config_id is not None:
                 mref = MiddlewareConfigRef(
