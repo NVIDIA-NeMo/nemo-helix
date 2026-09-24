@@ -106,6 +106,11 @@ def _requests_on_test_client(
 
 # -- fixtures -------------------------------------------------------------------------
 
+# models_auth_context is module-scoped (expensive to boot, auth_enabled=True): keep both
+# test classes on one xdist worker so they share it instead of each worker re-provisioning
+# it from scratch.
+pytestmark = pytest.mark.xdist_group("workspace_iam_models_isolation")
+
 
 @pytest.fixture(scope="module")
 def models_auth_context() -> Generator[ClientContext, None, None]:

@@ -38,6 +38,11 @@ from nhx.testing import (
     unique_email,
 )
 
+# ctx is module-scoped (expensive to boot, auth_enabled=True): keep all classes in this
+# file on one xdist worker so they share it instead of each worker re-provisioning it
+# from scratch.
+pytestmark = pytest.mark.xdist_group("igw_with_auth")
+
 
 @pytest.fixture(scope="module")
 def ctx() -> Generator[ClientContext, None, None]:
