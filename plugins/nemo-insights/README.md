@@ -61,7 +61,9 @@ uv run nemo insights analysis disable --agent research-agent
 ```
 
 `analysis enable` stores the effective default/fast model pair for scheduled
-jobs. Re-run `enable` after changing the pair with `nemo setup`.
+jobs. The pair comes from `nemo setup`; pass `--default-model` and `--fast-model`
+(Model Entity refs such as `default/<model>`) to set it without `nemo setup`, or
+to override it. Re-run `enable` after changing the pair.
 
 ## API and SDK
 

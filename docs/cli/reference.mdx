@@ -10215,6 +10215,8 @@ nemo insights analysis enable [OPTIONS]
 * `--agent`: Name of the agent to opt in to periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
+* `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
+* `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
 
 **Help:**
 

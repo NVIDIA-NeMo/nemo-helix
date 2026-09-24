@@ -13,6 +13,14 @@ require an analysis config.
 uv run nemo insights analysis enable --agent email-security-triage
 ```
 
+Without a model pair from `nemo setup`, name one explicitly (any Model Entity refs the
+platform can serve), or set it from the agent's **Details** tab in Studio:
+
+```bash
+uv run nemo insights analysis enable --agent email-security-triage \
+  --default-model default/<model> --fast-model default/<model>
+```
+
 ## Sample traces
 
 Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
