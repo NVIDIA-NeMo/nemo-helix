@@ -20,7 +20,7 @@ from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.nooa_model_client import configured_model_refs
+from nemo_helix_plugin.nooa_model_client import configured_fast_model, configured_model_refs
 from nemo_insights_plugin.contracts.profile import (
     DEFAULT_BASE_URL,
 )
@@ -478,6 +478,8 @@ def _resolve_model_refs(default_model: str | None, fast_model: str | None) -> tu
     """
     if default_model and fast_model:
         return default_model, fast_model
+    if default_model:
+        return default_model, configured_fast_model() or default_model
     try:
         configured = configured_model_refs()
     except ValueError as exc:
