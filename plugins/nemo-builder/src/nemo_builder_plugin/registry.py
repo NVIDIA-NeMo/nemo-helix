@@ -18,13 +18,16 @@ Two notes that cost time to rediscover:
 - ``HEAD /v2/`` is **not** a supported method. A ``405`` there is correct, not broken; the
   handshake is a ``GET``.
 - The auth flow is a challenge: an unauthenticated request returns ``401`` with a
-  ``WWW-Authenticate: Bearer realm=...,service=...,scope=...`` header naming a *token endpoint*.
-  You exchange a basic credential there for a scoped bearer token. Sending basic auth directly at
-  the manifest endpoint works on some registries and not on others.
+  ``WWW-Authenticate`` header, in one of two schemes. ``Bearer realm=...,service=...,scope=...``
+  names a *token endpoint*, where you exchange a basic credential for a scoped bearer token --
+  Docker Hub, GAR, ECR, Harbor. ``Basic realm="..."`` -- ``distribution`` with htpasswd -- wants
+  the credential itself, and its realm is a label, not a URL. Sending basic auth unprompted works
+  on some registries and not on others, so this client answers whichever challenge it is given.
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 from dataclasses import dataclass
@@ -104,7 +107,9 @@ class RegistryClient:
         self._scheme = "http" if insecure else "https"
         # `transport` is a test seam: an httpx.MockTransport stands in for a registry.
         self._client = httpx.Client(timeout=timeout, follow_redirects=True, transport=transport)
-        self._tokens: dict[str, str] = {}
+        #: The `Authorization` value that last answered each repository's challenge -- a bearer
+        #: token or the basic credential, whichever the registry asked for.
+        self._authorization: dict[str, str] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -140,37 +145,58 @@ class RegistryClient:
             raise RegistryError(f"token endpoint {realm} returned no token")
         return token
 
-    def _get(self, registry: str, repository: str, path: str, *, accept: str) -> httpx.Response:
-        """GET with bearer auth, recovering once from a stale token.
+    def _answer_challenge(self, registry: str, repository: str, challenge: str) -> str | None:
+        """The `Authorization` value that answers a 401's challenge, or None if nothing can.
 
-        **A 401 invalidates the cached token.** An earlier version cached one token per
+        **Both schemes, because registries use both.** An earlier version handled only Bearer,
+        and read a Basic challenge's realm -- ``"Registry Realm"``, a label -- as a token URL. The
+        request failed with an httpx error that is not a :class:`RegistryError`, so it escaped the
+        reconcile loop's handling, never counted against the attempt budget, and left every row
+        on such a registry ``pending`` forever. Found against ``distribution`` with htpasswd.
+
+        The credential goes only to a registry that asked for it, and only to the one a row
+        records -- which is the deployment's own, since a caller cannot name a registry.
+        """
+        scheme, _, params = challenge.partition(" ")
+        scheme = scheme.lower()  # auth schemes are case-insensitive (RFC 9110)
+        if scheme == "bearer":
+            token = self._exchange_token(registry, repository, params)
+            return f"Bearer {token}" if token else None
+        if scheme == "basic" and self._username and self._password:
+            return "Basic " + base64.b64encode(f"{self._username}:{self._password}".encode()).decode()
+        return None
+
+    def _get(self, registry: str, repository: str, path: str, *, accept: str) -> httpx.Response:
+        """GET, answering an auth challenge once and remembering the answer.
+
+        **A 401 invalidates the cached answer.** An earlier version cached one bearer token per
         repository for the life of the process and never dropped it. Bearer tokens are
         short-lived, so once one expired every lookup presented it, the single retry 401'd again,
         and the reconciler could no longer resolve anything -- against a real registry, within
-        the hour. Now a 401 drops the cache entry and triggers exactly one fresh exchange; a
-        second 401 is returned to the caller as a real authorization failure rather than retried.
+        the hour. Now a 401 drops the cache entry and triggers exactly one fresh answer; a second
+        401 is returned to the caller as a real authorization failure rather than retried.
 
-        The cached token is also sent on the FIRST request, which removes the unauthenticated
+        The cached answer is also sent on the FIRST request, which removes the unauthenticated
         round trip every call used to make just to be told to authenticate.
         """
         url = f"{self._scheme}://{registry}/v2/{repository}/{path}"
         cache_key = f"{registry}/{repository}"
         headers = {"Accept": accept}
 
-        cached = self._tokens.get(cache_key)
+        cached = self._authorization.get(cache_key)
         if cached:
-            headers["Authorization"] = f"Bearer {cached}"
+            headers["Authorization"] = cached
         response = self._client.get(url, headers=headers)
         if response.status_code != 401:
             return response
 
         # Stale, revoked, or never had one. Either way the cached value is no longer trusted.
-        self._tokens.pop(cache_key, None)
-        token = self._exchange_token(registry, repository, response.headers.get("WWW-Authenticate", ""))
-        if not token:
+        self._authorization.pop(cache_key, None)
+        authorization = self._answer_challenge(registry, repository, response.headers.get("WWW-Authenticate", ""))
+        if not authorization:
             return response
-        self._tokens[cache_key] = token
-        headers["Authorization"] = f"Bearer {token}"
+        self._authorization[cache_key] = authorization
+        headers["Authorization"] = authorization
         return self._client.get(url, headers=headers)
 
     # -- reads --------------------------------------------------------------

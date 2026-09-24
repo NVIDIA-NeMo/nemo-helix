@@ -130,3 +130,69 @@ class TestProtocol:
         client = RegistryClient(username="u", password="p", transport=httpx.MockTransport(handler))
         client.resolve(REGISTRY, REPO, "v1")
         assert seen == ["Basic " + base64.b64encode(b"u:p").decode()]
+
+
+class BasicRegistry:
+    """`distribution` with htpasswd: challenges with Basic, and its realm is a label, not a URL."""
+
+    def __init__(self, *, username: str = "robot", password: str = "s3cret") -> None:
+        self.expected = "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
+        #: The `Authorization` header each request carried, in order.
+        self.requests: list[str] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        auth = request.headers.get("Authorization", "")
+        self.requests.append(auth)
+        if auth != self.expected:
+            return httpx.Response(401, headers={"WWW-Authenticate": 'Basic realm="Registry Realm"'})
+        return httpx.Response(
+            200,
+            headers={"Docker-Content-Digest": DIGEST, "Content-Type": "application/vnd.oci.image.manifest.v1+json"},
+            content=json.dumps({"schemaVersion": 2}).encode(),
+        )
+
+
+def _basic_client(
+    fake: BasicRegistry, *, username: str | None = "robot", password: str | None = "s3cret"
+) -> RegistryClient:
+    return RegistryClient(username=username, password=password, transport=httpx.MockTransport(fake.handler))
+
+
+class TestBasicChallenge:
+    def test_it_is_answered_with_the_credential(self) -> None:
+        """The regression: the realm was read as a token URL, and the httpx error that produced
+        escaped the reconcile loop, so every row on such a registry sat `pending` forever."""
+        fake = BasicRegistry()
+        assert _basic_client(fake).resolve(REGISTRY, REPO, "v1").digest == DIGEST
+        assert fake.requests == ["", fake.expected], "the credential goes only to a registry that asked"
+
+    def test_the_answer_is_sent_first_next_time(self) -> None:
+        fake = BasicRegistry()
+        client = _basic_client(fake)
+        client.resolve(REGISTRY, REPO, "v1")
+        client.resolve(REGISTRY, REPO, "v1")
+        assert fake.requests == ["", fake.expected, fake.expected]
+
+    def test_with_no_credential_it_is_a_registry_error(self) -> None:
+        """A `RegistryError` is what the reconciler counts against the attempt budget, so the row
+        fails with a reason instead of an exception escaping the loop on every cycle."""
+        with pytest.raises(RegistryError, match="401"):
+            _basic_client(BasicRegistry(), username=None, password=None).resolve(REGISTRY, REPO, "v1")
+
+    def test_a_wrong_credential_is_refused_once_not_retried(self) -> None:
+        fake = BasicRegistry(password="right")
+        with pytest.raises(RegistryError, match="401"):
+            _basic_client(fake, password="wrong").resolve(REGISTRY, REPO, "v1")
+        assert len(fake.requests) == 2
+
+    def test_the_scheme_is_matched_case_insensitively(self) -> None:
+        fake = BasicRegistry()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            response = fake.handler(request)
+            if response.status_code == 401:
+                response.headers["WWW-Authenticate"] = 'BASIC realm="Registry Realm"'
+            return response
+
+        client = RegistryClient(username="robot", password="s3cret", transport=httpx.MockTransport(handler))
+        assert client.resolve(REGISTRY, REPO, "v1").digest == DIGEST

@@ -162,7 +162,9 @@ published some of its images. A row fails when:
 - the image is there but has no signature, because an unsigned build doesn't count as a success
 
 The reconciler authenticates with `registry_username` and `registry_password`, which only need
-read access, and uses HTTPS unless `registry_insecure` is set. Supply them from a Kubernetes Secret
+read access, and uses HTTPS unless `registry_insecure` is set. It answers whichever challenge the
+registry sends: Bearer, by exchanging the credential for a token (GAR, Docker Hub, Harbor), or
+Basic, by sending it directly (`distribution` with htpasswd). Supply them from a Kubernetes Secret
 as `NEMO_BUILDER_REGISTRY_USERNAME` and `NEMO_BUILDER_REGISTRY_PASSWORD` rather than in the config
 file; `deploy/local/platform.yaml` shows how. Run exactly one replica: there is no leader
 election.
@@ -405,8 +407,6 @@ The tests need no cluster, registry or running platform.
 - **One build node.** The work volume is `ReadWriteOnce`. A `ReadWriteMany` volume would lift this.
 - **One registry per deployment.** Every image is published to `registry`, under the submitting
   workspace's path. Publishing anywhere else means copying the image out afterwards.
-- **Registries that challenge with Basic auth** can be pushed to, but the reconciler only handles
-  Bearer tokens and can't resolve images on them.
 - **Each submission needs a new `revision`.** Reusing a `name` and `revision` returns `500`.
 - **Signatures are checked for presence, not validity.** Admission-time verification, on the
   cluster that runs the image, is what should check the key.
