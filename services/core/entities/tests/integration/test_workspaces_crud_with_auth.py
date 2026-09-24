@@ -33,6 +33,10 @@ from nemo_helix_plugin.workspaces.types import (
 from nhx.core.entities.service import EntitiesService
 from nhx.testing import TEST_USER_EMAIL, create_test_client, short_unique_name
 
+# sdk is module-scoped (expensive to boot, auth_enabled=True): keep this file's tests on
+# one xdist worker so they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("workspaces_crud_with_auth")
+
 
 @contextmanager
 def as_user(sdk: NeMoHelix, email: str) -> Generator[None, None, None]:

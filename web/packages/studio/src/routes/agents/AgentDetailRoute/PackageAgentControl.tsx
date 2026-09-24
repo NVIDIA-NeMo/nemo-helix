@@ -141,20 +141,20 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         }}
       >
         {isAgentLoading ? (
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             Checking whether this agent can be packaged…
           </Text>
         ) : null}
 
         {!canPackage && !isAgentLoading ? (
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             Packaging is available for Platform-managed agents. Build a NAT workflow image with{' '}
             <code>nemo agents package</code>.
           </Text>
         ) : null}
 
         {submitError ? (
-          <Text kind="body/regular/sm" color="danger">
+          <Text kind="body/regular/sm" className="text-feedback-danger">
             {getErrorMessage(submitError, 'Failed to start the packaging job')}
           </Text>
         ) : null}
@@ -174,7 +174,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
               <CodeSnippetCode value={image} />
             </CodeSnippetRoot>
             {restoredAt ? (
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Built{' '}
                 <RelativeTime
                   datetime={new Date(restoredAt).toISOString()}
@@ -184,7 +184,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
               </Text>
             ) : null}
             {published ? (
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Pushed to {published}
               </Text>
             ) : null}
@@ -194,7 +194,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         {isResultPending ? (
           <Flex gap="density-sm" className="items-center">
             <Spinner size="small" aria-label="Reading build result" />
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               Reading the build result…
             </Text>
           </Flex>
@@ -202,7 +202,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {resultError ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="danger">
+            <Text kind="body/regular/sm" className="text-feedback-danger">
               The build finished, but its result could not be read. Open the job for the tag.
             </Text>
             {viewJobButton}
@@ -211,7 +211,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {isComplete && !isResultPending && !resultError && !image ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               The job finished without reporting an image tag. Open the job to see why.
             </Text>
             {viewJobButton}
@@ -220,7 +220,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {isUnreachable ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="danger">
+            <Text kind="body/regular/sm" className="text-feedback-danger">
               Lost track of this build — its status could not be read. Open the job, or start
               another build.
             </Text>
@@ -240,7 +240,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {isFailed ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="danger">
+            <Text kind="body/regular/sm" className="text-feedback-danger">
               Packaging failed. Open the job for the build output.
             </Text>
             {viewJobButton}
@@ -251,7 +251,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           <Flex gap="density-sm" className="items-center justify-between">
             <Flex gap="density-sm" className="items-center">
               <Spinner size="small" aria-label="Building image" />
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 {isQueued
                   ? 'Waiting for a build to start…'
                   : 'Building — this takes a few minutes.'}

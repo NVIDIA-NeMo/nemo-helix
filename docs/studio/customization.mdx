@@ -2,23 +2,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "NeMo Studio Custom Models"
+title: "NeMo Studio Fine-tuning"
 description: "Fine-tune models from NeMo Studio, and track customization jobs."
 ---
 
-Use **Models > Fine-tune** in the NeMo Studio workspace sidebar to open the Custom Models list, start Customizer jobs, and track their progress for the selected workspace.
+Use **Models > Fine-tune** in the NeMo Studio workspace sidebar to open the fine-tuned models list, start fine-tuning jobs, and track their progress for the selected workspace.
 
 <Note>
 
-Custom Models is enabled by default. An administrator can disable it by setting `studio.feature_flags.customizer_enabled: false` in the platform configuration and restarting Studio, which removes the **Custom Models** navigation entry and hides Customizer jobs from the general **Jobs** list.
+Fine-tuning is enabled by default. An administrator can disable it by setting `studio.feature_flags.customizer_enabled: false` in the platform configuration and restarting Studio, which removes the **Fine-tune** navigation entry and hides fine-tuning jobs from the general **Jobs** list.
 
 </Note>
 
 For customization concepts, supported models, and the underlying CLI and API workflow, see [Customization Concepts](/documentation/customizer-reference/customization-concepts).
 
-## Start a Customization Job
+## Start a Fine-tuning Job
 
-Select **Customize a Model** from the Custom Models list to open **Fine-tune a Model**, which first asks how you want to start:
+Select **Customize a Model** from the fine-tuned models list to open **Fine-tune a Model**, which first asks how you want to start:
 
 | Option | What it does |
 | ------ | ------------ |
@@ -83,9 +83,9 @@ Provisioning downloads a model and a dataset from Hugging Face into your workspa
 
 From a job's detail page, open the actions menu (**⋯**) and select **Clone** to open **Fine-tune a Model** pre-filled with that job's settings. Adjust any fields before submitting to start a new job.
 
-## Custom Models List
+## Fine-tuned Models List
 
-The Custom Models list shows fine-tuned models created in the current workspace. Select a row to open the model details side panel, which includes **Model Details** and **Chat Playground** tabs, a **Customize this Model** action, an **Evaluate this Model** action, and a **View Intake Traces** link when intake is enabled.
+The list shows fine-tuned models created in the current workspace. Select a row to open the model details side panel, which includes **Model Details** and **Chat Playground** tabs, a **Customize this Model** action, an **Evaluate this Model** action, and a **View Intake Traces** link when intake is enabled.
 
 ## Customization Job Details
 

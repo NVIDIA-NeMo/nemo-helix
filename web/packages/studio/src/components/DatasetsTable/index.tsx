@@ -59,6 +59,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     handleDatasetDeleted,
     handleDeleteDataset,
     handleBulkDeleteSuccess,
+    handleBulkDeleteSettled,
     handleModalClose,
   } = useDatasetsTable({
     onDatasetsSelected,
@@ -126,6 +127,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
                 <DatasetBulkDeleteModal
                   selectedDatasets={selectedRows}
                   onConfirmSuccess={handleBulkDeleteSuccess}
+                  onSettled={handleBulkDeleteSettled}
                   slotTrigger={
                     <Button kind="tertiary" aria-label="Delete selected datasets">
                       <Trash />

@@ -3,7 +3,7 @@
 
 """Container entrypoint for the audit job.
 
-Invoked as ``python -m nemo_auditor.tasks.audit`` inside the nhx-cpu-tasks container.
+Invoked as ``python -m nemo_auditor.tasks.audit`` inside the nhx-tasks container.
 Builds the task SDK, then dispatches to :class:`~nemo_auditor.jobs.audit.AuditJob`.
 The SIGTERM handler installed here is overridden by the one in ``AuditJob.run()``
 before the probe loop begins, so partial-result aggregation is handled by the job.

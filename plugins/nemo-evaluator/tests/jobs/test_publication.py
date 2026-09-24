@@ -16,17 +16,18 @@ from typing import Any
 import httpx
 import pytest
 from nemo_evaluator.api.schemas import MetricInline
+from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
     AgentEvalTaskInput,
-    AgentEvalTaskSpec,
     AgentTarget,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    ResolvedTask,
     Target,
     target_agent_identity,
 )
@@ -587,7 +588,7 @@ def _job_context(tmp_path: Path, *, job_id: str | None = None) -> JobContext:
 
 def _job_spec(*, required: bool = True) -> AgentEvalSpec:
     return AgentEvalSpec(
-        tasks=[AgentEvalTaskSpec(id="task-1", intent="Answer.")],
+        tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
         target=FabricRunnerTarget(config={}, model="p/m"),
         publication=PublicationSpec(
             intake=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", required=required)
@@ -599,7 +600,10 @@ def test_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker:
     mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     client = _FakeClient()
 
-    spec = AgentEvalSpec(tasks=[AgentEvalTaskSpec(id="task-1", intent="Answer.")], target=FabricRunnerTarget(config={}))
+    spec = AgentEvalSpec(
+        tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
+        target=FabricRunnerTarget(config={}),
+    )
     result = AsyncAgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), async_client=client)
 
     assert "publication" not in result

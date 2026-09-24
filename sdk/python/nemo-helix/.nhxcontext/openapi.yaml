@@ -11281,7 +11281,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -14186,7 +14186,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -14357,7 +14357,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -19444,7 +19444,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -20701,7 +20701,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:

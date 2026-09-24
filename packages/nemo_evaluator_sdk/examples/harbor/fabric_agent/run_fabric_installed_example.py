@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 BARE_HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "bare_hello_world_dataset"
 FABRIC_INSTALLED_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent"
 DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-DEFAULT_FABRIC_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0b1"
+DEFAULT_FABRIC_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0"
 
 
 def api_key_env_for(model: str, override: str | None) -> str:

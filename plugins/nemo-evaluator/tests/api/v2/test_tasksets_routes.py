@@ -10,6 +10,7 @@ Covers route wiring, the get_taskset_service dependency, and status-code mapping
 from __future__ import annotations
 
 import hashlib
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -23,6 +24,12 @@ from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityN
 
 class _FakeTaskService:
     """Resolves the member tasks the route tests reference so create-time validation passes."""
+
+    async def head_by_id(self, task_id):
+        raise NotImplementedError("Use the real TaskService for ID tests")
+
+    async def resolve_head_revision(self, head):
+        raise NotImplementedError("Use the real TaskService for ID tests")
 
     async def get_task(self, workspace: str, name: str) -> object | None:
         return object() if name in {"task-a", "task-b"} else None
@@ -38,7 +45,7 @@ class _FakeTaskService:
 def client(entity_store) -> TestClient:
     app = FastAPI()
     app.include_router(tasksets_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TasksetService(entity_store, _FakeTaskService())
+    service = TasksetService(entity_store, _FakeTaskService(), authorize_task_read=AsyncMock())
     app.dependency_overrides[get_taskset_service] = lambda: service
     return TestClient(app)
 
@@ -48,7 +55,7 @@ def _body(*, description: str = "A grouping.", members: list[str] | None = None,
         description=description,
         tasks=[TaskRef(m) for m in (members or ["task-a", "default/task-b"])],
         tags=tags or [],
-    ).model_dump(mode="json")
+    ).model_dump(mode="json", exclude_unset=True)
 
 
 _BASE = "/v2/workspaces/default/tasksets"

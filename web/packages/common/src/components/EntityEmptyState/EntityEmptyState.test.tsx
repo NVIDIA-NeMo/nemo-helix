@@ -60,6 +60,21 @@ describe('EntityEmptyState', () => {
       expect(onCreate).toHaveBeenCalledTimes(1);
     });
 
+    it('labels the self-service help as an alternative to the create CTA', () => {
+      wrap(<Guardrails onCreate={vi.fn()} />);
+
+      expect(screen.getByTestId('entity-empty-state-alternative')).toHaveTextContent(
+        'Or use a coding agent or the CLI:'
+      );
+    });
+
+    it('omits the alternative label when there is no create CTA', () => {
+      wrap(<Guardrails />);
+
+      expect(screen.queryByTestId('entity-empty-state-alternative')).not.toBeInTheDocument();
+      expect(screen.getByTestId('entity-empty-state-help')).toBeInTheDocument();
+    });
+
     it('omits the create CTA when neither onCreate nor a route is available', () => {
       wrap(<Guardrails />);
 

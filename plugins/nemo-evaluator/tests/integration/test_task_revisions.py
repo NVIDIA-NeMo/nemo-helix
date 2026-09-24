@@ -17,13 +17,12 @@ So these tests target exactly the things only a real entity store can confirm:
 - a published revision is immutable in practice: reading a pinned digest returns the old content
   after the task has moved on.
 
-Pure CRUD (no online target or IGW), so it only needs the host subprocess backend. Shares the evaluator-plugin
-integration opt-in (``RUN_AGENT_EVAL_INTEGRATION``) and the session-scoped ``subprocess_platform``.
+Pure CRUD (no online target or IGW), so it only needs the host subprocess backend, through conftest's
+session-scoped ``subprocess_platform``.
 """
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -40,13 +39,7 @@ from nemo_helix_plugin.sdk import NeMoHelix
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 WORKSPACE = "default"
 
@@ -275,16 +268,29 @@ def test_republishing_a_taskset_after_a_member_moves_cuts_a_revision(subprocess_
 # --- Harbor-kind tasks --------------------------------------------------------
 
 
-def _harbor_input(digest: str = "a" * 64, *, config: dict | None = None) -> TaskInput:
-    return TaskInput(
-        spec=HarborTaskDefinition(
-            kind="harbor",
-            archive_ref="default/harbor-tasks#packages/org-name/abc/dist.tar.gz",
-            archive_digest=digest,
-            instruction="Fix the failing test.",
-            config=config if config is not None else {"verifier": {"type": "pytest"}},
+def _harbor_input(client, digest: str = "a" * 64, *, config: dict | None = None) -> TaskInput:
+    from nemo_evaluator.harbor.publication import publish_harbor_task_archive
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import private_directory
+    from nemo_helix_plugin.files.client import FilesClient
+
+    with private_directory() as parent:
+        root = parent / "task"
+        for name, text in {
+            "task.toml": "",
+            "instruction.md": "Fix the failing test.",
+            "environment/Dockerfile": "FROM ubuntu",
+            "tests/test.sh": "exit 0",
+            "version.txt": digest,
+        }.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        definition = publish_harbor_task_archive(
+            root, files_client=FilesClient(base_url=str(client.base_url)), fileset_ref="default/harbor-revision-tests"
         )
-    )
+    if config is not None:
+        definition.config = config  # Server must replace this untrusted projection.
+    return TaskInput(spec=definition)
 
 
 @pytest.mark.timeout(300)
@@ -294,7 +300,7 @@ def test_harbor_and_evaluator_tasks_coexist(subprocess_platform: str) -> None:
     client = _client(subprocess_platform)
     harbor_name, evaluator_name = _unique("harbor"), _unique("evaluator")
     try:
-        harbor = client.evaluator.tasks.create(harbor_name, task=_harbor_input(), workspace=WORKSPACE)
+        harbor = client.evaluator.tasks.create(harbor_name, task=_harbor_input(client), workspace=WORKSPACE)
         evaluator = client.evaluator.tasks.create(evaluator_name, task=_task_input(), workspace=WORKSPACE)
 
         assert harbor.spec.kind == "harbor"
@@ -315,13 +321,13 @@ def test_harbor_task_round_trips_through_the_store(subprocess_platform: str) -> 
     client = _client(subprocess_platform)
     name = _unique("harbor")
     try:
-        client.evaluator.tasks.create(name, task=_harbor_input(), workspace=WORKSPACE)
+        client.evaluator.tasks.create(name, task=_harbor_input(client), workspace=WORKSPACE)
 
         fetched = client.evaluator.tasks.retrieve(name, workspace=WORKSPACE)
         assert isinstance(fetched.spec, HarborTaskDefinition)
         assert fetched.spec.kind == "harbor"
-        assert fetched.spec.archive_digest == "a" * 64
-        assert fetched.spec.config == {"verifier": {"type": "pytest"}}
+        assert len(fetched.spec.source.files_hash) == 64
+        assert fetched.spec.config == {}
         assert fetched.spec.instruction == "Fix the failing test."
     finally:
         client.evaluator.tasks.delete(name, workspace=WORKSPACE)
@@ -330,20 +336,22 @@ def test_harbor_task_round_trips_through_the_store(subprocess_platform: str) -> 
 @pytest.mark.timeout(300)
 def test_harbor_config_changes_do_not_cut_a_revision(subprocess_platform: str) -> None:
     """`config` is excluded from the digest because it is a projection of task.toml inside the
-    archive. Confirmed end-to-end, since the exclusion is applied where the digest is computed."""
+    tree. Confirmed end-to-end, since the exclusion is applied where the digest is computed."""
     client = _client(subprocess_platform)
     name = _unique("harbor")
     try:
-        client.evaluator.tasks.create(name, task=_harbor_input(), workspace=WORKSPACE)
+        client.evaluator.tasks.create(name, task=_harbor_input(client), workspace=WORKSPACE)
 
         same = client.evaluator.tasks.replace(
-            name, task=_harbor_input(config={"verifier": {"type": "pytest"}, "new_field": 1}), workspace=WORKSPACE
+            name,
+            task=_harbor_input(client, config={"verifier": {"type": "pytest"}, "new_field": 1}),
+            workspace=WORKSPACE,
         )
         assert same.revision == 1, "a config-only change must not publish"
         assert isinstance(same.spec, HarborTaskDefinition)
-        assert same.spec.config["new_field"] == 1
+        assert same.spec.config == {}
 
-        moved = client.evaluator.tasks.replace(name, task=_harbor_input(digest="b" * 64), workspace=WORKSPACE)
-        assert moved.revision == 2, "an archive change must publish"
+        moved = client.evaluator.tasks.replace(name, task=_harbor_input(client, digest="b" * 64), workspace=WORKSPACE)
+        assert moved.revision == 2, "a tree change must publish"
     finally:
         client.evaluator.tasks.delete(name, workspace=WORKSPACE)

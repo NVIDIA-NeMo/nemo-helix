@@ -231,8 +231,9 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       "Sweep your agent's parameters against an evaluation to find a config that scores better.",
     cliCommand:
-      'nemo agents optimize submit --optimize-config <config>.yaml --fileset <bundle> --agent <agent-name> --workspace <workspace>',
+      'nemo agents optimize --optimize-config-fileset <workspace>/<bundle> --optimize-config <config>.yaml --agent <agent-name> --workspace <workspace>',
     skillPrompt: 'Help me run my first agent optimization with the nemo-optimization skill',
+    createAction: { label: 'Optimize' },
   },
   agents: {
     heading: 'No agents yet',

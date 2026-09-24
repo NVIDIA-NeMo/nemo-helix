@@ -51,7 +51,7 @@ export const BackendSelectionSection = () => {
               value={b.value}
               label={<Text kind="body/bold/lg">{b.title}</Text>}
               description={
-                <Text kind="body/regular/md" color="secondary">
+                <Text className="text-secondary" kind="body/regular/md">
                   {b.description}
                 </Text>
               }

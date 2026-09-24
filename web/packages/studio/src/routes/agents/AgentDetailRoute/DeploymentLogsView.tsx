@@ -11,9 +11,9 @@ import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { Block, Select, Stack, Text } from '@nvidia/foundations-react-core';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { streamSse } from '@studio/util/sseStream';
 import { type FC, useEffect, useMemo, useState } from 'react';
-import { useAuth } from 'react-oidc-context';
 
 interface DeploymentLogsViewProps {
   workspace: string;
@@ -118,7 +118,7 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
 
   const [streamedLines, setStreamedLines] = useState<HelixJobLog[]>([]);
 
-  const accessToken = useAuth()?.user?.access_token;
+  const accessToken = useOidcBearerToken();
   const tailOffset = data?.next_offset;
 
   // Also keyed on tailOffset: a refetch re-baselines `data` to the latest tail and

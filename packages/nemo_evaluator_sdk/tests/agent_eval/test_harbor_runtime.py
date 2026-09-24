@@ -7,12 +7,15 @@ import importlib
 import json
 import logging
 import os
+import shutil
 import sys
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -42,6 +45,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import (
     SemanticReducer,
     SemanticView,
     ViewSignal,
+    as_base_task,
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialError
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
@@ -60,6 +64,90 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 _HARBOR_ERROR_RESULT = _FIXTURES / "harbor_error_result.json"
 _EXPECTED_MAX_TRACEBACK_CHARS = 8192
 _MISSING = object()
+
+
+@pytest.mark.parametrize("directory", ["omitted", "none", "path"])
+def test_jobs_dir_is_optional_until_execution(directory, tmp_path):
+    options = {} if directory == "omitted" else {"jobs_dir": None if directory == "none" else tmp_path}
+    config = HarborRuntimeConfig(**options)
+    assert config.jobs_dir == (tmp_path if directory == "path" else None)
+    info = HarborAgentTaskRunner(config=config).runner_info()
+    assert info.config["jobs_dir"] == (str(tmp_path) if directory == "path" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["runner", "convenience"])
+async def test_missing_jobs_dir_fails_before_loading_or_running(entrypoint, tmp_path, monkeypatch):
+    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+
+    config = HarborRuntimeConfig()
+    dependencies = [
+        (harbor_runtime, "_dataset_path_from_tasks"),
+        (harbor_runtime.HarborTasksetLoader, "load"),
+        (harbor_runtime, "_cache_stamp"),
+        (harbor_runtime, "_build_native_job"),
+    ]
+    guards = []
+    for owner, name in dependencies:
+        guard = Mock(side_effect=AssertionError(f"unexpected {name}"))
+        monkeypatch.setattr(owner, name, guard)
+        guards.append(guard)
+    with pytest.raises(ValueError, match="jobs_dir is required for local Harbor execution"):
+        if entrypoint == "runner":
+            await HarborAgentTaskRunner(config=config).run_tasks([])
+        else:
+            await harbor_runtime.run_harbor_eval(config, tmp_path / "missing-dataset")
+    for guard in guards:
+        guard.assert_not_called()
+
+
+@pytest.mark.parametrize("helper", ["resolve", "cache", "build", "build_named"])
+def test_native_helpers_require_jobs_dir(helper, tmp_path):
+    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+
+    config = HarborRuntimeConfig()
+    with pytest.raises(ValueError, match="jobs_dir is required for local Harbor execution"):
+        if helper == "resolve":
+            harbor_runtime._resolve_job_dir(config)
+        elif helper == "cache":
+            harbor_runtime._cache_stamp(config, tmp_path, [])
+        else:
+            harbor_runtime._build_native_job(
+                config, tmp_path, None, job_name="named" if helper == "build_named" else None
+            )
+
+
+@pytest.mark.asyncio
+async def test_native_job_captures_validated_jobs_dir(tmp_path, monkeypatch):
+    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+
+    jobs_dir = tmp_path / "jobs"
+    config = HarborRuntimeConfig(jobs_dir=jobs_dir, agent_import_path="wrapper:Agent", agent_dir=tmp_path)
+    captured = []
+
+    async def create(job_config):
+        captured.append(job_config)
+        return _FakeJob()
+
+    _stub_harbor(monkeypatch, create)
+
+    class StorageConfig(_DriftConfig):
+        jobs_dir: Path
+
+    monkeypatch.setattr(sys.modules["harbor.job"], "JobConfig", StorageConfig)
+    exclusions = []
+
+    @contextmanager
+    def scoped_import(agent_dir, import_path, *, exclude):
+        exclusions.append(exclude)
+        yield import_path
+
+    monkeypatch.setattr(harbor_runtime, "scoped_harbor_agent_import", scoped_import)
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="named")
+    config.jobs_dir = None
+    await run_job()
+    assert captured[0].jobs_dir == jobs_dir
+    assert exclusions == [frozenset({jobs_dir.resolve()})]
 
 
 class _BadFloat(float):
@@ -197,6 +285,7 @@ async def test_primary_reward_matrix_survives_adaptation_and_metric_diagnostics(
     if raw is not _MISSING:
         rewards["score"] = raw
     trial = _adapt_raw_trial(tmp_path, rewards=rewards, reward_key="score")
+    assert trial.metadata["harbor_primary_reward_key"] == "score"
     result = await HarborRewardMetric(output_name="score", reward_keys=("score",)).compute_scores(
         MetricInput(row=DatasetRow(data={}), candidate=CandidateOutput(metadata=trial.metadata))
     )
@@ -481,6 +570,8 @@ async def test_errored_harbor_rewards_and_metric_owned_exclusions_are_independen
     )
 
     result = await AgentEvaluator().run(tasks=[task], target=HarborAgentTaskRunner(job_dir=job_dir))
+
+    assert all(trial.metadata["harbor_primary_reward_key"] == "reward" for trial in result.trials)
 
     assert [(trial.id, trial.status) for trial in result.trials] == [
         ("t__a_success", AgentEvalTrialStatus.COMPLETED),
@@ -1149,6 +1240,30 @@ async def test_task_subset_of_a_cached_run_still_hits(tmp_path: Path) -> None:
     _write_cache_stamp(job_dir, _cache_stamp(config, dataset_path, [task_a, task_b]))
 
     assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task_a])) is False
+
+
+def test_unfiltered_stamp_covers_whole_dataset_for_untyped_subset(tmp_path: Path) -> None:
+    # A hand-built base task (no harbor_task_dir, so no task_names filter) makes
+    # Harbor run the whole dataset. The discovered siblings are typed Harbor tasks;
+    # merging them unchanged with the base request made _cache_stamp raise
+    # "Cannot mix discovered Harbor tasks with plain AgentEvalTask objects" before Harbor started.
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_stamp, _stamp_coverage
+
+    dataset_path = tmp_path / "dataset"
+    for name in ("t", "u"):
+        task_dir = dataset_path / name
+        shutil.copytree(_HELLO_WORLD_DATASET / "hello-world", task_dir)
+        config_path = task_dir / "task.toml"
+        config_path.write_text(config_path.read_text().replace("harbor/hello-world", f"harbor/{name}"))
+    requested = AgentEvalTask(id="harbor/t", intent="x", inputs={"instruction": "x"}, metrics=[HarborRewardMetric()])
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="cached-job")
+
+    coverage = _stamp_coverage(dataset_path, [requested], None)
+    stamp = _cache_stamp(config, dataset_path, coverage)
+
+    assert [type(task) for task in coverage] == [AgentEvalTask, AgentEvalTask]
+    assert set(stamp["tasks"]) == {"harbor/t", "harbor/u"}
+    assert "<unresolved>" not in stamp["tasks"].values()
 
 
 def test_unpinned_job_name_writes_no_stamp_and_reads_no_files(tmp_path: Path) -> None:
@@ -3058,3 +3173,58 @@ async def test_an_unreadable_otlp_trace_is_not_promoted_over_a_valid_atif_one(tm
     assert isinstance(await trial.evidence.trace(), ATIFTraceHandle)
     # The malformed file is demoted, not hidden.
     assert trial.get_evidence("trace:otlp") is not None
+
+
+def test_typed_sources_reject_mixed_tasks(tmp_path: Path) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _typed_task_dirs
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+
+    typed = HarborAgentEvalTask(id="typed", intent="typed", inputs={}, source_dir=tmp_path)
+    base = AgentEvalTask(id="base", intent="base", inputs={})
+    with pytest.raises(ValueError, match="Cannot mix discovered Harbor tasks") as excinfo:
+        _typed_task_dirs([typed, base])
+    # The message names the offending plain tasks and both ways out.
+    assert "['base']" in str(excinfo.value)
+    assert "discover_harbor_tasks()" in str(excinfo.value)
+    assert "as_base_task()" in str(excinfo.value)
+
+
+def test_as_base_task_downcasts_a_discovered_task_for_a_plain_run() -> None:
+    # A discovered task cannot be rebuilt through the base model: source_dir is an extra field.
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _task_dirs_for
+
+    task = discover_harbor_tasks(_HELLO_WORLD_DATASET)[0]
+    with pytest.raises(ValidationError, match="source_dir"):
+        AgentEvalTask.model_validate(dict(task))
+
+    plain = as_base_task(task)
+
+    assert type(plain) is AgentEvalTask
+    assert plain.metrics == task.metrics
+    assert plain.metadata == task.metadata
+    assert as_base_task(plain) is plain
+    # A plain run resolves the package through dataset_path, as the error message suggests.
+    assert _task_dirs_for(_HELLO_WORLD_DATASET, [plain]) == {plain.id: _HELLO_WORLD_DATASET / "hello-world"}
+
+
+@pytest.mark.parametrize("constructed", [False, True])
+@pytest.mark.parametrize("invalid", ["missing_config", "symlink"])
+def test_typed_sources_reject_invalid_directories(tmp_path: Path, constructed: bool, invalid: str) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _typed_task_dirs
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+
+    source = tmp_path / "task"
+    source.mkdir()
+    if invalid == "symlink":
+        (source / "task.toml").write_text("")
+        link = tmp_path / "link"
+        link.symlink_to(source, target_is_directory=True)
+        source = link
+    fields = dict(id="task", intent="task", inputs={}, source_dir=source)
+    task = (
+        HarborAgentEvalTask.model_construct(id="task", intent="task", inputs={}, source_dir=source)
+        if constructed
+        else HarborAgentEvalTask.model_validate(fields)
+    )
+    with pytest.raises(ValueError, match="Invalid Harbor source directory"):
+        _typed_task_dirs([task])

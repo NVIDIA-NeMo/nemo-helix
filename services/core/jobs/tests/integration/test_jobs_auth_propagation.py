@@ -25,6 +25,10 @@ from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
 from nhx.testing import as_user, create_test_client, short_unique_name, unique_email
 
+# sdk is module-scoped (expensive to boot, auth_enabled=True): keep this file's tests on
+# one xdist worker so they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("jobs_auth_propagation")
+
 
 @pytest.fixture(scope="module")
 def sdk() -> Generator[NeMoHelix, None, None]:

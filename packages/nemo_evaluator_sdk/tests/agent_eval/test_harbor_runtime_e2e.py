@@ -232,7 +232,7 @@ async def test_nemo_fabric_agent_runs_deepagents_on_nemotron_inside_harbor(tmp_p
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
         agent_kwargs={
             "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
-            "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+            "fabric_package": "nemo-fabric[deepagents]==0.3.0",
             "fabric_workspace": "/app",
         },
         agent_model_name=os.environ.get("NEMO_FABRIC_TEST_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),

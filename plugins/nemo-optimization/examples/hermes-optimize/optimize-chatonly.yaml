@@ -7,6 +7,7 @@
 # Then launch it with:
 #   nemo agents optimize --optimize-config-fileset default/hermes-optimize-chatonly --optimize-config optimize-chatonly.yaml --workspace default
 #
+# Models route through the platform inference gateway (README setup step 5).
 # See README.md in this directory for install + run steps.
 schema_version: fabric.agent/v1alpha1
 metadata:
@@ -22,17 +23,16 @@ harness:
 models:
   default:
     provider: nvidia
-    # inference-api.nvidia.com model ids are often prefixed (e.g. nvidia/meta/...).
-    model: nvidia/nvidia/nemotron-3-nano-30b-a3b
-    base_url: https://inference-api.nvidia.com/v1
-    api_key_env: NVIDIA_API_KEY
+    model: nvidia-nemotron-3-super-120b-a12b
+    base_url: ${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1
+    api_key_env: NEMO_AGENTS_IGW_API_KEY
     temperature: 0.0
     top_p: 1.0
   judge:
     provider: nvidia
-    model: nvidia/nvidia/nemotron-3-nano-30b-a3b
-    base_url: https://inference-api.nvidia.com/v1
-    api_key_env: NVIDIA_API_KEY
+    model: nvidia-nemotron-3-super-120b-a12b
+    base_url: ${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1
+    api_key_env: NEMO_AGENTS_IGW_API_KEY
     temperature: 0.0
     max_tokens: 512
 instructions:
@@ -50,6 +50,9 @@ environment:
   provider: local
   workspace: ./.tmp/workspace
   artifacts: ./artifacts
+  # The gateway holds the provider key; this placeholder only satisfies the adapter.
+  env:
+    NEMO_AGENTS_IGW_API_KEY: not-used
 optimizer:
   numeric:
     enabled: true

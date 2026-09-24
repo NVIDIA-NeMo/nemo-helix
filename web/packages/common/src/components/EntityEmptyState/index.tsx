@@ -14,6 +14,7 @@ import {
   Flex,
   SegmentedControl,
   StatusMessage,
+  Text,
 } from '@nvidia/foundations-react-core';
 import { type FC, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -93,6 +94,7 @@ export const EntityEmptyState: FC<EntityEmptyStateProps> = ({
   const skillPrompt = resolveWorkspace(descriptor.skillPrompt, workspace);
   const handleCreate =
     onCreate ?? (createAction?.to ? () => navigate(createAction.to as string) : undefined);
+  const showCreate = !!createAction && !!handleCreate;
 
   return (
     <Centered className={className} testId="entity-empty-state-first-use">
@@ -101,7 +103,7 @@ export const EntityEmptyState: FC<EntityEmptyStateProps> = ({
         slotHeading={heading}
         slotSubheading={subheading}
         slotFooter={
-          createAction && handleCreate ? (
+          showCreate ? (
             <Button color="brand" onClick={handleCreate}>
               {createAction.label}
             </Button>
@@ -110,6 +112,15 @@ export const EntityEmptyState: FC<EntityEmptyStateProps> = ({
       />
       {(cliCommand || skillPrompt) && (
         <div className="mt-4 w-full max-w-[40rem]">
+          {showCreate ? (
+            <Text
+              kind="body/regular/sm"
+              className="block text-center text-secondary"
+              data-testid="entity-empty-state-alternative"
+            >
+              Or use a coding agent or the CLI:
+            </Text>
+          ) : null}
           <SelfServiceHelp cliCommand={cliCommand} skillPrompt={skillPrompt} />
         </div>
       )}

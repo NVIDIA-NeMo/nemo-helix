@@ -16,7 +16,17 @@ COMMON_IMPL = Path("tools/rename/rename_common.py")
 # This patch contains NMP commands that we still want to keep
 PATCH_PATH = Path("docker/rl/patches/nemo-rl-gym-host-hf-cache.patch")
 TEST_PATH = Path("tests/tools/rename/test_rename_tools.py")
-IGNORE_PATHS = {RENAME_SCRIPT, RENAME_IMPL, VERIFY_SCRIPT, VERIFY_IMPL, COMMON_IMPL, PATCH_PATH, TEST_PATH}
+GITIGNORE_PATH = Path(".gitignore")
+IGNORE_PATHS = {
+    RENAME_SCRIPT,
+    RENAME_IMPL,
+    VERIFY_SCRIPT,
+    VERIFY_IMPL,
+    COMMON_IMPL,
+    PATCH_PATH,
+    TEST_PATH,
+    GITIGNORE_PATH,
+}
 
 PRODUCT_REPLACEMENTS = [
     ("NeMo Platform", "NeMo Helix"),

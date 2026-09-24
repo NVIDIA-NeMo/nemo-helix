@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from nemo_evaluator_sdk.metrics.runner_rewards import HarborRewardMetric
 
 import contextlib
+import glob
 import hashlib
 import importlib.machinery
 import json
@@ -47,7 +48,7 @@ import re
 import shutil
 import sys
 import threading
-import tomllib
+import warnings
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,27 +56,37 @@ from types import ModuleType
 from typing import Any
 
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
-from nemo_evaluator_sdk.agent_eval.reward_keys import ParsedHarborRewards, validate_reward_key
+from nemo_evaluator_sdk.agent_eval.reward_keys import validate_reward_key
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
+    TASK_CONFIG_FILENAME,
+    TASK_TEMPLATE_DIRNAME,
+    capture_validated_task,
+    local_task_identity,
+    normalize_harbor_instruction,
+    private_directory,
+)
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import harbor_scoring_metrics
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import (
+    HARBOR_DATASET_PATH_KEY,
+    HARBOR_TASK_DIR_KEY,
+    HarborAgentEvalTask,
+    HarborTaskCollection,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
     _HARBOR_EXTRA_REQUIRED_MESSAGE,
     _iter_harbor_trial_results,
     _trial_from_harbor_result,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials, require_no_plaintext_credentials
-from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, AgentEvalTaskset
+from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, AgentEvalTaskset, as_base_task
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
-from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.metrics.protocol import Metric
-from nemo_evaluator_sdk.metrics.utils import metric_type_name
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 logger = logging.getLogger(__name__)
 
 # Default reward key inside Harbor's ``verifier_result.rewards`` mapping.
 DEFAULT_REWARD_KEY = "reward"
-# Filename that marks a directory as a Harbor task, and the template dir to skip.
-_TASK_CONFIG_FILENAME = "task.toml"
-_TASK_TEMPLATE_DIRNAME = "task_template"
 # Synthetic sys.modules root a custom ``import_path`` agent package is injected under.
 _AGENT_IMPORT_ROOT = "_nemo_evaluator_harbor_agents"
 # Guards the sys.modules mutation while injecting/removing scoped agent packages.
@@ -110,9 +121,6 @@ _HARBOR_RESUME_REFUSALS = ("resumed with a different config", "does not match th
 # Cap on each value rendered into the "what differed" log line: enough for a scalar
 # like `n_concurrent_trials`, bounded for a whole nested `agents` list.
 _DRIFT_VALUE_CHARS = 80
-# Markdown instruction files may carry repository license comments. Those are file metadata, not
-# agent-facing task instructions.
-_SPDX_HTML_COMMENT_RE = re.compile(r"<!--\s*SPDX-(?:FileCopyrightText|License-Identifier):[^>]*-->\s*")
 # Derived/VCS noise skipped when digesting a directory. Deliberately NOT skipped:
 # `node_modules` and other vendored dependency trees, which ship with the agent and
 # change what it does. `.venv`/`.uv` stay skipped because they are environment, not
@@ -131,7 +139,11 @@ class HarborRuntimeConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    jobs_dir: Path = Field(description="Parent directory Harbor writes the ``<job_name>/`` results tree into.")
+    jobs_dir: Path | None = Field(
+        default=None,
+        description="Parent directory Harbor writes the ``<job_name>/`` results tree into. Required for local "
+        "execution; may be omitted for platform submission, where the worker supplies managed storage.",
+    )
     job_name: str | None = Field(default=None, description="Harbor job name; a timestamp is generated when omitted.")
     agent_name: str | None = Field(
         default="oracle",
@@ -277,7 +289,7 @@ class HarborAgentTaskRunner:
                 # Native mode resolves the concrete job directory inside run_tasks (the name defaults
                 # to a timestamp), so record the configured location rather than a not-yet-known path.
                 "job_dir": str(self._job_dir) if self._job_dir is not None else None,
-                "jobs_dir": str(config.jobs_dir) if config is not None else None,
+                "jobs_dir": str(config.jobs_dir) if config is not None and config.jobs_dir is not None else None,
                 "job_name": config.job_name if config is not None else None,
                 "reward_key": self._reward_key,
             },
@@ -294,6 +306,9 @@ class HarborAgentTaskRunner:
         carries ``metadata['harbor_dataset_path']`` from
         :func:`discover_harbor_tasks`) unless a ``dataset_path`` override was given,
         so callers don't repeat it.
+
+        Native execution requires ``config.jobs_dir``; a missing directory raises
+        ``ValueError`` before resolving the dataset or accessing local storage.
 
         ``job_dir`` doubles as a cache. Results are served straight off it only when
         **both** hold: every requested task already has ``n_attempts`` Harbor-valid
@@ -317,7 +332,23 @@ class HarborAgentTaskRunner:
         volume will race.
         """
         if self._config is not None:
+            _require_jobs_dir(self._config)
+            typed_paths = _typed_task_dirs(tasks)
             dataset_path = self._dataset_path or _dataset_path_from_tasks(tasks)
+            folder_names = _harbor_folder_names(tasks)
+            if typed_paths is not None:
+                dataset_path = Path(dataset_path).absolute()
+                if len(typed_paths) == 1 and dataset_path == typed_paths[0]:
+                    dataset_path = dataset_path.parent
+                if dataset_path != typed_paths[0].parent:
+                    raise ValueError("Harbor dataset override differs from typed source directories")
+                from harbor.models.job.config import DatasetConfig
+
+                selected = await DatasetConfig(path=dataset_path, task_names=folder_names).get_task_configs()
+                if any(entry.path is None for entry in selected) or {
+                    entry.path.absolute() for entry in selected if entry.path is not None
+                } != set(typed_paths):
+                    raise ValueError("Native Harbor selection differs from typed source directories")
             job_name, job_dir = _resolve_job_dir(self._config)
 
             # Only fingerprint when the answer can depend on it: an unpinned job name
@@ -335,7 +366,7 @@ class HarborAgentTaskRunner:
                 # come from `[task] name`. Prefer folder names derived from the tasks
                 # actually being scored so a filter like `harbor/hello-world` still
                 # selects the `hello-world/` directory.
-                harbor_task_names = _harbor_folder_names(tasks) or self._task_names
+                harbor_task_names = folder_names or self._task_names
                 job_dir, run_job = _build_native_job(
                     self._config,
                     dataset_path,
@@ -398,33 +429,41 @@ class HarborAgentTaskRunner:
         ``agent_eval/trials.py``. It adds secondary rewards discovered in this task's trials as
         optional outputs.
         """
-        keys: set[str] = set()
-        for metric in task.metrics:
-            if metric_type_name(metric) == MetricType.HARBOR_REWARD:
-                keys.update(output.name for output in metric.output_spec() if not output.required)
-        for trial in trials:
-            # A reward the verifier emitted but the adapter could not use still names an output:
-            # the metric declares it and reports the rejection, rather than hiding the key.
-            rewards = ParsedHarborRewards.from_metadata(trial.metadata)
-            keys.update(rewards.values)
-            keys.update(rewards.rejected_by_key)
-        reward_keys = (self._reward_key, *sorted(keys - {self._reward_key}))
-        # ``output_name`` is deliberately the runner's ``reward_key``, not the task metric's own:
-        # ``discover_harbor_tasks`` builds ``HarborRewardMetric()`` with the default name, and a run
-        # with ``reward_key="score"`` relies on this rename. It is why this hook lives on the runner
-        # rather than on the metric.
-        return [
-            _harbor_reward_metric(output_name=self._reward_key, reward_keys=reward_keys)
-            if metric_type_name(metric) == MetricType.HARBOR_REWARD
-            else metric
-            for metric in task.metrics
-        ]
+        return harbor_scoring_metrics(task, trials, reward_key=self._reward_key)
+
+
+def _typed_task_dirs(tasks: Sequence[AgentEvalTask]) -> list[Path] | None:
+    """Validate typed source membership without trusting informational metadata."""
+    typed = [task for task in tasks if isinstance(task, HarborAgentEvalTask)]
+    if not typed:
+        return None
+    if len(typed) != len(tasks):
+        plain = [task.id for task in tasks if not isinstance(task, HarborAgentEvalTask)]
+        raise ValueError(
+            "Cannot mix discovered Harbor tasks with plain AgentEvalTask objects. "
+            f"Plain tasks: {plain}. Either rediscover them with discover_harbor_tasks(), or run every "
+            "task as a plain task: convert each with as_base_task() and pass "
+            "HarborAgentTaskRunner(dataset_path=...)."
+        )
+    paths = []
+    for task in typed:
+        # Scoring views are validated after the runner supplies reward outputs.
+        path = Path(task.source_dir).absolute()
+        if path.is_symlink() or not path.is_dir() or not (path / TASK_CONFIG_FILENAME).is_file():
+            raise ValueError(f"Invalid Harbor source directory: {path}")
+        paths.append(path)
+    if len(set(paths)) != len(paths) or len({p.parent for p in paths}) != 1:
+        raise ValueError("Harbor tasks require distinct directories under one dataset root")
+    return paths
 
 
 def _dataset_path_from_tasks(tasks: Sequence[AgentEvalTask]) -> Path:
     """Recover the Harbor dataset dir stamped on tasks by :func:`discover_harbor_tasks`."""
+    paths = _typed_task_dirs(tasks)
+    if paths is not None:
+        return paths[0].parent
     for task in tasks:
-        stamped = task.metadata.get("harbor_dataset_path")
+        stamped = task.metadata.get(HARBOR_DATASET_PATH_KEY)
         if isinstance(stamped, str) and stamped:
             return Path(stamped)
     raise ValueError(
@@ -443,9 +482,12 @@ def _harbor_folder_names(tasks: Sequence[AgentEvalTask]) -> list[str] | None:
     the ``hello-world/`` directory. Return ``None`` when any task is missing that
     stamp so callers can fall back to an explicit filter.
     """
+    paths = _typed_task_dirs(tasks)
+    if paths is not None:
+        return [glob.escape(path.name) for path in paths]
     names: list[str] = []
     for task in tasks:
-        stamped = task.metadata.get("harbor_task_dir")
+        stamped = task.metadata.get(HARBOR_TASK_DIR_KEY)
         if not isinstance(stamped, str) or not stamped:
             return None
         names.append(Path(stamped).name)
@@ -628,10 +670,15 @@ def _task_dirs_for(dataset_path: Path, tasks: Sequence[AgentEvalTask]) -> dict[s
     # `_safe_resolve`, not bare `resolve()`: this walk is a best-effort cache guard, so
     # a symlink that vanishes mid-run must degrade to an unresolved absolute path
     # rather than raise out of a job that would otherwise succeed.
+    paths = _typed_task_dirs(tasks)
+    if paths is not None:
+        if Path(dataset_path).absolute() != paths[0].parent:
+            raise ValueError("Harbor dataset differs from typed source directories")
+        return {task.id: path for task, path in zip(tasks, paths, strict=True)}
     dataset_root = _safe_resolve(dataset_path)
     resolved: dict[str, Path | None] = {}
     for task in tasks:
-        stamped = task.metadata.get("harbor_task_dir")
+        stamped = task.metadata.get(HARBOR_TASK_DIR_KEY)
         candidate = Path(stamped) if isinstance(stamped, str) and stamped else None
         # The stamp records where a task was *discovered*, which is not necessarily
         # where this run executes it: `dataset_path` can be overridden on the runner.
@@ -653,9 +700,17 @@ def _task_dirs_for(dataset_path: Path, tasks: Sequence[AgentEvalTask]) -> dict[s
         return resolved
 
     try:
-        discovered = {
-            task.id: Path(str(task.metadata["harbor_task_dir"])) for task in discover_harbor_tasks(dataset_path)
-        }
+        discovered = {}
+        identities: set[str] = set()
+        for path in _harbor_task_dirs(dataset_path):
+            if path.is_symlink() or not _safe_resolve(path).is_relative_to(dataset_root):
+                continue
+            task_id = local_task_identity(path)
+            # Same case-insensitive rule as discover_harbor_tasks.
+            if task_id.casefold() in identities:
+                raise ValueError("Duplicate native task identity")
+            identities.add(task_id.casefold())
+            discovered[task_id] = path
     except (OSError, ValueError) as exc:
         # discover_harbor_tasks raises on ANY malformed task.toml in the dataset.
         # Refusing the cache is the safe reading; failing the run is not, since this
@@ -687,7 +742,13 @@ def _stamp_coverage(
         # Same reasoning as _task_dirs_for: a malformed sibling task must not fail a
         # run. Recording only the requested tasks just costs a re-run later.
         return tasks
-    covered = {task.id: task for task in discovered}
+    if all(isinstance(task, HarborAgentEvalTask) for task in tasks):
+        covered: dict[str, AgentEvalTask] = {task.id: task for task in discovered}
+    else:
+        # Typed and base tasks cannot be stamped together (see _typed_task_dirs), so
+        # an untyped request downgrades the discovered siblings. They keep their
+        # harbor_task_dir metadata, which is what _task_dirs_for resolves them by.
+        covered = {task.id: as_base_task(task) for task in discovered}
     covered.update({task.id: task for task in tasks})
     return list(covered.values())
 
@@ -719,12 +780,14 @@ def _cache_stamp(
     ``agent_env_from_host`` participates by name only: the values they resolve to at run
     time are not fingerprinted, so rotating a credential keeps the cache valid.
     """
+    # Missing execution storage is invalid configuration, not a best-effort filesystem failure.
+    jobs_dir = _require_jobs_dir(config)
     options = config.model_dump(exclude=set(_CACHE_IRRELEVANT_OPTIONS), mode="json")
     # `_safe_resolve` throughout, matching `_task_dirs_for`: fingerprinting is
     # best-effort, so a symlink loop or a vanished link under any of these must
     # degrade to an unresolved path rather than raise out of `run_tasks` and fail a
     # run that would otherwise succeed.
-    excluded_roots = frozenset({_safe_resolve(config.jobs_dir.expanduser())})
+    excluded_roots = frozenset({_safe_resolve(jobs_dir.expanduser())})
 
     agent_digest = "<none>"
     if config.agent_dir is not None:
@@ -818,6 +881,15 @@ def _validated_job_dir(jobs_dir: Path, job_name: str) -> Path:
     return candidate
 
 
+def _require_jobs_dir(config: HarborRuntimeConfig) -> Path:
+    """Require concrete storage before local execution; platform workers supply their own path."""
+    if config.jobs_dir is None:
+        raise ValueError(
+            "jobs_dir is required for local Harbor execution; set it explicitly or submit through Evaluator.submit()."
+        )
+    return config.jobs_dir
+
+
 def _resolve_job_dir(config: HarborRuntimeConfig) -> tuple[str, Path]:
     """Resolve ``(job_name, job_dir)`` without importing Harbor.
 
@@ -829,8 +901,9 @@ def _resolve_job_dir(config: HarborRuntimeConfig) -> tuple[str, Path]:
     The resolved directory must be a strict descendant of ``jobs_dir``; see
     :func:`_validated_job_dir`.
     """
+    jobs_dir = _require_jobs_dir(config)
     job_name = config.job_name or datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S__%f")
-    return job_name, _validated_job_dir(config.jobs_dir, job_name)
+    return job_name, _validated_job_dir(jobs_dir, job_name)
 
 
 def _build_native_job(
@@ -857,8 +930,9 @@ def _build_native_job(
             than applied via ``model_copy`` so the caller's config is never mutated
             and the job name stays fixed.
     """
+    jobs_dir = _require_jobs_dir(config)
     resolved_name = job_name if job_name is not None else _resolve_job_dir(config)[0]
-    job_dir = _validated_job_dir(config.jobs_dir, resolved_name)
+    job_dir = _validated_job_dir(jobs_dir, resolved_name)
     effective_force_rerun = config.force_rerun if force_rerun is None else force_rerun
 
     async def run_job() -> None:
@@ -902,7 +976,7 @@ def _build_native_job(
         async def _create_and_run(agent: Any) -> None:
             job_config = JobConfig(
                 job_name=resolved_name,
-                jobs_dir=config.jobs_dir,
+                jobs_dir=jobs_dir,
                 n_attempts=config.n_attempts,
                 n_concurrent_trials=config.n_concurrent_trials,
                 quiet=config.quiet,
@@ -960,7 +1034,7 @@ def _build_native_job(
             # jobs_dir exclusion must match _cache_stamp's, or a jobs_dir nested under
             # agent_dir would shift the package name as results accumulate.
             agent_dir = config.agent_dir.expanduser().resolve()
-            excluded_roots = frozenset({config.jobs_dir.expanduser().resolve()})
+            excluded_roots = frozenset({jobs_dir.expanduser().resolve()})
             with scoped_harbor_agent_import(
                 agent_dir, config.agent_import_path, exclude=excluded_roots
             ) as scoped_import:
@@ -1219,67 +1293,66 @@ def build_trials_from_job_dir(
 
 def _harbor_task_dirs(dataset_path: Path) -> list[Path]:
     """Return the Harbor task folders under ``dataset_path`` (or itself if it is one)."""
-    if (dataset_path / _TASK_CONFIG_FILENAME).is_file():
+    if (dataset_path / TASK_CONFIG_FILENAME).is_file():
         return [dataset_path]
     return sorted(
         path
         for path in dataset_path.iterdir()
-        if path.is_dir() and path.name != _TASK_TEMPLATE_DIRNAME and (path / _TASK_CONFIG_FILENAME).is_file()
+        if path.is_dir() and path.name != TASK_TEMPLATE_DIRNAME and (path / TASK_CONFIG_FILENAME).is_file()
     )
 
 
-def _strip_leading_spdx_html_comments(text: str) -> str:
-    """Remove leading SPDX HTML comments from Markdown prompt content."""
-    position = 0
-    while match := _SPDX_HTML_COMMENT_RE.match(text, position):
-        position = match.end()
-    return text[position:]
+def discover_harbor_tasks(dataset_path: str | Path) -> HarborTaskCollection:
+    """Eagerly validate local packages and return tasks for execution or publication.
 
-
-def discover_harbor_tasks(dataset_path: str | Path) -> list[AgentEvalTask]:
-    """Build one :class:`AgentEvalTask` per Harbor task folder in ``dataset_path``.
-
-    Mirrors Harbor's own local-dataset discovery: every immediate subdirectory
-    with a ``task.toml`` is a task. The task id is read from ``[task] name`` so it
-    matches the ``task_name`` Harbor writes into each trial's ``result.json``, and
-    each task is scored by a :class:`HarborRewardMetric`.
-
-    Raises:
-        ValueError: if a task's ``task.toml`` or ``instruction.md`` is malformed or
-            unreadable — the offending path is named. A discovered task is never
-            silently dropped, since that would quietly shrink eval coverage.
+    A task root or a directory of tasks is accepted. Regular root files and hidden
+    directories are ignored; symlinked dataset entries and malformed visible task
+    entries fail. Symlinks inside a task are kept when their relative target stays
+    within that task.
+    Each package is captured once into temporary staging for native validation.
+    Returned paths always refer to the originals, not the discarded captures.
+    The attached ``HarborRewardMetric()`` is a placeholder the runner replaces; see
+    :class:`HarborRewardMetric`.
     """
-    dataset_path = Path(dataset_path)
-    tasks: list[AgentEvalTask] = []
-    for task_dir in _harbor_task_dirs(dataset_path):
-        config_path = task_dir / _TASK_CONFIG_FILENAME
+    root = Path(dataset_path).absolute()
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Dataset must be a real directory")
+    candidates = [root] if (root / TASK_CONFIG_FILENAME).is_file() else sorted(root.iterdir())
+    tasks = []
+    identities: set[str] = set()
+    for candidate in candidates:
+        if candidate.is_symlink():
+            raise ValueError(f"Symlinked dataset entry: {candidate}")
+        if candidate != root and candidate.is_file():
+            continue
+        if candidate != root and candidate.is_dir() and candidate.name.startswith("."):
+            continue
+        if candidate != root and candidate.name == TASK_TEMPLATE_DIRNAME and candidate.is_dir():
+            warnings.warn(f"Excluded template directory: {candidate}", stacklevel=2)
+            continue
+        if not candidate.is_dir() or not (candidate / TASK_CONFIG_FILENAME).is_file():
+            raise ValueError(f"Unhandled dataset entry: {candidate}")
         try:
-            config = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-            raise ValueError(f"malformed Harbor task config at {config_path}: {exc}") from exc
-        task_name = config.get("task", {}).get("name", task_dir.name)
-        instruction_path = task_dir / "instruction.md"
-        try:
-            instruction = (
-                _strip_leading_spdx_html_comments(instruction_path.read_text(encoding="utf-8")).strip()
-                if instruction_path.is_file()
-                else task_name
-            )
-        except (OSError, UnicodeDecodeError) as exc:
-            raise ValueError(f"unreadable Harbor instruction at {instruction_path}: {exc}") from exc
+            with private_directory() as staging:
+                _, native = capture_validated_task(candidate, staging)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"malformed Harbor task config at {candidate}: {exc}") from exc
+        if native.task_id.casefold() in identities:
+            raise ValueError("Duplicate native task identity")
+        identities.add(native.task_id.casefold())
         tasks.append(
-            AgentEvalTask(
-                id=task_name,
-                # `intent` is human-facing metadata, never shown to the agent; the task name is the
-                # only human label Harbor's task.toml provides. The instruction the agent acts on
-                # lives in `inputs["instruction"]`.
-                intent=task_name,
-                inputs={"instruction": instruction},
+            HarborAgentEvalTask(
+                id=native.task_id,
+                intent=native.task_id,
+                inputs={"instruction": normalize_harbor_instruction(native.instruction, task_id=native.task_id)},
                 metrics=[_harbor_reward_metric()],
-                metadata={"harbor_dataset_path": str(dataset_path), "harbor_task_dir": str(task_dir)},
+                source_dir=candidate,
+                metadata={HARBOR_DATASET_PATH_KEY: str(candidate.parent), HARBOR_TASK_DIR_KEY: str(candidate)},
             )
         )
-    return tasks
+    if not tasks:
+        raise ValueError("Dataset has no tasks")
+    return HarborTaskCollection(tasks)
 
 
 class HarborTasksetLoader:
@@ -1307,9 +1380,10 @@ class HarborTasksetLoader:
         """Discover Harbor tasks under ``source`` (or the configured path) into a taskset."""
         dataset_path = Path(source) if source is not None else self._dataset_path
         tasks = discover_harbor_tasks(dataset_path)
+        dataset_root = tasks[0].metadata[HARBOR_DATASET_PATH_KEY]
         if limit is not None:
             tasks = tasks[:limit]
-        return AgentEvalTaskset(tasks=tasks, metadata={"harbor_dataset_path": str(dataset_path)})
+        return AgentEvalTaskset(tasks=list(tasks), metadata={HARBOR_DATASET_PATH_KEY: dataset_root})
 
 
 async def run_harbor_eval(
@@ -1323,9 +1397,15 @@ async def run_harbor_eval(
     """Run a Harbor dataset natively and score it — the minimal-plumbing entry point.
 
     Loads the taskset from ``dataset_path``, runs Harbor via ``config``, and scores
-    through :class:`AgentEvaluator`. Tasks are scored by :class:`HarborRewardMetric`
-    unless ``metrics`` overrides them. Returns the scored :class:`AgentEvalResult`.
+    through :class:`AgentEvaluator`. Tasks are scored by :class:`HarborRewardMetric`, with its
+    primary reward taken from ``config.reward_key``. ``metrics`` replaces the whole list: include
+    ``HarborRewardMetric()`` in it, or the Harbor reward is not scored. Returns the scored
+    :class:`AgentEvalResult`.
+
+    Raises:
+        ValueError: ``config.jobs_dir`` is absent; rejected before loading the dataset.
     """
+    _require_jobs_dir(config)
     from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 
     dataset_path = Path(dataset_path)

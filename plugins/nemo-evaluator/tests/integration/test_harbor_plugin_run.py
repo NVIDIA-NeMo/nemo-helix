@@ -13,27 +13,113 @@ It is the plugin analog of the SDK's ``test_harbor_runtime_e2e.py``.
 Needs the ``harbor`` extra (Python >=3.12; ``pip install nemo-evaluator-sdk[harbor]``) and a working
 Docker daemon; ``importorskip('harbor')`` + a Docker check skip it otherwise (so it's inert on the
 3.11 workspace and in CI). Marked ``integration`` — a heavy, external-dependency run — but unlike the
-sibling tests it stands up no platform and isn't gated on ``RUN_AGENT_EVAL_INTEGRATION``.
+sibling tests it stands up no platform.
 """
 
 from __future__ import annotations
 
+import io
+import json
 import shutil
 import subprocess
+import tarfile
+import time
+import uuid
 from pathlib import Path
 
 import pytest
 from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs
 from nemo_evaluator.jobs.agent_evaluate import AGENT_BUNDLE_DIR, DEFAULT_RESULT_NAME, AgentEvalJob
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, AgentEvalTaskInput, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, HarborRunnerTarget
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRewardMetric, discover_harbor_tasks
+from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 pytestmark = [pytest.mark.integration]
+
+
+@pytest.mark.parametrize("direct", [False, True], ids=["taskset", "direct-list"])
+@pytest.mark.parametrize(
+    "subprocess_platform",
+    [["--services", "auth,entities,files,jobs,secrets,evaluator", "--controllers", "jobs,entities"]],
+    indirect=True,
+    ids=["harbor-services"],
+)
+@pytest.mark.timeout(900)
+def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path, direct):
+    """Publish a stored task, submit it directly or through a taskset, and verify the real job's trials and reward."""
+    pytest.importorskip("harbor")
+    if not _docker_available():
+        pytest.skip("Docker daemon is required to run a Harbor job")
+    import httpx
+    from nemo_evaluator.api.schemas import TaskInput, TaskRef, TasksetInput
+    from nemo_evaluator.harbor.publication import publish_harbor_task_archive
+    from nemo_helix import NeMoHelix
+    from nemo_helix_plugin.files.client import FilesClient
+    from nemo_helix_plugin.files.types import CreateFilesetRequest
+    from nemo_helix_plugin.jobs.client import JobsClient
+
+    base_url = subprocess_platform
+    name = f"harbor-bridge-{uuid.uuid4().hex[:8]}"
+    task_dir = _DATASET_DIR / "hello-world"
+    files_client = FilesClient(base_url=base_url, workspace="default")
+    files_client.create_fileset(body=CreateFilesetRequest(name=name)).data()
+    definition = publish_harbor_task_archive(task_dir, files_client=files_client, fileset_ref=f"default/{name}")
+    sdk = NeMoHelix(base_url=base_url, workspace="default")
+    sdk.evaluator.tasks.create(
+        name,
+        task=TaskInput(spec=definition),
+    )
+    sdk.evaluator.tasksets.create(name, taskset=TasksetInput(tasks=[TaskRef(f"default/{name}")]))
+    route = f"{base_url}/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs"
+    public_tasks = [f"default/{name}"] if direct else f"default/{name}"
+    response = httpx.post(
+        route,
+        json={
+            "profile": "harbor-test",
+            "spec": {
+                "tasks": public_tasks,
+                "target": {"kind": "harbor", "agent_name": "oracle"},
+            },
+        },
+        timeout=60,
+    )
+    assert response.status_code == 201, response.text
+    job = response.json()
+    snapshots = job["spec"]["tasks"]
+    assert len(snapshots) == 1
+    assert snapshots[0]["spec"]["provenance"]["entity_name"] == f"default/{name}"
+    assert snapshots[0]["spec"]["native_task_id"] == "harbor/hello-world"
+    assert snapshots[0]["spec"]["source"] == definition.source.model_dump(mode="json")
+    jobs_client = JobsClient(base_url=base_url, workspace="default")
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        status = httpx.get(f"{route}/{job['name']}/status", timeout=30).raise_for_status().json()
+        if status["status"] in {"completed", "error", "failed", "cancelled"}:
+            break
+        time.sleep(2)
+    assert status["status"] == "completed", status
+    payload = jobs_client.download_job_result(job=job["name"], name=DEFAULT_RESULT_NAME).read()
+    with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+        trial_file = next(member for member in tar.getmembers() if member.name.endswith("trials.jsonl"))
+        stream = tar.extractfile(trial_file)
+        assert stream is not None
+        trials = [json.loads(line) for line in stream if line.strip()]
+        assert trials and {trial["task_id"] for trial in trials} == {"harbor/hello-world"}
+        score_file = next(member for member in tar.getmembers() if member.name.endswith("scores.jsonl"))
+        stream = tar.extractfile(score_file)
+        assert stream is not None
+        scores = [json.loads(line) for line in stream if line.strip()]
+        assert scores and all(score["status"] == "completed" for score in scores), scores
+        assert any(
+            output["name"] == "reward" and output["value"] == 1.0 for score in scores for output in score["outputs"]
+        ), scores
+
 
 #: The bundled Harbor hello-world dataset (repo root → SDK examples).
 _DATASET_DIR = Path(__file__).resolve().parents[4] / "packages/nemo_evaluator_sdk/examples/harbor/hello_world_dataset"
@@ -99,7 +185,15 @@ def test_sync_job_runs_a_real_harbor_target(tmp_path: Path) -> None:
     # Harbor runs the task in Docker → adapt to trials → score → persist. The explicit ctx keeps
     # storage hermetic under tmp_path so the persisted bundle is readable here.
     client = NemoClient(base_url="http://platform.test", workspace="dev")
-    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    canonical = run_sync(
+        lambda: AgentEvalJob.to_spec(
+            input_spec,
+            workspace="default",
+            entity_client=None,
+            async_sdk=AsyncNeMoHelix(base_url="http://platform.test"),
+            is_local=True,
+        )
+    )
     result = AgentEvalJob().run(
         canonical.model_dump(mode="json"),
         ctx=ctx,

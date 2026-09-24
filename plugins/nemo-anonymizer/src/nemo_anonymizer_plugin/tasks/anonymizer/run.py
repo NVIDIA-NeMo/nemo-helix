@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Anonymizer task — runs inside the nhx-cpu-tasks container."""
+"""Anonymizer task — runs inside the nhx-tasks container."""
 
 from __future__ import annotations
 

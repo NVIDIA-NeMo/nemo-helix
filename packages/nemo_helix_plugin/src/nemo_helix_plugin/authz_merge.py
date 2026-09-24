@@ -9,25 +9,25 @@ import copy
 from typing import Any
 
 
-def _deep_merge_permission_registry(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Merge nested permission registry trees (leaf nodes have ``description``)."""
-    merged = copy.deepcopy(base)
+def _merge_permission_node_into(target: dict[str, Any], overlay: dict[str, Any]) -> None:
+    """Merge a nested permission registry tree into ``target`` in place.
+
+    Leaf nodes have ``description``. Unlike a copy-on-every-call deep merge, this mutates
+    ``target`` directly so callers can fold many small overlays into one pre-copied tree
+    without re-copying the (potentially large) accumulated registry on each overlay.
+    """
     for key, value in overlay.items():
-        if key not in merged:
-            merged[key] = copy.deepcopy(value)
+        if key not in target:
+            target[key] = copy.deepcopy(value)
             continue
-        if isinstance(merged[key], dict) and isinstance(value, dict):
-            if "description" in value or "description" in merged[key]:
-                # Leaf or partial leaf — overlay wins at this key when overlay is a leaf
-                if "description" in value:
-                    merged[key] = copy.deepcopy(value)
-                else:
-                    merged[key] = _deep_merge_permission_registry(merged[key], value)
+        if isinstance(target[key], dict) and isinstance(value, dict):
+            if "description" in value:
+                # Leaf overlay wins at this key, replacing whatever was there
+                target[key] = copy.deepcopy(value)
             else:
-                merged[key] = _deep_merge_permission_registry(merged[key], value)
+                _merge_permission_node_into(target[key], value)
         else:
-            merged[key] = copy.deepcopy(value)
-    return merged
+            target[key] = copy.deepcopy(value)
 
 
 def _permission_id_to_nested(permission_id: str, description: str) -> dict[str, Any]:
@@ -42,15 +42,11 @@ def _permission_id_to_nested(permission_id: str, description: str) -> dict[str, 
     return node
 
 
-def _merge_flat_permissions(
-    registry: dict[str, Any],
-    flat_permissions: dict[str, str],
-) -> dict[str, Any]:
-    merged = registry
+def _merge_flat_permissions_into(registry: dict[str, Any], flat_permissions: dict[str, str]) -> None:
+    """Merge flat ``permission_id -> description`` pairs into ``registry`` in place."""
     for perm_id, description in flat_permissions.items():
         nested = _permission_id_to_nested(perm_id, description)
-        merged = _deep_merge_permission_registry(merged, nested)
-    return merged
+        _merge_permission_node_into(registry, nested)
 
 
 def _default_roles_for_permission(permission_id: str) -> list[str]:
@@ -90,7 +86,7 @@ def merge_authz_contributions(
     for contribution in contributions:
         flat_permissions = contribution.get("permissions") or {}
         if isinstance(flat_permissions, dict):
-            registry = _merge_flat_permissions(registry, flat_permissions)
+            _merge_flat_permissions_into(registry, flat_permissions)
 
         contrib_endpoints = contribution.get("endpoints") or {}
         if isinstance(contrib_endpoints, dict):
@@ -112,8 +108,6 @@ def merge_authz_contributions(
         for perm_id in flat_permissions:
             for role_name in _default_roles_for_permission(perm_id):
                 auto_role_grants.setdefault(role_name, set()).add(perm_id)
-
-    authz["permissions"] = registry
 
     for role_name, perm_ids in auto_role_grants.items():
         role_cfg = roles.setdefault(role_name, {"permissions": []})

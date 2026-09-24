@@ -1575,3 +1575,20 @@ def test_naming_a_variable_both_ways_is_refused_rather_than_layered() -> None:
     """Which value Gym got would otherwise depend on layering order, not on what the caller asked."""
     with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
         _config(env_vars={"GYM_MODEL_KEY": "plaintext"}, env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")})
+
+
+@pytest.mark.parametrize(
+    "inputs,metadata", [({}, {}), ({"gym_row": {}}, {"gym_row_extras": []}), ({"gym_row": {}}, {"gym_row_extras": {}})]
+)
+def test_named_gym_row_validator_matches_materialization(inputs, metadata) -> None:
+    """Both entry points accept and reject the same row with identical errors."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import gym_task_row, validate_gym_task_row
+
+    try:
+        gym_task_row(task_id="task", inputs=inputs, metadata=metadata)
+    except ValueError as error:
+        with pytest.raises(ValueError) as caught:
+            validate_gym_task_row(task_id="task", inputs=inputs, metadata=metadata)
+        assert str(caught.value) == str(error)
+    else:
+        assert validate_gym_task_row(task_id="task", inputs=inputs, metadata=metadata) is None

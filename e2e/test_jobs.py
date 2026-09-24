@@ -602,7 +602,10 @@ def test_job_invalid_image_format(sdk: NeMoHelix, workspace: str, bad_image: str
         ),
     ).data()
 
-    completed_job = wait_for_platform_job(sdk, job.name, workspace)
+    # ``ubuntu:does-not-exist-1234`` parks the job in ``pending`` on
+    # ImagePullBackOff, which never advances the job timeout, so bound the pull
+    # instead. The 600s default outlives this module's pytest budget.
+    completed_job = wait_for_platform_job(sdk, job.name, workspace, image_pull_timeout=120)
     assert completed_job.status == "error", f"Job should have failed but has status: {completed_job.status}"
 
     job_status = jobs.get_job_status(workspace=workspace, name=job.name)

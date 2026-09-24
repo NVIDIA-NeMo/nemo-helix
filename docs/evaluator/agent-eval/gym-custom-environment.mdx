@@ -206,7 +206,7 @@ Evaluator compiles two ordered steps:
 1. `stage-environment` downloads the FileSet onto job-scoped persistent storage.
 2. `agent-evaluate` provisions `nhx-gym-host`, collects rollouts, scores them, and destroys the host.
 
-Both platform steps use `nhx-cpu-tasks`; Gym and Ray run in the separate sandbox host.
+Both platform steps use `nhx-tasks`; Gym and Ray run in the separate sandbox host.
 
 ## 5. Read the results
 

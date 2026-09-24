@@ -146,7 +146,7 @@ export const RewardEnvironmentSection: FC = () => {
                 })}
                 {noEnvs && (
                   <Block paddingX="density-md" paddingY="density-sm">
-                    <Text kind="body/regular/sm" color="secondary">
+                    <Text className="text-secondary" kind="body/regular/sm">
                       No environment filesets found.
                     </Text>
                   </Block>

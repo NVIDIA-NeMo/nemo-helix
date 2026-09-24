@@ -31,7 +31,7 @@ const AssistantChatLoadingState = ({ selectedSessionId }: { selectedSessionId?: 
   <AssistantLayout activeSessionId={selectedSessionId}>
     <Stack className="h-full w-full" padding="density-2xl">
       <Stack className="mx-auto min-h-0 w-full max-w-180 flex-1" align="center" justify="center">
-        <Text kind="body/regular/md" color="secondary">
+        <Text className="text-secondary" kind="body/regular/md">
           Loading chat...
         </Text>
       </Stack>

@@ -102,7 +102,7 @@ class JobExecutionProfileConfig(BaseModel):
         default=None,
         min_length=1,
         description="Default container image for job task pods. Used when a job step omits container.image. "
-        "When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).",
+        "When unset, falls back to the platform CPU tasks image (platform.image_registry/nhx-tasks:platform.image_tag).",
     )
     env: dict[str, str] = Field(
         default_factory=dict,
@@ -271,6 +271,20 @@ class KubernetesWorkloadIdentityConfig(BaseModel):
 
 class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
     """Common configuration for Kubernetes execution environment."""
+
+    # Only a pull that has already *failed* is counted -- a slow pull of a large
+    # image reports ContainerCreating and never reaches this budget -- so the
+    # question is how long a recoverable fault deserves. Registry rate limiting,
+    # a 5xx blip and a mid-rotation pull secret can all take minutes to clear,
+    # and killing a job that would have succeeded is worse than being slow to
+    # report one that never will. Hence generous, but still 3x faster than
+    # ttl_seconds_before_active and naming the image when it fires.
+    ttl_seconds_image_pull: int = Field(
+        default=10 * 60,
+        ge=0,
+        description="How long a pod may spend in image-pull backoff before the pull is treated as "
+        "unrecoverable and the step fails naming the image. 0 disables it.",
+    )
 
     namespace: str | None = Field(
         default=None,

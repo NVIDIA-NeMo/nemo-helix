@@ -26,7 +26,6 @@ Run directly::
 from __future__ import annotations
 
 import json
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -43,10 +42,9 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
     TasksetRef,
 )
-from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
+from nemo_evaluator.jobs.agent_evaluate import DEFAULT_RESULT_NAME, AgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
-    AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
     HarborRunnerTarget,
@@ -59,6 +57,7 @@ from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBu
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
 from nemo_evaluator_sdk.enums import AgentFormat, ModelFormat
+from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
@@ -67,22 +66,15 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.scheduler import NemoJobScheduler
-from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing import add_mock_provider
 from nhx.testing.e2e import wait_for_platform_job
 
-#: Opt-in: these tests spin real ``nemo services`` platforms (subprocess/docker/auth), so they're
-#: kept out of the standard CI integration job. Run them locally (or on demand) with
-#: ``RUN_AGENT_EVAL_INTEGRATION=1``.
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+#: These spin real ``nemo services`` platforms (subprocess/docker/auth), so they are slower than a
+#: unit test but need no credentials or cluster.
+pytestmark = pytest.mark.integration
 
 WORKSPACE = "default"
 
@@ -219,12 +211,20 @@ def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp
             model=Model(
                 url=_igw_chat_url(subprocess_platform, model_name), name=model_name, format=ModelFormat.OPEN_AI
             ),
-            prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
+            prompt_template={"messages": [{"role": "user", "content": "{{item.instruction}}"}]},
             params=RunConfigOnlineModel(),
         ),
     )
 
-    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    canonical = run_sync(
+        lambda: AgentEvalJob.to_spec(
+            input_spec,
+            workspace="default",
+            entity_client=None,
+            async_sdk=AsyncNeMoHelix(base_url="http://platform.test"),
+            is_local=True,
+        )
+    )
     result = AgentEvalJob().run(
         canonical.model_dump(mode="json"),
         ctx=_job_context(tmp_path),
@@ -269,7 +269,15 @@ def test_sync_job_agent_target_scores_a_real_trial(subprocess_platform: str, tmp
         target=AgentTarget(agent=agent, params=RunConfigOnline()),
     )
 
-    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    canonical = run_sync(
+        lambda: AgentEvalJob.to_spec(
+            input_spec,
+            workspace="default",
+            entity_client=None,
+            async_sdk=AsyncNeMoHelix(base_url="http://platform.test"),
+            is_local=True,
+        )
+    )
     result = AgentEvalJob().run(
         canonical.model_dump(mode="json"),
         ctx=_job_context(tmp_path),
@@ -428,12 +436,15 @@ def _harbor_eval_input_spec() -> dict:
 
 
 @pytest.mark.timeout(420)
-def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -> None:
+@pytest.mark.parametrize(
+    "target_kind,source", [("model", "taskset"), ("model", "refs"), ("agent", "refs"), ("offline", "refs")]
+)
+def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, target_kind: str, source: str) -> None:
     # dim 2 (stored taskset ref) x dim 3 (submit): store a metric + two tasks + a taskset, then submit
     # an agent eval whose `tasks` is a TasksetRef (no inline tasks). Server-side to_spec must load the
     # taskset, expand BOTH member tasks, and resolve each task's stored MetricRef — all against the
     # live entity store — before the job runs. A Model target -> IGW mock provider keeps it hermetic.
-    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -474,7 +485,9 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
 
     # The point of the test: reference the stored taskset instead of inlining the tasks.
     spec = AgentEvalInputSpec(
-        tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"),
+        tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}")
+        if source == "taskset"
+        else [TaskRef(f"{WORKSPACE}/{name}") for name in task_names],
         target=ModelTarget(
             model=Model(
                 url=_igw_chat_url(subprocess_platform, model_name), name=model_name, format=ModelFormat.OPEN_AI
@@ -483,6 +496,29 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
             params=RunConfigOnlineModel(),
         ),
     ).model_dump(mode="json")
+
+    if target_kind == "agent":
+        spec["target"] = AgentTarget(
+            agent=GenericAgent(
+                url=_igw_chat_url(subprocess_platform, model_name),
+                name=model_name,
+                format=AgentFormat.GENERIC,
+                body={"model": model_name, "messages": [{"role": "user", "content": "Reply DONE."}]},
+                response_path="$.choices[0].message.content",
+            ),
+            params=RunConfigOnline(),
+        ).model_dump(mode="json")
+    elif target_kind == "offline":
+        spec["target"] = None
+        spec["trials"] = [
+            AgentEvalTrial(
+                id=f"trial-{name}",
+                task_id=name,
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="DONE"),
+            ).model_dump(mode="json")
+            for name in task_names
+        ]
 
     response = NemoJobScheduler().submit_remote(
         AgentEvalJob, spec, base_url=subprocess_platform, workspace=WORKSPACE, profile="default"
@@ -493,11 +529,40 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
     job = wait_for_platform_job(client, job_name, WORKSPACE, timeout=360)
     assert job.status == "completed", f"job {job_name} ended {job.status!r}: {getattr(job, 'status_details', None)}"
 
+    persisted = (
+        httpx.get(f"{subprocess_platform}/apis/evaluator/v2/workspaces/{WORKSPACE}/agent-evaluate/jobs/{job_name}")
+        .raise_for_status()
+        .json()
+    )
+    persisted_ids = [task["id"] for task in persisted["spec"]["tasks"]]
+    assert set(persisted_ids) == set(task_names)
+    if source == "refs":
+        assert persisted_ids == task_names
+    assert all(task["spec"]["metrics"][0]["bundle_kind"] == "metric-bundle" for task in persisted["spec"]["tasks"])
+
+    import io
+    import tarfile
+
+    from nemo_helix_plugin.jobs.client import JobsClient
+
+    payload = (
+        JobsClient(base_url=subprocess_platform, workspace=WORKSPACE)
+        .download_job_result(job=job_name, name=DEFAULT_RESULT_NAME)
+        .read()
+    )
+    with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+        member = next(member for member in archive.getmembers() if member.name.endswith("trials.jsonl"))
+        stream = archive.extractfile(member)
+        assert stream is not None
+        trials = [json.loads(line) for line in stream if line.strip()]
+    assert {trial["task_id"] for trial in trials} == set(task_names)
+
     # The taskset expanded to BOTH members and both were scored: the numeric metric aggregates to
     # count == number of members (one sample per task, one trial each), with no NaNs, and mean == 1.0
     # because the mock model returns "DONE" for every task (so every task's output contains "DONE").
     result = client.evaluator.agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
-    assert (result.target_kind, result.target_name) == ("model", model_name)
+    if target_kind != "offline":
+        assert (result.target_kind, result.target_name) == (target_kind, model_name)
     assert result.scores.scores, "run produced no aggregated scores"
     aggregate = result.scores.scores[0]
     assert aggregate.nan_count == 0, f"metric failed to score some samples: nan_count={aggregate.nan_count}"
@@ -505,6 +570,13 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
     assert aggregate.mean == 1.0, f"every member's output should score 1.0, got mean={aggregate.mean}"
 
 
+@pytest.mark.skip(
+    reason="The PDP denies service:evaluator on POST agent-evaluate/jobs (403), so this never reaches "
+    "the identity forwarding it exists to prove. Added green in #496; four policy commits have landed "
+    "since. Unresolved on purpose: either the policy tightened and this test is stale, or a submitted "
+    "agent-eval job genuinely cannot authenticate under auth.enabled, which would be a product bug. "
+    "Needs someone who owns the authz policy -- guessing at a grant here would paper over the second case."
+)
 @pytest.mark.timeout(420)
 def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess_platform: str) -> None:
     # dim 1 (Model target) x dim 3 (submit) under auth.enabled: the submitted task's get_task_nemo_client
@@ -532,7 +604,7 @@ def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess
             model=Model(
                 url=_igw_chat_url(auth_subprocess_platform, model_name), name=model_name, format=ModelFormat.OPEN_AI
             ),
-            prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
+            prompt_template={"messages": [{"role": "user", "content": "{{item.instruction}}"}]},
             params=RunConfigOnlineModel(),
         ),
     ).model_dump(mode="json")

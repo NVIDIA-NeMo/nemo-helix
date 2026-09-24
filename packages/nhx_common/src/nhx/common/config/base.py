@@ -94,6 +94,12 @@ class OIDCConfig(BaseSettings):
         description="OAuth client ID for this NeMo Helix deployment. Used for device flow and token audience validation.",
     )
 
+    bearer_token_source: Literal["access_token", "id_token"] = Field(
+        default="access_token",
+        description="OIDC user token Studio sends to NeMo Helix APIs. Use 'access_token' for standard OAuth "
+        "resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer.",
+    )
+
     # Optional: Override endpoints if not using standard discovery
     authorization_endpoint: str | None = Field(
         default=None,

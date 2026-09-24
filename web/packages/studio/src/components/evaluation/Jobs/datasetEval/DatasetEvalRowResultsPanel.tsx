@@ -63,7 +63,7 @@ const LongCell: FC<{
   content ? (
     <TableExpandableCell content={content} title={title} onExpand={onExpand} />
   ) : (
-    <Text kind="body/regular/sm" color="secondary">
+    <Text className="text-secondary" kind="body/regular/sm">
       —
     </Text>
   );
@@ -132,7 +132,7 @@ export const DatasetEvalRowResultsPanel: FC<DatasetEvalRowResultsPanelProps> = (
               {expected}
             </Badge>
           ) : (
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               —
             </Text>
           );

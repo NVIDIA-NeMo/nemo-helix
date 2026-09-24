@@ -48,7 +48,7 @@ export const ArtifactRow = ({ label, value }: { label: string; value?: string })
 
   return (
     <Flex align="center" gap="density-xs" className="min-w-0 flex-wrap">
-      <Text kind="label/bold/sm" color="secondary" className="shrink-0">
+      <Text kind="label/bold/sm" className="shrink-0 text-secondary">
         {label}:
       </Text>
       <ArtifactChip>{value}</ArtifactChip>
@@ -58,7 +58,7 @@ export const ArtifactRow = ({ label, value }: { label: string; value?: string })
 
 export const ArtifactSection = ({ children, title }: { children: ReactNode; title: string }) => (
   <Stack gap="density-xs" className="min-w-0">
-    <Text kind="label/bold/sm" color="secondary">
+    <Text className="text-secondary" kind="label/bold/sm">
       {title}
     </Text>
     {children}

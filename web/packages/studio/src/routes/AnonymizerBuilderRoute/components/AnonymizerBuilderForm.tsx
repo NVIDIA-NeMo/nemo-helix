@@ -17,6 +17,7 @@ import {
   Stack,
 } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { parseAnonymizerApiError } from '@studio/routes/AnonymizerBuilderRoute/apiErrors';
 import { ColumnsSection } from '@studio/routes/AnonymizerBuilderRoute/components/ColumnsSection';
 import { DataSourceSection } from '@studio/routes/AnonymizerBuilderRoute/components/DataSourceSection';
@@ -43,7 +44,6 @@ import {
 import { getAnonymizerJobRoute, getWorkspaceAnonymizerRoute } from '@studio/routes/utils';
 import { useCallback, useState, type FC } from 'react';
 import { useFormContext, useWatch, type FieldErrors } from 'react-hook-form';
-import { useAuth } from 'react-oidc-context';
 import { useNavigate } from 'react-router';
 
 const INCOMPLETE_FORM_MESSAGE = 'Please complete the required fields highlighted below.';
@@ -51,7 +51,7 @@ const INCOMPLETE_FORM_MESSAGE = 'Please complete the required fields highlighted
 export const AnonymizerBuilderForm: FC = () => {
   const navigate = useNavigate();
   const workspace = useWorkspaceFromPath();
-  const { user } = useAuth();
+  const bearerToken = useOidcBearerToken();
   const form = useFormContext<AnonymizerFormData>();
   const strategy = useWatch({ control: form.control, name: 'strategy' });
   const [activeTab, setActiveTab] = useState<string>(TAB_SOURCE);
@@ -117,7 +117,7 @@ export const AnonymizerBuilderForm: FC = () => {
 
   const preview = useAnonymizerPreview({
     workspace,
-    accessToken: user?.access_token ?? undefined,
+    accessToken: bearerToken,
     getRequest: getPreviewRequest,
   });
 
