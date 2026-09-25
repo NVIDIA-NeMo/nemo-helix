@@ -20,7 +20,7 @@ from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.nooa_model_client import configured_model_refs
+from nemo_helix_plugin.nooa_model_client import configured_fast_model, configured_model_refs
 from nemo_insights_plugin.contracts.profile import (
     DEFAULT_BASE_URL,
 )
@@ -101,16 +101,28 @@ class InsightsCLI(NemoCLI):
                 help="Base URL of the running NHX instance.",
                 envvar="NHX_BASE_URL",
             ),
+            default_model: str | None = typer.Option(
+                None,
+                "--default-model",
+                help="Model Entity ref for analysis work. Default: the configured default model.",
+            ),
+            fast_model: str | None = typer.Option(
+                None,
+                "--fast-model",
+                help="Model Entity ref for context summarization. Default: the configured fast model.",
+            ),
         ) -> None:
             """Enable periodic analysis for an agent."""
             workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
-                asyncio.run(
+                _run_command(
                     _analysis_config_command(
                         action="enable",
                         agent=agent,
                         workspace=workspace,
                         base_url=base_url,
+                        default_model=default_model,
+                        fast_model=fast_model,
                     )
                 )
             )
@@ -138,7 +150,7 @@ class InsightsCLI(NemoCLI):
             """Disable periodic analysis for an agent."""
             workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
-                asyncio.run(
+                _run_command(
                     _analysis_config_command(
                         action="disable",
                         agent=agent,
@@ -171,7 +183,7 @@ class InsightsCLI(NemoCLI):
             """Show periodic analysis opt-in state."""
             workspace = resolve_cli_workspace(typer_ctx, workspace)
             typer.echo(
-                asyncio.run(
+                _run_command(
                     _analysis_config_command(
                         action="status",
                         agent=agent,
@@ -382,13 +394,15 @@ async def _analysis_config_command(
     agent: str | None,
     workspace: str,
     base_url: str,
+    default_model: str | None = None,
+    fast_model: str | None = None,
 ) -> str:
     """Run one analysis-config CLI action and return JSON for stdout."""
     model_refs = None
     if action == "enable":
         if agent is None:
             raise ValueError("agent is required for enable")
-        model_refs = configured_model_refs()
+        model_refs = _resolve_model_refs(default_model, fast_model)
 
     client = make_client(base_url)
     try:
@@ -398,8 +412,8 @@ async def _analysis_config_command(
             result = await client.insights.analysis_configs.enable(
                 workspace=workspace,
                 agent=agent,
-                default_model=model_refs.default,
-                fast_model=model_refs.fast,
+                default_model=model_refs[0],
+                fast_model=model_refs[1],
             )
             return _json(result.model_dump(mode="json"))
         if action == "disable":
@@ -464,7 +478,12 @@ def _resolve_model_refs(default_model: str | None, fast_model: str | None) -> tu
     """
     if default_model and fast_model:
         return default_model, fast_model
-    configured = configured_model_refs()
+    if default_model:
+        return default_model, configured_fast_model() or default_model
+    try:
+        configured = configured_model_refs()
+    except ValueError as exc:
+        raise ValueError(f"{exc} Or pass --default-model and --fast-model.") from exc
     return default_model or configured.default, fast_model or configured.fast
 
 
