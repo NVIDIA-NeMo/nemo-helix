@@ -18,5 +18,4 @@ autolabeler:
   - { label: ci,       title: ['/^ci/'] }
   - { label: chore,    title: ['/^chore/'] }
   - { label: revert,   title: ['/^revert/'] }
-  - { label: cp,       title: ['/^cp/'] }
   - { label: breaking, title: ['/!: /'] }
