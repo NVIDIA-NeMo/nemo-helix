@@ -10437,7 +10437,8 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--config.training.batch-size <INTEGER>`: The batch size per device for training. Must be >= 1.
 * `--config.training.gradient-accumulation-steps <INTEGER>`: Number of update steps to accumulate the gradients for, before performing a backward/update pass. This technique increases the effective batch size that will fit into GPU memory. Must be >= 1.
 * `--config.training.weight-decay <FLOAT>`: The weight decay to apply to all layers except all bias and LayerNorm weights in the AdamW optimizer. Must be in (0, 1).
-* `--config.training.warmup-ratio <FLOAT>`: Ratio of total training steps used for a linear warmup from 0 to the learning rate. Must be > 0.
+* `--config.training.warmup-steps <FLOAT>`: Linear warmup from 0 to the learning rate. A whole number of 1 or more sets the exact number of warmup steps; a float in (0, 1) is treated as a ratio of total training steps; 0 disables warmup. Must be finite and >= 0, and cannot be fractional at or above 1.
+* `--config.training.warmup-ratio <FLOAT>`: Deprecated. Use warmup_steps instead.
 * `--config.training.lr-scheduler`: The scheduler type to use. See the HuggingFace documentation of ``SchedulerType`` for all possible values.
 * `--config.training.learning-rate <FLOAT>`: The initial learning rate for `AdamW` optimizer. Must be in (0, 1). Setting to 'auto' uses a model-specific default if one exists. This flag accepts the number form only; use --spec or --spec-file for the other union form(s).
 * `--config.training.lora-r <INTEGER>`: The rank of the LoRA update matrices. Lower rank results in smaller update matrices with fewer trainable parameters. Must be > 0.
@@ -10457,13 +10458,16 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--config.generation.top-p <FLOAT>`: Nucleus sampling probability for token selection. Must be in (0, 1].
 * `--config.generation.patience <INTEGER>`: Number of consecutive generations where the ``invalid_fraction_threshold`` is reached before stopping generation. Must be >= 1.
 * `--config.generation.invalid-fraction-threshold <FLOAT>`: The fraction of invalid records that will stop generation after the ``patience`` limit is reached. Must be in [0, 1].
+* `--config.generation.max-tokens-multiplier <FLOAT>`: Multiplier on the longest training example when sizing per-sample max_tokens. Must be a finite value > 0. Default 1.2.
 * `--config.generation.structured-generation.enabled`: Whether to use structured generation for better format control.
 * `--config.generation.structured-generation.use-single-sequence`: Whether to use a regex that matches exactly one sequence or record if ``max_sequences_per_example`` is 1.
+* `--config.generation.structured-generation.max-records-per-sequence <INTEGER>`: Max records per grouped sequence under structured generation. None uses the largest training group size. Must be None or >= 1.
 * `--config.generation.enforce-timeseries-fidelity`: Enforce time-series fidelity by enforcing order, intervals, start and end times of the records.
 * `--config.generation.validation.group-by-accept-no-delineator`: Whether to accept completions without both beginning and end of sequence delineators as a single sequence.
 * `--config.generation.validation.group-by-ignore-invalid-records`: Whether to ignore invalid records in a sequence and proceed with the valid records.
 * `--config.generation.validation.group-by-fix-non-unique-value`: Whether to automatically fix non-unique group-by values in a sequence by using the first unique value for all records.
 * `--config.generation.validation.group-by-fix-unordered-records`: Whether to automatically fix unordered records in a sequence by sorting the records.
+* `--config.generation.validation.enforce-numeric-range`: When True, reject floats outside the training-observed min/max. Set False to skip float range checks (integers/enums still enforced).
 * `--config.generation.attention-backend`: The attention backend for the vLLM engine. Common values: 'FLASHINFER', 'FLASH_ATTN', 'TRITON_ATTN', 'FLEX_ATTENTION'. If ``None`` or 'auto', vLLM will auto-select the best available backend.
 * `--config.privacy.dp-enabled`: Enable differentially-private training with DP-SGD.
 * `--config.privacy.epsilon <FLOAT>`: Target privacy budget -- lower values provide stronger privacy. Must be > 0.
@@ -10507,7 +10511,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`, `config.unknown_fields`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

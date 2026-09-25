@@ -6321,10 +6321,10 @@ requires-dist = [
     { name = "nemo-relay", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.7,<0.8" },
     { name = "nemo-relay", marker = "extra == 'plugins'", specifier = ">=0.7,<0.8" },
     { name = "nemo-relay", marker = "extra == 'services'", specifier = ">=0.7,<0.8" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'all'", specifier = "==0.1.7" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = "==0.1.7" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", specifier = "==0.1.7" },
-    { name = "nemo-safe-synthesizer", marker = "extra == 'services'", specifier = "==0.1.7" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'all'", specifier = "==0.1.13" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = "==0.1.13" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", specifier = "==0.1.13" },
+    { name = "nemo-safe-synthesizer", marker = "extra == 'services'", specifier = "==0.1.13" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'harbor'", editable = "packages/sandboxed_gym" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "packages/sandboxed_gym" },
     { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.23.0" },
@@ -7299,7 +7299,7 @@ dev = [
 
 [[package]]
 name = "nemo-safe-synthesizer"
-version = "0.1.7"
+version = "0.1.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7318,7 +7318,7 @@ dependencies = [
     { name = "typing-extensions", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/31/573f66c9b87e663d23f061fb1f65ef5b8dc72a0597bff7d4b044e88c2a23/nemo_safe_synthesizer-0.1.7-py3-none-any.whl", hash = "sha256:07ad037e6ded8f7020039fa88efdab4aaaf805ea52fb8238380086e0811eaaf0", size = 586219, upload-time = "2026-07-10T18:34:02.825Z" },
+    { url = "https://files.pythonhosted.org/packages/58/f2/9139d39df2c0d1af4efe6a6d7c74ebf811df313c4f99bc21bcafe0179ab9/nemo_safe_synthesizer-0.1.13-py3-none-any.whl", hash = "sha256:61577bf0458549912b8baffddd5d704858da4101b234c537f8d278b105fff086", size = 615012, upload-time = "2026-09-04T22:41:14.454Z" },
 ]
 
 [[package]]
@@ -7376,7 +7376,7 @@ requires-dist = [
     { name = "lark", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.1.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "nemo-safe-synthesizer", specifier = "==0.1.7" },
+    { name = "nemo-safe-synthesizer", specifier = "==0.1.13" },
     { name = "openai", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.109.1" },
     { name = "pydantic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.9.2" },
