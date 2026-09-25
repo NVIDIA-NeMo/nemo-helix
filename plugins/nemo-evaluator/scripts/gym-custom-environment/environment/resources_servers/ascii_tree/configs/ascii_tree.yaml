@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+ascii_tree:
+  resources_servers:
+    ascii_tree:
+      entrypoint: app.py
+      domain: instruction_following
+      verified: false
+      description: Score structured ASCII trees with Prime Intellect ascii-tree 0.1.5 semantics
+      value: Compare generated ASCII tree lines with the expected tree

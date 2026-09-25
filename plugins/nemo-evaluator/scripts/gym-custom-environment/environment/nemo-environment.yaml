@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+format: wheels-v1
+config_paths:
+  - resources_servers/ascii_tree/configs/ascii_tree.yaml
+metadata:
+  name: custom-ascii-tree-environment
+  description: Custom ASCII Tree scorer delivered through an Evaluator FileSet
+  hub_id: primeintellect/ascii-tree
+  vf_env_id: ascii-tree
