@@ -11,6 +11,17 @@ from sqlalchemy import JSON, ColumnElement, DateTime, String, and_, cast, false,
 from sqlalchemy.orm import aliased
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE metacharacters so ``%`` and ``_`` match literally.
+
+    ``$like`` is a case-insensitive substring (contains) test in which ``%`` and
+    ``_`` are ordinary characters — the canonical contract documented and pinned
+    by ``InMemoryFilterRepository.like``. The backslash escape character is
+    escaped first so the escapes we add are not themselves re-escaped.
+    """
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class SQLAlchemyFilterRepository(FilterRepository):
     """SQLAlchemy implementation of FilterRepository.
 
@@ -150,11 +161,18 @@ class SQLAlchemyFilterRepository(FilterRepository):
         return column == value
 
     def like(self, field: str, value: str) -> Any:
-        """Like/contains comparison."""
+        """Case-insensitive substring (contains) comparison.
+
+        ``%`` and ``_`` in ``value`` are matched literally, not as SQL wildcards,
+        to agree with ``InMemoryFilterRepository.like``. Metacharacters are escaped
+        and an explicit ``ESCAPE`` clause is used, which behaves the same on SQLite
+        and PostgreSQL.
+        """
         column, is_json = self._get_column(field)
+        pattern = f"%{_escape_like(value)}%"
         if is_json:
-            return self._cast_json_to_text(column).ilike(f"%{value}%")
-        return column.ilike(f"%{value}%")
+            return self._cast_json_to_text(column).ilike(pattern, escape="\\")
+        return column.ilike(pattern, escape="\\")
 
     def lt(self, field: str, value: Any) -> Any:
         """Less than comparison."""
