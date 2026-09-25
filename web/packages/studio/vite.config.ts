@@ -584,6 +584,11 @@ export default defineConfig(({ mode }) => {
                 changeOrigin: true,
                 secure: false,
               },
+              '/plugin-ui': {
+                target: proxyDomain,
+                changeOrigin: true,
+                secure: false,
+              },
             },
           }
         : {}),
