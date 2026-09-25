@@ -19,7 +19,7 @@ When OIDC is enabled:
 1. **Platform configuration** points to your IdP (issuer URL, client ID, optional scope prefix and claim names).
 2. **Discovery**: Clients and the platform discover token and device-auth endpoints from the IdP's `.well-known/openid-configuration` (or from NeMo Helix's aggregated discovery at `{BASE_URL}/apis/auth/discovery`).
 3. **Login**: Users obtain tokens via **device flow** (browser) or **password grant** (CI) using the CLI, or authorization code flow in Studio.
-4. **API calls**: Studio sends the configured bearer token in the `Authorization: Bearer <token>` header. The default is the OAuth access token. NeMo Helix validates signed JWT bearers (signature, issuer, audience when configured, and expiry) and extracts claims for authorization.
+4. **API calls**: Clients send the configured bearer token in the `Authorization: Bearer <token>` header. The default is the OAuth access token. NeMo Helix validates signed JWT bearers (signature, issuer, audience when configured, and expiry) and extracts claims for authorization.
 
 OIDC provides the identity; authorization (workspace roles, scopes) works the same as with any other auth method.
 
@@ -57,7 +57,7 @@ auth:
     enabled: true
     issuer: "https://your-idp.example.com/realm"
     client_id: "your-client-id"
-    # Optional: use the current OIDC ID token as Studio's API bearer.
+    # Optional: use the current OIDC ID token as the API bearer.
     # Keep the default unless your IdP documents this backend pattern.
     # bearer_token_source: "id_token"
     # Optional: strip IdP scope prefix (e.g., Azure AD prepends API URI)
@@ -68,14 +68,14 @@ auth:
     # groups_claim: "groups"
 ```
 
-### Selecting Studio's API bearer
+### Selecting the API bearer
 
-`bearer_token_source` controls which token from Studio's current OIDC session is sent to NeMo Helix APIs:
+`bearer_token_source` controls which token from the current OIDC session is sent to NeMo Helix APIs:
 
 - `access_token` (default) preserves the standard OAuth resource-server flow and existing provider behavior.
 - `id_token` supports providers that issue opaque access tokens but explicitly document their signed ID token as the browser application's backend credential.
 
-This setting affects Studio only. The CLI and integrations that supply their own bearer token are unchanged. Studio reads the token from the current `oidc-client-ts` user on every request, including after silent renewal; it does not retain a separate copy of the initial ID token.
+This setting applies to Studio, CLI login, and SDK-managed user-token refresh. Studio reads the token from the current `oidc-client-ts` user on every request, including after silent renewal; it does not retain a separate copy of the initial ID token. The CLI fails authentication instead of falling back to the access token when an ID token is required but absent.
 
 Do not use `id_token` solely to work around an opaque access token. Confirm the provider contract, configure `audience`, and verify that the ID token contains the identity and group claims used by your RBAC policy. The `audience` setting defaults to unset; when it is unset, NeMo Helix validates the token signature, issuer, and expiry but does not require a specific audience. ID tokens commonly do not carry the OAuth `scope` claim, so token-scope enforcement does not apply when it is absent; NeMo Helix RBAC still applies.
 
@@ -129,22 +129,26 @@ nemo workspaces list
 
 ## OIDC Configuration Reference
 
-| Field                           | Type                         | Description                                                                                    |
-| ------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------- |
-| `enabled`                       | bool                         | Enable OIDC token validation.                                                                  |
-| `issuer`                        | string                       | IdP issuer URL (e.g., `https://login.microsoftonline.com/<tenant>/v2.0`).                      |
-| `client_id`                     | string                       | OAuth client ID for NeMo Helix.                                                                |
-| `bearer_token_source`           | `access_token` or `id_token` | Token from Studio's current OIDC user to send to NeMo Helix APIs (default: `access_token`).    |
-| `additional_issuers`            | list                         | Extra issuer URLs to accept (e.g., Azure AD v1 format).                                        |
-| `audience`                      | string                       | Expected token audience. Unset by default; validation is skipped when unset.                   |
-| `email_claim`                   | string                       | JWT claim for email (default: `email`).                                                        |
-| `subject_claim`                 | string                       | JWT claim for subject (default: `sub`).                                                        |
-| `groups_claim`                  | string                       | JWT claim for groups (default: `groups`).                                                      |
-| `default_scopes`                | string                       | Space-separated scopes requested when user does not pass `--scope`.                            |
-| `scope_prefix`                  | string                       | Prefix stripped from token scopes before authorization.                                        |
-| `token_endpoint`                | string                       | Override token endpoint (otherwise discovered from IdP).                                       |
-| `device_authorization_endpoint` | string                       | Override device auth endpoint.                                                                 |
-| `jwks_uri`                      | string                       | Override JWKS URI.                                                                             |
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Enable OIDC token validation. |
+| `issuer` | string | IdP issuer URL (e.g., `https://login.microsoftonline.com/<tenant>/v2.0`). |
+| `client_id` | string | OAuth client ID for the NeMo Helix deployment and its default interactive login flows. |
+| `cli_client_id` | string | Optional public-client ID dedicated to CLI user authentication; defaults to `client_id`. |
+| `bearer_token_source` | `access_token` or `id_token` | Token from the IdP response that clients send to NeMo Helix APIs (default: `access_token`). |
+| `additional_issuers` | list | Extra issuer URLs to accept (e.g., Azure AD v1 format). |
+| `audience` | string | Expected token audience. Unset by default; validation is skipped when unset. |
+| `email_claim` | string | JWT claim for email (default: `email`). |
+| `subject_claim` | string | JWT claim for subject (default: `sub`). |
+| `groups_claim` | string | JWT claim for groups (default: `groups`). |
+| `default_scopes` | string | Space-separated scopes requested when user does not pass `--scope`. |
+| `scope_prefix` | string | Prefix stripped from token scopes before authorization. |
+| `token_endpoint` | string | Override token endpoint (otherwise discovered from IdP). |
+| `device_authorization_endpoint` | string | Override device auth endpoint. |
+| `device_authorization_requires_device_id` | bool | Add a stable, locally generated `device_id` to CLI device authorization requests (default: `false`). |
+| `device_authorization_display_name` | string | Optional name shown by the IdP during device authorization. |
+| `device_token_request_includes_scope` | bool | Include `scope` in device-flow token polling requests; disable for providers that reject it (default: `true`). |
+| `jwks_uri` | string | Override JWKS URI. |
 
 ## Minimum IdP Checklist
 
@@ -154,6 +158,15 @@ Regardless of IdP, ensure:
 2. The application supports the **device authorization grant** (for `nemo auth login`).
 3. The selected bearer token includes claims for email, subject, and groups (or you have configured `email_claim`, `subject_claim`, `groups_claim` to match your IdP's claim names).
 4. _(If using access-token scopes)_ Custom API scopes (`platform:read`, `platform:write`) are exposed, included in access tokens, and admin consent is granted if required.
+
+For providers that issue opaque access tokens but signed ID tokens, set `bearer_token_source: id_token` only when
+the NeMo Helix deployment is intentionally configured to validate that ID token's issuer, signature, and audience.
+
+When `device_authorization_requires_device_id` is enabled, the CLI stores a random installation identifier at
+`$XDG_STATE_HOME/nhx/oidc-device-id` (or `~/.local/state/nhx/oidc-device-id`) with mode `0600`. It reuses that value
+for later logins. If `device_authorization_display_name` is unset, the CLI sends `NeMo Helix CLI`.
+Set `device_token_request_includes_scope: false` when the provider accepts scopes only on the initial device
+authorization request. The default remains enabled for providers that require the scope again while polling.
 
 ## Claim mapping
 

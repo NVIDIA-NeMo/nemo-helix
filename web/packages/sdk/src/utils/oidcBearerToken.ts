@@ -20,20 +20,27 @@ const parseBearerTokenSource = (
   return undefined;
 };
 
-const isUnexpiredIdToken = (token: string): boolean => {
+export const getOidcIdTokenExpiresAt = (token: string | undefined): number | undefined => {
+  if (!token) return undefined;
+
   const segments = token.split('.');
-  if (segments.length !== 3 || !segments[1]) return false;
+  if (segments.length !== 3 || !segments[1]) return undefined;
 
   try {
     const payload = segments[1].replace(/-/g, '+').replace(/_/g, '/');
     const paddedPayload = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=');
     const claims = JSON.parse(globalThis.atob(paddedPayload)) as unknown;
-    if (typeof claims !== 'object' || claims === null || !('exp' in claims)) return false;
+    if (typeof claims !== 'object' || claims === null || !('exp' in claims)) return undefined;
     const expiresAt = (claims as { exp?: unknown }).exp;
-    return typeof expiresAt === 'number' && expiresAt > Date.now() / 1000;
+    return typeof expiresAt === 'number' ? expiresAt : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+};
+
+const isUnexpiredIdToken = (token: string): boolean => {
+  const expiresAt = getOidcIdTokenExpiresAt(token);
+  return expiresAt !== undefined && expiresAt > Date.now() / 1000;
 };
 
 export const selectOidcBearerToken = (

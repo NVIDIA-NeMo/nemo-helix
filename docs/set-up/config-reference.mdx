@@ -95,9 +95,11 @@ auth:
     issuer: ''
     # Additional valid issuers for token validation. Useful for Azure AD where access tokens use v1.0 issuer format (https://sts.windows.net/{tenant}/) while endpoints use v2.0.
     additional_issuers: []
-    # OAuth client ID for this NeMo Helix deployment. Used for device flow and token audience validation. | default: ''
+    # OAuth client ID for this NeMo Helix deployment and its default interactive login flows. | default: ''
     client_id: ''
-    # OIDC user token Studio sends to NeMo Helix APIs. Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer. | default: 'access_token' | values: 'access_token' | 'id_token'
+    # OAuth client ID for interactive CLI user authentication. Defaults to client_id when unset.
+    cli_client_id:
+    # Token returned by the identity provider that clients send to NeMo Helix APIs. Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer. | default: 'access_token' | values: 'access_token' | 'id_token'
     bearer_token_source: access_token
     # Override authorization endpoint (defaults to discovery).
     authorization_endpoint:
@@ -105,6 +107,12 @@ auth:
     token_endpoint:
     # Override device authorization endpoint (defaults to discovery).
     device_authorization_endpoint:
+    # Include a stable, locally generated device_id parameter in CLI device authorization requests. Enable only for identity providers that require this extension. | default: False
+    device_authorization_requires_device_id: false
+    # Optional display_name sent with CLI device authorization requests.
+    device_authorization_display_name:
+    # Include the requested scope in CLI device-flow token polling requests. Disable for identity providers whose token endpoint rejects this extension. | default: True
+    device_token_request_includes_scope: true
     # Override JWKS URI for token validation (defaults to discovery).
     jwks_uri:
     # Fall back to RFC 7662 token introspection when a bearer token is not a JWT (some IdPs issue opaque access tokens). Requires introspection_endpoint to be set or discoverable, and typically introspection_client_secret_env_var pointing at a secret-backed environment variable. | default: False

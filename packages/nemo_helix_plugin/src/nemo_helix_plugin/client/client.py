@@ -1350,6 +1350,7 @@ def _client_from_config(
             context_name=ctx.context_name,
             access_token=ctx.user.token.get_secret_value(),
             refresh_token=ctx.user.refresh_token.get_secret_value() if ctx.user.refresh_token else None,
+            expires_at=ctx.user.expires_at,
             config_exists=config_exists,
             config_path=actual_config_path,
             explicit_access_token=explicit_access_token,

@@ -50,6 +50,7 @@ class OAuthUser(BaseUser):
     name: str = Field(..., min_length=1, description="Unique user name")
     token: SecretStr = Field(..., min_length=1, description="Access token (JWT)")
     refresh_token: SecretStr | None = Field(default=None, description="Refresh token for automatic renewal")
+    expires_at: float | None = Field(default=None, description="Access token expiry as a Unix timestamp")
 
     @field_validator("name")
     @classmethod
@@ -159,6 +160,7 @@ class ConfigParams(TypedDict, total=False):
     base_url: str
     access_token: str | None
     refresh_token: str | None
+    expires_at: float | None
     workspace: str
     default_model: str
     fast_model: str
@@ -209,8 +211,10 @@ class ConfigFile(BaseModel):
         user = next((u for u in self.users if u.name == user_name), None)
         access_token_provided = "access_token" in params
         refresh_token_provided = "refresh_token" in params
+        expires_at_provided = "expires_at" in params
         access_token = params.get("access_token")
         refresh_token = params.get("refresh_token")
+        expires_at = params.get("expires_at")
 
         if user is None:
             if access_token:
@@ -218,6 +222,7 @@ class ConfigFile(BaseModel):
                     name=user_name,
                     token=SecretStr(access_token),
                     refresh_token=SecretStr(refresh_token) if refresh_token else None,
+                    expires_at=expires_at,
                 )
             else:
                 user = NoAuthUser(name=user_name)
@@ -229,16 +234,20 @@ class ConfigFile(BaseModel):
                     name=user_name,
                     token=SecretStr(access_token),
                     refresh_token=SecretStr(refresh_token) if refresh_token else None,
+                    expires_at=expires_at,
                 )
             else:
                 user = NoAuthUser(name=user_name)
             self.users[idx] = user
-        elif isinstance(user, OAuthUser) and refresh_token_provided:
+        elif isinstance(user, OAuthUser) and (refresh_token_provided or expires_at_provided):
             idx = next(i for i, u in enumerate(self.users) if u.name == user_name)
             user = OAuthUser(
                 name=user_name,
                 token=user.token,
-                refresh_token=SecretStr(refresh_token) if refresh_token else None,
+                refresh_token=(SecretStr(refresh_token) if refresh_token else None)
+                if refresh_token_provided
+                else user.refresh_token,
+                expires_at=expires_at if expires_at_provided else user.expires_at,
             )
             self.users[idx] = user
 
