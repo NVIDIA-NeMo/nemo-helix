@@ -17,6 +17,10 @@ import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
 import { Columns3, TriangleAlert } from 'lucide-react';
 import { type FC } from 'react';
 
+// Module-level so its identity is stable: DataView rebuilds columns, and remounts every cell,
+// whenever makeColumns changes.
+const makeTraceColumns = makeIntakeTraceColumns();
+
 export interface InsightTracesTableProps {
   workspace: string;
   /** Intake trace ids (the insight's `trace_refs`). */
@@ -68,7 +72,7 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
       ) : null}
       <IntakeTelemetryDataView<Trace>
         dataViewState={dataViewState}
-        makeColumns={makeIntakeTraceColumns()}
+        makeColumns={makeTraceColumns}
         onRowClick={(trace, _index, event) =>
           openRow(event, getIntakeSessionTraceRoute(workspace, trace.session_id, trace.id))
         }

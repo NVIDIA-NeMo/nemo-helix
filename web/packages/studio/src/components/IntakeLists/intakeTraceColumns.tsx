@@ -8,6 +8,7 @@ import { Badge } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryStatusBadge } from '@studio/components/IntakeDetail/IntakeComponents/IntakeTelemetryStatusBadge';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import type { IntakeTelemetryDataView } from '@studio/components/IntakeLists/IntakeTelemetryDataView';
+import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   formatCost,
   formatDurationMs,
@@ -29,6 +30,8 @@ export interface IntakeTraceColumnOptions {
   sessionIdFilter?: boolean;
   /** Expose a Status filter in the workspace browse table. */
   statusFilter?: boolean;
+  /** Show an Agent column with an agent-name filter (workspace browse table). */
+  agentNameFilter?: boolean;
 }
 
 const TRACE_STATUS_FILTER_OPTIONS = [
@@ -49,6 +52,7 @@ export const makeIntakeTraceColumns =
     startedAtFilter = false,
     sessionIdFilter = false,
     statusFilter = false,
+    agentNameFilter = false,
   }: IntakeTraceColumnOptions = {}): MakeIntakeTraceColumns =>
   ({ accessor }) => [
     accessor('id', {
@@ -67,6 +71,24 @@ export const makeIntakeTraceColumns =
         : undefined,
       cell: ({ row }) => getTraceDisplayName(row.original),
     }),
+    ...(agentNameFilter
+      ? [
+          accessor('agent_name', {
+            id: AGENT_NAME_FILTER_ID,
+            header: 'Agent',
+            size: 200,
+            enableSorting: false,
+            meta: {
+              filter: {
+                type: 'text' as const,
+                label: 'Agent',
+                placeholder: 'Filter by agent name',
+              },
+            },
+            cell: ({ row }) => row.original.agent_name ?? '—',
+          }),
+        ]
+      : []),
     accessor('session_id', {
       id: 'session_id',
       header: 'Session',
