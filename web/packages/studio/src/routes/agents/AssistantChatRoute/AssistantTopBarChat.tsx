@@ -180,7 +180,7 @@ const AssistantTopBarChatPopout: FC<{ workspace: string }> = ({ workspace }) => 
               </Flex>
             </Flex>
             <Stack className="min-h-0 flex-1 overflow-hidden">
-              {hasOpened ? (
+              {isOpen && hasOpened ? (
                 <ChatThreadErrorBoundary onRetry={retryChatThread}>
                   <Suspense fallback={chatThreadFallback}>
                     <ChatThread

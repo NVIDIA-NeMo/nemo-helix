@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { initialize, type NebulaState } from '@nemo/common/src/components/Nebula/animate';
+import { destroy, initialize, type NebulaState } from '@nemo/common/src/components/Nebula/animate';
 import type { NebulaProps } from '@nemo/common/src/components/Nebula/types';
 import { useCallback, useEffect, useRef } from 'react';
 
@@ -42,6 +42,7 @@ export const Nebula = ({
     canvas: null,
     ctx: null,
     appearance: { color, shape },
+    animationFrameId: null,
   });
 
   useEffect(() => {
@@ -66,7 +67,11 @@ export const Nebula = ({
 
   const handleRef = useCallback(
     (canvasElement: HTMLCanvasElement | null) => {
-      initialize(nebulaState, canvasElement, variant);
+      if (canvasElement) {
+        initialize(nebulaState, canvasElement, variant);
+      } else {
+        destroy(nebulaState);
+      }
     },
     [variant]
   );
