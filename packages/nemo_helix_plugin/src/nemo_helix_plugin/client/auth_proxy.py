@@ -30,6 +30,7 @@ _ON_BEHALF_OF_EMAIL_HEADER = "x-nhx-principal-on-behalf-of-email"
 _ON_BEHALF_OF_GROUPS_HEADER = "x-nhx-principal-on-behalf-of-groups"
 _ON_BEHALF_OF_ACCOUNT_ID_HEADER = "x-nhx-subject-account-id"
 _ON_BEHALF_OF_ALIASES_HEADER = "x-nhx-subject-aliases"
+_SCOPES_HEADER = "x-nhx-scopes"
 
 # Request-header sanitization drops identity, framing, and hop-by-hop metadata:
 # - the workload's own credential / principal / on-behalf-of headers (we set the
@@ -63,6 +64,7 @@ _STRIP_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
         _ON_BEHALF_OF_GROUPS_HEADER,
         _ON_BEHALF_OF_ACCOUNT_ID_HEADER,
         _ON_BEHALF_OF_ALIASES_HEADER,
+        _SCOPES_HEADER,
     }
 )
 # We stream the response, so the upstream's framing headers no longer apply.

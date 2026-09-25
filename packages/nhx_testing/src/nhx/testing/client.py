@@ -37,6 +37,7 @@ from nhx.testing.access_log import AccessLog, AccessLogMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
+_IN_PROCESS_PLATFORM_BASE_URL = "http://127.0.0.1"
 
 
 @dataclass
@@ -149,8 +150,7 @@ def _default_service_configs(tmp_dir: Path) -> dict[type[object], ServiceConfig]
                 },
             },
         ),
-        # HelixConfig with testserver URL so get_service_url() works in tests
-        HelixConfig: HelixConfig(base_url="http://testserver"),
+        HelixConfig: HelixConfig(base_url=_IN_PROCESS_PLATFORM_BASE_URL),
     }
 
 
@@ -364,6 +364,10 @@ def create_test_client(
         configs = _default_service_configs(tmp_dir)
         if service_configs:
             configs.update(service_configs)
+        platform_config = configs.get(HelixConfig)
+        if not isinstance(platform_config, HelixConfig):
+            raise TypeError("create_test_client requires a HelixConfig platform config")
+        platform_base_url = platform_config.base_url
 
         # If auth is enabled, set up auth configs and add AuthService
         if auth_enabled:
@@ -373,7 +377,7 @@ def create_test_client(
 
             # Only add auth configs if not already provided by user.
             # PDP base is the platform root; get_pdp_url() appends /apis/auth/v2/authz/{entrypoint}.
-            pdp_base = "http://testserver"
+            pdp_base = platform_base_url
             if SharedAuthConfig not in configs:
                 configs[SharedAuthConfig] = SharedAuthConfig(
                     enabled=True,
@@ -455,7 +459,7 @@ def create_test_client(
 
         transport = httpx.ASGITransport(app=_pending_asgi_app)
         pdp_timeout = Configuration.get_service_config(AuthConfig).policy_decision_point_request_timeout_seconds
-        async_http_client = httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=pdp_timeout)
+        async_http_client = httpx.AsyncClient(transport=transport, base_url=platform_base_url, timeout=pdp_timeout)
 
         # Both auth callouts target this in-process ASGI app in tests.
         app = create_app(
@@ -481,10 +485,10 @@ def create_test_client(
         from nhx.common.sdk_factory import get_async_platform_sdk
 
         async_sdk = get_async_platform_sdk(
-            base_url="http://testserver",
+            base_url=platform_base_url,
             http_client=async_http_client,
         ).copy(workspace=workspace)
-        async_client = AsyncNemoClient(base_url="http://testserver", http_client=async_http_client, workspace=workspace)
+        async_client = AsyncNemoClient(base_url=platform_base_url, http_client=async_http_client, workspace=workspace)
 
         # Create the EntityClient (used for DI and optionally yielded)
         entity_client = EntityClient(client_from_platform(async_sdk, AsyncEntitiesClient))
@@ -534,12 +538,12 @@ def create_test_client(
         if all_overrides:
             app.dependency_overrides.update(all_overrides)
 
-        with TestClient(app) as client:
+        with TestClient(app, base_url=platform_base_url) as client:
             # Use max_retries=0 to avoid retry delays on 409 Conflict errors
             sdk_http_client = SDKTestClientAdapter(client)
             sdk = NeMoHelix(
                 workspace=workspace,
-                base_url="http://testserver",
+                base_url=platform_base_url,
                 http_client=sdk_http_client,
                 max_retries=0,
             )

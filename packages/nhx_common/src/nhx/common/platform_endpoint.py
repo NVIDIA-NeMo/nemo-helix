@@ -37,6 +37,7 @@ _AsyncEventHooks = Mapping[str, list[_AsyncRequestHook]]
 class _SyncClientKwargs(TypedDict, total=False):
     event_hooks: _SyncEventHooks
     follow_redirects: bool
+    limits: httpx.Limits
     timeout: TimeoutTypes
     transport: httpx.BaseTransport
     verify: str | bool
@@ -45,6 +46,7 @@ class _SyncClientKwargs(TypedDict, total=False):
 class _AsyncClientKwargs(TypedDict, total=False):
     event_hooks: _AsyncEventHooks
     follow_redirects: bool
+    limits: httpx.Limits
     timeout: TimeoutTypes
     transport: httpx.AsyncBaseTransport
     verify: str | bool
@@ -64,10 +66,64 @@ def _async_event_hooks(request_hooks: Iterable[_AsyncRequestHook] | None) -> _As
     return {"request": hooks, "response": []} if hooks else None
 
 
+def _sync_authorization_header_guard(endpoint: "HelixEndpoint") -> _SyncRequestHook:
+    def guard(request: httpx.Request) -> None:
+        if "Authorization" in request.headers:
+            require_authorization_header_request(endpoint, request.url, purpose="SDK request")
+
+    return guard
+
+
+def _async_authorization_header_guard(endpoint: "HelixEndpoint") -> _AsyncRequestHook:
+    async def guard(request: httpx.Request) -> None:
+        if "Authorization" in request.headers:
+            require_authorization_header_request(endpoint, request.url, purpose="async SDK request")
+
+    return guard
+
+
+def _wrapped_client_headers(headers: httpx.Headers, *, strip_authorization: bool) -> httpx.Headers:
+    copied = httpx.Headers(headers)
+    if strip_authorization and "Authorization" in copied:
+        del copied["Authorization"]
+    return copied
+
+
+def _sync_http_transport(
+    *,
+    verify: str | bool = True,
+    limits: httpx.Limits | None = None,
+    uds: str | None = None,
+) -> httpx.HTTPTransport:
+    if uds is None:
+        if limits is None:
+            return httpx.HTTPTransport(verify=verify)
+        return httpx.HTTPTransport(verify=verify, limits=limits)
+    if limits is None:
+        return httpx.HTTPTransport(uds=uds, verify=verify)
+    return httpx.HTTPTransport(uds=uds, verify=verify, limits=limits)
+
+
+def _async_http_transport(
+    *,
+    verify: str | bool = True,
+    limits: httpx.Limits | None = None,
+    uds: str | None = None,
+) -> httpx.AsyncHTTPTransport:
+    if uds is None:
+        if limits is None:
+            return httpx.AsyncHTTPTransport(verify=verify)
+        return httpx.AsyncHTTPTransport(verify=verify, limits=limits)
+    if limits is None:
+        return httpx.AsyncHTTPTransport(uds=uds, verify=verify)
+    return httpx.AsyncHTTPTransport(uds=uds, verify=verify, limits=limits)
+
+
 def _sync_default_sdk_client(
     *,
     timeout: TimeoutTypes | None,
     event_hooks: _SyncEventHooks | None,
+    limits: httpx.Limits | None = None,
     verify: str | bool | None = None,
     transport: httpx.BaseTransport | None = None,
     follow_redirects: bool | None = None,
@@ -77,6 +133,8 @@ def _sync_default_sdk_client(
         kwargs["timeout"] = timeout
     if event_hooks is not None:
         kwargs["event_hooks"] = event_hooks
+    if limits is not None:
+        kwargs["limits"] = limits
     if verify is not None:
         kwargs["verify"] = verify
     if transport is not None:
@@ -105,6 +163,7 @@ def _async_default_sdk_client(
     *,
     timeout: TimeoutTypes | None,
     event_hooks: _AsyncEventHooks | None,
+    limits: httpx.Limits | None = None,
     verify: str | bool | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     follow_redirects: bool | None = None,
@@ -114,6 +173,8 @@ def _async_default_sdk_client(
         kwargs["timeout"] = timeout
     if event_hooks is not None:
         kwargs["event_hooks"] = event_hooks
+    if limits is not None:
+        kwargs["limits"] = limits
     if verify is not None:
         kwargs["verify"] = verify
     if transport is not None:
@@ -145,6 +206,13 @@ def _get_platform_config() -> HelixConfig:
     return platform_config
 
 
+def _sdk_client_verify(verify: str | bool | None) -> str | bool | None:
+    if verify is not None:
+        return verify
+    client_verify = client_verify_from_env()
+    return None if client_verify is True else client_verify
+
+
 @dataclass(frozen=True)
 class HelixEndpoint:
     connect_base_url: str
@@ -158,64 +226,79 @@ class HelixEndpoint:
     )
 
     def sync_http_client(self, *, timeout: TimeoutTypes | None = None) -> httpx.Client:
+        client_verify = client_verify_from_env()
         if self.transport == "uds":
             if self.socket_path is None:
                 raise ValueError("UDS endpoint is missing a socket path")
-            transport = httpx.HTTPTransport(uds=str(self.socket_path))
+            transport = _sync_http_transport(uds=str(self.socket_path), verify=client_verify)
             if timeout is None:
                 return httpx.Client(transport=transport, follow_redirects=True)
             return httpx.Client(transport=transport, follow_redirects=True, timeout=timeout)
         if timeout is None:
-            return httpx.Client(follow_redirects=True)
-        return httpx.Client(follow_redirects=True, timeout=timeout)
+            if client_verify is True:
+                return httpx.Client(follow_redirects=True)
+            return httpx.Client(follow_redirects=True, verify=client_verify)
+        if client_verify is True:
+            return httpx.Client(follow_redirects=True, timeout=timeout)
+        return httpx.Client(follow_redirects=True, timeout=timeout, verify=client_verify)
 
     def async_http_client(self, *, timeout: TimeoutTypes | None = None) -> httpx.AsyncClient:
+        client_verify = client_verify_from_env()
         if self.transport == "uds":
             if self.socket_path is None:
                 raise ValueError("UDS endpoint is missing a socket path")
-            transport = httpx.AsyncHTTPTransport(uds=str(self.socket_path))
+            transport = _async_http_transport(uds=str(self.socket_path), verify=client_verify)
             if timeout is None:
                 return httpx.AsyncClient(transport=transport, follow_redirects=True)
             return httpx.AsyncClient(transport=transport, follow_redirects=True, timeout=timeout)
         if timeout is None:
-            return httpx.AsyncClient(follow_redirects=True)
-        return httpx.AsyncClient(follow_redirects=True, timeout=timeout)
+            if client_verify is True:
+                return httpx.AsyncClient(follow_redirects=True)
+            return httpx.AsyncClient(follow_redirects=True, verify=client_verify)
+        if client_verify is True:
+            return httpx.AsyncClient(follow_redirects=True, timeout=timeout)
+        return httpx.AsyncClient(follow_redirects=True, timeout=timeout, verify=client_verify)
 
     def sync_sdk_http_client(
         self,
         *,
         timeout: TimeoutTypes | None = None,
+        limits: httpx.Limits | None = None,
         http_client: httpx.Client | None = None,
         request_hooks: Iterable[_SyncRequestHook] | None = None,
         verify: str | bool | None = None,
         follow_redirects: bool | None = None,
     ) -> httpx.Client:
+        guarded_hooks = tuple(request_hooks or ()) + (_sync_authorization_header_guard(self),)
+        event_hooks = _sync_event_hooks(guarded_hooks)
+        client_verify = _sdk_client_verify(verify)
         if http_client is not None:
-            if not self.service_endpoints:
+            if not self.service_endpoints and event_hooks is None:
                 return http_client
             return ImmutableDefaultHttpxClient(
                 base_url=http_client.base_url,
                 cookies=http_client.cookies,
+                event_hooks=event_hooks,
                 follow_redirects=http_client.follow_redirects,
-                headers=http_client.headers,
+                headers=_wrapped_client_headers(http_client.headers, strip_authorization=event_hooks is not None),
                 max_redirects=http_client.max_redirects,
                 params=http_client.params,
                 timeout=http_client.timeout,
                 transport=_SyncExplicitClientRoutingTransport(endpoint=self, http_client=http_client),
             )
-        event_hooks = _sync_event_hooks(request_hooks)
         if self.service_endpoints:
-            transport = _SyncHelixEndpointRoutingTransport(endpoint=self, verify=verify)
+            transport = _SyncHelixEndpointRoutingTransport(endpoint=self, limits=limits, verify=client_verify)
             return _sync_default_sdk_client(
                 transport=transport,
                 timeout=timeout,
                 event_hooks=event_hooks,
+                limits=limits,
                 follow_redirects=follow_redirects,
             )
         if self.transport == "uds":
             if self.socket_path is None:
                 raise ValueError("UDS endpoint is missing a socket path")
-            transport = httpx.HTTPTransport(uds=str(self.socket_path))
+            transport = _sync_http_transport(uds=str(self.socket_path), limits=limits)
             return _sync_uds_sdk_client(
                 transport=transport,
                 timeout=timeout,
@@ -225,7 +308,8 @@ class HelixEndpoint:
         return _sync_default_sdk_client(
             timeout=timeout,
             event_hooks=event_hooks,
-            verify=verify,
+            limits=limits,
+            verify=client_verify,
             follow_redirects=follow_redirects,
         )
 
@@ -233,37 +317,42 @@ class HelixEndpoint:
         self,
         *,
         timeout: TimeoutTypes | None = None,
+        limits: httpx.Limits | None = None,
         http_client: httpx.AsyncClient | None = None,
         request_hooks: Iterable[_AsyncRequestHook] | None = None,
         verify: str | bool | None = None,
         follow_redirects: bool | None = None,
     ) -> httpx.AsyncClient:
+        guarded_hooks = tuple(request_hooks or ()) + (_async_authorization_header_guard(self),)
+        event_hooks = _async_event_hooks(guarded_hooks)
+        client_verify = _sdk_client_verify(verify)
         if http_client is not None:
-            if not self.service_endpoints:
+            if not self.service_endpoints and event_hooks is None:
                 return http_client
             return ImmutableDefaultAsyncHttpxClient(
                 base_url=http_client.base_url,
                 cookies=http_client.cookies,
+                event_hooks=event_hooks,
                 follow_redirects=http_client.follow_redirects,
-                headers=http_client.headers,
+                headers=_wrapped_client_headers(http_client.headers, strip_authorization=event_hooks is not None),
                 max_redirects=http_client.max_redirects,
                 params=http_client.params,
                 timeout=http_client.timeout,
                 transport=_AsyncExplicitClientRoutingTransport(endpoint=self, http_client=http_client),
             )
-        event_hooks = _async_event_hooks(request_hooks)
         if self.service_endpoints:
-            transport = _AsyncHelixEndpointRoutingTransport(endpoint=self, verify=verify)
+            transport = _AsyncHelixEndpointRoutingTransport(endpoint=self, limits=limits, verify=client_verify)
             return _async_default_sdk_client(
                 transport=transport,
                 timeout=timeout,
                 event_hooks=event_hooks,
+                limits=limits,
                 follow_redirects=follow_redirects,
             )
         if self.transport == "uds":
             if self.socket_path is None:
                 raise ValueError("UDS endpoint is missing a socket path")
-            transport = httpx.AsyncHTTPTransport(uds=str(self.socket_path))
+            transport = _async_http_transport(uds=str(self.socket_path), limits=limits)
             return _async_uds_sdk_client(
                 transport=transport,
                 timeout=timeout,
@@ -273,7 +362,8 @@ class HelixEndpoint:
         return _async_default_sdk_client(
             timeout=timeout,
             event_hooks=event_hooks,
-            verify=verify,
+            limits=limits,
+            verify=client_verify,
             follow_redirects=follow_redirects,
         )
 
@@ -313,12 +403,14 @@ class RoutedHelixEndpointRequest:
     endpoint: HelixEndpoint
 
 
-def resolve_platform_endpoint(platform_config: HelixConfig | None = None) -> HelixEndpoint:
-    """Resolve the default platform endpoint from ``NHX_BASE_URL`` / config."""
+def resolve_platform_endpoint(
+    platform_config: HelixConfig | None = None, *, base_url: str | None = None
+) -> HelixEndpoint:
+    """Resolve the default platform endpoint from an explicit URL or config base URL."""
 
     if platform_config is None:
         platform_config = _get_platform_config()
-    default_endpoint = parse_platform_endpoint(platform_config.base_url)
+    default_endpoint = parse_platform_endpoint(base_url or platform_config.base_url)
     service_endpoints = {
         service_name: resolve_service_endpoint(service_name, platform_config)
         for service_name in sorted(_service_route_names(platform_config, os.environ))
@@ -378,7 +470,22 @@ def parse_platform_endpoint(endpoint: str) -> HelixEndpoint:
 
 
 def require_authorization_header_endpoint(endpoint: HelixEndpoint, *, purpose: str) -> None:
-    """Require an endpoint safe enough for requests carrying Authorization."""
+    """Require endpoint routing safe enough for requests carrying Authorization."""
+    _require_single_authorization_header_endpoint(endpoint, purpose=purpose, service_name=None)
+    for service_name, service_endpoint in sorted(endpoint.service_endpoints.items()):
+        _require_single_authorization_header_endpoint(
+            service_endpoint,
+            purpose=purpose,
+            service_name=service_name,
+        )
+
+
+def _require_single_authorization_header_endpoint(
+    endpoint: HelixEndpoint,
+    *,
+    purpose: str,
+    service_name: str | None,
+) -> None:
     if endpoint.transport == "uds":
         return
 
@@ -388,10 +495,28 @@ def require_authorization_header_endpoint(endpoint: HelixEndpoint, *, purpose: s
     if parsed.scheme == "http" and _is_loopback_host(parsed.host):
         return
 
+    location = "endpoint" if service_name is None else f"service endpoint {service_name!r}"
     raise ValueError(
-        f"{purpose} cannot send Authorization to cleartext remote endpoint "
+        f"{purpose} cannot send Authorization to cleartext remote {location} "
         f"{endpoint.connect_base_url!r}; use https://, unix://, or loopback HTTP for local development"
     )
+
+
+def require_authorization_header_request(endpoint: HelixEndpoint, url: str | httpx.URL, *, purpose: str) -> None:
+    request_url = httpx.URL(url)
+    routed = endpoint.route_request_url(request_url)
+    uds_placeholder = (
+        routed.endpoint.transport == "uds"
+        and request_url.scheme == "http"
+        and request_url.host == httpx.URL(UDS_BASE_URL).host
+    )
+    if not uds_placeholder:
+        require_authorization_header_endpoint(parse_platform_endpoint(_origin_url(request_url)), purpose=purpose)
+    _require_single_authorization_header_endpoint(routed.endpoint, purpose=purpose, service_name=None)
+
+
+def _origin_url(url: httpx.URL) -> str:
+    return f"{url.scheme}://{url.netloc.decode('ascii')}"
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -495,14 +620,19 @@ def _uds_socket_paths(endpoint: HelixEndpoint) -> frozenset[Path]:
 
 
 class _SyncHelixEndpointRoutingTransport(httpx.BaseTransport):
-    def __init__(self, *, endpoint: HelixEndpoint, verify: str | bool | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: HelixEndpoint,
+        limits: httpx.Limits | None = None,
+        verify: str | bool | None = None,
+    ) -> None:
         self._endpoint = endpoint
         client_verify = client_verify_from_env() if verify is None else verify
-        self._tcp_transport = (
-            httpx.HTTPTransport() if client_verify is True else httpx.HTTPTransport(verify=client_verify)
-        )
+        self._tcp_transport = _sync_http_transport(verify=client_verify, limits=limits)
         self._uds_transports = {
-            socket_path: httpx.HTTPTransport(uds=str(socket_path)) for socket_path in _uds_socket_paths(endpoint)
+            socket_path: _sync_http_transport(uds=str(socket_path), verify=client_verify, limits=limits)
+            for socket_path in _uds_socket_paths(endpoint)
         }
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
@@ -539,14 +669,19 @@ class _SyncExplicitClientRoutingTransport(httpx.BaseTransport):
 
 
 class _AsyncHelixEndpointRoutingTransport(httpx.AsyncBaseTransport):
-    def __init__(self, *, endpoint: HelixEndpoint, verify: str | bool | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: HelixEndpoint,
+        limits: httpx.Limits | None = None,
+        verify: str | bool | None = None,
+    ) -> None:
         self._endpoint = endpoint
         client_verify = client_verify_from_env() if verify is None else verify
-        self._tcp_transport = (
-            httpx.AsyncHTTPTransport() if client_verify is True else httpx.AsyncHTTPTransport(verify=client_verify)
-        )
+        self._tcp_transport = _async_http_transport(verify=client_verify, limits=limits)
         self._uds_transports = {
-            socket_path: httpx.AsyncHTTPTransport(uds=str(socket_path)) for socket_path in _uds_socket_paths(endpoint)
+            socket_path: _async_http_transport(uds=str(socket_path), verify=client_verify, limits=limits)
+            for socket_path in _uds_socket_paths(endpoint)
         }
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:

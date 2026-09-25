@@ -21,6 +21,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client as plugin_get_nemo_client
 from nhx.common.config import HelixConfig
 from nhx.common.observability.otel import scoped_otel_headers
+from nhx.common.platform_endpoint import _AsyncExplicitClientRoutingTransport
 from nhx.common.service import DependencyProvider, RouterConfig, Service
 from nhx.common.service import __all__ as service_exports
 from nhx.common.service import get_nemo_client as facade_get_nemo_client
@@ -271,6 +272,12 @@ class CloseCountingAsyncClient(httpx.AsyncClient):
         await super().aclose()
 
 
+def _wrapped_async_http_client(client: httpx.AsyncClient) -> httpx.AsyncClient:
+    transport = client._transport
+    assert isinstance(transport, _AsyncExplicitClientRoutingTransport)
+    return transport._http_client
+
+
 class TestDependencyProvider:
     """Tests for DependencyProvider class."""
 
@@ -307,7 +314,7 @@ class TestDependencyProvider:
             nemo = provider.get_request_scoped_nemo_client()
             sdk = provider.get_request_scoped_sdk()
 
-        assert sdk._client is provider.get_http_client()
+        assert _wrapped_async_http_client(sdk._client) is provider.get_http_client()
         assert nemo._http is provider.get_http_client()
 
         await provider.close()
@@ -318,7 +325,7 @@ class TestDependencyProvider:
         provider._http_client = transport
 
         with patch(
-            "nhx.common.sdk_factory.get_principal_auth_headers",
+            "nhx.common.platform_client_context.current_principal_auth_headers",
             return_value={
                 "X-NHX-Principal-Id": "user-one@example.com",
                 "X-NHX-Principal-On-Behalf-Of": "delegate-one@example.com",
@@ -327,7 +334,7 @@ class TestDependencyProvider:
             with scoped_otel_headers({"traceparent": "00-trace-one-span-one-01"}):
                 first = provider.get_request_scoped_nemo_client()
         with patch(
-            "nhx.common.sdk_factory.get_principal_auth_headers",
+            "nhx.common.platform_client_context.current_principal_auth_headers",
             return_value={"X-NHX-Principal-Id": "user-two@example.com"},
         ):
             with scoped_otel_headers({"traceparent": "00-trace-two-span-two-01"}):
@@ -353,7 +360,7 @@ class TestDependencyProvider:
         await provider.close()
         await provider.close()
 
-        assert sdk._client is transport
+        assert _wrapped_async_http_client(sdk._client) is transport
         assert nemo._http is transport
         assert transport.close_count == 1
         assert provider._http_client is None
@@ -387,7 +394,8 @@ class TestDependencyProvider:
             return transport
 
         endpoint = SimpleNamespace(async_sdk_http_client=lambda: create_transport())
-        monkeypatch.setattr(service_base, "resolve_platform_endpoint", lambda: endpoint)
+        runtime_context = SimpleNamespace(endpoint=endpoint)
+        monkeypatch.setattr(service_base, "build_platform_runtime_context", lambda *, platform_config: runtime_context)
 
         with patch.object(
             sdk_factory, "get_async_platform_sdk", wraps=sdk_factory.get_async_platform_sdk
@@ -408,7 +416,7 @@ class TestDependencyProvider:
 
         assert created == [transport]
         assert len({id(client) for client in sdk_clients}) == 1
-        assert all(client._client is transport for client in sdk_clients)
+        assert all(_wrapped_async_http_client(client._client) is transport for client in sdk_clients)
         assert all(client._http is transport for client in nemo_clients)
 
         await provider.close()
@@ -446,11 +454,11 @@ class TestDependencyProvider:
     async def test_service_principal_sdk_shares_provider_transport(self):
         provider = DependencyProvider()
         cached_sdk = provider.get_sdk_client()
-        service_sdk = provider.get_sdk_client(as_service="entities")
+        service_sdk = provider.get_service_sdk_client("entities")
 
         assert service_sdk is not cached_sdk
-        assert service_sdk._client is provider.get_http_client()
-        assert cached_sdk._client is provider.get_http_client()
+        assert _wrapped_async_http_client(service_sdk._client) is provider.get_http_client()
+        assert _wrapped_async_http_client(cached_sdk._client) is provider.get_http_client()
 
         await provider.close()
 

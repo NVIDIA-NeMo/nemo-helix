@@ -3,19 +3,24 @@
 
 """Adapter to create a typed client from an existing platform client.
 
-Accepts either a legacy ``NeMoHelix`` SDK instance or a :class:`NemoClient`
-/ :class:`AsyncNemoClient`, so plugins registered via ``NemoPluginSDKResources``
-can use the typed endpoint/client infrastructure regardless of which platform
-client the caller holds.
+Accepts either a generated ``NeMoHelix`` SDK handle or a
+:class:`NemoClient` / :class:`AsyncNemoClient`, so plugins registered via
+``NemoPluginSDKResources`` can use the typed endpoint/client infrastructure
+regardless of which platform client the caller holds.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Protocol, TypeVar, cast, overload, runtime_checkable
+from typing import Protocol, TypeVar, overload, runtime_checkable
 
 import httpx
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.auth import TokenProvider
+from nemo_helix_plugin.client.client import (
+    AsyncNemoClient,
+    NemoClient,
+    NemoClientRuntime,
+)
 from nemo_helix_plugin.client.types import RetryPolicy
 
 SyncT = TypeVar("SyncT", bound=NemoClient)
@@ -26,9 +31,9 @@ AsyncT = TypeVar("AsyncT", bound=AsyncNemoClient)
 class HelixClient(Protocol):
     """Structural shape shared by every platform handle :func:`client_from_platform` accepts.
 
-    Satisfied by :class:`NemoClient` / :class:`AsyncNemoClient` and by the
-    generated ``NeMoHelix`` / ``AsyncNeMoHelix`` SDK classes. Use it to
-    annotate ``sdk`` / ``async_sdk`` parameters that are only forwarded to
+    Satisfied by :class:`NemoClient` / :class:`AsyncNemoClient` and by generated
+    ``NeMoHelix`` / ``AsyncNeMoHelix`` SDK handles. Use it to annotate
+    ``sdk`` / ``async_sdk`` parameters that are only forwarded to
     :func:`client_from_platform`, so the annotating module does not need to
     import the generated SDK. Prefer :class:`SyncHelixClient` or
     :class:`AsyncHelixClient` when the parameter is one or the other.
@@ -40,21 +45,28 @@ class HelixClient(Protocol):
     @property
     def workspace(self) -> str | None: ...
 
+    @property
+    def nemo_client_runtime(self) -> NemoClientRuntime: ...
+
+    @property
+    def nemo_client_auth(self) -> TokenProvider | None: ...
+
 
 @runtime_checkable
 class SyncHelixClient(HelixClient, Protocol):
     """A sync platform handle (``NeMoHelix`` or :class:`NemoClient`)."""
 
-    def __enter__(self) -> Any: ...
+    def __enter__(self) -> object: ...
 
 
 @runtime_checkable
 class AsyncHelixClient(HelixClient, Protocol):
     """An async platform handle (``AsyncNeMoHelix`` or :class:`AsyncNemoClient`)."""
 
-    async def __aenter__(self) -> Any: ...
+    async def __aenter__(self) -> object: ...
 
 
+@runtime_checkable
 class _HelixClient(Protocol):
     base_url: str | httpx.URL
     workspace: str | None
@@ -63,7 +75,20 @@ class _HelixClient(Protocol):
     _custom_headers: Mapping[str, str]
     _client: httpx.Client | httpx.AsyncClient
 
-    def _prepare_url(self, url: str) -> httpx.URL: ...
+    @property
+    def nemo_client_runtime(self) -> NemoClientRuntime: ...
+
+    @property
+    def nemo_client_auth(self) -> TokenProvider | None: ...
+
+
+def _generated_platform_client(platform: HelixClient) -> _HelixClient:
+    if isinstance(platform, _HelixClient):
+        return platform
+    raise TypeError(
+        f"Unsupported platform client type {type(platform).__name__}; "
+        "pass a NemoClient, AsyncNemoClient, or generated platform SDK"
+    )
 
 
 def platform_default_headers(platform: HelixClient) -> dict[str, str]:
@@ -76,7 +101,7 @@ def platform_default_headers(platform: HelixClient) -> dict[str, str]:
     """
     if isinstance(platform, (NemoClient, AsyncNemoClient)):
         return dict(platform.default_headers)
-    return dict(cast(_HelixClient, platform)._custom_headers)
+    return dict(_generated_platform_client(platform)._custom_headers)
 
 
 def _platform_default_headers(platform: _HelixClient) -> dict[str, str] | None:
@@ -91,9 +116,15 @@ def _platform_default_headers(platform: _HelixClient) -> dict[str, str] | None:
 
 
 @overload
-def client_from_platform(platform: SyncHelixClient, client_cls: type[SyncT]) -> SyncT: ...
+def client_from_platform(
+    platform: SyncHelixClient,
+    client_cls: type[SyncT],
+) -> SyncT: ...
 @overload
-def client_from_platform(platform: AsyncHelixClient, client_cls: type[AsyncT]) -> AsyncT: ...
+def client_from_platform(
+    platform: AsyncHelixClient,
+    client_cls: type[AsyncT],
+) -> AsyncT: ...
 
 
 def client_from_platform(
@@ -105,7 +136,8 @@ def client_from_platform(
     A :class:`NemoClient` / :class:`AsyncNemoClient` is derived with
     ``client_cls.from_client`` and shares its auth, headers, retry policy and
     transport. A generated ``NeMoHelix`` / ``AsyncNeMoHelix`` is adapted
-    onto its httpx client.
+    onto its httpx client and must carry the same :class:`NemoClientRuntime`
+    that was resolved when the platform SDK was constructed.
 
     The overloads pair sync platforms with sync clients and async with async,
     so a mismatch is a type error at the call site.
@@ -119,7 +151,7 @@ def client_from_platform(
             raise TypeError(f"AsyncNemoClient cannot back {client_cls.__name__}: sync/async mismatch")
         return platform if isinstance(platform, client_cls) else client_cls.from_client(platform)
 
-    platform_client = cast(_HelixClient, platform)
+    platform_client = _generated_platform_client(platform)
     headers = _platform_default_headers(platform_client)
     retry = RetryPolicy(
         max_retries=platform_client.max_retries,
@@ -128,8 +160,6 @@ def client_from_platform(
         respect_retry_decision_headers=True,
         respect_retry_after_headers=True,
     )
-    url_resolver = platform_client._prepare_url
-
     # Carry the platform's timeout across as a per-request override. The shared
     # httpx client keeps whatever timeout it was built with, so a caller's
     # ``platform.with_options(timeout=...)`` would otherwise be silently dropped
@@ -142,29 +172,35 @@ def client_from_platform(
         # the form httpx itself uses, so the override survives.
         timeout = httpx.Timeout(None)
 
+    typed_client_runtime = platform_client.nemo_client_runtime
+
     if isinstance(platform_client._client, httpx.AsyncClient):
         if not issubclass(client_cls, AsyncNemoClient):
             raise TypeError("AsyncNeMoHelix requires an AsyncNemoClient class")
-        return client_cls(
+        client = client_cls(
             base_url=str(platform_client.base_url).rstrip("/"),
             workspace=platform_client.workspace,
+            auth=platform_client.nemo_client_auth,
             default_headers=headers,
             timeout=timeout,
             retry=retry,
             http_client=platform_client._client,
             owns_http_client=False,
-            url_resolver=url_resolver,
+            client_runtime=typed_client_runtime,
         )
+        return client
 
     if not issubclass(client_cls, NemoClient):
         raise TypeError("NeMoHelix requires a NemoClient class")
-    return client_cls(
+    client = client_cls(
         base_url=str(platform_client.base_url).rstrip("/"),
         workspace=platform_client.workspace,
+        auth=platform_client.nemo_client_auth,
         default_headers=headers,
         timeout=timeout,
         retry=retry,
         http_client=platform_client._client,
         owns_http_client=False,
-        url_resolver=url_resolver,
+        client_runtime=typed_client_runtime,
     )
+    return client

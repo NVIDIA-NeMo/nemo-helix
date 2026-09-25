@@ -3,17 +3,32 @@
 
 """Unit tests for the AuthClient class."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from nemo_helix import NeMoHelix
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.exceptions import InvalidPermissionFormatError, InvalidScopeFormatError
 from nhx.common.auth.models import Principal
 from nhx.common.config import AuthConfig
+from nhx.common.config.base import OIDCConfig, TokenSigningConfig
 from nhx.common.sdk_factory import get_sdk_on_behalf_of
+
+
+def _write_private_key(path: Path) -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    path.write_bytes(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
 
 
 @pytest.fixture
@@ -107,6 +122,83 @@ class TestHasPermissionsFormatValidation:
         assert out.allowed is True
         body = mock_post.call_args[1]["json"]["input"]
         assert body["scopes"] == ["platform:read", "models:read"]
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_uses_service_bearer_for_pdp_in_token_exchange_mode(
+        self, auth_config, principal, tmp_path: Path
+    ):
+        mock_http_client = httpx.AsyncClient()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"allowed": True}}
+        mock_response.raise_for_status = MagicMock()
+        workload_private_key_file = tmp_path / "workload-private.pem"
+        _write_private_key(workload_private_key_file)
+        exchange_config = auth_config.model_copy(
+            update={
+                "token_signing": TokenSigningConfig(
+                    key_id="test-workload",
+                    private_key_file=str(workload_private_key_file),
+                ),
+                "oidc": OIDCConfig(workload_token_exchange_enabled=True),
+            }
+        )
+
+        with (
+            patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post,
+            patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+                new=AsyncMock(return_value="pdp-service-token"),
+            ),
+        ):
+            mock_post.return_value = mock_response
+            auth_client = AuthClient(
+                principal=principal,
+                config=exchange_config,
+                http_client=mock_http_client,
+                service_name="models",
+            )
+            out = await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/ws/models")
+
+        assert out.allowed is True
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers == {"X-NHX-Internal": "true", "Authorization": "Bearer pdp-service-token"}
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_rejects_service_bearer_for_remote_cleartext_pdp(
+        self, auth_config, principal, tmp_path: Path
+    ):
+        mock_http_client = httpx.AsyncClient()
+        workload_private_key_file = tmp_path / "workload-private.pem"
+        _write_private_key(workload_private_key_file)
+        exchange_config = auth_config.model_copy(
+            update={
+                "policy_decision_point_base_url": "http://pdp.example.test",
+                "token_signing": TokenSigningConfig(
+                    key_id="test-workload",
+                    private_key_file=str(workload_private_key_file),
+                ),
+                "oidc": OIDCConfig(workload_token_exchange_enabled=True),
+            }
+        )
+
+        with (
+            patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post,
+            patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+                new=AsyncMock(return_value="pdp-service-token"),
+            ) as get_token,
+            pytest.raises(ValueError, match="PDP service workload token.*cleartext remote endpoint"),
+        ):
+            auth_client = AuthClient(
+                principal=principal,
+                config=exchange_config,
+                http_client=mock_http_client,
+                service_name="models",
+            )
+            await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/ws/models")
+
+        get_token.assert_not_called()
+        mock_post.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_rejects_scope_syntax_in_permissions(self, auth_config, principal):

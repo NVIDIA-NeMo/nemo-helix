@@ -6,8 +6,7 @@
 from __future__ import annotations
 
 import nhx.common.auth.workload_identity as _workload_identity
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
 from nemo_helix_plugin.entities.client import EntitiesClient
 from nhx.common.auth import SyncWorkloadDelegationStore
 from nhx.common.entities import SyncEntityClient
@@ -17,7 +16,7 @@ build_token_archive = _workload_identity.build_token_archive
 workload_delegation_expires_at = _workload_identity.workload_delegation_expires_at
 
 
-def create_authenticated_workload_delegation_store(nhx_sdk: NeMoHelix) -> SyncWorkloadDelegationStore:
+def create_authenticated_workload_delegation_store(nhx_sdk: SyncHelixClient) -> SyncWorkloadDelegationStore:
     """Create a jobs service-scoped workload delegation store from a platform SDK."""
     entity_client = SyncEntityClient(client_from_platform(nhx_sdk, EntitiesClient)).as_service("jobs", internal=True)
     return SyncWorkloadDelegationStore(entity_client)

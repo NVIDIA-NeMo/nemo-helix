@@ -8,7 +8,7 @@ import pytest
 from nemo_helix_plugin.auth.client import AsyncAuthenticationClient, AuthenticationClient
 from nemo_helix_plugin.client.errors import AuthenticationError
 
-BASE = "http://test:8000"
+BASE = "http://127.0.0.1:8000"
 AUTH_RESPONSE = {
     "principal": "alice@example.com",
     "email": "alice@example.com",

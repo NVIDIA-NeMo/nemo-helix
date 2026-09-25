@@ -43,6 +43,8 @@ from .signing_keys import RSASigningKey, RSASigningKeyCache
 from .token_claims import TokenClaims, groups_from_claim, scopes_from_claim
 
 ACCESS_KEY_TOKEN_TYPE = "access_key"
+ACCESS_KEY_TOKEN_TYPE_CLAIM = "nhx_token_type"
+ACCESS_KEY_METADATA_CLAIM = "nhx_access_key"
 ACCESS_KEY_JWKS_PATH = "/apis/auth/jwks"
 ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
@@ -119,7 +121,7 @@ def is_access_key_token_candidate(token: str) -> bool:
         )
     except jwt.PyJWTError:
         return False
-    if unverified.get("nhx_token_type") != ACCESS_KEY_TOKEN_TYPE:
+    if unverified.get(ACCESS_KEY_TOKEN_TYPE_CLAIM) != ACCESS_KEY_TOKEN_TYPE:
         return False
     jti = unverified.get("jti", "")
     return isinstance(jti, str) and bool(_ACCESS_KEY_JTI_RE.match(jti))
@@ -368,8 +370,8 @@ def _build_access_key_token_payload(
         "iat": issued_at,
         "nbf": issued_at,
         "jti": jti,
-        "nhx_token_type": ACCESS_KEY_TOKEN_TYPE,
-        "nhx_access_key": access_key_metadata,
+        ACCESS_KEY_TOKEN_TYPE_CLAIM: ACCESS_KEY_TOKEN_TYPE,
+        ACCESS_KEY_METADATA_CLAIM: access_key_metadata,
     }
     resolved_scope = list(dict.fromkeys(service.strip() for service in (scope or []) if service.strip()))
     if resolved_scope:
@@ -451,7 +453,7 @@ async def validate_access_key_token(
                 "verify_aud": False,
             },
         )
-        if unverified.get("nhx_token_type") != ACCESS_KEY_TOKEN_TYPE:
+        if unverified.get(ACCESS_KEY_TOKEN_TYPE_CLAIM) != ACCESS_KEY_TOKEN_TYPE:
             return None
 
         if jwks_override is None:
@@ -472,7 +474,7 @@ async def validate_access_key_token(
         claims = jwt.decode(token, signing_key, **decode_kwargs)
 
         subject = claims.get("sub")
-        metadata = claims.get("nhx_access_key")
+        metadata = claims.get(ACCESS_KEY_METADATA_CLAIM)
         if not isinstance(subject, str) or not subject:
             return None
         try:

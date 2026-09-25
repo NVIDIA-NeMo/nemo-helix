@@ -26,7 +26,6 @@ ENVOY_SERVICE_URL_TEMPLATE = (
     '(dict "root" . "serviceName" "nemo-helix-envoy" '
     '"namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}'
 )
-ENVOY_CONTROLLER_ENV_URL = "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
 AUTHENTIK_SERVICE_URL_TEMPLATE = (
     '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}'
 )
@@ -982,7 +981,7 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     assert routes.index(public_ext_authz_route) < routes.index(protected_api_route)
 
     platform_config = nemo_values["platformConfig"].get("platform", {})
-    assert "base_url" not in platform_config
+    assert platform_config["base_url"] == ENVOY_SERVICE_URL_TEMPLATE
     assert "auth" not in platform_config.get("service_discovery", {})
     token_signing = nemo_values["platformConfig"]["auth"]["token_signing"]
     assert token_signing == {
@@ -1723,10 +1722,40 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         {"name": "tmp", "mountPath": "/tmp"},
         {"name": "workload-token-tls", "mountPath": "/etc/nhx/workload-token-tls", "readOnly": True},
     ]
-    assert nemo_values["core"]["controller"]["env"] == {
-        "NHX_PLATFORM_URL": ENVOY_CONTROLLER_ENV_URL,
-        "NHX_AUTH_URL": ENVOY_CONTROLLER_ENV_URL,
-    }
+    controller = nemo_values["core"]["controller"]
+    assert controller["env"] == {"NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt"}
+    assert "NHX_PLATFORM_URL" not in controller["env"]
+    assert "NHX_AUTH_URL" not in controller["env"]
+    assert controller["extraVolumes"] == [
+        {
+            "name": "workload-token-signing-key",
+            "secret": {"secretName": "nemo-workload-token-signing-key"},
+        },
+        {
+            "name": "workload-token-tls-ca",
+            "secret": {
+                "secretName": "nemo-helix-envoy-tls",
+                "items": [{"key": "ca.crt", "path": "ca.crt"}],
+            },
+        },
+    ]
+    assert controller["extraVolumeMounts"] == [
+        {
+            "name": "workload-token-signing-key",
+            "mountPath": "/etc/nhx/workload-token",
+            "readOnly": True,
+        },
+        {
+            "name": "workload-token-tls-ca",
+            "mountPath": "/etc/nhx/workload-token-ca",
+            "readOnly": True,
+        },
+    ]
+
+    seed_job = nemo_values["platformSeedJob"]
+    assert seed_job["extraEnv"] == [{"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/workload-token-ca/ca.crt"}]
+    assert seed_job["extraVolumes"] == controller["extraVolumes"]
+    assert seed_job["extraVolumeMounts"] == controller["extraVolumeMounts"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["env"] == {
         "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",

@@ -7,20 +7,28 @@ Runs inside a deployed workload's pod as a loopback forwarder. A co-located
 workload whose HTTP client we do not control (e.g. a NAT agent calling the
 Inference Gateway) points its platform base URL at this proxy
 (``http://127.0.0.1:<port>``) and sends no credentials of its own. The proxy
-stamps a service-principal identity header (``X-NHX-Principal-Id: service:<name>``)
-on every forwarded request, which the platform authorizes via the ServiceSystem
-role. This is the same static service-identity the platform's own SDK clients
-use (``get_platform_sdk(as_service=...)``); the proxy exists only for workloads
-that cannot set the header themselves.
+owns the platform credentialing mode on behalf of that client.
 
-When ``NHX_AUTH_PROXY_ON_BEHALF_OF`` is set, the proxy additionally stamps
-``X-NHX-Principal-On-Behalf-Of`` so the platform authorizes the request as that
-delegated principal rather than granting the service principal's full
-(ServiceSystem) reach. This scopes a deployed workload's platform access to the
-identity that created it (e.g. an agent deployment acting as its creator). The
-delegated identity is baked in at deploy time and is *not* taken from the
-incoming request — the inbound principal/OBO headers are stripped so a co-located
-workload cannot spoof a different identity.
+When ``NHX_WORKLOAD_IDENTITY_TOKEN_FILE`` is set, the proxy exchanges that
+subject-token file for NeMo Helix access tokens and forwards requests with
+``Authorization: Bearer <token>``. This is the preferred production path because
+the token exchange endpoint can mint delegated workload tokens and refresh them
+without exposing long-lived credentials to the colocated workload.
+
+When workload token exchange is not configured, the proxy falls back to
+trusted-header mode and stamps a service-principal identity header
+(``X-NHX-Principal-Id: service:<name>``) on forwarded requests. This is the same
+static service-identity the platform's own SDK clients use
+(``get_platform_sdk(as_service=...)``).
+
+In trusted-header mode, when ``NHX_AUTH_PROXY_ON_BEHALF_OF`` is set, the proxy
+additionally stamps ``X-NHX-Principal-On-Behalf-Of`` so the platform authorizes
+the request as that delegated principal rather than granting the service
+principal's full (ServiceSystem) reach. This scopes a deployed workload's
+platform access to the identity that created it (e.g. an agent deployment acting
+as its creator). The delegated identity is baked in at deploy time and is *not*
+taken from the incoming request — the inbound principal/OBO headers are stripped
+so a co-located workload cannot spoof a different identity.
 
 Started via ``nemo services run --sidecars auth-proxy``.
 """
@@ -31,11 +39,18 @@ import logging
 import os
 import threading
 from ipaddress import ip_address
+from pathlib import Path
 
 import httpx
 import uvicorn
 from fastapi import FastAPI
+from nemo_helix_plugin.client.auth import TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
+from nemo_helix_plugin.client.constants import (
+    WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+    is_workload_identity_token_file_set,
+)
+from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nhx.common.auth import Principal
 from nhx.common.auth.principal_identifier import normalize_service_principal_identifier
 from nhx.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter
@@ -65,6 +80,16 @@ def _upstream_base_url() -> str:
     )
 
 
+def _workload_token_auth(base_url: str) -> httpx.Auth | None:
+    if not is_workload_identity_token_file_set():
+        return None
+    provider = resolve_workload_exchange_provider(
+        base_url=base_url,
+        subject_token_file=Path(os.environ[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR]),
+    )
+    return TokenProviderAuth(provider)
+
+
 def build_app(
     *,
     base_url: str,
@@ -74,29 +99,42 @@ def build_app(
 ) -> FastAPI:
     """Build a forwarder with either service identity or transport authentication.
 
-    When *on_behalf_of* is provided, every forwarded request also carries
-    ``X-NHX-Principal-On-Behalf-Of``, delegating to that principal so the
-    platform scopes access to what it can reach rather than the service
-    principal's full ServiceSystem reach.
+    When workload identity token exchange is configured via
+    ``NHX_WORKLOAD_IDENTITY_TOKEN_FILE``, the proxy uses transport authentication
+    and forwards exchanged bearer tokens. Trusted identity headers and
+    *on_behalf_of* are not forwarded in that mode; workload tokens carry their
+    own delegation.
 
-    With *auth*, the transport resolves credentials for each request. No service
-    identity headers are added; workload tokens carry their own delegation.
+    When *on_behalf_of* is provided in trusted-header mode, every forwarded
+    request also carries ``X-NHX-Principal-On-Behalf-Of``, delegating to that
+    principal so the platform scopes access to what it can reach rather than the
+    service principal's full ServiceSystem reach.
+
+    With explicit *auth*, the transport resolves credentials for each request.
+    No service identity headers are added.
     """
-    if bool(principal) == (auth is not None):
+    if auth is not None:
+        if principal is not None:
+            raise ValueError("Provide exactly one of principal or auth")
+        if on_behalf_of is not None:
+            raise ValueError("on_behalf_of requires principal authentication")
+        return build_auth_proxy_app(base_url=base_url, auth=auth)
+
+    workload_auth = _workload_token_auth(base_url)
+    if workload_auth is not None:
+        return build_auth_proxy_app(base_url=base_url, auth=workload_auth)
+
+    if principal is None:
         raise ValueError("Provide exactly one of principal or auth")
-    if on_behalf_of is not None and auth is not None:
-        raise ValueError("on_behalf_of requires principal authentication")
-    identity_headers: dict[str, str] = {}
-    if principal:
-        principal_id = normalize_service_principal_identifier(principal)
-        principal_context = Principal(
-            id=principal_id,
-            authz_aliases=[principal_id],
-            on_behalf_of=on_behalf_of,
-            on_behalf_of_authz_aliases=[on_behalf_of] if on_behalf_of else [],
-        )
-        identity_headers = principal_context.get_headers()
-    return build_auth_proxy_app(base_url=base_url, headers=identity_headers if principal else None, auth=auth)
+
+    principal_id = normalize_service_principal_identifier(principal)
+    principal_context = Principal(
+        id=principal_id,
+        authz_aliases=[principal_id],
+        on_behalf_of=on_behalf_of,
+        on_behalf_of_authz_aliases=[on_behalf_of] if on_behalf_of else [],
+    )
+    return build_auth_proxy_app(base_url=base_url, headers=principal_context.get_headers())
 
 
 _UVICORN_JOIN_TIMEOUT_SECONDS = 10.0

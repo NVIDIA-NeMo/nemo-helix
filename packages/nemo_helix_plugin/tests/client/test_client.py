@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, AsyncNemoClient, NemoClient, _type_adapter
+from nemo_helix_plugin.client.client import (
+    DEFAULT_TIMEOUT,
+    AsyncNemoClient,
+    NemoClient,
+    NemoClientRuntime,
+    _type_adapter,
+)
 from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoResponseValidationError, NotFoundError
 from nemo_helix_plugin.client.response import NemoResponse
@@ -192,6 +198,24 @@ def test_base_url_trailing_slash_stripped() -> None:
 
     url_called = mock_http.request.call_args[0][1]
     assert not url_called.startswith(BASE + "//")
+
+
+def test_default_runtime_is_allocated_per_client() -> None:
+    sync_a = NemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.Client))
+    sync_b = NemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.Client))
+    async_a = AsyncNemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.AsyncClient))
+    async_b = AsyncNemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.AsyncClient))
+    explicit_runtime = NemoClientRuntime()
+    explicit_client = NemoClient(
+        base_url=BASE,
+        http_client=MagicMock(spec=httpx.Client),
+        client_runtime=explicit_runtime,
+    )
+
+    assert sync_a.nemo_client_runtime is not sync_b.nemo_client_runtime
+    assert async_a.nemo_client_runtime is not async_b.nemo_client_runtime
+    assert sync_a.nemo_client_runtime is not async_a.nemo_client_runtime
+    assert explicit_client.nemo_client_runtime is explicit_runtime
 
 
 def _assert_platform_url_behavior(client: NemoClient | AsyncNemoClient) -> None:

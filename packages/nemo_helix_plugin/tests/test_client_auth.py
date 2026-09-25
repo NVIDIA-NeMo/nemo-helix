@@ -21,7 +21,7 @@ from nemo_helix_plugin.client.auth import (
     StaticToken,
     TokenProvider,
 )
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient, NemoClientRuntime
 from nemo_helix_plugin.client.config.config import Config
 from nemo_helix_plugin.client.config.models import (
     NoAuthUser,
@@ -154,23 +154,18 @@ class TestNemoClientAuth:
         assert route.called
         assert "Authorization" not in route.calls[0].request.headers
 
-    def test_constructor_uses_workload_exchange_provider_from_env(self, monkeypatch, tmp_path):
+    def test_constructor_does_not_bootstrap_workload_identity_from_env(self, monkeypatch, tmp_path):
         subject_token_file = tmp_path / "workload-token"
         subject_token_file.write_text("subject-token\n", encoding="utf-8")
-        provider = object()
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
 
         with patch(
             "nemo_helix_plugin.client.oidc_factory.resolve_workload_exchange_provider",
-            return_value=provider,
         ) as resolve_provider:
             client = NemoClient(base_url="https://nemo.example.com")
 
-        assert client._auth is provider
-        resolve_provider.assert_called_once_with(
-            base_url="https://nemo.example.com",
-            subject_token_file=subject_token_file,
-        )
+        assert client._auth is None
+        resolve_provider.assert_not_called()
 
     def test_constructor_workload_exchange_does_not_override_authorization_header(self, monkeypatch, tmp_path):
         subject_token_file = tmp_path / "workload-token"
@@ -199,6 +194,58 @@ class TestNemoClientAuth:
 
         assert client._auth is None
         resolve_provider.assert_not_called()
+
+    def test_auth_rejects_remote_cleartext_endpoint_before_resolving_token(self):
+        """Bearer tokens must not leave the client over remote cleartext HTTP."""
+        from nemo_helix_plugin.client.types import PreparedRequest
+
+        class ExplodingProvider:
+            def get_access_token(self) -> str:
+                raise AssertionError("token provider should not be called")
+
+        seen: list[httpx.Request] = []
+        client = NemoClient(
+            base_url="http://nemo.example.test",
+            auth=ExplodingProvider(),
+            http_client=httpx.Client(
+                transport=httpx.MockTransport(lambda request: seen.append(request) or httpx.Response(200))
+            ),
+        )
+        req = PreparedRequest(
+            method="GET", path_template="/test", path_params={}, content=None, content_type=None, response_type=None
+        )
+
+        with pytest.raises(ValueError, match="NemoClient.*cleartext remote endpoint"):
+            client.send(req)
+
+        assert seen == []
+
+    def test_auth_allows_route_validated_endpoint(self):
+        """Platform-backed clients can validate the original route for UDS/local routing."""
+        from nemo_helix_plugin.client.types import PreparedRequest
+
+        seen: list[httpx.Request] = []
+        validated: list[str] = []
+        client = NemoClient(
+            base_url="https://gateway.example.test",
+            auth="token",
+            http_client=httpx.Client(
+                transport=httpx.MockTransport(lambda request: seen.append(request) or httpx.Response(200))
+            ),
+            url_resolver=lambda url: url.replace("https://gateway.example.test", "http://nemo-helix.local"),
+            client_runtime=NemoClientRuntime(
+                authorization_endpoint_policy=lambda raw_url, _resolved_url, _purpose: validated.append(raw_url)
+            ),
+        )
+        req = PreparedRequest(
+            method="GET", path_template="/test", path_params={}, content=None, content_type=None, response_type=None
+        )
+
+        client.send(req)
+
+        assert validated == ["https://gateway.example.test/test"]
+        assert str(seen[0].url) == "http://nemo-helix.local/test"
+        assert seen[0].headers["Authorization"] == "Bearer token"
 
 
 # ---------------------------------------------------------------------------
@@ -246,23 +293,42 @@ class TestAsyncNemoClientAuth:
         assert route.called
         assert route.calls[0].request.headers["Authorization"] == "Bearer sync-token"
 
-    def test_constructor_uses_workload_exchange_provider_from_env(self, monkeypatch, tmp_path):
+    def test_constructor_does_not_bootstrap_workload_identity_from_env(self, monkeypatch, tmp_path):
         subject_token_file = tmp_path / "workload-token"
         subject_token_file.write_text("subject-token\n", encoding="utf-8")
-        provider = object()
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
 
         with patch(
             "nemo_helix_plugin.client.oidc_factory.resolve_workload_exchange_provider",
-            return_value=provider,
         ) as resolve_provider:
             client = AsyncNemoClient(base_url="https://nemo.example.com")
 
-        assert client._auth is provider
-        resolve_provider.assert_called_once_with(
-            base_url="https://nemo.example.com",
-            subject_token_file=subject_token_file,
+        assert client._auth is None
+        resolve_provider.assert_not_called()
+
+    def test_auth_rejects_remote_cleartext_endpoint_before_resolving_token(self):
+        from nemo_helix_plugin.client.types import PreparedRequest
+
+        class ExplodingProvider:
+            async def get_access_token(self) -> str:
+                raise AssertionError("token provider should not be called")
+
+        seen: list[httpx.Request] = []
+        client = AsyncNemoClient(
+            base_url="http://nemo.example.test",
+            auth=ExplodingProvider(),
+            http_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: seen.append(request) or httpx.Response(200))
+            ),
         )
+        req = PreparedRequest(
+            method="GET", path_template="/test", path_params={}, content=None, content_type=None, response_type=None
+        )
+
+        with pytest.raises(ValueError, match="AsyncNemoClient.*cleartext remote endpoint"):
+            asyncio.run(client.send(req))
+
+        assert seen == []
 
 
 # ---------------------------------------------------------------------------

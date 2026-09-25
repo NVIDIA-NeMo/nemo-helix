@@ -901,6 +901,10 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.is_workload_identity_token_exchange_enabled",
+            return_value=False,
+        ),
         patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
     ):
         info = await backend.create_deployment(
@@ -932,7 +936,7 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of() -> None:
+async def test_create_deployment_k8s_trusted_header_auth_without_creator_omits_on_behalf_of() -> None:
     # When auth is on but the deployment has no known creator, the sidecar still
     # stamps the service principal but cannot delegate — access is unscoped.
     backend = _backend(
@@ -945,6 +949,10 @@ async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of(
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.is_workload_identity_token_exchange_enabled",
+            return_value=False,
+        ),
         patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
     ):
         info = await backend.create_deployment(
@@ -955,6 +963,80 @@ async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of(
     assert created_config.auth_proxy_sidecar is True
     assert created_config.auth_proxy_sidecar_identity == "agents"
     assert created_config.auth_proxy_sidecar_on_behalf_of is None
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_k8s_token_exchange_without_auth_context_fails_closed() -> None:
+    backend = _backend(
+        default_image="nhx-api:latest",
+        default_executor="k8s",
+        k8s_internal_base_url="http://nhx-api:8080",
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
+        patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+    ):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="hello-dep",
+            config={},
+            port=0,
+            deployment_mode="k8s",
+            created_by="user:alice",
+        )
+
+    assert info.status == "failed"
+    assert "creator auth context" in info.error
+    entities.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_k8s_token_exchange_uses_proxy_without_trusted_obo() -> None:
+    backend = _backend(
+        default_image="nhx-api:latest",
+        default_executor="k8s",
+        k8s_internal_base_url="http://nhx-api:8080",
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
+        patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.get_workload_identity_token_audience",
+            return_value="agent-audience",
+        ),
+        patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
+    ):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="hello-dep",
+            config={},
+            port=0,
+            deployment_mode="k8s",
+            created_by="user:alice",
+            auth_context=auth_context,
+        )
+
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    assert created_config.auth_proxy_sidecar is True
+    assert created_config.auth_proxy_sidecar_identity == "agents"
+    assert created_config.auth_proxy_sidecar_on_behalf_of is None
+    assert created_config.workload_identity is not None
+    assert created_config.workload_identity.enabled is True
+    assert created_config.workload_identity.token_audience == "agent-audience"
 
 
 @pytest.mark.asyncio
@@ -1130,6 +1212,10 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.is_workload_identity_token_exchange_enabled",
+            return_value=False,
+        ),
         patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
     ):
         info = await backend.create_deployment(

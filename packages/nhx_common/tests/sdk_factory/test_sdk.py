@@ -13,8 +13,11 @@ from nemo_helix_ext.auth.helpers import NHXOIDCConfig
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.jobs.client import JobsClient
-from nhx.common.auth import Principal
-from nhx.common.config import Configuration, HelixConfig
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nhx.common.auth import Principal, auth_client_context
+from nhx.common.auth.client import AuthClient
+from nhx.common.config import AuthConfig, Configuration, HelixConfig
+from nhx.common.config.base import OIDCConfig
 from nhx.common.http_clients import shared_async_http_client, shared_sync_http_client
 from nhx.common.platform_endpoint import (
     _AsyncHelixEndpointRoutingTransport,
@@ -26,6 +29,7 @@ from nhx.common.sdk_factory import (
     get_entity_parts,
     get_platform_sdk,
     get_request_scoped_sdk,
+    get_request_scoped_sync_sdk,
     get_sdk_on_behalf_of,
     get_task_sdk,
 )
@@ -39,6 +43,16 @@ def _workload_oidc_config() -> NHXOIDCConfig:
         workload_token_endpoint="https://idp.example.test/oauth2/token",
         workload_audience="nemo-helix",
         workload_scope="openid email groups",
+    )
+
+
+def _auth_config_with_token_exchange() -> AuthConfig:
+    return AuthConfig(
+        enabled=True,
+        oidc=OIDCConfig(
+            workload_token_exchange_enabled=True,
+            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+        ),
     )
 
 
@@ -157,6 +171,21 @@ def test_get_platform_sdk_with_service_principal():
     assert sdk.default_headers["X-NHX-Principal-Id"] == "service:my-service"
 
 
+def test_service_workload_sdk_omits_trusted_identity_headers():
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+
+        sdk = get_platform_sdk(as_service="deployments", internal=True)
+        typed_client = client_from_platform(sdk, JobsClient)
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    assert typed_client.default_headers == {"X-NHX-Internal": "true"}
+    assert sdk.nemo_client_auth is not None
+    assert typed_client.authenticates_as_service_principal
+    assert "X-NHX-Principal-Id" not in typed_client.default_headers
+
+
 def test_get_platform_sdk_with_on_behalf_of():
     """Test get_platform_sdk with on_behalf_of parameter."""
     sdk = get_platform_sdk(as_service="my-service", on_behalf_of="user@example.com")
@@ -179,6 +208,137 @@ def test_get_platform_sdk_internal_flag():
     assert sdk.default_headers["X-NHX-Actor-Aliases"] == "service:my-service"
 
 
+def test_get_platform_sdk_uses_service_bearer_hook_in_token_exchange_mode():
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+
+        with patch(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+            return_value="service-access-token",
+        ):
+            caller_client = httpx.Client(headers={"Authorization": "Bearer caller-token"})
+            sdk = get_platform_sdk(as_service="models", internal=True, http_client=caller_client)
+            try:
+                request = sdk._client.build_request(
+                    "GET",
+                    "http://localhost:8080/apis/entities/v2/workspaces/default",
+                )
+                sdk._client._event_hooks["request"][0](request)
+            finally:
+                sdk.close()
+                caller_client.close()
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    assert sdk.default_headers["X-NHX-Internal"] == "true"
+    assert "X-NHX-Principal-Id" not in sdk.default_headers
+    assert request.headers["Authorization"] == "Bearer service-access-token"
+    assert "X-NHX-Principal-Id" not in request.headers
+
+
+@pytest.mark.asyncio
+async def test_get_async_platform_sdk_service_bearer_hook_ignores_injected_client_authorization():
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+
+        with patch(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+            return_value="async-service-access-token",
+        ):
+            caller_client = httpx.AsyncClient(headers={"Authorization": "Bearer caller-token"})
+            sdk = get_async_platform_sdk(as_service="models", http_client=caller_client)
+            try:
+                request = sdk._client.build_request(
+                    "GET",
+                    "http://localhost:8080/apis/entities/v2/workspaces/default",
+                )
+                await sdk._client._event_hooks["request"][0](request)
+            finally:
+                await sdk.close()
+                await caller_client.aclose()
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    assert "X-NHX-Principal-Id" not in sdk.default_headers
+    assert sdk.nemo_client_auth is not None
+    assert client_from_platform(sdk, AsyncModelsClient).authenticates_as_service_principal
+    assert request.headers["Authorization"] == "Bearer async-service-access-token"
+    assert "X-NHX-Principal-Id" not in request.headers
+
+
+def test_get_platform_sdk_uses_service_bearer_hook_without_internal_in_token_exchange_mode():
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+
+        with patch(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+            return_value="service-access-token",
+        ):
+            sdk = get_platform_sdk(as_service="models")
+            try:
+                request = sdk._client.build_request(
+                    "GET",
+                    "http://localhost:8080/apis/entities/v2/workspaces/default",
+                )
+                sdk._client._event_hooks["request"][0](request)
+            finally:
+                sdk.close()
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    assert "X-NHX-Internal" not in sdk.default_headers
+    assert "X-NHX-Principal-Id" not in sdk.default_headers
+    assert request.headers["Authorization"] == "Bearer service-access-token"
+    assert "X-NHX-Principal-Id" not in request.headers
+
+
+def test_get_platform_sdk_rejects_service_bearer_to_remote_cleartext_base_url():
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+
+        with patch(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+            return_value="service-access-token",
+        ):
+            sdk = get_platform_sdk(as_service="models", base_url="http://platform.example.test")
+            try:
+                request = sdk._client.build_request("GET", "http://platform.example.test/apis/entities/v2/foo")
+                with pytest.raises(ValueError, match="SDK request.*cleartext remote endpoint"):
+                    for hook in sdk._client._event_hooks["request"]:
+                        hook(request)
+            finally:
+                sdk.close()
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+
+def test_get_platform_sdk_rejects_service_bearer_to_remote_cleartext_service_route():
+    platform_config = HelixConfig(
+        base_url="https://platform.example.test",
+        service_discovery={"entities": "http://entities.example.test"},
+    )
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+
+        with (
+            patch("nhx.common.sdk_factory.Configuration.get_platform_config", return_value=platform_config),
+            patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+                return_value="service-access-token",
+            ),
+        ):
+            sdk = get_platform_sdk(as_service="models")
+            try:
+                request = sdk._client.build_request("GET", "https://platform.example.test/apis/entities/v2/foo")
+                with pytest.raises(ValueError, match="SDK request.*cleartext remote endpoint"):
+                    for hook in sdk._client._event_hooks["request"]:
+                        hook(request)
+            finally:
+                sdk.close()
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+
 def test_get_platform_sdk_uses_workload_identity_when_token_file_configured(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Workload-token task environments should let the generated SDK inject Bearer auth."""
     subject_token_file = tmp_path / "workload-token"
@@ -192,7 +352,7 @@ def test_get_platform_sdk_uses_workload_identity_when_token_file_configured(monk
         return {"access_token": "exchanged-access-token", "expires_in": 300}
 
     monkeypatch.setenv("NHX_CONFIG_FILE", str(config_file))
-    monkeypatch.setenv("NHX_BASE_URL", "http://nhx.example.test")
+    monkeypatch.setenv("NHX_BASE_URL", "https://nhx.example.test")
     monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps({"id": "creator@example.com", "email": "creator@example.com"}))
     monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
@@ -204,7 +364,7 @@ def test_get_platform_sdk_uses_workload_identity_when_token_file_configured(monk
 
     sdk = get_platform_sdk()
     try:
-        request = sdk._client.build_request("GET", "http://nhx.example.test/apis/entities/v2/workspaces/default")
+        request = sdk._client.build_request("GET", "https://nhx.example.test/apis/entities/v2/workspaces/default")
         sdk._client._event_hooks["request"][0](request)
     finally:
         sdk.close()
@@ -240,8 +400,10 @@ async def test_get_async_platform_sdk_uses_explicit_http_client() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http_client:
         sdk = get_async_platform_sdk(base_url="http://nhx.example.test", http_client=http_client)
 
-        assert sdk._client is http_client
+        assert sdk._client is not http_client
         assert str(sdk.base_url).rstrip("/") == "http://nhx.example.test"
+        await sdk.close()
+        assert not http_client.is_closed
 
 
 def test_get_async_platform_sdk_with_service_principal():
@@ -385,7 +547,7 @@ def test_get_task_sdk_uses_workload_identity_when_token_file_configured(monkeypa
         return {"access_token": "task-access-token", "expires_in": 300}
 
     monkeypatch.setenv("NHX_CONFIG_FILE", str(config_file))
-    monkeypatch.setenv("NHX_BASE_URL", "http://nhx.example.test")
+    monkeypatch.setenv("NHX_BASE_URL", "https://nhx.example.test")
     monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps({"id": "creator@example.com", "email": "creator@example.com"}))
     monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
@@ -397,7 +559,7 @@ def test_get_task_sdk_uses_workload_identity_when_token_file_configured(monkeypa
 
     sdk = get_task_sdk(as_service="customizer")
     try:
-        request = sdk._client.build_request("GET", "http://nhx.example.test/apis/entities/v2/workspaces/default")
+        request = sdk._client.build_request("GET", "https://nhx.example.test/apis/entities/v2/workspaces/default")
         sdk._client._event_hooks["request"][0](request)
     finally:
         sdk.close()
@@ -416,7 +578,9 @@ def test_get_task_sdk_uses_explicit_sync_http_client(monkeypatch: pytest.MonkeyP
     with httpx.Client() as client:
         sdk = get_task_sdk(as_service="customizer", http_client=client)
 
-        assert sdk._client is client
+        assert sdk._client is not client
+        sdk.close()
+        assert not client.is_closed
 
 
 def test_platform_sdk_test_context_closes_factory_client() -> None:
@@ -443,8 +607,8 @@ def test_get_request_scoped_sdk_merges_otel_and_auth_headers():
     mock_otel_headers = {"traceparent": "00-trace-id-span-id-01", "tracestate": "vendor=value"}
     mock_auth_headers = {"X-NHX-Principal-Id": "user@example.com", "X-NHX-Principal-Groups": "group1,group2"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Verify it's a new SDK instance
@@ -474,9 +638,9 @@ def test_get_request_scoped_sdk_reuses_base_sdk_http_client(monkeypatch: pytest.
     try:
         base_sdk = get_async_platform_sdk()
 
-        with patch("nhx.common.sdk_factory.get_otel_headers", return_value={}):
+        with patch("nhx.common.platform_client_context.get_otel_headers", return_value={}):
             with patch(
-                "nhx.common.sdk_factory.get_principal_auth_headers",
+                "nhx.common.platform_client_context.current_principal_auth_headers",
                 return_value={"X-NHX-Principal-Id": "service:models"},
             ):
                 scoped_sdk = get_request_scoped_sdk(base_sdk)
@@ -514,8 +678,8 @@ def test_get_request_scoped_sdk_returns_base_sdk_when_no_headers():
     base_sdk = get_async_platform_sdk()
 
     # Mock both functions to return empty dicts
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value={}):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value={}):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value={}):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value={}):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Should return the same SDK instance when no headers to add
@@ -534,8 +698,8 @@ def test_get_request_scoped_sdk_preserves_original_base_sdk():
     mock_otel_headers = {"traceparent": "00-trace-id-span-id-01"}
     mock_auth_headers = {"X-NHX-Principal-Id": "user@example.com"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Verify original SDK is unchanged
@@ -552,8 +716,8 @@ def test_get_request_scoped_sdk_only_otel_headers():
 
     mock_otel_headers = {"traceparent": "00-trace-id-span-id-01"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value={}):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value={}):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Should create new SDK with OTEL headers
@@ -568,8 +732,8 @@ def test_get_request_scoped_sdk_only_auth_headers():
 
     mock_auth_headers = {"X-NHX-Principal-Id": "user@example.com"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value={}):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value={}):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Should create new SDK with auth headers
@@ -586,8 +750,8 @@ def test_get_request_scoped_sdk_auth_headers_override_otel_headers():
     mock_otel_headers = {"X-Custom-Header": "otel-value"}
     mock_auth_headers = {"X-Custom-Header": "auth-value"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Auth headers should win (they're applied after OTEL via .update())
@@ -601,8 +765,8 @@ def test_get_request_scoped_sdk_preserves_base_default_headers_with_scoped_heade
     mock_otel_headers = {"traceparent": "00-trace-id-span-id-01"}
     mock_auth_headers = {"X-NHX-Principal-On-Behalf-Of": "user@example.com"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     assert scoped_sdk.default_headers["X-NHX-Principal-Id"] == "service:jobs"
@@ -610,6 +774,195 @@ def test_get_request_scoped_sdk_preserves_base_default_headers_with_scoped_heade
     assert scoped_sdk.default_headers["X-NHX-Actor-Aliases"] == "service:jobs"
     assert scoped_sdk.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
     assert scoped_sdk.default_headers["traceparent"] == "00-trace-id-span-id-01"
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_sdk_forwards_bearer_in_token_exchange_mode():
+    config = _auth_config_with_token_exchange()
+    Configuration.set_override(config)
+    captured: list[httpx.Request] = []
+
+    async def capture_request(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "data": [],
+                "pagination": {
+                    "current_page_size": 0,
+                    "page": 1,
+                    "page_size": 0,
+                    "total_pages": 1,
+                    "total_results": 0,
+                },
+            },
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(capture_request))
+    context_token = auth_client_context.set(
+        AuthClient(
+            principal=Principal(id="service:models", authz_aliases=["service:models"]),
+            config=config,
+            bearer_token="incoming-service-token",
+        )
+    )
+    try:
+        with patch(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+            return_value="controller-service-token",
+        ):
+            base_sdk = get_async_platform_sdk(as_service="models", internal=True, http_client=http_client)
+            scoped_sdk = get_request_scoped_sdk(base_sdk)
+            models = client_from_platform(scoped_sdk, AsyncModelsClient)
+            (await models.list_models(workspace="-", query_params={"page_size": 1})).page()
+
+        assert scoped_sdk.default_headers["Authorization"] == "Bearer incoming-service-token"
+        assert scoped_sdk.default_headers["X-NHX-Internal"] == "true"
+        assert "X-NHX-Principal-Id" not in scoped_sdk.default_headers
+        assert captured[-1].headers["Authorization"] == "Bearer incoming-service-token"
+        assert "X-NHX-Principal-Id" not in captured[-1].headers
+    finally:
+        auth_client_context.reset(context_token)
+        await http_client.aclose()
+        Configuration.clear_override(AuthConfig)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_sdk_rejects_forwarded_bearer_to_remote_cleartext_base_url():
+    config = _auth_config_with_token_exchange()
+    Configuration.set_override(config)
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={})))
+    context_token = auth_client_context.set(
+        AuthClient(
+            principal=Principal(id="service:models", authz_aliases=["service:models"]),
+            config=config,
+            bearer_token="incoming-service-token",
+        )
+    )
+    try:
+        base_sdk = get_async_platform_sdk(base_url="http://platform.example.test", http_client=http_client)
+        scoped_sdk = get_request_scoped_sdk(base_sdk)
+        request_headers = {name: value for name, value in scoped_sdk.default_headers.items() if isinstance(value, str)}
+        request = scoped_sdk._client.build_request(
+            "GET",
+            "http://platform.example.test/apis/models/v2/foo",
+            headers=request_headers,
+        )
+
+        with pytest.raises(ValueError, match="async SDK request.*cleartext remote endpoint"):
+            for hook in scoped_sdk._client._event_hooks["request"]:
+                await hook(request)
+    finally:
+        auth_client_context.reset(context_token)
+        await http_client.aclose()
+        Configuration.clear_override(AuthConfig)
+
+
+def test_request_scoped_sdk_owned_client_rejects_forwarded_bearer_to_remote_cleartext_base_url():
+    config = _auth_config_with_token_exchange()
+    Configuration.set_override(config)
+    base_sdk = get_platform_sdk(base_url="http://platform.example.test")
+    context_token = auth_client_context.set(
+        AuthClient(
+            principal=Principal(id="service:models", authz_aliases=["service:models"]),
+            config=config,
+            bearer_token="incoming-service-token",
+        )
+    )
+    try:
+        scoped_sdk = get_request_scoped_sync_sdk(base_sdk)
+        request_headers = {name: value for name, value in scoped_sdk.default_headers.items() if isinstance(value, str)}
+        request = scoped_sdk._client.build_request(
+            "GET",
+            "http://platform.example.test/apis/models/v2/foo",
+            headers=request_headers,
+        )
+
+        assert request.headers["Authorization"] == "Bearer incoming-service-token"
+        with pytest.raises(ValueError, match="SDK request.*cleartext remote endpoint"):
+            for hook in scoped_sdk._client._event_hooks["request"]:
+                hook(request)
+    finally:
+        auth_client_context.reset(context_token)
+        base_sdk.close()
+        Configuration.clear_override(AuthConfig)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_sdk_owned_async_client_rejects_forwarded_bearer_to_remote_cleartext_base_url():
+    config = _auth_config_with_token_exchange()
+    Configuration.set_override(config)
+    base_sdk = get_async_platform_sdk(base_url="http://platform.example.test")
+    context_token = auth_client_context.set(
+        AuthClient(
+            principal=Principal(id="service:models", authz_aliases=["service:models"]),
+            config=config,
+            bearer_token="incoming-service-token",
+        )
+    )
+    try:
+        scoped_sdk = get_request_scoped_sdk(base_sdk)
+        request_headers = {name: value for name, value in scoped_sdk.default_headers.items() if isinstance(value, str)}
+        request = scoped_sdk._client.build_request(
+            "GET",
+            "http://platform.example.test/apis/models/v2/foo",
+            headers=request_headers,
+        )
+
+        assert request.headers["Authorization"] == "Bearer incoming-service-token"
+        with pytest.raises(ValueError, match="async SDK request.*cleartext remote endpoint"):
+            for hook in scoped_sdk._client._event_hooks["request"]:
+                await hook(request)
+    finally:
+        auth_client_context.reset(context_token)
+        await base_sdk.close()
+        Configuration.clear_override(AuthConfig)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_typed_client_allows_forwarded_bearer_to_uds_endpoint():
+    config = _auth_config_with_token_exchange()
+    platform_config = HelixConfig.model_construct(base_url="unix:///tmp/nemo-helix.sock")
+    Configuration.set_override(config)
+    captured: list[httpx.Request] = []
+
+    async def capture_request(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "data": [],
+                "pagination": {
+                    "current_page_size": 0,
+                    "page": 1,
+                    "page_size": 0,
+                    "total_pages": 1,
+                    "total_results": 0,
+                },
+            },
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(capture_request))
+    context_token = auth_client_context.set(
+        AuthClient(
+            principal=Principal(id="service:models", authz_aliases=["service:models"]),
+            config=config,
+            bearer_token="incoming-service-token",
+        )
+    )
+    try:
+        with patch("nhx.common.sdk_factory.Configuration.get_platform_config", return_value=platform_config):
+            base_sdk = get_async_platform_sdk(http_client=http_client)
+            scoped_sdk = get_request_scoped_sdk(base_sdk)
+            models = client_from_platform(scoped_sdk, AsyncModelsClient)
+            (await models.list_models(workspace="-", query_params={"page_size": 1})).page()
+
+        assert scoped_sdk.default_headers["Authorization"] == "Bearer incoming-service-token"
+        assert captured[-1].headers["Authorization"] == "Bearer incoming-service-token"
+    finally:
+        auth_client_context.reset(context_token)
+        await http_client.aclose()
+        Configuration.clear_override(AuthConfig)
 
 
 def test_get_request_scoped_sdk_preserves_base_sdk_http_client():
@@ -625,8 +978,8 @@ def test_get_request_scoped_sdk_preserves_base_sdk_http_client():
 
     mock_auth_headers = {"X-NHX-Principal-Id": "user@example.com"}
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value={}):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value={}):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Verify the HTTP client is reused (same instance)
@@ -648,8 +1001,8 @@ def test_get_request_scoped_sdk_with_on_behalf_of_header():
         "X-NHX-Principal-Groups": "admin-group",
     }
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Verify it's a new SDK instance
@@ -679,8 +1032,8 @@ def test_get_request_scoped_sdk_service_principal_with_on_behalf_of():
         "X-NHX-Principal-On-Behalf-Of": "user@example.com",
     }
 
-    with patch("nhx.common.sdk_factory.get_otel_headers", return_value={}):
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+    with patch("nhx.common.platform_client_context.get_otel_headers", return_value={}):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
     # Verify scoped SDK has both service principal and on-behalf-of
@@ -794,6 +1147,26 @@ def test_get_platform_sdk_base_url_preserves_routing_transport_for_uds_service(
     assert isinstance(transport, _SyncHelixEndpointRoutingTransport)
 
 
+def test_get_platform_sdk_base_url_updates_runtime_endpoint(
+    platform_config_with_service_discovery: HelixConfig,
+) -> None:
+    with patch(
+        "nhx.common.sdk_factory.Configuration.get_platform_config",
+        return_value=platform_config_with_service_discovery,
+    ):
+        with get_platform_sdk(base_url="https://override.example.test") as sdk:
+            runtime = sdk.nemo_client_runtime
+
+    assert (
+        runtime.resolve_url("https://override.example.test/health/ready")
+        == "https://override.example.test/health/ready"
+    )
+    assert (
+        runtime.resolve_url("https://override.example.test/apis/entities/v2/workspaces/default")
+        == "http://entities-service:8080/apis/entities/v2/workspaces/default"
+    )
+
+
 def test_get_platform_sdk_workload_identity_uses_routing_transport_for_uds_service(
     monkeypatch: pytest.MonkeyPatch,
     platform_config_with_uds_service_route: HelixConfig,
@@ -885,6 +1258,27 @@ async def test_get_async_platform_sdk_base_url_preserves_routing_transport_for_u
             transport = sdk._client._transport
 
     assert isinstance(transport, _AsyncHelixEndpointRoutingTransport)
+
+
+@pytest.mark.asyncio
+async def test_get_async_platform_sdk_base_url_updates_runtime_endpoint(
+    platform_config_with_service_discovery: HelixConfig,
+) -> None:
+    with patch(
+        "nhx.common.sdk_factory.Configuration.get_platform_config",
+        return_value=platform_config_with_service_discovery,
+    ):
+        async with get_async_platform_sdk(base_url="https://override.example.test") as sdk:
+            runtime = sdk.nemo_client_runtime
+
+    assert (
+        runtime.resolve_url("https://override.example.test/health/ready")
+        == "https://override.example.test/health/ready"
+    )
+    assert (
+        runtime.resolve_url("https://override.example.test/apis/entities/v2/workspaces/default")
+        == "http://entities-service:8080/apis/entities/v2/workspaces/default"
+    )
 
 
 # --- get_entity_parts tests ---

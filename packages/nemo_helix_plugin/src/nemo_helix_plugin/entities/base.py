@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Set, Type, TypeVar, get_type_hints
 
@@ -411,24 +410,10 @@ def _convert_sort_to_api_sort(sort: str) -> str:
     return sort
 
 
-def _merge_header_items(target: dict[str, str], headers: object) -> None:
-    if not isinstance(headers, Mapping):
-        return
-    for key, value in headers.items():
-        target[str(key).lower()] = str(value)
-
-
-def _client_headers(client: AsyncEntitiesClient | EntitiesClient) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    _merge_header_items(headers, client._client.headers)
-    _merge_header_items(headers, client._default_headers)
-    return headers
-
-
 def _convert_api_entity_to_model(
     entity: Entity,
     entity_type: EntityTypeLike,
-    sdk_headers: dict[str, str],
+    client: AsyncEntitiesClient | EntitiesClient,
 ) -> EntityT:
     """Convert an API entity to an EntityBase model."""
     entity_dict = entity.model_dump()
@@ -458,11 +443,8 @@ def _convert_api_entity_to_model(
                 setattr(result, field_name, raw_value)
 
     # Strip _auth_context unless the effective caller is a service principal.
-    # With on-behalf-of delegation the SDK authenticates as service:platform but
-    # the real caller is in X-NHX-Principal-On-Behalf-Of.
     if hasattr(result, "_auth_context"):
-        effective = sdk_headers.get("x-nhx-principal-on-behalf-of") or sdk_headers.get("x-nhx-principal-id", "")
-        if not effective.startswith("service:"):
+        if not client.can_read_stored_auth_context:
             setattr(result, "_auth_context", None)
 
     return result
@@ -540,7 +522,11 @@ class EntityClient:
 
     def _convert_api_entity_to_model(self, entity: Entity, entity_type: EntityTypeLike) -> EntityT:
         """Convert an API entity to an EntityBase model."""
-        return _convert_api_entity_to_model(entity, entity_type, _client_headers(self._client))
+        return _convert_api_entity_to_model(
+            entity,
+            entity_type,
+            self._client,
+        )
 
     async def list(
         self,
@@ -1071,7 +1057,11 @@ class SyncEntityClient:
 
     def _convert_api_entity_to_model(self, entity: Entity, entity_type: EntityTypeLike) -> EntityT:
         """Convert an API entity to an EntityBase model."""
-        return _convert_api_entity_to_model(entity, entity_type, _client_headers(self._client))
+        return _convert_api_entity_to_model(
+            entity,
+            entity_type,
+            self._client,
+        )
 
     def list(
         self,

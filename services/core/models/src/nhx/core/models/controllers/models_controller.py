@@ -65,11 +65,9 @@ class ModelsController(HeartbeatMixin, Controller):
         self._models_sdk = get_async_platform_sdk(
             as_service="models",
             internal=True,
-            http_client=httpx.AsyncClient(
-                timeout=_CONTROLLER_HTTP_TIMEOUT,
-                limits=_CONTROLLER_HTTP_LIMITS,
-                follow_redirects=True,
-            ),
+            timeout=_CONTROLLER_HTTP_TIMEOUT,
+            limits=_CONTROLLER_HTTP_LIMITS,
+            follow_redirects=True,
         )
         self._models_client = client_from_platform(self._models_sdk, AsyncModelsClient)
         self._service_backends = backend_registry.list_backends()

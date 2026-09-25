@@ -117,7 +117,7 @@ class _SyncHelix(EvaluatorClient):
     def __init__(self) -> None:
         self.http_client = MagicMock(spec=httpx.Client)
         super().__init__(
-            base_url="http://test:8000",
+            base_url="http://127.0.0.1:8000",
             workspace="platform-ws",
             default_headers={"Authorization": "Bearer sync-platform-token"},
             timeout=httpx.Timeout(42.0),
@@ -129,7 +129,7 @@ class _AsyncHelix(AsyncEvaluatorClient):
     def __init__(self) -> None:
         self.http_client = AsyncMock(spec=httpx.AsyncClient)
         super().__init__(
-            base_url="http://test:8000",
+            base_url="http://127.0.0.1:8000",
             workspace="platform-ws",
             default_headers={"Authorization": "Bearer platform-token"},
             timeout=httpx.Timeout(43.0),
@@ -171,7 +171,7 @@ def test_async_executor_initializes_without_resource_callbacks() -> None:
 
 def test_resolve_workspace_requires_explicit_or_default_workspace() -> None:
     """Remote submission should fail when no workspace can be resolved."""
-    client = EvaluatorClient(base_url="http://test:8000", workspace=None)
+    client = EvaluatorClient(base_url="http://127.0.0.1:8000", workspace=None)
     executor = _SyncEvaluatorPluginExecutor(client=client)
 
     with pytest.raises(ValueError, match="workspace must be provided"):
@@ -280,14 +280,14 @@ def test_sync_resource_calls_evaluator_plugin_status() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
         {"plugin": "evaluator", "status": "ok"},
     )
 
     resource = Evaluator(platform)
 
     assert resource.plugin_status() == {"plugin": "evaluator", "status": "ok"}
-    assert platform.http_client.request.call_args.args == ("GET", "http://test:8000/apis/evaluator/v1/healthz")
+    assert platform.http_client.request.call_args.args == ("GET", "http://127.0.0.1:8000/apis/evaluator/v1/healthz")
     assert platform.http_client.request.call_args.kwargs["headers"] == {"Authorization": "Bearer sync-platform-token"}
     assert platform.http_client.request.call_args.kwargs["params"] is None
     assert platform.http_client.request.call_args.kwargs["timeout"] == platform._timeout
@@ -296,7 +296,7 @@ def test_sync_resource_calls_evaluator_plugin_status() -> None:
 def test_sync_resource_rejects_non_object_plugin_status() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
-        "GET", "http://test:8000/apis/evaluator/v1/healthz", ["ok"]
+        "GET", "http://127.0.0.1:8000/apis/evaluator/v1/healthz", ["ok"]
     )
     resource = Evaluator(platform)
 
@@ -331,7 +331,7 @@ def test_sync_executor_creates_evaluator_job() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -347,7 +347,7 @@ def test_sync_executor_creates_evaluator_job() -> None:
     assert _single_metric(job.job.spec).metric_type == "exact-match"
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     assert platform.http_client.request.call_args.kwargs["headers"] == {
@@ -361,7 +361,7 @@ def test_sync_executor_create_does_not_use_asyncio_thread_bridge() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -379,7 +379,7 @@ def test_sync_executor_create_uses_platform_workspace_by_default() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
         {"name": "job-123", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -391,7 +391,7 @@ def test_sync_executor_create_uses_platform_workspace_by_default() -> None:
     assert _single_metric(job.job.spec).metric_type == "exact-match"
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
 
@@ -400,7 +400,7 @@ def test_sync_executor_create_rejects_malformed_response() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         ["job-123"],
         status_code=201,
     )
@@ -408,7 +408,7 @@ def test_sync_executor_create_rejects_malformed_response() -> None:
 
     with pytest.raises(NemoResponseValidationError):
         executor.create(spec=_EXACT_MATCH_EVALUATE_INPUT_SPEC, workspace="ws")
-    assert _last_request_url(platform) == "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
+    assert _last_request_url(platform) == "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
 
 
@@ -416,7 +416,7 @@ def test_sync_executor_waits_when_requested(mocker: MockerFixture) -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -428,7 +428,7 @@ def test_sync_executor_waits_when_requested(mocker: MockerFixture) -> None:
     assert isinstance(job, EvaluatorJobResource)
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     wait.assert_called_once_with(
@@ -442,7 +442,7 @@ def test_sync_resource_gets_existing_job_resource() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = Evaluator(platform)
@@ -453,7 +453,7 @@ def test_sync_resource_gets_existing_job_resource() -> None:
     assert job.name == "job-123"
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
     )
 
 
@@ -461,7 +461,7 @@ def test_sync_resource_propagates_missing_job_response() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _empty_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/missing",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/missing",
         status_code=404,
     )
     resource = Evaluator(platform)
@@ -477,7 +477,7 @@ def test_sync_resource_url_encodes_reserved_chars_in_job_name() -> None:
     platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
         {"name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = Evaluator(platform)
@@ -486,7 +486,7 @@ def test_sync_resource_url_encodes_reserved_chars_in_job_name() -> None:
 
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
     )
 
 
@@ -667,7 +667,7 @@ async def test_async_resource_calls_evaluator_plugin_status() -> None:
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
         {"plugin": "evaluator", "status": "ok"},
     )
 
@@ -677,7 +677,7 @@ async def test_async_resource_calls_evaluator_plugin_status() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
     )
     assert platform.http_client.request.call_args.kwargs["headers"] == {"Authorization": "Bearer platform-token"}
     assert platform.http_client.request.call_args.kwargs["timeout"] == platform._timeout
@@ -687,7 +687,7 @@ async def test_async_resource_calls_evaluator_plugin_status() -> None:
 async def test_async_resource_rejects_non_object_plugin_status() -> None:
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
-        "GET", "http://test:8000/apis/evaluator/v1/healthz", ["ok"]
+        "GET", "http://127.0.0.1:8000/apis/evaluator/v1/healthz", ["ok"]
     )
     resource = AsyncEvaluator(platform)
 
@@ -706,7 +706,7 @@ async def test_async_executor_creates_evaluator_job() -> None:
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -723,7 +723,7 @@ async def test_async_executor_creates_evaluator_job() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     assert platform.http_client.request.call_args.kwargs["headers"] == {
@@ -739,7 +739,7 @@ async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> Non
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -753,7 +753,7 @@ async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> Non
 
     assert isinstance(job, AsyncEvaluatorJobResource)
     platform.http_client.request.assert_awaited_once()
-    assert _last_request_url(platform) == "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
+    assert _last_request_url(platform) == "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     wait.assert_awaited_once_with(
         poll_interval_seconds=mocker.ANY,
@@ -767,7 +767,7 @@ async def test_async_resource_gets_existing_job_resource() -> None:
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = AsyncEvaluator(platform)
@@ -779,7 +779,7 @@ async def test_async_resource_gets_existing_job_resource() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
     )
 
 
@@ -789,7 +789,7 @@ async def test_async_resource_url_encodes_reserved_chars_in_job_name() -> None:
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
         {"name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = AsyncEvaluator(platform)
@@ -799,7 +799,7 @@ async def test_async_resource_url_encodes_reserved_chars_in_job_name() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
     )
 
 
@@ -930,7 +930,7 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
     platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -942,7 +942,7 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     assert platform.http_client.request.call_args.kwargs["headers"] == {

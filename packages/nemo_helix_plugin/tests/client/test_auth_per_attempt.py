@@ -21,7 +21,7 @@ from nemo_helix_plugin.client.endpoint import get
 from nemo_helix_plugin.client.types import BinaryContent, Paginated, RetryPolicy
 from pydantic import BaseModel
 
-BASE = "http://test"
+BASE = "http://localhost:8080"
 
 
 class Item(BaseModel):
@@ -188,7 +188,7 @@ def test_transport_auth_hook_does_not_double_resolve() -> None:
 def test_sync_client_rejects_async_provider_at_send_time() -> None:
     client = NemoClient(
         base_url=BASE,
-        auth=AsyncRotatingProvider(),  # type: ignore[arg-type]
+        auth=AsyncRotatingProvider(),  # ty: ignore[invalid-argument-type]  # intentional runtime misuse
         http_client=httpx.Client(transport=httpx.MockTransport(_paging_handler([]))),
     )
 

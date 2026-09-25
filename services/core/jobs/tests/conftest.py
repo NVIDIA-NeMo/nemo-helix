@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.capabilities import reset_capability_cache
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.jobs.api_factory import ContainerSpec as FactoryContainerSpec
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec as FactoryCPUExecutionProviderSpec
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable as FactoryEnvironmentVariable
@@ -325,7 +326,18 @@ def mock_nhx_client(mock_files_client, mock_jobs_client):
     ``JobsClient`` requests resolve to ``mock_jobs_client``; anything else falls
     back to the files client.
     """
-    mock_client = MagicMock()
+
+    def _unexpected_request(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"Unexpected platform request in jobs unit test: {request.method} {request.url}")
+
+    mock_client = NemoClient(
+        base_url="http://localhost:8080",
+        workspace="default",
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(_unexpected_request),
+            base_url="http://localhost:8080",
+        ),
+    )
     mock_client.beta = MagicMock()
 
     from nemo_helix_plugin.jobs.client import JobsClient

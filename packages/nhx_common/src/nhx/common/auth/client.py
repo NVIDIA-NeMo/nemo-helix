@@ -11,7 +11,7 @@ from typing import Any, List, Optional
 
 import httpx
 from nhx.common.config import AuthConfig
-from nhx.common.platform_endpoint import parse_platform_endpoint
+from nhx.common.platform_endpoint import parse_platform_endpoint, require_authorization_header_endpoint
 from pydantic import BaseModel, Field
 
 from .authz_format import validate_permission_strings, validate_runtime_authorize_scopes
@@ -86,6 +86,13 @@ class AuthClient(BaseModel):
             "scope claims, e.g. to prevent a scope-restricted access key from minting a broader one."
         ),
     )
+    bearer_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "Raw bearer token that authenticated this request. Used only for forwarding auth to downstream "
+            "services in workload token-exchange mode, where trusted identity headers are rejected."
+        ),
+    )
     identity_resolution: Optional[dict[str, Any]] = Field(
         default=None,
         description="Trusted identity material used by the PDP to resolve stable account context.",
@@ -107,21 +114,34 @@ class AuthClient(BaseModel):
         endpoint = parse_platform_endpoint(self.config.policy_decision_point_base_url)
         return endpoint.async_http_client(timeout=self.config.policy_decision_point_request_timeout_seconds)
 
-    @property
-    def _pdp_request_headers(self) -> dict[str, str]:
+    async def _pdp_request_headers(self) -> dict[str, str]:
         """Headers sent with every PDP HTTP request.
 
         Combines the internal-request marker (suppresses access logging) with a
-        service principal so the receiving middleware auto-authorises the call
-        instead of recursing back into the PDP.
+        service credential so the receiving middleware auto-authorises the call
+        instead of recursing back into the PDP. In workload token-exchange mode
+        this uses a NeMo-minted Bearer token rather than trusted identity headers.
         """
         from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 
-        return {
-            **MARK_INTERNAL_REQUEST_HEADERS,
-            "X-NHX-Principal-Id": f"service:{self.service_name or 'unknown'}",
-            "X-NHX-Actor-Aliases": f"service:{self.service_name or 'unknown'}",
-        }
+        headers = MARK_INTERNAL_REQUEST_HEADERS.copy()
+        service_name = self.service_name or "unknown"
+        if self.config.enabled and self.config.oidc.workload_token_exchange_enabled:
+            from .workload_tokens import ServiceWorkloadAccessTokenProvider
+
+            if not self.policy_decision_point_base_url:
+                raise RuntimeError("Policy Decision Point URL not configured")
+            require_authorization_header_endpoint(
+                parse_platform_endpoint(self.policy_decision_point_base_url),
+                purpose="PDP service workload token",
+            )
+            token = await ServiceWorkloadAccessTokenProvider(self.config, service_name).get_access_token_async()
+            headers["Authorization"] = f"Bearer {token}"
+            return headers
+
+        headers["X-NHX-Principal-Id"] = f"service:{service_name}"
+        headers["X-NHX-Actor-Aliases"] = f"service:{service_name}"
+        return headers
 
     def _add_principal_context(
         self,
@@ -204,7 +224,7 @@ class AuthClient(BaseModel):
 
         logger.debug("Calling PDP: url=%s, input=%s", auth_url, auth_input)
 
-        pdp_headers = self._pdp_request_headers
+        pdp_headers = await self._pdp_request_headers()
 
         # Use provided http_client, instance http_client (from middleware), or create a new one
         # See architecture/docs/http-client-injection.md for injection patterns.
@@ -267,7 +287,7 @@ class AuthClient(BaseModel):
             response = await client.post(
                 self.config.get_pdp_url(pdp_endpoint),
                 json={"input": auth_input},
-                headers=self._pdp_request_headers,
+                headers=await self._pdp_request_headers(),
             )
             response.raise_for_status()
             return bool(response.json().get("result", {}).get(result_key, False))
@@ -526,7 +546,7 @@ class AuthClient(BaseModel):
                         }
                     }
 
-                    response = await client.post(auth_url, json=payload, headers=self._pdp_request_headers)
+                    response = await client.post(auth_url, json=payload, headers=await self._pdp_request_headers())
                     response.raise_for_status()
                     result = response.json()
                     has_role = result.get("result", {}).get("has_role", False)

@@ -10,7 +10,7 @@ platform machinery the SDK factory uses:
 - base URL from :class:`~nhx.common.config.Configuration`;
 - per-service URL routing via :class:`~nhx.common.platform_endpoint.HelixEndpoint`;
 - endpoint-aware sync/async HTTP clients;
-- principal / auth + internal-request headers via ``_get_default_headers``;
+- principal / auth + runtime context via :mod:`nhx.common.platform_client_context`;
 - OTEL trace-propagation headers captured on the current request.
 
 :class:`HelixNemoClientProvider` is registered under the ``nemo.client_provider``
@@ -21,79 +21,16 @@ discovers it automatically whenever ``nhx-common`` is installed.
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 
 import httpx
-from nemo_helix_plugin.client.auth import TokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.constants import (
-    WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
-    is_workload_identity_token_file_set,
-)
-from nhx.common.auth import Principal, principal_from_env
-from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
-from nhx.common.observability.otel import get_otel_headers
-from nhx.common.platform_endpoint import HelixEndpoint, resolve_platform_endpoint
-from nhx.common.sdk_factory import _get_default_headers, _should_bootstrap_workload_identity
+from nemo_helix_plugin.client.constants import is_workload_identity_token_file_set
+from nhx.common.auth.models import Principal
+from nhx.common.auth.tasks import principal_from_env
+from nhx.common.platform_client_context import build_platform_client_context
+from nhx.common.platform_endpoint import resolve_platform_endpoint
 
 logger = logging.getLogger(__name__)
-
-
-def _sync_http_client_for_endpoint(
-    endpoint: HelixEndpoint,
-    http_client: httpx.Client | None,
-) -> httpx.Client:
-    """Endpoint-aware sync client, honoring explicit clients first."""
-    if http_client is not None:
-        return http_client
-    return endpoint.sync_sdk_http_client()
-
-
-def _async_http_client_for_endpoint(
-    endpoint: HelixEndpoint,
-    http_client: httpx.AsyncClient | None,
-) -> httpx.AsyncClient:
-    """Async counterpart of :func:`_sync_http_client_for_endpoint`."""
-    if http_client is not None:
-        return http_client
-    return endpoint.async_sdk_http_client()
-
-
-def _workload_identity_auth(base_url: str) -> TokenProvider:
-    """Build a workload-identity token-exchange auth provider.
-
-    Only call when :func:`is_workload_identity_token_file_set` is true.
-    """
-    from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
-
-    token_file = os.environ[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR]
-    return resolve_workload_exchange_provider(base_url=base_url, subject_token_file=Path(token_file))
-
-
-def _workload_identity_headers(internal: bool) -> dict[str, str]:
-    return MARK_INTERNAL_REQUEST_HEADERS.copy() if internal else {}
-
-
-def _forwardable_otel_headers() -> dict[str, str]:
-    return {name: value for name, value in get_otel_headers().items() if not name.lower().startswith("x-nhx-")}
-
-
-def _platform_headers(
-    as_service: str | None,
-    internal: bool,
-    on_behalf_of: str | Principal | None,
-) -> dict[str, str]:
-    """Auth / internal headers plus OTEL trace-propagation headers.
-
-    ``_get_default_headers`` supplies the principal + internal-request markers
-    (wire-identical to the SDK factory); ``get_otel_headers`` layers on the
-    trace-propagation context captured on the current request (empty outside a
-    request scope).
-    """
-    headers = _get_default_headers(as_service, internal, on_behalf_of)
-    headers.update(_forwardable_otel_headers())
-    return headers
 
 
 def get_nemo_client(
@@ -124,28 +61,21 @@ def get_nemo_client(
         rather than caching one across requests, or its ``traceparent`` will be
         stale (mirrors ``get_platform_sdk``).
     """
-    endpoint = resolve_platform_endpoint()
-    if _should_bootstrap_workload_identity(
+    context = build_platform_client_context(
         as_service=as_service,
+        internal=internal,
         on_behalf_of=on_behalf_of,
-        http_client=http_client,
-        endpoint=endpoint,
-    ):
-        return NemoClient(
-            base_url=endpoint.connect_base_url,
-            workspace=workspace,
-            auth=_workload_identity_auth(endpoint.connect_base_url),
-            default_headers=_workload_identity_headers(internal) or None,
-            http_client=_sync_http_client_for_endpoint(endpoint, http_client),
-            url_resolver=lambda url: endpoint.route_request_url(url).url,
-        )
-    headers = _platform_headers(as_service, internal, on_behalf_of)
+        has_explicit_http_client=http_client is not None,
+        include_otel_headers=True,
+    )
+    base_url = context.base_url
     return NemoClient(
-        base_url=endpoint.connect_base_url,
+        base_url=base_url,
         workspace=workspace,
-        default_headers=headers or None,
-        http_client=_sync_http_client_for_endpoint(endpoint, http_client),
-        url_resolver=lambda url: endpoint.route_request_url(url).url,
+        auth=context.nemo_client_auth(),
+        default_headers=context.default_headers_or_none(),
+        http_client=context.runtime_context.sync_nemo_http_client(http_client=http_client),
+        client_runtime=context.runtime,
     )
 
 
@@ -162,28 +92,21 @@ def get_async_nemo_client(
     Uses the explicitly provided ``http_client`` (e.g. from a test fixture), or
     creates one from the resolved platform endpoint.
     """
-    endpoint = resolve_platform_endpoint()
-    if _should_bootstrap_workload_identity(
+    context = build_platform_client_context(
         as_service=as_service,
+        internal=internal,
         on_behalf_of=on_behalf_of,
-        http_client=http_client,
-        endpoint=endpoint,
-    ):
-        return AsyncNemoClient(
-            base_url=endpoint.connect_base_url,
-            workspace=workspace,
-            auth=_workload_identity_auth(endpoint.connect_base_url),
-            default_headers=_workload_identity_headers(internal) or None,
-            http_client=_async_http_client_for_endpoint(endpoint, http_client),
-            url_resolver=lambda url: endpoint.route_request_url(url).url,
-        )
-    headers = _platform_headers(as_service, internal, on_behalf_of)
+        has_explicit_http_client=http_client is not None,
+        include_otel_headers=True,
+    )
+    base_url = context.base_url
     return AsyncNemoClient(
-        base_url=endpoint.connect_base_url,
+        base_url=base_url,
         workspace=workspace,
-        default_headers=headers or None,
-        http_client=_async_http_client_for_endpoint(endpoint, http_client),
-        url_resolver=lambda url: endpoint.route_request_url(url).url,
+        auth=context.nemo_client_auth(),
+        default_headers=context.default_headers_or_none(),
+        http_client=context.runtime_context.async_nemo_http_client(http_client=http_client),
+        client_runtime=context.runtime,
     )
 
 

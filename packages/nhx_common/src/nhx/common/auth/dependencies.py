@@ -95,22 +95,17 @@ def get_principal_auth_headers() -> Dict[str, str]:
                 return response.json()
         ```
     """
-    auth_client = auth_client_context.get()
-    if auth_client and auth_client.principal:
-        return auth_client.principal.get_headers()
-    return {}
+    from nhx.common.platform_client_context import current_principal_auth_headers
+
+    return current_principal_auth_headers()
 
 
 def build_service_principal_headers(service_name: str) -> Dict[str, str]:
     """Build NeMo Helix auth headers for outbound service-to-service calls.
 
-    Returns:
-    - `X-NHX-Principal-Id: service:<service_name>` so the downstream service
-      can authorize the call.
-    - When the current auth context is a non-service principal, also forwards
-      `X-NHX-Principal-On-Behalf-Of`, `-Email`, and `-Groups` from
-      ``Principal.effective_principal`` so downstream PDP checks evaluate the
-      acting user (not the elevated service row alone).
+    In workload token-exchange mode, this returns a service workload Bearer
+    token, optionally issued on behalf of the current effective user. In
+    trusted-header mode, it returns `X-NHX-Principal-*` headers.
 
     Args:
         service_name: The calling service's name (ex. "guardrails").
@@ -118,30 +113,9 @@ def build_service_principal_headers(service_name: str) -> Dict[str, str]:
     Returns:
         Header dictionary ready to merge into an outbound request.
     """
-    headers: Dict[str, str] = {
-        "X-NHX-Principal-Id": f"service:{service_name}",
-        "X-NHX-Actor-Aliases": f"service:{service_name}",
-    }
+    from nhx.common.platform_client_context import service_principal_auth_headers
 
-    auth_client = auth_client_context.get()
-    if auth_client is None or not auth_client.principal or not auth_client.principal.id:
-        return headers
-
-    effective = auth_client.principal.effective_principal
-    if effective.caller_kind == "service_principal":
-        return headers
-
-    headers["X-NHX-Principal-On-Behalf-Of"] = effective.id
-    if effective.email:
-        headers["X-NHX-Principal-On-Behalf-Of-Email"] = effective.email
-    if effective.groups:
-        headers["X-NHX-Principal-On-Behalf-Of-Groups"] = ",".join(effective.groups)
-    if effective.account_id:
-        headers["X-NHX-Subject-Account-Id"] = effective.account_id
-    if effective.authz_aliases:
-        headers["X-NHX-Subject-Aliases"] = ",".join(effective.authz_aliases)
-
-    return headers
+    return service_principal_auth_headers(service_name)
 
 
 @contextmanager

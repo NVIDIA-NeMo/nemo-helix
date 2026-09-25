@@ -485,7 +485,7 @@ class DockerDeploymentBackend(DeploymentBackend):
             sidecar_identity: tuple[str, str] | None = None
             sidecar_labels = {**base_labels, CONTAINER_ROLE_LABEL: sidecar.name}
             try:
-                if not is_auth_proxy_container(sidecar):
+                if not is_auth_proxy_container(sidecar) or workload_identity_requested(config):
                     sidecar_identity = await self._prepare_workload_identity_for_container(
                         workspace=workspace,
                         deployment_name=name,

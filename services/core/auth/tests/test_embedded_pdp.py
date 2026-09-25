@@ -597,6 +597,31 @@ class TestWithStaticAuthzData:
         assert editor_result["allowed"] is False
         assert job_runner_result["allowed"] is True
 
+    def test_job_runner_otlp_logs_allow_identity_only_workload_scopes(self, static_authz_data):
+        static_authz_data["authz"]["principals"] = {
+            "nemo-workloads": {"workspaces": {"my-ws": ["Viewer", "JobRunner"]}},
+        }
+        set_policy_data(static_authz_data)
+
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": "nemo-workloads",
+                "method": "POST",
+                "path": "/apis/files/v2/workspaces/my-ws/filesets/job-fileset-test/otlp/v1/logs",
+                "scopes": ["openid", "email", "groups"],
+            },
+        )
+
+        assert result["allowed"] is True
+
+    def test_job_runner_otlp_logs_endpoint_is_not_file_scope_gated(self, static_authz_data):
+        post_config = static_authz_data["authz"]["endpoints"][
+            "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"
+        ]["post"]
+
+        assert post_config == {"permissions": ["jobs.logs.create"], "scopes": []}
+
 
 class TestIntakeAuthorization:
     """Verify active Intake endpoints are workspace-scoped in static authz data."""
