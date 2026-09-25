@@ -42,9 +42,9 @@ from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialS
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_helix.types.intake.trace_filter_param import TraceFilterParam
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import TraceFilterParam
 from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 pytestmark = pytest.mark.integration

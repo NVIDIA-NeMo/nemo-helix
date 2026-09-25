@@ -15,13 +15,14 @@
 
 # File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 from datetime import datetime
 
 from ..._models import BaseModel
-from ..intake.span_status import SpanStatus
 
 __all__ = ["EvaluationSessionResponse"]
+
+SpanStatus = Literal["success", "error", "cancelled", "unknown"] | str
 
 
 class EvaluationSessionResponse(BaseModel):

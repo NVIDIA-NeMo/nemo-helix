@@ -54,9 +54,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_helix import APIError, AsyncNeMoHelix
-from nemo_helix.types.intake.trace_filter_param import TraceFilterParam
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import TraceFilterParam
 
 #: Tasks to pull and run. Terminal-Bench 2.1 is Apache-2.0 and its tasks ship prebuilt images, so a
 #: run pulls rather than builds; these two are among its quickest.
