@@ -21,6 +21,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.compose import (
 # the provider default of 30s on every create/close cycle.
 _SHUTDOWN_TIMEOUT_SECONDS = 1.0
 _KEEPALIVE = 'command: ["sleep", "300"]'
+# NVIDIA Docker Hub mirror (see Platform-Deploy setup_docker_e2e.sh). Unqualified
+# ``busybox:latest`` resolves to docker.io and fails when Hub auth is unavailable.
+_BUSYBOX_IMAGE = "dockerhub.nvidia.com/busybox:latest"
 
 
 def _docker_ready() -> bool:
@@ -49,7 +52,7 @@ def _run(*argv: str, cwd: Path | None = None) -> None:
 def _build_fixture(context: Path, image: str, value: str) -> None:
     context.mkdir(parents=True, exist_ok=True)
     (context / "Dockerfile").write_text(
-        "FROM busybox:latest\nCOPY value.txt /value.txt\nRUN adduser -D -u 1001 app\nWORKDIR /home/app\nUSER app\n",
+        f"FROM {_BUSYBOX_IMAGE}\nCOPY value.txt /value.txt\nRUN adduser -D -u 1001 app\nWORKDIR /home/app\nUSER app\n",
         encoding="utf-8",
     )
     value_path = context / "value.txt"
@@ -181,7 +184,7 @@ async def test_build_mode_rebuilds_changed_provisioned_workspace(tmp_path: Path)
     context = tmp_path / "source"
     context.mkdir()
     (context / "Dockerfile").write_text(
-        "FROM busybox:latest\nCOPY value.txt /value.txt\n",
+        f"FROM {_BUSYBOX_IMAGE}\nCOPY value.txt /value.txt\n",
         encoding="utf-8",
     )
     compose_file = tmp_path / "compose.yaml"
@@ -234,7 +237,7 @@ async def test_ordered_override_and_profile_activate_expected_topology(tmp_path:
             [
                 "services:",
                 "  agent:",
-                "    image: busybox:latest",
+                f"    image: {_BUSYBOX_IMAGE}",
                 f"    {_KEEPALIVE}",
             ]
         )
@@ -246,7 +249,7 @@ async def test_ordered_override_and_profile_activate_expected_topology(tmp_path:
             [
                 "services:",
                 "  worker:",
-                "    image: busybox:latest",
+                f"    image: {_BUSYBOX_IMAGE}",
                 "    profiles: [extra]",
                 f"    {_KEEPALIVE}",
             ]
