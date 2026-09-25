@@ -47,6 +47,7 @@ jobs:
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
       fabric: ${{ steps.changes.outputs.fabric }}
+      harbor-integration: ${{ steps.changes.outputs.harbor-integration }}
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
@@ -1276,7 +1277,8 @@ jobs:
 
   python-integration-test:
     name: Python integration tests
-    needs: [policy-wasm]
+    # Expose path-filter outputs for the conditional Harbor step below.
+    needs: [policy-wasm, changes]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -1321,6 +1323,43 @@ jobs:
           # xdist never forwards. See conftest.py.
           PYTEST_CRASH_DUMP_DIR: crash-dumps
           PYTEST_EXTRA: -p no:faulthandler
+      # Run separately from xdist: the shared platform fixture binds one port.
+      # Keep opt-in and plugin isolation scoped to this step, not the general suite.
+      - name: Run Harbor taskset integration
+        id: harbor-integration
+        # Directory/file patterns live in .github/actions/changes/action.yaml.
+        # Dependency changes can also affect Harbor; manual runs always exercise it.
+        if: >
+          !cancelled() && (
+            github.event_name == 'workflow_dispatch' ||
+            needs.changes.outputs.deps == 'true' ||
+            needs.changes.outputs.harbor-integration == 'true'
+          )
+        timeout-minutes: 10
+        run: |
+          uv sync --frozen --package nemohelix --package nemo-evaluator-plugin --extra harbor
+          # Preserve the Harbor extra when the fixture launches `uv run nemo services run`.
+          export UV_NO_SYNC=1
+          uv run --frozen --no-sync pytest \
+            plugins/nemo-evaluator/tests/integration/test_harbor_taskset.py -v -n 0 \
+            --basetemp="$RUNNER_TEMP/harbor-taskset" \
+            --junitxml="$RUNNER_TEMP/harbor-taskset.xml" -o junit_logging=all
+        env:
+          RUN_AGENT_EVAL_INTEGRATION: "1"
+          NEMO_PLUGIN_SERVICES_ALLOWLIST: evaluator
+          NEMO_PLUGIN_CONTROLLERS_ALLOWLIST: ""
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      - name: Upload Harbor integration diagnostics
+        if: always() && (steps.harbor-integration.outcome == 'success' || steps.harbor-integration.outcome == 'failure')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harbor-taskset-results
+          retention-days: 14
+          if-no-files-found: warn
+          # Exclude the platform database and ClickHouse storage in sibling directories.
+          path: |
+            ${{ runner.temp }}/harbor-taskset.xml
+            ${{ runner.temp }}/harbor-taskset/test_harbor_taskset*/
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
