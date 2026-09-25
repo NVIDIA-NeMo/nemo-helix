@@ -124,6 +124,7 @@ Things you can ask it to do, once the platform is running:
 - **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. Harbor-backed eval suites for regression testing.
 - **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
 - **Build agents.** NVIDIA NeMo Agent Toolkit (NAT) for LangGraph-based agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.
+- **Fine-tune models.** Easily customize any OSS LLMs using PEFT, SFT, DPO, GRPO, either locally, single-node or at multi-node scale, and get deployment ready outputs for NIM or vLLM.   
 - **Generate synthetic data.** Generate synthetic data for training or evaluation purposes using Data Designer.
 - **NeMo Studio (alpha).** Installed automatically with the platform. Browser UI for chat, monitoring, and reviewing optimization suggestions. Studio's agent-focused features are still a work in progress; the CLI is the primary surface today.
 
