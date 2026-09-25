@@ -58,6 +58,7 @@ from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_expo
 from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.routes import add_job_routes
 from pydantic import ValidationError
@@ -945,6 +946,27 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
     payload = json.loads((ctx.storage.persistent / "results" / FABRIC_RUN_RESULT_NAME).read_text())
     assert payload["metadata"] == {"adapter_runner": "python"}
     assert payload["runtime_id"] == "runtime-1"
+
+
+def test_run_reports_terminal_fabric_token_usage(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+    )
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        return FabricRuntimeResult(
+            status="succeeded",
+            output={"response": "done", "usage": {"input_tokens": 21, "output_tokens": 8}},
+        )
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert isinstance(ctx.usage, LocalJobUsageReporter)
+    assert ctx.usage.latest is not None
+    assert ctx.usage.latest.input_tokens == 21
+    assert ctx.usage.latest.output_tokens == 8
 
 
 def test_run_threads_custom_timeout_to_fabric(ctx: JobContext) -> None:
