@@ -329,13 +329,13 @@ async def test_compiler_emits_four_steps(
         "--service-source",
         "rl",
         "--service-name",
-        "rl",
+        "customization",
     ]
     assert _container(steps[3])["command"] == [
         "-m",
         "nhx.customization_common.tasks.model_entity",
         "--service-name",
-        "rl",
+        "customization",
     ]
 
     upload_meta = steps[2]["config"]["upload"][0]["metadata"]

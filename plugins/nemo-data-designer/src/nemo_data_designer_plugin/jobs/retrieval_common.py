@@ -27,7 +27,7 @@ from pydantic import BaseModel
 _ENTRYPOINT = ["python", "-m"]
 RETRIEVAL_MINE_MODULE = "nhx.automodel.tasks.retrieval_mine"
 _FILE_IO_MODULE = "nhx.customization_common.tasks.file_io"
-_FILE_IO_ARGS = ["--service-source", "automodel", "--service-name", "customizer"]
+_FILE_IO_ARGS = ["--service-source", "automodel", "--service-name", "customization"]
 
 
 def _persistent_storage_environment() -> list[EnvironmentVariable]:

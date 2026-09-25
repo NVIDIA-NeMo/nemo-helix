@@ -469,7 +469,7 @@ async def test_platform_job_config_compiler_sft_lora(
         "--service-source",
         "automodel",
         "--service-name",
-        "customizer",
+        "customization",
     ]
     download_entrypoint = _executor_container(steps[0]).entrypoint
     assert download_entrypoint == ["/opt/venv/bin/python"]

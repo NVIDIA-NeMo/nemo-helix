@@ -43,8 +43,8 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Examples:\n"
         "  python -m nhx.automodel.tasks --help\n"
-        "  python -m nhx.customization_common.tasks.file_io --service-source automodel --service-name customizer\n"
-        "  python -m nhx.customization_common.tasks.model_entity --service-name customizer\n\n"
+        "  python -m nhx.customization_common.tasks.file_io --service-source automodel --service-name customization\n"
+        "  python -m nhx.customization_common.tasks.model_entity --service-name customization\n\n"
         "GPU training uses backend-specific training images:\n"
         "  python -m nhx.automodel.tasks.training\n"
         "  python -m nhx.automodel.tasks.retrieval_mine\n",
