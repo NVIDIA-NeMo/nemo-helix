@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Dispatch recovery to Platform-Deploy
+      - name: Dispatch forward-merge recovery
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
