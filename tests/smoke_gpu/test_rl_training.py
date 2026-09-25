@@ -103,14 +103,15 @@ WORKER_VENV_IMPORTS = {
     "nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor": [
         "nemo_gym",
         "opensandbox",
+        "sandboxed_gym",
         "nemo_rl.environments.sandbox.nemo_gym_actor",
     ],
     # Trusted episode broker: creates per-episode sandboxes so the untrusted job sandbox never
-    # holds the OpenSandbox credential.
-    "nemo_rl.environments.sandbox.broker_actor.SandboxEpisodeBrokerActor": [
+    # holds the OpenSandbox credential. Keyed by the FQN Ray derives the venv path from.
+    "sandboxed_gym.ray.broker_actor.SandboxEpisodeBrokerActor": [
         "nemo_gym",
         "opensandbox",
-        "nemo_rl.environments.sandbox.broker_actor",
+        "sandboxed_gym.ray.broker_actor",
     ],
 }
 
@@ -182,17 +183,15 @@ def test_nhx_rl_training_importable():
 def test_sandboxed_gym_driver_imports():
     """The driver must be able to import the mode-B sandbox modules.
 
-    Sandboxed GRPO calls spinup_nemo_gym_actor() in the DRIVER process, which imports
-    nemo_rl.environments.sandbox.{nemo_gym_actor,host.models}. Both reach
-    nemo_gym.sandbox.broker at module scope, so the base venv needs nemo_gym even though
-    the Gym actor itself runs in its own venv. The `uv sync --all-groups` in the base
-    image is exact and prunes the nemo_gym extra, so this is only satisfied by the
-    explicit `uv pip install` of the Gym workspace member — without it, mode B fails at
-    Gym spin-up with `ModuleNotFoundError: No module named 'nemo_gym'`, minutes into a
-    run and only on a sandbox-capable cluster.
+    Sandboxed GRPO calls spinup_nemo_gym_actor() in the DRIVER process, which imports the
+    adapter and sandboxed_gym.host.models at module scope, so the base venv needs both even
+    though the Gym actor itself runs in its own venv. The `uv sync --all-groups` in the base
+    image is exact and prunes the nemo_gym extra, so this is only satisfied by the explicit
+    `uv pip install` of the Gym workspace member — without it, mode B fails at Gym spin-up
+    with a ModuleNotFoundError, minutes into a run and only on a sandbox-capable cluster.
     """
-    from nemo_rl.environments.sandbox.host.models import NemoGymSandboxedConfig  # noqa: F401
     from nemo_rl.environments.sandbox.nemo_gym_actor import SandboxedGymActorConfig  # noqa: F401
+    from sandboxed_gym.host.models import NemoGymSandboxedConfig  # noqa: F401
 
 
 # --- per-worker venvs: where training actually runs ---------------------------------------------
