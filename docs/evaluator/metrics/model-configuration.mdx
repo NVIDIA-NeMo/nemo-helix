@@ -93,7 +93,7 @@ job = evaluator.submit(
     dataset=dataset,
     config=RunConfigOnlineModel(
         parallelism=4,
-        inference=InferenceParams(temperature=0.1, max_tokens=64),
+        inference=InferenceParams(temperature=0.1, max_tokens=4096),
     ),
     target=model,
     prompt_template={
