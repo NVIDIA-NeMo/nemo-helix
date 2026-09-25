@@ -32,8 +32,10 @@ Phase = Literal["request", "response"]
 # config_hash -> factory_name. Multiple VMs with identical configs share one factory.
 FACTORIES_BY_CONFIG_HASH: dict[str, str] = {}
 
-# vm_id -> [config_hash, ...]. A VM may have multiple nemo-switchyard middlewares
-# (e.g., random_routing + translate); we track all so destroy can clean them all up.
+# vm_key ("workspace/name") -> [config_hash, ...]. A VM may have multiple
+# nemo-switchyard middlewares (e.g., random_routing + translate); we track all so
+# destroy can clean them all up. Keyed by vm_key because the IGW lifecycle hooks
+# do not carry the entity id (see NVBug 6563245).
 VM_CONFIG_MAPPING: dict[str, list[str]] = {}
 
 # (vm_key, config_type, phase) -> config_hash. Phase is "request" or "response".

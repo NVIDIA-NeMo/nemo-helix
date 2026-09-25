@@ -318,7 +318,15 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
                 )
             )
 
-        _state.VM_CONFIG_MAPPING[virtual_model.id] = registered_hashes
+        # Key by vm_key (workspace/name), NOT virtual_model.id: the IGW lifecycle
+        # dispatcher builds plugin VMs without mapping the entity id, so .id is the
+        # same empty string for every VM. Keying on it collapsed all VMs into one
+        # VM_CONFIG_MAPPING slot — each upsert overwrote the previous VM's entry and
+        # destroying ANY VM popped the shared slot and unregistered factories that
+        # live VMs still referenced ("Factory not found for config hash ..." 500s
+        # on catalog-visible VMs; NVBug 6563245). vm_key is the identity that both
+        # hooks reliably carry.
+        _state.VM_CONFIG_MAPPING[vm_key] = registered_hashes
 
     def _register_entry(
         self,
@@ -394,10 +402,9 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
 
     async def on_virtual_model_destroyed(self, virtual_model: VirtualModel) -> None:
         """Unregister this VM's middlewares; factories shared with other VMs stay."""
-        vm_id = virtual_model.id
         vm_key = f"{virtual_model.workspace}/{virtual_model.name}"
 
-        config_hashes = _state.VM_CONFIG_MAPPING.pop(vm_id, None)
+        config_hashes = _state.VM_CONFIG_MAPPING.pop(vm_key, None)
         if not config_hashes:
             logger.debug("SwitchyardMiddleware: VirtualModel %s has no registered configs", vm_key)
             return
