@@ -8,7 +8,7 @@ Command-line interface for NeMo Helix.
 
 **Getting started:**
 - Browse documentation with **`nemo docs --list`**
-- Run local platform services with **`nemo services run --help`**
+- Run local Helix services with **`nemo services run --help`**
 - Read the Kubernetes deployment guide with **`nemo docs set-up/helm/install`**
 
 **Examples:**
@@ -99,7 +99,7 @@ nemo setup [OPTIONS]
 
 * `--auto`: Non-interactive mode: register provider from environment variables
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--start-services, --no-start-services`: Start local platform services
+* `--start-services, --no-start-services`: Start local Helix services
 * `--install-skills, --no-install-skills`: Install NeMo skills for coding agents
 * `--skills-agents`: Comma-separated list of agents to install skills for (e.g. 'codex,cursor'). Default: all detected. Only applied when --install-skills is set.
 * `--skills-scope <CHOICE>`: Install scope for skills: 'project' (this repo) or 'user' (home). Default: project. Only applied when --install-skills is set. [possible values: project, user]
@@ -416,7 +416,7 @@ nemo auth access-keys rotate [OPTIONS] JTI
 
 ### nemo services
 
-Run platform services locally.
+Run Helix services locally.
 
 **Usage:**
 
@@ -430,11 +430,11 @@ nemo services [OPTIONS] [COMMAND] [ARGS]...
 
 **Commands:**
 
-* `run`: Run platform services in the foreground.
-* `start`: Start platform services in the background.
-* `stop`: Stop running platform services.
-* `restart`: Restart platform services.
-* `status`: Show status of the platform services instance for this...
+* `run`: Run Helix services in the foreground.
+* `start`: Start Helix services in the background.
+* `stop`: Stop running Helix services.
+* `restart`: Restart Helix services.
+* `status`: Show status of the Helix services instance for this scope.
 * `ls`: List service instances on this host.
 * `rm`: Remove a stopped instance directory and its logs.
 * `prune`: Remove all stopped instance directories on this host.
@@ -442,7 +442,7 @@ nemo services [OPTIONS] [COMMAND] [ARGS]...
 
 #### nemo services run
 
-Run platform services in the foreground.  Ctrl-C to stop.
+Run Helix services in the foreground.  Ctrl-C to stop.
 
 **Usage:**
 
@@ -469,7 +469,7 @@ nemo services run [OPTIONS]
 
 #### nemo services start
 
-Start platform services in the background.
+Start Helix services in the background.
 
 Detaches the process, polls /status, then returns.
 
@@ -505,7 +505,7 @@ nemo services start [OPTIONS]
 
 #### nemo services stop
 
-Stop running platform services.
+Stop running Helix services.
 
 Sends SIGTERM to the running service process and waits for it to exit.
 Falls back to SIGKILL after a timeout.  Foreground instances (started
@@ -537,7 +537,7 @@ nemo services stop [OPTIONS]
 
 #### nemo services restart
 
-Restart platform services.
+Restart Helix services.
 
 Stops any running services and relaunches them.  Without flags, preserves
 the service set from the previous run.  Errors if no previously tracked
@@ -575,7 +575,7 @@ nemo services restart [OPTIONS]
 
 #### nemo services status
 
-Show status of the platform services instance for this scope.
+Show status of the Helix services instance for this scope.
 
 **Usage:**
 

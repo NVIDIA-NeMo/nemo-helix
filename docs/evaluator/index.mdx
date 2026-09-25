@@ -100,7 +100,7 @@ execution.
 
 | Mode | Caller | Call | Best for |
 |------|--------|------|----------|
-| **Local SDK** | `Evaluator()` (`nemo_evaluator_sdk`) | `await evaluator.run(metrics=[metric], dataset=dataset, config=config)` | Fast in-process iteration with no platform services. |
+| **Local SDK** | `Evaluator()` (`nemo_evaluator_sdk`) | `await evaluator.run(metrics=[metric], dataset=dataset, config=config)` | Fast in-process iteration with no Helix services. |
 | **Remote job** | `client.evaluator` | `evaluator.submit(metric=metric, dataset=dataset, config=config)` | Durable, monitored platform jobs for production and regressions. |
 
 The platform caller is mounted on a `NeMoHelix` client:

@@ -154,7 +154,7 @@ When `authz=` is set, `add_function_routes` stamps a rule on the route and mints
 
 ### Caller kinds on generated routes
 
-Factory-generated routes admit **both** caller kinds — `PRINCIPAL` and `SERVICE_PRINCIPAL` — and this is not configurable. Plugin controllers and other in-platform services call these routes as `service:<name>`, and a principal-only route is an unconditional **deny** for a service principal: it overrides even the `ServiceSystem` wildcard, so no role grant recovers it.
+Factory-generated routes admit **both** caller kinds — `PRINCIPAL` and `SERVICE_PRINCIPAL` — and this is not configurable. Plugin controllers and other Helix services call these routes as `service:<name>`, and a principal-only route is an unconditional **deny** for a service principal: it overrides even the `ServiceSystem` wildcard, so no role grant recovers it.
 
 Caller kind is the wrong lever for narrowing service-to-service reach — it separates humans from services, not one service from another — so a per-route knob here could only encode guesses about which service calls what. Scoping that reach properly needs well-scoped service tokens, which the platform does not have yet.
 

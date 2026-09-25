@@ -16,7 +16,7 @@ from nemo_helix_plugin.service import NemoService, RouterSpec
 
 class MyService(NemoService):
     name: ClassVar[str] = "my-plugin"          # REQUIRED — entry-point key, URL prefix
-    dependencies: ClassVar[list[str]] = ["entities"]  # platform services to wait for
+    dependencies: ClassVar[list[str]] = ["entities"]  # Helix services to wait for
 
     def get_routers(self) -> list[RouterSpec]:  # REQUIRED
         return [RouterSpec(_build_router(), tag="My Plugin", prefix="/v2/workspaces/{workspace}")]
@@ -218,5 +218,5 @@ def test_get_widget():
 
 - [`crud-example.md`](crud-example.md) — Complete CRUD implementation with all imports
 - [`../plugin-entities/SKILL.md`](../plugin-entities/SKILL.md) — Entity definitions and client
-- [`../plugin-platform-services/SKILL.md`](../plugin-platform-services/SKILL.md) — Calling other platform services
+- [`../plugin-platform-services/SKILL.md`](../plugin-platform-services/SKILL.md) — Calling other Helix services
 - [`../plugin-authz/SKILL.md`](../plugin-authz/SKILL.md) — Authorization for plugin routes

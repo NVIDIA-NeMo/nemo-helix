@@ -422,7 +422,7 @@ authz:
       - jobs.logs.create
     ServiceSystem:
       description: >-
-        Internal platform service principal (principal IDs matching service:*). Used when no
+        Internal Helix service principal (principal IDs matching service:*). Used when no
         explicit role bindings exist in policy data; may be replaced by per-service roles later.
         Wildcard permission grants every API permission for known endpoints.
       permissions:

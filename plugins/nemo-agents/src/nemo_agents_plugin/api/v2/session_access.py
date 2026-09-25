@@ -84,7 +84,7 @@ def _is_owned_session(
     if session.workspace != workspace:
         return False
     # No-auth mode has no request principal. Entity writes still use the
-    # platform service client and therefore carry a service ``created_by``;
+    # Helix service client and therefore carry a service ``created_by``;
     # workspace scoping is the applicable boundary in that mode.
     return not effective_principal_id or session.created_by == effective_principal_id
 

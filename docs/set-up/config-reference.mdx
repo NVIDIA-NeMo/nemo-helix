@@ -19,7 +19,7 @@ platform:
   runtime: docker
   # Base URL for the NeMo Helix api. Used as the default URL for all services. | default: 'http://localhost:8080'
   base_url: http://localhost:8080
-  # Optional loopback address override for job containers to reach platform services. If not specified, automatically determined based on platform: macOS uses 'host.docker.internal', Docker containers use container hostname, Linux host network uses no override. Can be set via config file or NHX_LOOPBACK_ADDRESS env var.
+  # Optional loopback address override for job containers to reach Helix services. If not specified, automatically determined based on platform: macOS uses 'host.docker.internal', Docker containers use container hostname, Linux host network uses no override. Can be set via config file or NHX_LOOPBACK_ADDRESS env var.
   loopback_address:
   # Global image pull secrets for the platform
   image_pull_secrets: []
@@ -204,7 +204,7 @@ auth:
   embedded_pdp_memory_limit_mb: 32
   # Fail-mode for a plugin that contributes invalid HTTP authz. | default: 'hard_fail' | values: 'deny_route' | 'quarantine' | 'hard_fail'
   on_invalid_plugin: hard_fail
-  # Additional service principal names allowed for stable account materialization. Built-in platform services and installed plugin services are allowed automatically.
+  # Additional service principal names allowed for stable account materialization. Built-in Helix services and installed plugin services are allowed automatically.
   allowed_service_principals: []
 ```
 

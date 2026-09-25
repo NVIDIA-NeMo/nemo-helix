@@ -88,7 +88,7 @@ class NemoService(_NamedPlugin):
     .. attribute:: dependencies
         :type: list[str]
 
-        Names of platform services that must start before this one.
+        Names of Helix services that must start before this one.
         Defaults to ``[]``.
     """
 

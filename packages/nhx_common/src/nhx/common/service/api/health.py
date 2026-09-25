@@ -65,7 +65,7 @@ async def async_wait_for_service_ready(
     poll_interval: float = 0.5,
     http_client: httpx.AsyncClient | None = None,
 ) -> bool:
-    """Wait for a specific platform service to be ready by polling its /status endpoint.
+    """Wait for a specific Helix service to be ready by polling its /status endpoint.
 
     Uses platform_config.get_service_url(service_name) so each service can have its own URL
     (e.g. from service_discovery). Returns True when the named service appears in
@@ -126,7 +126,7 @@ async def async_wait_for_dependencies(
     poll_interval: float = 0.5,
     http_client: httpx.AsyncClient | None = None,
 ) -> bool:
-    """Wait for all named platform services to be ready (same pattern as Service._wait_for_dependencies).
+    """Wait for all named Helix services to be ready (same pattern as Service._wait_for_dependencies).
 
     Uses get_service_url(service_name) for each dependency so service APIs may live at different URLs.
     Waits for each dependency in order; returns False if any timeout.
@@ -160,7 +160,7 @@ def wait_for_service_ready(
     timeout: float = 60.0,
     poll_interval: float = 0.5,
 ) -> bool:
-    """Wait for a specific platform service to be ready by polling /status.
+    """Wait for a specific Helix service to be ready by polling /status.
 
     Polls the platform's /status endpoint (which always returns 200 with
     per-service status). Returns True when the named service appears in

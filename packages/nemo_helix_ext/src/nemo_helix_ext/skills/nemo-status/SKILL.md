@@ -104,7 +104,7 @@ For drill-downs:
 
 ## Verification
 
-Status is itself a verification: the commands together prove the platform is reachable, platform services/controllers are healthy, the agents plugin is loaded (or not), the provider is registered, and at least one model has been discovered. If any command returns an error, surface it in the summary block rather than hiding it.
+Status is itself a verification: the commands together prove the platform is reachable, Helix services/controllers are healthy, the agents plugin is loaded (or not), the provider is registered, and at least one model has been discovered. If any command returns an error, surface it in the summary block rather than hiding it.
 
 ## If verification fails
 

@@ -49,6 +49,7 @@ PRODUCT_REPLACEMENTS = [
     ("NEMO Platform", "NEMO Helix"),
     ("NEMO-PLATFORM", "NEMO-HELIX"),
     ("NEMO_PLATFORM", "NEMO_HELIX"),
+    ("platform service", "Helix service"),
 ]
 
 ACRONYM_REPLACEMENTS = {

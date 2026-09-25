@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generic API server helpers for platform services."""
+"""Generic API server helpers for Helix services."""
 
 from __future__ import annotations
 

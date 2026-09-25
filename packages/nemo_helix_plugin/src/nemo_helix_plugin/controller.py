@@ -78,7 +78,7 @@ class NemoController(_NamedPlugin):
     .. attribute:: dependencies
         :type: list[str]
 
-        Names of platform services that must be ready before this controller
+        Names of Helix services that must be ready before this controller
         starts (e.g. ``["entities"]``).  Defaults to ``[]``.
     """
 

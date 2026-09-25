@@ -493,7 +493,7 @@ baseHelixConfig: |
     # Always set to 'kubernetes' for NeMo Helix when deploying with Helm.
     runtime: kubernetes
 
-    # Base URLs for various platform services
+    # Base URLs for various Helix services
     base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
 
     # Image configuration for launching containers via the platform

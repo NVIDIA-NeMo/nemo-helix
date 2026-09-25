@@ -67,7 +67,7 @@ def base_dir(tmp_path: Path, monkeypatch) -> Path:
 def test_services_group_is_registered():
     result = runner.invoke(app, ["services", "--help"])
     assert result.exit_code == 0
-    assert "Run platform services locally." in result.stdout
+    assert "Run Helix services locally." in result.stdout
     assert "run" in result.stdout
 
 

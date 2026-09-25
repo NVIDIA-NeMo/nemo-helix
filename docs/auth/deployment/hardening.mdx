@@ -30,7 +30,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 - [ ] **Strip auth headers from external requests**: Configure your ingress/gateway to remove `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`, and `X-NHX-Scopes` from all incoming external traffic. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 - [ ] **Enable TLS termination**: Terminate TLS at the ingress or load balancer. Tokens in `Authorization` headers are sent in the clear without TLS.
-- [ ] **Consider gateway bearer-auth callout**: To enforce bearer-token validation before requests reach platform services, configure Envoy `ext_authz` to call `/apis/auth/ext-authz`. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+- [ ] **Consider gateway bearer-auth callout**: To enforce bearer-token validation before requests reach Helix services, configure Envoy `ext_authz` to call `/apis/auth/ext-authz`. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
 ## Policy Engine
 

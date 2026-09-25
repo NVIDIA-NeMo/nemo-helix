@@ -1349,7 +1349,7 @@ def _maybe_start_services(
     require_docker_for_default_local(console=console)
 
     if already_running:
-        console.print("  Restarting platform services...")
+        console.print("  Restarting Helix services...")
         _kill_existing_services(base_url)
         deadline = time.time() + _KILL_WAIT_TIMEOUT
         while time.time() < deadline and _check_platform_reachable(
@@ -1359,7 +1359,7 @@ def _maybe_start_services(
         ):
             _pause(1)
     else:
-        console.print("  Starting platform services...")
+        console.print("  Starting Helix services...")
     _ensure_port_available_for_start(base_url)
     proc = _start_services_background(base_url, data_dir=data_dir)
 
@@ -2464,7 +2464,7 @@ def setup_command(
     ] = None,
     start_services: Annotated[
         bool | None,
-        typer.Option("--start-services/--no-start-services", help="Start local platform services"),
+        typer.Option("--start-services/--no-start-services", help="Start local Helix services"),
     ] = None,
     install_skills: Annotated[
         bool | None,
