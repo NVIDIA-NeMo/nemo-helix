@@ -17,6 +17,7 @@ from nemo_helix_plugin.client.errors import NemoTransportError as PluginTranspor
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelEntity
+from nhx.common.entities.utils import parse_model_entity_ref
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.core.inference_gateway.api.proxy import retrieve_secret_value
 from nhx.core.inference_gateway.api.virtual_model_cache import (
@@ -93,6 +94,15 @@ class ModelCache:
     secret_value_ttl: int = SECRETS_TTL_SEC
     """Time-to-live in seconds for cached secrets (0 = always refresh)"""
 
+    _entity_map_signature: frozenset[tuple[str, str, tuple[tuple[str, str], ...]]] | None = field(default=None)
+    """Signature of the provider layer as of the last ``rebuild_model_entity_map`` run.
+
+    Used by :func:`refresh_model_cache` to skip a redundant rebuild when the provider set
+    and its served-models are unchanged since the previous cycle. ``None`` means "no rebuild
+    has run yet" (forces the first rebuild); the signature is computed inline in
+    :func:`refresh_model_cache`.
+    """
+
     def get_from_provider(self, workspace: str, provider_name: str) -> ModelProviderInfo | None:
         model_info = self.workspace_name_provider_map.get((workspace, provider_name))
         return model_info
@@ -117,11 +127,15 @@ class ModelCache:
         for model_provider_info in self.workspace_name_provider_map.values():
             served_models = model_provider_info.model_provider.served_models or []
             for served_model in served_models:
-                parts = served_model.model_entity_id.split("/", 1)
-                if len(parts) < 2 or not (parts[0] and parts[1]):
+                # First-"/"-only split (preserving a LoRA composite as the entity name) via the
+                # shared parser; a malformed id (no "/" or empty segment) raises ValueError, which
+                # we log and skip. The parser also strips surrounding whitespace.
+                try:
+                    ref = parse_model_entity_ref(served_model.model_entity_id)
+                except ValueError:
                     logger.warning("Skipping malformed entity_id %r", served_model.model_entity_id)
                     continue
-                workspace, model_entity_name = parts[0], parts[1]
+                workspace, model_entity_name = ref.workspace, ref.name
                 key = (workspace, model_entity_name)
                 model_entity_info = rebuilt_map.get(key)
                 if model_entity_info is None:
@@ -284,7 +298,30 @@ async def refresh_model_cache(
             secrets_sdk=secrets_sdk,
         )
 
-    model_cache.rebuild_model_entity_map()
+    # Skip the entity-map rebuild when the provider layer is unchanged since the last
+    # cycle. Compute-only optimization: it saves no network calls, but avoids the
+    # synchronous O(providers x served_models) rebuild burst on the event loop every cycle.
+    #
+    # The signature is order-sensitive over each provider's served_models because the
+    # rebuild appends to model_providers[] in that order and consumers pick [0] — a reorder
+    # is a real routing change and must invalidate. Metadata (spec/finetuning_type/
+    # backend_format) and provider config (host_url/secrets) are excluded: both are applied
+    # in place, not via rebuild. Cold start is covered by the initial None signature, so an
+    # empty map with an unchanged signature (no served_models yet, or only malformed ids) is
+    # a valid steady state and is correctly skipped.
+    entity_map_signature = frozenset(
+        (
+            mp.workspace,
+            mp.name,
+            tuple((sm.model_entity_id, sm.served_model_name) for sm in (mp.served_models or [])),
+        )
+        for mp in model_providers
+    )
+    if entity_map_signature != model_cache._entity_map_signature:
+        model_cache.rebuild_model_entity_map()
+        model_cache._entity_map_signature = entity_map_signature
+    else:
+        logger.debug("Provider layer unchanged since last cycle; skipping model entity map rebuild")
     if model_entity_getter is not None:
         try:
             model_entities = await model_entity_getter()
