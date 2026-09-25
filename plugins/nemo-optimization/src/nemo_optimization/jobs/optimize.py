@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OptimizeJob — Agents numeric HPO (``nemo agents optimize``).
+"""OptimizeJob — Fabric agent optimization (``nemo agents optimize``).
 
 Implementation lives in ``nemo_optimization``; registration and HTTP mounting
 are owned by the agents plugin (``agents.optimize``).
@@ -66,10 +66,10 @@ OPTIMIZE_TASK_IMAGE = "nhx-tasks"
 
 
 class OptimizeJob(NemoJob):
-    """Run a Fabric-native numeric optimize study via the Agents optimize job."""
+    """Run Fabric-native optimization via the Agents optimize job."""
 
     name: ClassVar[str] = "optimize"
-    description: ClassVar[str] = "Optimize a Fabric agent workflow (numeric HPO)."
+    description: ClassVar[str] = "Optimize a Fabric agent workflow."
     container: ClassVar[str] = "cpu-tasks"
     job_collection_path: ClassVar[str | None] = None
     generate_legacy_verbs: ClassVar[bool] = False
@@ -390,7 +390,7 @@ def _publish_results(
 
     if not artifacts.is_dir() or not any(path.is_file() for path in artifacts.rglob("*")):
         raise FileNotFoundError(
-            f"Optimize study reported success but wrote no artifacts to {artifacts}; nothing to publish."
+            f"Optimize study returned a result but wrote no artifacts to {artifacts}; nothing to publish."
         )
 
     if classify_output_target(output) is LocalDir:

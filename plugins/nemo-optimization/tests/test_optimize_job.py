@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -28,6 +29,13 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     SubprocessJobExecutionProfile,
 )
 from nemo_helix_plugin.refs import FilesetRef
+from nemo_optimization.backends.protocol import (
+    OptimizationBackendCapabilities,
+    OptimizationPhase,
+    OptimizationPhaseRequest,
+    OptimizationPhaseResult,
+    OptimizationPhaseStatus,
+)
 from nemo_optimization.jobs.optimize import OptimizeJob
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 from pydantic import ValidationError
@@ -701,6 +709,92 @@ def test_run_does_not_publish_when_study_fails(tmp_path: Path, ctx: JobContext) 
     assert uploaded == {}
 
 
+def test_run_publishes_intermediate_artifacts_when_prompt_phase_fails(
+    tmp_path: Path,
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config())
+    dest = tmp_path / "published"
+    calls: list[str] = []
+
+    def _backend(name: str, *, phase: OptimizationPhase):  # noqa: ANN001
+        return _JobFakeBackend(name=name, phase=phase, calls=calls, fail_prompt=True)
+
+    monkeypatch.setattr("nemo_optimization.router.require_optimization_backend", _backend)
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "failed"
+    assert calls == ["numeric", "prompt"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "phase_results.json").is_file()
+    assert (published / "intermediate_numeric_config.yml").is_file()
+    assert (published / "intermediate_numeric_payload.json").is_file()
+    assert not (published / "final_optimized_config.yml").exists()
+
+
+@pytest.mark.integration
+def test_run_publishes_preflight_failure_when_real_prompt_config_raises(
+    tmp_path: Path,
+    ctx: JobContext,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config(prompt_overrides={"population_size": 0}))
+    dest = tmp_path / "published"
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "failed"
+    assert [phase["status"] for phase in result["phases"]] == ["skipped", "failed"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "phase_results.json").is_file()
+    assert not (published / "intermediate_numeric_config.yml").exists()
+    assert not (published / "intermediate_numeric_payload.json").exists()
+    assert (published / "prompt_phase_failure.json").is_file()
+    assert not (published / "final_optimized_config.yml").exists()
+
+
+def test_run_publishes_final_artifacts_when_multi_phase_succeeds(
+    tmp_path: Path,
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config())
+    dest = tmp_path / "published"
+    calls: list[str] = []
+
+    def _backend(name: str, *, phase: OptimizationPhase):  # noqa: ANN001
+        return _JobFakeBackend(name=name, phase=phase, calls=calls)
+
+    monkeypatch.setattr("nemo_optimization.router.require_optimization_backend", _backend)
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["numeric", "prompt"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "intermediate_numeric_config.yml").is_file()
+    assert (published / "final_optimized_config.yml").is_file()
+    assert (
+        yaml.safe_load((published / "final_optimized_config.yml").read_text(encoding="utf-8"))["instructions"][
+            "system"
+        ]["content"]
+        == "Tuned prompt."
+    )
+
+
 def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext) -> None:
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
@@ -743,3 +837,109 @@ def test_optimize_task_module_is_importable() -> None:
     from nemo_optimization.jobs.optimize import OPTIMIZE_TASK_MODULE
 
     assert importlib.import_module(OPTIMIZE_TASK_MODULE) is not None
+
+
+class _JobFakeBackend:
+    def __init__(
+        self,
+        *,
+        name: str,
+        phase: OptimizationPhase,
+        calls: list[str],
+        fail_prompt: bool = False,
+    ) -> None:
+        self.name = name
+        self.capabilities = OptimizationBackendCapabilities(phases=(phase,))
+        self._phase = phase
+        self._calls = calls
+        self._fail_prompt = fail_prompt
+
+    def run_phase(
+        self,
+        request: OptimizationPhaseRequest,
+        *,
+        ctx: JobContext,
+        sdk=None,  # noqa: ANN001
+    ) -> OptimizationPhaseResult:
+        del ctx, sdk
+        self._calls.append(request.phase.value)
+        payload = copy.deepcopy(request.payload)
+        if self._phase is OptimizationPhase.NUMERIC:
+            payload["models"]["default"]["temperature"] = 0.4
+            return OptimizationPhaseResult(
+                phase=OptimizationPhase.NUMERIC,
+                backend=self.name,
+                status=OptimizationPhaseStatus.COMPLETED,
+                optimized_payload=payload,
+                summary={"best_params": {"temperature": 0.4}},
+                trial_count=2,
+                trial_number_offset=request.trial_number_offset,
+            )
+
+        if self._fail_prompt:
+            return OptimizationPhaseResult(
+                phase=OptimizationPhase.PROMPT,
+                backend=self.name,
+                status=OptimizationPhaseStatus.FAILED,
+                optimized_payload=copy.deepcopy(request.payload),
+                summary={"error": "prompt failed"},
+                trial_count=1,
+                trial_number_offset=request.trial_number_offset,
+            )
+        payload["instructions"]["system"]["content"] = "Tuned prompt."
+        return OptimizationPhaseResult(
+            phase=OptimizationPhase.PROMPT,
+            backend=self.name,
+            status=OptimizationPhaseStatus.COMPLETED,
+            optimized_payload=payload,
+            summary={"best_prompts": {"system_prompt": "Tuned prompt."}},
+            trial_count=3,
+            trial_number_offset=request.trial_number_offset,
+        )
+
+    def validate_phase(
+        self,
+        request: OptimizationPhaseRequest,
+        *,
+        ctx: JobContext,
+        sdk=None,  # noqa: ANN001
+    ) -> None:
+        del request, ctx, sdk
+
+
+def _multi_phase_config(*, prompt_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    prompt = {"enabled": True, "backend": "ga", "model": "prompt_optimizer"}
+    if prompt_overrides:
+        prompt.update(prompt_overrides)
+    return {
+        **FABRIC_AGENT,
+        "models": {
+            "default": {"provider": "openai", "model": "agent-model", "temperature": 0.0},
+            "prompt_optimizer": {
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "base_url": "https://example.test/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "optimizer": {
+            "experiment_id": "exp-job",
+            "numeric": {"enabled": True, "backend": "optuna", "n_trials": 2},
+            "prompt": prompt,
+            "eval_metrics": {"average_score": {"direction": "maximize", "weight": 1.0}},
+            "search_space": {
+                "temperature": {
+                    "type": "fabric",
+                    "path": "models.default.temperature",
+                    "values": [0.0, 0.4],
+                },
+                "system_prompt": {
+                    "type": "fabric",
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                },
+            },
+        },
+    }
