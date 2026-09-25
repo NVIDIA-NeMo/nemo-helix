@@ -1,0 +1,189 @@
+[
+  {
+    "id": "setup-fresh-local-platform",
+    "question": "Set up NeMo Platform locally so I can start developing.",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "Run `make bootstrap` to install Python dependencies, Studio assets, and plugins. Then activate the venv with `source .venv/bin/activate` and run `nemo setup` (interactive) or `nemo setup --auto --start-services --install-skills --deploy-agent` (non-interactive). The platform will be available at localhost:8080. Before starting, check if port 8080 is already in use and decide whether to wipe the local DB at ~/.local/share/nemo.",
+    "expected_behavior": [
+      "Check if a NeMo platform is already running on port 8080",
+      "Ask about the local data directory preference (default ~/.local/share/nemo)",
+      "Ask whether to wipe the existing local database",
+      "Run make bootstrap followed by nemo setup",
+      "Verify services are running on localhost:8080",
+      "Offer next-step options based on the user's goal"
+    ]
+  },
+  {
+    "id": "setup-bootstrap-nemo-platform",
+    "question": "How do I bootstrap the NeMo platform from a fresh clone?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "From the repo root, run `make bootstrap` which installs Python deps via uv sync, Studio web assets via pnpm, and plugins including the built-in NeMo agent. Then `source .venv/bin/activate` and `nemo setup`. The bootstrap target has finer-grained variants: `make bootstrap-python` (Python only) and `make bootstrap-studio` (web assets only).",
+    "expected_behavior": [
+      "Explain the make bootstrap command and what it installs",
+      "Mention the finer-grained targets (bootstrap-python, bootstrap-studio)",
+      "Instruct to activate the venv and run nemo setup",
+      "Note that make bootstrap includes plugin installation"
+    ]
+  },
+  {
+    "id": "setup-macos-localhost",
+    "question": "I want to run nemo setup on my Mac. Any gotchas I should know about?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "On macOS, use http://127.0.0.1:8080 instead of localhost due to IPv6 resolution issues. Also be aware of the unlinked-inode gotcha: running `rm -rf ~/.local/share/nemo` while a nemo services run process is still alive does not reset state because the running process keeps writing to its open inode. Always kill the platform process first, then wipe the DB.",
+    "expected_behavior": [
+      "Warn about macOS IPv6 issue (use 127.0.0.1 not localhost)",
+      "Explain the unlinked-inode gotcha when wiping the database",
+      "Advise killing the platform process before wiping state",
+      "Provide the standard setup steps (make bootstrap, nemo setup)"
+    ]
+  },
+  {
+    "id": "setup-port-conflict",
+    "question": "My nemo setup failed because port 8080 is already in use. What should I do?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "Run `lsof -iTCP:8080 -sTCP:LISTEN` and `ps -ef | grep 'nemo services run' | grep -v grep` to identify what's using the port. Options: (a) kill the existing platform process with SIGTERM, wait ~10s, then wipe DB and start fresh; (b) keep the running platform and skip setup; (c) abort and investigate. If killing, verify each PID still matches a nemo services run command before SIGKILL to avoid PID reuse issues.",
+    "expected_behavior": [
+      "Run lsof or ps to identify the process on port 8080",
+      "Present options: kill and restart, keep running platform, or abort",
+      "If killing, use SIGTERM first then verify before SIGKILL",
+      "Warn about PID reuse when escalating to SIGKILL"
+    ]
+  },
+  {
+    "id": "setup-wipe-database",
+    "question": "How do I wipe the local NeMo database and start fresh?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "First, ensure no `nemo services run` process is holding the file open (kill it first due to macOS unlinked-inode gotcha). Then run `rm -rf ~/.local/share/nemo` (or the custom path from $NMP_DATA_DIR or $XDG_DATA_HOME/nemo). This deletes local platform state including secret metadata and the local encryption key. Providers and secrets must be re-seeded afterward.",
+    "expected_behavior": [
+      "Warn that platform must be stopped before wiping",
+      "Explain the macOS unlinked-inode risk",
+      "Provide the rm -rf command for the correct data directory",
+      "Note that secrets and providers must be re-seeded after wipe"
+    ]
+  },
+  {
+    "id": "setup-noninteractive-ci",
+    "question": "Run nemo setup in non-interactive mode for my CI pipeline.",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "Use the non-interactive command: `export NVIDIA_API_KEY=nvapi-... && nemo setup --auto --start-services --install-skills --deploy-agent`. This runs setup without prompts. The default model is selected from $NEMO_DEFAULT_MODEL if set, otherwise the first model discovered from the provider. Model entity IDs must be hyphenated (e.g., nvidia-llama-3-3-nemotron-super-49b-v1-5), not the slash-with-dots catalog form.",
+    "expected_behavior": [
+      "Provide the nemo setup --auto command with all flags",
+      "Note that NVIDIA_API_KEY must be exported",
+      "Explain default model selection order (env var then first discovered)",
+      "Warn about hyphenated entity ID format requirement"
+    ]
+  },
+  {
+    "id": "setup-invalid-tag-error",
+    "question": "I'm getting cryptography.exceptions.InvalidTag when starting NeMo services. How do I fix this?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "This error occurs when the database and encryption key get out of sync. The fix is to wipe the local state: first kill any running `nemo services run` process, then `rm -rf ~/.local/share/nemo`. After wiping, restart services and re-seed providers/secrets. The database and key must always be deleted together.",
+    "expected_behavior": [
+      "Identify this as a DB/encryption key desync issue",
+      "Instruct to kill the running platform process first",
+      "Wipe ~/.local/share/nemo to clear both DB and key",
+      "Note that providers and secrets need re-seeding after"
+    ]
+  },
+  {
+    "id": "setup-deploy-builtin-agent",
+    "question": "I need to register an inference provider and deploy the built-in NeMo agent locally.",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "After `make bootstrap` installs the NeMo agents plugin, run `nemo setup --auto --start-services --install-skills --deploy-agent` which handles provider registration and agent deployment. Verify with `nemo agents list` and `nemo agents invoke --agent nemo-agent --input 'list all of my workspaces'`. The agent is deployed in the default workspace.",
+    "expected_behavior": [
+      "Confirm make bootstrap installs the agents plugin",
+      "Run nemo setup with --deploy-agent flag",
+      "Verify agent deployment with nemo agents list",
+      "Test agent with a sample invocation"
+    ]
+  },
+  {
+    "id": "setup-switchyard-middleware",
+    "question": "How do I start the NeMo platform with Switchyard middleware enabled?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "Switchyard is installed automatically by `make bootstrap-python` via the root workspace's enabled-plugins group. The library is vendored in-tree at plugins/nemo-switchyard/vendor/switchyard/. Start with debug logging: `LOG_LEVEL=DEBUG uv run nemo services run --services entities,models,inference-gateway,secrets --controllers models`. Switchyard is auto-discovered via its nemo.inference_middleware entry point.",
+    "expected_behavior": [
+      "Note that Switchyard installs automatically via make bootstrap",
+      "Explain it is vendored in-tree (no separate checkout needed)",
+      "Provide the services run command with LOG_LEVEL=DEBUG",
+      "Mention auto-discovery via entry point"
+    ]
+  },
+  {
+    "id": "setup-custom-data-dir",
+    "question": "I want to use a custom directory for NeMo platform state instead of the default. How?",
+    "expected_skill": "nemo-setup",
+    "expected_script": null,
+    "ground_truth": "Set $NMP_DATA_DIR before starting services: `export NMP_DATA_DIR=/custom/path/to/state`. The resolution order is: (1) $NMP_DATA_DIR used as-is, (2) $XDG_DATA_HOME/nemo if XDG_DATA_HOME is set, (3) ~/.local/share/nemo as default. `nemo setup` persists the choice to ~/.config/nmp/config.yaml under local_services.data_dir. When running services manually, set NMP_DATA_DIR yourself each session.",
+    "expected_behavior": [
+      "Explain the NMP_DATA_DIR environment variable",
+      "List the resolution order (NMP_DATA_DIR, XDG_DATA_HOME/nemo, default)",
+      "Note that nemo setup persists the choice to config.yaml",
+      "Advise exporting the var before starting services"
+    ]
+  },
+  {
+    "id": "negative-deploy-production-dgx",
+    "question": "Deploy my fine-tuned LLM to production on DGX Cloud for serving customer traffic.",
+    "expected_skill": null,
+    "expected_script": null,
+    "ground_truth": "This task is about production deployment to DGX Cloud, not local platform setup. It would involve NIM deployment, Kubernetes orchestration, or cloud infrastructure — not the nemo-setup skill.",
+    "expected_behavior": [
+      "Do NOT activate the nemo-setup skill",
+      "Recognize this is a production deployment task, not local setup"
+    ]
+  },
+  {
+    "id": "negative-inference-api-call",
+    "question": "Write a Python script that calls the NeMo inference API to generate text completions.",
+    "expected_skill": null,
+    "expected_script": null,
+    "ground_truth": "This task is about making inference API calls programmatically, not setting up the platform. It belongs to the inference skill which covers ModelProviders, VirtualModels, and chat completion endpoints.",
+    "expected_behavior": [
+      "Do NOT activate the nemo-setup skill",
+      "Recognize this is an inference/API usage task"
+    ]
+  },
+  {
+    "id": "negative-fine-tune-customizer",
+    "question": "How do I fine-tune a Llama model using NeMo Customizer with my training dataset?",
+    "expected_skill": null,
+    "expected_script": null,
+    "ground_truth": "This task is about model fine-tuning/customization, not platform setup. It belongs to the NeMo Customizer skill which covers SFT, LoRA, and training job configuration.",
+    "expected_behavior": [
+      "Do NOT activate the nemo-setup skill",
+      "Recognize this is a customization/fine-tuning task"
+    ]
+  },
+  {
+    "id": "negative-create-eval-metric",
+    "question": "Create an LLM-judge evaluation metric that scores response helpfulness on a 1-5 scale.",
+    "expected_skill": null,
+    "expected_script": null,
+    "ground_truth": "This task is about creating evaluation metrics, not platform setup. It belongs to the nemo-evaluator skill which covers metric creation, evaluation jobs, and LLM-judge configuration.",
+    "expected_behavior": [
+      "Do NOT activate the nemo-setup skill",
+      "Recognize this is an evaluation/metrics task"
+    ]
+  },
+  {
+    "id": "negative-tensorrt-llm",
+    "question": "What CUDA version and GPU driver do I need for TensorRT-LLM on my H100?",
+    "expected_skill": null,
+    "expected_script": null,
+    "ground_truth": "This task is about TensorRT-LLM hardware requirements, a completely different NVIDIA product. It has nothing to do with NeMo Platform local setup.",
+    "expected_behavior": [
+      "Do NOT activate the nemo-setup skill",
+      "Recognize this is about a different NVIDIA product (TensorRT-LLM)"
+    ]
+  }
+]
