@@ -73,3 +73,30 @@ describe('parseUTCDateForPicker', () => {
     });
   });
 });
+
+describe('formatDateRange timezone stability', () => {
+  beforeEach(() => {
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('names the UTC day for a boundary instant, not the local one', () => {
+    const result = formatDateRange('2024-01-01T00:00:00.000Z');
+
+    expect(result).toContain('2024');
+    expect(result).not.toContain('2023');
+  });
+
+  it('names the UTC day at both ends of a range', () => {
+    const result = formatDateRange('2024-01-01T00:00:00.000Z', '2024-01-31T23:59:59.999Z');
+
+    expect(result).not.toContain('2023');
+    expect(result.split('—')).toHaveLength(2);
+    for (const half of result.split('—')) {
+      expect(half).toContain('2024');
+    }
+  });
+});

@@ -8,7 +8,9 @@
  * If both are provided, shows "[start] — [end]"
  */
 export const formatDateRange = (startDate?: string | number, endDate?: string | number) => {
-  const formatDate = (date: string | number) => new Date(date).toLocaleDateString();
+  // Bounds are UTC instants; render the UTC day so the tag matches the picker.
+  const formatDate = (date: string | number) =>
+    new Date(date).toLocaleDateString(undefined, { timeZone: 'UTC' });
 
   if (startDate && endDate) {
     return `${formatDate(startDate)} — ${formatDate(endDate)}`;

@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { handleGenericError } from '@nemo/common/src/utils/logger';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Block, Select } from '@nvidia/foundations-react-core';
+import { useAgentChatSession } from '@studio/api/agents/useAgentChatSession';
 import { ModelChat } from '@studio/components/ModelChat';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
@@ -45,6 +47,15 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
       : []
   );
   const noHealthyDeployments = !isDeploymentsLoading && healthyDeployments.length === 0;
+  const {
+    extraHeaders,
+    isPending: isSessionPending,
+    recoverFromError,
+  } = useAgentChatSession(workspace, chatDeployment);
+
+  const handleChatError = (error: Error) => {
+    if (!recoverFromError(error)) handleGenericError(error);
+  };
 
   return (
     <div ref={chatAreaRef} className="flex flex-col h-full min-h-0">
@@ -76,7 +87,11 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
               ? `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${workspace}/deployments/${chatDeployment.name}/-/v1`
               : undefined
           }
-          disabled={isDeploymentsLoading || noHealthyDeployments || !chatDeployment}
+          extraHeaders={extraHeaders}
+          onError={handleChatError}
+          disabled={
+            isDeploymentsLoading || noHealthyDeployments || !chatDeployment || isSessionPending
+          }
         />
       </Block>
     </div>
