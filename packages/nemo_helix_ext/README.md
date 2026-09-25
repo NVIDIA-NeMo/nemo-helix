@@ -37,8 +37,11 @@ nemo setup
 # List workspaces
 nemo workspaces list
 
-# Interactive chat with a model
-nemo chat nvidia-build --model nvidia/llama-3.3-nemotron-super-49b-v1.5
+# Interactive chat with the default model from 'nemo setup'
+nemo chat
+
+# Chat through a specific provider
+nemo chat --model nvidia/llama-3.3-nemotron-super-49b-v1.5 --provider nvidia-build
 ```
 
 ## Configuration

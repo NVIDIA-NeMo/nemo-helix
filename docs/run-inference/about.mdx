@@ -75,7 +75,7 @@ nemo inference providers create "my-nvidia-build" \
 nemo wait inference provider my-nvidia-build
 
 # Test using interactive chat
-nemo chat nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
+nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
     --provider my-nvidia-build
 ```
 
@@ -130,7 +130,7 @@ nemo inference providers create "openai" \
 nemo wait inference provider openai
 
 # Test using interactive chat
-nemo chat gpt-4 'Hello!' \
+nemo chat -m gpt-4 'Hello!' \
     --provider openai
 ```
 

@@ -139,11 +139,13 @@ uv run python -m nhx.platform_seed
 
 `uv run nemo-helix run task --task nhx.platform_seed` is equivalent. The seed task is idempotent. It creates the **HelixAdmin** binding in the `system` workspace for `auth.admin_email`, the wildcard **Editor** binding for the default workspace, the wildcard **Viewer** binding for the `system` workspace, and the wildcard **WorkspaceCreator** binding for the `system` workspace. Without this step, OIDC login can succeed but admin operations may still return `403 Forbidden` because the RBAC bindings are missing.
 
-When setup completes, try chatting with the model you selected. Use the model name shown at the end of setup (or find it with `nemo models list`):
+When setup completes, try chatting with the default model you selected:
 
 ```bash
-nemo chat <model-name>
+nemo chat
 ```
+
+Use `--fast` for the fast model, or `--model <model-name>` for any other model from `nemo models list`.
 
 ### Demo agent
 
@@ -233,7 +235,8 @@ nemo setup --no-install-skills --no-deploy-agent
 
 | Goal | Command or link |
 |------|-----------------|
-| Chat with a model | `nemo chat <model-name>` |
+| Chat with the default model | `nemo chat` |
+| Chat with another model | `nemo chat --model <model-name>` |
 | List available models | `nemo models list` |
 | Open the Studio UI | [http://localhost:8080](http://localhost:8080) |
 | Browse docs from the CLI | `nemo docs --list` |

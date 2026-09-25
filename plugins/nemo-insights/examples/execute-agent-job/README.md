@@ -40,7 +40,7 @@ backed by the generic `agents.execute` job.
 
   ```bash
   MODEL=default/nvidia-nemotron-3-super-120b-a12b  # a ref from the commands above
-  nemo chat "$MODEL" "Reply with just: ok"
+  nemo chat -m "$MODEL" "Reply with just: ok"
   ```
 
   A live model replies. A stale one prints `API error: (424) Failed

@@ -97,6 +97,8 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     for var in list(os.environ):
         if var.startswith("NHX_"):
             monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("NEMO_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("NEMO_FAST_MODEL", raising=False)
 
     config_file = tmp_path / "config.yaml"
     config_file.touch()
@@ -133,34 +135,113 @@ def _mock_client_with_openai_response(response: object) -> MagicMock:
     return mock_client
 
 
-def test_chat_missing_model_fails_with_usage_error(runner: CliRunner) -> None:
-    """Chat without model argument should fail with usage error."""
-    result = runner.invoke(app, ["chat"])
-    assert result.exit_code == 2  # Typer/Click usage error
+def test_chat_without_model_or_configured_default_fails_with_usage_error(runner: CliRunner) -> None:
+    """Chat without --model and no configured default model points at setup."""
+    result = runner.invoke(app, ["chat", "hello"])
+    assert result.exit_code == 2
+    assert "no default model is configured" in result.output
+    assert "NEMO_DEFAULT_MODEL" in result.output
+
+
+def test_chat_rejects_positional_model(runner: CliRunner) -> None:
+    """The model is no longer positional; MODEL PROMPT is an extra-argument error."""
+    result = runner.invoke(app, ["chat", "my-model", "hello"])
+    assert result.exit_code == 2
+
+
+def test_chat_model_and_fast_are_mutually_exclusive(runner: CliRunner) -> None:
+    """--model and --fast cannot be combined."""
+    result = runner.invoke(app, ["chat", "-m", "my-model", "--fast", "hello"])
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.output
+
+
+def test_chat_provider_requires_model(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provider routing never falls back to the context model entity."""
+    monkeypatch.setenv("NEMO_DEFAULT_MODEL", "default/big-model")
+    result = runner.invoke(app, ["chat", "hello", "--provider", "nvidia-build"])
+    assert result.exit_code == 2
+    assert "--provider requires --model" in result.output
+
+
+@pytest.mark.parametrize(
+    "env,args,expected_workspace,expected_model",
+    [
+        # Default model from the context, carrying its own workspace
+        ({"NEMO_DEFAULT_MODEL": "team/big-model"}, [], "team", "team/big-model"),
+        # Bare default model resolves against the configured workspace
+        ({"NEMO_DEFAULT_MODEL": "big-model"}, [], "default", "default/big-model"),
+        # --fast selects the fast model
+        (
+            {"NEMO_DEFAULT_MODEL": "team/big-model", "NEMO_FAST_MODEL": "team/small-model"},
+            ["--fast"],
+            "team",
+            "team/small-model",
+        ),
+        # --fast falls back to the default model when no fast model is set
+        ({"NEMO_DEFAULT_MODEL": "team/big-model"}, ["--fast"], "team", "team/big-model"),
+        # A --workspace matching the configured model's workspace is accepted
+        ({"NEMO_DEFAULT_MODEL": "team/big-model"}, ["--workspace", "team"], "team", "team/big-model"),
+        # --workspace applies to a bare configured model
+        ({"NEMO_DEFAULT_MODEL": "big-model"}, ["--workspace", "team"], "team", "team/big-model"),
+        # --model overrides the configured default
+        ({"NEMO_DEFAULT_MODEL": "team/big-model"}, ["-m", "other-model"], "default", "default/other-model"),
+    ],
+)
+def test_chat_resolves_model_from_context(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+    args: list[str],
+    expected_workspace: str,
+    expected_model: str,
+) -> None:
+    """Without --model, chat uses the context's default or fast model."""
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    mock_client = _mock_client_with_openai_response(_mock_streaming_response("ok"))
+
+    with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
+        result = runner.invoke(app, ["chat", "hi", *args])
+
+    assert result.exit_code == 0, result.output
+    _, kwargs = mock_client.stream_openai.call_args
+    assert kwargs["workspace"] == expected_workspace
+    assert kwargs["body"].root["model"] == expected_model
+
+
+def test_chat_rejects_workspace_conflicting_with_configured_model(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--workspace pointing away from the configured model's workspace is an error."""
+    monkeypatch.setenv("NEMO_DEFAULT_MODEL", "team/big-model")
+    result = runner.invoke(app, ["chat", "hi", "--workspace", "other"])
+    assert result.exit_code == 2
+    assert "Configured model 'team/big-model' is in workspace 'team'" in result.output
 
 
 def test_chat_model_only(runner: CliRunner) -> None:
     """Chat with just model argument parses correctly."""
-    result = runner.invoke(app, ["chat", "my-model", "hello"])
+    result = runner.invoke(app, ["chat", "-m", "my-model", "hello"])
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
 
 def test_chat_model_with_inline_workspace(runner: CliRunner) -> None:
     """Chat with workspace/model syntax parses correctly."""
-    result = runner.invoke(app, ["chat", "my-workspace/my-model", "hello"])
+    result = runner.invoke(app, ["chat", "-m", "my-workspace/my-model", "hello"])
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
 
 def test_chat_with_workspace_flag(runner: CliRunner) -> None:
     """Chat with --workspace flag parses correctly."""
-    result = runner.invoke(app, ["chat", "my-model", "hello", "--workspace", "test-ws"])
+    result = runner.invoke(app, ["chat", "-m", "my-model", "hello", "--workspace", "test-ws"])
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
 
 def test_chat_with_provider_flag(runner: CliRunner) -> None:
     """Chat with --provider flag parses correctly."""
     result = runner.invoke(
-        app, ["chat", "nvidia/model-id", "hello", "--provider", "nvidia-build", "--workspace", "test-ws"]
+        app, ["chat", "-m", "nvidia/model-id", "hello", "--provider", "nvidia-build", "--workspace", "test-ws"]
     )
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
@@ -168,7 +249,7 @@ def test_chat_with_provider_flag(runner: CliRunner) -> None:
 def test_chat_provider_rejects_workspace_prefix(runner: CliRunner) -> None:
     """Chat with --provider containing workspace prefix fails with helpful error."""
     result = runner.invoke(
-        app, ["chat", "nvidia/model-id", "hello", "--provider", "workspace/build", "--workspace", "default"]
+        app, ["chat", "-m", "nvidia/model-id", "hello", "--provider", "workspace/build", "--workspace", "default"]
     )
     assert result.exit_code == 2
     assert "Invalid provider name 'workspace/build'" in result.output
@@ -178,19 +259,19 @@ def test_chat_provider_rejects_workspace_prefix(runner: CliRunner) -> None:
 
 def test_chat_with_temperature(runner: CliRunner) -> None:
     """Chat with --temperature parses correctly."""
-    result = runner.invoke(app, ["chat", "ws/model", "hello", "--temperature", "0.7"])
+    result = runner.invoke(app, ["chat", "-m", "ws/model", "hello", "--temperature", "0.7"])
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
 
 def test_chat_with_max_tokens(runner: CliRunner) -> None:
     """Chat with --max-tokens parses correctly."""
-    result = runner.invoke(app, ["chat", "ws/model", "hello", "--max-tokens", "512"])
+    result = runner.invoke(app, ["chat", "-m", "ws/model", "hello", "--max-tokens", "512"])
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
 
 def test_chat_with_system_message(runner: CliRunner) -> None:
     """Chat with --system-message parses correctly."""
-    result = runner.invoke(app, ["chat", "ws/model", "hello", "--system-message", "You are helpful."])
+    result = runner.invoke(app, ["chat", "-m", "ws/model", "hello", "--system-message", "You are helpful."])
     assert result.exit_code == REMOTE_ERROR_EXIT_CODE
 
 
@@ -200,6 +281,7 @@ def test_chat_all_options(runner: CliRunner) -> None:
         app,
         [
             "chat",
+            "-m",
             "nvidia/llama-3.3-nemotron",
             "What is 2+2?",
             "--provider",
@@ -219,13 +301,13 @@ def test_chat_all_options(runner: CliRunner) -> None:
 
 def test_chat_temperature_rejects_non_numeric(runner: CliRunner) -> None:
     """Temperature option rejects non-numeric values."""
-    result = runner.invoke(app, ["chat", "ws/model", "hi", "--temperature", "hot"])
+    result = runner.invoke(app, ["chat", "-m", "ws/model", "hi", "--temperature", "hot"])
     assert result.exit_code == 2  # Usage error
 
 
 def test_chat_max_tokens_rejects_non_integer(runner: CliRunner) -> None:
     """Max-tokens option rejects non-integer values."""
-    result = runner.invoke(app, ["chat", "ws/model", "hi", "--max-tokens", "many"])
+    result = runner.invoke(app, ["chat", "-m", "ws/model", "hi", "--max-tokens", "many"])
     assert result.exit_code == 2  # Usage error
 
 
@@ -240,7 +322,7 @@ def test_chat_prompt_runs_once_with_plain_text_output(runner: CliRunner) -> None
     ):
         result = runner.invoke(
             app,
-            ["chat", "my-model", "What is 17 * 23? Reply with just the number."],
+            ["chat", "-m", "my-model", "What is 17 * 23? Reply with just the number."],
         )
 
     assert result.exit_code == 0
@@ -266,7 +348,7 @@ def test_chat_one_shot_includes_system_message(runner: CliRunner) -> None:
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi", "--system-message", "Be concise."])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--system-message", "Be concise."])
 
     assert result.exit_code == 0
     _, kwargs = mock_client.stream_openai.call_args
@@ -282,7 +364,7 @@ def test_chat_text_output_strips_thinking_tags_when_no_regular_content(runner: C
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi"])
 
     assert result.exit_code == 0
     assert result.stdout == "\n"
@@ -295,7 +377,7 @@ def test_chat_text_output_strips_split_thinking_tags(runner: CliRunner) -> None:
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi"])
 
     assert result.exit_code == 0
     assert result.stdout == "visible  done\n"
@@ -309,7 +391,7 @@ def test_chat_text_output_strips_split_closing_thinking_tag(runner: CliRunner) -
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi"])
 
     assert result.exit_code == 0
     assert result.stdout == "after\n"
@@ -321,7 +403,7 @@ def test_chat_stream_error_event_fails(runner: CliRunner) -> None:
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi"])
 
     assert result.exit_code == 1
     assert "Streaming chat request failed: backend exploded" in result.output
@@ -334,7 +416,7 @@ def test_chat_empty_stream_error_event_includes_status_code(runner: CliRunner) -
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi"])
 
     assert result.exit_code == 1
     assert "Streaming chat request failed (HTTP 207)" in result.output
@@ -346,7 +428,7 @@ def test_chat_prompt_takes_precedence_over_piped_stdin(runner: CliRunner) -> Non
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "prompt wins"], input="stdin loses")
+        result = runner.invoke(app, ["chat", "-m", "my-model", "prompt wins"], input="stdin loses")
 
     assert result.exit_code == 0
     assert result.stdout == "from prompt\n"
@@ -372,7 +454,7 @@ def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner:
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=KeyboardInterrupt) as mock_prompt,
     ):
-        result = runner.invoke(app, ["chat", "my-model", "hi", "--interactive"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
 
     assert result.exit_code == 0
     mock_prompt.assert_called_once()
@@ -399,7 +481,7 @@ def test_chat_interactive_interrupt_during_initial_response_exits_gracefully(
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch("nemo_helix_ext.cli.chat_tui.Prompt.ask") as mock_prompt,
     ):
-        result = runner.invoke(app, ["chat", "my-model", "hi", "--interactive"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
 
     assert result.exit_code == 0
     assert "Chat session ended" in result.stdout
@@ -426,7 +508,7 @@ def test_chat_interactive_preserves_model_history_across_shared_tui_turns(runner
             side_effect=["What did I just say?", KeyboardInterrupt],
         ),
     ):
-        result = runner.invoke(app, ["chat", "my-model", "hi", "--interactive"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
 
     assert result.exit_code == 0
     assert captured_messages == [
@@ -455,7 +537,7 @@ def test_chat_interactive_discards_user_turn_after_empty_response(runner: CliRun
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=["second turn", KeyboardInterrupt]),
     ):
-        result = runner.invoke(app, ["chat", "my-model", "empty turn", "--interactive"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "empty turn", "--interactive"])
 
     assert result.exit_code == 0
     assert captured_messages == [
@@ -466,7 +548,7 @@ def test_chat_interactive_discards_user_turn_after_empty_response(runner: CliRun
 
 def test_chat_interactive_requires_tty(runner: CliRunner) -> None:
     """--interactive fails fast when the REPL cannot safely read from a terminal."""
-    result = runner.invoke(app, ["chat", "my-model", "hi", "--interactive"])
+    result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
 
     assert result.exit_code == 2
     assert "Interactive chat requires a terminal" in result.output
@@ -478,7 +560,7 @@ def test_chat_reads_prompt_from_stdin_in_non_tty_mode(runner: CliRunner) -> None
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model"], input="hello from stdin")
+        result = runner.invoke(app, ["chat", "-m", "my-model"], input="hello from stdin")
 
     assert result.exit_code == 0
     assert result.stdout == "from stdin\n"
@@ -496,7 +578,7 @@ def test_chat_json_output_includes_content_thinking_model_and_usage(runner: CliR
     mock_client = _mock_client_with_openai_response(response)
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model", "hi", "--output-format", "json"])
+        result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--output-format", "json"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {
@@ -512,7 +594,7 @@ def test_chat_non_tty_without_prompt_requires_prompt(runner: CliRunner) -> None:
     mock_client = MagicMock()
 
     with patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client):
-        result = runner.invoke(app, ["chat", "my-model"])
+        result = runner.invoke(app, ["chat", "-m", "my-model"])
 
     assert result.exit_code == 2
     assert "One-shot chat requires a prompt" in result.output
@@ -553,6 +635,7 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
             app,
             [
                 "chat",
+                "-m",
                 "nvidia/llama-3.3-nemotron-super-49b-v1",
                 "Hello!",
                 "--provider",

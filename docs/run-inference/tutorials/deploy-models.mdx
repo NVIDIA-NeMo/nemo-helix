@@ -45,7 +45,7 @@ nemo inference providers create "my-nvidia-build" \
 nemo wait inference provider my-nvidia-build
 
 # Test using interactive chat
-nemo chat nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
+nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
 --provider my-nvidia-build
 ```
 
@@ -100,7 +100,7 @@ nemo inference providers create "openai" \
 nemo wait inference provider openai
 
 # Test using interactive chat
-nemo chat gpt-4 'Hello!' \
+nemo chat -m gpt-4 'Hello!' \
 --provider openai
 ```
 
@@ -211,7 +211,7 @@ nemo inference deployments create \
 
 nemo wait inference deployment llama-3-2-1b-deployment
 
-nemo chat meta/llama-3.2-1b-instruct 'Hello!' \
+nemo chat -m meta/llama-3.2-1b-instruct 'Hello!' \
 --provider llama-3-2-1b-deployment \
 --max-tokens 100
 ```
@@ -369,7 +369,7 @@ nemo inference deployments create "qwen-fs-deployment" \
 
 nemo wait inference deployment qwen-fs-deployment
 
-nemo chat default/qwen-2-5-1-5b 'Hello!' \
+nemo chat -m default/qwen-2-5-1-5b 'Hello!' \
 --provider qwen-fs-deployment \
 --max-tokens 100
 ```
@@ -480,7 +480,7 @@ nemo inference deployments create "qwen3-vllm-deployment" \
 
 nemo wait inference deployment qwen3-vllm-deployment
 
-nemo chat default/qwen3-1-7b 'Hello!' \
+nemo chat -m default/qwen3-1-7b 'Hello!' \
   --provider qwen3-vllm-deployment \
   --max-tokens 100
 ```
@@ -787,7 +787,7 @@ nemo inference deployments create \
 
 nemo wait inference deployment qwen-14b-deployment
 
-nemo chat default/qwen-2-5-14b 'Hello!' \
+nemo chat -m default/qwen-2-5-14b 'Hello!' \
 --max-tokens 100
 ```
 

@@ -93,7 +93,7 @@ Run inference by passing the Model Entity.
 ```bash
 # Model entities are auto-discovered from deployments
 # Use the model entity name from 'nemo models list'
-nemo chat meta-llama-3-2-1b-instruct 'Hello!' --max-tokens 100
+nemo chat -m meta-llama-3-2-1b-instruct 'Hello!' --max-tokens 100
 ```
 
 </Tab>
@@ -160,7 +160,7 @@ Pass inference request using provider routing.
 
 ```bash
 # Provider name matches deployment name for auto-created providers
-nemo chat meta/llama-3.2-1b-instruct 'Hello!' \
+nemo chat -m meta/llama-3.2-1b-instruct 'Hello!' \
 --provider llama-3-2-1b-deployment \
 --max-tokens 100
 ```
