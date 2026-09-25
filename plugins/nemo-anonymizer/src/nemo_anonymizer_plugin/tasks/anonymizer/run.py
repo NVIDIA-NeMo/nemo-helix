@@ -22,8 +22,9 @@ from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_anonymizer_plugin.app.input import prepare_anonymizer_input
 from nemo_anonymizer_plugin.app.task_config import AnonymizerStepConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
@@ -36,7 +37,6 @@ from nemo_helix_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nemo_helix_plugin.models.client import ModelsClient
-from nemo_helix_plugin.sdk_provider import get_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +44,9 @@ ARTIFACTS_RESULT_NAME = "artifacts"
 _TASK_LOG_HANDLER_MARKER = "_nemo_anonymizer_task_handler"
 
 
-def run(sdk: SyncHelixClient | None = None) -> int:
+def run(sdk: NemoClient | None = None) -> int:
     try:
-        service_sdk = sdk or get_platform_sdk(as_service="anonymizer")
+        service_sdk = sdk or get_nemo_client(as_service="anonymizer")
         return run_step_config(_load_step_config(), ctx=_get_ctx(service_sdk), sdk=service_sdk)
     except Exception:
         logger.exception("Anonymizer task failed")
@@ -57,7 +57,7 @@ def run_step_config(
     step_config: AnonymizerStepConfig,
     *,
     ctx: JobContext,
-    sdk: SyncHelixClient | None = None,
+    sdk: NemoClient | None = None,
 ) -> int:
     try:
         return _run_with_step_config(sdk, step_config, ctx=ctx)
@@ -67,7 +67,7 @@ def run_step_config(
 
 
 def _run_with_step_config(
-    service_sdk: SyncHelixClient | None,
+    service_sdk: NemoClient | None,
     step_config: AnonymizerStepConfig,
     *,
     ctx: JobContext,
@@ -138,7 +138,7 @@ def _run_with_step_config(
 
 
 def _resolve_provider_endpoints(
-    sdk: SyncHelixClient,
+    sdk: NemoClient,
     step_config: AnonymizerStepConfig,
     workspace: str,
 ) -> list[DDModelProvider] | None:
@@ -227,7 +227,7 @@ def _load_step_config() -> AnonymizerStepConfig:
         return AnonymizerStepConfig.model_validate_json(f.read())
 
 
-def _get_ctx(sdk: SyncHelixClient) -> JobContext:
+def _get_ctx(sdk: NemoClient) -> JobContext:
     workspace = _get_workspace()
     job_name = _get_job_name()
     client = client_from_platform(sdk, NemoClient)

@@ -70,7 +70,7 @@ async def test_validate_user_models_belong_to_accessible_providers() -> None:
         u.make_mock_client_context() as client_context,
         pytest.raises(NDDInvalidConfigError) as exc_info,
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
     assert unknown_provider in str(exc_info.value)
     assert "Cannot access provider" in str(exc_info.value)
 
@@ -102,7 +102,7 @@ async def test_validate_user_models_are_allowed_by_providers() -> None:
         u.setup_mock_providers(client_context),
         pytest.raises(NDDInvalidConfigError) as exc_info,
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
     assert forbidden_model in str(exc_info.value)
     assert "not enabled for provider" in str(exc_info.value)
 
@@ -175,7 +175,7 @@ async def test_validate_hf_token_secret() -> None:
         u.setup_mock_secret(client_context),
         pytest.raises(NDDInvalidConfigError),
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
 
     builder.with_seed_dataset(dd.HuggingFaceSeedSource(path="datasets/foo/data.parquet", token=u.SECRET_NAME))
     dd_job_config = DataDesignerJobConfig(num_records=42, config=builder.build())
@@ -183,7 +183,7 @@ async def test_validate_hf_token_secret() -> None:
         u.make_mock_client_context() as client_context,
         u.setup_mock_secret(client_context),
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
 
 
 @pytest.mark.asyncio
@@ -206,7 +206,7 @@ async def test_validate_fileset_seed_source_is_accessible() -> None:
         u.setup_mock_file(client_context),
         pytest.raises(NDDInvalidConfigError),
     ):
-        await u.compile_create_job(dd_job_config, workspace="workspace", sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, workspace="workspace", sdk=client_context.async_client)
 
     builder.with_seed_dataset(
         FilesetFileSeedSource(path=u.FILESET_FILE_SEED_SOURCE_PATH)  # ty: ignore[invalid-argument-type]
@@ -216,7 +216,7 @@ async def test_validate_fileset_seed_source_is_accessible() -> None:
         u.make_mock_client_context() as client_context,
         u.setup_mock_file(client_context),
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
 
 
 @pytest.mark.asyncio
@@ -243,7 +243,7 @@ async def test_successful_compilation() -> None:
         u.make_mock_client_context() as client_context,
         u.setup_mock_providers(client_context),
     ):
-        platform_job_spec = await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        platform_job_spec = await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
 
     platform_job_spec_dict = u._normalize_job_config(platform_job_spec)
     assert len(platform_job_spec_dict["steps"]) == 1
@@ -280,7 +280,7 @@ async def test_to_spec_aggregates_multiple_config_errors() -> None:
         u.setup_mock_providers(client_context),
         pytest.raises(NDDInvalidConfigError) as exc_info,
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
 
     msg = str(exc_info.value)
     # Both messages must surface together (no short-circuit on the first failure).
@@ -314,5 +314,5 @@ async def test_to_spec_pure_internal_errors_raise_internal_error(monkeypatch: py
         u.setup_mock_providers(client_context),
         pytest.raises(NDDInternalError) as exc_info,
     ):
-        await u.compile_create_job(dd_job_config, sdk=client_context.async_sdk)
+        await u.compile_create_job(dd_job_config, sdk=client_context.async_client)
     assert "simulated internal failure" in str(exc_info.value)

@@ -14,10 +14,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
-from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
@@ -32,17 +33,18 @@ def _unique(prefix: str) -> str:
 
 @pytest.mark.timeout(300)
 def test_metric_type_filter_narrows_listing(subprocess_platform: str) -> None:
-    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    evaluator_client = EvaluatorClient(
+        base_url=subprocess_platform, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2)
+    )
+    WorkspacesClient.from_client(evaluator_client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
+    client = Evaluator(evaluator_client)
 
     exact = _unique("exact")
     strcheck = _unique("strcheck")
-    client.evaluator.metrics.create(
-        exact, metric=ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
-    )
-    client.evaluator.metrics.create(
+    client.metrics.create(exact, metric=ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}"))
+    client.metrics.create(
         strcheck,
         metric=StringCheckMetric(
             operation="contains", left_template="{{sample.output_text}}", right_template="{{item.phrase}}"
@@ -51,10 +53,10 @@ def test_metric_type_filter_narrows_listing(subprocess_platform: str) -> None:
 
     # Server-side filter on metric_type (a data.* field) must narrow the listing — the whole point of
     # the DataFilter translation. Robust to other metrics the shared platform may hold.
-    exact_only = client.evaluator.metrics.list(workspace=WORKSPACE, metric_type="exact-match")
+    exact_only = client.metrics.list(workspace=WORKSPACE, metric_type="exact-match")
     names = {m.name for m in exact_only.data}
     assert exact in names
     assert strcheck not in names
     assert all(m.metric_type == "exact-match" for m in exact_only.data)
 
-    assert client.evaluator.metrics.list(workspace=WORKSPACE, metric_type="no-such-type").data == []
+    assert client.metrics.list(workspace=WORKSPACE, metric_type="no-such-type").data == []

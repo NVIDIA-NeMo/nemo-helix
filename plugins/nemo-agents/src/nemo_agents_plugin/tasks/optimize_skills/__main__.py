@@ -14,8 +14,8 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.errors import LocalRunError
-from nemo_helix_plugin.sdk_provider import get_task_sdk
 from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
 from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
@@ -31,8 +31,7 @@ def main() -> int:
     configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
-        sdk = get_task_sdk("agents")
-        ctx = build_ctx_from_env(sdk)
+        ctx = build_ctx_from_env(get_task_nemo_client("agents"))
         config = read_step_config()
         job = OptimizeSkillsJob()
     except Exception:

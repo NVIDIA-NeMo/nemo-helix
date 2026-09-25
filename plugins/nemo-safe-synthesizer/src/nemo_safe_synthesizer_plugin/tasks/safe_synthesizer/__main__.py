@@ -25,8 +25,9 @@ from typing import cast
 import pandas as pd
 from datasets import Dataset, DatasetDict, load_dataset
 from filesets import FilesetFileSystem, parse_fileset_ref
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
@@ -40,7 +41,6 @@ from nemo_helix_plugin.jobs.constants import (
 )
 from nemo_helix_plugin.jobs.file_manager import FilesetFileManager, TmpDirPath
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
-from nemo_helix_plugin.sdk_provider import get_platform_sdk
 from nemo_safe_synthesizer.config.internal_results import SafeSynthesizerResults
 from nemo_safe_synthesizer.errors import ParameterError
 from nemo_safe_synthesizer.observability import initialize_observability
@@ -67,7 +67,7 @@ def download_from_fileset(fileset_url: str) -> pd.DataFrame:
     """Download a dataset from a fileset and load it as a DataFrame."""
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     workspace, fileset_name, _ = parse_fileset_ref(fileset_url, workspace_fallback=workspace)
-    sdk = get_platform_sdk()
+    sdk = get_nemo_client()
 
     file_manager = FilesetFileManager(
         workspace=workspace,
@@ -149,7 +149,7 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
         raise ValueError(f"{NEMO_JOB_ID_ENVVAR} is not set")
 
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
-    sdk = get_platform_sdk()
+    sdk = get_nemo_client()
     fileset_name = f"job-results-{job_id}"
     file_manager = FilesetFileManager(
         workspace=workspace,
@@ -200,7 +200,7 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
         _create_job_result(sdk, workspace, job_id, "adapter", artifact_url)
 
 
-def _create_job_result(sdk: NeMoHelix, workspace: str, job_name: str, result_name: str, artifact_url: str):
+def _create_job_result(sdk: NemoClient, workspace: str, job_name: str, result_name: str, artifact_url: str):
     """Create a job result record."""
     client_from_platform(sdk, JobsClient).create_job_result(
         name=result_name,
@@ -215,14 +215,14 @@ def _resolve_pretrained_model(
     job_config: SafeSynthesizerJobConfig,
     *,
     workspace: str,
-    sdk: NeMoHelix | None = None,
+    sdk: NemoClient | None = None,
 ) -> tuple[TmpDirPath | None, Path | None]:
     """Download a prior job's adapter artifact from Files when ``pretrained_model_job`` is set."""
     if not job_config.pretrained_model_job:
         return None, None
 
     if sdk is None:
-        sdk = get_platform_sdk()
+        sdk = get_nemo_client()
 
     model_workspace, model_job = parse_pretrained_model_job_ref(
         job_config.pretrained_model_job,
@@ -367,7 +367,7 @@ def run_from_env() -> None:
     """Run in the platform task-container environment."""
     initialize_observability()
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
-    sdk = get_platform_sdk()
+    sdk = get_nemo_client()
     files_url = get_platform_config().get_service_url("files")
     if files_url:
         logger.info("Initializing model weights from Files API...")

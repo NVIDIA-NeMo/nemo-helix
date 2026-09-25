@@ -31,13 +31,13 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalRunJobConfig,
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec, HelixJobStep
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import ValidationError
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://platform.test", workspace="default")
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 def _steps(compiled: HelixJobSpec) -> list[HelixJobStep]:

@@ -3,7 +3,7 @@
 
 """Tests for the auditor plugin SDK CRUD sub-resources and ``run`` helper.
 
-Each CRUD test stubs ``platform._client`` with a ``MagicMock(spec=httpx.Client)``
+Each CRUD test stubs ``platform.http`` with a ``MagicMock(spec=httpx.Client)``
 (or ``AsyncMock(spec=httpx.AsyncClient)``) so we can assert on the URL and
 JSON body the SDK actually sends — same pattern the evaluator plugin uses in
 ``plugins/nemo-evaluator/tests/test_sdk.py``.
@@ -35,21 +35,30 @@ from nemo_auditor.entities import (
 from nemo_auditor.sdk import AsyncAuditorPluginResource, AuditorPluginResource
 from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, AuditorJobResource
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext
 
 NOW = datetime.now(timezone.utc)
 
 
-class _SyncHelix:
+class _SyncHelix(NeMoHelix):
+    """Generated sync SDK over a mocked ``httpx.Client`` (exposed as ``http``)."""
+
+    http: MagicMock
+
     def __init__(self) -> None:
-        self.base_url = "http://test:8000"
-        self._client = MagicMock(spec=httpx.Client)
+        self.http = MagicMock(spec=httpx.Client)
+        super().__init__(base_url="http://test:8000", http_client=self.http)
 
 
-class _AsyncHelix:
+class _AsyncHelix(AsyncNeMoHelix):
+    """Generated async SDK over a mocked ``httpx.AsyncClient`` (exposed as ``http``)."""
+
+    http: AsyncMock
+
     def __init__(self) -> None:
-        self.base_url = "http://test:8000"
-        self._client = AsyncMock(spec=httpx.AsyncClient)
+        self.http = AsyncMock(spec=httpx.AsyncClient)
+        super().__init__(base_url="http://test:8000", http_client=self.http)
 
 
 def _config_payload(name: str = "cfg-1", workspace: str = "default", **overrides: Any) -> dict:
@@ -104,7 +113,7 @@ def _ok_response(payload: dict, *, status_code: int = 200) -> MagicMock:
 class TestSyncConfigs:
     def test_create_posts_to_workspace_route_with_full_body(self) -> None:
         platform = _SyncHelix()
-        platform._client.post.return_value = _ok_response(_config_payload(name="cfg-1"), status_code=201)
+        platform.http.post.return_value = _ok_response(_config_payload(name="cfg-1"), status_code=201)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         cfg = resource.configs.create(
@@ -118,8 +127,8 @@ class TestSyncConfigs:
         assert isinstance(cfg, AuditConfig)
         assert cfg.name == "cfg-1"
         assert cfg.workspace == "default"
-        platform._client.post.assert_called_once()
-        url, kwargs = platform._client.post.call_args[0], platform._client.post.call_args.kwargs
+        platform.http.post.assert_called_once()
+        url, kwargs = platform.http.post.call_args[0], platform.http.post.call_args.kwargs
         assert url == ("http://test:8000/apis/auditor/v2/workspaces/default/configs",)
         body = kwargs["json"]
         assert body["name"] == "cfg-1"
@@ -130,12 +139,12 @@ class TestSyncConfigs:
 
     def test_create_fills_default_subblocks_when_omitted(self) -> None:
         platform = _SyncHelix()
-        platform._client.post.return_value = _ok_response(_config_payload(), status_code=201)
+        platform.http.post.return_value = _ok_response(_config_payload(), status_code=201)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         resource.configs.create(workspace="default", name="cfg-1")
 
-        body = platform._client.post.call_args.kwargs["json"]
+        body = platform.http.post.call_args.kwargs["json"]
         # CreateAuditConfigRequest defaults must round-trip even when caller omits everything.
         assert body["system"] == AuditSystemData().model_dump(mode="json")
         assert body["run"] == AuditRunData().model_dump(mode="json")
@@ -144,7 +153,7 @@ class TestSyncConfigs:
 
     def test_list_forwards_pagination_params(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.return_value = _ok_response(
+        platform.http.get.return_value = _ok_response(
             {
                 "data": [],
                 "pagination": {"page": 2, "page_size": 5, "total_pages": 0, "total_results": 0},
@@ -156,34 +165,34 @@ class TestSyncConfigs:
         body = resource.configs.list(workspace="prod", page=2, page_size=5, sort="name")
 
         assert body["pagination"]["page"] == 2
-        url = platform._client.get.call_args.args[0]
-        params = platform._client.get.call_args.kwargs["params"]
+        url = platform.http.get.call_args.args[0]
+        params = platform.http.get.call_args.kwargs["params"]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/prod/configs"
         assert params == {"page": 2, "page_size": 5, "sort": "name"}
 
     def test_get_hits_named_route_and_returns_entity(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.return_value = _ok_response(_config_payload(name="cfg-1"))
+        platform.http.get.return_value = _ok_response(_config_payload(name="cfg-1"))
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         cfg = resource.configs.get(workspace="default", name="cfg-1")
 
         assert isinstance(cfg, AuditConfig)
         assert cfg.name == "cfg-1"
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/configs/cfg-1",
         )
 
     def test_update_puts_full_body(self) -> None:
         platform = _SyncHelix()
-        platform._client.put.return_value = _ok_response(_config_payload(name="cfg-1", description="new"))
+        platform.http.put.return_value = _ok_response(_config_payload(name="cfg-1", description="new"))
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         cfg = resource.configs.update(workspace="default", name="cfg-1", description="new")
 
         assert cfg.description == "new"
-        url = platform._client.put.call_args.args[0]
-        body = platform._client.put.call_args.kwargs["json"]
+        url = platform.http.put.call_args.args[0]
+        body = platform.http.put.call_args.kwargs["json"]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/default/configs/cfg-1"
         assert body["description"] == "new"
 
@@ -192,13 +201,13 @@ class TestSyncConfigs:
         response = MagicMock(spec=httpx.Response)
         response.status_code = 204
         response.raise_for_status.return_value = None
-        platform._client.delete.return_value = response
+        platform.http.delete.return_value = response
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         result = resource.configs.delete(workspace="default", name="cfg-1")
 
         assert result is None
-        platform._client.delete.assert_called_once_with(
+        platform.http.delete.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/configs/cfg-1",
         )
 
@@ -211,7 +220,7 @@ class TestSyncConfigs:
 class TestSyncTargets:
     def test_create_posts_to_workspace_route(self) -> None:
         platform = _SyncHelix()
-        platform._client.post.return_value = _ok_response(_target_payload(name="tgt-1"), status_code=201)
+        platform.http.post.return_value = _ok_response(_target_payload(name="tgt-1"), status_code=201)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         tgt = resource.targets.create(
@@ -225,9 +234,9 @@ class TestSyncTargets:
 
         assert isinstance(tgt, AuditTarget)
         assert tgt.name == "tgt-1"
-        platform._client.post.assert_called_once()
-        url = platform._client.post.call_args.args[0]
-        body = platform._client.post.call_args.kwargs["json"]
+        platform.http.post.assert_called_once()
+        url = platform.http.post.call_args.args[0]
+        body = platform.http.post.call_args.kwargs["json"]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/default/targets"
         assert body == {
             "name": "tgt-1",
@@ -239,30 +248,30 @@ class TestSyncTargets:
 
     def test_get_and_delete_hit_named_route(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.return_value = _ok_response(_target_payload(name="tgt-1"))
+        platform.http.get.return_value = _ok_response(_target_payload(name="tgt-1"))
         delete_response = MagicMock(spec=httpx.Response)
         delete_response.status_code = 204
         delete_response.raise_for_status.return_value = None
-        platform._client.delete.return_value = delete_response
+        platform.http.delete.return_value = delete_response
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         tgt = resource.targets.get(workspace="default", name="tgt-1")
         resource.targets.delete(workspace="default", name="tgt-1")
 
         assert isinstance(tgt, AuditTarget)
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/targets/tgt-1",
         )
-        platform._client.delete.assert_called_once_with(
+        platform.http.delete.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/targets/tgt-1",
         )
 
     def test_list_and_update_round_trip(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.return_value = _ok_response(
+        platform.http.get.return_value = _ok_response(
             {"data": [_target_payload(name="a"), _target_payload(name="b")], "pagination": None, "sort": "-created_at"}
         )
-        platform._client.put.return_value = _ok_response(_target_payload(name="tgt-1", model="new-model"))
+        platform.http.put.return_value = _ok_response(_target_payload(name="tgt-1", model="new-model"))
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         listed = resource.targets.list(workspace="default")
@@ -300,7 +309,7 @@ def test_configs_and_targets_properties_are_cached() -> None:
 class TestSyncRun:
     def test_resolves_name_strings_via_get_then_calls_job(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.side_effect = [
+        platform.http.get.side_effect = [
             _ok_response(_config_payload(name="my-cfg", workspace="default")),
             _ok_response(_target_payload(name="my-tgt", workspace="default")),
         ]
@@ -313,11 +322,11 @@ class TestSyncRun:
 
         assert result["status"] == "completed"
         # Resolved both entities via two sync GETs.
-        assert platform._client.get.call_count == 2
-        platform._client.get.assert_any_call(
+        assert platform.http.get.call_count == 2
+        platform.http.get.assert_any_call(
             "http://test:8000/apis/auditor/v2/workspaces/default/configs/my-cfg",
         )
-        platform._client.get.assert_any_call(
+        platform.http.get.assert_any_call(
             "http://test:8000/apis/auditor/v2/workspaces/default/targets/my-tgt",
         )
 
@@ -329,7 +338,9 @@ class TestSyncRun:
         assert spec_dict["config"]["name"] == "my-cfg"
         assert isinstance(spec_dict["target"], dict)
         assert spec_dict["target"]["name"] == "my-tgt"
-        assert kwargs["sdk"] is platform
+        # The job gets a typed client adapted onto the SDK's transport.
+        assert isinstance(kwargs["sdk"], NemoClient)
+        assert kwargs["sdk"]._http is platform.http
         assert isinstance(kwargs["ctx"], JobContext)
         assert kwargs["ctx"].workspace == "default"
 
@@ -346,7 +357,7 @@ class TestSyncRun:
             resource.run(config=inline_config, target=inline_target)
 
         # No HTTP roundtrip — inline entities go straight to the job.
-        platform._client.get.assert_not_called()
+        platform.http.get.assert_not_called()
         spec_dict = job.run.call_args.args[0]
         assert spec_dict["config"]["name"] == "inline-cfg"
         assert spec_dict["target"]["name"] == "inline-tgt"
@@ -356,7 +367,7 @@ class TestSyncRun:
 
     def test_workspace_qualified_name_parses_workspace_from_string(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.side_effect = [
+        platform.http.get.side_effect = [
             _ok_response(_config_payload(name="cfg-1", workspace="prod")),
             _ok_response(_target_payload(name="tgt-1", workspace="staging")),
         ]
@@ -368,10 +379,10 @@ class TestSyncRun:
             resource.run(config="prod/cfg-1", target="staging/tgt-1", workspace="default")
 
         # GETs must use the workspace from the qualified name, not the default.
-        platform._client.get.assert_any_call(
+        platform.http.get.assert_any_call(
             "http://test:8000/apis/auditor/v2/workspaces/prod/configs/cfg-1",
         )
-        platform._client.get.assert_any_call(
+        platform.http.get.assert_any_call(
             "http://test:8000/apis/auditor/v2/workspaces/staging/targets/tgt-1",
         )
         # The run workspace used by JobContext still comes from the kwarg.
@@ -399,16 +410,16 @@ _JOBS_LIST_PAYLOAD = {
 class TestSyncJobMethods:
     def test_submit_with_string_refs_posts_correct_url_and_body(self) -> None:
         platform = _SyncHelix()
-        platform._client.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
+        platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         result = resource.submit(config="ws/my-cfg", target="ws/my-tgt", workspace="ws")
 
         assert isinstance(result, AuditorJobResource)
         assert result.name == "audit-job-abc123"
-        platform._client.post.assert_called_once()
-        url = platform._client.post.call_args.args[0]
-        body = platform._client.post.call_args.kwargs["json"]
+        platform.http.post.assert_called_once()
+        url = platform.http.post.call_args.args[0]
+        body = platform.http.post.call_args.kwargs["json"]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/ws/jobs/audit"
         assert body["spec"]["config"] == "ws/my-cfg"
         assert body["spec"]["target"] == "ws/my-tgt"
@@ -417,7 +428,7 @@ class TestSyncJobMethods:
 
     def test_submit_with_inline_entities_serialises_full_dict(self) -> None:
         platform = _SyncHelix()
-        platform._client.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
+        platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         cfg = AuditConfig(name="cfg-1", workspace="default")
@@ -425,7 +436,7 @@ class TestSyncJobMethods:
         result = resource.submit(config=cfg, target=tgt, workspace="default")
 
         assert isinstance(result, AuditorJobResource)
-        body = platform._client.post.call_args.kwargs["json"]
+        body = platform.http.post.call_args.kwargs["json"]
         assert isinstance(body["spec"]["config"], dict)
         assert body["spec"]["config"]["name"] == "cfg-1"
         assert isinstance(body["spec"]["target"], dict)
@@ -433,37 +444,37 @@ class TestSyncJobMethods:
 
     def test_submit_defaults_workspace_to_default(self) -> None:
         platform = _SyncHelix()
-        platform._client.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
+        platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         result = resource.submit(config="my-cfg", target="my-tgt")
 
         assert isinstance(result, AuditorJobResource)
-        url = platform._client.post.call_args.args[0]
+        url = platform.http.post.call_args.args[0]
         assert "/workspaces/default/" in url
 
     def test_list_jobs_hits_collection_url_with_pagination(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.return_value = _ok_response(_JOBS_LIST_PAYLOAD)
+        platform.http.get.return_value = _ok_response(_JOBS_LIST_PAYLOAD)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         result = resource.list_jobs(workspace="ws", page=2, page_size=5)
 
         assert result == _JOBS_LIST_PAYLOAD
-        url = platform._client.get.call_args.args[0]
-        params = platform._client.get.call_args.kwargs["params"]
+        url = platform.http.get.call_args.args[0]
+        params = platform.http.get.call_args.kwargs["params"]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/ws/jobs/audit"
         assert params == {"page": 2, "page_size": 5}
 
     def test_get_job_hits_named_url(self) -> None:
         platform = _SyncHelix()
-        platform._client.get.return_value = _ok_response(_JOB_PAYLOAD)
+        platform.http.get.return_value = _ok_response(_JOB_PAYLOAD)
         resource = AuditorPluginResource(cast(NeMoHelix, platform))
 
         result = resource.get_job("audit-job-abc123", workspace="ws")
 
         assert result == _JOB_PAYLOAD
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/ws/jobs/audit/audit-job-abc123",
         )
 
@@ -472,39 +483,39 @@ class TestSyncJobMethods:
 class TestAsyncJobMethods:
     async def test_submit_posts_correct_url_and_body(self) -> None:
         platform = _AsyncHelix()
-        platform._client.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
+        platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
         resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
 
         result = await resource.submit(config="ws/my-cfg", target="ws/my-tgt", workspace="ws")
 
         assert isinstance(result, AsyncAuditorJobResource)
         assert result.name == "audit-job-abc123"
-        url = platform._client.post.call_args.args[0]
-        body = platform._client.post.call_args.kwargs["json"]
+        url = platform.http.post.call_args.args[0]
+        body = platform.http.post.call_args.kwargs["json"]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/ws/jobs/audit"
         assert body["spec"]["config"] == "ws/my-cfg"
         assert body["spec"]["target"] == "ws/my-tgt"
 
     async def test_list_jobs_hits_collection_url(self) -> None:
         platform = _AsyncHelix()
-        platform._client.get.return_value = _ok_response(_JOBS_LIST_PAYLOAD)
+        platform.http.get.return_value = _ok_response(_JOBS_LIST_PAYLOAD)
         resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
 
         result = await resource.list_jobs(workspace="ws")
 
         assert result == _JOBS_LIST_PAYLOAD
-        url = platform._client.get.call_args.args[0]
+        url = platform.http.get.call_args.args[0]
         assert url == "http://test:8000/apis/auditor/v2/workspaces/ws/jobs/audit"
 
     async def test_get_job_hits_named_url(self) -> None:
         platform = _AsyncHelix()
-        platform._client.get.return_value = _ok_response(_JOB_PAYLOAD)
+        platform.http.get.return_value = _ok_response(_JOB_PAYLOAD)
         resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
 
         result = await resource.get_job("audit-job-abc123", workspace="ws")
 
         assert result == _JOB_PAYLOAD
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/ws/jobs/audit/audit-job-abc123",
         )
 
@@ -517,22 +528,22 @@ class TestAsyncJobMethods:
 @pytest.mark.asyncio
 async def test_async_configs_create_posts_to_workspace_route() -> None:
     platform = _AsyncHelix()
-    platform._client.post.return_value = _ok_response(_config_payload(name="cfg-1"), status_code=201)
+    platform.http.post.return_value = _ok_response(_config_payload(name="cfg-1"), status_code=201)
     resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
 
     cfg = await resource.configs.create(workspace="default", name="cfg-1", description="hi")
 
     assert isinstance(cfg, AuditConfig)
     assert cfg.name == "cfg-1"
-    platform._client.post.assert_called_once()
-    url = platform._client.post.call_args.args[0]
+    platform.http.post.assert_called_once()
+    url = platform.http.post.call_args.args[0]
     assert url == "http://test:8000/apis/auditor/v2/workspaces/default/configs"
 
 
 @pytest.mark.asyncio
 async def test_async_run_resolves_names_and_calls_job_in_thread() -> None:
     platform = _AsyncHelix()
-    platform._client.get.side_effect = [
+    platform.http.get.side_effect = [
         _ok_response(_config_payload(name="my-cfg")),
         _ok_response(_target_payload(name="my-tgt")),
     ]
@@ -556,7 +567,9 @@ async def test_async_run_resolves_names_and_calls_job_in_thread() -> None:
     spec_dict = call.args[1]
     assert spec_dict["config"]["name"] == "my-cfg"
     assert spec_dict["target"]["name"] == "my-tgt"
-    assert call.kwargs["async_sdk"] is platform
+    # The job gets a typed client adapted onto the SDK's transport.
+    assert isinstance(call.kwargs["async_sdk"], AsyncNemoClient)
+    assert call.kwargs["async_sdk"]._http is platform.http
     assert isinstance(call.kwargs["ctx"], JobContext)
     assert call.kwargs["ctx"].workspace == "default"
 
@@ -594,39 +607,39 @@ class TestAuditorJobResource:
 
     def test_get_job_hits_named_url(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response(_JOB_PAYLOAD)
+        platform.http.get.return_value = _ok_response(_JOB_PAYLOAD)
 
         result = resource.get_job()
 
         assert result == _JOB_PAYLOAD
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/jobs/audit/audit-job-abc123"
         )
 
     def test_get_job_status_hits_status_url(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "active"})
+        platform.http.get.return_value = _ok_response({"status": "active"})
 
         status = resource.get_job_status()
 
         assert status == "active"
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/jobs/audit/audit-job-abc123/status"
         )
 
     def test_check_if_complete_returns_true_when_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "completed"})
+        platform.http.get.return_value = _ok_response({"status": "completed"})
         assert resource.check_if_complete() is True
 
     def test_check_if_complete_returns_false_when_active(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "active"})
+        platform.http.get.return_value = _ok_response({"status": "active"})
         assert resource.check_if_complete() is False
 
     def test_check_if_complete_raises_when_requested(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "error"})
+        platform.http.get.return_value = _ok_response({"status": "error"})
         with pytest.raises(RuntimeError):
             resource.check_if_complete(raise_if_not_complete=True)
 
@@ -639,7 +652,7 @@ class TestAuditorJobResource:
             _ok_response({"status": "completed"}),
         ]
         logs_response = _ok_response({"data": [], "next_page": None})
-        platform._client.get.side_effect = (
+        platform.http.get.side_effect = (
             status_responses[:1] + [logs_response, status_responses[1]] + [logs_response, status_responses[2]]
         )
 
@@ -655,7 +668,7 @@ class TestAuditorJobResource:
             _ok_response({"status": "error"}),
         ]
         logs_response = _ok_response({"data": [], "next_page": None})
-        platform._client.get.side_effect = [
+        platform.http.get.side_effect = [
             status_responses[0],
             logs_response,
             status_responses[1],
@@ -666,7 +679,7 @@ class TestAuditorJobResource:
 
     def test_download_artifacts_raises_when_not_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "active"})
+        platform.http.get.return_value = _ok_response({"status": "active"})
 
         with pytest.raises(RuntimeError, match="status 'active'"):
             resource.download_artifacts()
@@ -677,12 +690,12 @@ class TestAuditorJobResource:
         tar_resp = MagicMock(spec=httpx.Response)
         tar_resp.raise_for_status.return_value = None
         tar_resp.content = _make_tar_bytes()
-        platform._client.get.side_effect = [status_resp, tar_resp]
+        platform.http.get.side_effect = [status_resp, tar_resp]
 
         result = resource.download_artifacts(path=tmp_path)
 
         assert result == tmp_path
-        platform._client.get.assert_called_with(
+        platform.http.get.assert_called_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/jobs/audit/audit-job-abc123/results/artifacts/download"
         )
 
@@ -725,23 +738,23 @@ class TestAsyncAuditorJobResource:
 
     async def test_get_job_status_hits_status_url(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "completed"})
+        platform.http.get.return_value = _ok_response({"status": "completed"})
 
         status = await resource.get_job_status()
 
         assert status == "completed"
-        platform._client.get.assert_called_once_with(
+        platform.http.get.assert_called_once_with(
             "http://test:8000/apis/auditor/v2/workspaces/default/jobs/audit/audit-job-abc123/status"
         )
 
     async def test_check_if_complete_returns_true_when_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "completed"})
+        platform.http.get.return_value = _ok_response({"status": "completed"})
         assert await resource.check_if_complete() is True
 
     async def test_check_if_complete_raises_when_requested(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "cancelled"})
+        platform.http.get.return_value = _ok_response({"status": "cancelled"})
         with pytest.raises(RuntimeError):
             await resource.check_if_complete(raise_if_not_complete=True)
 
@@ -753,7 +766,7 @@ class TestAsyncAuditorJobResource:
             _ok_response({"status": "completed"}),
         ]
         logs_response = _ok_response({"data": [], "next_page": None})
-        platform._client.get.side_effect = (
+        platform.http.get.side_effect = (
             status_responses[:1] + [logs_response, status_responses[1]] + [logs_response, status_responses[2]]
         )
 
@@ -762,7 +775,7 @@ class TestAsyncAuditorJobResource:
 
     async def test_download_artifacts_raises_when_not_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform._client.get.return_value = _ok_response({"status": "pending"})
+        platform.http.get.return_value = _ok_response({"status": "pending"})
 
         with pytest.raises(RuntimeError, match="status 'pending'"):
             await resource.download_artifacts()
@@ -773,7 +786,7 @@ class TestAsyncAuditorJobResource:
         tar_resp = MagicMock(spec=httpx.Response)
         tar_resp.raise_for_status.return_value = None
         tar_resp.content = _make_tar_bytes()
-        platform._client.get.side_effect = [status_resp, tar_resp]
+        platform.http.get.side_effect = [status_resp, tar_resp]
 
         result = await resource.download_artifacts(path=tmp_path)
 

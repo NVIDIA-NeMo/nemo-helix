@@ -10,8 +10,8 @@ import signal
 import sys
 from types import FrameType
 
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.errors import LocalRunError
-from nemo_helix_plugin.sdk_provider import get_task_sdk
 from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
 from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
@@ -29,15 +29,15 @@ def main() -> int:
     configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
-        sdk = get_task_sdk("agents")
-        ctx = build_ctx_from_env(sdk)
+        client = get_task_nemo_client("agents")
+        ctx = build_ctx_from_env(client)
         config = read_step_config()
         job = OptimizeJob()
     except Exception:
         logger.exception("Failed to prepare task for agents")
         return 2
     try:
-        return exit_code_for(job.run(config, ctx=ctx, sdk=sdk))
+        return exit_code_for(job.run(config, ctx=ctx, sdk=client))
     except LocalRunError:
         raise
     except Exception:
