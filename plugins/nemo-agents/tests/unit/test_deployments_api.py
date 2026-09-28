@@ -607,3 +607,98 @@ class TestDeleteDeployment:
 
         assert resp.status_code == 409
         assert mock_entity_client.update.await_count == deployments_router_module._DELETE_MARK_ATTEMPTS  # noqa: SLF001
+
+
+class TestListDeploymentModes:
+    @staticmethod
+    def _configure(
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        executors: dict[str, str],
+        default_executor: str | None = None,
+        docker_executor: str | None = None,
+        k8s_executor: str | None = None,
+        default_image: str | None = None,
+    ) -> None:
+        from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
+
+        deployments_cfg = DeploymentsConfig(
+            executors=[ExecutorConfigEntry(name=name, backend=backend) for name, backend in executors.items()]
+        )
+        monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: deployments_cfg))
+        agents_cfg = AgentsConfig.get()
+        monkeypatch.setattr(agents_cfg.deployments, "default_executor", default_executor)
+        monkeypatch.setattr(agents_cfg.deployments, "docker_executor", docker_executor)
+        monkeypatch.setattr(agents_cfg.deployments, "k8s_executor", k8s_executor)
+        monkeypatch.setattr(agents_cfg.deployments, "default_image", default_image)
+        monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
+
+    @staticmethod
+    def _modes() -> dict[str, dict[str, Any]]:
+        resp = _test_client(AsyncMock()).get("/apis/agents/v2/workspaces/default/deployment-modes")
+        assert resp.status_code == 200
+        return {entry["mode"]: entry for entry in resp.json()["data"]}
+
+    def test_only_subprocess_is_enabled_without_executors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._configure(monkeypatch, executors={})
+
+        assert self._modes() == {
+            "subprocess": {"mode": "subprocess", "enabled": True, "requires_image": False},
+            "docker": {"mode": "docker", "enabled": False, "requires_image": True},
+            "k8s": {"mode": "k8s", "enabled": False, "requires_image": True},
+        }
+
+    def test_k8s_is_disabled_when_it_would_fall_back_to_a_docker_executor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._configure(monkeypatch, executors={"local": "docker"}, default_executor="local")
+
+        modes = self._modes()
+
+        assert modes["docker"]["enabled"] is True
+        assert modes["k8s"]["enabled"] is False
+
+    def test_each_container_mode_is_enabled_by_its_own_executor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._configure(
+            monkeypatch,
+            executors={"local": "docker", "cluster": "k8s"},
+            docker_executor="local",
+            k8s_executor="cluster",
+        )
+
+        modes = self._modes()
+
+        assert modes["docker"]["enabled"] is True
+        assert modes["k8s"]["enabled"] is True
+
+    def test_a_default_image_means_container_modes_need_no_image(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._configure(
+            monkeypatch,
+            executors={"local": "docker"},
+            default_executor="local",
+            default_image="registry.example/agent:pinned",
+        )
+
+        modes = self._modes()
+
+        assert modes["docker"]["requires_image"] is False
+        assert modes["k8s"]["requires_image"] is False
+
+    def test_an_enabled_mode_passes_create_validation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._configure(monkeypatch, executors={"local": "docker"}, default_executor="local")
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        mock_entity_client.create = AsyncMock(side_effect=lambda deployment: deployment)
+        client = _test_client(mock_entity_client)
+
+        for mode, availability in self._modes().items():
+            resp = client.post(
+                "/apis/agents/v2/workspaces/default/deployments",
+                json={
+                    "agent": "fabric-agent",
+                    "name": f"fabric-{mode}",
+                    "deployment_mode": mode,
+                    "image": "registry.example/agent:1.0",
+                },
+            )
+            assert (resp.status_code == 201) is availability["enabled"], mode

@@ -18,19 +18,20 @@ from __future__ import annotations
 
 import logging
 import secrets
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.config import AgentsConfig
+from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     AgentDeployment,
     AgentEnvironmentInline,
+    DeploymentMode,
     EnvironmentSpecInline,
     is_container_deployment_mode,
 )
@@ -42,12 +43,15 @@ from nemo_agents_plugin.environment_resolution import (
     resolve_environment,
 )
 from nemo_agents_plugin.runner.deployments_backend import (
+    executor_backend,
     executor_for_mode,
     require_executor_matches_mode,
 )
 from nemo_agents_plugin.schema import (
     CreateDeploymentRequest,
     DeploymentFilter,
+    DeploymentModeAvailability,
+    DeploymentModeList,
     DeploymentPage,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
@@ -215,6 +219,29 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
     except EnvironmentResolutionError as exc:
         # 422: e.g. a secret env var bound to conflicting references.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/deployment-modes", response_model=DeploymentModeList, tags=["Agent Deployments"])
+@scope.read
+@path_rule(
+    callers=[CallerKind.PRINCIPAL],
+    permissions=[DeploymentPerms.LIST],
+)
+async def list_deployment_modes(workspace: str) -> DeploymentModeList:
+    """List every deployment mode and whether this platform can run it."""
+    runner_config = AgentsConfig.get().deployments
+    return DeploymentModeList(data=[_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)])
+
+
+def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
+    if not is_container_deployment_mode(mode):
+        return DeploymentModeAvailability(mode=mode, enabled=True, requires_image=False)
+    backend = executor_backend(executor_for_mode(runner_config, mode))
+    return DeploymentModeAvailability(
+        mode=mode,
+        enabled=backend == mode,
+        requires_image=not runner_config.default_image,
+    )
 
 
 @router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])
