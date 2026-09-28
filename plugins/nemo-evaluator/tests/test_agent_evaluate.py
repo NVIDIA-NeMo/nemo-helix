@@ -91,7 +91,6 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.jobs.providers import SubprocessExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile, HelixJobSpec
-from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from pydantic import JsonValue, ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -222,7 +221,7 @@ async def test_reference_round_trips_from_input_spec_to_runtime_task() -> None:
     )
 
     spec = await AgentEvalJob.to_spec(
-        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
     )
     assert isinstance(spec, AgentEvalSpec)
     assert all(task.spec.kind == "evaluator" for task in spec.tasks)
@@ -252,7 +251,7 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
     )
 
     spec = await AgentEvalJob.to_spec(
-        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
     )
 
     assert isinstance(spec, AgentEvalSpec)
@@ -594,14 +593,6 @@ def _async_sdk() -> AsyncNemoClient:
     )
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(
-        base_url="http://platform.test",
-        workspace="default",
-        http_client=AsyncMock(spec=httpx.AsyncClient),
-    )
-
-
 _SDK_IDENTITY_HEADERS = {
     "X-NHX-Principal-Id": "service:evaluator",
     "X-NHX-Actor-Account-Id": "account-service",
@@ -835,7 +826,7 @@ async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> Non
     )
 
     spec = await AgentEvalJob.to_spec(
-        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
     )
 
     assert isinstance(spec, AgentEvalSpec)
@@ -857,7 +848,7 @@ async def test_to_spec_requires_entity_store_to_resolve_a_metric_reference() -> 
     )
     with pytest.raises(ValueError, match="platform connection"):
         await AgentEvalJob.to_spec(
-            input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
         )
 
 
@@ -887,7 +878,7 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
         input_spec,
         workspace="default",
         entity_client=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
         is_local=False,
     )
 
@@ -901,7 +892,7 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
         spec=spec,
         entity_client=None,
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
     job_spec = HelixJobSpec.model_validate(compiled)
     _assert_agent_eval_step_entrypoint(job_spec)
@@ -924,7 +915,7 @@ def _kubernetes_profile_with_job_storage(pvc_name: str = "job-storage") -> Kuber
     )
 
 
-async def _compile_harbor(*, async_sdk: AsyncNeMoHelix, profile: str | None = None) -> HelixJobSpec:
+async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = None) -> HelixJobSpec:
     """Compile the minimal Harbor submission every backend-guard test makes."""
     compiled = await AgentEvalJob.compile(
         workspace="default",
@@ -994,7 +985,7 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -1029,7 +1020,7 @@ async def test_compile_gym_target_honors_configured_image_override(mocker: Mocke
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -1090,7 +1081,7 @@ async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocke
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -1136,7 +1127,7 @@ async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -1161,7 +1152,7 @@ async def test_compile_gym_environment_propagates_platform_sandbox_protocol(mock
         spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
         entity_client=object(),
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     evaluate = HelixJobSpec.model_validate(compiled).steps[-1]
@@ -1196,7 +1187,7 @@ async def test_compile_gym_environment_uses_host_commands_for_subprocess_profile
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -1223,7 +1214,7 @@ async def test_compile_rejects_fileset_environment_when_sandboxing_is_disabled(m
             spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
             entity_client=object(),
             job_name=None,
-            async_sdk=_async_platform(),
+            async_sdk=_async_sdk(),
         )
 
 
@@ -1262,7 +1253,7 @@ async def test_compile_rejects_mismatched_job_and_sandbox_storage_pvcs(mocker: M
             spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
             entity_client=object(),
             job_name=None,
-            async_sdk=_async_platform(),
+            async_sdk=_async_sdk(),
         )
 
 
@@ -1296,7 +1287,7 @@ async def test_compile_prefers_kubernetes_profile_for_opensandbox_fileset(mocker
         spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
         entity_client=object(),
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     job_spec = HelixJobSpec.model_validate(compiled)
@@ -1318,7 +1309,7 @@ async def test_compile_marks_gym_profile_transport_failure_as_retryable(mocker: 
             spec=spec,
             entity_client=object(),
             job_name=None,
-            async_sdk=_async_platform(),
+            async_sdk=_async_sdk(),
         )
 
 
@@ -1360,7 +1351,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
     resolved = await _resolve_gym_environment(
         target,
         workspace="dev",
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     assert isinstance(resolved, GymRunnerTarget)
@@ -1403,7 +1394,7 @@ async def test_resolve_gym_environment_accepts_native_v1(mocker: MockerFixture) 
     resolved = await _resolve_gym_environment(
         _gym_environment_target(),
         workspace="dev",
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     assert isinstance(resolved, GymRunnerTarget)
@@ -1427,7 +1418,7 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
         await _resolve_gym_environment(
             target,
             workspace="dev",
-            async_sdk=_async_platform(),
+            async_sdk=_async_sdk(),
         )
 
 
@@ -1448,7 +1439,7 @@ async def test_resolve_gym_environment_rejects_missing_manifest(mocker: MockerFi
         await _resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
-            async_sdk=_async_platform(),
+            async_sdk=_async_sdk(),
         )
 
     files.download_file.assert_not_awaited()
@@ -1471,7 +1462,7 @@ async def test_resolve_gym_environment_rejects_manifest_listing_mismatch(mocker:
         await _resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
-            async_sdk=_async_platform(),
+            async_sdk=_async_sdk(),
         )
 
 
@@ -1483,7 +1474,7 @@ async def test_compile_rejects_harbor_target_for_docker_profile(mocker: MockerFi
     )
 
     with pytest.raises(HelixJobCompilationError) as exc_info:
-        await _compile_harbor(async_sdk=_async_platform())
+        await _compile_harbor(async_sdk=_async_sdk())
 
     message = str(exc_info.value)
     assert "profile 'default'" in message
@@ -1512,7 +1503,7 @@ async def test_compile_rejects_harbor_target_for_containerized_profile(
     _patch_execution_profiles(mocker, [execution_profile])
 
     with pytest.raises(HelixJobCompilationError, match=rf"backend '{backend}'"):
-        await _compile_harbor(async_sdk=_async_platform())
+        await _compile_harbor(async_sdk=_async_sdk())
 
 
 async def test_compile_routes_harbor_directly_to_advertised_subprocess_profile(mocker: MockerFixture) -> None:
@@ -1525,7 +1516,7 @@ async def test_compile_routes_harbor_directly_to_advertised_subprocess_profile(m
         ],
     )
 
-    job_spec = await _compile_harbor(async_sdk=_async_platform())
+    job_spec = await _compile_harbor(async_sdk=_async_sdk())
 
     executor = job_spec.steps[0].executor
     assert isinstance(executor, SubprocessExecutionProvider)
@@ -1538,7 +1529,7 @@ async def test_compile_rejects_harbor_when_profile_is_missing(mocker: MockerFixt
     _patch_execution_profiles(mocker, [SubprocessJobExecutionProfile.model_validate({"profile": "other"})])
 
     with pytest.raises(HelixJobCompilationError, match="profile 'default'.*does not resolve"):
-        await _compile_harbor(async_sdk=_async_platform())
+        await _compile_harbor(async_sdk=_async_sdk())
 
 
 async def test_compile_marks_profile_transport_failure_as_retryable(mocker: MockerFixture) -> None:
@@ -1550,7 +1541,7 @@ async def test_compile_marks_profile_transport_failure_as_retryable(mocker: Mock
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=jobs_client)
 
     with pytest.raises(HelixJobDependencyUnavailableError, match="Jobs service is temporarily unavailable"):
-        await _compile_harbor(async_sdk=_async_platform())
+        await _compile_harbor(async_sdk=_async_sdk())
 
 
 @pytest.mark.parametrize("failure_kind", ["invalid-response", "server-error"])
@@ -1567,7 +1558,7 @@ async def test_compile_marks_profile_dependency_failure_as_retryable(failure_kin
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=jobs_client)
 
     with pytest.raises(HelixJobDependencyUnavailableError, match="Jobs service is temporarily unavailable"):
-        await _compile_harbor(async_sdk=_async_platform())
+        await _compile_harbor(async_sdk=_async_sdk())
 
 
 async def test_compile_does_not_classify_unexpected_profile_failure_as_invalid(mocker: MockerFixture) -> None:
@@ -1576,7 +1567,7 @@ async def test_compile_does_not_classify_unexpected_profile_failure_as_invalid(m
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=jobs_client)
 
     with pytest.raises(RuntimeError, match="unexpected lookup bug"):
-        await _compile_harbor(async_sdk=_async_platform())
+        await _compile_harbor(async_sdk=_async_sdk())
 
 
 async def test_compile_non_harbor_target_does_not_resolve_execution_profiles(mocker: MockerFixture) -> None:
@@ -1591,7 +1582,7 @@ async def test_compile_non_harbor_target_does_not_resolve_execution_profiles(moc
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
     )
 
     assert cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)["target"]["kind"] == "fabric"
@@ -1611,7 +1602,7 @@ async def test_compile_injects_target_api_key_secret() -> None:
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
     )
 
     step = HelixJobSpec.model_validate(compiled).steps[0]
@@ -1634,7 +1625,7 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
 
     with pytest.raises(ValueError, match="reserved"):
         await AgentEvalJob.compile(
-            workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+            workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
         )
 
 
@@ -1677,7 +1668,7 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
 
     canonical = run_sync(
         lambda: AgentEvalJob.to_spec(
-            input_spec, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+            input_spec, workspace="default", entity_client=None, async_sdk=_async_sdk(), is_local=True
         )
     )
     result = AgentEvalJob().run(
@@ -1718,7 +1709,7 @@ def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: Mock
 
     canonical = run_sync(
         lambda: AgentEvalJob.to_spec(
-            input_spec, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+            input_spec, workspace="default", entity_client=None, async_sdk=_async_sdk(), is_local=True
         )
     )
     result = AgentEvalJob().run(
@@ -1748,15 +1739,16 @@ def test_spec_requires_exactly_one_of_target_or_trials() -> None:
 class TestAgentEvalTask:
     """Coverage for the compiled container/subprocess task entrypoint."""
 
-    def test_main_dispatches_agent_eval_job_with_task_sdk(self, mocker: MockerFixture) -> None:
-        sdk = NeMoHelix(base_url="http://platform.test", workspace="default")
+    def test_main_dispatches_agent_eval_job_with_task_client(self, mocker: MockerFixture) -> None:
+        client = NemoClient(
+            base_url="http://platform.test", workspace="default", http_client=MagicMock(spec=httpx.Client)
+        )
         async_client = AsyncNemoClient(
             base_url="http://platform.test", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
         )
         ctx = MagicMock()
-        get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", return_value=sdk)
         build_ctx = mocker.patch("nemo_evaluator.tasks.runner.build_ctx_from_env", return_value=ctx)
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
+        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client", return_value=client)
         get_async_task_client = mocker.patch(
             "nemo_evaluator.tasks.runner.get_async_task_nemo_client", return_value=async_client
         )
@@ -1765,22 +1757,23 @@ class TestAgentEvalTask:
         exit_code = agent_eval_task_main()
 
         assert exit_code == 0
-        get_platform_sdk.assert_called_once_with("evaluator")
-        build_ctx.assert_called_once_with(sdk)
-        get_task_client.assert_not_called()
+        get_task_client.assert_called_once_with("evaluator")
+        build_ctx.assert_called_once_with(client)
         get_async_task_client.assert_called_once_with("evaluator")
         run_task.assert_called_once_with(AsyncAgentEvalJob, async_client=async_client, ctx=ctx)
 
-    def test_main_returns_setup_exit_code_when_task_sdk_fails(self, mocker: MockerFixture) -> None:
-        get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", side_effect=RuntimeError("boom"))
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
+    def test_main_returns_setup_exit_code_when_task_client_fails(self, mocker: MockerFixture) -> None:
+        get_task_client = mocker.patch(
+            "nemo_evaluator.tasks.runner.get_task_nemo_client", side_effect=RuntimeError("boom")
+        )
+        get_async_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_async_task_nemo_client")
         run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client")
 
         exit_code = agent_eval_task_main()
 
         assert exit_code == SDK_INITIALIZATION_EXIT_CODE
-        get_platform_sdk.assert_called_once_with("evaluator")
-        get_task_client.assert_not_called()
+        get_task_client.assert_called_once_with("evaluator")
+        get_async_task_client.assert_not_called()
         run_task.assert_not_called()
 
 
@@ -1825,7 +1818,7 @@ async def test_trial_error_survives_the_job_spec_wire_contract() -> None:
     assert error.message == "Agent process failed with exit code 127"
 
     spec = await AgentEvalJob.to_spec(
-        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
     )
     assert isinstance(spec, AgentEvalSpec)
     assert spec.trials is not None
@@ -1937,7 +1930,7 @@ async def test_compile_resolves_gym_runner_env_secrets(mocker: MockerFixture) ->
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
     )
 
     step = HelixJobSpec.model_validate(compiled).steps[0]
@@ -1966,7 +1959,7 @@ async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture)
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
     )
 
     step = HelixJobSpec.model_validate(compiled).steps[0]
@@ -1998,13 +1991,13 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
     )
     if valid:
         await AgentEvalJob.to_spec(
-            request, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+            request, workspace="default", entity_client=None, async_sdk=_async_sdk(), is_local=True
         )
         resolver.assert_awaited_once()
     else:
         with pytest.raises(ValueError, match="missing inputs"):
             await AgentEvalJob.to_spec(
-                request, workspace="default", entity_client=None, async_sdk=_async_platform(), is_local=True
+                request, workspace="default", entity_client=None, async_sdk=_async_sdk(), is_local=True
             )
         resolver.assert_not_awaited()
 
@@ -2042,7 +2035,7 @@ async def test_non_gym_submission_never_prepares_gym(monkeypatch, target: Target
         request,
         workspace="default",
         entity_client=None,
-        async_sdk=_async_platform(),
+        async_sdk=_async_sdk(),
         is_local=True,
     )
     assert isinstance(result, AgentEvalSpec)

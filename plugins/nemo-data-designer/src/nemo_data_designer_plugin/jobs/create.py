@@ -13,7 +13,7 @@ from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig, DataDesignerStepConfig
 from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -43,7 +43,7 @@ class CreateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:  # DataDesignerStepConfig
         del entity_client, is_local
@@ -67,7 +67,7 @@ class CreateJob(NemoJob):
         spec: BaseModel,  # DataDesignerStepConfig
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> HelixJobSpec:

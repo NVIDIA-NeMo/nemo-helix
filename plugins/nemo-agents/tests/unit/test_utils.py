@@ -40,7 +40,7 @@ from nemo_agents_plugin.utils import (
     temp_injected_config,
     validate_llm_models,
 )
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job_context import JobContext
@@ -867,7 +867,7 @@ class TestResolveOutput:
         evaluation artifacts on the floor.
         """
         job = EvaluateAgentJob()
-        with pytest.raises(LocalRunError, match="sdk: NeMoHelix"):
+        with pytest.raises(LocalRunError, match="requires a sync platform client"):
             with job._resolve_output(FilesetRef("eval-results"), workspace="default", sdk=None, ctx=ctx):
                 pass
 
@@ -1422,12 +1422,12 @@ class _StubSDKWithVirtualModels:
         self.inference = _StubInference(virtual_models)
 
 
-def _platform_sdk_stub() -> NeMoHelix:
-    return cast(NeMoHelix, object())
+def _platform_sdk_stub() -> NemoClient:
+    return cast(NemoClient, object())
 
 
-def _virtual_model_sdk(virtual_models: _RecordingVirtualModels) -> NeMoHelix:
-    return cast(NeMoHelix, _StubSDKWithVirtualModels(virtual_models))
+def _virtual_model_sdk(virtual_models: _RecordingVirtualModels) -> NemoClient:
+    return cast(NemoClient, _StubSDKWithVirtualModels(virtual_models))
 
 
 @pytest.fixture(autouse=True)
