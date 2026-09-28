@@ -5,7 +5,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
 });
 
-import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema';
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -22,12 +22,12 @@ import { http, HttpResponse } from 'msw';
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
 
-const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/optimize`;
+const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 const OPTIMIZE_JOB_URL = `${OPTIMIZE_JOBS_URL}/:name`;
 
 const FILESET_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`;
 
-const listOnly = (studyName: string, overrides: Partial<OptimizeJob> = {}) => {
+const listOnly = (studyName: string, overrides: Partial<RunStrategyJob> = {}) => {
   const data = mockOptimizeJobs
     .filter((job) => job.name === studyName)
     .map((job) => ({ ...job, ...overrides }));
@@ -95,7 +95,7 @@ describe('AgentDetailRoute optimizations tab', () => {
     const filters: string[] = [];
     const capture = ({ request }: { request: Request }) => {
       const url = new URL(request.url);
-      if (!url.pathname.endsWith('/jobs/optimize')) return;
+      if (!url.pathname.endsWith('/jobs/run-strategy')) return;
       filters.push(url.searchParams.get('filter') ?? '');
     };
     server.events.on('request:start', capture);
@@ -140,6 +140,7 @@ describe('AgentDetailRoute optimizations tab', () => {
   /** A study as Studio launches it: its marker names the bundle the study actually runs from. */
   const launchedByStudio = (bundle = BUNDLE) => ({
     spec: {
+      strategy: 'legacy',
       optimize_config: 'optimize-brevity.yaml',
       agent: agentName,
       optimize_config_fileset: `${workspace}/${bundle}`,

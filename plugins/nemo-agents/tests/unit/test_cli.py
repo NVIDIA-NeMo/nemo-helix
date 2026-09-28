@@ -7,7 +7,6 @@ import json
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -216,70 +215,6 @@ def test_list_404_prints_request_context_and_hint() -> None:
     assert "route may not be deployed" in result.stderr
 
 
-def test_optimize_targets_agents_route() -> None:
-    captured: dict[str, Any] = {}
-
-    from nemo_helix_plugin.commands import add_job_commands
-    from nemo_helix_plugin.scheduler import submit_path_for
-
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
-    assert submit_path_for(OptimizeJob, workspace="default") == "/apis/agents/v2/workspaces/default/jobs/optimize"
-
-    def _submit_remote(_self, job_cls, spec, **kwargs):
-        captured["job_cls"] = job_cls
-        captured["spec"] = spec
-        captured["base_url"] = kwargs["base_url"]
-        captured["workspace"] = kwargs["workspace"]
-        return {"name": "optimize-123"}
-
-    agents_cli = AgentsCLI()
-    app = agents_cli.get_cli()
-    add_job_commands(app, {"agents.optimize": OptimizeJob}, cli=agents_cli)
-    with patch("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
-        result = CliRunner().invoke(
-            app,
-            [
-                "optimize",
-                "--optimize-config",
-                "/tmp/optimize.yml",
-                "--agent",
-                "react-agent",
-                "--base-url",
-                "http://test",
-            ],
-        )
-
-    assert result.exit_code == 0, result.stderr
-    assert captured["job_cls"] is OptimizeJob
-    assert captured["base_url"] == "http://test"
-    assert captured["workspace"] == "default"
-    assert captured["spec"]["agent"] == "react-agent"
-    assert captured["spec"]["optimize_config"] == "/tmp/optimize.yml"
-
-    legacy_result = CliRunner().invoke(app, ["optimize", "submit"])
-    assert legacy_result.exit_code == 2
-    assert "No such command 'submit'" in legacy_result.output
-
-
-def test_optimize_prepare_fileset_stays_under_optimize_command() -> None:
-    from nemo_helix_plugin.commands import add_job_commands
-
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
-
-    agents_cli = AgentsCLI()
-    app = agents_cli.get_cli()
-    add_job_commands(app, {"agents.optimize": OptimizeJob}, cli=agents_cli)
-
-    result = CliRunner().invoke(app, ["optimize", "prepare-fileset", "--help"])
-
-    assert result.exit_code == 0, result.output
-    assert "--source" in result.output
-    assert "--fileset" in result.output
-
-    top_level_result = CliRunner().invoke(app, ["prepare-fileset", "--help"])
-    assert top_level_result.exit_code != 0
-
-
 def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     import click
     from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
@@ -292,13 +227,11 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     from nemo_helix_plugin.job import NemoJob
     from typer.main import get_command
 
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
     jobs: dict[str, type[NemoJob]] = {
         "agents.analyze": AnalyzeBatchJob,
         "agents.evaluate": EvaluateAgentJob,
         "agents.evaluate-suite": EvaluateSuiteJob,
         "agents.execute": ExecuteAgentJob,
-        "agents.optimize": OptimizeJob,
         "agents.optimize-skills": OptimizeSkillsJob,
         "agents.package-agent": PackageAgentJob,
     }
@@ -309,22 +242,13 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     command = get_command(app)
 
     assert isinstance(command, click.Group)
-    flat_job_names = {job_cls.name for job_cls in jobs.values()} - {"optimize"}
-    for job_name in flat_job_names:
+    for job_name in {job_cls.name for job_cls in jobs.values()}:
         job_command = command.commands[job_name]
         assert not isinstance(job_command, click.Group)
         for legacy_verb in ("run", "submit"):
             legacy_result = CliRunner().invoke(app, [job_name, legacy_verb])
             assert legacy_result.exit_code == 2
             assert "Got unexpected extra argument" in legacy_result.output
-
-    optimize_command = command.commands["optimize"]
-    assert isinstance(optimize_command, click.Group)
-    assert set(optimize_command.commands) == {"prepare-fileset"}
-
-    optimize_help = CliRunner().invoke(app, ["optimize", "--help"])
-    assert optimize_help.exit_code == 0, optimize_help.output
-    assert "Precedence:" in optimize_help.output
 
     for job_cls in jobs.values():
         job_command = command.commands[job_cls.name]
