@@ -2,13 +2,28 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
+import typer
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.config.models import NoAuthUser, OAuthUser
+from nemo_helix_plugin.cli_state import CLIState, resolve_output_format
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.secrets.client import SecretsClient
+
+
+def test_cli_context_implements_the_plugin_cli_state_protocol():
+    """Plugin commands depend on ``CLIState``; ty rejects this assignment if ``CLIContext`` drifts from it."""
+    state: CLIState = CLIContext()
+    assert state is not None
+
+
+def test_plugin_resolve_output_format_follows_cli_context_rules():
+    """The shared resolver must give plugin commands the same answer core commands get."""
+    typer_ctx = cast(typer.Context, SimpleNamespace(obj=CLIContext(agent_mode=True)))
+    assert resolve_output_format(typer_ctx) == "markdown"
 
 
 def test_context_instances_are_independent():
