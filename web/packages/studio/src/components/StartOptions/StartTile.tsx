@@ -60,22 +60,32 @@ export const StartTile: FC<StartTileProps> = ({
         </Flex>
 
         <Flex gap="density-md" align="center" className="col-start-2 row-start-1 w-full min-h-0">
-          <Text kind={labelKind} role={busy ? 'status' : undefined}>
-            {busy ? (busyLabel ?? 'Working…') : label}
-          </Text>
-          {!busy && slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
+          <Text kind={labelKind}>{label}</Text>
+          {slotEnd != null && <div className="ml-auto shrink-0">{slotEnd}</div>}
         </Flex>
 
         {hasDescription && (
-          // Held in place while busy so swapping in the status does not resize the tile.
-          <Text
-            kind={descriptionKind}
-            color="secondary"
-            aria-hidden={busy || undefined}
-            className={cn('col-start-2 row-start-2 text-left', busy && 'invisible')}
-          >
-            {description}
-          </Text>
+          // While busy the status takes the description's place. Both are stacked in the one
+          // grid cell so the row keeps the taller of the two and the tile does not resize.
+          <div className="col-start-2 row-start-2 grid text-left">
+            <Text
+              kind={descriptionKind}
+              color="secondary"
+              aria-hidden={busy || undefined}
+              className={cn('col-start-1 row-start-1', busy && 'invisible')}
+            >
+              {description}
+            </Text>
+            {busy && (
+              <Text
+                kind={descriptionKind}
+                role="status"
+                className="col-start-1 row-start-1 text-base-foreground"
+              >
+                {busyLabel ?? 'Working…'}
+              </Text>
+            )}
+          </div>
         )}
       </Card>
     </button>

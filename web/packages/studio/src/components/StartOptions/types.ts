@@ -56,9 +56,9 @@ export interface StartPageProps {
   onSelect: (id: string) => void;
   /** Locks every tile while a pick is being acted on. */
   disabled?: boolean;
-  /** The tile being acted on; its content is replaced by `busyLabel`. */
+  /** The tile being acted on; its description is replaced by `busyLabel`. */
   busyId?: string | null;
-  /** Progress text shown in place of the busy tile's own content. */
+  /** Progress text shown in place of the busy tile's description. */
   busyLabel?: string;
   /** Badge on the divider — the templates' counterpart to the per-option tags. */
   templatesTag?: StartOptionTag;
@@ -74,7 +74,7 @@ export interface StartTileProps {
   slotEnd?: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
-  /** Replaces the tile's icon, label and badge with a spinner and `busyLabel`. */
+  /** Swaps the icon for a spinner and the description for `busyLabel`. */
   busy?: boolean;
   busyLabel?: string;
   labelKind?: ComponentProps<typeof Text>['kind'];

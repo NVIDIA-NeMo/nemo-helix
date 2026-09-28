@@ -210,10 +210,10 @@ describe('CreateCustomizationStart', () => {
       // Setup is now parked on the held read, with every tile still mounted.
       await user.click(screen.getByText('Build from scratch'));
 
-      // The picked tile reads as its own progress, so its title is gone while it runs.
+      // The picked tile reads its progress under its own name, which stays put.
       // The exact step depends on how far setup got, so match a live label, not one string.
       expect(await screen.findByRole('status')).toHaveTextContent(/…$/);
-      expect(screen.queryByText(CUSTOMIZATION_TEMPLATES[0].title)).not.toBeInTheDocument();
+      expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title)).toBeInTheDocument();
       // Its description keeps its box so the tile does not resize mid-flight, but it is
       // no longer part of the tile's meaning. (jsdom loads no CSS, so only this is assertable.)
       expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].description)).toHaveAttribute(

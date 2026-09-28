@@ -205,7 +205,7 @@ describe('StartPage selection', () => {
     expect(screen.getByText('Registering model')).toBeInTheDocument();
   });
 
-  it('swaps the busy tile own content for the status', () => {
+  it('swaps the busy tile description for the status, keeping its name', () => {
     render(
       <TestProviders>
         <StartPage
@@ -221,10 +221,11 @@ describe('StartPage selection', () => {
       </TestProviders>
     );
 
-    // The name goes, so the tile reads as the status rather than as a thing to pick.
-    expect(screen.queryByText('Template One')).not.toBeInTheDocument();
+    // The name stays put; only the line under it becomes the progress.
+    expect(screen.getByText('Template One')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Registering model');
-    // Untouched tiles keep theirs.
+    expect(screen.getByText('Does a thing.')).toHaveAttribute('aria-hidden', 'true');
+    // Untouched tiles read normally.
     expect(screen.getByText('Build from scratch')).toBeInTheDocument();
   });
 });
