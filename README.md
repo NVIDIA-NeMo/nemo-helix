@@ -67,7 +67,7 @@ the managed ClickHouse container before deleting any bind-mounted data.
 ```bash
 nemo --help                # All commands
 nemo models list           # Available models
-nemo chat <model-name>     # Chat directly with a model
+nemo chat                  # Chat with your default model
 nemo services status       # Platform health
 nemo skills list           # Skills installed on the platform
 ```

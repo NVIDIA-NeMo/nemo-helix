@@ -869,7 +869,7 @@ def up(
     console.print("• Run [cyan]nemo quickstart status[/cyan] to check cluster status")
     console.print("• Run [cyan]nemo quickstart logs -f[/cyan] to follow logs")
     if quickstart_config.inference_provider == "nvidia-build":
-        console.print("• Chat with Nemotron: [cyan]nemo chat nvidia-llama-3-3-nemotron-super-49b-v1-5[/cyan]")
+        console.print("• Chat with Nemotron: [cyan]nemo chat -m nvidia-llama-3-3-nemotron-super-49b-v1-5[/cyan]")
 
 
 @quickstart_app.command()
