@@ -13,7 +13,7 @@ import {
 import {
   type EvaluateJobRequest,
   type MetricInline,
-  PlatformJobStatus,
+  HelixJobStatus,
 } from '@nemo/sdk/generated/evaluator/schema';
 import { buildEvalJobName } from '@studio/components/evaluation/submitEvaluationJob';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -27,9 +27,9 @@ import { useCallback, useRef, useState } from 'react';
 import { useAuth } from 'react-oidc-context';
 
 const TERMINAL_STATUSES: string[] = [
-  PlatformJobStatus.completed,
-  PlatformJobStatus.error,
-  PlatformJobStatus.cancelled,
+  HelixJobStatus.completed,
+  HelixJobStatus.error,
+  HelixJobStatus.cancelled,
 ];
 
 const POLL_INTERVAL_MS = 1500;
@@ -266,11 +266,11 @@ export function useLiveTest() {
 
         if (superseded()) return;
 
-        if (status !== PlatformJobStatus.completed) {
+        if (status !== HelixJobStatus.completed) {
           setState({
             status: 'error',
             message:
-              status === PlatformJobStatus.error
+              status === HelixJobStatus.error
                 ? 'Scoring failed. Both models responded, so check the metric configuration.'
                 : 'Scoring did not finish in time.',
           });
