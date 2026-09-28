@@ -62,7 +62,7 @@ dev = [
 ]
 
 [tool.uv]
-# Not installed by default; remove this to install the plugin.
+# Not installed by default; opt in with `uv run --frozen --with-editable ./plugins/nemo-agent-hardener nemo ...`.
 package = false
 
 [tool.pytest.ini_options]
