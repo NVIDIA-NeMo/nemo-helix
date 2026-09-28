@@ -3,7 +3,7 @@
 
 import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 
-const ENTITY_NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+const MODEL_ENTITY_NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 describe('FILESET_TEMPLATES', () => {
   const templateModels = FILESET_TEMPLATES.flatMap((template) =>
@@ -13,6 +13,6 @@ describe('FILESET_TEMPLATES', () => {
   );
 
   it.each(templateModels)('$template names model $model by its entity name', ({ model }) => {
-    expect(model).toMatch(ENTITY_NAME_PATTERN);
+    expect(model).toMatch(MODEL_ENTITY_NAME_PATTERN);
   });
 });
