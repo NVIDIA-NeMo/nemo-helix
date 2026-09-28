@@ -541,13 +541,6 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
-    # Automodel: write a consolidated HF export. V1 forbids model_save_format.
-    if parallelism.policy_backend is PolicyBackend.AUTOMODEL:
-        cfg["checkpointing"]["save_consolidated"] = True
-        cfg["checkpointing"]["v4_compatible"] = customizer_config.model.v4_compatible
-        _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
-        if customizer_config.training.finetuning_type == FinetuningType.ALL_WEIGHTS:
-            cfg["checkpointing"]["model_save_format"] = "safetensors"
     lora_cfg = _build_lora_cfg(customizer_config)
     dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(customizer_config, grpo_hp)
     chat_template = resolve_chat_template(
@@ -587,6 +580,9 @@ def compile_grpo_config(
             # whole distribution.
             "top_p": 1.0,
             "top_k": grpo_hp.top_k,
+            "val_temperature": grpo_hp.temperature,
+            "val_top_p": 1.0,
+            "val_top_k": grpo_hp.top_k,
             "stop_token_ids": None,
             "stop_strings": None,
             "vllm_cfg": {
@@ -615,6 +611,17 @@ def compile_grpo_config(
         "dynamic_batching": dynamic_batching_cfg,
         "make_sequence_length_divisible_by": parallelism.tensor_parallel_size,
     }
+
+    # DTensor v2 reads these from policy.dtensor_cfg.checkpoint. The top-level
+    # checkpointing config rejects them. "every" consolidates each save, which is
+    # what publication needs: the kept checkpoint is the best one, not always the last.
+    if parallelism.policy_backend is PolicyBackend.AUTOMODEL:
+        cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
+            "model_save_format": "safetensors",
+            "save_consolidated": "every",
+            "v4_compatible": customizer_config.model.v4_compatible,
+        }
+        _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than

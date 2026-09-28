@@ -10,11 +10,12 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
-from nemo_rl.algorithms.grpo import MasterConfig, _should_use_nemo_gym, grpo_train, setup
+from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data.utils import setup_response_data
 from nemo_rl.distributed.virtual_cluster import init_ray
-from nemo_rl.environments.nemo_gym import setup_nemo_gym_config
+from nemo_rl.environments.nemo_gym import setup_nemo_gym_config, should_use_nemo_gym
+from nemo_rl.environments.utils import shutdown_environments
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -44,11 +45,10 @@ def _run_facts(config: MasterConfig) -> dict[str, object]:
     ``nemo_rl`` for both DPO and GRPO, so without this nothing in a job's status
     tells the two apart.
 
-    ``rollouts_per_step`` is how many rollouts one step generates, so a reader can
-    get the running total by multiplying by the current step. It is computed here
-    rather than left to the reader because it only equals prompts times generations
-    while dynamic sampling is off, which ``grpo_config`` currently hardcodes. Turning
-    dynamic sampling on means fixing this one expression instead of every consumer.
+    ``rollouts_per_step`` is prompts times generations, the size of one generation
+    batch. A reader gets a running total by multiplying by the current step while
+    dynamic sampling is off. With it on, a step can draw more than one batch, so
+    this product is the batch size rather than the step total.
 
     Both fields are declared on NeMo-RL's ``GRPOConfig``, so plain attribute access
     is safe here, unlike the platform's own extra fields beside them.
@@ -135,7 +135,7 @@ def main() -> None:
         trains_mtp=False,
     )
     setup_nemo_gym_config(config, tokenizer)
-    assert _should_use_nemo_gym(config)
+    assert should_use_nemo_gym(config)
 
     train_dataset, val_dataset = setup_response_data(tokenizer, config.data, env_configs=None)
 
@@ -202,13 +202,10 @@ def main() -> None:
             master_config,
         )
     finally:
-        for task_name, env in task_to_env.items():
-            try:
-                import ray
-
-                ray.get(env.shutdown.remote(), timeout=120)
-            except Exception as exc:
-                logger.warning("Error shutting down environment %s: %s", task_name, exc)
+        # Covers a failure between setup() and grpo_train. grpo_train shuts the
+        # same set down itself; this call accepts a shard set and waits long
+        # enough for OpenSandbox destroy_host.
+        shutdown_environments(task_to_env, timeout=300)
 
     if config.checkpointing["enabled"] and checkpointer.get_best_checkpoint_path() is None:
         if config.grpo.use_dynamic_sampling:

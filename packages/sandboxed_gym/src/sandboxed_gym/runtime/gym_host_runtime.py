@@ -946,7 +946,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self._announce_close()
         self.end_headers()
-        self._write_chunk(self._await_results(future, started))
+        try:
+            body = self._await_results(future, started)
+        except BaseException as exc:  # noqa: BLE001
+            # Headers are already sent. An exception here must still become an error body,
+            # or the proxy forwards a 200 with no payload. Stdout is what the job can see.
+            detail = traceback.format_exc(limit=_TRACEBACK_FRAMES)
+            print(f"gym-host: rollouts/run crashed: {detail}", flush=True)
+            body = self._error_body(
+                "internal",
+                f"{type(exc).__name__}: {exc}\n{detail[-_MAX_TRACEBACK_CHARS:]}",
+            )
+        if not body:
+            # A zero-length chunk is the terminator, so an empty body cannot be sent as
+            # one: it would reach the caller as a successful batch of nothing.
+            body = self._error_body("internal", "rollout produced an empty response body")
+        self._write_chunk(body)
+        # Terminator. Only this ends the body.
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
@@ -1005,7 +1021,15 @@ class Handler(BaseHTTPRequestHandler):
             "environment_path": os.environ.get("NHX_ENVIRONMENT_PATH", ""),
             "work_path": os.environ.get("NHX_WORK_PATH", ""),
         }
-        body = json.dumps(envelope).encode("utf-8")
+        try:
+            body = json.dumps(envelope).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            # A Gym result is an arbitrary object, so encoding it is part of running the
+            # batch and not a detail of the framing: a single value the environment left
+            # unencodable would otherwise take down the whole response.
+            detail = f"rollout results are not JSON-serializable: {exc}"
+            print(f"gym-host: rollouts/run failed: {detail}", flush=True)
+            return self._error_body("internal", detail)
         if len(body) > self.max_response_bytes:
             return self._error_body(
                 "payload_too_large",
@@ -1048,6 +1072,20 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+class _Server(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` that reports handler failures where they can be read.
+
+    The base class prints them to stderr, which is not surfaced to the job: a request
+    that died mid-response left no trace anywhere, on either side of the connection.
+    """
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        print(
+            f"gym-host: unhandled error serving {client_address}: {traceback.format_exc()}",
+            flush=True,
+        )
+
+
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
@@ -1072,7 +1110,7 @@ def main() -> None:
 
     port = _env_int("NHX_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
     # Threaded so chunked rollouts overlap and /health stays answerable mid-batch.
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    _Server(("0.0.0.0", port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

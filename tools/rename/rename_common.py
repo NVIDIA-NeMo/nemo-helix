@@ -13,8 +13,6 @@ RENAME_IMPL = Path("tools/rename/rename_to_nemo_helix.py")
 VERIFY_SCRIPT = Path("tools/rename/verify-nemo-helix-rename.sh")
 VERIFY_IMPL = Path("tools/rename/verify_nemo_helix_rename.py")
 COMMON_IMPL = Path("tools/rename/rename_common.py")
-# This patch contains NMP commands that we still want to keep
-PATCH_PATH = Path("docker/rl/patches/nemo-rl-gym-host-hf-cache.patch")
 TEST_PATH = Path("tests/tools/rename/test_rename_tools.py")
 GITIGNORE_PATH = Path(".gitignore")
 # The current release note documents the NeMo Platform to NeMo Helix rebrand
@@ -30,7 +28,6 @@ IGNORE_PATHS = {
     VERIFY_SCRIPT,
     VERIFY_IMPL,
     COMMON_IMPL,
-    PATCH_PATH,
     TEST_PATH,
     GITIGNORE_PATH,
     CURRENT_RELEASE_NOTE_PATH,

@@ -9,10 +9,13 @@
 #   - causal-conv1d (CUDA extension required by mamba-ssm)
 #   - mamba-ssm     (selective state space model)
 #   - av + opencv-python-headless + decord2 (FFmpeg 8.1.2 bundled wheels for nspect / VLM)
+#   - rl-cuda-ext-wheel (CPython 3.13 / torch 2.13.0+cu130 extensions for nhx-rl-base)
 #
 # causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc.
 # av / opencv wheels bundle FFmpeg; upstream PyPI wheels lag nspect 8.1.2.
-# Build via the nhx-automodel-gpu-wheels bake group.
+# The cp311/cp312 causal-conv1d and mamba-ssm targets stay for Automodel and Unsloth.
+# Build those via the nhx-automodel-gpu-wheels bake group.
+# Build the RL set via the rl-cuda-ext-wheel target.
 #
 # Build args:
 #   CAUSAL_CONV1D_VERSION  - git tag to build              (default: v1.5.3)
@@ -27,6 +30,10 @@
 #######
 
 ARG CUDA_VERSION=12.8.1
+# FROM args for the rl-cuda-ext-wheel stages. They must be global (before the
+# first FROM) or the FROM lines see them as empty.
+ARG RL_CUDA_EXT_BASE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
+ARG RL_CUDA_EXT_PYTHON=3.13.15
 
 # =============================================================================
 # Shared base: CUDA + Python 3.11 + torch (required by extension builds)
@@ -421,3 +428,141 @@ COPY --from=av-wheel-builder-py312 /wheels /wheels
 COPY --from=opencv-headless-wheel-builder-py312 /wheels /wheels
 COPY --from=opencv-headless-wheel-builder-py313 /wheels /wheels
 COPY --from=decord2-wheel-builder-py313 /wheels /wheels
+
+# =============================================================================
+# RL CUDA extension wheels — CPython 3.13.15, CUDA 13.3
+#
+# One platform build emits nine wheels under /wheels. Each package is its own
+# stage off a shared base so BuildKit compiles them in parallel. mamba-ssm
+# waits for the causal-conv1d wheel and installs it before compiling.
+# Do not reuse the cp312 causal-conv1d / mamba-ssm stages above: those are a
+# different Python, torch, and source revision.
+#
+# docker/rl/scripts/sync-rl-cuda-wheels.py copies the git commits and sdist
+# versions below from NeMo-RL's pyproject.toml at NEMO_RL_REF.
+# NeMo-RL commit: 3f05fc8abe69d0ffa786767cdc5335a52c612c65
+# =============================================================================
+FROM python:${RL_CUDA_EXT_PYTHON}-slim-bookworm AS rl-cuda-ext-cpython
+
+FROM ${RL_CUDA_EXT_BASE} AS rl-cuda-ext-base
+ARG UV_VERSION=0.11.33
+ARG CMAKE_VERSION=4.0.3
+ENV DEBIAN_FRONTEND=noninteractive \
+    UV_PYTHON=/opt/cpython/bin/python3.13 \
+    LD_LIBRARY_PATH=/opt/cpython/lib \
+    PATH="/opt/venv/bin:/opt/cpython/bin:/usr/local/cuda/bin:/usr/local/bin:${PATH}" \
+    VIRTUAL_ENV=/opt/venv \
+    CUDA_HOME=/usr/local/cuda \
+    TORCH_CUDA_ARCH_LIST="9.0 10.0" \
+    CPLUS_INCLUDE_PATH=/usr/local/cuda/include/cccl \
+    UV_HTTP_TIMEOUT=120 \
+    UV_HTTP_RETRIES=8 \
+    CAUSAL_CONV1D_REV=4f6ae4e26ae5fe8af9372f8d312ab25cc4595223 \
+    MAMBA_SSM_REV=a14b1dff0454a3bc27d9eb31355dc01e4b2490ec \
+    NV_GROUPED_GEMM_REV=6dfaf60e6112166b8b82e9210b51c7f557956f0a \
+    FAST_HADAMARD_REV=f134af63deb2df17e1171a9ec1ea4a7d8604d5ca \
+    FLASH_MLA_REV=b7643bd54521f563b839b98289b5cd048c062ba2 \
+    DEEP_EP_REV=17cfb817bccec3a9c247013360cc550c2bac441e \
+    DEEP_GEMM_REV=67fc64863d43521080bf2005e6528d0fceee9510
+
+COPY --from=rl-cuda-ext-cpython /usr/local /opt/cpython
+COPY docker/base/build-rl-cuda-ext-wheel.sh /usr/local/bin/build-rl-cuda-ext-wheel.sh
+
+RUN chmod -R a+rX /opt/cpython && \
+    chmod +x /usr/local/bin/build-rl-cuda-ext-wheel.sh && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    libibverbs-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    ARCH="$(uname -m)" && \
+    F="cmake-${CMAKE_VERSION}-linux-${ARCH}" && \
+    curl --retry 3 --retry-delay 2 -fsSL -o "${F}.tar.gz" \
+    "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${F}.tar.gz" && \
+    tar -xzf "${F}.tar.gz" && \
+    cp -r "${F}/bin/"* /usr/local/bin/ && \
+    cp -r "${F}/share/"* /usr/local/share/ && \
+    rm -rf "${F}" "${F}.tar.gz" && \
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh && \
+    cp /root/.local/bin/uv /usr/local/bin/uv && \
+    python3.13 -c 'import ssl; print(ssl.OPENSSL_VERSION)' && \
+    uv venv --python /opt/cpython/bin/python3.13 /opt/venv && \
+    uv pip install --python /opt/venv/bin/python \
+    --index-url https://download.pytorch.org/whl/cu130 \
+    --extra-index-url https://pypi.org/simple \
+    --index-strategy unsafe-best-match \
+    "torch==2.13.0+cu130" \
+    ninja packaging "setuptools>=80" wheel psutil einops numpy pybind11 && \
+    mkdir -p /wheels
+
+# causal-conv1d. Installed into the mamba-ssm stage before that build.
+FROM rl-cuda-ext-base AS rl-cuda-ext-causal-conv1d
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/Dao-AILab/causal-conv1d "$CAUSAL_CONV1D_REV"
+
+# mamba-ssm. This revision builds with its own triton dependency;
+# do not strip triton the way the 2.2.5 stage above does.
+FROM rl-cuda-ext-base AS rl-cuda-ext-mamba-ssm
+COPY --from=rl-cuda-ext-causal-conv1d /wheels /tmp/causal-conv1d-wheels
+RUN uv pip install --python /opt/venv/bin/python --no-deps /tmp/causal-conv1d-wheels/*.whl && \
+    build-rl-cuda-ext-wheel.sh git https://github.com/state-spaces/mamba.git "$MAMBA_SSM_REV"
+
+# nv-grouped-gemm. Submodules carry the CUTLASS headers the build includes.
+FROM rl-cuda-ext-base AS rl-cuda-ext-nv-grouped-gemm
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/fanshiqing/grouped_gemm "$NV_GROUPED_GEMM_REV" --submodules
+
+# fast-hadamard-transform.
+FROM rl-cuda-ext-base AS rl-cuda-ext-fast-hadamard
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/Dao-AILab/fast-hadamard-transform.git "$FAST_HADAMARD_REV"
+
+# flash-mla. setup.py stamps the version from `git rev-parse`,
+# so the checkout is the full commit, not a shallow clone that hides it.
+# CUTLASS lives in csrc/cutlass.
+FROM rl-cuda-ext-base AS rl-cuda-ext-flash-mla
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/deepseek-ai/FlashMLA "$FLASH_MLA_REV" --submodules
+
+# deep-ep. libibverbs-dev is in the base. nvshmem is a build input.
+# NCCL is a submodule under third-party/nccl.
+FROM rl-cuda-ext-base AS rl-cuda-ext-deep-ep
+RUN uv pip install --python /opt/venv/bin/python \
+    --extra-index-url https://pypi.org/simple \
+    "nvidia-nvshmem-cu13==3.7.2" && \
+    build-rl-cuda-ext-wheel.sh git https://github.com/deepseek-ai/DeepEP.git "$DEEP_EP_REV" --submodules
+
+# deep-gemm. CUDA 13 moved the CCCL headers; CPLUS_INCLUDE_PATH is set on the base.
+# CUTLASS and fmt are submodules under third-party/.
+FROM rl-cuda-ext-base AS rl-cuda-ext-deep-gemm
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/deepseek-ai/DeepGEMM.git "$DEEP_GEMM_REV" --submodules
+
+# flash-attn from the PyPI sdist. 4 jobs matches the RL pyproject cap.
+FROM rl-cuda-ext-base AS rl-cuda-ext-flash-attn
+ENV MAX_JOBS=4
+RUN build-rl-cuda-ext-wheel.sh sdist "flash-attn==2.8.1"
+
+# transformer-engine-torch from the PyPI sdist. The meta packages already
+# publish wheels. Two ptxas jobs keeps the arm64 builder from running eight at once.
+# CUDNN_HOME points at the pip cuDNN wheel, which TE prefers over the image's copy.
+FROM rl-cuda-ext-base AS rl-cuda-ext-transformer-engine
+ENV NVTE_FRAMEWORK=pytorch \
+    NVTE_CUDA_ARCHS="90;100" \
+    NVTE_BUILD_MAX_JOBS=2 \
+    CUDNN_HOME=/opt/venv/lib/python3.13/site-packages/nvidia/cudnn \
+    CUDNN_PATH=/opt/venv/lib/python3.13/site-packages/nvidia/cudnn
+RUN uv pip install --python /opt/venv/bin/python \
+    --extra-index-url https://pypi.org/simple \
+    "nvidia-cudnn-cu13==9.20.0.48" && \
+    build-rl-cuda-ext-wheel.sh sdist "transformer-engine-torch==2.18.0"
+
+# One /wheels directory, one architecture per platform build.
+FROM scratch AS rl-cuda-ext-wheel
+COPY --from=rl-cuda-ext-causal-conv1d /wheels /wheels
+COPY --from=rl-cuda-ext-mamba-ssm /wheels /wheels
+COPY --from=rl-cuda-ext-nv-grouped-gemm /wheels /wheels
+COPY --from=rl-cuda-ext-fast-hadamard /wheels /wheels
+COPY --from=rl-cuda-ext-flash-mla /wheels /wheels
+COPY --from=rl-cuda-ext-deep-ep /wheels /wheels
+COPY --from=rl-cuda-ext-deep-gemm /wheels /wheels
+COPY --from=rl-cuda-ext-flash-attn /wheels /wheels
+COPY --from=rl-cuda-ext-transformer-engine /wheels /wheels

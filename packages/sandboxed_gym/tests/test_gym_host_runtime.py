@@ -1187,6 +1187,19 @@ def _body_is_complete(received: bytes) -> bool:
     return False
 
 
+def _decode_chunked_body(received: bytes) -> str:
+    """Reassemble the chunked body in ``received``, heartbeats included."""
+    _, _, rest = received.partition(b"\r\n\r\n")
+    decoded = ""
+    while True:
+        size_line, _, rest = rest.partition(b"\r\n")
+        size = int(size_line, 16)
+        if size == 0:
+            return decoded
+        decoded += rest[:size].decode()
+        rest = rest[size + 2 :]
+
+
 def _raw_rollout_exchange(base_url: str, payload: str, version: str) -> bytes:
     """POST /rollouts/run over a bare socket and return the response bytes as sent.
 
@@ -1241,7 +1254,6 @@ def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server)
     assert body.endswith(b"0\r\n\r\n")
     # A heartbeat is its own chunk -- length-prefixed, so it cannot read as the end.
     assert body.startswith(b"1\r\n \r\n")
-
     decoded = ""
     rest = body
     while True:
@@ -1252,6 +1264,53 @@ def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server)
         decoded += rest[:size].decode()
         rest = rest[size + 2 :]
     assert len(json.loads(decoded)["results"]) == 1
+
+
+def test_rollouts_run_reports_an_unencodable_result_in_the_body(ready_server):
+    """An unencodable result is a failed batch, not an empty one.
+
+    Serializing happens after the status line, so a raised encoder used to escape the
+    handler with the terminating chunk unwritten -- which every hop downstream reports
+    as a well-formed empty 200, i.e. a batch that succeeded with no rewards.
+    """
+
+    class _UnencodableHelper:
+        def run_examples(self, examples, head_server_config=None):
+            async def _one(row):
+                return row, {"reward": object()}
+
+            return [_one(row) for row in examples]
+
+    runtime._ROLLOUT_HELPER = _UnencodableHelper()
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+
+    assert _body_is_complete(received), received
+    head, _, _ = received.partition(b"\r\n\r\n")
+    assert b"200" in head.split(b"\r\n")[0]
+
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "not JSON-serializable" in body["error"]["message"]
+
+
+def test_rollouts_run_never_answers_with_an_empty_body(ready_server):
+    """A body of zero bytes is indistinguishable from a stream that was dropped."""
+
+    def _empty(self, future, started):
+        return b""
+
+    original = runtime.Handler._await_results
+    runtime.Handler._await_results = _empty
+    try:
+        received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+    finally:
+        runtime.Handler._await_results = original
+
+    assert _body_is_complete(received), received
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "empty response body" in body["error"]["message"]
 
 
 def test_rollouts_run_sends_a_length_to_an_http_10_caller(ready_server):

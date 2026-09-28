@@ -20,6 +20,7 @@ members = [
   "packages/models",
   "sdk/python/nemo-helix",
   "packages/nemo_helix_plugin",
+  "packages/sandboxed_gym",
   "packages/nhx_common",
   "packages/nhx_customization_common",
   "services/rl",
@@ -31,6 +32,7 @@ filesets = { workspace = true }
 models = { workspace = true }
 nemo-helix-sdk = { workspace = true }
 nemo-helix-plugin = { workspace = true }
+nemo-sandboxed-gym = { workspace = true }
 nhx-common = { workspace = true }
 nhx-customization-common = { workspace = true }
 nhx-rl = { workspace = true }

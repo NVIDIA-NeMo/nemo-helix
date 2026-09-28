@@ -41,8 +41,9 @@ from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel
 
 GYM_REPO = "https://github.com/NVIDIA-NeMo/Gym"
 
-# Matches the interpreter the training image builds Gym server venvs with.
-TARGET_PYTHON_VERSION = "3.13"
+# Gym 0.7 requires Python>=3.13.14. A bare "3.13" resolves as 3.13.0 and rejects
+# that wheel. The training image is CPython 3.13.15, so 3.13.14 is a compatible target.
+TARGET_PYTHON_VERSION = "3.13.14"
 # The training images are published for both linux/amd64 and linux/arm64, so wheel
 # architecture is a property of the cluster's nodes. Several glibc floors are listed per arch
 # because pip matches these tags literally rather than expanding a compatibility range.
