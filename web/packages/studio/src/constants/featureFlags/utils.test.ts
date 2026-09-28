@@ -14,6 +14,7 @@ import {
   booleanFlag,
   stringFlag,
   numberFlag,
+  listFlag,
   parseFlags,
   EnvConfig,
 } from '@studio/constants/featureFlags/utils';
@@ -157,6 +158,42 @@ describe('featureFlags utils', () => {
       const flag = numberFlag('MY_ENV_VAR');
       expect(flag.envVar).toBe('MY_ENV_VAR');
       expect(flag.typeName).toBe('number');
+    });
+  });
+
+  describe('listFlag', () => {
+    it('splits a comma-separated env var into a trimmed array', () => {
+      const flag = listFlag('TEST_FLAG');
+      const result = flag.schema.safeParse('a, b ,c');
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual(['a', 'b', 'c']);
+    });
+
+    it('drops empty entries', () => {
+      const flag = listFlag('TEST_FLAG');
+      const result = flag.schema.safeParse('a,,b,');
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual(['a', 'b']);
+    });
+
+    it('returns default value when env var is undefined', () => {
+      const flag = listFlag('TEST_FLAG', ['default']);
+      const result = flag.schema.safeParse(undefined);
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual(['default']);
+    });
+
+    it('defaults to an empty array when no default is given', () => {
+      const flag = listFlag('TEST_FLAG');
+      const result = flag.schema.safeParse(undefined);
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual([]);
+    });
+
+    it('sets envVar and typeName correctly', () => {
+      const flag = listFlag('MY_ENV_VAR');
+      expect(flag.envVar).toBe('MY_ENV_VAR');
+      expect(flag.typeName).toBe('list');
     });
   });
 

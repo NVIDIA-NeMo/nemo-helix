@@ -14,6 +14,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_DEPLOYMENTS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_DISABLED_STUDIO_PLUGINS', 'disabled-plugin');
 });
 
 /** The Models children, in the order a user walks the funnel. Virtual Models trails them. */
@@ -220,6 +221,26 @@ describe('WorkspaceSideNav', () => {
 
     expect(screen.getAllByText('Red Team')).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'Probes' })).toBeInTheDocument();
+  });
+
+  it('excludes a plugin listed in VITE_FF_DISABLED_STUDIO_PLUGINS', () => {
+    renderWithPlugins([
+      makePlugin('disabled-plugin', [
+        {
+          group: 'Governance',
+          items: [
+            {
+              id: 'disabled-item',
+              iconName: 'shield',
+              label: 'Disabled Item',
+              href: '/workspaces/test-workspace/disabled-item',
+            },
+          ],
+        },
+      ]),
+    ]);
+
+    expect(screen.queryByRole('link', { name: 'Disabled Item' })).not.toBeInTheDocument();
   });
 
   it('keeps a plugin item whose id matches a core item in the merged group', () => {

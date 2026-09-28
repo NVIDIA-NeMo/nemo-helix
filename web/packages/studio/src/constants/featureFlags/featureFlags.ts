@@ -10,7 +10,12 @@
  * its affiliates is strictly prohibited.
  */
 
-import { booleanFlag, FlagDescriptor, previewFlag } from '@studio/constants/featureFlags/utils';
+import {
+  booleanFlag,
+  FlagDescriptor,
+  listFlag,
+  previewFlag,
+} from '@studio/constants/featureFlags/utils';
 import { z } from 'zod';
 
 // ============================================================================
@@ -71,6 +76,7 @@ export const flagDefinitions = {
   dataDesignerEnabled: previewFlag('VITE_FF_DATA_DESIGNER_ENABLED', true),
   datasetsEnabled: previewFlag('VITE_FF_DATASETS_ENABLED', true),
   deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED', true),
+  disabledStudioPlugins: listFlag('VITE_FF_DISABLED_STUDIO_PLUGINS'),
   evaluatorBenchmarksEnabled: previewFlag('VITE_FF_EVALUATOR_BENCHMARKS_ENABLED', false),
   evaluatorEnabled: previewFlag('VITE_FF_EVALUATOR_ENABLED', true),
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),
