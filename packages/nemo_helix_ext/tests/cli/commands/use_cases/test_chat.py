@@ -143,6 +143,15 @@ def test_chat_without_model_or_configured_default_fails_with_usage_error(runner:
     assert "NEMO_DEFAULT_MODEL" in result.output
 
 
+def test_chat_fast_without_any_configured_model_fails_with_usage_error(runner: CliRunner) -> None:
+    """--fast with neither a fast nor a default model configured points at both env vars."""
+    result = runner.invoke(app, ["chat", "--fast", "hello"])
+    assert result.exit_code == 2
+    assert "no fast or default model is configured" in result.output
+    assert "NEMO_FAST_MODEL" in result.output
+    assert "NEMO_DEFAULT_MODEL" in result.output
+
+
 def test_chat_rejects_positional_model(runner: CliRunner) -> None:
     """The model is no longer positional; MODEL PROMPT is an extra-argument error."""
     result = runner.invoke(app, ["chat", "my-model", "hello"])

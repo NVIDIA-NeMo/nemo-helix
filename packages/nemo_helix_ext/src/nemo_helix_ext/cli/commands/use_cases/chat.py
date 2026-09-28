@@ -105,10 +105,17 @@ def _resolve_context_model(
     ctx = state.get_sdk_context()
     configured = ctx.fast_model if fast else ctx.default_model
     if not configured:
-        env_var = "NEMO_FAST_MODEL" if fast else "NEMO_DEFAULT_MODEL"
+        if fast:
+            # --fast falls back to the default model (see config resolution), so this branch
+            # is only reached when neither a fast nor a default model is configured.
+            raise click.UsageError(
+                "No model specified and no fast or default model is configured. "
+                "Pass --model, run 'nemo setup', or set NEMO_FAST_MODEL "
+                "(or NEMO_DEFAULT_MODEL, which --fast also falls back to)."
+            )
         raise click.UsageError(
-            f"No model specified and no {'fast' if fast else 'default'} model is configured. "
-            f"Pass --model, run 'nemo setup', or set {env_var}."
+            "No model specified and no default model is configured. "
+            "Pass --model, run 'nemo setup', or set NEMO_DEFAULT_MODEL."
         )
 
     model_workspace, _, model_name = configured.rpartition("/")
@@ -295,6 +302,12 @@ def chat(
     if model is not None and fast:
         raise click.UsageError("--model and --fast are mutually exclusive.")
     if provider and model is None:
+        if fast:
+            raise click.UsageError(
+                "--provider requires --model: provider routing passes the provider's own model "
+                "ID, not a model entity from the context. --fast selects a configured model "
+                "entity, not a provider-native model ID, so --model is still required."
+            )
         raise click.UsageError(
             "--provider requires --model: provider routing passes the provider's own model ID, "
             "not a model entity from the context."
