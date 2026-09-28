@@ -99,7 +99,7 @@ def test_agent_invoked_audit() -> None:
     commands = session.get_bash_commands()
 
     has_audit = any(
-        _has_token_sequence(cmd, "auditor", "audit") and "--spec" in cmd and CONFIG_REF in cmd and TARGET_REF in cmd
+        _has_token_sequence(cmd, "auditor", "audit", "--spec") and CONFIG_REF in cmd and TARGET_REF in cmd
         for cmd in commands
     )
 
