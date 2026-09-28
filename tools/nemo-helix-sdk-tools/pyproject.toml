@@ -17,19 +17,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "caseutil>=0.7.2",
     "click>=8.2.0",
     "jinja2>=3.1.6",
     "libcst>=1.5.0",
     "nemo-helix-ext",
-    "nemo-helix-sdk",
     "nhx-common",
     "packaging>=25.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "requests>=2.32.0",
     "rich>=14.1.0",
-    "ruamel.yaml>=0.18.14",
     "tomlkit>=0.13.2",
     "typer>=0.19.2",
     "urllib3>=2.6.3",
@@ -41,7 +38,6 @@ nemo-helix-sdk-tools = "nemo_helix_sdk_tools.cli:app"
 
 [tool.uv.sources]
 nemo-helix-ext = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 nhx-common = { workspace = true }
 
 

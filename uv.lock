@@ -744,15 +744,6 @@ wheels = [
 ]
 
 [[package]]
-name = "caseutil"
-version = "0.7.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5d/de/8cdaf896811af1f1d64833e511baa9dec13b4ca24cf4c34f1b45daeee82a/caseutil-0.7.2.tar.gz", hash = "sha256:36e5283590e67e33749d6c1ddb913dcfabb870749215776f7b411f9eb8e361e6", size = 122493, upload-time = "2025-02-13T18:28:26.887Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/a8/20761d6a13a6a6f290c5ed53d8b633e20167477dff0851844ce00553cfda/caseutil-0.7.2-py2.py3-none-any.whl", hash = "sha256:11c06c3379e381d0c3633e910be5463e28fa983c42cd086382da5f73ea587a91", size = 8941, upload-time = "2025-02-13T18:28:24.228Z" },
-]
-
-[[package]]
 name = "certifi"
 version = "2026.7.22"
 source = { registry = "https://pypi.org/simple" }
@@ -7128,19 +7119,16 @@ name = "nemo-helix-sdk-tools"
 version = "0.0.0"
 source = { editable = "tools/nemo-helix-sdk-tools" }
 dependencies = [
-    { name = "caseutil", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "click", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "libcst", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-ext", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-helix-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "packaging", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "ruamel-yaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tomlkit", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "urllib3", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7154,19 +7142,16 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "caseutil", specifier = ">=0.7.2" },
     { name = "click", specifier = ">=8.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "libcst", specifier = ">=1.5.0" },
     { name = "nemo-helix-ext", editable = "packages/nemo_helix_ext" },
-    { name = "nemo-helix-sdk", editable = "sdk/python/nemo-helix" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", specifier = ">=2.32.0" },
     { name = "rich", specifier = ">=14.1.0" },
-    { name = "ruamel-yaml", specifier = ">=0.18.14" },
     { name = "tomlkit", specifier = ">=0.13.2" },
     { name = "typer", specifier = ">=0.19.2" },
     { name = "urllib3", specifier = ">=2.6.3" },

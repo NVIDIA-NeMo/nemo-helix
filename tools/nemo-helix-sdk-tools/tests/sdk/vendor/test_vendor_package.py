@@ -355,7 +355,7 @@ switchyard = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchy
     monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
     monkeypatch.setattr(vendor_package, "WRAPPER_PATH", wrapper_path)
 
-    vendor_package._create_core_local_extra([])
+    vendor_package._create_core_local_extra()
 
     wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
     wrapper_optional = wrapper_updated["project"]["optional-dependencies"]
@@ -547,6 +547,57 @@ dependencies = ["openai>=2"]
     assert "test" not in optional
     assert "scripts" not in wrapper_updated["project"]
     assert not wrapper_updated["project"]["entry-points"]
+
+
+def test_process_bundle_packages_keeps_published_workspace_dependencies(tmp_path: Path, monkeypatch) -> None:
+    wrapper_path = tmp_path / "packages/nemo_helix"
+    evaluator_path = tmp_path / "packages/nemo_evaluator_sdk"
+    gym_path = tmp_path / "packages/sandboxed_gym"
+    unpublished_path = tmp_path / "packages/nhx_testing"
+    for path in (wrapper_path, evaluator_path, gym_path, unpublished_path):
+        path.mkdir(parents=True)
+
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.uv.workspace]
+members = ["packages/nemo_helix", "packages/nemo_evaluator_sdk", "packages/sandboxed_gym", "packages/nhx_testing"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (wrapper_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "nemo-helix"
+
+[project.optional-dependencies]
+
+[tool.bundle-package]
+nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk" }
+
+[tool.bundle-package-published]
+packages = ["nemo-sandboxed-gym"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (evaluator_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "nemo-evaluator-sdk"
+dependencies = ["pydantic>=2.10.6", "nemo-sandboxed-gym", "nhx-testing"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (gym_path / "pyproject.toml").write_text('[project]\nname = "nemo-sandboxed-gym"\n', encoding="utf-8")
+    (unpublished_path / "pyproject.toml").write_text('[project]\nname = "nhx-testing"\n', encoding="utf-8")
+
+    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
+    vendor_package._process_bundle_packages()
+
+    wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
+    assert list(wrapper_updated["project"]["optional-dependencies"]["nemo-evaluator-sdk"]) == [
+        "pydantic>=2.10.6",
+        "nemo-sandboxed-gym",
+    ]
 
 
 def test_process_bundle_packages_rebuilds_generated_dependency_groups(tmp_path: Path, monkeypatch) -> None:

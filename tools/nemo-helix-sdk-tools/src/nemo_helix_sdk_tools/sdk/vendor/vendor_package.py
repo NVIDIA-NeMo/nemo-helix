@@ -642,20 +642,32 @@ def vendor_all_packages_from_configs(packages: list[str]) -> None:
     for config in configs:
         _vendor_package_metadata(config)
 
-    # Phase 3: create core-service extra that aggregates all service -service extras
-    _create_core_local_extra(configs)
+    _refresh_bundle_metadata()
 
-    # Phase 4: process [tool.bundle-package] configs across all workspace packages.
+
+@app.command("bundle-metadata")
+def vendor_bundle_metadata() -> None:
+    """Refresh wrapper metadata generated from `[tool.bundle-package]` without touching the SDK tree."""
+    _setup_logging()
+    _reset_generated_pyproject_fields()
+    _refresh_bundle_metadata()
+
+
+def _refresh_bundle_metadata() -> None:
+    # Create the core-service extra that aggregates all service -service extras.
+    _create_core_local_extra()
+
+    # Process [tool.bundle-package] configs across all workspace packages.
     # This reads each bundled package's deps and writes them into the deps_group
     # specified by the parent's bundle config. It also copies scripts,
     # entry-points, and optional-dependencies from bundled packages.
     _process_bundle_packages()
 
-    # Phase 5: sort auto-generated fields in the wrapper for deterministic output.
+    # Sort auto-generated fields in the wrapper for deterministic output.
     # Without this, ordering depends on package processing order in the Makefile.
     _sort_wrapper_pyproject_fields()
 
-    # Phase 6: rewrite optional-dependencies (manual aliases + generated extras)
+    # Rewrite optional-dependencies (manual aliases + generated extras)
     # and annotate generated scripts/entry-point tables.
     _annotate_generated_bundle_groups()
 
@@ -862,9 +874,12 @@ def _process_bundle_packages() -> None:
     metadata explicitly listed in the bundle entry's ``inherit`` field, plus any
     scripts declared directly in the bundle config.
 
-    Workspace package dependencies are filtered out (they're not on PyPI).
-    If a filtered dep has its own bundle entry, the dependency name is kept in
-    source metadata so build hooks can rewrite final wheel metadata if needed.
+    Workspace package dependencies are filtered out (they're not on PyPI),
+    except members listed in the parent's ``[tool.bundle-package-published]``
+    ``packages``, which release to PyPI on their own and stay regular
+    requirements. If a filtered dep has its own bundle entry, the dependency
+    name is kept in source metadata so build hooks can rewrite final wheel
+    metadata if needed.
     """
     root_pyproject_path = NHX_ROOT_PATH / "pyproject.toml"
     if not root_pyproject_path.exists():
@@ -899,6 +914,10 @@ def _process_bundle_packages() -> None:
             continue
 
         parent_name = member_config.get("project", {}).get("name", member)
+        published_package_names = {
+            canonicalize_name(name)
+            for name in member_config.get("tool", {}).get("bundle-package-published", {}).get("packages", [])
+        }
 
         rich.print(f"📦 Processing [tool.bundle-package] for `{parent_name}` ({len(bundle_config)} packages)")
 
@@ -955,7 +974,7 @@ def _process_bundle_packages() -> None:
                     filtered_deps.append(dep)
                     logger.debug(f"  Keeping bundled dep: {dep}")
                     continue
-                if dep_name in workspace_package_names:
+                if dep_name in workspace_package_names and dep_name not in published_package_names:
                     logger.debug(f"  Filtering workspace dep: {dep}")
                     continue
                 filtered_deps.append(dep)
@@ -1449,7 +1468,7 @@ def _sort_wrapper_pyproject_fields() -> None:
     pyproject_path.write_text(tomlkit.dumps(pyproject), encoding="utf-8")
 
 
-def _create_core_local_extra(configs: list[dict]) -> None:
+def _create_core_local_extra() -> None:
     """Create aggregate extras and ensure `services` references them.
 
     Reads from [tool.bundle-package] on the wrapper to determine which packages
