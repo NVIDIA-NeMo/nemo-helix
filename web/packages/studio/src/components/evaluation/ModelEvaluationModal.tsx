@@ -34,6 +34,7 @@ import {
   NEW_CONFIG,
   REFERENCE_METRICS,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
+import { useConfigNameStatus } from '@studio/routes/evaluation/EvaluationNewRoute/useConfigNameStatus';
 import { useCreateEvaluation } from '@studio/routes/evaluation/EvaluationNewRoute/useCreateEvaluation';
 import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
 import { useJudgePromptVariables } from '@studio/routes/evaluation/EvaluationNewRoute/useJudgePromptVariables';
@@ -328,13 +329,21 @@ const ModelEvaluationModalInner: FC<{
   const judgePromptInvalid =
     judgeSelected && (judgePrompt.invalid.length > 0 || judgePrompt.malformed);
 
+  const { status: nameStatus } = useConfigNameStatus();
+  const nameTaken = !reusing && nameStatus === 'conflict';
+
   const steps = stepsFor(reusing);
   const at = steps.indexOf(step);
   const isLast = at === steps.length - 1;
 
   const handleSubmit = form.handleSubmit(
     (values) => {
-      void createEvaluation(values, bindings);
+      void createEvaluation(values, bindings, (name) => {
+        form.setError('name', {
+          message: `A fileset named "${name}" already exists. Choose another name.`,
+        });
+        setStep('configuration');
+      });
     },
     (errors) => {
       const target: WizardStep | null = ['name', 'dataset', 'fieldMapping'].some(
@@ -363,6 +372,7 @@ const ModelEvaluationModalInner: FC<{
   const goNext = async () => {
     const fields = FIELDS_BY_STEP[step];
     if (fields.length > 0 && !(await form.trigger(fields))) return;
+    if (step === 'configuration' && nameTaken) return;
     if (step === 'metrics' && judgePromptInvalid) return;
     setStep(steps[Math.min(at + 1, steps.length - 1)]);
   };
@@ -416,7 +426,7 @@ const ModelEvaluationModalInner: FC<{
               color="brand"
               type="submit"
               loading={isPending}
-              disabled={isPending || !configReady}
+              disabled={isPending || !configReady || nameTaken}
             >
               Submit
             </LoadingButton>

@@ -6,7 +6,10 @@ import { getErrorMessage } from '@nemo/common/src/utils/error';
 import { logger } from '@nemo/common/src/utils/logger';
 import { useEvaluatorCreateEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
 import type { EvaluateJobRequest, MetricInline } from '@nemo/sdk/generated/evaluator/schema';
-import { ensureEvalConfigFileset } from '@studio/api/evaluation/eval-config-fileset';
+import {
+  createEvalConfigFileset,
+  isConflictError,
+} from '@studio/api/evaluation/eval-config-fileset';
 import { evalConfigFilename } from '@studio/components/evaluation/experimentEvalConfig';
 import {
   buildEvalJobName,
@@ -34,7 +37,11 @@ export function useCreateEvaluation() {
   const toast = useToast();
   const { mutateAsync: createEvaluateJob, isPending } = useEvaluatorCreateEvaluateJob();
 
-  const createEvaluation = async (values: EvaluationFormValues, bindings: DatasetBindings) => {
+  const createEvaluation = async (
+    values: EvaluationFormValues,
+    bindings: DatasetBindings,
+    onNameConflict?: (name: string) => void
+  ) => {
     const spec = buildEvaluationSpec(values, bindings, workspace);
 
     // Reusing a saved config: `configSource` IS the fileset it lives in, so the
@@ -47,7 +54,7 @@ export function useCreateEvaluation() {
       if (!reusing) {
         // Persist first: a config that cannot be stored is not worth running, and
         // this way a failed upload leaves no orphan job behind.
-        await ensureEvalConfigFileset(
+        await createEvalConfigFileset(
           workspace,
           fileset,
           new AbortController().signal,
@@ -100,6 +107,10 @@ export function useCreateEvaluation() {
       toast.success('Evaluation job created');
       navigate(getEvaluationResultDetailsRoute(workspace, job.name), { flushSync: true });
     } catch (error) {
+      if (!reusing && isConflictError(error)) {
+        onNameConflict?.(fileset);
+        return;
+      }
       const message = getErrorMessage(error as Error, 'Failed to create evaluation');
       logger.error(`EvaluationNewRoute: ${message}`);
       toast.error(message);
