@@ -84,13 +84,12 @@ Target types: `nim`, `openai`
 ## Audit Job Commands
 
 ```bash
-# Run an audit locally (spec references config and target as namespace/name)
-nemo auditor audit run \
+# Submit an audit job (spec references config and target as namespace/name)
+nemo auditor audit \
   --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
 
-# Submit an audit to a configured cluster
-nemo auditor audit submit \
-  --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
+# Print the audit job input/output schemas
+nemo auditor audit explain
 ```
 
 Jobs may take a long time or remain in pending/created status. That is expected.
@@ -110,4 +109,4 @@ Jobs may take a long time or remain in pending/created status. That is expected.
 1. Create a target pointing to the model endpoint
 2. Create a config with probe selection
 3. Create a job referencing `default/<config>` and `default/<target>`
-4. Run locally with `nemo auditor audit run --spec '{...}'`, or submit with `nemo auditor audit submit --spec '{...}'`
+4. Submit it with `nemo auditor audit --spec '{...}'`

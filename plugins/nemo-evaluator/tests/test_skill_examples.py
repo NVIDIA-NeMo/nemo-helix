@@ -569,10 +569,9 @@ def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:
     """The skill's own eval must not grade highest for what the skill tells you not to do.
 
     Two contradictions have lived here. ``evals.json`` expected
-    ``nemo evaluator evaluate run --spec`` while SKILL.md says to default to ``submit`` (the flags
-    are identical, so it rewarded the discouraged verb for nothing), and it expected the agent to
-    require manual ``.venv`` activation while SKILL.md routes a checkout through ``uv run`` and says
-    installed usage needs no activation at all.
+    ``nemo evaluator evaluate run --spec`` while SKILL.md routes durable platform evaluation through
+    the plugin-specific job commands, and it expected the agent to require manual ``.venv`` activation
+    while SKILL.md routes a checkout through ``uv run`` and says installed usage needs no activation at all.
 
     Both are the same failure: the eval and the guidance drifting apart with nothing comparing them.
     """
@@ -587,7 +586,7 @@ def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:
         )
 
     skill = (_repo_root() / "skills/nemo-evaluator-plugin/SKILL.md").read_text(encoding="utf-8")
-    assert "Default to `submit` for every plugin evaluation." in skill
+    assert "Default to the plugin-specific job commands for durable platform evaluation" in skill
     assert "without assuming a repository root or manually activating `.venv`" in skill
 
 
@@ -674,8 +673,8 @@ def test_authored_skill_guidance_uses_job_commands_for_plugin_jobs() -> None:
     examples = "\n".join(path.read_text(encoding="utf-8") for path in sorted((root / "assets/examples").glob("*.py")))
     guidance = "\n".join([*markdown.values(), examples])
 
-    # The plugin's local execution path is being retired. Prose may name it so the
-    # agent knows why to avoid it; runnable snippets must never demonstrate it.
+    # The plugin's legacy CLI verbs are retired. Prose may name them so the
+    # agent knows why to avoid them; runnable snippets must never demonstrate them.
     retiring = (
         "nemo evaluator evaluate run",
         "nemo evaluator agent-evaluate run",
@@ -688,7 +687,7 @@ def test_authored_skill_guidance_uses_job_commands_for_plugin_jobs() -> None:
     assert "client.evaluator.create(" not in guidance
 
     normalized_skill = " ".join(markdown[root / "SKILL.md"].split())
-    assert "is being retired" in normalized_skill
+    assert "old `nemo evaluator ... run` and `nemo evaluator ... submit` CLI verbs" in normalized_skill
     assert "`nemo_evaluator_sdk.Evaluator`" in normalized_skill
 
     assert "Evaluator().run_sync(" in guidance

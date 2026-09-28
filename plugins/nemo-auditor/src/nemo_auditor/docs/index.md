@@ -34,6 +34,12 @@ Inspect the generated job metadata:
 nemo auditor audit explain
 ```
 
+Submit an audit job:
+
+```bash
+nemo auditor audit --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
+```
+
 ## Python Examples
 
 Read the plugin service status through the platform SDK namespace:

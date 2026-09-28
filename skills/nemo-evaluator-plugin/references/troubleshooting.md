@@ -17,7 +17,7 @@ nemo evaluator agent-evaluate explain
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `No such command 'evaluation'` | The legacy generated CLI group is not the plugin surface | Use `nemo evaluator ...` |
-| Guidance or `--help` references a local plugin `run` verb | That execution path is being retired; `client.evaluator.run()` is already gone | Use `submit`, or the standalone SDK for local iteration |
+| Guidance or `--help` references a local plugin `run` verb | That execution path is retired; `client.evaluator.run()` is already gone | Use the matching plugin job command, or the standalone SDK for local iteration |
 | Agent-eval metric fails every trial with a missing template key | The metric uses the dataset-driven `item.*` context in a task-driven run | Use `inputs.*`, `reference.*`, `task.*`, `trial.*`, or `sample.output_text` |
 | Metric validation reports a missing required output | `compute_scores` omitted an output whose spec defaults to `required=True` | Emit the output on every scoreable trial, or set `required=False` only when absence means unmeasured or not expected on every trial |
 | An optional output has `missing > 0` or `nan_count > 0` | The output was omitted, the metric or trial failed, or an emitted value was non-finite | Compare `missing` and `failed` coverage, then inspect score diagnostics and the effective `count`; do not fill omissions with zero |
