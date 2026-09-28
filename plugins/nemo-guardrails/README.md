@@ -66,7 +66,7 @@ To use an inline config, ensure it matches the `RailsConfig` shape.
         "rails": {
           "input": { "flows": ["your input flow names"] },
           "output": { "flows": ["your output flow names"] }
-        },
+        }
       }
     }
   ]

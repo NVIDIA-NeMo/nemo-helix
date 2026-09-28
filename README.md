@@ -21,7 +21,7 @@ NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and 
 Quick install from PyPI:
 
 ```bash
-curl -LsSf https://astral.sh/uv/0.9.30/install.sh | sh
+curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install "nemo-helix[all]"
 
