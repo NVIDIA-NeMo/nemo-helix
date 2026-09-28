@@ -176,7 +176,7 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_MODEL_EVALUATION_FORM_ENABLED",
         config_path="studio.feature_flags.model_evaluation_form_enabled",
-        default="false",
+        default="true",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_MONITOR_ENABLED",
