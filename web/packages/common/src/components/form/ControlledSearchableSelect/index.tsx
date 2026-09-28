@@ -17,6 +17,7 @@ import {
   Stack,
   Text,
   TextInput,
+  Tooltip,
 } from '@nvidia/foundations-react-core';
 import { Filter } from 'lucide-react';
 import { ChangeEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -219,6 +220,31 @@ export const ControlledSearchableSelect = ({
     onBlur();
   };
 
+  const resolveLabel = useCallback(
+    (optionValue: string) => options.find((option) => option.value === optionValue)?.label,
+    [options]
+  );
+
+  const defaultRenderValue = useCallback(
+    (currentValue: string | string[] | undefined) => {
+      if (Array.isArray(currentValue)) {
+        return currentValue.map((v) => resolveLabel(v) ?? v).join(', ');
+      }
+      return currentValue ? (resolveLabel(currentValue) ?? currentValue) : undefined;
+    },
+    [resolveLabel]
+  );
+
+  /**
+   * The trigger truncates long values with an ellipsis; without this tooltip, two options with
+   * different names but the same visible prefix are indistinguishable once selected.
+   */
+  const triggerTooltip = Array.isArray(value)
+    ? value.map((v) => resolveLabel(v) ?? v).join(', ')
+    : value
+      ? (resolveLabel(value) ?? value)
+      : undefined;
+
   return (
     <FormField
       name={useControllerProps.name}
@@ -234,22 +260,24 @@ export const ControlledSearchableSelect = ({
         open={selectOpen}
         onOpenChange={handleSelectOpenChange}
       >
-        <SelectTrigger
-          renderValue={renderValue}
-          className="w-full border-1 nv-input"
-          onBlur={handleBlur}
-          placeholder={
-            isLoading
-              ? 'Loading...'
-              : triggerPlaceholder === ''
-                ? INVISIBLE_TRIGGER_PLACEHOLDER
-                : triggerPlaceholder
-          }
-          slotEnd={isLoading && <TextInputSpinner />}
-          required={required}
-          status={status || (error ? 'error' : undefined)}
-          {...selectProps}
-        />
+        <Tooltip slotContent={triggerTooltip} disabled={!triggerTooltip}>
+          <SelectTrigger
+            renderValue={renderValue ?? defaultRenderValue}
+            className="w-full border-1 nv-input"
+            onBlur={handleBlur}
+            placeholder={
+              isLoading
+                ? 'Loading...'
+                : triggerPlaceholder === ''
+                  ? INVISIBLE_TRIGGER_PLACEHOLDER
+                  : triggerPlaceholder
+            }
+            slotEnd={isLoading && <TextInputSpinner />}
+            required={required}
+            status={status || (error ? 'error' : undefined)}
+            {...selectProps}
+          />
+        </Tooltip>
         <SelectContent>
           <SelectListbox>
             <Block className="p-2 w-full sticky top-0 bg-surface z-10">

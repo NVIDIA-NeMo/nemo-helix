@@ -53,6 +53,21 @@ describe('ControlledSearchableSelect', () => {
       expect(screen.getByText('Favorite Fruit')).toBeInTheDocument();
     });
 
+    it('should render the selected option label in the trigger, not its raw value', async () => {
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+          formFieldProps={{ slotLabel: 'Favorite Fruit' }}
+        />,
+        { defaultValues: { fruit: 'banana' } }
+      );
+
+      const combobox = await screen.findByRole('combobox');
+      expect(combobox).toHaveTextContent('Banana');
+      expect(combobox).not.toHaveTextContent('banana');
+    });
+
     it('should show loading placeholder when isLoading is true', () => {
       renderWithForm(
         <ControlledSearchableSelect
