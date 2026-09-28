@@ -369,7 +369,7 @@ RUN umask 022 && uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps 
 # cache. See README.md, "Prefetching the per-worker venvs".
 #
 # Filters are SUBSTRING matches on actor FQNs, and one venv is built PER ACTOR, so actors sharing
-# an extra still need their own filter. Eight filters -> nine venvs:
+# an extra still need their own filter. Seven filters -> eight venvs:
 #   dtensor_policy_worker.DTensorPolicyWorker      -> fsdp      (DPO training)
 #   dtensor_policy_worker_v2.DTensorPolicyWorkerV2 -> automodel (GRPO training; the only LoRA-capable
 #       DTensor worker). The V1 filter does not match it - the FQN reads `dtensor_policy_worker_v2.`.
@@ -381,7 +381,6 @@ RUN umask 022 && uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps 
 #   sync_rollout_actor.SyncRolloutActor            -> vllm      (GRPO rollout driver)
 #   nemo_gym.NemoGym                               -> nemo_gym  (Gym environment actor, mode A)
 #   nemo_gym_actor.SandboxedGymActor               -> nemo_gym  (mode B proxy actor)
-#   broker_actor.SandboxEpisodeBrokerActor         -> nemo_gym  (per-episode sandbox broker)
 # Kept specific on purpose: a bare "vllm" would also match modelopt's vllm_quant_worker.
 #
 # NOT prefetched: sglang, trtllm, modelopt-quant, MegatronValueWorker / DTensorValueWorkerV2 (GRPO
@@ -396,8 +395,7 @@ uv run nemo_rl/utils/prefetch_venvs.py \
     vllm.vllm_worker \
     sync_rollout_actor.SyncRolloutActor \
     nemo_gym.NemoGym \
-    nemo_gym_actor.SandboxedGymActor \
-    broker_actor.SandboxEpisodeBrokerActor
+    nemo_gym_actor.SandboxedGymActor
 
 # Fail loudly if the registry moved an actor out from under a filter above - otherwise the venv
 # would silently be built on the node at first use instead, turning a build error into a slow job.
@@ -409,7 +407,6 @@ for actor in \
     nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker \
     nemo_rl.environments.nemo_gym.NemoGym \
     nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor \
-    sandboxed_gym.ray.broker_actor.SandboxEpisodeBrokerActor \
     nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker \
     nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker \
     nemo_rl.experience.sync_rollout_actor.SyncRolloutActor
