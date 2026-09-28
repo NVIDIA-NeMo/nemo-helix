@@ -15,7 +15,8 @@ to a ConfigMap, mounts it, and points ``NEMO_JOB_STEP_CONFIG_FILE_PATH`` at the 
 
 **Read these by what each one does not carry.**
 
-- ``fetch`` is told what to download. It is not told any registry, tag, or credential.
+- ``fetch`` is told what to download -- filesets, and images to import by digest. It is not told
+  any destination, tag, or credential.
 - ``supervise`` is told how to build. It is **not told where anything will be pushed** -- no
   registry, no tags, no secret name. The sandbox does not push, so the step orchestrating it has
   no reason to know where the trusted step intends to write, and not telling it means a
@@ -37,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ContextSource(BaseModel):
@@ -130,6 +131,19 @@ class WorkLayout:
         return path.with_name(f"{path.name}.nhx-context-hash")
 
     @property
+    def imports(self) -> PurePosixPath:
+        """Where ``fetch`` writes the synthesized contexts of derived imports.
+
+        A directory of its own rather than a name under ``context/``, which holds filesets: no
+        fileset name can then collide with it.
+        """
+        return self.root / "imports"
+
+    def import_context(self, image: str) -> PurePosixPath:
+        """One derived import's context: a single Dockerfile, ``FROM`` its upstream plus the layer."""
+        return self.imports / _relative(image)
+
+    @property
     def outputs(self) -> PurePosixPath:
         """Where the sandbox writes OCI layouts and ``push`` reads them."""
         return self.root / "out"
@@ -144,16 +158,73 @@ class WorkLayout:
 # ---------------------------------------------------------------------------
 
 
+class RuntimeLayerSpec(BaseModel):
+    """The runtime layer a set names, resolved from operator config at submit."""
+
+    name: str
+    version: str
+    dockerfile: str = Field(description="Appended verbatim after the image's own instructions.")
+
+    @property
+    def label(self) -> str:
+        """`<name>@<version>`, as recorded on each row."""
+        return f"{self.name}@{self.version}"
+
+
+class FetchDockerfile(BaseModel):
+    """A fetched Dockerfile that gets the runtime layer appended."""
+
+    source: ContextSource
+    dockerfile: str = Field(description="Relative to the source's context, as `BuildSpec.dockerfile` is.")
+
+
+class FetchImport(BaseModel):
+    """One image to import.
+
+    A **copy** is pulled into the output slot a sandbox would have written, so ``push`` publishes
+    it exactly as it publishes a build and cannot tell the two apart. A **derive** is not pulled
+    here at all: ``fetch`` writes a one-line context, ``FROM`` the upstream, and the sandbox builds
+    it -- the layer runs the upstream image's own package manager, which is code nobody here
+    wrote, so it runs where untrusted code runs.
+    """
+
+    image: str = Field(description="`ContainerImage.name` -- the row this import satisfies.")
+    ref: str = Field(
+        description=(
+            "`<registry>/<repository>@<digest>` of the PLATFORM manifest the submit path resolved, "
+            "not the reference the caller named: for an index those differ, and pulling by the "
+            "manifest digest takes exactly what the row expects."
+        )
+    )
+    platform: str
+    mode: Literal["copy", "derive"]
+
+
 class FetchStepConfig(BaseModel):
     """Trusted. Holds a Files client. Holds no registry credential. Runs no caller code."""
 
     sources: list[ContextSource] = Field(
-        min_length=1,
+        default_factory=list,
         description=(
             "Deduplicated across the set: two specs sharing a source cause one download, and a "
             "whole fileset absorbs requests for its own subtrees."
         ),
     )
+    imports: list[FetchImport] = Field(default_factory=list)
+    runtime_layer: RuntimeLayerSpec | None = Field(
+        default=None,
+        description="Appended to every Dockerfile in `dockerfiles` and to every derived import's.",
+    )
+    dockerfiles: list[FetchDockerfile] = Field(
+        default_factory=list,
+        description="The fetched Dockerfiles the layer goes on, deduplicated. Empty without a layer.",
+    )
+
+    @model_validator(mode="after")
+    def _has_work(self) -> FetchStepConfig:
+        if not self.sources and not self.imports:
+            raise ValueError("a fetch step must have a source or an import")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +303,14 @@ class SandboxGroup(BaseModel):
     -- they include the job id, and the job does not exist yet when the compiler runs.
     """
 
-    source: ContextSource
+    source: ContextSource | None = Field(
+        default=None,
+        description=(
+            "The fileset context every image here builds from, or None for the set's derived "
+            "imports, which share one group: each context is a Dockerfile `fetch` wrote -- a "
+            "`FROM` and the operator's layer -- with nothing in it a sibling should not see."
+        ),
+    )
     images: list[SandboxImage] = Field(min_length=1)
 
 
@@ -276,6 +354,14 @@ class PushImage(BaseModel):
             "The caller's tag and the system tag, in that order. Both, always: the caller's tag "
             "is what a human uses and the system tag is what the reconciler resolves, and a "
             "build that pushed only the first would be invisible to the control plane."
+        ),
+    )
+    expected_digest: str | None = Field(
+        default=None,
+        description=(
+            "For a copy, the upstream manifest digest the submit path resolved: the layout must "
+            "be exactly that image, or nothing is pushed or signed. None for anything built, whose "
+            "digest nobody can know in advance."
         ),
     )
 

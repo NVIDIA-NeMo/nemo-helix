@@ -21,11 +21,49 @@ authority and it computes ``NEMO_<SAFE_NAME>_``.
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar, Literal
 
 from nemo_builder_plugin.identity import ImageIdentityError, validate_registry_host, validate_repository
 from nemo_helix_plugin.config import NemoConfig
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+#: A runtime name, as `BuildSet.runtime` accepts it.
+_RUNTIME_NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+#: A Dockerfile instruction that starts a new stage. See `RuntimeLayer`.
+_FROM_LINE = re.compile(r"^\s*FROM\s", re.IGNORECASE | re.MULTILINE)
+
+
+class RuntimeLayer(BaseModel):
+    """One runtime's contract, as Dockerfile text appended to every image built for it.
+
+    A runtime -- the evaluator's Harbor sandbox, a deployed agent -- runs images under rules an
+    image built for Docker Desktop does not meet: a non-root user, a read-only root filesystem,
+    tools its harness expects. This closes the gap in the build, once per runtime, instead of in
+    every Dockerfile. It belongs to a runtime rather than a cluster: one cluster can host several,
+    and Astra already does.
+    """
+
+    version: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+        description="Bumped whenever `dockerfile` changes. Recorded on every row as `<name>@<version>`.",
+    )
+    dockerfile: str = Field(
+        min_length=1,
+        description=(
+            "Instructions appended after the image's own. No `FROM`: a new stage would discard "
+            "the image it is meant to adapt, so the result would not be derived from it at all.\n\n"
+            "Prefer pinned versions, or tools copied from a pinned image, over installing from the "
+            "network: an unpinned install makes a derived image a function of the day it was built."
+        ),
+    )
+
+    @field_validator("dockerfile")
+    @classmethod
+    def _no_new_stage(cls, value: str) -> str:
+        if _FROM_LINE.search(value):
+            raise ValueError("a runtime layer must not contain FROM; it would start a new stage")
+        return value
 
 
 class BuilderConfig(NemoConfig):
@@ -198,6 +236,55 @@ class BuilderConfig(NemoConfig):
             "this system builds, and a MUST with a fallback is a default."
         ),
     )
+    # --- Imports and runtimes -------------------------------------------
+
+    import_registries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Registry hosts an `ImageSource` may name, e.g. `docker.io`. Checked at submit, before "
+            "any row exists, against the NORMALIZED reference -- so `alpine@sha256:...` is "
+            "`docker.io`. Empty, the default, refuses every import.\n\n"
+            "This is what bounds what the signing key covers on the import path: every import is "
+            "published and signed, so the list is the operator's statement of whose images it is "
+            "willing to sign for."
+        ),
+    )
+    runtime_layers: dict[str, RuntimeLayer] = Field(
+        default_factory=dict,
+        description=(
+            "Runtime name -> the layer appended to every image built for it. A `BuildSet` names "
+            "one in `runtime`, or none. With none, an import is a byte-for-byte copy; with one, it "
+            "is `FROM <upstream>@<digest>` plus the layer. Supply as JSON through "
+            "`NEMO_BUILDER_RUNTIME_LAYERS`, or in the config file."
+        ),
+    )
+
+    @field_validator("import_registries")
+    @classmethod
+    def _import_registries_are_hosts(cls, value: list[str]) -> list[str]:
+        """Each a host on the reference grammar, lowercased, and Docker Hub's aliases folded in.
+
+        Normalized the way references are, because they are compared with normalized references:
+        an entry that never matches anything -- `" docker.io"`, `Index.Docker.io` -- would refuse
+        imports it was written to allow, with nothing saying why.
+        """
+        hosts: list[str] = []
+        for host in value:
+            try:
+                normalized = validate_registry_host(host)
+            except ImageIdentityError as exc:
+                raise ValueError(f"import_registries entries must be registry hosts, got {host!r}") from exc
+            hosts.append("docker.io" if normalized in ("index.docker.io", "registry-1.docker.io") else normalized)
+        return hosts
+
+    @field_validator("runtime_layers")
+    @classmethod
+    def _runtime_names(cls, value: dict[str, RuntimeLayer]) -> dict[str, RuntimeLayer]:
+        for name in value:
+            if not _RUNTIME_NAME.fullmatch(name):
+                raise ValueError(f"invalid runtime name {name!r}; use lowercase letters, digits and '-'")
+        return value
+
     registry_username: str = Field(
         default="",
         description=(

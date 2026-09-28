@@ -220,6 +220,42 @@ def normalize_reference(image_ref: str) -> ImageReference:
     return parse_reference(f"{registry}/{path}{at}{digest}")
 
 
+def normalize_pinned_reference(image_ref: str) -> ImageReference:
+    """A caller-supplied reference that MUST be pinned by digest, normalized to ``repo@digest``.
+
+    The front door for an import. A published task pins its images by digest, and the digest is
+    the whole point: it names the bytes the benchmark ran. So a tag alone is refused rather than
+    resolved -- a tag names whatever its publisher pushed last.
+
+    ``repo:tag@sha256:...`` is accepted and the tag DROPPED. Docker writes that form, and so do
+    release pipelines that pin a tag they also want humans to read; the digest is what identifies
+    the image, and keeping the tag would give ``parse_reference`` two identities to reconcile.
+    """
+    value = image_ref.strip()
+    name, separator, digest = value.partition("@")
+    if not separator:
+        raise ImageIdentityError(f"image must be pinned by digest (repository@sha256:...), got {image_ref!r}")
+    last_slash = name.rfind("/")
+    if name.rfind(":") > last_slash:
+        name = name[: name.rfind(":")]
+    return normalize_reference(f"{name}@{digest}")
+
+
+def require_allowed_registry(reference: ImageReference, allowed: list[str]) -> ImageReference:
+    """Refuse a reference whose registry the operator has not allowed.
+
+    Takes a PARSED reference on purpose: a string comparison against a list containing
+    ``docker.io`` matches none of ``alpine``, ``library/alpine`` or ``alpine:latest``, so a caller
+    who can choose the spelling chooses the verdict. Normalize first, then compare hosts.
+    """
+    if reference.registry not in {host.lower() for host in allowed}:
+        listed = ", ".join(sorted(allowed)) or "none"
+        raise ImageIdentityError(
+            f"registry {reference.registry!r} is not an allowed import source on this deployment (allowed: {listed})"
+        )
+    return reference
+
+
 def compose_system_tag(workspace: str, build_set: str, revision: int, index: int) -> str:
     """``<workspace>--<build_set>-<revision>-<index>`` -- the tag the reconciler resolves.
 
@@ -279,18 +315,16 @@ def split_system_tag(tag: str) -> tuple[str, str, int, int]:
     return workspace, set_name, int(revision), int(index)
 
 
-# --- Registry policy is NOT here, and push destinations no longer need it. ---
+# --- Registry policy: where the allowlist applies, and where it does not yet. ---
 #
 # RFC 001 pairs identity with a registry allowlist, and makes normalization and allowlisting ONE
-# feature on purpose: a raw string comparison against a list containing `docker.io` matches none
-# of `alpine`, `alpine:latest` or `library/alpine:latest`, so a caller who can choose the
-# spelling chooses the verdict. The evaluator belongs in this module, next to
-# `normalize_reference`, so that an allowlist check cannot be written against an unnormalized
-# string.
+# feature on purpose -- which is why `require_allowed_registry` takes a parsed reference and lives
+# next to `normalize_reference`.
 #
 # A caller cannot name a push destination at all: every image goes to the deployment's one
-# registry, under a path the compiler composes. What still wants an allowlist is the two places
-# a caller-named registry remains -- a base image's `FROM`, which the pull-through mirror bounds
-# (`M2-1`, not built), and registering an image this system did not build
-# (`POST /container-images`, `M1-10`, not built). Its open semantics (`M1-9`) are open only for
-# those.
+# registry, under a path the compiler composes. A caller-named registry remains in three places:
+#   - an import's source (`ImageSource`), which `builder.import_registries` bounds at submit;
+#   - a base image's `FROM`, which the pull-through mirror bounds (`M2-1`, not built);
+#   - registering an image this system did not build (`POST /container-images`, `M1-10`, not
+#     built).
+# The open semantics of shorthand expansion (`M1-9`) apply to all three.

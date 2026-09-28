@@ -36,6 +36,11 @@ class TestWhereThingsLive:
             assert ROOT / "context" not in hash_file.parents
         assert layout.context_hash_file(whole) != layout.context_hash_file(subtree)
 
+    def test_derived_import_contexts_live_apart_from_every_fileset(self) -> None:
+        """Not a name under `context/`, where a fileset of the same name could collide with it."""
+        assert layout.import_context("demo-1-0") == ROOT / "imports/demo-1-0"
+        assert layout.fileset("ws/imports") == ROOT / "context/ws/imports"
+
     def test_outputs_are_one_directory_per_image(self) -> None:
         assert layout.output("demo-1-0") == layout.outputs / "demo-1-0" == ROOT / "out/demo-1-0"
 

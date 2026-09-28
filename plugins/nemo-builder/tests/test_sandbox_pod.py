@@ -308,3 +308,40 @@ class TestExitCode:
 
     def test_a_single_image_set_that_failed_fails_the_step(self) -> None:
         assert _exit_code(failures=1, total=1) == 1
+
+
+class TestTheDerivedImportGroup:
+    """A derived import's context is the Dockerfile `fetch` wrote for it, mounted on its own."""
+
+    @staticmethod
+    def _imports(n: int = 1) -> SandboxGroup:
+        return SandboxGroup(
+            source=None,
+            images=[
+                SandboxImage(image=f"demo-1-{i}", platform="linux/amd64", dockerfile="Dockerfile") for i in range(n)
+            ],
+        )
+
+    def test_it_mounts_only_its_own_import_context_read_only(self) -> None:
+        """Not the whole imports directory: a sibling import's build runs another publisher's
+        binaries, and the plan gives each one a sandbox of its own."""
+        pod = _pod_manifest(
+            name="nhx-sbx-abc-g1",
+            group=self._imports(),
+            sandbox=_sandbox(),
+            pvc="nhx-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        view = WorkLayout(SANDBOX_ROOT)
+        mounts = {m.mount_path: m for m in pod.spec.containers[0].volume_mounts}
+        own = mounts[str(view.import_context("demo-1-0"))]
+        assert own.read_only is True
+        assert own.sub_path == str(WorkLayout(PurePosixPath("jobs/default/abc")).import_context("demo-1-0"))
+        assert str(view.imports) not in mounts
+        assert set(mounts) == {str(view.import_context("demo-1-0")), str(view.output("demo-1-0"))}
+
+    def test_each_image_builds_from_its_own_context(self) -> None:
+        script = _build_script(self._imports(2), _sandbox())
+        view = WorkLayout(SANDBOX_ROOT)
+        for image in ("demo-1-0", "demo-1-1"):
+            assert f"--context=dir://{view.import_context(image)}" in script

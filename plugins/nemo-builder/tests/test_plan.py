@@ -189,8 +189,11 @@ class TestGrouping:
 
     def test_a_cross_workspace_fileset_keeps_its_workspace(self) -> None:
         plan = _plan(_set(_spec("a", fileset="other/fs-a")))
-        assert [source.fileset for source, _ in plan.groups()] == ["other/fs-a"]
+        assert [source for source, _ in plan.groups()] == [ContextSource(fileset="other/fs-a")]
 
     def test_group_order_follows_first_appearance(self) -> None:
         plan = _plan(_set(_spec("b", fileset="fs-b"), _spec("a", fileset="fs-a"), _spec("b2", fileset="fs-b")))
-        assert [source.fileset for source, _ in plan.groups()] == ["default/fs-b", "default/fs-a"]
+        assert [source for source, _ in plan.groups()] == [
+            ContextSource(fileset="default/fs-b"),
+            ContextSource(fileset="default/fs-a"),
+        ]

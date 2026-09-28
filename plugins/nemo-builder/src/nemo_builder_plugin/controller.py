@@ -73,7 +73,9 @@ class _Registry(Protocol):
     READ. It cannot push, and the credential behind it does not need to.
     """
 
-    def resolve(self, registry: str, repository: str, reference: str) -> ResolvedImage: ...
+    def resolve(
+        self, registry: str, repository: str, reference: str, *, platform: str | None = None
+    ) -> ResolvedImage: ...
 
     def exists(self, registry: str, repository: str, reference: str) -> bool: ...
 
@@ -283,8 +285,8 @@ class BuilderController(NemoController):
         key = (row.workspace, row.name)
 
         try:
-            resolved = self._registry.resolve(row.registry, row.repository, origin.system_tag)
-            # Requirement 8 makes signing a MUST on everything this system builds, and a MUST
+            resolved = self._registry.resolve(row.registry, row.repository, origin.system_tag, platform=row.platform)
+            # Requirement 8 makes signing a MUST on everything this system publishes, and a MUST
             # that nothing checks is a comment. Presence only -- see RegistryClient.exists.
             signed = self._registry.exists(row.registry, row.repository, signature_tag(resolved.digest))
         except ReferenceNotFound:
@@ -300,6 +302,21 @@ class BuilderController(NemoController):
             # the truthful state, and a registry that stays unreachable is for health alerting.
             logger.warning("image %s: registry error, retrying next cycle: %s", row.name, exc)
             return
+
+        # A copy's identity is a claim about someone else's image, and this is where it is
+        # checked: against the manifest the submit path resolved before the row existed, not
+        # against anything a step reported. Both digests, because `digest` is the one a consumer
+        # pins: a layout that swapped the copy for an index wrapping it would pass on
+        # `manifest_digest` alone, and serve other platforms whatever that index lists.
+        if origin.is_copy and origin.upstream is not None:
+            expected = origin.upstream.manifest_digest
+            if resolved.digest != expected or resolved.manifest_digest != expected:
+                await self._fail(
+                    row,
+                    f"published copy {resolved.digest} does not match upstream "
+                    f"{origin.upstream.image_ref} ({expected})",
+                )
+                return
 
         if not signed:
             if not job.succeeded:

@@ -12,6 +12,12 @@ a window where a pushed image has nothing pointing at it -- and closing that win
 over terminal jobs. Creating the row first means the pointer always exists and the only question
 is what state it is in.
 
+**An import is resolved before anything is written.** Its upstream reference is read from the
+upstream registry -- the one piece of I/O a submit does besides writing -- and the platform
+manifest it names is recorded on the row. That value is what the reconciler later checks a copy
+against, so it must come from here, not from any step. A reference that does not resolve is a 400,
+before any row exists.
+
 **Concurrency is settled by the database, not by a check.** Row names are deterministic from the
 request (``<set>-<revision>-<index>``), so two submitters racing on the same ``(name, revision)``
 collide on the entity store's unique index. There is no read-then-write here, because a
@@ -35,8 +41,10 @@ from typing import Any, Protocol
 
 from nemo_builder_plugin.compile import compile_build_set
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance
-from nemo_builder_plugin.plan import BuildCompileError, BuildPlan
+from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance, UpstreamImage
+from nemo_builder_plugin.identity import ImageReference
+from nemo_builder_plugin.plan import BuildCompileError, BuildPlan, PlannedImage
+from nemo_builder_plugin.registry import ReferenceNotFound
 from nemo_builder_plugin.schema import BuildSet
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityConflictError
@@ -91,6 +99,11 @@ def request_digest(build_set: BuildSet) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
+#: Resolves an import's upstream reference to the manifest digest for a platform. Injected for the
+#: same reason as `CreateJob`: it is the one piece of the submit that reads a registry.
+ResolveUpstream = Callable[[ImageReference, str], Awaitable[str]]
+
+
 @dataclass(frozen=True, slots=True)
 class SubmitResult:
     """What the caller gets back.
@@ -105,8 +118,31 @@ class SubmitResult:
     images: list[ContainerImage]
 
 
+def _upstream(image: PlannedImage) -> UpstreamImage | None:
+    if image.upstream is None or image.upstream_manifest_digest is None:
+        return None
+    return UpstreamImage(image_ref=image.upstream.normalized_ref, manifest_digest=image.upstream_manifest_digest)
+
+
+async def _resolve_imports(plan: BuildPlan, resolve_upstream: ResolveUpstream | None) -> BuildPlan:
+    """Fill in every import's platform manifest, or refuse the request."""
+    if not plan.imports:
+        return plan
+    if resolve_upstream is None:
+        raise RuntimeError("this submit path has no upstream resolver, so it cannot accept imports")
+    manifests: dict[str, str] = {}
+    for image in plan.imports:
+        assert image.upstream is not None
+        try:
+            manifests[image.name] = await resolve_upstream(image.upstream, image.spec.platform)
+        except ReferenceNotFound as exc:
+            raise ValueError(f"build spec {image.spec.name!r}: {exc}") from exc
+    return plan.with_upstream_manifests(manifests)
+
+
 def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
     """The desired state, before anything is built."""
+    runtime_layer = plan.runtime_layer.label if plan.runtime_layer else None
     return [
         ContainerImage(
             name=image.name,
@@ -122,6 +158,8 @@ def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
                     job=f"{plan.workspace}/{plan.job_name}",
                     system_tag=image.system_tag,
                     request_digest=digest,
+                    upstream=_upstream(image),
+                    runtime_layer=runtime_layer,
                 ),
             ),
         )
@@ -137,13 +175,15 @@ async def submit_build_set(
     entity_client: _EntityWriter,
     create_job: CreateJob,
     get_job_fields: GetJobFields,
+    resolve_upstream: ResolveUpstream | None = None,
 ) -> SubmitResult:
     """Resolve, compile, write the rows, create the job. In that order."""
-    # Resolve and compile FIRST. Both are pure, and resolving is the only step that can reject
-    # the request for a reason the caller can act on, so it runs before anything is written.
-    # The rows and the job are both projections of this one plan.
+    # Resolve and compile FIRST. Resolving is where the request can be rejected for a reason the
+    # caller can act on, so it runs before anything is written. The rows and the job are both
+    # projections of this one plan.
     try:
         plan = BuildPlan.resolve(build_set, config=config, workspace=workspace)
+        plan = await _resolve_imports(plan, resolve_upstream)
         platform_spec = compile_build_set(plan, config=config)
     except BuildCompileError:
         raise

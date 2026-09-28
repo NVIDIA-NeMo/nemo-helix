@@ -96,9 +96,12 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
         # new one.
         quoted = shlex.quote(str(layout))
         lines.append(f"rm -rf {quoted}/* {quoted}/.[!.]* {quoted}/..?*")
+        # A fileset group shares one context; a derived import's context is its own directory,
+        # holding the one Dockerfile `fetch` wrote for it.
+        context = view.context(group.source) if group.source is not None else view.import_context(image.image)
         args = [
             KANIKO_EXECUTOR,
-            f"--context=dir://{view.context(group.source)}",
+            f"--context=dir://{context}",
             f"--dockerfile={image.dockerfile}",
             f"--custom-platform={image.platform}",
             "--no-push",
@@ -129,14 +132,20 @@ def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeM
     -- or code in a base image it pulls -- could rewrite an earlier group's layout, and ``push``
     would sign it as that image. Images in one group share a context and a caller, and still
     share a container, so a ``RUN`` in one can reach its siblings' outputs; nothing else can.
+
+    A derived import's context is the one Dockerfile ``fetch`` wrote for it, under ``imports/``,
+    mounted per image for the same reason. Each derived import is a group of its own: its build
+    runs the upstream publisher's binaries, which must not reach another publisher's image.
     """
     volume, view = WorkLayout(PurePosixPath(job_sub_path)), WorkLayout(SANDBOX_ROOT)
+    if group.source is not None:
+        contexts = [(volume.context(group.source), view.context(group.source))]
+    else:
+        contexts = [(volume.import_context(i.image), view.import_context(i.image)) for i in group.images]
     return [
-        k8s.V1VolumeMount(
-            name="work",
-            sub_path=str(volume.context(group.source)),
-            mount_path=str(view.context(group.source)),
-            read_only=True,
+        *(
+            k8s.V1VolumeMount(name="work", sub_path=str(sub_path), mount_path=str(mount_path), read_only=True)
+            for sub_path, mount_path in contexts
         ),
         *(
             k8s.V1VolumeMount(

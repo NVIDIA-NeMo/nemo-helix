@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 import pytest
 from nemo_builder_plugin.controller import JOB_CREATION_GRACE, MAX_ATTEMPTS, BuilderController, _JobOutcome
-from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance, RegisteredOrigin
+from nemo_builder_plugin.entities import ContainerImage, JobOrigin, Provenance, RegisteredOrigin, UpstreamImage
 from nemo_builder_plugin.registry import ReferenceNotFound, RegistryError, ResolvedImage, signature_tag
 from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
@@ -32,9 +32,11 @@ class FakeRegistry:
         self._signed = signed
         self._error = error
         self.asked: list[str] = []
+        self.platforms: list[str | None] = []
 
-    def resolve(self, registry: str, repository: str, reference: str) -> ResolvedImage:
+    def resolve(self, registry: str, repository: str, reference: str, *, platform: str | None = None) -> ResolvedImage:
         self.asked.append(reference)
+        self.platforms.append(platform)
         if self._error:
             raise self._error
         if reference.endswith(".sig"):
@@ -357,3 +359,70 @@ class TestJobStatusErrorsAreClassifiedHonestly:
         await controller.reconcile_one(row)
         assert row.status == "pending"
         assert entities.updated == []
+
+
+UPSTREAM = "sha256:" + "d" * 64
+
+
+def _import_row(*, runtime_layer: str | None = None) -> ContainerImage:
+    row = _row()
+    row.provenance = Provenance(
+        backend="execution",
+        built_by=JobOrigin(
+            build_set="demo",
+            revision=1,
+            job="default/demo-1",
+            system_tag="default--demo-1-0",
+            upstream=UpstreamImage(
+                image_ref=f"docker.io/harborframework/terminal-bench@{UPSTREAM}", manifest_digest=UPSTREAM
+            ),
+            runtime_layer=runtime_layer,
+        ),
+    )
+    return row
+
+
+class TestCopies:
+    """A copy's digest is a claim about someone else's image, so it is the one that gets checked."""
+
+    @pytest.mark.asyncio
+    async def test_a_copy_that_matches_upstream_becomes_ready(self) -> None:
+        registry = FakeRegistry(resolves=ResolvedImage(digest=UPSTREAM, manifest_digest=UPSTREAM, media_type="x"))
+        controller, entities = _controller(registry)
+        await controller.reconcile_one(_import_row())
+        assert entities.updated[-1].status == "ready"
+        assert entities.updated[-1].digest == UPSTREAM
+
+    @pytest.mark.asyncio
+    async def test_a_copy_that_changed_on_the_way_through_fails(self) -> None:
+        registry = FakeRegistry(resolves=ResolvedImage(digest=DIGEST, manifest_digest=DIGEST, media_type="x"))
+        controller, entities = _controller(registry)
+        await controller.reconcile_one(_import_row())
+        row = entities.updated[-1]
+        assert row.status == "failed"
+        assert row.status_detail is not None and "does not match upstream" in row.status_detail
+
+    @pytest.mark.asyncio
+    async def test_a_copy_wrapped_in_an_index_fails_though_its_child_matches(self) -> None:
+        """`digest` is what a consumer pins. An index whose child for this platform is the
+        upstream image would pass on `manifest_digest`, and serve other platforms anything."""
+        wrapper = "sha256:" + "e" * 64
+        registry = FakeRegistry(resolves=ResolvedImage(digest=wrapper, manifest_digest=UPSTREAM, media_type="x"))
+        controller, entities = _controller(registry)
+        await controller.reconcile_one(_import_row())
+        assert entities.updated[-1].status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_a_derived_image_is_new_bytes_and_is_not_held_to_upstreams_digest(self) -> None:
+        registry = FakeRegistry(resolves=ResolvedImage(digest=DIGEST, manifest_digest=DIGEST, media_type="x"))
+        controller, entities = _controller(registry)
+        await controller.reconcile_one(_import_row(runtime_layer="harbor-sandbox@3"))
+        assert entities.updated[-1].status == "ready"
+
+    @pytest.mark.asyncio
+    async def test_it_resolves_for_the_rows_platform(self) -> None:
+        """An index resolves to the child for this platform, never to whichever is listed first."""
+        registry = FakeRegistry(resolves=ResolvedImage(digest=DIGEST, manifest_digest=DIGEST, media_type="x"))
+        controller, _ = _controller(registry)
+        await controller.reconcile_one(_row())
+        assert registry.platforms[0] == "linux/amd64"

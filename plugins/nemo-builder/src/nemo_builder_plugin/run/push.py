@@ -32,7 +32,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -40,7 +39,7 @@ from typing import Protocol
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
 from kubernetes.client.exceptions import ApiException
-from nemo_builder_plugin.run.context import read_step_config, work_mount
+from nemo_builder_plugin.run.context import read_step_config, run_tool, work_mount
 from nemo_builder_plugin.steps import PushImage, PushStepConfig, SigningConfig, WorkLayout
 
 logger = logging.getLogger(__name__)
@@ -54,10 +53,6 @@ _CHUNK = 1024 * 1024
 DOCKERCONFIGJSON_KEY = ".dockerconfigjson"
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
-
-#: crane and cosign are given this long each. A registry that stops answering must not hold the
-#: step -- and the credential it has materialized -- until the job's own deadline.
-_TOOL_TIMEOUT_SECONDS = 30 * 60
 
 
 class CredentialError(Exception):
@@ -222,29 +217,20 @@ def validate_layout(layout: Path) -> str:
     return digest
 
 
-def _run(args: list[str]) -> str:
-    logger.info("$ %s", " ".join(args))
-    try:
-        result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=_TOOL_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"{args[0]} did not finish within {_TOOL_TIMEOUT_SECONDS}s") from exc
-    if result.stdout:
-        logger.info("%s", result.stdout.strip())
-    if result.returncode != 0:
-        logger.error("%s", result.stderr.strip())
-        raise RuntimeError(f"{args[0]} failed with exit {result.returncode}")
-    return result.stdout.strip()
-
-
 def _push_one(image: PushImage, layout: Path, signing: SigningConfig, insecure: bool = False) -> None:
     digest = validate_layout(layout)
+    if image.expected_digest is not None and digest != image.expected_digest:
+        # A copy is someone else's image, and the only one this step may sign under its name is
+        # the one the submit path resolved. Anything else in the slot -- a pull gone wrong, or a
+        # layout a sandbox wrote there -- is refused before a byte is pushed.
+        raise LayoutRejected(f"layout is {digest}, but this copy must be {image.expected_digest}")
 
     # Destinations come from the compiler. Nothing read off the volume reaches this list.
     for tag in image.tags:
         args = ["crane", "push", str(layout), tag]
         if insecure:
             args.append("--insecure")
-        _run(args)
+        run_tool(args)
 
     # Sign BY DIGEST, never by tag: a tag is mutable and signing one races anything that could
     # move it. The digest was derived from bytes validated above.
@@ -252,7 +238,7 @@ def _push_one(image: PushImage, layout: Path, signing: SigningConfig, insecure: 
     sign_args = ["cosign", "sign"]
     if insecure:
         sign_args.append("--allow-insecure-registry")
-    _run(
+    run_tool(
         [
             *sign_args,
             f"--key={signing.key}",

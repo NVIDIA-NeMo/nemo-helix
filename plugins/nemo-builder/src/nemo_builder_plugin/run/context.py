@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,30 @@ def context_hash(root: Path) -> str:
             digest.update(hashlib.sha256(path.read_bytes()).digest())
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
+
+
+#: crane and cosign are given this long each. A registry that stops answering must not hold a
+#: step -- and, in `push`, the credential it has materialized -- until the job's own deadline.
+TOOL_TIMEOUT_SECONDS = 30 * 60
+
+
+def run_tool(args: list[str]) -> str:
+    """Run crane or cosign, log what it said, and raise on a non-zero exit.
+
+    stderr is logged only on failure: both tools are chatty on success, and a failure is the one
+    case where their explanation is the thing a reader needs.
+    """
+    logger.info("$ %s", " ".join(args))
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=TOOL_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{args[0]} did not finish within {TOOL_TIMEOUT_SECONDS}s") from exc
+    if result.stdout:
+        logger.info("%s", result.stdout.strip())
+    if result.returncode != 0:
+        logger.error("%s", result.stderr.strip())
+        raise RuntimeError(f"{args[0]} failed with exit {result.returncode}")
+    return result.stdout.strip()
 
 
 def split_fileset_ref(ref: str, default_workspace: str) -> tuple[str, str]:

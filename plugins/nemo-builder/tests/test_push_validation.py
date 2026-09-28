@@ -16,7 +16,9 @@ import os
 from pathlib import Path
 
 import pytest
+from nemo_builder_plugin.run import push
 from nemo_builder_plugin.run.push import LayoutRejected, validate_layout
+from nemo_builder_plugin.steps import PushImage, SigningConfig
 
 
 def _blob(layout: Path, content: bytes) -> str:
@@ -160,3 +162,28 @@ class TestRefusesHostileLayouts:
     def test_a_missing_layout_directory_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(LayoutRejected, match="no layout"):
             validate_layout(tmp_path / "never-built")
+
+
+class TestACopyIsHeldToItsUpstream:
+    """A copy is someone else's image: push may sign only the digest the submit path resolved."""
+
+    @staticmethod
+    def _push(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expected: str) -> list[list[str]]:
+        calls: list[list[str]] = []
+        monkeypatch.setattr(push, "run_tool", lambda args: calls.append(args) or "")
+        layout, _ = _good_layout(tmp_path)
+        image = PushImage(image="demo-1-0", tags=["r/a:v1", "r/a:default--demo-1-0"], expected_digest=expected)
+        push._push_one(image, layout, SigningConfig(key="k8s://nhx-builds/cosign-key"))
+        return calls
+
+    def test_the_upstream_image_is_pushed_and_signed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (tmp_path / "probe").mkdir()
+        _, digest = _good_layout(tmp_path / "probe")  # the same bytes, so the same digest
+        calls = self._push(tmp_path, monkeypatch, digest)
+        assert [c[:2] for c in calls] == [["crane", "push"], ["crane", "push"], ["cosign", "sign"]]
+
+    def test_anything_else_is_refused_before_a_byte_is_pushed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with pytest.raises(LayoutRejected, match="this copy must be"):
+            self._push(tmp_path, monkeypatch, "sha256:" + "9" * 64)

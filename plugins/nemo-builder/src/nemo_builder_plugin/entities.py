@@ -55,6 +55,24 @@ class RegisteredOrigin(BaseModel):
     )
 
 
+class UpstreamImage(BaseModel):
+    """The published image an import copied, or a derived build started ``FROM``.
+
+    Written by the submit route from a registry read it makes before the row exists, so it is
+    desired state rather than observed state: the reconciler reads it and never writes it.
+    """
+
+    image_ref: str = Field(description="The `ImageSource.image`, normalized: `<registry>/<repository>@<digest>`.")
+    manifest_digest: str = Field(
+        pattern=DIGEST_PATTERN,
+        description=(
+            "The platform manifest the import takes: the reference's own digest when it names a "
+            "plain manifest, and the child matching the spec's platform when it names an index. For "
+            "a copy, the reconciler requires the published `manifest_digest` to equal this."
+        ),
+    )
+
+
 class JobOrigin(BaseModel):
     """A build job produces it."""
 
@@ -102,6 +120,28 @@ class JobOrigin(BaseModel):
             "the job never built."
         ),
     )
+    upstream: UpstreamImage | None = Field(
+        default=None,
+        description=(
+            "Set when the spec was an `ImageSource`: what the import was of. With `runtime_layer` "
+            "unset the row is a COPY, and its digest is a claim about the publisher's image rather "
+            "than about anything built here -- the reconciler checks it. With `runtime_layer` set "
+            "it is a DERIVED image, and this names its base. None for a build from a fileset."
+        ),
+    )
+    runtime_layer: str | None = Field(
+        default=None,
+        description=(
+            "`<name>@<version>` of the runtime layer this job appended, or None where the set named "
+            "no runtime. An image adapted to one runtime's contract -- or to one version of it -- "
+            "is not an image adapted to another, and this is the only place that says which."
+        ),
+    )
+
+    @property
+    def is_copy(self) -> bool:
+        """An import published byte for byte: the one row whose digest must equal upstream's."""
+        return self.upstream is not None and self.runtime_layer is None
 
 
 Origin = Annotated[RegisteredOrigin | JobOrigin, Field(discriminator="type")]

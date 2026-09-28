@@ -16,7 +16,13 @@ import json
 
 import httpx
 import pytest
-from nemo_builder_plugin.registry import ReferenceNotFound, RegistryClient, RegistryError, parse_challenges
+from nemo_builder_plugin.registry import (
+    NoMatchingImage,
+    ReferenceNotFound,
+    RegistryClient,
+    RegistryError,
+    parse_challenges,
+)
 
 REGISTRY = "reg.example.com"
 REPO = "team/app"
@@ -178,6 +184,30 @@ class TestEveryFailureIsARegistryError:
             RegistryClient(transport=httpx.MockTransport(handler)).resolve(REGISTRY, REPO, "v1")
 
 
+class TestRedirects:
+    def test_a_redirect_off_https_is_refused(self) -> None:
+        """The registry names the redirect; a metadata server answers plain HTTP."""
+        reached: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "169.254.169.254":
+                reached.append(str(request.url))
+                return httpx.Response(200, content=MANIFEST)
+            return httpx.Response(307, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+
+        with pytest.raises(RegistryError, match="plain-HTTP"):
+            RegistryClient(transport=httpx.MockTransport(handler)).resolve(REGISTRY, REPO, "v1")
+        assert reached == []
+
+    def test_an_https_redirect_is_followed(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "cdn.example.com":
+                return httpx.Response(200, content=MANIFEST)
+            return httpx.Response(307, headers={"Location": "https://cdn.example.com/m"})
+
+        assert RegistryClient(transport=httpx.MockTransport(handler)).resolve(REGISTRY, REPO, "v1").digest == DIGEST
+
+
 class TestChallenges:
     def test_several_challenges_are_read_separately(self) -> None:
         header = 'Bearer realm="https://auth/token",service="r", Basic realm="Registry Realm"'
@@ -303,3 +333,124 @@ class TestBasicChallenge:
 
         client = RegistryClient(username="robot", password="s3cret", transport=httpx.MockTransport(handler))
         assert client.resolve(REGISTRY, REPO, "v1").digest == DIGEST
+
+
+INDEX_TYPE = "application/vnd.oci.image.index.v1+json"
+MANIFEST_TYPE = "application/vnd.oci.image.manifest.v1+json"
+AMD64 = "sha256:" + "a" * 64
+ARM64 = "sha256:" + "b" * 64
+
+
+def _sha(body: bytes) -> str:
+    return "sha256:" + hashlib.sha256(body).hexdigest()
+
+
+INDEX_BODY = json.dumps(
+    {
+        "manifests": [
+            {"digest": "sha256:" + "0" * 64, "platform": {"os": "unknown", "architecture": "unknown"}},
+            {"digest": ARM64, "platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}},
+            {"digest": AMD64, "platform": {"os": "linux", "architecture": "amd64"}},
+        ]
+    }
+).encode()
+INDEX = _sha(INDEX_BODY)
+
+
+def _index_registry(requests: list[httpx.Request], body: bytes = INDEX_BODY) -> httpx.MockTransport:
+    """Serves one multi-platform index, anonymously, and records every request it gets."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200, headers={"Docker-Content-Digest": _sha(body), "Content-Type": INDEX_TYPE}, content=body
+        )
+
+    return httpx.MockTransport(handler)
+
+
+def _single_platform_registry(os_name: str, architecture: str) -> tuple[httpx.MockTransport, str]:
+    """Serves one plain manifest, and the config blob that says what platform it is for."""
+    config = json.dumps({"os": os_name, "architecture": architecture}).encode()
+    manifest = json.dumps({"schemaVersion": 2, "config": {"digest": _sha(config)}, "layers": []}).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/blobs/" in request.url.path:
+            return httpx.Response(200, content=config)
+        return httpx.Response(200, headers={"Content-Type": MANIFEST_TYPE}, content=manifest)
+
+    return httpx.MockTransport(handler), _sha(manifest)
+
+
+class TestPlatforms:
+    def test_an_index_resolves_to_the_requested_platforms_child(self) -> None:
+        client = RegistryClient(transport=_index_registry([]))
+        resolved = client.resolve(REGISTRY, REPO, INDEX, platform="linux/amd64")
+        assert (resolved.digest, resolved.manifest_digest) == (INDEX, AMD64)
+
+    def test_a_variant_narrows_the_match(self) -> None:
+        client = RegistryClient(transport=_index_registry([]))
+        assert client.resolve(REGISTRY, REPO, INDEX, platform="linux/arm64/v8").manifest_digest == ARM64
+
+    def test_no_matching_child_is_an_error_not_the_first_entry(self) -> None:
+        """The first entry here is an attestation manifest; recording it would be recording nonsense."""
+        client = RegistryClient(transport=_index_registry([]))
+        with pytest.raises(RegistryError, match="no linux/s390x manifest"):
+            client.resolve(REGISTRY, REPO, INDEX, platform="linux/s390x")
+
+    def test_a_digest_served_as_another_digest_is_refused(self) -> None:
+        client = RegistryClient(transport=_index_registry([]))
+        with pytest.raises(RegistryError, match="was served as"):
+            client.resolve(REGISTRY, REPO, AMD64, platform="linux/amd64")
+
+    def test_arm64_without_a_variant_is_arm64_v8(self) -> None:
+        """buildx lists arm64 with no variant; a caller writing `linux/arm64/v8` means that image."""
+        body = json.dumps({"manifests": [{"digest": ARM64, "platform": {"os": "linux", "architecture": "arm64"}}]})
+        client = RegistryClient(transport=_index_registry([], body.encode()))
+        digest = _sha(body.encode())
+        assert client.resolve(REGISTRY, REPO, digest, platform="linux/arm64/v8").manifest_digest == ARM64
+
+    def test_a_missing_platform_is_not_found_rather_than_an_error(self) -> None:
+        """The caller's reference, not the registry, is what is wrong: a 400, not a 502."""
+        client = RegistryClient(transport=_index_registry([]))
+        with pytest.raises(NoMatchingImage):
+            client.resolve(REGISTRY, REPO, INDEX, platform="linux/s390x")
+        assert issubclass(NoMatchingImage, ReferenceNotFound)
+
+    def test_docker_hub_is_asked_at_its_api_host(self) -> None:
+        """`https://docker.io/v2/` redirects to the marketing site, measured."""
+        requests: list[httpx.Request] = []
+        RegistryClient(transport=_index_registry(requests)).resolve(
+            "docker.io", "harborframework/terminal-bench", INDEX, platform="linux/amd64"
+        )
+        assert requests[0].url.host == "registry-1.docker.io"
+        assert requests[0].url.path == f"/v2/harborframework/terminal-bench/manifests/{INDEX}"
+
+
+class TestImports:
+    """`resolve_import`: a caller's pinned reference to a registry this deployment does not run."""
+
+    def test_a_single_platform_image_for_the_platform_is_accepted(self) -> None:
+        transport, digest = _single_platform_registry("linux", "amd64")
+        resolved = RegistryClient(transport=transport).resolve_import(REGISTRY, REPO, digest, platform="linux/amd64")
+        assert resolved.manifest_digest == digest
+
+    def test_a_single_platform_image_for_another_platform_is_refused(self) -> None:
+        """Only an index lists platforms. An arm64-only image imported as amd64 would otherwise be
+        published, signed and recorded as amd64 -- and fail where it runs."""
+        transport, digest = _single_platform_registry("linux", "arm64")
+        with pytest.raises(NoMatchingImage, match="single linux/arm64 image"):
+            RegistryClient(transport=transport).resolve_import(REGISTRY, REPO, digest, platform="linux/amd64")
+
+    def test_refused_anonymous_access_is_not_found(self) -> None:
+        """Docker Hub answers a missing or private repository with 401, not 404."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/token":
+                return httpx.Response(200, json={"token": "anonymous"})
+            return httpx.Response(401, headers={"WWW-Authenticate": f'Bearer realm="https://{REGISTRY}/token"'})
+
+        with pytest.raises(ReferenceNotFound, match="not public"):
+            RegistryClient(transport=httpx.MockTransport(handler)).resolve_import(
+                REGISTRY, REPO, INDEX, platform="linux/amd64"
+            )

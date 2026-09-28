@@ -14,6 +14,7 @@ Every route carries ``@scope.*`` and ``@path_rule``; without them the OPA bundle
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import ClassVar
 
@@ -22,7 +23,9 @@ from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.plan import BuildCompileError
+from nemo_builder_plugin.registry import RegistryClient, RegistryError
 from nemo_builder_plugin.schema import BuildSet
 from nemo_builder_plugin.submit import BuildConflict, InvalidBuildRequest, submit_build_set
 from nemo_helix import AsyncNeMoHelix
@@ -99,6 +102,17 @@ def _build_router() -> APIRouter:
         async def get_job_fields(name: str):
             return (await jobs_client.retrieve(name, workspace=workspace)).custom_fields or {}
 
+        # Anonymous and over HTTPS: an import's source is a public registry the operator
+        # allowlisted, and nothing about reading it needs the deployment's credentials.
+        upstream = RegistryClient()
+
+        async def resolve_upstream(reference: ImageReference, platform: str) -> str:
+            assert reference.digest is not None
+            resolved = await asyncio.to_thread(
+                upstream.resolve_import, reference.registry, reference.repository, reference.digest, platform=platform
+            )
+            return resolved.manifest_digest
+
         try:
             result = await submit_build_set(
                 body,
@@ -107,6 +121,7 @@ def _build_router() -> APIRouter:
                 entity_client=entity_client,
                 create_job=create_job,
                 get_job_fields=get_job_fields,
+                resolve_upstream=resolve_upstream,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -115,6 +130,10 @@ def _build_router() -> APIRouter:
             # rather than 400: the request is well-formed; the deployment or the revision's
             # history is what stands in the way.
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RegistryError as exc:
+            # The upstream registry of an import failed to answer. Not the caller's request and
+            # not this deployment: a gateway error, and worth retrying.
+            raise HTTPException(status_code=502, detail=f"could not read an import's registry: {exc}") from exc
         except PermissionDeniedError as exc:
             # The job and rows are created as the caller, so a caller allowed to submit builds but
             # not to create jobs in this workspace lands here. Theirs to fix, not ours.
@@ -127,6 +146,8 @@ def _build_router() -> APIRouter:
         except Exception as exc:
             logger.exception("failed to submit build set %r", body.name)
             raise HTTPException(status_code=500, detail="Failed to submit build.") from exc
+        finally:
+            upstream.close()
 
         return SubmitBuildResponse(job=result.job, images=result.images)
 

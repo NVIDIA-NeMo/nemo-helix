@@ -14,6 +14,8 @@
 #   - the registry is in-cluster, anonymous and plain HTTP, so `push`'s credential handling and
 #     the reconciler's Bearer-challenge path never execute
 #   - `repository_prefix` is empty; see "Configuration" in the README for why a real one is not
+#   - `import_registries` allows all of Docker Hub, so this key signs any public image imported
+#     from it; a real deployment lists the registries whose images it has decided to vouch for
 #   - finished jobs keep their pods and work directories for an hour, so their logs can be read
 #   - the sandbox is sized for a laptop
 #   - the platform images are side-loaded with `minikube image load`, so there is no image pull
@@ -109,6 +111,18 @@ builder:
   push_credential_secret: registry-push-credential
   signing_key: k8s://nhx-builds/cosign-key
   signature_storage: tag
+
+  # Imports: published images this deployment will copy in and sign. Empty refuses every import.
+  # All of Docker Hub, for the demo only -- see the header.
+  import_registries: [docker.io]
+  # Named by `BuildSet.runtime`. Appended to every image in a set that names it, which also turns
+  # an import from a copy into a derived image. `demo` only leaves a mark, so a build can be
+  # checked for it; a real layer adapts images to a runtime's contract (a user, tools, a home).
+  runtime_layers:
+    demo:
+      version: "1"
+      dockerfile: |
+        RUN echo "runtime layer demo@1" > /nhx-runtime-layer
 
   # Sized for a laptop. On a real deployment this is the default 2 / 8Gi.
   sandbox_cpu: "500m"
