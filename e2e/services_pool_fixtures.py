@@ -139,7 +139,10 @@ def services_pool_sdk(_services: str, _services_instance: RunningServices) -> Ne
 
 
 def _services_pool_auth() -> TokenProvider | None:
-    """Resolve the bearer auth for the pooled platform from the same env the CLI honors."""
+    """Resolve bearer auth for the platform instance leased from ``E2EServicesPool``.
+
+    Reads the same ``NHX_ACCESS_TOKEN`` / ``NHX_CONTEXT_NAME`` env the CLI honors.
+    """
     access_token = os.environ.get("NHX_ACCESS_TOKEN")
     if access_token:
         return StaticToken(access_token)
@@ -151,7 +154,7 @@ def _services_pool_auth() -> TokenProvider | None:
 
 @pytest.fixture(scope="module", name="services_pool_client")
 def services_pool_client(_services: str, _services_instance: RunningServices) -> Iterator[NemoClient]:
-    """Typed platform client bound to the pooled services instance for this module.
+    """Typed platform client for the platform instance this module leased from ``E2EServicesPool``.
 
     The transport carries the base URL, admin headers and bearer auth itself so
     tests can also issue raw ``client._client.get("/path")`` requests against

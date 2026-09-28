@@ -150,7 +150,7 @@ def _job_status_value(status: object) -> str:
 
 
 def wait_for_platform_job(
-    sdk: SyncHelixClient,
+    client: SyncHelixClient,
     job_name: str,
     workspace: str,
     timeout: float = 120.0,
@@ -168,7 +168,7 @@ def wait_for_platform_job(
     the job may remain pending before the test fails.
 
     Args:
-        sdk: A sync platform handle (typed client or generated SDK) for the jobs API.
+        client: The sync platform client for the jobs API.
         job_name: The platform job name.
         workspace: The workspace name.
         timeout: Maximum time to wait in seconds (excluding image-pull time).
@@ -192,7 +192,7 @@ def wait_for_platform_job(
 
     def get_status() -> str:
         nonlocal last_job
-        last_job = client_from_platform(sdk, JobsClient).get_job(name=job_name, workspace=workspace).data()
+        last_job = client_from_platform(client, JobsClient).get_job(name=job_name, workspace=workspace).data()
         current = _job_status_value(last_job.status)
         if not status_history or status_history[-1] != current:
             status_history.append(current)
@@ -210,7 +210,9 @@ def wait_for_platform_job(
     except TimeoutError as e:
         error_parts = [str(e), f"Status history: {' -> '.join(status_history)}"]
         try:
-            job_status = client_from_platform(sdk, JobsClient).get_job_status(name=job_name, workspace=workspace).data()
+            job_status = (
+                client_from_platform(client, JobsClient).get_job_status(name=job_name, workspace=workspace).data()
+            )
             error_parts.append(f"Job status details: {job_status.model_dump()}")
         except Exception as detail_err:
             error_parts.append(f"Failed to get job status: {detail_err}")
@@ -222,7 +224,7 @@ def wait_for_platform_job(
 
 
 def wait_for_platform_job_terminal_or_absent(
-    sdk: SyncHelixClient,
+    client: SyncHelixClient,
     job_name: str,
     workspace: str,
     timeout: float = 120.0,
@@ -230,7 +232,7 @@ def wait_for_platform_job_terminal_or_absent(
     terminal_statuses: set[str] | None = None,
 ) -> HelixJobResponse | None:
     """Wait until a platform job is terminal or already absent."""
-    jobs = client_from_platform(sdk, JobsClient)
+    jobs = client_from_platform(client, JobsClient)
     terminal = terminal_statuses or TERMINAL_STATUSES
     deadline = time.monotonic() + timeout
     last_status = ""
@@ -251,7 +253,7 @@ def wait_for_platform_job_terminal_or_absent(
 
 
 def cleanup_platform_job(
-    sdk: SyncHelixClient,
+    client: SyncHelixClient,
     job_name: str,
     workspace: str,
     timeout: float = 120.0,
@@ -263,7 +265,7 @@ def cleanup_platform_job(
     swallowed; the helper keeps polling DELETE until it succeeds, the job is
     absent, or the bounded timeout expires.
     """
-    jobs = client_from_platform(sdk, JobsClient)
+    jobs = client_from_platform(client, JobsClient)
     try:
         job = jobs.get_job(name=job_name, workspace=workspace).data()
     except NotFoundError:
@@ -277,7 +279,7 @@ def cleanup_platform_job(
         except ConflictError:
             pass
         wait_for_platform_job_terminal_or_absent(
-            sdk,
+            client,
             job_name,
             workspace,
             timeout=timeout,
@@ -300,7 +302,7 @@ def cleanup_platform_job(
 
 
 def wait_for_job_logs(
-    sdk: SyncHelixClient,
+    client: SyncHelixClient,
     job_name: str,
     workspace: str,
     min_log_count: int = 1,
@@ -313,7 +315,7 @@ def wait_for_job_logs(
     completion. This function retries until logs appear or timeout.
 
     Args:
-        sdk: A sync platform handle (typed client or generated SDK) for the jobs API.
+        client: The sync platform client for the jobs API.
         job_name: The platform job name.
         workspace: The workspace name.
         min_log_count: Minimum number of logs expected.
@@ -330,7 +332,7 @@ def wait_for_job_logs(
     logs = None
 
     while time.time() - start_time < timeout:
-        page = client_from_platform(sdk, JobsClient).list_job_logs(workspace=workspace, name=job_name).page()
+        page = client_from_platform(client, JobsClient).list_job_logs(workspace=workspace, name=job_name).page()
         logs = HelixJobLogPage(data=page.items, **page.metadata)
         if len(logs.data) >= min_log_count:
             return logs
