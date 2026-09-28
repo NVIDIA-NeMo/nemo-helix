@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The one new privilege in the design.
+#
+# `nhx-build-control` -- the `supervise` step -- is the control plane for an untrusted pod. It
+# creates the sandbox, watches it, reads its log, and deletes it. That is all it may do, and this
+# Role is deliberately the shortest file here: pods in this namespace, and nothing else.
+#
+# It holds no Files client and no registry credential -- but pod creation in this namespace is
+# not a small grant. RBAC cannot say WHICH pods: on its own, `create pods` here admits one that
+# runs as `nhx-build-push`, mounts `cosign-key` or `registry-push-credential`, mounts the whole
+# work volume, or drops the sandbox label and with it the NetworkPolicy. Each of those is the push
+# identity, or every tenant's build contexts. 25-sandbox-admission.yaml is what narrows this Role
+# to the sandbox's shape; without it, a compromise of this identity is a compromise of `push`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-pod-control
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-pod-control
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-pod-control
+subjects:
+  # `nhx-build-control` ONLY. Binding `fetch` or `push` here would hand pod creation to an
+  # identity that also holds a credential, which is the confused deputy the step split exists
+  # to remove.
+  - kind: ServiceAccount
+    name: nhx-build-control
+    namespace: nhx-builds
+---
+# The signing key, readable by the one step that signs.
+#
+# `builder.signing_key` is a `k8s://<namespace>/<secret>` reference, which cosign resolves
+# through the Kubernetes API using the pod's own ServiceAccount. So `nhx-build-push` needs `get`
+# on exactly that Secret and nothing else -- not `list`, which would let it enumerate every
+# secret in the namespace including the registry credential's Kubernetes copy.
+#
+# `nhx-build-fetch` and `nhx-build-control` get no such binding. A caller cannot choose whether
+# its image is signed, and the steps that run closest to caller input cannot reach the key that
+# does the signing.
+#
+# A KMS-backed key (`gcpkms://`) removes this Role entirely, because the private half never
+# materialises anywhere a pod could read it. That is `M1-7`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-read-signing-key
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["cosign-key"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-read-signing-key
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-read-signing-key
+subjects:
+  - kind: ServiceAccount
+    name: nhx-build-push
+    namespace: nhx-builds
+---
+# The push credential, readable by the one step that pushes.
+#
+# `builder.push_credential_secret` names a `kubernetes.io/dockerconfigjson` Secret in this
+# namespace, and `push` reads it through the Kubernetes API as its own ServiceAccount -- the route
+# the signing key takes, for the same reason: `get` on exactly this Secret, by name, and nothing
+# else. The name here must match that setting.
+#
+# It is the OPERATOR's credential, so it is deliberately not a Secrets-service entry: the Jobs
+# launcher resolves those as the submitting principal, which would mean everyone able to submit a
+# build could read it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-read-push-credential
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["registry-push-credential"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-read-push-credential
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-read-push-credential
+subjects:
+  - kind: ServiceAccount
+    name: nhx-build-push
+    namespace: nhx-builds

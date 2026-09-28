@@ -88,8 +88,8 @@ class WorkLayout:
     - ``fetch`` and ``push`` mount the slice, and root it at their mount path.
     - ``supervise`` mounts nothing, but writes the sandbox's ``subPath``\\ s, so it roots it at
       the slice's path *within* the volume.
-    - The sandbox sees the same layout again under its own root, with only two parts of it
-      mounted: its own context, read-only, and the output directory.
+    - The sandbox sees the same layout again under its own root, with only its own parts of it
+      mounted: its context, read-only, and one output directory per image it builds.
 
     So what ``fetch`` writes, what the sandbox mounts and builds, and what ``push`` reads are one
     function of the same names, evaluated under different roots. They cannot disagree.

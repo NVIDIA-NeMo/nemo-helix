@@ -1,0 +1,309 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""``nhx-build push`` -- step 3. Trusted. Holds the registry credential and the signing key.
+
+**It publishes bytes it did not produce.** That is the point of the step split, and it is also
+exactly why this file is the most defensive one in the plugin: it is the only thing standing
+between a sandbox's output and a credential the sandbox was never given.
+
+The layout on the work volume was written by a pod that ran caller-authored ``RUN``. It is
+**hostile input**, and it is treated as such before anything is uploaded:
+
+- **Destinations come from the compiler, never from the layout.** Nothing read off the volume
+  can influence where bytes go.
+- **No symlinks are followed, and no path may escape the layout.** This step mounts the job's
+  whole slice of the work volume, not just one image's output, so a followed symlink -- the
+  layout's own directory included -- could hand it another image's layout or a context.
+- **Every blob is verified against its own digest.** A blob whose contents do not hash to its
+  filename is a layout lying about what it contains.
+- **The index must resolve to a manifest that is actually present.**
+
+It runs no caller code, and it is the last step, so a failure here costs a publish rather than a
+build.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import logging
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path, PurePosixPath
+from typing import Protocol
+
+from kubernetes import client as k8s
+from kubernetes import config as k8s_config
+from kubernetes.client.exceptions import ApiException
+from nemo_builder_plugin.run.context import read_step_config, work_mount
+from nemo_builder_plugin.steps import PushImage, PushStepConfig, SigningConfig, WorkLayout
+
+logger = logging.getLogger(__name__)
+
+#: Read in chunks: a layer blob is routinely hundreds of megabytes and a build that OOMs the
+#: trusted step because a caller shipped a large layer is a denial of service with extra steps.
+_CHUNK = 1024 * 1024
+
+
+#: The key `kubectl create secret docker-registry` writes, and the only one this step reads.
+DOCKERCONFIGJSON_KEY = ".dockerconfigjson"
+
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+#: crane and cosign are given this long each. A registry that stops answering must not hold the
+#: step -- and the credential it has materialized -- until the job's own deadline.
+_TOOL_TIMEOUT_SECONDS = 30 * 60
+
+
+class CredentialError(Exception):
+    """The push credential cannot be read, or is not something crane and cosign will use."""
+
+
+class _SecretReader(Protocol):
+    """The one Kubernetes call this step makes. `CoreV1Api` satisfies it; so does a test double."""
+
+    def read_namespaced_secret(self, name: str, namespace: str) -> k8s.V1Secret: ...
+
+
+def _read_credential(api: _SecretReader, *, namespace: str, name: str) -> str:
+    """The push credential, read from its Kubernetes Secret as this step's own ServiceAccount.
+
+    The route the signing key already takes: `nhx-build-push` holds `get` on this one Secret, by
+    name, and no other step holds it. Not a Secrets-service entry, because the Jobs launcher
+    resolves those as the submitter -- which would mean every submitter could read the operator's
+    credential.
+    """
+    try:
+        secret = api.read_namespaced_secret(name=name, namespace=namespace)
+    except ApiException as exc:
+        raise CredentialError(f"cannot read Secret {namespace}/{name}: {exc.status} {exc.reason}") from exc
+    encoded = (secret.data or {}).get(DOCKERCONFIGJSON_KEY)
+    if not encoded:
+        raise CredentialError(
+            f"Secret {namespace}/{name} has no {DOCKERCONFIGJSON_KEY!r} key; "
+            "create it with `kubectl create secret docker-registry`"
+        )
+    return base64.b64decode(encoded).decode()
+
+
+def _materialize_credential(docker_config: str, *, registry: str) -> str:
+    """Write the credential where crane and cosign will look for it, and return that directory.
+
+    Both read a Docker config, so the value has to land on a filesystem somewhere -- there is no
+    "pass a credential on the command line" for either, and doing so would put it in the process
+    table anyway. It goes to a 0600 file in a private temp directory rather than to the default
+    `~/.docker/config.json`, and ``main`` removes that directory when it is done, so its reach is
+    this step. It is still on the container's disk while the step runs.
+
+    **A missing entry for ``registry`` is logged, not refused.** crane with no matching entry
+    pushes anonymously, and against an anonymous registry that succeeds -- which is how an
+    earlier version shipped a credential that never reached crane without anything noticing. A
+    deployment on an anonymous registry legitimately has no entry, so this is a warning rather
+    than a refusal, but it is one that says exactly what will happen.
+    """
+    try:
+        document = json.loads(docker_config)
+    except json.JSONDecodeError as exc:
+        raise CredentialError("the push credential is not a Docker config JSON document") from exc
+    auths = document.get("auths") if isinstance(document, dict) else None
+    if not isinstance(auths, dict):
+        raise CredentialError("the push credential is not a Docker config: it has no `auths` map")
+    hosts = {host.removeprefix("https://").removeprefix("http://").rstrip("/") for host in auths}
+    if registry not in hosts:
+        logger.warning("the push credential has no entry for %s; crane and cosign will push anonymously", registry)
+
+    directory = tempfile.mkdtemp(prefix="nhx-docker-")
+    path = Path(directory) / "config.json"
+    path.write_text(docker_config)
+    path.chmod(0o600)
+    os.environ["DOCKER_CONFIG"] = directory
+    logger.info("registry credential materialized at %s", directory)
+    return directory
+
+
+class LayoutRejected(Exception):
+    """The OCI layout failed validation and will not be published."""
+
+
+def _verify_no_escape(root: Path) -> list[Path]:
+    """Every regular file under ``root``, with symlinks and escapes refused.
+
+    ``Path.rglob`` does not follow directory symlinks, but it will *list* them, and a later
+    ``read_bytes`` would follow one. So symlinks are rejected outright rather than resolved --
+    there is no legitimate symlink in an OCI layout, which makes "reject" both safe and simple.
+    """
+    root = root.resolve(strict=True)
+    files: list[Path] = []
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise LayoutRejected(f"layout contains a symlink: {path.relative_to(root)}")
+        resolved = path.resolve()
+        if root not in resolved.parents and resolved != root:
+            raise LayoutRejected(f"layout path escapes its directory: {path}")
+        if path.is_file():
+            files.append(path)
+        elif not path.is_dir():
+            # A FIFO named as a blob would pass a regular-file check by being skipped, and then
+            # block crane in `open()` forever.
+            raise LayoutRejected(f"layout contains something that is not a file: {path.relative_to(root)}")
+    return files
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(_CHUNK):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_layout(layout: Path) -> str:
+    """Validate an OCI layout and return the digest its index points at.
+
+    Raises :class:`LayoutRejected` on anything inconsistent. The returned digest is derived from
+    bytes this function verified, not from anything the layout asserted about itself.
+    """
+    if layout.is_symlink():
+        # Checked before resolving, below: resolving would follow it. Only the layout's own
+        # directory is checked here; its parents legitimately include symlinks (`/var/run`).
+        raise LayoutRejected(f"layout {layout} is a symlink")
+    if not layout.is_dir():
+        raise LayoutRejected(f"no layout at {layout}")
+
+    # Resolve ONCE, here, and use the resolved path for everything below.
+    #
+    # `_verify_no_escape` resolves internally and returns resolved paths. Comparing those against
+    # an UNRESOLVED `layout` is wrong the moment any parent component is a symlink -- and one
+    # always is: the work volume mounts under `/var/run`, which is a symlink to `/run` on every
+    # mainstream base image. The observed failure was `relative_to` raising "is not in the
+    # subpath of", and before that every file compared unequal to the markers and was rejected as
+    # "unexpected file in layout". A correct layout was refused for being correct.
+    layout = layout.resolve(strict=True)
+    files = _verify_no_escape(layout)
+
+    marker = layout / "oci-layout"
+    index_path = layout / "index.json"
+    for required in (marker, index_path):
+        if not required.is_file():
+            raise LayoutRejected(f"layout is missing {required.name}")
+
+    blobs_dir = layout / "blobs" / "sha256"
+    for path in files:
+        if blobs_dir not in path.parents:
+            # Only the two marker files live outside blobs/. Anything else is unexpected, and
+            # "unexpected" in a directory written by untrusted code is a refusal, not a warning.
+            if path not in (marker, index_path):
+                raise LayoutRejected(f"unexpected file in layout: {path.relative_to(layout)}")
+            continue
+        actual = _sha256_file(path)
+        if actual != path.name:
+            raise LayoutRejected(f"blob {path.name} hashes to {actual}: the layout misdescribes its contents")
+
+    try:
+        index = json.loads(index_path.read_text())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LayoutRejected("index.json is not JSON") from exc
+    manifests = index.get("manifests") if isinstance(index, dict) else None
+    if not isinstance(manifests, list) or len(manifests) != 1 or not isinstance(manifests[0], dict):
+        raise LayoutRejected("expected exactly one manifest in index.json")
+
+    digest = manifests[0].get("digest")
+    if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
+        raise LayoutRejected(f"index.json names something other than a sha256 digest: {digest!r}")
+    if not (blobs_dir / digest.removeprefix("sha256:")).is_file():
+        raise LayoutRejected(f"index.json names a manifest that is not in the layout: {digest}")
+
+    logger.info("layout %s validated: %d blob(s), manifest %s", layout.name, len(files), digest)
+    return digest
+
+
+def _run(args: list[str]) -> str:
+    logger.info("$ %s", " ".join(args))
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=_TOOL_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{args[0]} did not finish within {_TOOL_TIMEOUT_SECONDS}s") from exc
+    if result.stdout:
+        logger.info("%s", result.stdout.strip())
+    if result.returncode != 0:
+        logger.error("%s", result.stderr.strip())
+        raise RuntimeError(f"{args[0]} failed with exit {result.returncode}")
+    return result.stdout.strip()
+
+
+def _push_one(image: PushImage, layout: Path, signing: SigningConfig, insecure: bool = False) -> None:
+    digest = validate_layout(layout)
+
+    # Destinations come from the compiler. Nothing read off the volume reaches this list.
+    for tag in image.tags:
+        args = ["crane", "push", str(layout), tag]
+        if insecure:
+            args.append("--insecure")
+        _run(args)
+
+    # Sign BY DIGEST, never by tag: a tag is mutable and signing one races anything that could
+    # move it. The digest was derived from bytes validated above.
+    repository = image.tags[0].rsplit(":", 1)[0]
+    sign_args = ["cosign", "sign"]
+    if insecure:
+        sign_args.append("--allow-insecure-registry")
+    _run(
+        [
+            *sign_args,
+            f"--key={signing.key}",
+            # Mandatory, not optional: cosign v2 uploads to the PUBLIC Rekor transparency log by
+            # default, which would publish internal image names.
+            "--tlog-upload=false",
+            "--yes",
+            f"{repository}@{digest}",
+        ]
+    )
+    logger.info("published and signed %s@%s", repository, digest)
+
+
+def main() -> int:
+    config = PushStepConfig.model_validate(read_step_config())
+    k8s_config.load_incluster_config()
+    try:
+        docker_config = _read_credential(k8s.CoreV1Api(), namespace=config.namespace, name=config.credential_secret)
+        credential_dir = _materialize_credential(docker_config, registry=config.registry)
+    except CredentialError as exc:
+        # Nothing is pushed. Publishing anonymously when a credential was configured would hide
+        # the misconfiguration behind a registry's 401, or worse, succeed somewhere it shouldn't.
+        logger.error("%s", exc)
+        return 1
+    try:
+        return _publish_all(config)
+    finally:
+        shutil.rmtree(credential_dir, ignore_errors=True)
+
+
+def _publish_all(config: PushStepConfig) -> int:
+    work = WorkLayout(PurePosixPath(work_mount()))
+    published = 0
+    failures = 0
+    for image in config.images:
+        layout = Path(work.output(image.image))
+        if not layout.exists():
+            # The build step attempts every spec and does not abort the set, so a missing layout
+            # means THAT image failed -- not that this step has nothing to do. Skip it and
+            # publish the rest; its row stays `pending` and the reconciler fails it.
+            logger.warning("no layout for %s; skipping (its build failed)", image.image)
+            failures += 1
+            continue
+        try:
+            _push_one(image, layout, config.signing, config.insecure)
+            published += 1
+        except Exception:
+            # Anything, not just the failures this step anticipates: the layout is hostile input,
+            # and an error nobody predicted in one image must not cost the rest of the set.
+            logger.exception("refusing to publish %s", image.image)
+            failures += 1
+
+    logger.info("published %d image(s), %d failure(s)", published, failures)
+    return 1 if failures else 0

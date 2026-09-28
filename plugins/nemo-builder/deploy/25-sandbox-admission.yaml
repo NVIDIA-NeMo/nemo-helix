@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# What a pod created by `nhx-build-control` may look like: the sandbox's shape, and nothing else.
+#
+# RBAC grants `supervise` pod creation in this namespace and cannot say which pods. `baseline`
+# does not narrow it either: it admits a pod that runs as `nhx-build-push`, mounts a Secret, or
+# mounts the whole work volume. So without this policy, anything that can act as
+# `nhx-build-control` -- a bug in `supervise`, or a caller who submits a raw Jobs job naming the
+# `build-control` profile -- holds the signing key and every tenant's build contexts.
+#
+# Every rule below is one of those paths closed, and each restates what `supervise` already does
+# (run/supervise.py, `_pod_manifest`), so a correct `supervise` never trips one:
+#
+#   - the sandbox label, so the NetworkPolicy applies;
+#   - no ServiceAccount token, and the namespace's default account;
+#   - no environment, and no injected Service variables;
+#   - no init or ephemeral containers, where the rest would not be checked;
+#   - the work volume as the only volume, and every mount a `jobs/...` subPath of it.
+#
+# NOT closed: which job's subPath. A pod of this shape can still mount `jobs/<any workspace>/<any
+# job>`, because nothing the API server sees ties a pod to the job that asked for it. Such a pod
+# has no credential and no cluster network, but it can read and write other tenants' build
+# contexts and outputs. Closing that needs the work volume split per job, or the builder creating
+# its pods itself.
+#
+# Needs Kubernetes 1.30 or later. Check it with deploy/sandbox-admission-check.sh.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: nhx-build-sandbox-shape
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: nhx-builds
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: created-by-build-control
+      expression: request.userInfo.username == "system:serviceaccount:nhx-builds:nhx-build-control"
+  validations:
+    - expression: >-
+        has(object.metadata.labels) && 'nhx.nvidia.com/sandbox' in object.metadata.labels
+        && object.metadata.labels['nhx.nvidia.com/sandbox'] == 'true'
+      message: "a build-control pod must carry nhx.nvidia.com/sandbox=true, which the NetworkPolicy selects on"
+    - expression: >-
+        has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false
+        && (!has(object.spec.serviceAccountName) || object.spec.serviceAccountName == 'default')
+      message: "a build-control pod must run as the default ServiceAccount, with no token mounted"
+    - expression: >-
+        has(object.spec.enableServiceLinks) && object.spec.enableServiceLinks == false
+        && object.spec.containers.all(c, !has(c.env) && !has(c.envFrom))
+      message: "a build-control pod must have no environment"
+    - expression: "!has(object.spec.initContainers) && !has(object.spec.ephemeralContainers)"
+      message: "a build-control pod must have no init or ephemeral containers"
+    - expression: >-
+        has(object.spec.volumes) && object.spec.volumes.all(v,
+          has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'nhx-build-work')
+      message: "a build-control pod may mount only the work volume"
+    - expression: >-
+        object.spec.containers.all(c, has(c.volumeMounts) && c.volumeMounts.all(m,
+          has(m.subPath) && m.subPath.startsWith('jobs/') && !has(m.subPathExpr)))
+      message: "a build-control pod may mount only a job's slice of the work volume, never the whole of it"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: nhx-build-sandbox-shape
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  policyName: nhx-build-sandbox-shape
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: nhx-builds
