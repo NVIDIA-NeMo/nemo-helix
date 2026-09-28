@@ -22,7 +22,7 @@ nemo customization automodel submit path/to/job.json -w acme-corp
 nemo customization automodel submit path/to/job.json --cluster my-cluster
 ```
 
-Other customization backends may still use `nemo customization <backend> jobs submit ...`.
+Other customization backends use the same direct `nemo customization <backend> submit ...` shape.
 
 Job JSON uses the simplified `AutomodelJobInput` schema (see `nemo_automodel_plugin/schema.py`). Submit posts to `/apis/customization/v2/workspaces/{workspace}/automodel/jobs`.
 

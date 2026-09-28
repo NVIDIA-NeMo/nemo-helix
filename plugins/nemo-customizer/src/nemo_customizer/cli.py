@@ -48,6 +48,7 @@ class CustomizationCLI(NemoCLI):
 
     name: ClassVar[str] = "customization"
     description: ClassVar[str] = "Train a model on your own data with an installed training backend."
+    auto_inject_job_commands: ClassVar[bool] = False
 
     def __init__(self) -> None:
         self._contributors = discover_customization_contributors()
