@@ -3,7 +3,7 @@
 
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import { NewDataDesignerJobForm } from '@studio/components/NewDataDesignerJobForm';
-import { DEFAULT_BUILD_MODEL_NAME } from '@studio/constants/constants';
+import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_MODEL_NAME } from '@studio/constants/constants';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
@@ -73,7 +73,7 @@ function setupProvidersMock() {
             served_models: [
               {
                 model_entity_id: `${WORKSPACE}/${DEFAULT_BUILD_MODEL_NAME}`,
-                served_model_name: DEFAULT_BUILD_MODEL_NAME,
+                served_model_name: DEFAULT_MODEL_NAME,
               },
             ],
           },
