@@ -143,13 +143,13 @@ def make_mock_client_context(workspace: str = WORKSPACE_NAME) -> Generator[Clien
 @contextmanager
 def setup_mock_providers(client_context: ClientContext) -> Generator[None]:
     add_mock_provider(
-        sdk=client_context.sdk,
-        workspace=client_context.sdk.workspace or WORKSPACE_NAME,
+        client_context.client,
+        workspace=client_context.client.workspace or WORKSPACE_NAME,
         name=_RAW_OPEN_PROVIDER_NAME,
     )
     add_mock_provider(
-        sdk=client_context.sdk,
-        workspace=client_context.sdk.workspace or WORKSPACE_NAME,
+        client_context.client,
+        workspace=client_context.client.workspace or WORKSPACE_NAME,
         name=_RAW_RESTRICTED_PROVIDER_NAME,
         enabled_models=[ENABLED_MODEL_NAME],
     )
