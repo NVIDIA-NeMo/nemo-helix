@@ -64,7 +64,6 @@ from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
-from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator.task_refs import (
     groupby_kind,
     load_tasks,
