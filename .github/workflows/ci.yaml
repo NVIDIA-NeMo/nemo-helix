@@ -1382,19 +1382,6 @@ jobs:
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-      # Harbor builds task images from Docker Hub bases; authenticate to avoid anonymous pull limits.
-      - name: Log in to Docker Hub
-        # Same condition as the Harbor step, so login still happens when the evaluator step fails.
-        if: >
-          !cancelled() && (
-            github.event_name == 'workflow_dispatch' ||
-            needs.changes.outputs.deps == 'true' ||
-            needs.changes.outputs.harbor-integration == 'true'
-          )
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          username: ${{ vars.AIRE_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.AIRE_DOCKERHUB_ACCESS_TOKEN }}
       # Run separately from xdist: the shared platform fixture binds one port.
       # Keep opt-in and plugin isolation scoped to this step, not the general suite.
       - name: Run Harbor taskset integration
