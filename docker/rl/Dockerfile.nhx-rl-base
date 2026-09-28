@@ -28,8 +28,12 @@ ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
 # https), so it (plus the Automodel / Megatron-Bridge submodules) rides in with the RL git ADD below.
 # If the RL fork's uv.lock and its submodule pins drift (`uv sync --frozen` fails), pass
 # `--build-arg UV_SYNC_MODE=` to relock instead.
+#
+# The ref defaults to a SHA, not a branch, for the reason docker-bake.hcl gives for its own pin: a
+# branch moves under the build and silently invalidates the heavy uv-sync layer below. Bake passes
+# NEMO_RL_REF explicitly, so this default only serves a direct `docker build`; keep the two in step.
 ARG NEMO_RL_REPO=https://github.com/soluwalana/RL.git
-ARG NEMO_RL_REF=nhx/customizer
+ARG NEMO_RL_REF=a5b789d7cc1551600bff82285afd5da13a55c35e
 
 # uv 0.11.18 bundles a vulnerable quinn-proto (0.12 has breaking changes, so stay on 0.11.x).
 # Official CPython 3.13.15 is copied from python:3.13.15-slim-bookworm. uv's catalog has no
