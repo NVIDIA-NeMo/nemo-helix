@@ -99,6 +99,21 @@ describe('ControlledSearchableSelect', () => {
       expect(screen.getByRole('option', { name: 'Banana' })).toBeInTheDocument();
     });
 
+    it('should let the popover grow past the trigger width to fit long option labels', async () => {
+      const user = userEvent.setup();
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+        />
+      );
+
+      await user.click(screen.getByRole('combobox'));
+      await screen.findByRole('listbox');
+
+      expect(screen.getByTestId('nv-select-content')).toHaveClass('w-max', 'min-w-full');
+    });
+
     it('should show search input in dropdown', async () => {
       const user = userEvent.setup();
       renderWithForm(

@@ -278,7 +278,7 @@ export const ControlledSearchableSelect = ({
             {...selectProps}
           />
         </Tooltip>
-        <SelectContent>
+        <SelectContent className="w-max min-w-full max-w-[32rem]">
           <SelectListbox>
             <Block className="p-2 w-full sticky top-0 bg-surface z-10">
               <TextInput
