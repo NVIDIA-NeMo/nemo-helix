@@ -18,8 +18,8 @@ inference backend.
 from collections.abc import Callable
 from typing import Any
 
-import nemo_helix
 import pytest
+from nemo_helix_plugin.client.errors import NemoHTTPError
 
 from e2e.guardrails.utils import (
     BACKEND_RESPONSE,
@@ -226,7 +226,7 @@ def test_chat_completions_rejects_unsupported_body_guardrails_config(
 ) -> None:
     test_case = guardrails_chat_test_case(config_mode="referenced", outcome="safe", rail_types=("input",))
 
-    with pytest.raises(nemo_helix.APIStatusError) as exc_info:
+    with pytest.raises(NemoHTTPError) as exc_info:
         post_chat_completion(
             test_case,
             extra_body={"guardrails": {"config_id": test_case.config_ref}},

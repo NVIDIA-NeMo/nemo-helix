@@ -12,9 +12,8 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig, httpx_tls_config_from_env
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
 
@@ -358,8 +357,7 @@ def auth_idp_runtime(
 @pytest.fixture
 def auth_idp_workspace(auth_idp_runtime) -> Iterator[str]:
     workspace_name = f"auth-idp-ws-{uuid.uuid4().hex[:8]}"
-    sdk = auth_idp_runtime.e2e_setup_sdk()
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+    workspaces = WorkspacesClient.from_client(auth_idp_runtime.e2e_setup_client())
     workspaces.create_workspace(
         query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),
         body=CreateWorkspaceRequest(name=workspace_name, description="Workspace for auth-idp provider contract tests"),
@@ -427,35 +425,23 @@ def interactive_user_token(authentik_stack: ProviderConfig) -> str:
 
 
 @pytest.fixture(scope="module")
-def authentik_e2e_setup_sdk(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NeMoHelix:
-    return NeMoHelix(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {e2e_setup_token}"},
-        max_retries=0,
-    )
+def authentik_e2e_setup_client(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=e2e_setup_token)
 
 
 @pytest.fixture(scope="module")
-def authentik_interactive_user_sdk(authentik_stack: ProviderConfig, interactive_user_token: str) -> NeMoHelix:
-    return NeMoHelix(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {interactive_user_token}"},
-        max_retries=0,
-    )
+def authentik_interactive_user_client(authentik_stack: ProviderConfig, interactive_user_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=interactive_user_token)
 
 
 @pytest.fixture(scope="module")
-def workload_provider_sdk(authentik_stack: ProviderConfig, workload_provider_token: str) -> NeMoHelix:
-    return NeMoHelix(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {workload_provider_token}"},
-        max_retries=0,
-    )
+def workload_provider_client(authentik_stack: ProviderConfig, workload_provider_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=workload_provider_token)
 
 
 @pytest.fixture
-def authentik_workspace(authentik_e2e_setup_sdk: NeMoHelix) -> Iterator[str]:
-    workspaces = client_from_platform(authentik_e2e_setup_sdk, WorkspacesClient)
+def authentik_workspace(authentik_e2e_setup_client: NemoClient) -> Iterator[str]:
+    workspaces = WorkspacesClient.from_client(authentik_e2e_setup_client)
     workspace_name = f"authentik-ws-{uuid.uuid4().hex[:8]}"
     workspaces.create_workspace(
         query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),

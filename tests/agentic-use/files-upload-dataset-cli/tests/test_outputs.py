@@ -15,8 +15,7 @@ import json
 import os
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from trace_reader import get_session
 
@@ -30,14 +29,14 @@ EXPECTED_FILES = {
 
 
 @pytest.fixture
-def client() -> NeMoHelix:
+def client() -> NemoClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE)
+    return NemoClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 @pytest.fixture
-def files_client(client: NeMoHelix) -> FilesClient:
-    return client_from_platform(client, FilesClient)
+def files_client(client: NemoClient) -> FilesClient:
+    return FilesClient.from_client(client)
 
 
 def test_fileset_exists(files_client: FilesClient) -> None:
@@ -49,9 +48,9 @@ def test_fileset_exists(files_client: FilesClient) -> None:
     )
 
 
-def test_all_files_uploaded(client: NeMoHelix) -> None:
+def test_all_files_uploaded(client: NemoClient) -> None:
     """Test that all three JSONL files are present in the fileset."""
-    files = client.files.list(fileset=FILESET_NAME)
+    files = FilesClient.from_client(client).list_files(name=FILESET_NAME).data()
     file_paths = [f.path for f in files.data]
 
     for filename in EXPECTED_FILES:
@@ -61,9 +60,9 @@ def test_all_files_uploaded(client: NeMoHelix) -> None:
 
 
 @pytest.mark.parametrize("filename,min_rows", list(EXPECTED_FILES.items()))
-def test_file_content_valid_jsonl(client: NeMoHelix, filename: str, min_rows: int) -> None:
+def test_file_content_valid_jsonl(client: NemoClient, filename: str, min_rows: int) -> None:
     """Test that each uploaded file contains valid JSONL with prompt/completion format."""
-    content_bytes = client.files.download_content(remote_path=filename, fileset=FILESET_NAME)
+    content_bytes = FilesClient.from_client(client).download_file(name=FILESET_NAME, path=filename).read()
     content = content_bytes.decode("utf-8").strip()
 
     assert content, f"File '{filename}' is empty!"

@@ -14,9 +14,9 @@ import pytest
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.nemotron_personas import WORKSPACE, get_resource_name_for_locale
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_helix import NeMoHelix
-from nemo_helix.types.inference import ModelProvider
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -60,8 +60,14 @@ def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
     }
 
 
-def _make_mock_provider(sdk: NeMoHelix, workspace: str) -> ModelProvider:
-    return add_mock_provider(
+def _data_designer(client: NemoClient) -> DataDesignerResource:
+    """High-level Data Designer resource driven by the typed platform client."""
+    return DataDesignerResource(client)  # ty: ignore[invalid-argument-type]
+
+
+def _make_mock_provider(sdk: NeMoHelix, workspace: str) -> str:
+    """Create the two-model mock provider and return its name."""
+    provider = add_mock_provider(
         sdk,
         workspace=workspace,
         name=PROVIDER_NAME,
@@ -74,20 +80,21 @@ def _make_mock_provider(sdk: NeMoHelix, workspace: str) -> ModelProvider:
             ],
         },
     )
+    return provider.name
 
 
-def _setup_dd_config(provider: ModelProvider) -> dd.DataDesignerConfigBuilder:
+def _setup_dd_config(provider_name: str) -> dd.DataDesignerConfigBuilder:
     model_configs = [
         dd.ModelConfig(
             alias="a",
             model=MODEL_A,
-            provider=provider.name,
+            provider=provider_name,
             inference_parameters=dd.ChatCompletionInferenceParams(top_p=1),
         ),
         dd.ModelConfig(
             alias="b",
             model=MODEL_B,
-            provider=provider.name,
+            provider=provider_name,
             inference_parameters=dd.ChatCompletionInferenceParams(top_p=1),
         ),
     ]
@@ -128,20 +135,22 @@ def _assert_dataset_equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
     pd.testing.assert_frame_equal(actual, expected, check_like=True)
 
 
-def test_simple_ndd_config(sdk: NeMoHelix, workspace: str) -> None:
-    provider = _make_mock_provider(sdk, workspace)
-    config_builder = _setup_dd_config(provider)
+def test_simple_ndd_config(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+    provider_name = _make_mock_provider(sdk, workspace)
+    config_builder = _setup_dd_config(provider_name)
 
-    preview_results = sdk.data_designer.preview(config_builder, workspace=workspace)
+    preview_results = _data_designer(client).preview(config_builder, workspace=workspace)
+
+    assert preview_results.dataset is not None
     expected_preview_dataset = _make_expected_dataset(COMMON_EXPECTED_ROW_DATA, PREVIEW_NUM_RECORDS)
     _assert_dataset_equal(preview_results.dataset, expected_preview_dataset)
 
-    job_dataset = _create_job_and_get_dataset(sdk, workspace, config_builder)
+    job_dataset = _create_job_and_get_dataset(client, workspace, config_builder)
     expected_job_dataset = _make_expected_dataset(COMMON_EXPECTED_ROW_DATA, JOB_NUM_RECORDS)
     _assert_dataset_equal(job_dataset, expected_job_dataset)
 
 
-def test_fileset_seed_data(sdk: NeMoHelix, files_client: FilesClient, workspace: str) -> None:
+def test_fileset_seed_data(sdk: NeMoHelix, client: NemoClient, files_client: FilesClient, workspace: str) -> None:
     """Tests that the Data Designer *library* plugin that makes Filesets available as seed sources
     is wired up properly by the Data Designer *platform plugin*.
     """
@@ -152,7 +161,7 @@ def test_fileset_seed_data(sdk: NeMoHelix, files_client: FilesClient, workspace:
     remote_path = "data.parquet"
     with tempfile.NamedTemporaryFile(suffix=".parquet") as f:
         seed_data.to_parquet(f.name, index=False)
-        client_from_platform(sdk, FilesClient).upload_file(
+        files_client.upload_file(
             path=remote_path,
             name=fileset_name,
             workspace=workspace,
@@ -161,19 +170,21 @@ def test_fileset_seed_data(sdk: NeMoHelix, files_client: FilesClient, workspace:
 
     filepath = f"{workspace}/{fileset_name}#{remote_path}"
 
-    provider = _make_mock_provider(sdk, workspace)
-    config_builder = _setup_dd_config(provider)
+    provider_name = _make_mock_provider(sdk, workspace)
+    config_builder = _setup_dd_config(provider_name)
 
     config_builder.with_seed_dataset(FilesetFileSeedSource(path=filepath))  # ty: ignore[invalid-argument-type]
 
     expected_row_data = {"seed": "my-seed"}
     expected_row_data.update(COMMON_EXPECTED_ROW_DATA)
 
-    preview_results = sdk.data_designer.preview(config_builder, workspace=workspace)
+    preview_results = _data_designer(client).preview(config_builder, workspace=workspace)
+
+    assert preview_results.dataset is not None
     expected_preview_dataset = _make_expected_dataset(expected_row_data, PREVIEW_NUM_RECORDS)
     _assert_dataset_equal(preview_results.dataset, expected_preview_dataset)
 
-    job_dataset = _create_job_and_get_dataset(sdk, workspace, config_builder)
+    job_dataset = _create_job_and_get_dataset(client, workspace, config_builder)
     expected_job_dataset = _make_expected_dataset(expected_row_data, JOB_NUM_RECORDS)
     _assert_dataset_equal(job_dataset, expected_job_dataset)
 
@@ -216,15 +227,17 @@ def nemotron_personas_locale(
         files_client.delete_fileset(name=fileset_name, workspace=WORKSPACE)
 
 
-def test_nemotron_personas_sampling(sdk: NeMoHelix, workspace: str, nemotron_personas_locale: str) -> None:
+def test_nemotron_personas_sampling(
+    sdk: NeMoHelix, client: NemoClient, workspace: str, nemotron_personas_locale: str
+) -> None:
     """Test Nemotron Personas data can be created in the platform and subsequently dd.SamplerType.PERSON
     columns can be included in workloads.
 
     Nemotron Personas filesets are created via the CLI. The CLI invocation is "buried" in a pytest
     fixture to ensure a clean test environment on each run, see ``nemotron_personas_locale``.
     """
-    provider = _make_mock_provider(sdk, workspace)
-    config_builder = _setup_dd_config(provider)
+    provider_name = _make_mock_provider(sdk, workspace)
+    config_builder = _setup_dd_config(provider_name)
 
     config_builder.add_column(
         dd.SamplerColumnConfig(
@@ -255,21 +268,23 @@ def test_nemotron_personas_sampling(sdk: NeMoHelix, workspace: str, nemotron_per
         demo_values = dataset["demo"].values
         return [_parse_age(value) for value in demo_values]
 
-    preview_results = sdk.data_designer.preview(config_builder, workspace=workspace)
+    preview_results = _data_designer(client).preview(config_builder, workspace=workspace)
+
+    assert preview_results.dataset is not None
     assert len(preview_results.dataset) == PREVIEW_NUM_RECORDS
     assert all(25 <= age <= 45 for age in _get_demo_ages(preview_results.dataset))
 
-    job_dataset = _create_job_and_get_dataset(sdk, workspace, config_builder)
+    job_dataset = _create_job_and_get_dataset(client, workspace, config_builder)
     assert len(job_dataset) == JOB_NUM_RECORDS
     assert all(25 <= age <= 45 for age in _get_demo_ages(job_dataset))
 
 
 def _create_job_and_get_dataset(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     config_builder: dd.DataDesignerConfigBuilder,
 ) -> pd.DataFrame:
-    job = sdk.data_designer.create(config_builder, num_records=JOB_NUM_RECORDS, workspace=workspace)
+    job = _data_designer(client).create(config_builder, num_records=JOB_NUM_RECORDS, workspace=workspace)
     job.wait_until_done()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -308,9 +323,9 @@ def _download_artifacts_when_ready(job: Any, tmpdir: str) -> Any:
     raise DataDesignerJobError(f"Timed out waiting for Data Designer artifacts: {last_error}") from last_error
 
 
-def _make_unservable_model_provider(sdk: NeMoHelix, workspace: str) -> ModelProvider:
-    """A provider that resolves cleanly but 404s the model itself."""
-    return add_mock_provider(
+def _make_unservable_model_provider(sdk: NeMoHelix, workspace: str) -> str:
+    """A provider that resolves cleanly but 404s the model itself. Returns its name."""
+    provider = add_mock_provider(
         sdk,
         workspace=workspace,
         name="unservable-provider",
@@ -323,15 +338,16 @@ def _make_unservable_model_provider(sdk: NeMoHelix, workspace: str) -> ModelProv
             ],
         },
     )
+    return provider.name
 
 
-def _single_model_config(provider: ModelProvider, model: str) -> dd.DataDesignerConfigBuilder:
+def _single_model_config(provider_name: str, model: str) -> dd.DataDesignerConfigBuilder:
     builder = dd.DataDesignerConfigBuilder(
         model_configs=[
             dd.ModelConfig(
                 alias="a",
                 model=model,
-                provider=provider.name,
+                provider=provider_name,
                 inference_parameters=dd.ChatCompletionInferenceParams(top_p=1),
             )
         ]
@@ -348,9 +364,13 @@ def _single_model_config(provider: ModelProvider, model: str) -> dd.DataDesigner
 
 def test_check_models_passes_for_servable_models(sdk: NeMoHelix, workspace: str) -> None:
     """The only place a real model probe runs: integration tests cannot, because
-    the engine's HTTP client does not carry their ASGI transport."""
-    provider = _make_mock_provider(sdk, workspace)
-    config_builder = _setup_dd_config(provider)
+    the engine's HTTP client does not carry their ASGI transport.
+
+    check_models runs the engine pass, which still converts the generated SDK
+    handle (data_designer_nemo.sdk_translation), so it is driven from ``sdk``.
+    """
+    provider_name = _make_mock_provider(sdk, workspace)
+    config_builder = _setup_dd_config(provider_name)
 
     report = sdk.data_designer.check_models(config_builder, workspace=workspace)
 
@@ -360,9 +380,12 @@ def test_check_models_passes_for_servable_models(sdk: NeMoHelix, workspace: str)
 def test_check_models_catches_model_the_provider_cannot_serve(sdk: NeMoHelix, workspace: str) -> None:
     """validate can be green while check_models is red;
     only the latter makes a live inference call.
+
+    Both run the engine pass, which still converts the generated SDK handle
+    (data_designer_nemo.sdk_translation), so they are driven from ``sdk``.
     """
-    provider = _make_unservable_model_provider(sdk, workspace)
-    config_builder = _single_model_config(provider, MODEL_UNSERVABLE)
+    provider_name = _make_unservable_model_provider(sdk, workspace)
+    config_builder = _single_model_config(provider_name, MODEL_UNSERVABLE)
 
     validation_report = sdk.data_designer.validate(config_builder, workspace=workspace)
     assert validation_report.ok, [e.message for e in validation_report.errors]
@@ -375,7 +398,7 @@ def test_check_models_catches_model_the_provider_cannot_serve(sdk: NeMoHelix, wo
 
 
 def test_check_models_cli_exits_nonzero_for_unservable_model(_services: str, sdk: NeMoHelix, workspace: str) -> None:
-    provider = _make_unservable_model_provider(sdk, workspace)
+    provider_name = _make_unservable_model_provider(sdk, workspace)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config_path = Path(tmpdir) / "config.py"
@@ -386,7 +409,7 @@ def test_check_models_cli_exits_nonzero_for_unservable_model(_services: str, sdk
             "def load_config_builder() -> dd.DataDesignerConfigBuilder:\n"
             "    builder = dd.DataDesignerConfigBuilder(\n"
             "        model_configs=[\n"
-            f"            dd.ModelConfig(alias='a', model={MODEL_UNSERVABLE!r}, provider={provider.name!r})\n"
+            f"            dd.ModelConfig(alias='a', model={MODEL_UNSERVABLE!r}, provider={provider_name!r})\n"
             "        ]\n"
             "    )\n"
             "    builder.add_column(\n"

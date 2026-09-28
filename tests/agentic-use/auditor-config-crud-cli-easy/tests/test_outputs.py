@@ -12,40 +12,40 @@ Checks:
 import os
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.auditor.client import AuditorClient
 from trace_reader import get_session
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
-def client() -> NeMoHelix:
+def client() -> AuditorClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE)
+    return AuditorClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
-def test_harbor_test_config_deleted(client: NeMoHelix) -> None:
+def test_harbor_test_config_deleted(client: AuditorClient) -> None:
     """Test that harbor-test-config was deleted after CRUD operations."""
-    configs = client.auditor.configs.list(workspace=WORKSPACE)
-    config_names = [c["name"] for c in configs["data"]]
+    configs = client.list_audit_configs(workspace=WORKSPACE)
+    config_names = [c.name for c in configs.items()]
     assert "harbor-test-config" not in config_names, (
         f"Config 'harbor-test-config' should have been deleted but still exists! Found: {config_names}"
     )
 
 
-def test_harbor_final_config_exists(client: NeMoHelix) -> None:
+def test_harbor_final_config_exists(client: AuditorClient) -> None:
     """Test that harbor-final-config was created and has correct metadata."""
-    response = client.auditor.configs.get(workspace=WORKSPACE, name="harbor-final-config")
+    response = client.get_audit_config(workspace=WORKSPACE, name="harbor-final-config").data()
     assert response.name == "harbor-final-config", f"Expected config name 'harbor-final-config', got '{response.name}'"
     assert response.description == "Final config for verification", (
         f"Expected description 'Final config for verification', got '{response.description}'"
     )
 
 
-def test_harbor_final_config_probe_spec(client: NeMoHelix) -> None:
+def test_harbor_final_config_probe_spec(client: AuditorClient) -> None:
     """Test that harbor-final-config uses the dan.DanInTheWild probe."""
-    response = client.auditor.configs.get(workspace=WORKSPACE, name="harbor-final-config")
-    probe_spec = response.plugins.probe_spec
+    response = client.get_audit_config(workspace=WORKSPACE, name="harbor-final-config").data()
+    probe_spec = response.plugins["probe_spec"]
     assert "dan.DanInTheWild" in probe_spec, f"Expected probe_spec to contain 'dan.DanInTheWild', got '{probe_spec}'"
 
 

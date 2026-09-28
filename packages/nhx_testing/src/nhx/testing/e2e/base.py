@@ -15,7 +15,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.image import image_builder
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ class E2EBackend(ABC):
     """Abstract base class for e2e test backends.
 
     Supports context manager protocol for automatic cleanup.
-    Produces a NeMoHelix SDK client for tests.
+    Produces a typed platform client for tests.
 
     Args:
         config_path: Path to the NeMo Helix configuration YAML file, or an E2EConfig object.
@@ -90,14 +90,14 @@ class E2EBackend(ABC):
         pass
 
     @abstractmethod
-    def get_sdk(self, principal_id: str | None = None) -> NeMoHelix:
-        """Create an SDK client for the test environment.
+    def get_client(self, principal_id: str | None = None) -> NemoClient:
+        """Create a typed platform client for the test environment.
 
         Args:
             principal_id: Optional principal ID for authentication (X-NHX-Principal-Id header).
 
         Returns:
-            Configured NeMoHelix SDK client.
+            Configured typed platform client.
         """
         pass
 
