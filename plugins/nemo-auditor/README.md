@@ -4,7 +4,7 @@
 # NeMo Auditor Plugin
 
 A NeMo Helix plugin which provides Auditor, an LLM
-vulnerability scanner service powered by [Garak](https://https://github.com/NVIDIA/garak)
+vulnerability scanner service powered by [Garak](https://github.com/NVIDIA/garak)
 
 ## CLI quickstart
 
