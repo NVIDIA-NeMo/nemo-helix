@@ -38,7 +38,7 @@ integrations = [
 # unsloth via its canonical `uv pip install unsloth --torch-backend=auto`
 # command (per unsloth's README), so this extra is mainly for non-container
 # callers that want a single-package handle.
-unsloth = ["unsloth[huggingface]"]
+unsloth = ["unsloth[huggingface]>=2026.8.4"] # floor added to prove CVE-2026-9856/CVE-2026-80047 (transformers) exemption; do not silently regress unsloth to satisfy a newer transformers floor
 
 [project.scripts]
 # Container entrypoints. Each script matches the automodel name pattern for parity.
