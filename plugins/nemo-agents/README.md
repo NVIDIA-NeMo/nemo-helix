@@ -685,43 +685,162 @@ nemo --help   # should show "agents" under Plugins
 nat --help    # should show run, eval, optimize, start, …
 ```
 
-### ReAct example — Wikipedia search and datetime tools
+> **Working directory:** All example commands that reference `examples/` use
+> paths relative to the plugin directory. Run them from `plugins/nemo-agents/`:
+>
+> ```bash
+> cd plugins/nemo-agents/
+> ```
 
-The bundled ReAct example includes an agent config, evaluation dataset and
-config, and optimization config under `examples/react-agent/`. Start the
-platform and set up an inference provider first. Then, from
-`plugins/nemo-agents/`, choose a model entity shown by `nemo models list`:
+---
+
+### ReAct agent demo — Wikipedia search + datetime tools
+
+`examples/react-agent/react-agent.yml` uses the model selected by
+`NEMO_DEFAULT_MODEL` with:
+
+- `wiki_search` — searches Wikipedia (no API key needed)
+- `current_datetime` — returns current UTC time
+
+When deployed via the platform, the Inference Gateway URL is injected
+automatically into the agent config — you only need to:
+
+1. Create an `nvidia-build` inference provider pointing at NVIDIA Build
+2. Create the agent and deploy it
+3. Invoke through the gateway
+
+#### NAT Step 1 — Start the platform
+
+Run this in a **dedicated terminal** — it stays in the foreground. Use a
+separate terminal for all subsequent steps.
 
 ```bash
+nemo services run
+```
+
+#### NAT Step 2 — Create an inference provider
+
+In a new terminal, export the base URL once so all subsequent `nemo` commands
+pick it up automatically:
+
+```bash
+export NHX_BASE_URL=http://127.0.0.1:8080
+cd plugins/nemo-agents/
+```
+
+In production the `system/nvidia-build` provider is created automatically by
+the platform seed job. For local development, create it manually:
+
+```bash
+# Store the API key as a secret
+nemo secrets create ngc-api-key \
+    --value "$NVIDIA_API_KEY"
+
+# Create the model provider
+nemo inference providers create nvidia-build \
+    --host-url https://integrate.api.nvidia.com \
+    --api-key-secret-name ngc-api-key
+```
+
+Wait for the models controller to discover served models and register model
+entities:
+
+```bash
+nemo wait inference provider nvidia-build
+```
+
+#### NAT Step 3 — Create and deploy the agent
+
+```bash
+# The config resolves this model when the agent is created.
+nemo models list
 export NEMO_DEFAULT_MODEL=your-model-entity-name
-nemo agents create --name react-agent \
-  --agent-config examples/react-agent/react-agent.yml
+nemo agents create \
+    --name react-agent \
+    --agent-config examples/react-agent/react-agent.yml
+
+# Deploy waits for the agent to reach a running or failed state.
 nemo agents deploy --agent react-agent
-nemo agents invoke --agent react-agent \
-  --input "What time is it right now?"
+
+# Container mode (docker): requires the nemo-deployments controller plus a
+# configured docker executor (see agents.deployments / deployments.executors).
+# Build an image first, then deploy with that tag:
+#   nemo agents package --agent examples/react-agent/react-agent.yml --tag react-agent:local
+#   nemo agents deploy --agent react-agent --mode docker --image react-agent:local
+#
+# --mode k8s needs a k8s executor and a registry-reachable image; in-cluster
+# inference-gateway wiring is still evolving — prefer docker for local smoke.
 ```
 
-Set `NEMO_DEFAULT_MODEL` before `agents create`: the platform stores the
-resolved config. The deployment must be running before you evaluate or
-optimize it. The supplied evaluation and optimization configs pin separate
-agent and judge models; check that both are available in your workspace and
-adjust their `model_name` values if needed.
+The deploy command prints a status line each time the deployment changes
+state:
+
+```
+Waiting for deployment 'react-agent-e5e29e05' (timeout=300s)...
+  [  0s] status: pending
+  [  1s] status: starting
+  [ 38s] status: running
+Deployment 'react-agent-e5e29e05' is running at http://127.0.0.1:49152
+```
+
+If the subprocess dies during startup, the command exits 1 with the failure
+reason from the deployment entity (e.g. ``Process exited with code 1``).
+Use ``nemo agents logs --agent react-agent`` to inspect the subprocess log
+afterwards (see [Inspecting agent logs](#inspecting-agent-logs)).
+
+For scripted pipelines that prefer to poll separately, pass ``--no-wait``
+to restore the legacy fire-and-forget behaviour:
 
 ```bash
-nemo agents evaluate --agent react-agent \
-  --eval-config examples/react-agent/react-eval.yml
-
-nemo agents optimize prepare-fileset \
-  --source examples/react-agent \
-  --optimize-config react-optimize.yml \
-  --fileset react-optimize
-nemo agents optimize --agent react-agent \
-  --optimize-config-fileset default/react-optimize \
-  --optimize-config react-optimize.yml
+nemo agents deploy --agent react-agent --no-wait
+nemo agents deployments wait --agent react-agent
 ```
 
-For the governance walkthrough, see the
-[Agent Hardener quickstart](../nemo-agent-hardener/README.md#quickstart).
+#### NAT Step 4 — Invoke through the gateway
+
+```bash
+nemo agents invoke \
+    --agent react-agent \
+    --input "Who invented the telephone? Also, what time is it right now?"
+```
+
+The gateway URL is:
+
+```
+http://127.0.0.1:8080/apis/agents/v2/workspaces/default/agents/react-agent/-/v1/chat/completions
+```
+
+You can call it directly with any OpenAI-compatible client using the same path.
+
+Requests without ``X-Nemo-Session-Id`` use a one-shot Fabric runtime that is
+stopped when the response or response stream completes. To retain runtime
+context across turns, send a stable session ID in that header; the registered
+runtime then follows the Platform session lifecycle.
+
+The agent is still running — continue to [Evaluation](#evaluation) below, or
+see [Cleanup](#cleanup-optional) to tear everything down.
+
+---
+
+### Evaluation
+
+Evaluation delegates to `nat eval`, which sends dataset questions to the
+agent's `/generate/full` endpoint and scores responses with a judge LLM.
+
+The agent must be deployed and running (see NAT Step 3 above) before evaluating.
+The supplied config pins separate agent and judge models. Check that both
+are available in your workspace and adjust their `model_name` values if needed.
+
+```bash
+nemo agents evaluate \
+    --eval-config examples/react-agent/react-eval.yml \
+    --agent react-agent
+```
+
+The `--agent` flag resolves the running deployment endpoint automatically and
+passes it to `nat eval --endpoint`.
+
+---
 
 ### Packaging NAT workflows
 
@@ -735,11 +854,13 @@ Pass `--nat-version` to make the installed NAT runtime reproducible. The value
 defaults to `NAT_VERSION` and then to the CLI's built-in version (`1.8.0`). This
 option is valid only for NAT workflows.
 
-For example, from `plugins/nemo-agents/`:
+From `plugins/nemo-agents/`, build the ReAct example with:
 
 ```bash
-nemo agents package --agent examples/react-agent/react-agent.yml \
-  --nat-version 1.8.0 --tag react-agent:local
+nemo agents package \
+  --agent examples/react-agent/react-agent.yml \
+  --nat-version 1.8.0 \
+  --tag react-agent:local
 ```
 
 #### NAT workflow validation
@@ -778,8 +899,28 @@ runtime version.
 Agent configs are standard NAT workflow YAML files. The platform stores them
 as `nat-workflow-v1` entities. All NAT component types are supported.
 
-The [ReAct config](examples/react-agent/react-agent.yml) demonstrates a
-`react_agent` workflow with `wiki_search` and `current_datetime` tools.
+**ReAct agent with tools** (`examples/react-agent/react-agent.yml`):
+
+```yaml
+functions:
+  wiki:
+    _type: wiki_search           # Wikipedia search, no API key
+  clock:
+    _type: current_datetime      # current UTC time
+
+llms:
+  llm:
+    _type: openai
+    api_key: not-used            # injected by platform at deploy time
+    model_name: ${NEMO_DEFAULT_MODEL}
+    temperature: 0.0
+
+workflow:
+  _type: react_agent
+  tool_names: [wiki, clock]
+  llm_name: llm
+  parse_agent_response_max_retries: 3
+```
 
 #### base_url injection
 
