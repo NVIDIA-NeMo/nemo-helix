@@ -28,7 +28,7 @@ export const PRIMARY_CANONICAL_FIELDS: readonly CanonicalField[] = ['input', 're
 
 export const CANONICAL_FIELD_LABELS: Record<CanonicalField, string> = {
   input: 'Input',
-  reference: 'Ground Truth',
+  reference: 'Reference',
   context: 'Context',
   messages: 'Messages',
 };
@@ -171,8 +171,6 @@ export const composeJudgePromptTemplate = (
 });
 
 export const composeJudgeUserPrompt = (bindings: DatasetBindings): string => {
-  // Labels match the mapping UI exactly -- a user who mapped "Ground Truth"
-  // should see "Ground Truth" in the prompt, not a synonym.
   const lines = [`Input: ${bindings.input}`];
   if (bindings.context) lines.push(`Context: ${bindings.context}`);
   if (bindings.reference) lines.push(`Ground Truth: ${bindings.reference}`);
@@ -414,7 +412,7 @@ export const evaluationSchema = z
         path: mapping.messages ? ['dataset'] : ['fieldMapping', 'input'],
         message: mapping.messages
           ? 'No user turn in this file to send as Input. Its last assistant message is not preceded by one.'
-          : 'Map a dataset column to Input.',
+          : 'Map a dataset field to Input.',
       });
     }
 
@@ -431,15 +429,15 @@ export const evaluationSchema = z
     );
     // A bound messages column is NOT proof of a ground truth: the reference is
     // the assistant turn, and a prompts-only dataset has none. The error goes to
-    // the metrics slot in that case because no Ground Truth select is rendered
+    // the metrics slot in that case because no Reference select is rendered
     // for a messages dataset, so a field error there would never be seen.
     if (needsReference && !mapping.reference) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: mapping.messages ? ['body', 'metrics'] : ['fieldMapping', 'reference'],
         message: mapping.messages
-          ? 'This dataset has no assistant turn to compare against. Clear the metrics that score against Ground Truth.'
-          : 'This metric compares against ground truth, so Ground Truth must be mapped.',
+          ? 'This dataset has no assistant turn to compare against. Clear the metrics that score against the Reference.'
+          : 'This metric compares against the Reference, so Reference must be mapped.',
       });
     }
 

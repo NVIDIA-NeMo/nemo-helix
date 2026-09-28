@@ -18,7 +18,7 @@ import {
   detectFormatFromPath,
   resolveSchemaForFile,
 } from '@studio/routes/FilesetDetailRoute/DatasetSchemaEditor/helpers';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 /** Bytes read for line-delimited formats, where a partial tail still parses. */
@@ -157,6 +157,7 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     queryKey: ['evaluation-new', 'dataset-row', datasetRef, fileBytes, rowIndex],
     enabled: Boolean(parsed && path && format && fileBytes !== undefined),
     staleTime: Infinity,
+    placeholderData: keepPreviousData,
     // A failed head is a dead end, not a flake: retrying just parks the user
     // behind a spinner for the whole backoff before showing the same error.
     retry: false,

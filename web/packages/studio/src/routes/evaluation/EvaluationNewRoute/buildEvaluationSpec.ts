@@ -44,6 +44,12 @@ type BundleOutput = {
   value_json_schema: Record<string, unknown>;
 };
 
+/** These two name their outputs after the score they compute, not after the
+ *  metric; a bundle whose `outputs` disagree with what the metric emits is
+ *  rejected at submit. */
+const ROUGE_OUTPUT_NAMES = ['rouge_1_score', 'rouge_2_score', 'rouge_3_score', 'rouge_L_score'];
+const BLEU_OUTPUT_NAME = 'sentence';
+
 const continuousOutput = (name: string, description?: string | null): BundleOutput => ({
   name,
   description: description ?? null,
@@ -116,13 +122,21 @@ const buildMetricBundle = (
   switch (metric) {
     case 'exact-match':
     case 'f1':
-    case 'rouge':
       if (!reference) return null;
       return bundle(
         metric,
         { reference },
         [continuousOutput(metric)],
-        `${metric} against the mapped ground truth`
+        `${metric} against the mapped reference`
+      );
+
+    case 'rouge':
+      if (!reference) return null;
+      return bundle(
+        metric,
+        { reference },
+        ROUGE_OUTPUT_NAMES.map((name) => continuousOutput(name)),
+        'rouge against the mapped reference'
       );
 
     case 'bleu':
@@ -130,8 +144,8 @@ const buildMetricBundle = (
       return bundle(
         metric,
         { references: [reference] },
-        [continuousOutput(metric)],
-        'bleu against the mapped ground truth'
+        [continuousOutput(BLEU_OUTPUT_NAME)],
+        'bleu against the mapped reference'
       );
 
     case 'string-check':
@@ -144,7 +158,7 @@ const buildMetricBundle = (
           right_template: reference,
         },
         [continuousOutput(metric)],
-        `string check (${values.body.stringCheck.operation}) against the mapped ground truth`
+        `string check (${values.body.stringCheck.operation}) against the mapped reference`
       );
 
     case 'number-check': {
@@ -161,7 +175,7 @@ const buildMetricBundle = (
           ...(operation === 'absolute difference' && epsilon !== null ? { epsilon } : {}),
         },
         [continuousOutput(metric)],
-        `number check (${operation}) against the mapped ground truth`
+        `number check (${operation}) against the mapped reference`
       );
     }
 

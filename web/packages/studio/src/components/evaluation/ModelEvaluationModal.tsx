@@ -24,6 +24,7 @@ import { MODEL_EVAL_CONFIG_DESCRIPTION } from '@studio/components/evaluation/sub
 import { LINK_EVAL_DOCS } from '@studio/constants/links';
 import { ConfigureStep } from '@studio/routes/evaluation/EvaluationNewRoute/ConfigureStep';
 import { EvaluationStep } from '@studio/routes/evaluation/EvaluationNewRoute/EvaluationStep';
+import { MetricPanel } from '@studio/routes/evaluation/EvaluationNewRoute/MetricPanel';
 import { specToFormValues } from '@studio/routes/evaluation/EvaluationNewRoute/specToFormValues';
 import {
   COMPARISON_METRICS,
@@ -35,6 +36,7 @@ import {
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { useCreateEvaluation } from '@studio/routes/evaluation/EvaluationNewRoute/useCreateEvaluation';
 import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
+import { useJudgePromptVariables } from '@studio/routes/evaluation/EvaluationNewRoute/useJudgePromptVariables';
 import {
   type SavedConfig,
   useSavedConfig,
@@ -47,15 +49,16 @@ import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form
  *  with one: `configSource` only holds a fileset name once one is picked. */
 const EXISTING_CONFIG = 'existing';
 
-type WizardStep = 'start' | 'configuration' | 'evaluation';
+type WizardStep = 'start' | 'configuration' | 'metrics' | 'evaluation';
 
 /** Re-using a configuration skips authoring one -- the same way the agent
  *  wizard's re-run path skips creating an experiment. */
 const stepsFor = (reusing: boolean): WizardStep[] =>
-  reusing ? ['start', 'evaluation'] : ['start', 'configuration', 'evaluation'];
+  reusing ? ['start', 'evaluation'] : ['start', 'configuration', 'metrics', 'evaluation'];
 const STEP_HEADINGS: Record<WizardStep, string> = {
   start: 'Begin',
   configuration: 'Configuration',
+  metrics: 'Metrics',
   evaluation: 'Run Evaluation',
 };
 
@@ -130,9 +133,6 @@ const StartStep: FC<{
           onValueChange={(value) => {
             onModeChange(value);
             if (value === NEW_CONFIG) {
-              // Authoring starts from nothing, so a configuration loaded before
-              // backtracking here cannot leak into it. The model is chosen per
-              // run and survives.
               const { model } = getValues();
               reset({ ...EVALUATION_FORM_DEFAULTS, configSource: NEW_CONFIG, model });
             } else {
@@ -177,21 +177,17 @@ const SavedConfigLoader: FC<{
   const { spec, isLoading, error } = saved;
 
   useEffect(() => {
-    const { model } = getValues();
-    reset({ ...EVALUATION_FORM_DEFAULTS, configSource: filesetName, model });
-  }, [filesetName, reset, getValues]);
-
-  useEffect(() => {
-    if (!spec) return;
     const current = getValues();
-    reset({
-      ...current,
-      ...specToFormValues(spec, workspace),
-      configSource: filesetName,
-      // The model is chosen per run, so a config swap must not clear one the
-      // user already picked.
-      model: current.model,
-    });
+    reset(
+      spec
+        ? {
+            ...current,
+            ...specToFormValues(spec, workspace),
+            configSource: filesetName,
+            model: current.model,
+          }
+        : { ...EVALUATION_FORM_DEFAULTS, configSource: filesetName, model: current.model }
+    );
   }, [spec, filesetName, workspace, reset, getValues]);
 
   if (isLoading) return <Text kind="body/regular/md">Loading configuration...</Text>;
@@ -207,23 +203,16 @@ const SavedConfigLoader: FC<{
 const ModalBody: FC<{
   workspace: string;
   step: WizardStep;
-  steps: WizardStep[];
   mode: string;
   onModeChange: (mode: string) => void;
   saved: SavedConfig;
-}> = ({ workspace, step, steps, mode, onModeChange, saved }) => {
+}> = ({ workspace, step, mode, onModeChange, saved }) => {
   const { control } = useFormContext<EvaluationFormValues>();
   const configSource = useWatch({ control, name: 'configSource' });
   const reusing = mode === EXISTING_CONFIG;
 
   return (
     <Stack gap="density-2xl">
-      <Stepper
-        className="eval-wizard-stepper"
-        aria-label="New evaluation progress"
-        activeStep={steps.indexOf(step)}
-        items={steps.map((item) => ({ slotHeading: STEP_HEADINGS[item] }))}
-      />
       {step === 'start' ? (
         <>
           <Text kind="body/regular/md">
@@ -243,6 +232,7 @@ const ModalBody: FC<{
         </>
       ) : null}
       {step === 'configuration' ? <ConfigureStep /> : null}
+      {step === 'metrics' ? <MetricPanel /> : null}
       {step === 'evaluation' ? (
         <Stack gap="density-lg">
           {reusing ? <ConfigSourceField workspace={workspace} /> : null}
@@ -326,16 +316,17 @@ const ModelEvaluationModalInner: FC<{
   const saved = useSavedConfig(reusing && configSource ? configSource : null);
   const metrics = useWatch({ control: form.control, name: 'body.metrics' });
 
-  /** A messages configuration stores no input or reference path -- both are
-   *  array-indexed, so `toFieldMapping` drops them -- and `useMessagesBinding`
-   *  only re-derives them once the preview row lands. Submitting in that window
-   *  fails validation on a field this step does not render. */
   const needsReference = [...REFERENCE_METRICS, ...COMPARISON_METRICS].some(
     (metric) => metrics?.[metric]
   );
   const bindingsReady =
     Boolean(bindings.inputPath) && (!needsReference || Boolean(bindings.referencePath));
   const configReady = !reusing || (Boolean(saved.spec) && bindingsReady);
+
+  const judgeSelected = Boolean(metrics?.['llm-judge']);
+  const judgePrompt = useJudgePromptVariables();
+  const judgePromptInvalid =
+    judgeSelected && (judgePrompt.invalid.length > 0 || judgePrompt.malformed);
 
   const steps = stepsFor(reusing);
   const at = steps.indexOf(step);
@@ -346,13 +337,14 @@ const ModelEvaluationModalInner: FC<{
       void createEvaluation(values, bindings);
     },
     (errors) => {
-      // Every field except the model lives on an earlier screen, so a failure
-      // here would otherwise mark fields the user cannot see. Send them back to
-      // the step that owns the first error.
-      const onEarlierStep = ['name', 'dataset', 'fieldMapping', 'body'].some(
+      const target: WizardStep | null = ['name', 'dataset', 'fieldMapping'].some(
         (field) => field in errors
-      );
-      if (onEarlierStep && steps.includes('configuration')) setStep('configuration');
+      )
+        ? 'configuration'
+        : 'body' in errors
+          ? 'metrics'
+          : null;
+      if (target && steps.includes(target)) setStep(target);
     }
   );
 
@@ -361,7 +353,8 @@ const ModelEvaluationModalInner: FC<{
    *  until the last one. */
   const FIELDS_BY_STEP: Record<WizardStep, (keyof EvaluationFormValues)[]> = {
     start: [],
-    configuration: ['name', 'dataset', 'fieldMapping', 'body'],
+    configuration: ['name', 'dataset', 'fieldMapping'],
+    metrics: ['body'],
     evaluation: ['model', 'configSource'],
   };
 
@@ -370,10 +363,19 @@ const ModelEvaluationModalInner: FC<{
   const goNext = async () => {
     const fields = FIELDS_BY_STEP[step];
     if (fields.length > 0 && !(await form.trigger(fields))) return;
+    if (step === 'metrics' && judgePromptInvalid) return;
     setStep(steps[Math.min(at + 1, steps.length - 1)]);
   };
 
-  const goBack = () => setStep(steps[Math.max(at - 1, 0)]);
+  const goBack = () => {
+    const fields = FIELDS_BY_STEP[step];
+    for (const field of fields) {
+      form.setValue(field, EVALUATION_FORM_DEFAULTS[field]);
+    }
+    if (reusing && fields.includes('configSource')) form.setValue('configSource', '');
+    form.clearErrors(fields);
+    setStep(steps[Math.max(at - 1, 0)]);
+  };
 
   return (
     <FormModal
@@ -388,6 +390,14 @@ const ModelEvaluationModalInner: FC<{
       // step is a single column now, so it no longer needs the extra room.
       className="w-[690px]! max-w-[95vw]!"
       onSubmit={handleSubmit}
+      slotAboveBody={
+        <Stepper
+          className="eval-wizard-stepper"
+          aria-label="New evaluation progress"
+          activeStep={steps.indexOf(step)}
+          items={steps.map((item) => ({ slotHeading: STEP_HEADINGS[item] }))}
+        />
+      }
       // The whole footer, matching the agent modal: Cancel, then Back, then the
       // forward action. Supplying this replaces FormModal's default pair, which
       // is the only way to get Back between them rather than off to the left.
@@ -421,7 +431,6 @@ const ModelEvaluationModalInner: FC<{
       <ModalBody
         workspace={workspace}
         step={step}
-        steps={steps}
         mode={mode}
         onModeChange={onModeChange}
         saved={saved}

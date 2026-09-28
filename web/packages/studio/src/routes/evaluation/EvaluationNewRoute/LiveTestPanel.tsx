@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
+import { DatasetRowPager } from '@nemo/common/src/components/DatasetRowPager';
+import { PreviewBox } from '@nemo/common/src/components/PreviewBox';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
@@ -9,7 +11,6 @@ import { type EvaluationFormValues } from '@studio/routes/evaluation/EvaluationN
 import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
 import { useDatasetPreview } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { useLiveTest } from '@studio/routes/evaluation/EvaluationNewRoute/useLiveTest';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { FC, useEffect, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -19,11 +20,9 @@ const asText = (value: unknown): string => {
 };
 
 const PreviewField: FC<{ label: string; value: string }> = ({ label, value }) => (
-  <Stack gap="density-xs">
-    <Text kind="label/bold/lg">{label}</Text>
-    <pre className="whitespace-pre-wrap rounded-md border border-disabled bg-disabled p-density-md font-mono text-xs text-secondary">
-      {value}
-    </pre>
+  <Stack gap="density-xxs">
+    <Text kind="label/bold/sm">{label}</Text>
+    <PreviewBox value={value} label={label} />
   </Stack>
 );
 
@@ -80,49 +79,18 @@ export const LiveTestPanel: FC = () => {
   return (
     <Stack justify="start" gap="density-lg">
       {(input !== null || reference !== null) && rowCount > 1 ? (
-        <Stack gap="density-xs">
-          {/* Same shape as the row navigator in FileRowEditor: chevrons either
-              side of a "Row N of M" label. Disabled while a run is in flight --
-              moving rows mid-run would leave the previews on one row and the
-              result on another. */}
-          {fileName ? (
-            <Text kind="body/regular/sm" className="truncate text-center">
-              {fileName}
-            </Text>
-          ) : null}
-          <Flex align="center" justify="center" gap="density-sm">
-            <Button
-              kind="secondary"
-              size="small"
-              aria-label="Previous row"
-              disabled={busy || rowIndex === 0}
-              onClick={() => setRowIndex((index) => Math.max(0, index - 1))}
-            >
-              <ChevronLeft size={16} />
-            </Button>
-            <Text kind="body/regular/sm" className="text-secondary">
-              Row {rowIndex + 1} of {rowCount}
-            </Text>
-            <Button
-              kind="secondary"
-              size="small"
-              aria-label="Next row"
-              disabled={busy || rowIndex >= rowCount - 1}
-              onClick={() => setRowIndex((index) => index + 1)}
-            >
-              <ChevronRight size={16} />
-            </Button>
-          </Flex>
-          {isPartial ? (
-            <Text kind="body/regular/sm" className="text-center text-placeholder">
-              First {rowCount} rows of a large file.
-            </Text>
-          ) : null}
-        </Stack>
+        <DatasetRowPager
+          fileName={fileName}
+          rowIndex={rowIndex}
+          rowCount={rowCount}
+          isPartial={isPartial}
+          onChange={setRowIndex}
+          disabled={busy}
+        />
       ) : null}
 
-      {input !== null ? <PreviewField label="Input Prompt" value={input} /> : null}
-      {reference !== null ? <PreviewField label="Ground Truth" value={reference} /> : null}
+      {input !== null ? <PreviewField label="Input" value={input} /> : null}
+      {reference !== null ? <PreviewField label="Reference" value={reference} /> : null}
 
       {modelResponse !== null ? (
         <PreviewField label="Model Response" value={modelResponse} />

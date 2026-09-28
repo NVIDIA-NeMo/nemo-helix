@@ -11,6 +11,7 @@
  */
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import {
+  Block,
   Button,
   Flex,
   ModalContent,
@@ -53,6 +54,10 @@ export interface FormModalProps {
   onClose: () => void;
   styles?: React.CSSProperties;
   className?: string;
+  /** Rendered between the heading and the scrollable body, so it stays in view
+   *  while the body scrolls and keeps its height when the dialog is short. For
+   *  chrome such as a wizard stepper. */
+  slotAboveBody?: ReactNode;
   slotFooterLeft?: ReactNode;
   slotFooterRight?: ReactNode;
   attributes?: {
@@ -76,6 +81,7 @@ export const FormModal: FC<PropsWithChildren<FormModalProps>> = ({
   onClose,
   children,
   className,
+  slotAboveBody,
   slotFooterLeft,
   slotFooterRight,
   attributes,
@@ -101,6 +107,7 @@ export const FormModal: FC<PropsWithChildren<FormModalProps>> = ({
         <ModalContent className={`max-h-[90vh] ${className || ''}`}>
           <form className="contents" onSubmit={handleSubmit} noValidate {...attributes?.Form}>
             <ModalHeading>{title}</ModalHeading>
+            {slotAboveBody ? <Block className="shrink-0">{slotAboveBody}</Block> : null}
             <ModalMain className="flex-1 min-h-0 overflow-y-auto">
               <Stack gap="density-md" className="pt-4">
                 {errorText && <p className="text-feedback-danger whitespace-normal">{errorText}</p>}
