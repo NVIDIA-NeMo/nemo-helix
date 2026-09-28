@@ -38,6 +38,8 @@ The recommended way to use mock provider mode in tests is via `nhx_testing`:
 import pytest
 from typing import Generator
 
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nhx.testing import ClientContext, add_mock_provider, create_test_client
 from nhx.core.inference_gateway.service import InferenceGatewayService
 from nhx.core.models.service import ModelsService
@@ -58,7 +60,7 @@ def test_my_service(mock_provider_test_clients: ClientContext):
     """Test using mock provider mode."""
     # Create a mock provider with a pre-configured response
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace="default",
         name="my-judge",  # Becomes "igw-mock-my-judge"
         mock_response_body={
@@ -68,41 +70,41 @@ def test_my_service(mock_provider_test_clients: ClientContext):
         },
     )
 
-    sdk = mock_provider_test_clients.sdk
+    gateway = InferenceGatewayClient.from_client(mock_provider_test_clients.client)
 
     # === Route 1: Provider route ===
-    response = sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,  # Use provider.name from returned ModelProvider
+    response = gateway.provider_post(
         workspace="default",
-        body={"model": "test", "messages": []},
-    )
+        name=provider.name,  # Use provider.name from returned ModelProvider
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({"model": "test", "messages": []}),
+    ).data()
 
     # === Route 2: Model Entity route ===
     # Uses default served_models mapping (entity name = "my-judge")
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
-        name="my-judge",
+    response = gateway.model_post(
         workspace="default",
-        body={"model": "test", "messages": []},
-    )
+        name="my-judge",
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({"model": "test", "messages": []}),
+    ).data()
 
     # === Route 3: OpenAI route ===
-    response = sdk.inference.gateway.openai.post(
-        "v1/chat/completions",
+    response = gateway.openai_post(
         workspace="default",
-        body={
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({
             "model": "default/my-judge",  # workspace/entity_name format
             "messages": [],
-        },
-    )
+        }),
+    ).data()
 ```
 
 ### The `add_mock_provider` Function
 
 ```python
 def add_mock_provider(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -116,7 +118,7 @@ def add_mock_provider(
 ```
 
 **Parameters:**
-- `sdk`: The NeMoHelix SDK client
+- `client`: The typed platform client (`nemo_helix_plugin.client.client.NemoClient`)
 - `workspace`: Provider workspace
 - `name`: Provider name (auto-prefixed with `igw-mock-`)
 - `mock_response_body`: Static JSON response to return for all requests (optional - uses smart defaults if this and mock_response_body_by_model are omitted)
@@ -138,7 +140,7 @@ In most cases, returning a static response via `mock_response_body` is sufficien
 from nhx.testing import MockProviderResponse
 
 provider = add_mock_provider(
-    sdk,
+    client,
     workspace=workspace,
     name="nim-provider",
     mock_response_body_by_model={
@@ -193,7 +195,7 @@ Mock provider mode supports streaming responses. When `stream=True` is in the re
 import json
 
 provider = add_mock_provider(
-    sdk,
+    client,
     workspace="default",
     name="streaming-model",
     mock_response_body={
@@ -206,25 +208,25 @@ provider = add_mock_provider(
 )
 
 # Request with streaming enabled
-response = sdk.inference.gateway.openai.with_streaming_response.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).stream_openai(
     workspace="default",
-    body={
+    trailing_uri="v1/chat/completions",
+    body=JsonBody({
         "model": "default/streaming-model",
         "messages": [{"role": "user", "content": "Hi"}],
         "stream": True,
-    },
+    }),
 )
 
 # Parse Server-Sent Events (SSE) stream
-with response as stream:
-    for line in stream.iter_lines():
+with response.stream() as chunks:
+    for line in b"".join(chunks).decode().splitlines():
         if line.startswith("data: "):
             line = line[len("data: "):]
-        
+
         if not line or line == "[DONE]":
             continue
-        
+
         try:
             chunk = json.loads(line)
             content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
@@ -243,10 +245,10 @@ with response as stream:
 ### Simulating Errors
 
 ```python
-from nemo_helix import RateLimitError
+from nemo_helix_plugin.client.errors import RateLimitError
 
 provider = add_mock_provider(
-    sdk,
+    client,
     workspace="default",
     name="rate-limited",
     mock_response_body={"error": {"message": "Rate limit exceeded"}},
@@ -254,11 +256,11 @@ provider = add_mock_provider(
 )
 
 with pytest.raises(RateLimitError):
-    sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,
+    InferenceGatewayClient.from_client(client).provider_post(
         workspace="default",
-        body={"model": "test", "messages": []},
+        name=provider.name,
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({"model": "test", "messages": []}),
     )
 ```
 
@@ -269,12 +271,16 @@ For one-off scenarios, pass the response via header:
 ```python
 from nhx.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER
 
-response = sdk.inference.gateway.provider.post(
-    "v1/chat/completions",
-    name="any-provider",  # Doesn't need to exist
-    workspace="default",
-    body={"model": "test", "messages": []},
-    extra_headers={MOCK_RESPONSE_HEADER: json.dumps({"id": "inline-response"})},
+response = (
+    InferenceGatewayClient.from_client(client)
+    .with_headers({MOCK_RESPONSE_HEADER: json.dumps({"id": "inline-response"})})
+    .provider_post(
+        workspace="default",
+        name="any-provider",  # Doesn't need to exist
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({"model": "test", "messages": []}),
+    )
+    .data()
 )
 ```
 
