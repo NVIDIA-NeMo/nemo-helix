@@ -438,7 +438,7 @@ _STUDIO_LINK_DESTINATION_ANY_FEATURE_FLAGS: dict[str, tuple[str, ...]] = {
 _STUDIO_FEATURE_FLAG_MAPPINGS = {
     mapping.config_path.removeprefix("studio.feature_flags."): mapping
     for mapping in ENV_MAPPINGS
-    if mapping.config_path.startswith("studio.feature_flags.")
+    if mapping.config_path.startswith("studio.feature_flags.") and mapping.default in ("true", "false")
 }
 
 _STUDIO_LINK_DESTINATION_DESCRIPTION = ", ".join(sorted(STUDIO_LINK_DESTINATIONS))
