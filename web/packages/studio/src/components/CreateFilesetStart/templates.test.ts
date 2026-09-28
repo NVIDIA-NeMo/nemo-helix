@@ -3,8 +3,6 @@
 
 import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
 
-// The models service normalizes model ids to entity names made of `[a-z0-9-]` only; templates
-// resolve their models by entity name, so a served-style name (with `/` or `.`) never matches.
 const ENTITY_NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 describe('FILESET_TEMPLATES', () => {
