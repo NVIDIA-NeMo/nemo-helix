@@ -285,28 +285,28 @@ describe('template dataset sources', () => {
 
     // The HF export records only the single physical MTP layer, so without these the
     // recipe trains at depth 1 where the cookbook intends one layer reused twice.
-    it.each([
-      ['lora-nemotron-35-lightning-text2sql'],
-      ['lora-nemotron-3-ultra-text2sql'],
-    ])('%s sets the cookbook MTP overrides', (id) => {
-      expect(byId(id).training.mtp).toEqual({
-        num_nextn_predict_layers: 2,
-        use_repeated_layer: true,
-        loss_scaling_factor: 0.1,
-      });
-    });
+    it.each([['lora-nemotron-35-lightning-text2sql'], ['lora-nemotron-3-ultra-text2sql']])(
+      '%s sets the cookbook MTP overrides',
+      (id) => {
+        expect(byId(id).training.mtp).toEqual({
+          num_nextn_predict_layers: 2,
+          use_repeated_layer: true,
+          loss_scaling_factor: 0.1,
+        });
+      }
+    );
 
     it('leaves MTP alone for Super, whose cookbook declares none', () => {
       expect(byId('lora-nemotron-3-super-text2sql').training.mtp).toBeUndefined();
     });
 
     // Super's cookbook notes it "avoids OOM on 80GB"; Ultra sets it for the same reason.
-    it.each([
-      ['lora-nemotron-3-super-text2sql'],
-      ['lora-nemotron-3-ultra-text2sql'],
-    ])('%s recomputes activations', (id) => {
-      expect(byId(id).training.activation_checkpointing).toBe(true);
-    });
+    it.each([['lora-nemotron-3-super-text2sql'], ['lora-nemotron-3-ultra-text2sql']])(
+      '%s recomputes activations',
+      (id) => {
+        expect(byId(id).training.activation_checkpointing).toBe(true);
+      }
+    );
 
     it('leaves activation checkpointing off for Lightning, whose cookbook omits it', () => {
       expect(byId('lora-nemotron-35-lightning-text2sql').training.activation_checkpointing).toBe(
