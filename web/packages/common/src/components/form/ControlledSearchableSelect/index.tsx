@@ -26,6 +26,7 @@ import {
   ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -67,12 +68,16 @@ function truncateMiddleToWidth(text: string, font: string, maxWidth: number): st
  * so values sharing a long common prefix (e.g. `nvidia-nemotron-3-super-120b-a12b` vs.
  * `...-ultra-550b-a55b`) stay distinguishable once selected. `w-full` makes its layout box track
  * the trigger's own already-constrained width rather than shrink-wrapping to the text content.
+ *
+ * `useLayoutEffect`, not `useEffect`: the truncated width depends on layout that isn't known until
+ * after mount, but computing it in a post-paint effect would flash the untruncated (CSS
+ * end-ellipsized) text for one frame on every mount with a pre-selected long value.
  */
 const MiddleTruncatedText: FC<{ text: string }> = ({ text }) => {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [display, setDisplay] = useState(text);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const recompute = () => {
@@ -292,7 +297,9 @@ export const ControlledSearchableSelect = ({
   const defaultRenderValue = useCallback(
     (currentValue: string | string[] | undefined) => {
       if (Array.isArray(currentValue)) {
-        return currentValue.map((v) => resolveLabel(v) ?? v).join(', ');
+        if (currentValue.length === 0) return undefined;
+        const joined = currentValue.map((v) => resolveLabel(v) ?? v).join(', ');
+        return <MiddleTruncatedText text={joined} />;
       }
       if (!currentValue) return undefined;
       return <MiddleTruncatedText text={resolveLabel(currentValue) ?? currentValue} />;
