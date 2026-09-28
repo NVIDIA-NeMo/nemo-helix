@@ -5,7 +5,7 @@
 
 Two parallel helpers, one per primitive:
 
-- :func:`add_job_commands` — flat job submit callbacks plus ``explain`` per
+- :func:`add_job_commands` — job submit callbacks plus ``explain`` per
   :class:`~nemo_helix_plugin.job.NemoJob`, routed through
   :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler`.
 - :func:`add_function_commands` — two-verb subgroups
@@ -22,8 +22,8 @@ the plugin's :class:`typer.Typer` group. Legacy jobs expose a sub-group with
 retaining ``explain`` as a schema subcommand.
 
 Plugin authors do **not** call this themselves — it is called automatically
-by the platform's CLI loader. The result is that each job becomes available
-as::
+by the platform's CLI loader. Jobs that set ``generate_legacy_verbs = False``
+become available as::
 
     nemo <plugin> <job-name>          [--profile ...] [--cluster ...] [-o ...]
     nemo <plugin> <job-name> explain  [--profile ...] [--cluster ...]

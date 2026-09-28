@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-job
-description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding flat job CLI generation and generate_legacy_verbs, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, flat job CLI, submit, explain, generate_legacy_verbs, NemoJobScheduler.
+description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shapes and generate_legacy_verbs, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, submit, explain, generate_legacy_verbs, NemoJobScheduler.
 ---
 
 # Plugin Jobs (NemoJob)
 
-A `NemoJob` drives job CLI commands that the platform auto-generates from the class. New jobs should set `generate_legacy_verbs = False` and expose submission as the job command itself:
+A `NemoJob` drives job CLI commands that the platform auto-generates from the class. When a job sets `generate_legacy_verbs = False`, submission is exposed as the job command itself:
 
 ```
 nemo <plugin> <job>          [--profile <p>] [--cluster <c>] \
@@ -17,7 +17,7 @@ nemo <plugin> <job>          [--profile <p>] [--cluster <c>] \
 nemo <plugin> <job> explain  [--profile <p>]
 ```
 
-The flat job command POSTs to the plugin service, which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling. Leaving `generate_legacy_verbs` at its default `True` preserves the older nested `<job> submit` / `<job> explain` command group for compatibility.
+The generated submit command POSTs to the plugin service, which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling. Leaving `generate_legacy_verbs` at its default `True` preserves the nested `<job> submit` / `<job> explain` command group for compatibility.
 
 ## Class Signature
 
@@ -35,7 +35,6 @@ class GenerateJob(NemoJob):
     description: ClassVar[str] = "Generate rows."
     spec_schema: ClassVar[type[BaseModel]] = GenerateSpec
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     def run(self, config: dict) -> dict:
         cfg = GenerateSpec.model_validate(config)
@@ -136,7 +135,7 @@ that turns the validated spec into the concrete step / container / resources des
 
 ## Submit body wire shape (informational)
 
-When the CLI submits a job with the flat `nemo <plugin> <job>` command, the body POSTed to the plugin service looks like:
+When the generated CLI submits a job, the body POSTed to the plugin service looks like:
 
 ```json
 {
