@@ -99,7 +99,7 @@ describe('ControlledSearchableSelect', () => {
       expect(screen.getByRole('option', { name: 'Banana' })).toBeInTheDocument();
     });
 
-    it('should let the popover grow past the trigger width to fit long option labels', async () => {
+    it('should size the popover to its content, capped rather than stretched full width', async () => {
       const user = userEvent.setup();
       renderWithForm(
         <ControlledSearchableSelect
@@ -111,7 +111,12 @@ describe('ControlledSearchableSelect', () => {
       await user.click(screen.getByRole('combobox'));
       await screen.findByRole('listbox');
 
-      expect(screen.getByTestId('nv-select-content')).toHaveClass('w-max', 'min-w-full');
+      const popover = screen.getByTestId('nv-select-content');
+      expect(popover).toHaveClass('w-max', 'max-w-96');
+      // `min-w-full` resolves against the anchored popover's containing block (viewport-wide),
+      // not the trigger, and outranks `max-w-*` in the CSS min/max conflict rule -- regression
+      // guard for the popover silently going full width again.
+      expect(popover.className).not.toMatch(/\bmin-w-full\b/);
     });
 
     it('should show search input in dropdown', async () => {

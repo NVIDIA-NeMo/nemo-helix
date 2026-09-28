@@ -278,7 +278,10 @@ export const ControlledSearchableSelect = ({
             {...selectProps}
           />
         </Tooltip>
-        <SelectContent className="w-max min-w-full max-w-[32rem]">
+        {/* No `min-w-full`: it resolves against the anchored popover's containing block, not the
+            trigger, so it stretches near-viewport-wide and (per the CSS min/max conflict rule)
+            wins over `max-w-*` outright. */}
+        <SelectContent className="w-max max-w-96">
           <SelectListbox>
             <Block className="p-2 w-full sticky top-0 bg-surface z-10">
               <TextInput
