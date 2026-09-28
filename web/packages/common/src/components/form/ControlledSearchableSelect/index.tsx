@@ -311,11 +311,23 @@ export const ControlledSearchableSelect = ({
    * The trigger truncates long values with an ellipsis; without this tooltip, two options with
    * different names but the same visible prefix are indistinguishable once selected.
    */
-  const triggerTooltip = Array.isArray(value)
-    ? value.map((v) => resolveLabel(v) ?? v).join(', ')
-    : value
-      ? (resolveLabel(value) ?? value)
-      : undefined;
+  const renderTriggerValue: NonNullable<ControlledSearchableSelectProps['renderValue']> =
+    useCallback(
+      (currentValue, setValue) => {
+        const rendered = (renderValue ?? defaultRenderValue)(currentValue, setValue);
+        const fullText = Array.isArray(currentValue)
+          ? currentValue.map((v) => resolveLabel(v) ?? v).join(', ')
+          : currentValue && (resolveLabel(currentValue) ?? currentValue);
+        if (!rendered || !fullText) return rendered;
+        // On the value, not the trigger: the tooltip's aria-describedby would replace the field's help text.
+        return (
+          <Tooltip slotContent={fullText}>
+            <span className="block w-full min-w-0">{rendered}</span>
+          </Tooltip>
+        );
+      },
+      [renderValue, defaultRenderValue, resolveLabel]
+    );
 
   return (
     <FormField
@@ -332,24 +344,22 @@ export const ControlledSearchableSelect = ({
         open={selectOpen}
         onOpenChange={handleSelectOpenChange}
       >
-        <Tooltip slotContent={triggerTooltip} disabled={!triggerTooltip}>
-          <SelectTrigger
-            renderValue={renderValue ?? defaultRenderValue}
-            className="w-full border-1 nv-input"
-            onBlur={handleBlur}
-            placeholder={
-              isLoading
-                ? 'Loading...'
-                : triggerPlaceholder === ''
-                  ? INVISIBLE_TRIGGER_PLACEHOLDER
-                  : triggerPlaceholder
-            }
-            slotEnd={isLoading && <TextInputSpinner />}
-            required={required}
-            status={status || (error ? 'error' : undefined)}
-            {...selectProps}
-          />
-        </Tooltip>
+        <SelectTrigger
+          renderValue={renderTriggerValue}
+          className="w-full border-1 nv-input"
+          onBlur={handleBlur}
+          placeholder={
+            isLoading
+              ? 'Loading...'
+              : triggerPlaceholder === ''
+                ? INVISIBLE_TRIGGER_PLACEHOLDER
+                : triggerPlaceholder
+          }
+          slotEnd={isLoading && <TextInputSpinner />}
+          required={required}
+          status={status || (error ? 'error' : undefined)}
+          {...selectProps}
+        />
         {/* No `min-w-full`: it resolves against the anchored popover's containing block, not the
             trigger, so it stretches near-viewport-wide and (per the CSS min/max conflict rule)
             wins over `max-w-*` outright. */}

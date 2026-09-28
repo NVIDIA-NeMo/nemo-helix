@@ -53,6 +53,37 @@ describe('ControlledSearchableSelect', () => {
       expect(screen.getByText('Favorite Fruit')).toBeInTheDocument();
     });
 
+    it('should keep the help text as the trigger description when a value is selected', async () => {
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+          formFieldProps={{ slotLabel: 'Favorite Fruit', slotHelp: 'Pick one you like' }}
+        />,
+        { defaultValues: { fruit: 'banana' } }
+      );
+
+      expect(await screen.findByRole('combobox')).toHaveAccessibleDescription('Pick one you like');
+    });
+
+    it('should show the full selected label in a tooltip on hover', async () => {
+      const user = userEvent.setup();
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+        />,
+        { defaultValues: { fruit: 'banana' } }
+      );
+
+      const combobox = await screen.findByRole('combobox');
+      await user.hover(
+        within(combobox).getByText('Banana', { ignore: '[role="tooltip"], [role="tooltip"] *' })
+      );
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent('Banana');
+    });
+
     it('should render the selected option label in the trigger, not its raw value', async () => {
       renderWithForm(
         <ControlledSearchableSelect
@@ -87,7 +118,7 @@ describe('ControlledSearchableSelect', () => {
       );
 
       const combobox = await screen.findByRole('combobox');
-      const text = combobox.textContent ?? '';
+      const text = within(combobox).getByText(/…/).textContent ?? '';
       // 150px / 10px-per-char budget keeps ~15 of the label's 34 chars -- just enough to check
       // it ellipsizes in the middle and keeps the tail that differs from the other option, not
       // the exact character count (that's the truncation algorithm's business, not this test's).
