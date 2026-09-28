@@ -22,7 +22,8 @@ import json
 import os
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.data_designer.client import DataDesignerClient
+from nemo_helix_plugin.data_designer.types import PreviewRequest
 from trace_reader import get_session
 
 EXPECTED_COLUMNS = {"product_category", "product_subcategory", "price", "status", "product_description"}
@@ -95,19 +96,16 @@ PREVIEW_CONFIG = {
 
 
 @pytest.fixture
-def client() -> NeMoHelix:
+def client() -> DataDesignerClient:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace="default")
+    return DataDesignerClient(base_url=nhx_base_url, workspace="default", timeout=120)
 
 
-def _run_preview(client: NeMoHelix, num_records: int = 5) -> list[dict]:
-    """Run preview using the low-level SDK API and return the dataset records."""
+def _run_preview(client: DataDesignerClient, num_records: int = 5) -> list[dict]:
+    """Run preview through the typed Data Designer client and return the dataset records."""
     try:
-        result = client.data_designer._preview(
-            config=PREVIEW_CONFIG,
-            num_records=num_records,
-            timeout=120,
-        )
+        with client.preview(body=PreviewRequest(config=PREVIEW_CONFIG, num_records=num_records)).stream() as frames:
+            result = list(frames)
     except Exception as e:
         raise AssertionError(
             f"Preview API call failed with {type(e).__name__}: {e}\n"
@@ -115,15 +113,14 @@ def _run_preview(client: NeMoHelix, num_records: int = 5) -> list[dict]:
             f"num_records: {num_records}"
         ) from e
 
-    messages_seen = []
-    for message in result:
-        messages_seen.append(message.message_type)
-        if message.message_type == "dataset":
-            return json.loads(message.message)
+    kinds_seen = []
+    for frame in result:
+        kinds_seen.append(frame.kind)
+        if frame.kind == "dataset":
+            return list(frame.model_dump(mode="json")["records"])
 
     raise AssertionError(
-        f"No message with message_type=='dataset' was returned. "
-        f"Received {len(messages_seen)} messages with types: {messages_seen}"
+        f"No frame with kind=='dataset' was returned. Received {len(kinds_seen)} frames with kinds: {kinds_seen}"
     )
 
 
@@ -152,7 +149,7 @@ def test_agent_ran_preview() -> None:
     print("Test passed: Agent executed a preview command")
 
 
-def test_preview_generates_expected_columns(client: NeMoHelix) -> None:
+def test_preview_generates_expected_columns(client: DataDesignerClient) -> None:
     """Test that the preview produces data with all five expected columns."""
     records = _run_preview(client)
 
@@ -169,7 +166,7 @@ def test_preview_generates_expected_columns(client: NeMoHelix) -> None:
     print(f"Test passed: Preview generated {len(records)} records with columns {actual_columns}")
 
 
-def test_preview_subcategory_relationships(client: NeMoHelix) -> None:
+def test_preview_subcategory_relationships(client: DataDesignerClient) -> None:
     """Test that subcategory values are consistent with their parent category."""
     records = _run_preview(client)
 
@@ -192,7 +189,7 @@ def test_preview_subcategory_relationships(client: NeMoHelix) -> None:
     print(f"Test passed: All {len(records)} records have valid category-subcategory relationships")
 
 
-def test_preview_data_values_valid(client: NeMoHelix) -> None:
+def test_preview_data_values_valid(client: DataDesignerClient) -> None:
     """Test that price and status columns contain valid values."""
     records = _run_preview(client)
 
@@ -209,7 +206,7 @@ def test_preview_data_values_valid(client: NeMoHelix) -> None:
     print(f"Test passed: All {len(records)} records have valid price and status values")
 
 
-def test_preview_llm_descriptions_non_empty(client: NeMoHelix) -> None:
+def test_preview_llm_descriptions_non_empty(client: DataDesignerClient) -> None:
     """Test that the LLM-generated product_description column has non-empty text."""
     records = _run_preview(client)
 

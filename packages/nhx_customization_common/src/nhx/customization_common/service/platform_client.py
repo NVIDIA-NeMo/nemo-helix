@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import FilesetPurpose
@@ -38,13 +38,13 @@ class AsyncCustomizationHelixClients:
 
 
 def async_customization_platform_clients_from_platform(
-    platform: AsyncHelixClient,
+    platform: AsyncNemoClient,
 ) -> AsyncCustomizationHelixClients:
-    """Build the customization compile-time client bundle from an async platform handle."""
+    """Build the customization compile-time client bundle sharing *platform*'s transport and auth."""
     return AsyncCustomizationHelixClients(
-        files=client_from_platform(platform, AsyncFilesClient),
-        models=client_from_platform(platform, AsyncModelsClient),
-        jobs=client_from_platform(platform, AsyncJobsClient),
+        files=AsyncFilesClient.from_client(platform),
+        models=AsyncModelsClient.from_client(platform),
+        jobs=AsyncJobsClient.from_client(platform),
     )
 
 

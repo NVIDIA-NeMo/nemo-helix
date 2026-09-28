@@ -63,50 +63,15 @@ async def test_async_filesystem_uses_async_client() -> None:
         await async_client._http.aclose()
 
 
-def test_platform_files_resource_returns_sync_filesystem() -> None:
-    from nemo_helix import NeMoHelix
-
-    http_client = httpx.Client(
-        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
-        timeout=httpx.Timeout(60.0),
-    )
-    platform = NeMoHelix(base_url=BASE, workspace="default", http_client=http_client)
-
-    fs = platform.files.fsspec
-
-    assert isinstance(fs, FilesetFileSystem)
-    assert fs._client._http is http_client
-
-
-async def test_async_platform_files_resource_returns_async_filesystem() -> None:
-    from nemo_helix import AsyncNeMoHelix
-
-    http_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
-        timeout=httpx.Timeout(60.0),
-    )
-    platform = AsyncNeMoHelix(base_url=BASE, workspace="default", http_client=http_client)
-
-    try:
-        fs = platform.files.fsspec
-
-        assert isinstance(fs, AsyncFilesetFileSystem)
-        assert fs._client._http is http_client
-    finally:
-        await http_client.aclose()
-
-
 def test_upload_timeout_survives_the_whole_client_chain() -> None:
-    """End to end: an SDK-level timeout override reaches the sync transfer client."""
-    from nemo_helix import NeMoHelix
-
+    """End to end: a client-level timeout override reaches the sync transfer client."""
     http_client = httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
         timeout=httpx.Timeout(60.0),
     )
-    platform = NeMoHelix(base_url=BASE, workspace="default", http_client=http_client)
+    client = FilesClient(base_url=BASE, workspace="default", http_client=http_client)
 
-    fs = platform.with_options(timeout=UPLOAD_TIMEOUT).files.fsspec
+    fs = FilesetFileSystem(client=client.with_options(timeout=UPLOAD_TIMEOUT))
 
     assert fs._client._timeout == UPLOAD_TIMEOUT
     assert fs._client._http is http_client

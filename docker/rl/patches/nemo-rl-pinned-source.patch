@@ -447,3 +447,10 @@ diff --git a/tests/unit/algorithms/test_grpo.py b/tests/unit/algorithms/test_grp
      checkpointer.shutdown.assert_called_once()
  
  
+diff --git a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
+--- a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
++++ b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
+@@ -1,2 +1,2 @@
+ -e nemo-gym[dev] @ ../../
+-verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.1.14
++verifiers==0.1.14

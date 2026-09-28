@@ -16,7 +16,7 @@ const workspace = workspace1.workspace;
 const agentName = 'hermes';
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 const UPLOAD_URL = `${FILESETS_URL}/:name/-/*`;
-const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/optimize`;
+const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 
 const OVERLAY = `optimizer:
   numeric:
@@ -102,10 +102,10 @@ describe('LaunchOptimizeModal', () => {
     expect(uploaded.sort()).toEqual(['dataset.json', 'optimize.yaml']);
     expect(submitted).toHaveLength(1);
     expect(submitted[0]?.spec).toMatchObject({
+      strategy: 'legacy',
       optimize_config: 'optimize.yaml',
       optimize_config_fileset: expect.stringMatching(new RegExp(`^${workspace}/hermes-optimize-`)),
       agent: agentName,
-      workspace,
     });
   });
 

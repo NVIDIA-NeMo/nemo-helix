@@ -17,9 +17,20 @@ import {
   Stack,
   Text,
   TextInput,
+  Tooltip,
 } from '@nvidia/foundations-react-core';
 import { Filter } from 'lucide-react';
-import { ChangeEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChangeEvent,
+  FC,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useController } from 'react-hook-form';
 
 /**
@@ -27,6 +38,65 @@ import { useController } from 'react-hook-form';
  * string is treated as “unset”. Use ZWSP when the consumer wants no visible placeholder.
  */
 const INVISIBLE_TRIGGER_PLACEHOLDER = '\u200b';
+
+let measureCanvasContext: CanvasRenderingContext2D | null = null;
+
+function measureTextWidth(text: string, font: string): number {
+  measureCanvasContext ??= document.createElement('canvas').getContext('2d');
+  if (!measureCanvasContext) return text.length * 8;
+  measureCanvasContext.font = font;
+  return measureCanvasContext.measureText(text).width;
+}
+
+/** Shrinks from whichever side is longer so the trailing, most-distinguishing part of similar values survives. */
+function truncateMiddleToWidth(text: string, font: string, maxWidth: number): string {
+  if (measureTextWidth(text, font) <= maxWidth) return text;
+  const ellipsis = '\u2026';
+  let head = Math.ceil(text.length / 2);
+  let tail = text.length - head;
+  while (head + tail > 0) {
+    const candidate = `${text.slice(0, head)}${ellipsis}${text.slice(text.length - tail)}`;
+    if (measureTextWidth(candidate, font) <= maxWidth) return candidate;
+    if (head > tail) head -= 1;
+    else tail -= 1;
+  }
+  return ellipsis;
+}
+
+/**
+ * Renders `text`, ellipsizing from the middle to fit its own allocated width instead of the end --
+ * so values sharing a long common prefix (e.g. `nvidia-nemotron-3-super-120b-a12b` vs.
+ * `...-ultra-550b-a55b`) stay distinguishable once selected. `w-full` makes its layout box track
+ * the trigger's own already-constrained width rather than shrink-wrapping to the text content.
+ *
+ * `useLayoutEffect`, not `useEffect`: the truncated width depends on layout that isn't known until
+ * after mount, but computing it in a post-paint effect would flash the untruncated (CSS
+ * end-ellipsized) text for one frame on every mount with a pre-selected long value.
+ */
+const MiddleTruncatedText: FC<{ text: string }> = ({ text }) => {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [display, setDisplay] = useState(text);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const recompute = () => {
+      const width = el.getBoundingClientRect().width;
+      if (width === 0) return;
+      setDisplay(truncateMiddleToWidth(text, getComputedStyle(el).font, width));
+    };
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <span ref={ref} className="block w-full text-left">
+      {display}
+    </span>
+  );
+};
 
 export interface SelectItemOption {
   /** The value to be stored in the form */
@@ -219,6 +289,46 @@ export const ControlledSearchableSelect = ({
     onBlur();
   };
 
+  const resolveLabel = useCallback(
+    (optionValue: string) => options.find((option) => option.value === optionValue)?.label,
+    [options]
+  );
+
+  const defaultRenderValue = useCallback(
+    (currentValue: string | string[] | undefined) => {
+      if (Array.isArray(currentValue)) {
+        if (currentValue.length === 0) return undefined;
+        const joined = currentValue.map((v) => resolveLabel(v) ?? v).join(', ');
+        return <MiddleTruncatedText text={joined} />;
+      }
+      if (!currentValue) return undefined;
+      return <MiddleTruncatedText text={resolveLabel(currentValue) ?? currentValue} />;
+    },
+    [resolveLabel]
+  );
+
+  /**
+   * The trigger truncates long values with an ellipsis; without this tooltip, two options with
+   * different names but the same visible prefix are indistinguishable once selected.
+   */
+  const renderTriggerValue: NonNullable<ControlledSearchableSelectProps['renderValue']> =
+    useCallback(
+      (currentValue, setValue) => {
+        const rendered = (renderValue ?? defaultRenderValue)(currentValue, setValue);
+        const fullText = Array.isArray(currentValue)
+          ? currentValue.map((v) => resolveLabel(v) ?? v).join(', ')
+          : currentValue && (resolveLabel(currentValue) ?? currentValue);
+        if (!rendered || !fullText) return rendered;
+        // On the value, not the trigger: the tooltip's aria-describedby would replace the field's help text.
+        return (
+          <Tooltip slotContent={fullText}>
+            <span className="block w-full min-w-0">{rendered}</span>
+          </Tooltip>
+        );
+      },
+      [renderValue, defaultRenderValue, resolveLabel]
+    );
+
   return (
     <FormField
       name={useControllerProps.name}
@@ -235,7 +345,7 @@ export const ControlledSearchableSelect = ({
         onOpenChange={handleSelectOpenChange}
       >
         <SelectTrigger
-          renderValue={renderValue}
+          renderValue={renderTriggerValue}
           className="w-full border-1 nv-input"
           onBlur={handleBlur}
           placeholder={
@@ -250,7 +360,10 @@ export const ControlledSearchableSelect = ({
           status={status || (error ? 'error' : undefined)}
           {...selectProps}
         />
-        <SelectContent>
+        {/* No `min-w-full`: it resolves against the anchored popover's containing block, not the
+            trigger, so it stretches near-viewport-wide and (per the CSS min/max conflict rule)
+            wins over `max-w-*` outright. */}
+        <SelectContent className="w-max max-w-96">
           <SelectListbox>
             <Block className="p-2 w-full sticky top-0 bg-surface z-10">
               <TextInput

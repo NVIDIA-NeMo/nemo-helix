@@ -20,6 +20,9 @@ from uuid import UUID
 
 import httpx
 from nemo_helix_ext.client.factory import create_client
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.intake.client import IntakeClient
+from nemo_helix_plugin.intake.types import DirectSpansIngestRequest
 
 JsonObject = dict[str, Any]
 SPAN_BATCH_LIMIT = 1000
@@ -417,6 +420,7 @@ class IntakeWriter:
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self._sdk_client: Any | None = None
+        self._intake_client: IntakeClient | None = None
         if session is None:
             self._sdk_client = create_client(
                 base_url=base_url,
@@ -424,6 +428,7 @@ class IntakeWriter:
                 timeout=float(timeout_seconds),
                 max_retries=0,
             )
+            self._intake_client = client_from_platform(self._sdk_client, IntakeClient)
             self.session = _SdkSession(self._sdk_client)
             self.base_url = _validated_base_url(str(self._sdk_client.base_url))
             self.workspace = workspace or self._sdk_client.workspace or "default"
@@ -448,16 +453,16 @@ class IntakeWriter:
         if self._sdk_client is not None:
             self._sdk_client.close()
             self._sdk_client = None
+            self._intake_client = None
 
     def write(self, bundle: ImportBundle, *, batch_size: int) -> JsonObject:
         bundle.validate()
         for start in range(0, len(bundle.spans), batch_size):
             spans = bundle.spans[start : start + batch_size]
-            if self._sdk_client is not None:
-                self._sdk_client.intake.ingest.spans.create(
+            if self._intake_client is not None:
+                self._intake_client.create_spans(
                     workspace=self.workspace,
-                    source=bundle.source,
-                    spans=spans,
+                    body=DirectSpansIngestRequest.model_validate({"source": bundle.source, "spans": spans}),
                 )
             else:
                 self._request(

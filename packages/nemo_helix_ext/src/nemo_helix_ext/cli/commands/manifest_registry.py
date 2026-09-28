@@ -29,8 +29,8 @@ Set up NeMo Helix: connect or start services, configure a provider, install skil
 
 Uses an already-running platform, starts local services, or connects the
 CLI to an existing remote deployment. Then selects and registers an
-inference provider, picks default and fast agent models, installs coding
-agent skills, and optionally deploys a demo agent.
+inference provider, picks default and fast agent models, and installs
+coding agent skills. Auto mode can optionally deploy a demo agent.
 
 The active config context remembers the Platform URL. When a remote
 deployment is already reachable, setup asks whether to continue with it,
@@ -57,7 +57,7 @@ Examples:
   nemo setup --auto --start-services --ready-timeout 360
   NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
   nemo setup --workspace my-workspace
-  nemo setup --no-install-skills --no-deploy-agent
+  nemo setup --no-install-skills
   nemo --base-url http://localhost:8080 setup""",
         name="setup",
         panel="Setup",

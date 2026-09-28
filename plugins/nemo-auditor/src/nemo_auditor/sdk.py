@@ -31,6 +31,8 @@ from nemo_auditor.sdk_resources.configs import _AsyncConfigResource, _ConfigReso
 from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, AuditorJobResource
 from nemo_auditor.sdk_resources.targets import _AsyncTargetResource, _TargetResource
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -155,7 +157,7 @@ class AuditorPluginResource:
         return AuditJob().run(
             spec.model_dump(mode="json"),
             ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
-            sdk=self._platform,
+            sdk=client_from_platform(self._platform, NemoClient),
         )
 
     def _resolve_config(self, value: AuditConfig | str, *, default_workspace: str) -> AuditConfig:
@@ -272,7 +274,7 @@ class AsyncAuditorPluginResource:
             AuditJob().run,
             spec.model_dump(mode="json"),
             ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
-            async_sdk=self._platform,
+            async_sdk=client_from_platform(self._platform, AsyncNemoClient),
         )
 
     async def _resolve_config(self, value: AuditConfig | str, *, default_workspace: str) -> AuditConfig:

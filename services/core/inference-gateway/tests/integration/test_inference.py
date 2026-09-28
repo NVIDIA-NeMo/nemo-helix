@@ -19,11 +19,22 @@ import pytest
 from docker.errors import NotFound
 from nemo_deployments_plugin.backends.labels import container_name as plugin_container_name
 from nemo_deployments_plugin.backends.labels import docker_volume_name
-from nemo_helix import ConflictError, NeMoHelix, NotFoundError
-from nemo_helix.types.inference.model_deployment import ModelDeployment
-from nemo_helix.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_helix.types.inference.model_provider import ModelProvider
 from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    ModelDeployment,
+    ModelDeploymentConfig,
+    ModelProvider,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+)
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 from nhx.core.inference_gateway.api.dependencies import global_virtual_model_cache
 from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
 from nhx.core.models.controllers.backends.deployments_plugin.naming import entity_names
@@ -35,7 +46,7 @@ DEFAULT_WORKSPACE = "default"
 
 def _wait_for_deployment_ready(
     controller: ModelsController,
-    sdk: NeMoHelix,
+    models: ModelsClient,
     deployment_name: str,
     max_wait: float = 30,
     poll_interval: float = 0.1,
@@ -46,7 +57,7 @@ def _wait_for_deployment_ready(
 
     Args:
         controller: The ModelsController instance
-        sdk: The SDK client
+        models: The typed models client
         deployment_name: Name of the deployment to wait for
         max_wait: Maximum time to wait in seconds (default 30)
         poll_interval: Time between polls in seconds (default 0.1)
@@ -61,10 +72,7 @@ def _wait_for_deployment_ready(
     @retry(stop=stop_after_delay(max_wait), wait=wait_fixed(poll_interval), reraise=True)
     def _poll():
         controller.step()
-        deployment = sdk.inference.deployments.retrieve(
-            deployment_name,
-            workspace=DEFAULT_WORKSPACE,
-        )
+        deployment = models.get_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
         assert deployment.status == "READY", f"Deployment not READY: {deployment.status}"
         return deployment
 
@@ -73,7 +81,7 @@ def _wait_for_deployment_ready(
 
 def _wait_for_deployment_deleted(
     controller: ModelsController,
-    sdk: NeMoHelix,
+    models: ModelsClient,
     deployment_name: str,
     max_wait: float = 30,
     poll_interval: float = 0.1,
@@ -91,10 +99,7 @@ def _wait_for_deployment_deleted(
     def _poll() -> None:
         controller.step()
         try:
-            deployment = sdk.inference.deployments.retrieve(
-                deployment_name,
-                workspace=DEFAULT_WORKSPACE,
-            )
+            deployment = models.get_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE).data()
         except NotFoundError:
             return
         assert deployment.status == "DELETED", f"Deployment not DELETED: {deployment.status}"
@@ -103,7 +108,7 @@ def _wait_for_deployment_deleted(
 
 
 def _create_deployment_with_config(
-    sdk: NeMoHelix,
+    models: ModelsClient,
     config_name: str,
     deployment_name: str,
     mock_nim_image: str,
@@ -111,7 +116,7 @@ def _create_deployment_with_config(
     """Create a deployment config and deployment.
 
     Args:
-        sdk: The SDK client
+        models: The typed models client
         config_name: Name for the deployment config
         deployment_name: Name for the deployment
         mock_nim_image: Full image name:tag for the mock NIM
@@ -122,29 +127,30 @@ def _create_deployment_with_config(
     # Use rsplit to handle registry URLs with port numbers
     # e.g., "registry.example.com/nemo-helix/mock-nim:1.0.0"
     image_name, image_tag = mock_nim_image.rsplit(":", 1)
-    config = sdk.inference.deployment_configs.create(
+    config = models.create_deployment_config(
         workspace=DEFAULT_WORKSPACE,
-        name=config_name,
-        engine="nim",
-        model_spec={},
-        executor_config={
-            "gpu": 0,
-            "image_name": image_name,
-            "image_tag": image_tag,
-        },
-    )
+        body=CreateModelDeploymentConfigRequest(
+            name=config_name,
+            engine="nim",
+            model_spec={},
+            executor_config={
+                "gpu": 0,
+                "image_name": image_name,
+                "image_tag": image_tag,
+            },
+        ),
+    ).data()
 
-    deployment = sdk.inference.deployments.create(
+    deployment = models.create_deployment(
         workspace=DEFAULT_WORKSPACE,
-        name=deployment_name,
-        config=config_name,
-    )
+        body=CreateModelDeploymentRequest(name=deployment_name, config=config_name),
+    ).data()
 
     return config, deployment
 
 
 def _configure_served_models(
-    sdk: NeMoHelix,
+    models: ModelsClient,
     provider_name: str,
     model_entity_name: str,
     served_model_name: str,
@@ -152,7 +158,7 @@ def _configure_served_models(
     """Configure served_models on a provider for model entity routing.
 
     Args:
-        sdk: The SDK client
+        models: The typed models client
         provider_name: Name of the provider
         model_entity_name: Name of the model entity
         served_model_name: Name for the backend model
@@ -160,16 +166,18 @@ def _configure_served_models(
     Returns:
         The updated ModelProvider
     """
-    return sdk.inference.providers.update_status(
-        provider_name,
+    return models.update_provider_status(
+        name=provider_name,
         workspace=DEFAULT_WORKSPACE,
-        served_models=[
-            {
-                "model_entity_id": f"{DEFAULT_WORKSPACE}/{model_entity_name}",
-                "served_model_name": served_model_name,
-            }
-        ],
-    )
+        body=UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(
+                    model_entity_id=f"{DEFAULT_WORKSPACE}/{model_entity_name}",
+                    served_model_name=served_model_name,
+                )
+            ]
+        ),
+    ).data()
 
 
 def _assert_chat_response(response_data: dict[str, Any], route_name: str) -> None:
@@ -186,7 +194,7 @@ def _assert_chat_response(response_data: dict[str, Any], route_name: str) -> Non
 
 def _manually_add_provider_to_cache(
     model_cache: ModelCache,
-    sdk: NeMoHelix,
+    models: ModelsClient,
     provider_name: str,
     rebuild_model_entity_map: bool = False,
 ) -> bool:
@@ -197,7 +205,7 @@ def _manually_add_provider_to_cache(
 
     Args:
         model_cache: The ModelCache instance to update
-        sdk: The SDK client
+        models: The typed models client
         provider_name: Name of the provider to add
         rebuild_model_entity_map: If True, rebuild the model entity map after adding
 
@@ -205,10 +213,7 @@ def _manually_add_provider_to_cache(
         True if provider was added, False otherwise
     """
     try:
-        provider = sdk.inference.providers.retrieve(
-            provider_name,
-            workspace=DEFAULT_WORKSPACE,
-        )
+        provider = models.get_provider(name=provider_name, workspace=DEFAULT_WORKSPACE).data()
     except Exception:
         return False
 
@@ -218,26 +223,27 @@ def _manually_add_provider_to_cache(
     if rebuild_model_entity_map:
         model_cache.rebuild_model_entity_map()
 
-    # Create a passthrough VirtualModel via the SDK for every served entity, mirroring
+    # Create a passthrough VirtualModel via the API for every served entity, mirroring
     # the production provider reconciler's _ensure_passthrough_virtual_model behavior.
     # The IGW requires every inference request to resolve to a VirtualModel, and the
-    # IGW's background cache refresher rebuilds the VM map from the SDK list periodically;
-    # going through the SDK ensures the VM survives refreshes. The fixture mocks the
+    # IGW's background cache refresher rebuilds the VM map from the API list periodically;
+    # going through the API ensures the VM survives refreshes. The fixture mocks the
     # production reconciler away to avoid event-loop conflicts (see
     # controller_with_docker_and_igw), so this test must create VMs explicitly.
     # LoRA composites are skipped to match the production reconciler.
     virtual_model_cache = global_virtual_model_cache()
+    virtual_models = VirtualModelsClient.from_client(models)
     now_iso = "2026-01-01T00:00:00Z"
     for served_model in provider.served_models or []:
         ws, _, entity_name = served_model.model_entity_id.partition("/")
         if not entity_name or "&adapters/" in entity_name:
             continue
         try:
-            sdk.inference.virtual_models.create(
+            virtual_models.create_virtual_model(
                 workspace=ws,
-                name=entity_name,
-                default_model_entity=f"{ws}/{entity_name}",
-                autoprovisioned=True,
+                body=CreateVirtualModelRequest(
+                    name=entity_name, default_model_entity=f"{ws}/{entity_name}", autoprovisioned=True
+                ),
             )
         except ConflictError:
             pass
@@ -276,7 +282,9 @@ def test_igw_routes_to_deployed_mock_nim(
     4. Tests GET and POST requests through all 3 route types
     5. Cleans up deployment
     """
-    controller, model_cache, sdk, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    controller, model_cache, client, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    models = ModelsClient.from_client(client)
+    gateway = InferenceGatewayClient.from_client(client)
     test_uuid = uuid.uuid4().hex[:8]
     config_name = f"test-igw-e2e-{test_uuid}"
     deployment_name = f"test-igw-e2e-{test_uuid}"
@@ -289,14 +297,14 @@ def test_igw_routes_to_deployed_mock_nim(
     ctx.register_volume(docker_volume_name(DEFAULT_WORKSPACE, names.scratch))
 
     # === Phase 1: Create deployment config and deployment ===
-    config, deployment = _create_deployment_with_config(sdk, config_name, deployment_name, mock_nim_image)
+    config, deployment = _create_deployment_with_config(models, config_name, deployment_name, mock_nim_image)
     assert config.name == config_name
     assert deployment.name == deployment_name
 
     # === Phase 3: Controller creates container and wait for READY ===
     # The controller.step() creates the container and polls health checks
     # We poll with short intervals until deployment becomes READY
-    deployment = _wait_for_deployment_ready(controller, sdk, deployment_name)
+    deployment = _wait_for_deployment_ready(controller, models, deployment_name)
     assert deployment and deployment.status == "READY", f"Deployment not READY: {deployment}"
 
     # Verify container is running with retry (DinD may be slow)
@@ -315,10 +323,10 @@ def test_igw_routes_to_deployed_mock_nim(
     model_entity_name = f"test-model-{test_uuid}"
     served_model_name = "mock-model"
 
-    _configure_served_models(sdk, deployment_name, model_entity_name, served_model_name)
+    _configure_served_models(models, deployment_name, model_entity_name, served_model_name)
 
     # === Phase 5: Manually add provider to IGW cache ===
-    assert _manually_add_provider_to_cache(model_cache, sdk, deployment_name, rebuild_model_entity_map=True), (
+    assert _manually_add_provider_to_cache(model_cache, models, deployment_name, rebuild_model_entity_map=True), (
         "Failed to add provider to cache"
     )
 
@@ -333,27 +341,37 @@ def test_igw_routes_to_deployed_mock_nim(
     # === Phase 6: Test all 3 IGW proxy route types (GET) ===
 
     # --- Route Type 1: Provider route ---
-    provider_models = sdk.inference.gateway.provider.get("v1/models", name=deployment_name, workspace=DEFAULT_WORKSPACE)
+    provider_models = gateway.provider_get(
+        trailing_uri="v1/models",
+        name=deployment_name,
+        workspace=DEFAULT_WORKSPACE,
+    ).data()
     assert "data" in provider_models, f"Expected 'data' in response: {provider_models}"
 
-    provider_health = sdk.inference.gateway.provider.get(
-        "v1/health/ready", name=deployment_name, workspace=DEFAULT_WORKSPACE
-    )
+    provider_health = gateway.provider_get(
+        trailing_uri="v1/health/ready",
+        name=deployment_name,
+        workspace=DEFAULT_WORKSPACE,
+    ).data()
     assert provider_health.get("status") == "ready", f"Expected ready status: {provider_health}"
 
     # --- Route Type 2: Model entity route ---
-    model_entity_models = sdk.inference.gateway.model.get(
-        "v1/models", name=model_entity_name, workspace=DEFAULT_WORKSPACE
-    )
+    model_entity_models = gateway.model_get(
+        trailing_uri="v1/models",
+        name=model_entity_name,
+        workspace=DEFAULT_WORKSPACE,
+    ).data()
     assert "data" in model_entity_models, f"Expected 'data' in model entity response: {model_entity_models}"
 
-    model_entity_health = sdk.inference.gateway.model.get(
-        "v1/health/ready", name=model_entity_name, workspace=DEFAULT_WORKSPACE
-    )
+    model_entity_health = gateway.model_get(
+        trailing_uri="v1/health/ready",
+        name=model_entity_name,
+        workspace=DEFAULT_WORKSPACE,
+    ).data()
     assert model_entity_health.get("status") == "ready", f"Expected ready status: {model_entity_health}"
 
     # --- Route Type 3: OpenAI-compatible route ---
-    openai_models = sdk.inference.gateway.openai.v1.models.list(workspace=DEFAULT_WORKSPACE)
+    openai_models = gateway.list_openai_models(workspace=DEFAULT_WORKSPACE).data()
     assert openai_models.data is not None, f"Expected 'data' in OpenAI models response: {openai_models}"
 
     # Verify our model is listed in OpenAI format (workspace/model_entity_name)
@@ -361,7 +379,7 @@ def test_igw_routes_to_deployed_mock_nim(
     expected_model_id = f"{DEFAULT_WORKSPACE}/{model_entity_name}"
     assert expected_model_id in model_ids, f"Expected {expected_model_id} in OpenAI models: {model_ids}"
 
-    openai_model = sdk.inference.gateway.openai.v1.models.get(expected_model_id, workspace=DEFAULT_WORKSPACE)
+    openai_model = gateway.get_openai_model(name=expected_model_id, workspace=DEFAULT_WORKSPACE).data()
     assert openai_model.id == expected_model_id, f"Expected model ID {expected_model_id}: {openai_model}"
 
     # === Phase 7: Test POST requests through all 3 route types ===
@@ -371,15 +389,21 @@ def test_igw_routes_to_deployed_mock_nim(
     }
 
     # POST through provider route
-    provider_chat = sdk.inference.gateway.provider.post(
-        "v1/chat/completions", name=deployment_name, workspace=DEFAULT_WORKSPACE, body=chat_request
-    )
+    provider_chat = gateway.provider_post(
+        trailing_uri="v1/chat/completions",
+        name=deployment_name,
+        workspace=DEFAULT_WORKSPACE,
+        body=JsonBody(chat_request),
+    ).data()
     _assert_chat_response(provider_chat, "Provider route")
 
     # POST through model entity route
-    model_chat = sdk.inference.gateway.model.post(
-        "v1/chat/completions", name=model_entity_name, workspace=DEFAULT_WORKSPACE, body=chat_request
-    )
+    model_chat = gateway.model_post(
+        trailing_uri="v1/chat/completions",
+        name=model_entity_name,
+        workspace=DEFAULT_WORKSPACE,
+        body=JsonBody(chat_request),
+    ).data()
     _assert_chat_response(model_chat, "Model entity route")
 
     # POST through OpenAI route
@@ -387,15 +411,17 @@ def test_igw_routes_to_deployed_mock_nim(
         "model": expected_model_id,
         "messages": [{"role": "user", "content": "Hello from OpenAI route"}],
     }
-    openai_chat = sdk.inference.gateway.openai.post(
-        "v1/chat/completions", workspace=DEFAULT_WORKSPACE, body=openai_chat_request
-    )
+    openai_chat = gateway.openai_post(
+        trailing_uri="v1/chat/completions",
+        workspace=DEFAULT_WORKSPACE,
+        body=JsonBody(openai_chat_request),
+    ).data()
     _assert_chat_response(openai_chat, "OpenAI route")
 
     # === Phase 8: Cleanup ===
-    sdk.inference.deployments.delete(deployment_name, workspace=DEFAULT_WORKSPACE)
+    models.delete_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE)
     # Drive the non-blocking delete to completion before removing the config.
-    _wait_for_deployment_deleted(controller, sdk, deployment_name)
+    _wait_for_deployment_deleted(controller, models, deployment_name)
 
     # Container should be gone once the deployment is DELETED (DinD may lag).
     @retry(stop=stop_after_delay(15), wait=wait_fixed(0.1), reraise=True)
@@ -415,24 +441,33 @@ def test_igw_routes_to_deployed_mock_nim(
         # After all retries, log but don't fail - provider deletion is the key check
         print(f"Warning: Container {container_name} still running after retries")
 
-    sdk.inference.deployment_configs.delete(config_name, workspace=DEFAULT_WORKSPACE)
+    models.delete_deployment_config(name=config_name, workspace=DEFAULT_WORKSPACE)
 
 
 def test_igw_returns_404_for_unknown_provider(controller_with_docker_and_igw):
     """Test that IGW returns 404 for non-existent providers and model entities."""
-    _, _, sdk, _, _, _ = controller_with_docker_and_igw
+    _, _, client, _, _, _ = controller_with_docker_and_igw
+    gateway = InferenceGatewayClient.from_client(client)
 
     # Provider route 404
     with pytest.raises(NotFoundError):
-        sdk.inference.gateway.provider.get("v1/models", name="nonexistent-provider", workspace=DEFAULT_WORKSPACE)
+        gateway.provider_get(
+            trailing_uri="v1/models",
+            name="nonexistent-provider",
+            workspace=DEFAULT_WORKSPACE,
+        ).data()
 
     # Model entity route 404
     with pytest.raises(NotFoundError):
-        sdk.inference.gateway.model.get("v1/models", name="nonexistent-model", workspace=DEFAULT_WORKSPACE)
+        gateway.model_get(
+            trailing_uri="v1/models",
+            name="nonexistent-model",
+            workspace=DEFAULT_WORKSPACE,
+        ).data()
 
     # OpenAI route 404 (workspace from path, model name only in request)
     with pytest.raises(NotFoundError):
-        sdk.inference.gateway.openai.v1.models.get("nonexistent-model", workspace=DEFAULT_WORKSPACE)
+        gateway.get_openai_model(name="nonexistent-model", workspace=DEFAULT_WORKSPACE)
 
 
 def test_igw_cache_removes_deleted_deployment_provider(
@@ -444,7 +479,8 @@ def test_igw_cache_removes_deleted_deployment_provider(
     Verifies that after a deployment is deleted and the provider is removed,
     the cache can be updated to reflect the deletion.
     """
-    controller, model_cache, sdk, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    controller, model_cache, client, mock_nim_image, ctx, _ = controller_with_docker_and_igw
+    models = ModelsClient.from_client(client)
     test_uuid = uuid.uuid4().hex[:8]
     config_name = f"test-igw-delete-{test_uuid}"
     deployment_name = f"test-igw-delete-{test_uuid}"
@@ -456,21 +492,21 @@ def test_igw_cache_removes_deleted_deployment_provider(
     ctx.register_volume(docker_volume_name(DEFAULT_WORKSPACE, names.scratch))
 
     # Create deployment
-    config, deployment = _create_deployment_with_config(sdk, config_name, deployment_name, mock_nim_image)
+    config, deployment = _create_deployment_with_config(models, config_name, deployment_name, mock_nim_image)
     assert config.name == config_name
     assert deployment.name == deployment_name
 
     # Wait for deployment to become READY
-    deployment = _wait_for_deployment_ready(controller, sdk, deployment_name)
+    deployment = _wait_for_deployment_ready(controller, models, deployment_name)
     assert deployment and deployment.status == "READY", f"Deployment not READY: {deployment}"
 
     # Manually add provider to cache
-    _manually_add_provider_to_cache(model_cache, sdk, deployment_name)
+    _manually_add_provider_to_cache(model_cache, models, deployment_name)
     assert model_cache.get_from_provider(DEFAULT_WORKSPACE, deployment_name) is not None
 
     # Delete deployment
-    sdk.inference.deployments.delete(deployment_name, workspace=DEFAULT_WORKSPACE)
-    _wait_for_deployment_deleted(controller, sdk, deployment_name)
+    models.delete_deployment(name=deployment_name, workspace=DEFAULT_WORKSPACE)
+    _wait_for_deployment_deleted(controller, models, deployment_name)
 
     # Manually remove from cache (simulating cache refresh)
     cache_key = (DEFAULT_WORKSPACE, deployment_name)
@@ -481,4 +517,4 @@ def test_igw_cache_removes_deleted_deployment_provider(
     assert model_cache.get_from_provider(DEFAULT_WORKSPACE, deployment_name) is None
 
     # Cleanup
-    sdk.inference.deployment_configs.delete(config_name, workspace=DEFAULT_WORKSPACE)
+    models.delete_deployment_config(name=config_name, workspace=DEFAULT_WORKSPACE)

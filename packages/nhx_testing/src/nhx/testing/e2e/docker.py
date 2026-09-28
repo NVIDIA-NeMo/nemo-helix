@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.docker.gpu_detection import detect_gpu_device_ids
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
@@ -542,14 +542,14 @@ class Docker(E2EBackend):
 
         self._host_port = None
 
-    def get_sdk(self, principal_id: str | None = None) -> NeMoHelix:
-        """Create an SDK client for the containerized NeMo Helix API.
+    def get_client(self, principal_id: str | None = None) -> NemoClient:
+        """Create a typed platform client for the containerized NeMo Helix API.
 
         Args:
             principal_id: Optional principal ID for authentication (X-NHX-Principal-Id header).
 
         Returns:
-            Configured NeMoHelix SDK client.
+            Configured typed platform client.
 
         Raises:
             RuntimeError: If the container is not running.
@@ -560,7 +560,7 @@ class Docker(E2EBackend):
         container_host = self.container.get_container_host_ip()
         base_url = f"http://{container_host}:{self._host_port}"
         headers = {"X-NHX-Principal-Id": principal_id} if principal_id else None
-        return NeMoHelix(base_url=base_url, default_headers=headers)
+        return NemoClient(base_url=base_url, default_headers=headers)
 
     @property
     def network_name(self) -> str | None:

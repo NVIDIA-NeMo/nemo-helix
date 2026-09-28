@@ -11,6 +11,7 @@ from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, AsyncNemoClient, Ne
 from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoResponseValidationError, NotFoundError
 from nemo_helix_plugin.client.response import NemoResponse
+from nemo_helix_plugin.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 from pydantic import BaseModel
 
 BASE = "http://test:8000"
@@ -696,3 +697,19 @@ def test_query_param_dicts_are_json_serialized() -> None:
     _, kwargs = mock_http.request.call_args
     filter_value = kwargs["params"]["filter"]
     assert filter_value == '{"name": "test"}', f"Expected JSON string, got: {filter_value}"
+
+
+@pytest.mark.parametrize(
+    ("client_cls", "httpx_cls"),
+    [(NemoClient, "Client"), (AsyncNemoClient, "AsyncClient")],
+)
+def test_owned_transport_verifies_with_the_configured_ca_bundle(
+    monkeypatch: pytest.MonkeyPatch, client_cls: type, httpx_cls: str
+) -> None:
+    monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
+    built = MagicMock()
+    monkeypatch.setattr(httpx, httpx_cls, built)
+
+    client_cls(base_url="https://gateway.example")
+
+    assert built.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"

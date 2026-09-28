@@ -41,8 +41,28 @@ def _paginator(items):
     return gen()
 
 
+class _FakePaginated:
+    """Stand-in for the typed client's awaitable paginated response."""
+
+    def __init__(self, items):
+        self._items = items
+
+    def __await__(self):
+        async def ready():
+            return self
+
+        return ready().__await__()
+
+    def items(self):
+        return _paginator(self._items)
+
+
 class FakeClient:
-    """Captures every list call's kwargs; serves canned docs per (collection, workspace)."""
+    """Captures every list call's kwargs; serves canned docs per (collection, workspace).
+
+    The typed intake fake flattens ``query_params`` into the recorded kwargs so the
+    assertions read the same for intake and non-intake collections.
+    """
 
     def __init__(self, docs: dict):
         self.docs = docs  # {("spans", ws): [Doc, ...], ...}
@@ -64,10 +84,27 @@ class FakeClient:
                 return _paginator(items)
 
         class _Intake:
-            spans = _Collection("spans")
-            annotations = _Collection("annotations")
-            evaluator_results = _Collection("evaluator_results")
-            traces = _Collection("traces")
+            def _list(self, name, *, workspace, query_params=None):
+                kwargs = {"workspace": workspace, **(query_params or {})}
+                outer.calls.append((name, kwargs))
+                items = outer.docs.get((name, workspace), [])
+                filters = kwargs.get("filter") or {}
+                for key in ("evaluation_id", "trace_id", "session_id"):
+                    if key in filters:
+                        items = [item for item in items if item.payload.get(key) == filters[key]]
+                return _FakePaginated(items)
+
+            def list_spans(self, **kwargs):
+                return self._list("spans", **kwargs)
+
+            def list_annotations(self, **kwargs):
+                return self._list("annotations", **kwargs)
+
+            def list_evaluator_results(self, **kwargs):
+                return self._list("evaluator_results", **kwargs)
+
+            def list_traces(self, **kwargs):
+                return self._list("traces", **kwargs)
 
         class _Experiments:
             async def retrieve(self, name, **kwargs):
@@ -88,6 +125,7 @@ class FakeClient:
 def _install_fake_client(monkeypatch, docs) -> FakeClient:
     client = FakeClient(docs)
     monkeypatch.setattr(export, "make_client", lambda base_url: client)
+    monkeypatch.setattr(export, "_intake_client", lambda platform: platform.intake)
     return client
 
 
@@ -193,8 +231,9 @@ def test_export_closes_client(tmp_path, monkeypatch):
     assert client.closed
 
 
-def test_export_closes_injected_client(tmp_path):
+def test_export_closes_injected_client(tmp_path, monkeypatch):
     client = FakeClient({})
+    monkeypatch.setattr(export, "_intake_client", lambda platform: platform.intake)
 
     export.export_workspaces(
         "http://localhost:8080",

@@ -53,10 +53,11 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     discover_harbor_tasks,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
-from nemo_helix import APIError, AsyncNeMoHelix
-from nemo_helix.types.intake.trace_filter_param import TraceFilterParam
+from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import TraceFilterParam
 
 #: Tasks to pull and run. Terminal-Bench 2.1 is Apache-2.0 and its tasks ship prebuilt images, so a
 #: run pulls rather than builds; these two are among its quickest.
@@ -236,7 +237,7 @@ def _preflight(base_url: str, agent: str, model: str | None) -> None:
         raise SystemExit(f"Platform at {base_url} is not ready.")
 
 
-async def _probe_intake(async_sdk: AsyncNeMoHelix, workspace: str) -> None:
+async def _probe_intake(intake: AsyncIntakeClient, workspace: str) -> None:
     """Confirm Intake can reach ClickHouse, which platform readiness does not cover.
 
     Intake starts and reports itself ready when ClickHouse is unreachable, serving its
@@ -245,9 +246,8 @@ async def _probe_intake(async_sdk: AsyncNeMoHelix, workspace: str) -> None:
     """
     probe: TraceFilterParam = {"session_id": "harbor-to-intake-preflight"}
     try:
-        async for _ in async_sdk.intake.traces.list(workspace=workspace, filter=probe):
-            break
-    except APIError as error:
+        (await intake.list_traces(workspace=workspace, query_params={"filter": probe, "page_size": 1})).page()
+    except NemoClientError as error:
         raise SystemExit(f"Intake cannot serve queries — is ClickHouse reachable? {error}") from error
 
 
@@ -292,6 +292,7 @@ async def _evaluate(
 
 async def _publish(
     async_sdk: AsyncNeMoHelix,
+    intake: AsyncIntakeClient,
     result: AgentEvalResult,
     *,
     workspace: str,
@@ -316,7 +317,7 @@ async def _publish(
 
     report = await publish_to_intake(
         result,
-        client=client_from_platform(async_sdk, AsyncIntakeClient),
+        client=intake,
         experiment_id=evaluation,
         workspace=workspace,
         agent_name=agent,
@@ -330,13 +331,14 @@ async def _publish(
     return report
 
 
-async def _read_back(async_sdk: AsyncNeMoHelix, report: PublishReport, *, workspace: str) -> None:
+async def _read_back(intake: AsyncIntakeClient, report: PublishReport, *, workspace: str) -> None:
     """Query Intake for what was just written — the trajectory and its score rows."""
     print("\nRead back from Intake:")
     for published in report.published_trials:
         trace_filter: TraceFilterParam = {"session_id": published.session_id}
-        traces = [trace async for trace in async_sdk.intake.traces.list(workspace=workspace, filter=trace_filter)]
-        rows = await async_sdk.intake.spans.evaluator_results.list(published.span_id, workspace=workspace)
+        paginator = await intake.list_traces(workspace=workspace, query_params={"filter": trace_filter})
+        traces = [trace async for trace in paginator.items()]
+        rows = await intake.spans.evaluator_results.list(published.span_id, workspace=workspace)
         print(f"  {published.trial_id}: {len(traces)} trajectory, span {published.span_id}")
         for row in rows:
             value = row.string_value if row.data_type == "TEXT" else row.value
@@ -370,13 +372,15 @@ async def _main(args: argparse.Namespace) -> None:
     dataset_dir = _ensure_tasks(args.tasks, args.tasks_dir)
     _validate_tasks(dataset_dir, args.tasks)
     async with AsyncNeMoHelix(base_url=args.base_url, max_retries=2) as async_sdk:
-        await _probe_intake(async_sdk, args.workspace)
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
+        await _probe_intake(intake, args.workspace)
         result = await _evaluate(dataset_dir, args.tasks, agent=args.agent, model=args.model, jobs_dir=args.jobs_dir)
         # One Evaluation per run by default: a stable name makes every re-run pile more test-case
         # rows into the same list, which is rarely what you want to look at.
         evaluation = args.evaluation or _run_evaluation_name(args.dataset, result.run_id)
         report = await _publish(
             async_sdk,
+            intake,
             result,
             workspace=args.workspace,
             experiment=args.experiment,
@@ -385,7 +389,7 @@ async def _main(args: argparse.Namespace) -> None:
             agent=args.agent,
             model=args.model,
         )
-        await _read_back(async_sdk, report, workspace=args.workspace)
+        await _read_back(intake, report, workspace=args.workspace)
     _print_studio_links(
         args.base_url,
         report,

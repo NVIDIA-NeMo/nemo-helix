@@ -13,7 +13,7 @@ import { http, HttpResponse } from 'msw';
 
 const workspace = workspace1.workspace;
 const jobName = 'temperature-sweep';
-const OPTIMIZE_JOB_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/optimize/:name`;
+const OPTIMIZE_JOB_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy/:name`;
 
 const renderStudy = (status: HelixJobStatus) => {
   server.use(

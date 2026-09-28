@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import ClassVar, Generic, TypeVar
 
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.capabilities import probe_docker
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.config import NemoHelixConfig, Runtime
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -126,7 +126,7 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoHelix,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> JobOutputT:
         """Validate platform refs, resolve naming, return the canonical spec."""

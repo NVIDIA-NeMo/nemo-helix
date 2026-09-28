@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: Forward merge alert
+name: Forward merge recovery dispatch
 
 on:
   issue_comment:
@@ -9,11 +9,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  notify:
-    name: Notify failed forward merge
+  dispatch:
+    name: Dispatch failed forward merge recovery
     if: >-
       github.event.issue.pull_request != null &&
       github.event.comment.user.login == 'rapids-bot[bot]' &&
@@ -24,23 +23,20 @@ jobs:
       - name: Check out workflow revision
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          fetch-depth: 0
           persist-credentials: false
 
-      - name: Send Slack alert
+      - name: Dispatch forward-merge recovery
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
-          FORWARD_MERGE_RECOVERY_DOCS_URL: ${{ secrets.FORWARD_MERGE_RECOVERY_DOCS_URL }}
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
         with:
+          github-token: ${{ env.ACT == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
-            const { sendForwardMergeAlert } = require("./.github/scripts/forward-merge-alert.cjs");
-            await sendForwardMergeAlert({
-              github,
-              context,
+            const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
+            await dispatchOrReport({
               core,
+              github,
               env: process.env,
-              fetchImpl: fetch,
-              workspace: process.env.GITHUB_WORKSPACE,
+              eventType: "recover-forward-merge",
+              clientPayload: { pull_number: context.payload.issue.number },
             });

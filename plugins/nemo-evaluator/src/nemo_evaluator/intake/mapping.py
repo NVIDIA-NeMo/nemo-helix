@@ -15,11 +15,11 @@ Design constraints (see AALGO-289):
   no platform client, no imports from the Intake *service* (``nhx.intake.*``).
 * **Typed at the boundary.** The returned values are typed-client
   ``TypedDict`` params (``AtifCreateParams`` / ``EvaluatorResultCreateParams``).
-  At runtime they are plain dicts the adapter splats into the client
-  (``client.intake.ingest.atif.create(**body)``); statically, ``ty`` checks our
-  field names, literals, and nested shapes against the real generated schema, so
-  an API change that regenerates the SDK surfaces here as a type error instead of
-  drifting silently. We depend on the client SDK (already a plugin dependency),
+  At runtime they are plain dicts the publisher wraps into the typed client's
+  request models (``AsyncIntakeClient.create_atif`` / ``create_evaluator_result``);
+  statically, ``ty`` checks our field names, literals, and nested shapes against
+  the typed intake schema, so an API change there surfaces here as a type error
+  instead of drifting silently. We depend on the client SDK (already a plugin dependency),
   never on the Intake service package.
 * The well-known evidence-key constants (``initial_state``/``trace``/``logs``/
   ``final_state``/``verifier_logs``) belong with the SDK evidence work (D1,

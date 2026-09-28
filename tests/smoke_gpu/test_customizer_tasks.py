@@ -77,15 +77,12 @@ def test_nhx_customizer_tasks_importable():
 
 
 @pytest.mark.smoke_nhx_customizer_tasks
-def test_sdk_alias_resources_importable():
-    from nemo_helix import NeMoHelix
+def test_typed_client_resources_importable():
+    from nemo_helix_plugin.client.client import NemoClient
 
-    sdk = NeMoHelix(base_url="http://127.0.0.1:1")
-    try:
-        sdk.files
-        sdk.models
-    finally:
-        sdk.close()
+    with NemoClient(base_url="http://127.0.0.1:1") as client:
+        client.files
+        client.models
 
 
 @pytest.mark.smoke_nhx_customizer_tasks

@@ -14,7 +14,7 @@ owns only the docker-specific wiring.
 
 What it proves — the deployments reconcile chain end to end, on Docker::
 
-    sdk._client POST /apis/deployments/v2/...   (config / volume / deployment)
+    client._client POST /apis/deployments/v2/...   (config / volume / deployment)
       -> deployments reconcile controller
       -> docker executor creates the container / named volume
       -> Deployment.status converges (READY for the nginx service,
@@ -45,7 +45,7 @@ How it runs, and where:
 from __future__ import annotations
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 from e2e.deployments_helpers import (
     run_job_deployment_lifecycle,
@@ -99,33 +99,33 @@ def _skip_without_docker() -> None:
         pytest.skip(f"Docker daemon not reachable: {exc}")
 
 
-def test_docker_service_deployment_reaches_ready(sdk: NeMoHelix, workspace: str) -> None:
+def test_docker_service_deployment_reaches_ready(client: NemoClient, workspace: str) -> None:
     """A restart_policy=Always nginx service reconciles to READY with an endpoint."""
     _skip_without_docker()
     run_service_deployment_lifecycle(
-        sdk,
+        client,
         workspace=workspace,
         backend_key="docker",
         reap_backend_resources=_remove_deployment_container_if_present,
     )
 
 
-def test_docker_job_deployment_reaches_succeeded(sdk: NeMoHelix, workspace: str) -> None:
+def test_docker_job_deployment_reaches_succeeded(client: NemoClient, workspace: str) -> None:
     """A restart_policy=Never alpine job runs to completion (SUCCEEDED, exit 0)."""
     _skip_without_docker()
     run_job_deployment_lifecycle(
-        sdk,
+        client,
         workspace=workspace,
         backend_key="docker",
         reap_backend_resources=_remove_deployment_container_if_present,
     )
 
 
-def test_docker_volume_is_provisioned_mounted_and_readable(sdk: NeMoHelix, workspace: str) -> None:
+def test_docker_volume_is_provisioned_mounted_and_readable(client: NemoClient, workspace: str) -> None:
     """A named volume is provisioned, mounted into a job, written to, and read back."""
     _skip_without_docker()
     run_volume_deployment_round_trip(
-        sdk,
+        client,
         workspace=workspace,
         backend_key="docker",
         reap_backend_resources=_remove_deployment_container_if_present,

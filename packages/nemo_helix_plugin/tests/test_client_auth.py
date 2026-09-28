@@ -270,6 +270,10 @@ class TestAsyncNemoClientAuth:
 # ---------------------------------------------------------------------------
 
 
+# Any fixed instant; only its constancy across processes matters.
+_FIXED_IAT = 1_700_000_000
+
+
 def _make_jwt(exp: float | None = None, sub: str = "user") -> str:
     """Create a minimal unsigned JWT for testing."""
     return generate_unsigned_jwt(
@@ -309,28 +313,54 @@ class TestOIDCTokenProvider:
             with pytest.raises(ValueError, match="bearer_token_source"):
                 discover_nhx_config("https://nemo.example.com")
 
+    # `issued_at` is pinned and the ids are explicit because these run under pytest-xdist: the
+    # tokens are built when the decorator is evaluated, once per worker process. A wall-clock
+    # `iat` makes each worker produce a different token, and pytest derives the test id from the
+    # parameter, so the workers disagree on what was collected and the whole run aborts.
     @pytest.mark.parametrize(
         ("token", "kwargs", "field"),
         [
             (
-                generate_unsigned_jwt("user", expires_in_seconds=None, extra_claims={"exp": float("nan")}),
+                generate_unsigned_jwt(
+                    "user", expires_in_seconds=None, issued_at=_FIXED_IAT, extra_claims={"exp": float("nan")}
+                ),
                 {},
                 "JWT exp",
             ),
-            (generate_unsigned_jwt("user", expires_in_seconds=None), {"expires_at": float("inf")}, "expires_at"),
             (
-                generate_unsigned_jwt("user", expires_in_seconds=None),
+                generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
+                {"expires_at": float("inf")},
+                "expires_at",
+            ),
+            (
+                generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
                 {"expires_in": float("-inf")},
                 "expires_in",
             ),
         ],
-        # Explicit ids: the generated JWTs embed the collection time, so derived ids differ across
-        # xdist workers and abort the run.
-        ids=["jwt-exp-nan", "expires-at-inf", "expires-in-neg-inf"],
+        ids=["jwt-exp", "expires-at", "expires-in"],
     )
     def test_token_set_rejects_non_finite_expiry(self, token, kwargs, field):
         with pytest.raises(ValueError, match=rf"{field} must be finite"):
             TokenSet.from_access_token(token, **kwargs)
+
+    def test_non_finite_expiry_params_do_not_vary_between_xdist_workers(self):
+        collected = [
+            # `pytest.param(...)` would expose `.values`; a bare tuple is the value itself.
+            getattr(case, "values", case)[0]
+            for mark in type(self).test_token_set_rejects_non_finite_expiry.pytestmark
+            if mark.name == "parametrize"
+            for case in mark.args[1]
+        ]
+        # Each worker evaluates the decorator in its own process; a token carrying a wall-clock
+        # `iat` differs between them, and pytest names the test after it.
+        assert collected == [
+            generate_unsigned_jwt(
+                "user", expires_in_seconds=None, issued_at=_FIXED_IAT, extra_claims={"exp": float("nan")}
+            ),
+            generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
+            generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
+        ]
 
     @pytest.mark.parametrize("expires_at", [float("nan"), float("inf"), float("-inf")])
     def test_token_set_treats_non_finite_expiry_as_expired(self, expires_at):

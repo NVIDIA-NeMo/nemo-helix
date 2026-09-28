@@ -12,7 +12,7 @@ module owns only the k8s-specific wiring.
 What it proves — the container-mode chain end to end for both supported agent
 config formats, on Kubernetes::
 
-    sdk.agents.invoke (gateway proxy, container-mode endpoint resolution)
+    agents.invoke (gateway proxy, container-mode endpoint resolution)
       -> k8s agent pod (NAT or Fabric/DeepAgents server), fronted by a ClusterIP Service
       -> Inference Gateway /openai (base_url injected at deploy time)
       -> mock provider short-circuit (no real upstream / no API key)
@@ -51,6 +51,7 @@ import os
 import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 from e2e.agents_deploy_helpers import run_container_agent_deploy_and_invoke
 
@@ -89,11 +90,12 @@ def agent_deployment_image() -> str:
 
 
 def test_nat_k8s_agent_deploys_and_invokes_through_gateway(
-    sdk: NeMoHelix, workspace: str, agent_deployment_image: str
+    sdk: NeMoHelix, client: NemoClient, workspace: str, agent_deployment_image: str
 ) -> None:
     """Deploy a NAT agent as a k8s Deployment+Service and invoke it through the gateway."""
     run_container_agent_deploy_and_invoke(
         sdk,
+        client,
         workspace=workspace,
         deployment_mode="k8s",
         image=agent_deployment_image,
@@ -105,11 +107,12 @@ def test_nat_k8s_agent_deploys_and_invokes_through_gateway(
 
 
 def test_fabric_k8s_agent_deploys_and_invokes_through_gateway(
-    sdk: NeMoHelix, workspace: str, agent_deployment_image: str
+    sdk: NeMoHelix, client: NemoClient, workspace: str, agent_deployment_image: str
 ) -> None:
     """Exercise non-streaming, streaming, and session calls against a Kubernetes Fabric agent."""
     run_container_agent_deploy_and_invoke(
         sdk,
+        client,
         workspace=workspace,
         deployment_mode="k8s",
         image=agent_deployment_image,

@@ -14,7 +14,16 @@ import time
 import uuid
 
 import pytest
-from nemo_helix import NeMoHelix, NotFoundError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+)
 
 # Kind smoke generic deployment image (python -m http.server). Keep in sync with
 # .github/actions/setup-kind-cluster/action.yaml GENERIC_HTTP_* prepull vars.
@@ -31,9 +40,9 @@ def _unique_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
-def _deployment_diagnostic(sdk: NeMoHelix, *, workspace: str, name: str, prefix: str) -> str:
+def _deployment_diagnostic(models: ModelsClient, *, workspace: str, name: str, prefix: str) -> str:
     try:
-        deployment = sdk.inference.deployments.retrieve(name, workspace=workspace)
+        deployment = models.get_deployment(name=name, workspace=workspace).data()
     except NotFoundError:
         return f"{prefix}\nDeployment {name!r} not found."
     return (
@@ -45,7 +54,7 @@ def _deployment_diagnostic(sdk: NeMoHelix, *, workspace: str, name: str, prefix:
 
 
 def _wait_for_deployment_ready(
-    sdk: NeMoHelix,
+    models: ModelsClient,
     *,
     workspace: str,
     name: str,
@@ -56,12 +65,12 @@ def _wait_for_deployment_ready(
     last_message: str | None = None
 
     while time.monotonic() < deadline:
-        deployment = sdk.inference.deployments.retrieve(name, workspace=workspace)
+        deployment = models.get_deployment(name=name, workspace=workspace).data()
         last_status = deployment.status
         last_message = deployment.status_message
         if deployment.status == "READY":
             assert deployment.model_provider_id is not None, _deployment_diagnostic(
-                sdk,
+                models,
                 workspace=workspace,
                 name=name,
                 prefix="Deployment reached READY without model_provider_id",
@@ -70,7 +79,7 @@ def _wait_for_deployment_ready(
         if deployment.status == "ERROR":
             pytest.fail(
                 _deployment_diagnostic(
-                    sdk,
+                    models,
                     workspace=workspace,
                     name=name,
                     prefix=f"Deployment {name!r} entered ERROR",
@@ -85,7 +94,7 @@ def _wait_for_deployment_ready(
 
 
 def _wait_for_deployment_deleted(
-    sdk: NeMoHelix,
+    models: ModelsClient,
     *,
     workspace: str,
     name: str,
@@ -96,12 +105,12 @@ def _wait_for_deployment_deleted(
 
     while time.monotonic() < deadline:
         try:
-            deployment = sdk.inference.deployments.retrieve(name, workspace=workspace)
+            deployment = models.get_deployment(name=name, workspace=workspace).data()
             last_status = deployment.status
             if deployment.status == "ERROR":
                 pytest.fail(
                     _deployment_diagnostic(
-                        sdk,
+                        models,
                         workspace=workspace,
                         name=name,
                         prefix=f"Deployment {name!r} entered ERROR while waiting for deletion",
@@ -114,36 +123,38 @@ def _wait_for_deployment_deleted(
     pytest.fail(f"Deployment {name!r} was not deleted within {timeout_seconds}s; last status={last_status!r}")
 
 
-def test_generic_model_deployment_lifecycle(sdk: NeMoHelix, workspace: str) -> None:
+def test_generic_model_deployment_lifecycle(client: NemoClient, workspace: str) -> None:
     """Create → READY → delete a generic CPU deployment on the plugin k8s backend."""
+    models = ModelsClient.from_client(client)
     config_name = _unique_name("kind-generic-cfg")
     deployment_name = _unique_name("kind-generic-dep")
 
-    sdk.inference.deployment_configs.create(
+    models.create_deployment_config(
         workspace=workspace,
-        name=config_name,
-        engine="generic",
-        model_spec={},
-        executor_config={
-            "gpu": 0,
-            "image_name": GENERIC_HTTP_IMAGE,
-            "image_tag": GENERIC_HTTP_TAG,
-            "additional_args": ["python3", "-m", "http.server", "8000"],
-            "health_check_path": "/",
-        },
+        body=CreateModelDeploymentConfigRequest(
+            name=config_name,
+            engine=Engine.GENERIC,
+            model_spec=ModelDeploymentConfigModelSpec(),
+            executor_config=ContainerExecutorConfig(
+                gpu=0,
+                image_name=GENERIC_HTTP_IMAGE,
+                image_tag=GENERIC_HTTP_TAG,
+                additional_args=["python3", "-m", "http.server", "8000"],
+                health_check_path="/",
+            ),
+        ),
     )
-    sdk.inference.deployments.create(
+    models.create_deployment(
         workspace=workspace,
-        name=deployment_name,
-        config=config_name,
+        body=CreateModelDeploymentRequest(name=deployment_name, config=config_name),
     )
 
     try:
-        _wait_for_deployment_ready(sdk, workspace=workspace, name=deployment_name)
+        _wait_for_deployment_ready(models, workspace=workspace, name=deployment_name)
     finally:
         try:
-            sdk.inference.deployments.delete(deployment_name, workspace=workspace)
+            models.delete_deployment(name=deployment_name, workspace=workspace)
         except NotFoundError:
             pass
 
-    _wait_for_deployment_deleted(sdk, workspace=workspace, name=deployment_name)
+    _wait_for_deployment_deleted(models, workspace=workspace, name=deployment_name)

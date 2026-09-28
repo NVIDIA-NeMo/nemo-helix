@@ -40,7 +40,7 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     (adapter_path / "adapter_config.json").write_text("{}", encoding="utf-8")
 
     sdk = MagicMock()
-    monkeypatch.setattr(task_main, "get_platform_sdk", lambda: sdk)
+    monkeypatch.setattr(task_main, "get_nemo_client", lambda: sdk)
 
     jobs_client = MagicMock()
     jobs_client.get_job.return_value = _resp(SimpleNamespace(attempt_id="attempt-123"))

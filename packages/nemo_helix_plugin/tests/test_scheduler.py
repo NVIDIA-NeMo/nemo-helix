@@ -10,14 +10,14 @@ import json
 
 import httpx
 import pytest
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 from pydantic import BaseModel
 
 
-def _spec_async_sdk() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://platform.test", workspace="default")
+def _spec_async_sdk() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 class _LegacyRawJob(NemoJob):
