@@ -23,6 +23,7 @@
 #   CAUSAL_CONV1D_VERSION  - git tag to build              (default: v1.5.3)
 #   MAMBA_22_COMMIT        - git SHA or tag to build
 #   MAGI_ATTENTION_COMMIT  - MagiAttention git SHA (match Automodel's [tool.uv.sources] rev)
+#   NVSHMEM_VERSION        - nvidia-nvshmem-cu13 for magi-attention (match nhx-automodel-base)
 #   CUDA_VERSION           - CUDA devel image version      (default: 12.8.1)
 #   TORCH_CUDA_ARCH_LIST   - semicolon-separated SM targets (default: "8.0;8.6;9.0")
 #   FFMPEG_VERSION         - FFmpeg for av/opencv wheels   (default: 8.1.2)
@@ -296,10 +297,24 @@ COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
 FROM mamba-wheel-base-py312-cu13.3 AS magi-attention-wheel-builder-py312-cu13.3
 
 ARG MAGI_ATTENTION_COMMIT=d7ea8afd44c790b65fab68a04a6a0fdd5adbf182
+ARG NVSHMEM_VERSION=3.6.5
+
+# Automodel's docker/Dockerfile installs the RDMA headers and NVSHMEM before it builds
+# MagiAttention. Without NVSHMEM, magi_attn_comm still compiles its internode kernels and
+# fails. MagiAttention finds NVSHMEM through the nvidia.nvshmem package and records its lib
+# dir as the extension's RPATH, so nhx-automodel-base installs the same NVSHMEM_VERSION with
+# the system pip, at the same path.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --allow-change-held-packages rdma-core libibverbs-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir "nvidia-nvshmem-cu13==${NVSHMEM_VERSION}" && \
+    python -c "import nvidia.nvshmem"
 
 # Build settings mirror Automodel's docker/Dockerfile: Hopper + Blackwell kernels only,
 # FFA kernels JIT-compiled at runtime instead of prebuilt. versioningit stamps the wheel
-# version from git tags (Automodel lists it as an extra build dependency).
+# version from git tags (Automodel lists it as an extra build dependency). uv checks out a
+# git dependency's submodules (CUTLASS, the flash-attention fork), so this clone does too.
 RUN mkdir -p /wheels && \
     pip install --no-cache-dir versioningit && \
     git clone https://github.com/SandAI-org/MagiAttention.git /src/magi-attention && \
@@ -308,7 +323,6 @@ RUN mkdir -p /wheels && \
     git submodule update --init --recursive && \
     MAGI_ATTENTION_BUILD_COMPUTE_CAPABILITY="90,100" \
     MAGI_ATTENTION_PREBUILD_FFA=0 \
-    MAX_JOBS=8 \
     uv build --wheel --no-build-isolation --out-dir=/wheels . && \
     rm -rf /src/magi-attention
 

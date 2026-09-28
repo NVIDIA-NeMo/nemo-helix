@@ -181,6 +181,12 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/r
     --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/tmp/common-file-removals.txt,readonly \
     python /tmp/remove-listed-files.py /tmp/common-file-removals.txt
 
+# magi_attn_comm (magi-attention-wheel) loads libnvshmem_host through an RPATH into the system
+# site-packages it was built against, so install the same NVSHMEM with the system pip, before
+# PATH puts /opt/venv first. Keep NVSHMEM_VERSION equal to the magi-attention-wheel build.
+ARG NVSHMEM_VERSION=3.6.5
+RUN pip install --no-cache-dir "nvidia-nvshmem-cu13==${NVSHMEM_VERSION}"
+
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN bash /usr/local/bin/collect-apt-sources.sh \

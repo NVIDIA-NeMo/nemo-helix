@@ -196,6 +196,13 @@ variable "MAGI_ATTENTION_COMMIT" {
   default = "d7ea8afd44c790b65fab68a04a6a0fdd5adbf182"
 }
 
+# nvidia-nvshmem-cu13 that magi-attention-wheel builds against and nhx-automodel-base ships; the
+# wheel's RPATH points at it, so both targets take this one value. Keep in sync with the NVSHMEM
+# pin in Automodel's docker/Dockerfile.
+variable "NVSHMEM_VERSION" {
+  default = "3.6.5"
+}
+
 function "get_causal_conv1d_wheel_image" {
   params = []
   result = "${WHEELS_REGISTRY}/causal-conv1d-wheel:${WHEELS_TAG}"
@@ -906,6 +913,7 @@ target "magi-attention-wheel" {
   output     = image_output()
   args = {
     MAGI_ATTENTION_COMMIT = MAGI_ATTENTION_COMMIT
+    NVSHMEM_VERSION       = NVSHMEM_VERSION
   }
   platforms = get_platforms()
 }
@@ -1121,6 +1129,7 @@ target "nhx-automodel-base-builder" {
   }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NVSHMEM_VERSION     = NVSHMEM_VERSION
   }
   platforms = get_platforms()
 }
