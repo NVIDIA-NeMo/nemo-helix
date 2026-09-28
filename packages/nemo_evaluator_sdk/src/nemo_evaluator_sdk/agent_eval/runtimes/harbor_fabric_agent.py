@@ -10,19 +10,20 @@ document :class:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime.FabricAg
 host. The config is used **verbatim**: harness, models, instructions, skills, MCP servers, tools, and
 telemetry all come from it, and so does the agent's identity (``metadata.name``, the Relay
 ``agent_name``). Harbor decides only where a trial lives -- the workspace and artifact paths inside
-the container -- and the request/response schemas its runner protocol needs.
+the container -- the request/response schemas its runner protocol needs, the settings a harness needs
+to run unattended in a task container, and the placeholder key a gateway-routed model's client insists
+on. A config handed to Harbor must therefore hold no credential-named value at all, placeholder
+included; Harbor persists ``agent_kwargs`` unredacted, and :class:`HarborRuntimeConfig` refuses one.
 
-That is the difference from the upstream ``nemo_fabric.integrations.harbor:FabricAgent`` this class
-extends. Upstream *builds* a config from flat ``fabric_*`` keyword arguments (``fabric_adapter_id``,
-``fabric_system_instruction``, ``fabric_max_turns``, ...) and stamps it ``harbor-<adapter>``, so
-anything without a keyword -- skills, Fabric MCP servers, tool policy, telemetry sinks -- cannot be
-expressed and the agent under test is anonymous to Intake. Those keywords are rejected here: build the
-whole config upstream of the agent and pass it in. The install/run keywords (``fabric_package``,
-``fabric_config_bundle``, ``fabric_workspace``, ``fabric_python``, ...) are unchanged.
+The flat ``fabric_*`` keywords the upstream ``nemo_fabric.integrations.harbor:FabricAgent`` builds a
+config from (``fabric_adapter_id``, ``fabric_system_instruction``, ``fabric_max_turns``, ...) are
+refused rather than merged; the install/run keywords (``fabric_package``, ``fabric_config_bundle``,
+``fabric_workspace``, ``fabric_python``, ...) are unchanged.
 
 Files the config refers to by relative path (``skills.paths``) resolve against ``fabric_config_target``
 when a ``fabric_config_bundle`` is uploaded, exactly as upstream: stage the agent's files into a
-directory, pass it as the bundle, and keep the paths relative.
+directory, pass it as the bundle, and keep the paths relative. Custom adapters shipped in the bundle
+are found only if the config lists their directory under ``discovery.local_paths``.
 """
 
 from __future__ import annotations
@@ -31,13 +32,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from nemo_fabric import EnvironmentConfig, FabricConfig, RelayAtofFileSinkConfig
-from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent
+from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, harbor_harness_defaults
 
 #: build.nvidia.com's OpenAI-compatible endpoint, for configs that name an ``nvidia`` model directly.
 NVIDIA_MODEL_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-#: Upstream ``FabricAgent`` keywords that *describe the agent* rather than how to install or run it.
-#: They compete with ``fabric_config`` for the same fields, so they are refused rather than merged.
+#: Upstream ``FabricAgent`` keywords that describe the agent rather than how to install or run it.
 FLAT_CONFIG_KWARGS: frozenset[str] = frozenset(
     {
         "fabric_adapter_id",
@@ -54,18 +54,26 @@ FLAT_CONFIG_KWARGS: frozenset[str] = frozenset(
     }
 )
 
-#: Harbor's runner protocol: the instruction arrives as text, the answer leaves as a message.
 HARBOR_INPUT_SCHEMA = "text"
 HARBOR_OUTPUT_SCHEMA = "message"
+
+#: Claude Code refuses ``bypassPermissions`` as root unless it is told it is sandboxed.
+_CLAUDE_ADAPTER_ID = "nvidia.fabric.claude"
+_CLAUDE_UNATTENDED_ENV = {"IS_SANDBOX": "1"}
+
+#: The platform's Inference Gateway authenticates the job, not the request, but a harness's client
+#: still refuses an empty key, so a gateway-routed model is handed a placeholder under its
+#: ``api_key_env``. Must agree with ``nemo_agents_plugin.fabric.gateway_credentials``.
+PLATFORM_GATEWAY_PATH_MARKER = "/apis/inference-gateway/"
+PLATFORM_GATEWAY_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
+PLATFORM_GATEWAY_API_KEY_PLACEHOLDER = "not-used"
 
 
 class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
     """``FabricAgent`` that runs a complete ``fabric_config`` instead of building one from keywords.
 
-    ``fabric_default_max_turns`` applies only when the config sets no ``runtime.max_turns``: Fabric
-    leaves a harness unbounded by default, and an unbounded harness on a task it cannot finish runs
-    until Harbor kills the agent phase -- which yields no ``RunResult`` at all. A config that names its
-    own budget (including an explicit ``null``) is left alone.
+    ``fabric_default_max_turns`` fills ``runtime.max_turns`` only when the config leaves it unset; an
+    explicit ``null`` keeps Fabric's unbounded harness.
     """
 
     def __init__(
@@ -98,25 +106,31 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         config = self.fabric_config.model_copy(deep=True)
         artifact_root = f"{HARBOR_ARTIFACT_ROOT}/{config.metadata.name}"
 
-        # Runner protocol + artifact root. A config-supplied schema wins; most agent configs set none.
         runtime = config.runtime
         runtime.input_schema = runtime.input_schema or HARBOR_INPUT_SCHEMA
         runtime.output_schema = runtime.output_schema or HARBOR_OUTPUT_SCHEMA
         runtime.artifacts = artifact_root
-        if runtime.max_turns is None and self.fabric_default_max_turns is not None:
+        if "max_turns" not in runtime.model_fields_set and self.fabric_default_max_turns is not None:
             runtime.max_turns = self.fabric_default_max_turns
 
-        # Where the trial lives. Harbor's task environment is always the local provider from Fabric's
-        # point of view; the config's own ``env`` (gateway placeholders, forwarded platform URLs) stays.
+        # Harbor's task container is Fabric's local provider, whatever the config says.
         environment = config.environment or EnvironmentConfig(provider="local")
         environment.provider = "local"
         environment.workspace = self.fabric_workspace
         environment.artifacts = artifact_root
         config.environment = environment
 
-        # Harbor's ``agent_model_name`` swaps the model *id* only; endpoint and credential wiring are the
-        # config's. Absent a default model there is nothing to swap onto, and inventing one would drop
-        # the ``base_url``/``api_key_env`` a caller expected.
+        assert config.harness is not None  # checked at construction
+        for key, value in harbor_harness_defaults(config.harness.adapter_id).items():
+            config.harness.settings.setdefault(key, value)
+        if config.harness.adapter_id == _CLAUDE_ADAPTER_ID:
+            for key, value in _CLAUDE_UNATTENDED_ENV.items():
+                environment.env.setdefault(key, value)
+        for model in config.models.values():
+            if model.base_url and PLATFORM_GATEWAY_PATH_MARKER in model.base_url:
+                model.api_key_env = model.api_key_env or PLATFORM_GATEWAY_API_KEY_ENV
+                environment.env.setdefault(model.api_key_env, PLATFORM_GATEWAY_API_KEY_PLACEHOLDER)
+
         if self.model_name:
             default = config.models.get("default")
             if default is None:
@@ -138,7 +152,6 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
                         if isinstance(sink, RelayAtofFileSinkConfig):
                             sink.output_directory = relay_output
 
-        # Servers and skills Harbor itself provides for the task, on top of the agent's own.
         for server in self.mcp_servers:
             if server.transport == "stdio":
                 config.add_mcp_server(

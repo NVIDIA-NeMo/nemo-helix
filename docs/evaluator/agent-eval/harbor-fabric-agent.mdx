@@ -122,8 +122,8 @@ Four differences from `NemoFabricAgent`:
   unbounded `None`. When an unbounded harness cannot finish a task, Harbor eventually kills the agent
   phase, and a killed phase produces no `RunResult` — no trajectory and no error, only
   `AgentTimeoutError`. A budget lets the harness stop on its own terms; in our sample runs it accounted
-  for most of the lost trials. Size it in the config for your dataset, or pass
-  `fabric_default_max_turns=None` for Fabric's unbounded behaviour.
+  for most of the lost trials. Size it in the config for your dataset, or set `runtime.max_turns` to
+  an explicit `null` there (or pass `fabric_default_max_turns=None`) for Fabric's unbounded behaviour.
 
 The packaged example runs it against a deliberately bare `ubuntu:24.04` task — no Python, no pip, no
 curl — and `--dataset-dir` points it at any Harbor dataset, including one pulled from the Hub:

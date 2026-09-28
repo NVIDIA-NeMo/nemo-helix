@@ -54,8 +54,8 @@ DEFAULT_FABRIC_PYTHON_VERSION = "3.12"
 #: a killed phase produces no ``RunResult`` at all -- no trajectory, no error, nothing to debug, just
 #: an ``AgentTimeoutError``. Measured on `terminal-bench-sample`: six of ten trials died that way.
 #: A ceiling cannot be derived from the task, so this is a deliberately generous guess whose only job
-#: is to make the harness stop on its own terms. Pass ``fabric_max_turns`` to size it properly, or
-#: ``fabric_max_turns=None`` for Fabric's unbounded behaviour.
+#: is to make the harness stop on its own terms. Set ``runtime.max_turns`` in the config to size it
+#: properly, or an explicit ``null`` there for Fabric's unbounded behaviour.
 DEFAULT_FABRIC_MAX_TURNS = 50
 #: uv release the installer is pinned to.
 #:
@@ -161,8 +161,6 @@ class FabricInstalledAgent(BaseInstalledAgent):
             mcp_servers=mcp_servers,
             skills_dir=skills_dir,
         )
-        # Applied only when the config sets no ``runtime.max_turns``; a config that names its own budget
-        # (including an explicit ``null``) is left alone.
         fabric_kwargs.setdefault("fabric_default_max_turns", DEFAULT_FABRIC_MAX_TURNS)
         # `**fabric_kwargs` rather than an enumerated signature, so every FabricAgent constructor
         # argument stays reachable without this class tracking upstream's parameter list.

@@ -83,8 +83,6 @@ async def _main(
     job_name: str | None,
 ) -> None:
     agent_kwargs: dict[str, JsonValue] = {
-        # The agent itself: harness, model, endpoint, credential variable. Skills, MCP servers, and
-        # telemetry would go in here too -- NemoFabricAgent runs the config as given.
         "fabric_config": fabric_config_for(model, api_key_env),
         "fabric_package": fabric_package,
         # The task image's working directory; Fabric's default `/testbed` does not exist there.

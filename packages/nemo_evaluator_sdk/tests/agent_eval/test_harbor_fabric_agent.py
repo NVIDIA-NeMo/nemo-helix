@@ -29,7 +29,7 @@ def _registered_agent_config() -> dict[str, Any]:
             "provider": "local",
             "workspace": "./workspace",
             "artifacts": "./artifacts",
-            "env": {"NHX_BASE_URL": "http://platform.test", "NVIDIA_API_KEY": "not-used"},
+            "env": {"NHX_BASE_URL": "http://platform.test"},
         },
         "models": {
             "default": {
@@ -133,6 +133,34 @@ def test_default_turn_budget_applies_only_when_the_config_names_none(tmp_path: P
     assert agent._build_config().runtime.max_turns == 5
 
 
+def test_an_explicit_null_turn_budget_keeps_the_harness_unbounded(tmp_path: Path) -> None:
+    """``max_turns: null`` is a choice, not an omission; the default must not paper over it."""
+    unbounded = _registered_agent_config()
+    unbounded["runtime"] = {"max_turns": None}
+    agent = NemoFabricAgent(logs_dir=tmp_path, fabric_config=unbounded, fabric_default_max_turns=50)
+    assert agent._build_config().runtime.max_turns is None
+
+
+def test_unattended_harness_settings_are_filled_in_but_never_overridden(tmp_path: Path) -> None:
+    """A Claude harness prompts for permissions unless told otherwise; in a task container nobody answers."""
+    claude = _registered_agent_config()
+    claude["harness"] = {"adapter_id": "nvidia.fabric.claude"}
+    config = NemoFabricAgent(logs_dir=tmp_path, fabric_config=claude, fabric_workspace="/app")._build_config()
+    assert config.harness is not None
+    assert config.harness.settings["permission_mode"] == "bypassPermissions"
+    assert config.environment is not None and config.environment.env["IS_SANDBOX"] == "1"
+
+    claude["harness"] = {"adapter_id": "nvidia.fabric.claude", "settings": {"permission_mode": "acceptEdits"}}
+    claude["environment"]["env"]["IS_SANDBOX"] = "0"
+    config = NemoFabricAgent(logs_dir=tmp_path, fabric_config=claude, fabric_workspace="/app")._build_config()
+    assert config.harness is not None and config.harness.settings["permission_mode"] == "acceptEdits"
+    assert config.environment is not None and config.environment.env["IS_SANDBOX"] == "0"
+
+    # Other harnesses need nothing; the agent's own settings pass through untouched.
+    deepagents = _agent(tmp_path)._build_config()
+    assert deepagents.harness is not None and deepagents.harness.settings == {"deepagents": {}}
+
+
 def test_harbor_model_name_swaps_the_model_id_but_keeps_the_endpoint_wiring(tmp_path: Path) -> None:
     model = _agent(tmp_path, model_name="nvidia-nemotron-3-super")._build_config().models["default"]
 
@@ -192,9 +220,27 @@ def test_reports_its_own_name_to_harbor() -> None:
     assert NemoFabricAgent.name() == "nemo-fabric"
 
 
-def test_a_fabric_config_in_agent_kwargs_is_judged_by_value_shape_not_key_name(tmp_path: Path) -> None:
-    """The runtime config persists kwargs unredacted, so it refuses credentials -- but a registered agent's
-    config *names* its credential variable and carries the gateway placeholder, which are not credentials."""
+def test_gateway_models_get_the_placeholder_key_their_client_insists_on(tmp_path: Path) -> None:
+    """The gateway authenticates the job, but the harness's client refuses an empty key. The placeholder is
+    added per trial so the config handed to Harbor never has to carry a credential-named value."""
+    env = _agent(tmp_path)._build_config().environment
+    assert env is not None and env.env["NVIDIA_API_KEY"] == "not-used"
+
+    unnamed = _registered_agent_config()
+    del unnamed["models"]["default"]["api_key_env"]
+    config = NemoFabricAgent(logs_dir=tmp_path, fabric_config=unnamed)._build_config()
+    assert config.models["default"].api_key_env == "NEMO_AGENTS_IGW_API_KEY"
+    assert config.environment is not None and config.environment.env["NEMO_AGENTS_IGW_API_KEY"] == "not-used"
+
+    direct = _registered_agent_config()
+    direct["models"]["default"]["base_url"] = "https://integrate.api.nvidia.com/v1"
+    config = NemoFabricAgent(logs_dir=tmp_path, fabric_config=direct)._build_config()
+    assert config.environment is not None and "NVIDIA_API_KEY" not in config.environment.env
+
+
+def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value(tmp_path: Path) -> None:
+    """Harbor persists ``agent_kwargs`` unredacted. ``api_key_env`` names a variable and passes; anything
+    under a credential-named key is refused -- an issued token, an unrecognised secret, or the placeholder."""
     config = HarborRuntimeConfig(
         jobs_dir=tmp_path,
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
@@ -203,14 +249,30 @@ def test_a_fabric_config_in_agent_kwargs_is_judged_by_value_shape_not_key_name(t
     kept = config.agent_kwargs["fabric_config"]
     assert isinstance(kept, dict) and kept["models"]["default"]["api_key_env"] == "NVIDIA_API_KEY"
 
-    leaked = _registered_agent_config()
-    leaked["environment"]["env"]["NVIDIA_API_KEY"] = "nvapi-" + "a" * 60
-    with pytest.raises(ValueError, match="fabric_config.environment.env.NVIDIA_API_KEY"):
-        HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs={"fabric_config": leaked})
+    for name, value in [
+        ("NVIDIA_API_KEY", "nvapi-" + "a" * 60),
+        ("MY_API_KEY", "an-unrecognised-real-secret"),
+        ("NVIDIA_API_KEY", "not-used"),
+    ]:
+        leaked = _registered_agent_config()
+        leaked["environment"]["env"][name] = value
+        with pytest.raises(ValueError, match=f"fabric_config.environment.env.{name}"):
+            HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs={"fabric_config": leaked})
 
 
-def test_provenance_redaction_keeps_a_fabric_configs_variable_names() -> None:
-    recorded = redact_credentials({"fabric_config": _registered_agent_config(), "api_key": "plain"})
-    assert recorded["fabric_config"]["models"]["default"]["api_key_env"] == "NVIDIA_API_KEY"
-    assert recorded["fabric_config"]["environment"]["env"]["NVIDIA_API_KEY"] == "not-used"
-    assert recorded["api_key"] == "<redacted>"  # loose kwargs keep the key-marker rule
+def test_provenance_redaction_keeps_variable_names_and_redacts_values() -> None:
+    config = _registered_agent_config()
+    config["environment"]["env"]["MY_API_KEY"] = "an-unrecognised-real-secret"
+    config["models"]["default"]["api_key_env"] = "sk-" + "a" * 40  # a value where a name belongs
+
+    recorded = redact_credentials({"fabric_config": config, "api_key": "plain"})
+
+    assert recorded["fabric_config"]["environment"]["env"]["MY_API_KEY"] == "<redacted>"
+    assert recorded["fabric_config"]["models"]["default"]["api_key_env"] == "<redacted>"
+    assert recorded["api_key"] == "<redacted>"
+    assert (
+        redact_credentials({"fabric_config": _registered_agent_config()})["fabric_config"]["models"]["default"][
+            "api_key_env"
+        ]
+        == "NVIDIA_API_KEY"
+    )

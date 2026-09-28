@@ -42,15 +42,12 @@ _CREDENTIAL_VALUE = re.compile(
 _CREDENTIAL_VALUE_MIN_CHARS = 16
 
 
-#: Free-form settings keys whose value is a *typed agent document* rather than loose knobs -- Harbor's
-#: ``agent_kwargs["fabric_config"]`` is a whole Fabric ``agent.yaml``. Such a document legitimately
-#: *names* credential variables (``models.*.api_key_env``) and carries gateway placeholders
-#: (``environment.env.NVIDIA_API_KEY: not-used``), so the key-marker heuristic would refuse or redact
-#: every registered agent. Under these keys only the value shape decides.
-VALUE_ONLY_SETTINGS_KEYS: frozenset[str] = frozenset({"fabric_config"})
+def _names_a_variable(path: str) -> bool:
+    """A ``*_env`` key (Fabric's ``api_key_env``) holds the *name* of an environment variable, not a value."""
+    return path.rpartition(".")[2].casefold().endswith("_env")
 
 
-def redact_credentials(settings: Mapping[str, Any], _prefix: str = "", *, _value_only: bool = False) -> dict[str, Any]:
+def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[str, Any]:
     """Redact credential-looking values from free-form settings before they are recorded as provenance.
 
     Runner configs carry escape hatches forwarded verbatim to the harness (Gym's ``hydra_params``,
@@ -65,17 +62,19 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "", *, _value
     Lists are walked too, since a mapping inside one — ``{"models": [{"api_key": "sk-..."}]}`` —
     reaches the harness just as a nested mapping does. The index contributes no path segment: what
     marks a value as a credential is the key it sits under, not where in a list it happens to fall.
+
+    A ``*_env`` key names the variable a harness should read rather than holding its value, so the key
+    marker does not apply to it; the value-shape check still does.
     """
     redacted: dict[str, Any] = {}
     for key, value in settings.items():
         path = f"{_prefix}{key}"
-        value_only = _value_only or (not _prefix and key in VALUE_ONLY_SETTINGS_KEYS)
         if isinstance(value, Mapping):
-            redacted[key] = redact_credentials(value, f"{path}.", _value_only=value_only)
-        elif not value_only and any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
+            redacted[key] = redact_credentials(value, f"{path}.")
+        elif not _names_a_variable(path) and any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
             redacted[key] = _REDACTED
         elif isinstance(value, (list, tuple)):
-            redacted[key] = [_redact_list_item(item, path, value_only=value_only) for item in value]
+            redacted[key] = [_redact_list_item(item, path) for item in value]
         elif is_credential_value(value):
             redacted[key] = _REDACTED
         else:
@@ -83,12 +82,12 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "", *, _value
     return redacted
 
 
-def _redact_list_item(item: Any, path: str, *, value_only: bool = False) -> Any:
+def _redact_list_item(item: Any, path: str) -> Any:
     """Redact inside one element of a list-valued setting. See :func:`redact_credentials`."""
     if isinstance(item, Mapping):
-        return redact_credentials(item, f"{path}.", _value_only=value_only)
+        return redact_credentials(item, f"{path}.")
     if isinstance(item, (list, tuple)):
-        return [_redact_list_item(nested, path, value_only=value_only) for nested in item]
+        return [_redact_list_item(nested, path) for nested in item]
     return _REDACTED if is_credential_value(item) else item
 
 
@@ -109,35 +108,25 @@ def credential_shaped_settings(settings: Mapping[str, Any]) -> list[str]:
       credential, where redaction can afford to match it.
     * ``${NAME}`` templates pass. Naming a credential without carrying its value is the supported
       route, so it is what a rejected caller is redirected to.
+    * A ``*_env`` key passes the marker check: it names the variable to read, as Fabric's
+      ``models.*.api_key_env`` does. Its value is still checked for an issued-token shape.
 
     A value carrying a recognised issued-token shape is reported whatever its key, since an ``env``
     mapping forwarded to a harness names its own variables.
     """
-    exposed = [
-        path
-        for key, value in settings.items()
-        for path in _exposed_paths(key, value, value_only=key in VALUE_ONLY_SETTINGS_KEYS)
-    ]
+    exposed = [path for key, value in settings.items() for path in _exposed_paths(key, value)]
     return list(dict.fromkeys(exposed))
 
 
-def _exposed_paths(path: str, value: Any, *, value_only: bool = False) -> list[str]:
-    """Paths exposed by one setting. See :func:`credential_shaped_settings`.
-
-    Under a :data:`VALUE_ONLY_SETTINGS_KEYS` key the path says nothing -- ``api_key_env`` names a
-    variable -- so only an issued-token value shape counts.
-    """
+def _exposed_paths(path: str, value: Any) -> list[str]:
+    """Paths exposed by one setting. See :func:`credential_shaped_settings`."""
     if isinstance(value, Mapping):
-        return [
-            nested
-            for key, item in value.items()
-            for nested in _exposed_paths(f"{path}.{key}", item, value_only=value_only)
-        ]
+        return [nested for key, item in value.items() for nested in _exposed_paths(f"{path}.{key}", item)]
     if isinstance(value, (list, tuple)):
-        return [nested for item in value for nested in _exposed_paths(path, item, value_only=value_only)]
+        return [nested for item in value for nested in _exposed_paths(path, item)]
     if not isinstance(value, str) or not value or _ENV_TEMPLATE.fullmatch(value):
         return []
-    if not value_only and _SECRET_KEY_MARKER_RE.search(path.casefold()):
+    if not _names_a_variable(path) and _SECRET_KEY_MARKER_RE.search(path.casefold()):
         return [path]
     return [path] if is_credential_value(value) else []
 
