@@ -37,7 +37,7 @@ from nemo_helix_plugin.scheduler import submit_path_for
 # Strategy name -> a module owned by the plugin that ships it, used only to decide
 # whether that plugin is installed in this venv at all.
 _REQUIRED_STRATEGY_MODULES = {
-    "nat": "nemo_optimization",
+    "legacy": "nemo_optimization",
 }
 
 _MISSING_PLUGINS = sorted(
@@ -87,19 +87,19 @@ def test_every_shipped_strategy_resolves_from_real_entry_points() -> None:
 
 @_STRATEGIES_INSTALLED
 @pytest.mark.asyncio
-async def test_the_router_applies_the_nat_strategys_own_submit_rules() -> None:
-    """A submission without a staged bundle is refused by nat's *submit* schema.
+async def test_the_router_applies_the_legacy_strategys_own_submit_rules() -> None:
+    """A submission without a staged bundle is refused by the legacy strategy's *submit* schema.
 
-    That rule lives only on ``OptimizeSubmitSpec``; nat's canonical ``OptimizeSpec``
+    That rule lives only on ``OptimizeSubmitSpec``; the legacy strategy's canonical ``OptimizeSpec``
     accepts a missing bundle for local runs.  Reaching it proves the router put the
     forwarded fields through the strategy's own input schema rather than straight
     into its canonical one.
     """
     spec = RunStrategySpec.model_validate(
-        {"strategy": "nat", "optimize_config": "/host/only/optimize.yml", "workspace": "default"}
+        {"strategy": "legacy", "optimize_config": "/host/only/optimize.yml", "workspace": "default"}
     )
 
-    with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'nat'") as excinfo:
+    with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'legacy'") as excinfo:
         await RunStrategyJob.compile(
             workspace="default", spec=spec, entity_client=MagicMock(), job_name=None, async_sdk=MagicMock()
         )

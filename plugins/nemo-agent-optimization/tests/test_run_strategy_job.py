@@ -336,7 +336,7 @@ async def test_compile_calls_to_spec_the_way_the_route_layer_would(
 async def test_compile_applies_the_strategys_submit_rules_not_only_its_canonical_ones(
     resolving_strategy: type[_ResolvingStrategyJob],
 ) -> None:
-    """A rule that lives only on the submit shape (like nat's remote-only bundle check) still fires."""
+    """A rule that lives only on the submit shape (like the legacy strategy's remote-only bundle check) still fires."""
     spec = submitted_spec(strategy="resolving", optimize_config_fileset=None)
 
     with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'resolving'"):

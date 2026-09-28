@@ -10,7 +10,7 @@ doesn't have any optimization options without this plugin installed.
 ```
 nemo agents optimize run-strategy     # submit a run (--strategy picks the implementation)
 nemo agents optimize list-strategies  # what the platform has installed
-nemo agents optimize prepare-fileset  # contributed by the `nat` strategy
+nemo agents optimize prepare-fileset  # contributed by the `legacy` strategy
 ```
 
 `RunStrategyJob` resolves `--strategy` to an installed strategy job and
@@ -34,7 +34,7 @@ class variable:
 ```python
 class OptimizeJob(NemoJob):
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-        name="nat",
+        name="legacy",
         description="Hyperparameter and GA prompt optimization.",
     )
 ```
@@ -63,7 +63,7 @@ To add a strategy:
 3. Optionally contribute companion verbs to the shared `optimize` group by
    declaring a plain `def register(group: typer.Typer) -> None` under
    `nemo.cli.agents.optimize`. The group is shared, so prefix your strategy name
-   onto anything that is not plainly generic. (The `nat` strategy holds the
+   onto anything that is not plainly generic. (The `legacy` strategy holds the
    generic `prepare-fileset`.)
 
    ```toml
@@ -86,7 +86,7 @@ write, and so on. A mismatch surfaces as a 422 on the submit.
 ```bash
 $ nemo agents optimize list-strategies
 Targeting http://localhost:8080
-nat
+legacy
 ```
 
 Only the names go to stdout (the target line is on stderr), so the output is

@@ -127,7 +127,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         typer.echo("Submit the study with:\n")
         typer.echo(
             f"  nemo agents optimize run-strategy \\\n"
-            f"    --strategy nat \\\n"
+            f"    --strategy legacy \\\n"
             f"    --optimize-config-fileset {ws}/{name} \\\n"
             f"    --optimize-config {optimize_config} \\\n"
             + (f"    --agent {agent} \\\n" if agent else "")

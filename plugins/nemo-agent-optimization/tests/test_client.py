@@ -15,7 +15,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 
 BASE = "http://platform"
 
-_LISTING = {"data": [{"name": "nat", "description": "Numeric HPO."}]}
+_LISTING = {"data": [{"name": "legacy", "description": "Numeric HPO."}]}
 
 
 def _client(handler: Callable[[httpx.Request], httpx.Response], *, base_url: str = BASE) -> AgentOptimizationClient:
@@ -34,7 +34,7 @@ def test_list_strategies_asks_the_route_the_service_mounts() -> None:
 
     listing = _client(handler).list_strategies().data()
 
-    assert [strategy.name for strategy in listing.data] == ["nat"]
+    assert [strategy.name for strategy in listing.data] == ["legacy"]
     assert listing.data[0].description == "Numeric HPO."
     assert seen[0].method == "GET"
     assert seen[0].url == f"{BASE}{STRATEGIES_PATH}"

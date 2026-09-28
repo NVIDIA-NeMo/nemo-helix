@@ -17,7 +17,7 @@
 #       --fileset react-optimize
 #
 #   nemo agents optimize run-strategy \
-#       --strategy nat \
+#       --strategy legacy \
 #       --optimize-config-fileset default/react-optimize \
 #       --optimize-config react-optimize.yml \
 #       --agent react-agent

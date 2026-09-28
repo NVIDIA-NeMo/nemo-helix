@@ -106,7 +106,7 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
     assert record["local_path"] == bundle
     assert record["remote_path"] == ""
     assert "nemo agents optimize run-strategy" in result.output
-    assert "--strategy nat" in result.output
+    assert "--strategy legacy" in result.output
     assert "--optimize-config-fileset default/my-opt-fs" in result.output
     assert "--optimize-config optimize.yml" in result.output
 

@@ -26,7 +26,7 @@ class RunStrategySubmitSpec(BaseModel):
 
     strategy: str = Field(
         min_length=1,
-        description="Installed optimization strategy to run, e.g. 'nat'. "
+        description="Installed optimization strategy to run, e.g. 'legacy'. "
         "List what this platform has with `nemo agents optimize list-strategies`.",
     )
     optimize_config: str = Field(

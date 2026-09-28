@@ -279,7 +279,7 @@ nemo files list nemo-agent-telemetry
 
 The `nemo agents optimize run-strategy` command submits Fabric-backed numeric
 optimization. `nemo agents optimize` is a shared command group, one per
-installed optimization strategy; `--strategy nat` selects the Fabric-backed
+installed optimization strategy; `--strategy legacy` selects the Fabric-backed
 numeric study implemented in `nemo-optimization`. Run
 `nemo agents optimize list-strategies` to see what this environment has.
 Input must be a Fabric-native agent package
@@ -316,7 +316,7 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-chatonly \
   --workspace default
 nemo agents optimize run-strategy \
-  --strategy nat \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -341,7 +341,7 @@ What it does under the hood:
 
 - Confirms the agent has a Fabric-native optimization YAML.
 - Stages the optimize bundle with `nemo agents optimize prepare-fileset`,
-  then submits it with `nemo agents optimize run-strategy --strategy nat`.
+  then submits it with `nemo agents optimize run-strategy --strategy legacy`.
 - Compares results against the evaluation baseline and surfaces deltas
   for review.
 
@@ -359,7 +359,7 @@ WORKSPACE = "default"
 result = NemoJobScheduler().submit_remote(
     RunStrategyJob,
     {
-        "strategy": "nat",
+        "strategy": "legacy",
         "optimize_config": "optimize-chatonly.yaml",
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
         "workspace": WORKSPACE,
@@ -398,7 +398,7 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-mcp \
   --workspace default
 nemo agents optimize run-strategy \
-  --strategy nat \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default
@@ -418,7 +418,7 @@ WORKSPACE = "default"
 result = NemoJobScheduler().submit_remote(
     RunStrategyJob,
     {
-        "strategy": "nat",
+        "strategy": "legacy",
         "optimize_config": "optimize-mcp.yaml",
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
         "workspace": WORKSPACE,
@@ -483,7 +483,7 @@ the bundle before staging.
 
 ```bash
 nemo agents optimize run-strategy \
-  --strategy nat \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -498,7 +498,7 @@ trials dataframe, ATIF evidence) somewhere addressable when it finishes.
 
 `run-strategy` does no optimization itself: it resolves `--strategy` to the
 installed strategy job and delegates `compile` to it, so the executor and entry
-point below are the `nat` strategy's own. That job picks its executor from the
+point below are the `legacy` strategy's own. That job picks its executor from the
 execution profiles the platform actually registered, for the requested profile
 (currently always `default`):
 

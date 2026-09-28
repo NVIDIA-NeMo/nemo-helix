@@ -31,7 +31,7 @@ def _register_badly(group: typer.Typer) -> None:
     raise RuntimeError("this contribution is broken")
 
 
-_LISTING = {"data": [{"name": "nat", "description": "Numeric HPO."}]}
+_LISTING = {"data": [{"name": "legacy", "description": "Numeric HPO."}]}
 
 
 def install(monkeypatch: pytest.MonkeyPatch, contributions: dict[str, Any] | None = None) -> None:
@@ -109,12 +109,12 @@ def _stdout(result: Any) -> list[str]:
 def test_list_strategies_reports_the_platforms_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """The platform runs the job, so it is the only authority on what `--strategy` takes."""
     install(monkeypatch)
-    _remote(monkeypatch, ["nat", "acme"])
+    _remote(monkeypatch, ["legacy", "acme"])
 
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
 
     assert result.exit_code == 0, result.output
-    assert _stdout(result) == ["nat", "acme"]
+    assert _stdout(result) == ["legacy", "acme"]
 
 
 def test_an_unreachable_platform_is_an_error_not_a_local_listing(
@@ -191,7 +191,7 @@ def test_the_listing_builds_a_client_for_the_resolved_target(monkeypatch: pytest
 
     names, target = cli_module._remote_strategy_names(None)
 
-    assert names == ["nat"]
+    assert names == ["legacy"]
     assert target == "http://platform"
     assert captured["base_url"] == "http://platform"
     assert captured["default_headers"] == {"Authorization": "Bearer token"}

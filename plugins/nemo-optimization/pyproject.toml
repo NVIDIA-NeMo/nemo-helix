@@ -26,7 +26,7 @@ dependencies = [
 ]
 version = "0.0.0"
 
-# Discovered by `nemo agents optimize` as the `nat` strategy, via the
+# Discovered by `nemo agents optimize` as the `legacy` strategy, via the
 # `nemo_agent_optimization_strategy` class variable on OptimizeJob. The key sits under the
 # dispatcher's `agent-optimization` plugin namespace rather than minting a new one: plugin
 # allowlists and `nemo plugins list` group `nemo.jobs` entries by that prefix, so a deployment

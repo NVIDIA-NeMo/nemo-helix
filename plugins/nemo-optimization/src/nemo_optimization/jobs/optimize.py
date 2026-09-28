@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OptimizeJob — Agents numeric HPO, the ``nat`` optimization strategy.
+"""OptimizeJob — Agents numeric HPO, the ``legacy`` optimization strategy.
 
-Reached as ``nemo agents optimize run-strategy --strategy nat``: the router job in
+Reached as ``nemo agents optimize run-strategy --strategy legacy``: the router job in
 nemo-agent-optimization-plugin discovers this class through the
 ``nemo_agent_optimization_strategy`` class variable below and delegates its
 ``compile`` / ``run`` to it, so this job's steps are what the platform actually runs.
@@ -80,7 +80,7 @@ class OptimizeJob(NemoJob):
     #: strategy's, not the job's: ``description`` below introduces the job to CLI users,
     #: while this one tells a caller choosing a ``--strategy`` what this one does.
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-        name="nat",
+        name="legacy",
         description="Hyperparameter and GA prompt optimization.",
     )
     description: ClassVar[str] = "Optimize a Fabric agent workflow (numeric HPO)."

@@ -4,10 +4,10 @@
 # nemo-optimization-plugin
 
 Shared library for hyperparameter and GA prompt optimization,
-and the ``nat`` strategy behind ``nemo agents optimize run-strategy``.
+and the ``legacy`` strategy behind ``nemo agents optimize run-strategy``.
 
 ``OptimizeJob`` declares ``nemo_agent_optimization_strategy`` as an
-``OptimizationStrategy`` named ``nat``, which is how nemo-agent-optimization-plugin's
+``OptimizationStrategy`` named ``legacy``, which is how nemo-agent-optimization-plugin's
 router discovers it and how ``list-strategies`` describes it.
 
 ## Prerequisites
@@ -27,7 +27,7 @@ nemo agents optimize prepare-fileset \
   --workspace default
 
 nemo agents optimize run-strategy \
-  --strategy nat \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -53,7 +53,7 @@ Install and QA steps live in that directory's README.
 The platform does not vendor example-agent packages such as the email phishing
 analyzer; MCP servers are declared statically under ``mcp.servers``.
 
-Job registration: ``agent-optimization.optimize``, discovered as the ``nat`` strategy of
+Job registration: ``agent-optimization.optimize``, discovered as the ``legacy`` strategy of
 ``nemo agents optimize run-strategy``.  CLI registration: ``prepare-fileset`` under
 ``nemo.cli.agents.optimize``, which hangs that verb off the same shared group.
 ``compile`` selects the ``subprocess`` execution profile when the platform registers

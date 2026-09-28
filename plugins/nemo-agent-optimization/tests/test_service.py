@@ -73,7 +73,7 @@ def test_strategies_lists_what_the_platform_has_installed(monkeypatch: pytest.Mo
     """Each entry is the declaration its own plugin made, forwarded unchanged."""
     installed = [
         OptimizationStrategy(name="acme", description="Something else."),
-        OptimizationStrategy(name="nat", description="Numeric HPO over a Fabric agent workflow."),
+        OptimizationStrategy(name="legacy", description="Numeric HPO over a Fabric agent workflow."),
     ]
 
     response = _client(monkeypatch, installed).get("/apis/agent-optimization/v2/strategies")
@@ -82,7 +82,7 @@ def test_strategies_lists_what_the_platform_has_installed(monkeypatch: pytest.Mo
     assert response.json() == {
         "data": [
             {"name": "acme", "description": "Something else."},
-            {"name": "nat", "description": "Numeric HPO over a Fabric agent workflow."},
+            {"name": "legacy", "description": "Numeric HPO over a Fabric agent workflow."},
         ]
     }
 
