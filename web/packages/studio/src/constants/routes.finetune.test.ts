@@ -14,6 +14,7 @@ describe('fine-tuning routes', () => {
   const table = [
     { path: ROUTES.workspace.customizationJobList, id: 'list' },
     { path: ROUTES.workspace.newCustomizationJob, id: 'new' },
+    { path: ROUTES.workspace.newCustomizationJobScratch, id: 'scratch' },
     { path: ROUTES.workspace.customizationJobDetails, id: 'details' },
   ];
 
@@ -21,6 +22,10 @@ describe('fine-tuning routes', () => {
 
   it('sends /fine-tune/new to the create page, not to a job named "new"', () => {
     expect(matchedId('/workspaces/default/fine-tune/new')).toBe('new');
+  });
+
+  it('sends /fine-tune/new/scratch to the form, not to the start page', () => {
+    expect(matchedId('/workspaces/default/fine-tune/new/scratch')).toBe('scratch');
   });
 
   it('sends a job name to the details page', () => {
