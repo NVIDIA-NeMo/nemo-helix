@@ -222,6 +222,26 @@ describe('WorkspaceSideNav', () => {
     expect(screen.getByRole('link', { name: 'Probes' })).toBeInTheDocument();
   });
 
+  it('excludes a plugin listed in VITE_FF_DISABLED_STUDIO_PLUGINS', () => {
+    renderWithPlugins([
+      makePlugin('agent-hardener', [
+        {
+          group: 'Governance',
+          items: [
+            {
+              id: 'agent-hardener',
+              iconName: 'swords',
+              label: 'Agent Hardener',
+              href: '/workspaces/test-workspace/agent-hardener',
+            },
+          ],
+        },
+      ]),
+    ]);
+
+    expect(screen.queryByRole('link', { name: 'Agent Hardener' })).not.toBeInTheDocument();
+  });
+
   it('keeps a plugin item whose id matches a core item in the merged group', () => {
     const duplicateKeyWarning = vi.spyOn(console, 'error').mockImplementation(() => {});
 

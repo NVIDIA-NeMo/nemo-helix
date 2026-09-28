@@ -89,6 +89,27 @@ export const stringFlag = (envVar: string, defaultValue?: string): FlagDescripto
 });
 
 /**
+ * List flag. Splits a comma-separated env var into a trimmed, non-empty string array.
+ * @param envVar - The environment variable name
+ * @param defaultValue - Default value if env var is not set (default: [])
+ */
+export const listFlag = (envVar: string, defaultValue: string[] = []): FlagDescriptor => ({
+  envVar,
+  typeName: 'list',
+  schema: z
+    .string()
+    .optional()
+    .transform((val) =>
+      val
+        ? val
+            .split(',')
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : defaultValue
+    ),
+});
+
+/**
  * Number flag. Coerces env var string to number.
  * Uses z.coerce.number() for proper validation (invalid strings fail instead of becoming NaN).
  * @param envVar - The environment variable name

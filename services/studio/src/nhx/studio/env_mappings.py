@@ -130,6 +130,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="true",
     ),
     EnvMapping(
+        marker="STUDIO_UI_VITE_FF_DISABLED_STUDIO_PLUGINS",
+        config_path="studio.feature_flags.disabled_studio_plugins",
+        default="agent-hardener",
+    ),
+    EnvMapping(
         marker="STUDIO_UI_VITE_FF_EVALUATOR_BENCHMARKS_ENABLED",
         config_path="studio.feature_flags.evaluator_benchmarks_enabled",
         default="false",

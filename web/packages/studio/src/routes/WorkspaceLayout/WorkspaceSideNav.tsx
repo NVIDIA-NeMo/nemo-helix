@@ -9,6 +9,7 @@ import type {
   NavItem as NavItemData,
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
+import { featureFlags } from '@studio/constants/featureFlags';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getPluginIcon } from '@studio/plugins/iconMap';
 import {
@@ -193,27 +194,29 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
 
   const pluginNavGroups = useMemo(
     () =>
-      plugins.flatMap((plugin) => {
-        try {
-          return plugin.navItems(workspace).map((group) => ({
-            group: group.group,
-            items: group.items.map((item) => {
-              const Icon = getPluginIcon(item.iconName);
-              return {
-                // Namespaced: ids are React keys and accordion-state keys, and
-                // merging puts plugin items in the same array as core ones.
-                id: `${plugin.name}:${item.id}`,
-                slotIcon: Icon ? <Icon className={iconColorClass} /> : undefined,
-                slotLabel: item.label,
-                href: item.href,
-              };
-            }),
-          }));
-        } catch (err) {
-          logger.warn(`[plugins] navItems() threw for plugin "${plugin.name}":`, err);
-          return [];
-        }
-      }),
+      plugins
+        .filter((plugin) => !featureFlags.disabledStudioPlugins.includes(plugin.name))
+        .flatMap((plugin) => {
+          try {
+            return plugin.navItems(workspace).map((group) => ({
+              group: group.group,
+              items: group.items.map((item) => {
+                const Icon = getPluginIcon(item.iconName);
+                return {
+                  // Namespaced: ids are React keys and accordion-state keys, and
+                  // merging puts plugin items in the same array as core ones.
+                  id: `${plugin.name}:${item.id}`,
+                  slotIcon: Icon ? <Icon className={iconColorClass} /> : undefined,
+                  slotLabel: item.label,
+                  href: item.href,
+                };
+              }),
+            }));
+          } catch (err) {
+            logger.warn(`[plugins] navItems() threw for plugin "${plugin.name}":`, err);
+            return [];
+          }
+        }),
     [plugins, workspace]
   );
 
