@@ -265,7 +265,7 @@ _POST_START_REACHABLE_DELAY = 2.0
 
 _DEMO_AGENT_NAME = "calculator-agent"
 _SAMPLE_AGENT_NAME = "email-security-triage"
-_SAMPLE_AGENT_DESCRIPTION = "Fabric email security triage sample agent created by the NeMo setup flow."
+_SAMPLE_AGENT_DESCRIPTION = "Email security triage sample agent created by the NeMo setup flow."
 _SAMPLE_DATASET_FILESET = "esec-eval-data"
 _SAMPLE_DATASET_FILENAME = "dataset.jsonl"
 _SAMPLE_DATASET_DESCRIPTION = "Evaluation dataset for the NeMo setup sample email security agent."
