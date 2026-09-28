@@ -113,6 +113,26 @@ const defaultEvalSeedFiles = (): EvalSeedFile[] => [
   { path: SAMPLE_EVAL_DATA_PATH, content: SAMPLE_EVAL_DATA_JSON, type: 'application/json' },
 ];
 
+/** Creates the fileset and writes the config, failing when the name is taken. */
+export const createEvalConfigFileset = async (
+  workspace: string,
+  fileset: string,
+  signal: AbortSignal,
+  files: EvalSeedFile[],
+  description?: string
+): Promise<void> => {
+  await filesCreateFileset(workspace, { name: fileset, description }, signal);
+  for (const file of files) {
+    await filesUploadFile(
+      workspace,
+      fileset,
+      file.path,
+      new Blob([file.content], { type: file.type }),
+      signal
+    );
+  }
+};
+
 export const ensureEvalConfigFileset = async (
   workspace: string,
   fileset: string,

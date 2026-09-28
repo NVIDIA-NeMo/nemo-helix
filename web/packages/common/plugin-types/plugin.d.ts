@@ -4012,6 +4012,7 @@ interface FormModalProps {
   onClose: () => void;
   styles?: React.CSSProperties;
   className?: string;
+  slotAboveBody?: ReactNode;
   slotFooterLeft?: ReactNode;
   slotFooterRight?: ReactNode;
   attributes?: {

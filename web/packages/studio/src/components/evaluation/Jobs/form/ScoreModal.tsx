@@ -3,8 +3,19 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { FormModal } from '@nemo/common/src/components/FormModal';
-import { Button, Flex, SegmentedControl, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Button,
+  Flex,
+  ModalContent,
+  ModalDialog,
+  ModalFooter,
+  ModalHeading,
+  ModalMain,
+  ModalRoot,
+  SegmentedControl,
+  Stack,
+  Text,
+} from '@nvidia/foundations-react-core';
 import { Trash } from 'lucide-react';
 import { FC, useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
@@ -184,118 +195,132 @@ export const ScoreModal: FC<ScoreModalProps> = ({ open, onClose, onSave, initial
     onClose();
   };
 
+  const label = initialValues ? 'Edit Score' : 'Add Score';
+
   return (
-    <FormModal
-      open={open}
-      title={initialValues ? 'Edit Score' : 'Add Score'}
-      submitButtonText={initialValues ? 'Edit Score' : 'Add Score'}
-      onClose={onClose}
-      onSubmit={form.handleSubmit(handleSubmit)}
-      className="w-[560px]"
-    >
-      <Stack gap="density-lg">
-        <SegmentedControl
-          className="w-full"
-          value={scoreType}
-          onValueChange={handleTypeChange}
-          items={[
-            { value: 'rubric', children: 'Rubric' },
-            { value: 'range', children: 'Range' },
-          ]}
-        />
+    <ModalRoot open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+      <ModalDialog>
+        <ModalContent className="w-[560px] max-h-[90vh]">
+          <ModalHeading>{label}</ModalHeading>
+          <ModalMain className="flex-1 min-h-0 overflow-y-auto">
+            <Stack gap="density-lg" className="pt-4">
+              <SegmentedControl
+                className="w-full"
+                value={scoreType}
+                onValueChange={handleTypeChange}
+                items={[
+                  { value: 'rubric', children: 'Rubric' },
+                  { value: 'range', children: 'Range' },
+                ]}
+              />
 
-        <ControlledTextInput
-          useControllerProps={{ control: form.control, name: 'name' }}
-          label="Name"
-          required
-          placeholder="e.g., quality"
-        />
+              <ControlledTextInput
+                useControllerProps={{ control: form.control, name: 'name' }}
+                label="Name"
+                placeholder="e.g., quality"
+              />
 
-        <ControlledTextInput
-          useControllerProps={{ control: form.control, name: 'description' }}
-          label="Description"
-          placeholder="Optional description of what this score measures"
-        />
+              <ControlledTextInput
+                useControllerProps={{ control: form.control, name: 'description' }}
+                label="Description (optional)"
+              />
 
-        {scoreType === 'range' && (
-          <Flex gap="density-lg">
-            <ControlledTextInput
-              useControllerProps={{ control: form.control, name: 'minimum' }}
-              label="Minimum"
-              required
-              type="number"
-            />
-            <ControlledTextInput
-              useControllerProps={{ control: form.control, name: 'maximum' }}
-              label="Maximum"
-              required
-              type="number"
-            />
-          </Flex>
-        )}
-
-        {scoreType === 'rubric' && (
-          <Stack gap="density-sm">
-            <Flex gap="density-sm">
-              <Text className="flex-1" kind="label/bold/sm">
-                Label
-              </Text>
-              <Text className="flex-1" kind="label/bold/sm">
-                Description
-              </Text>
-              <Text className="w-[80px] shrink-0" kind="label/bold/sm">
-                Value
-              </Text>
-              <div className="w-[36px] shrink-0" />
-            </Flex>
-            {rubricFields.fields.map((field, index) => (
-              <Flex key={field.id} gap="density-sm" align="start">
-                <div className="flex-1">
+              {scoreType === 'range' && (
+                <Flex gap="density-lg">
                   <ControlledTextInput
-                    useControllerProps={{ control: form.control, name: `rubric.${index}.label` }}
-                    required
-                    placeholder="Label"
-                  />
-                </div>
-                <div className="flex-1">
-                  <ControlledTextInput
-                    useControllerProps={{
-                      control: form.control,
-                      name: `rubric.${index}.description`,
-                    }}
-                    placeholder="Description"
-                  />
-                </div>
-                <div className="w-[80px] shrink-0">
-                  <ControlledTextInput
-                    useControllerProps={{ control: form.control, name: `rubric.${index}.value` }}
-                    required
+                    useControllerProps={{ control: form.control, name: 'minimum' }}
+                    label="Minimum"
                     type="number"
                   />
-                </div>
-                <Button
-                  kind="tertiary"
-                  aria-label="Remove rubric item"
-                  onClick={() => rubricFields.remove(index)}
-                  disabled={rubricFields.fields.length <= 2}
-                  type="button"
-                >
-                  <Trash />
-                </Button>
-              </Flex>
-            ))}
-            <Button
-              kind="secondary"
-              type="button"
-              onClick={() =>
-                rubricFields.append({ label: '', description: '', value: '' as unknown as number })
-              }
-            >
-              Add Item
+                  <ControlledTextInput
+                    useControllerProps={{ control: form.control, name: 'maximum' }}
+                    label="Maximum"
+                    type="number"
+                  />
+                </Flex>
+              )}
+
+              {scoreType === 'rubric' && (
+                <Stack gap="density-sm">
+                  <Flex gap="density-sm">
+                    <Text className="flex-1" kind="label/bold/sm">
+                      Label
+                    </Text>
+                    <Text className="flex-1" kind="label/bold/sm">
+                      Description
+                    </Text>
+                    <Text className="w-[80px] shrink-0" kind="label/bold/sm">
+                      Value
+                    </Text>
+                    <div className="w-[36px] shrink-0" />
+                  </Flex>
+                  {rubricFields.fields.map((field, index) => (
+                    <Flex key={field.id} gap="density-sm" align="start">
+                      <div className="flex-1">
+                        <ControlledTextInput
+                          useControllerProps={{
+                            control: form.control,
+                            name: `rubric.${index}.label`,
+                          }}
+                          placeholder="Label"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <ControlledTextInput
+                          useControllerProps={{
+                            control: form.control,
+                            name: `rubric.${index}.description`,
+                          }}
+                          placeholder="Description"
+                        />
+                      </div>
+                      <div className="w-[80px] shrink-0">
+                        <ControlledTextInput
+                          useControllerProps={{
+                            control: form.control,
+                            name: `rubric.${index}.value`,
+                          }}
+                          type="number"
+                        />
+                      </div>
+                      <Button
+                        kind="tertiary"
+                        aria-label="Remove rubric item"
+                        onClick={() => rubricFields.remove(index)}
+                        disabled={rubricFields.fields.length <= 2}
+                        type="button"
+                      >
+                        <Trash />
+                      </Button>
+                    </Flex>
+                  ))}
+                  <Button
+                    kind="secondary"
+                    type="button"
+                    onClick={() =>
+                      rubricFields.append({
+                        label: '',
+                        description: '',
+                        value: '' as unknown as number,
+                      })
+                    }
+                  >
+                    Add Item
+                  </Button>
+                </Stack>
+              )}
+            </Stack>
+          </ModalMain>
+          <ModalFooter className="flex w-full flex-shrink-0 justify-end gap-2">
+            <Button kind="tertiary" type="button" onClick={onClose}>
+              Cancel
             </Button>
-          </Stack>
-        )}
-      </Stack>
-    </FormModal>
+            <Button type="button" onClick={() => void form.handleSubmit(handleSubmit)()}>
+              {label}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </ModalDialog>
+    </ModalRoot>
   );
 };
