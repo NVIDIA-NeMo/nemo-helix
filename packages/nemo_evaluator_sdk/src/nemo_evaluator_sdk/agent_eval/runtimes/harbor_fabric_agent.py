@@ -80,7 +80,7 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         self,
         logs_dir: Any,
         *args: Any,
-        fabric_config: Mapping[str, Any] | FabricConfig,
+        fabric_config: Mapping[str, Any],
         fabric_default_max_turns: int | None = None,
         **kwargs: Any,
     ) -> None:
@@ -90,7 +90,7 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
                 f"{', '.join(rejected)}: NemoFabricAgent runs the `fabric_config` it is given; describe the "
                 "agent there instead of through FabricAgent's flat keywords"
             )
-        config = fabric_config if isinstance(fabric_config, FabricConfig) else FabricConfig.from_mapping(fabric_config)
+        config = FabricConfig.from_mapping(fabric_config)
         if config.harness is None or not config.harness.adapter_id.strip():
             raise ValueError("fabric_config must select a harness: set `harness.adapter_id`")
         self.fabric_config = config
