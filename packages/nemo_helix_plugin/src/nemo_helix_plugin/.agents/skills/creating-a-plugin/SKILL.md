@@ -174,7 +174,7 @@ class SayHelloJob(NemoJob):
         ...
 ```
 
-Entry-point key uses dot: `"my-plugin.say-hello"` under the `nemo.jobs` group. The platform auto-generates `nemo my-plugin say-hello run / submit / explain`. Mount server routes with `add_job_routes(SayHelloJob, authz=AuthzScope("my-plugin"))` from `nemo_helix_plugin.jobs.routes` — the `authz=` kwarg is required, or the generated routes are unruled and fail the OPA bundle build. See the `plugin-job` skill for the full pattern.
+Entry-point key uses dot: `"my-plugin.say-hello"` under the `nemo.jobs` group. By default, the platform auto-generates `nemo my-plugin say-hello submit` for submission and `nemo my-plugin say-hello explain` for schemas. A job can set `generate_legacy_verbs = False` to move generated submission to `nemo my-plugin say-hello`. Mount server routes with `add_job_routes(SayHelloJob, authz=AuthzScope("my-plugin"))` from `nemo_helix_plugin.jobs.routes` — the `authz=` kwarg is required, or the generated routes are unruled and fail the OPA bundle build. See the `plugin-job` skill for the full pattern.
 
 **Add a function:**
 

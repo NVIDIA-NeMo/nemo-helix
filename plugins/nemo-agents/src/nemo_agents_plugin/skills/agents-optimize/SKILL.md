@@ -124,7 +124,7 @@ Each suggestion sets `model` to the new model name and includes:
   `--model` override flag on `evaluate`; the model swap goes through the
   sibling agent, or by editing the eval-config YAML.
 - `nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'` then
-  `nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'`
+  `nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<target>"}'`
   to verify the new model is robust against jailbreaks before promotion.
 
 Pure set subtraction — no downloads required.
@@ -334,7 +334,7 @@ nemo files filesets list
 
 # Auditor (jailbreak robustness check on a candidate model)
 nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'
-nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'
+nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<target>"}'
 ```
 
 ## What requires execution vs. what can be reasoned

@@ -8883,25 +8883,6 @@ nemo auditor audit [OPTIONS] [COMMAND] [ARGS]...
 
 * `--help, -h`: Show this message and exit.
 
-**Commands:**
-
-* `submit`: Submit to a cluster.
-* `explain`: Show input/output schemas.
-
-##### nemo auditor audit submit
-
-Submit to a cluster.
-
-**Usage:**
-
-```shell
-nemo auditor audit submit [OPTIONS]
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
 **Job Spec:**
 
 * `--max-probe-retries <INTEGER>`: Override `max_probe_retries` in the spec.
@@ -8925,6 +8906,10 @@ Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence
 
 Some spec fields cannot be represented as CLI flags: `config`, `target`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
 
 ##### nemo auditor audit explain
 

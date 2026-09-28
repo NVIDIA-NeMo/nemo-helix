@@ -12,7 +12,7 @@ Every plugin capability is a "surface" — a typed contract registered via a Pyt
 | **HTTP service** ★ | `nemo.services` | `NemoService` | `/apis/<name>/...` | wraps in `NemoServiceAdapter`, mounts FastAPI router |
 | **CLI** ★ | `nemo.cli` | `NemoCLI` | `nemo <name> <cmd>` | calls `get_cli()`, mounts as Typer subcommand |
 | **Agent CLI** | `nemo.cli.agents` | `NemoCLI` | `nemo agents <agent> <verb>` | mounts an agent command group under the shared `agents` namespace |
-| **Job** ★ | `nemo.jobs` | `NemoJob` | key: `<plugin>.<job>` | auto-generates `run` / `submit` / `explain` CLI verbs; the scheduler drives local runs and remote submission |
+| **Job** ★ | `nemo.jobs` | `NemoJob` | key: `<plugin>.<job>` | auto-injects generated submission and schema commands; the scheduler drives container runs and remote submission |
 | **Controller** ★ | `nemo.controllers` | `NemoController` | (background) | wraps in `NemoControllerAdapter`, runs reconcile loop |
 | SDK | `nemo.sdk` | (any class) | `nemo.<name>` on hub | instantiated as attribute on the `NeMo` hub |
 | MCP | `nemo.mcp` | `() -> list[dict]` | (MCP tool list) | returns MCP tool definitions |
@@ -114,7 +114,7 @@ At startup, for every plugin that registers both `nemo.cli` and `nemo.jobs`, the
 - `submit` delegates to `NemoJobScheduler.submit_remote` — POSTs to the plugin service's per-job endpoint; the cluster executes.
 - `explain` delegates to `NemoJobScheduler.explain` — reads schemas locally from the `NemoJob` class.
 
-Jobs can set `generate_legacy_verbs = False` to expose submission as a flat command named after the job instead of a nested `<job> submit` command. The `<job> explain` command remains available for compatibility.
+By default the generated job group exposes nested `<job> submit` and `<job> explain` commands. Jobs can set `generate_legacy_verbs = False` to move the generated submit callback to `<job>` itself while keeping `<job> explain`. That switch applies only to the generated job surface; plugin-owned CLI commands and `NemoCLI.update_job_cli()` can customize or extend the command group.
 
 Plugin services mount the matching POST/GET/LIST/DELETE endpoints with the `add_job_routes(job_cls)` helper from `nemo_helix_plugin.jobs.routes` — a one-liner that replaces the multi-arg `job_route_factory(...)` pattern.
 

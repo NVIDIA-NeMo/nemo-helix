@@ -16,6 +16,8 @@ import httpx
 import pytest
 import typer
 from nemo_auditor.cli import AuditorPluginCLI
+from nemo_auditor.jobs.audit import AuditJob
+from nemo_helix_plugin.commands import add_job_commands
 from typer.testing import CliRunner
 
 
@@ -27,6 +29,13 @@ def runner() -> CliRunner:
 @pytest.fixture
 def app():
     return AuditorPluginCLI().get_cli()
+
+
+def _app_with_audit_job() -> typer.Typer:
+    cli = AuditorPluginCLI()
+    app = cli.get_cli()
+    add_job_commands(app, {"auditor.audit": AuditJob}, cli=cli)
+    return app
 
 
 def _install_mock_transport(
@@ -300,6 +309,23 @@ class TestStructure:
 
         assert result.exit_code == 0, result.stdout + result.stderr
         assert str(captured[0].url).startswith("http://custom:9999/")
+
+    def test_audit_job_uses_flat_command_shape(self, runner) -> None:
+        app = _app_with_audit_job()
+        command = typer.main.get_command(app)
+        audit_command = command.commands["audit"]
+        assert isinstance(audit_command, click.Group)
+        assert "explain" in audit_command.commands
+        assert "run" not in audit_command.commands
+        assert "submit" not in audit_command.commands
+
+        result = runner.invoke(app, ["audit", "--help"])
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert "--spec" in result.stdout
+
+        legacy_result = runner.invoke(app, ["audit", "submit"])
+        assert legacy_result.exit_code != 0
 
 
 # ---------------------------------------------------------------------------
