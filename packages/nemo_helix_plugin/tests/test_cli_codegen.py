@@ -3,8 +3,12 @@
 
 """Tests for ``--output-format code`` generation against typed clients."""
 
+from typing import cast
+
 import pytest
-from nemo_helix_ext.cli.core.code_generator import generate_python_code
+from nemo_helix_plugin.cli_codegen import generate_python_code, handle_code_generation
+from nemo_helix_plugin.cli_state import CLIState
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
@@ -206,3 +210,33 @@ def test_generated_snippet_is_valid_python():
     )
 
     compile(code, "<generated>", "exec")
+
+
+class _WidgetsClient(NemoClient):
+    """A client defined outside nemo_helix_plugin, the way plugin clients are."""
+
+
+class _BaseUrlState:
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return "http://plugin.example.com"
+
+
+def _state() -> CLIState:
+    return cast(CLIState, _BaseUrlState())
+
+
+def test_handle_code_generation_does_nothing_for_other_formats(capsys: pytest.CaptureFixture[str]) -> None:
+    assert handle_code_generation(_WidgetsClient, "list_widgets", {}, "json", _state()) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_handle_code_generation_renders_plugin_clients(capsys: pytest.CaptureFixture[str]) -> None:
+    handled = handle_code_generation(
+        _WidgetsClient, "list_widgets", {"workspace": "team-a", "page": None}, "code", _state(), result="list"
+    )
+
+    assert handled is True
+    out = capsys.readouterr().out
+    assert f"from {__name__} import _WidgetsClient" in out
+    assert 'client = _WidgetsClient(base_url="http://plugin.example.com")' in out
+    assert 'response = client.list_widgets(workspace="team-a")' in out
