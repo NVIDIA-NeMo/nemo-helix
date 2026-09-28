@@ -324,6 +324,9 @@ class TestOIDCTokenProvider:
                 "expires_in",
             ),
         ],
+        # Explicit ids: the generated JWTs embed the collection time, so derived ids differ across
+        # xdist workers and abort the run.
+        ids=["jwt-exp-nan", "expires-at-inf", "expires-in-neg-inf"],
     )
     def test_token_set_rejects_non_finite_expiry(self, token, kwargs, field):
         with pytest.raises(ValueError, match=rf"{field} must be finite"):
