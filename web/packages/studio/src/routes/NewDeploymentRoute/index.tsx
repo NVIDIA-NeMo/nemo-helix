@@ -278,6 +278,10 @@ export const NewDeploymentRoute: FC = () => {
           workspace={workspace}
           open={createSecretModalOpen}
           onClose={() => setCreateSecretModalOpen(false)}
+          onSecretCreated={(secretName) => {
+            setValue('hfTokenSecret', secretName, { shouldValidate: true });
+            setCreateSecretModalOpen(false);
+          }}
         />
       </Stack>
     </AccessibleTitle>
