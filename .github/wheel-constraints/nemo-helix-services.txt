@@ -54,7 +54,7 @@ nemo-fabric-adapters-hermes==0.3.0
 nemo-fabric-runtime==0.3.0
 nemoguardrails==0.23.0
 nemo-relay==0.7.3
-nemo-safe-synthesizer==0.1.7
+nemo-safe-synthesizer==0.1.13
 ngcsdk==4.34.10
 numpy==2.5.2
 nvidia-ml-py==13.610.43
