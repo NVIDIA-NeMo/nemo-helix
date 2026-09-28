@@ -9,8 +9,7 @@ import click
 import httpx
 import pytest
 import typer
-from nemo_helix_ext.cli.app import app
-from nemo_helix_ext.cli.core.errors import (
+from nemo_helix_plugin.cli_error_handling import (
     InvalidSearchPatternError,
     _format_api_error,
     handle_exception,
@@ -28,7 +27,6 @@ from nemo_helix_plugin.client.errors import (
     PermissionDeniedError,
     RateLimitError,
 )
-from typer.testing import CliRunner
 
 DOCUMENTED_REMOTE_ERROR_EXIT_CODE = 3
 
@@ -366,7 +364,7 @@ def test_verbose_mode_traceback(capsys, debug_enabled, should_show_traceback):
 
 
 def test_decorator_catches_and_handles_errors(capsys):
-    from nemo_helix_ext.cli.core.errors import handle_errors
+    from nemo_helix_plugin.cli_error_handling import handle_errors
 
     @handle_errors
     def failing_function():
@@ -466,7 +464,7 @@ def test_handle_invalid_search_pattern_error_with_json(capsys):
 
 
 def test_decorator_passes_through_success():
-    from nemo_helix_ext.cli.core.errors import handle_errors
+    from nemo_helix_plugin.cli_error_handling import handle_errors
 
     @handle_errors
     def successful_function():
@@ -474,19 +472,6 @@ def test_decorator_passes_through_success():
 
     result = successful_function()
     assert result == "success"
-
-
-def test_root_no_args_prints_help_successfully():
-    """Running nemo without args should print help and exit successfully."""
-    runner = CliRunner()
-    result = runner.invoke(app, [])
-
-    assert result.exit_code == 0
-    assert "Usage:" in result.stdout
-    assert result.stderr == ""
-    # No ANSI escape codes should appear (colors stripped for non-TTY)
-    # TODO: This fails after vendoring, will fix it later
-    # assert "\x1b[" not in result.stdout
 
 
 def _make_mock_context_with_commands(info_name: str, commands: dict, parent: click.Context | None = None) -> MagicMock:

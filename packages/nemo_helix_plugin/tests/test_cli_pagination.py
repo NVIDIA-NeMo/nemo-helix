@@ -9,7 +9,7 @@ from urllib.parse import parse_qs
 
 import httpx
 import pytest
-from nemo_helix_ext.cli.core.pagination import (
+from nemo_helix_plugin.cli_pagination import (
     AllCursorPagesResponse,
     AllPagesResponse,
     CursorPageResponse,
@@ -330,7 +330,7 @@ def test_model_dump_handles_plain_dict_items():
 
 def test_warn_if_more_pages_offset(monkeypatch):
     warnings: list[str] = []
-    monkeypatch.setattr("nemo_helix_ext.cli.core.pagination.add_warning", warnings.append)
+    monkeypatch.setattr("nemo_helix_plugin.cli_pagination.add_warning", warnings.append)
     client = _offset_client({1: ["a"], 2: ["b"]})
 
     warn_if_more_pages(collect_offset_pages(client.send(list_items()), all_pages=False), PaginationType.PAGE_NUMBER)
@@ -346,7 +346,7 @@ def test_warn_if_more_pages_offset(monkeypatch):
 
 def test_warn_if_more_pages_cursor(monkeypatch):
     warnings: list[str] = []
-    monkeypatch.setattr("nemo_helix_ext.cli.core.pagination.add_warning", warnings.append)
+    monkeypatch.setattr("nemo_helix_plugin.cli_pagination.add_warning", warnings.append)
     client = _cursor_client({None: (["a"], "cur-2"), "cur-2": (["b"], None)})
 
     warn_if_more_pages(collect_cursor_pages(client.send(list_logs()), all_pages=False), PaginationType.CURSOR)
@@ -361,6 +361,6 @@ def test_warn_if_more_pages_cursor(monkeypatch):
 
 def test_warn_if_more_pages_not_paginated(monkeypatch):
     warnings: list[str] = []
-    monkeypatch.setattr("nemo_helix_ext.cli.core.pagination.add_warning", warnings.append)
+    monkeypatch.setattr("nemo_helix_plugin.cli_pagination.add_warning", warnings.append)
     warn_if_more_pages(object(), PaginationType.NOT_PAGINATED)
     assert warnings == []

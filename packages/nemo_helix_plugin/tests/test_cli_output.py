@@ -20,6 +20,7 @@ from nemo_helix_plugin.cli_output import (
     format_stream_event,
     format_table,
     format_yaml,
+    is_tty,
     iter_json_lines,
     model_to_dict,
     validate_stream_output_format,
@@ -950,3 +951,17 @@ def test_format_json_soft_wrap_with_nested_long_strings(mock_is_tty):
     # Both long strings should be fully present
     assert long_value_1 in result
     assert long_value_2 in result
+
+
+@patch("sys.stdout.isatty")
+def test_is_tty_true(mock_isatty):
+    """Test is_tty when stdout is a TTY."""
+    mock_isatty.return_value = True
+    assert is_tty() is True
+
+
+@patch("sys.stdout.isatty")
+def test_is_tty_false(mock_isatty):
+    """Test is_tty when stdout is not a TTY."""
+    mock_isatty.return_value = False
+    assert is_tty() is False
