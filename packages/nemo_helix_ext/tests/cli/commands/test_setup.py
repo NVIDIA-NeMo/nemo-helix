@@ -4391,7 +4391,7 @@ class TestMaybeDeploySampleAgent:
             "sample/selected-model",
             headers={"Authorization": "Bearer token"},
             agent_name="email-security-triage",
-            description="Fabric email security triage sample agent created by the NeMo setup flow.",
+            description="Email security triage sample agent created by the NeMo setup flow.",
             certificate_authority="/tmp/ca.pem",
         )
 
