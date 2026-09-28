@@ -45,6 +45,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_deployments_plugin.auth_proxy import auth_proxy_port
+from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.entities import (
     ConfigFile,
@@ -73,6 +74,7 @@ from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -417,7 +419,12 @@ def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: Dep
         raise _backend_mismatch(entry.name, entry.backend, mode)
     if mode == "docker":
         try:
-            require_docker(docker_host=entry.config.get("docker_host"))
+            docker_host = DockerExecutorConfig.model_validate(entry.config).docker_host
+        except ValidationError as exc:
+            logger.debug("Docker executor %r has invalid config: %s", entry.name, exc)
+            raise ValueError(f"Docker executor {entry.name!r} has an invalid configuration.") from exc
+        try:
+            require_docker(docker_host=docker_host)
         except CapabilityUnavailableError as exc:
             logger.debug("Docker executor %r is unavailable: %s", entry.name, exc)
             # The probe result is cached per process, as the deployments plugin's executor registry is.

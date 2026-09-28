@@ -132,9 +132,14 @@ def _configure_deployments(
     k8s_executor: str | None = None,
     default_image: str = "",
     docker_available: bool = True,
-) -> None:
+    executor_configs: dict[str, dict[str, Any]] | None = None,
+) -> list[str | None]:
+    configs = executor_configs or {}
     deployments_cfg = DeploymentsConfig(
-        executors=[ExecutorConfigEntry(name=name, backend=backend) for name, backend in executors.items()]
+        executors=[
+            ExecutorConfigEntry(name=name, backend=backend, config=configs.get(name, {}))
+            for name, backend in executors.items()
+        ]
     )
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: deployments_cfg))
     agents_cfg = AgentsConfig.get()
@@ -144,11 +149,15 @@ def _configure_deployments(
     monkeypatch.setattr(agents_cfg.deployments, "default_image", default_image)
     monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
 
-    def _require_docker(**_: Any) -> None:
+    probed_hosts: list[str | None] = []
+
+    def _require_docker(*, docker_host: str | None = None, **_: Any) -> None:
+        probed_hosts.append(docker_host)
         if not docker_available:
             raise CapabilityUnavailableError("Docker daemon unreachable (tcp://10.20.0.5:2376)")
 
     monkeypatch.setattr("nemo_agents_plugin.runner.deployments_backend.require_docker", _require_docker)
+    return probed_hosts
 
 
 class TestSpecRevisionSnapshot:
@@ -728,6 +737,28 @@ class TestListDeploymentModes:
         _configure_deployments(monkeypatch, executors={"local": "docker"}, docker_executor="typo")
 
         assert self._modes()["docker"]["enabled"] is False
+
+    def test_docker_probes_the_host_the_executor_is_configured_with(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        probed_hosts = _configure_deployments(
+            monkeypatch,
+            executors={"remote": "docker"},
+            default_executor="remote",
+            executor_configs={"remote": {"docker_host": "tcp://docker.internal:2376"}},
+        )
+
+        assert self._modes()["docker"]["enabled"] is True
+        assert probed_hosts == ["tcp://docker.internal:2376"]
+
+    def test_a_docker_executor_with_invalid_config_is_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        probed_hosts = _configure_deployments(
+            monkeypatch,
+            executors={"local": "docker"},
+            default_executor="local",
+            executor_configs={"local": {"docker_timeout": "not-a-number"}},
+        )
+
+        assert self._modes()["docker"]["enabled"] is False
+        assert probed_hosts == []
 
     def test_a_default_image_means_container_modes_need_no_image(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _configure_deployments(
