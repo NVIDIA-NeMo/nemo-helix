@@ -45,6 +45,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_deployments_plugin.auth_proxy import auth_proxy_port
+from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.entities import (
     ConfigFile,
     Container,
@@ -64,6 +65,7 @@ from nemo_helix_plugin.auth.workload_identity import (
     get_workload_identity_token_audience,
     is_workload_identity_token_exchange_enabled,
 )
+from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.base import parse_qualified_name
@@ -357,16 +359,18 @@ def executor_backend(name: str | None) -> str | None:
     the deployments plugin's own ``default_executor``, so resolving it here is what
     makes the mode check see the executor that will actually run.
     """
-    from nemo_deployments_plugin.config import DeploymentsConfig
+    entry = _executor_entry(_resolve_executor_name(name))
+    return entry.backend if entry else None
 
-    config = DeploymentsConfig.get()
-    resolved = name or config.default_executor
-    if not resolved:
+
+def _resolve_executor_name(name: str | None) -> str | None:
+    return name or DeploymentsConfig.get().default_executor
+
+
+def _executor_entry(name: str | None) -> ExecutorConfigEntry | None:
+    if not name:
         return None
-    for entry in config.executors:
-        if entry.name == resolved:
-            return entry.backend
-    return None
+    return next((entry for entry in DeploymentsConfig.get().executors if entry.name == name), None)
 
 
 def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) -> None:
@@ -387,6 +391,35 @@ def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) ->
         f"{backend!r}. Set 'deployments.{mode}_executor' to an executor whose backend "
         f"is {mode!r}{alternative}."
     )
+
+
+def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> None:
+    """Refuse a mode this platform cannot run, before anything is persisted.
+
+    Stricter than ``require_executor_matches_mode``: an executor that cannot be
+    resolved, or a Docker daemon that is unreachable, is refused here instead of
+    surfacing as a failed deployment after the caller has had its 201.
+    """
+    if mode not in CONTAINER_DEPLOYMENT_MODES:
+        return
+    executor = _resolve_executor_name(executor_for_mode(config, mode))
+    entry = _executor_entry(executor)
+    if entry is None:
+        if executor:
+            raise ValueError(
+                f"deployment_mode {mode!r} resolved to executor {executor!r}, which is not configured "
+                "in 'deployments.executors'."
+            )
+        raise ValueError(
+            f"deployment_mode {mode!r} has no executor. Set 'deployments.{mode}_executor' or "
+            "'deployments.default_executor'."
+        )
+    require_executor_matches_mode(entry.name, mode)
+    if mode == "docker":
+        probe = probe_docker(docker_host=entry.config.get("docker_host"))
+        if not probe.available:
+            detail = probe.detail or "Docker daemon is unavailable"
+            raise ValueError(f"deployment_mode 'docker' resolved to executor {entry.name!r}, but: {detail}.")
 
 
 _HTTP_PROTOCOLS = frozenset({"http", "https"})

@@ -42,11 +42,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
-from nemo_agents_plugin.runner.deployments_backend import (
-    executor_backend,
-    executor_for_mode,
-    require_executor_matches_mode,
-)
+from nemo_agents_plugin.runner.deployments_backend import require_deployment_mode_available
 from nemo_agents_plugin.schema import (
     CreateDeploymentRequest,
     DeploymentFilter,
@@ -116,12 +112,10 @@ async def create_deployment(
 
     # The controller refuses this too, but only on its next reconcile — by which
     # point a pending deployment exists and the caller has had its 201.
-    if is_container_deployment_mode(body.deployment_mode):
-        runner_config = AgentsConfig.get().deployments
-        try:
-            require_executor_matches_mode(executor_for_mode(runner_config, body.deployment_mode), body.deployment_mode)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        require_deployment_mode_available(AgentsConfig.get().deployments, body.deployment_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # The runner fails the deployment for this; the answer is already available here.
     if is_container_deployment_mode(body.deployment_mode) and not (
@@ -234,13 +228,15 @@ async def list_deployment_modes(workspace: str) -> DeploymentModeList:
 
 
 def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
-    if not is_container_deployment_mode(mode):
-        return DeploymentModeAvailability(mode=mode, enabled=True, requires_image=False)
-    backend = executor_backend(executor_for_mode(runner_config, mode))
+    try:
+        require_deployment_mode_available(runner_config, mode)
+        enabled = True
+    except ValueError:
+        enabled = False
     return DeploymentModeAvailability(
         mode=mode,
-        enabled=backend == mode,
-        requires_image=not runner_config.default_image,
+        enabled=enabled,
+        requires_image=is_container_deployment_mode(mode) and not runner_config.default_image,
     )
 
 

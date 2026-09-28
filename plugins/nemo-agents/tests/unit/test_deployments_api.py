@@ -28,7 +28,9 @@ from nemo_agents_plugin.entities import (
     ComputeResources,
     DeploymentStatus,
 )
+from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.capabilities import ProbeResult
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
@@ -121,6 +123,33 @@ def _test_client(mock_entity_client: AsyncMock, mock_files_client: AsyncMock | N
     return TestClient(app, raise_server_exceptions=False)
 
 
+def _configure_deployments(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    executors: dict[str, str],
+    default_executor: str | None = None,
+    docker_executor: str | None = None,
+    k8s_executor: str | None = None,
+    default_image: str = "",
+    docker_available: bool = True,
+) -> None:
+    deployments_cfg = DeploymentsConfig(
+        executors=[ExecutorConfigEntry(name=name, backend=backend) for name, backend in executors.items()]
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: deployments_cfg))
+    agents_cfg = AgentsConfig.get()
+    monkeypatch.setattr(agents_cfg.deployments, "default_executor", default_executor)
+    monkeypatch.setattr(agents_cfg.deployments, "docker_executor", docker_executor)
+    monkeypatch.setattr(agents_cfg.deployments, "k8s_executor", k8s_executor)
+    monkeypatch.setattr(agents_cfg.deployments, "default_image", default_image)
+    monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
+    probe = ProbeResult(available=docker_available, detail=None if docker_available else "Docker daemon unreachable")
+    monkeypatch.setattr(
+        "nemo_agents_plugin.runner.deployments_backend.probe_docker",
+        lambda **_: probe,
+    )
+
+
 class TestSpecRevisionSnapshot:
     @staticmethod
     def _create(files_client: AsyncMock, *, agent: Agent | None = None) -> AgentDeployment:
@@ -190,6 +219,10 @@ class TestSpecRevisionSnapshot:
 
 
 class TestCreateDeployment:
+    @pytest.fixture(autouse=True)
+    def _reachable_docker_executor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _configure_deployments(monkeypatch, executors={"local": "docker"}, default_executor="local")
+
     def test_create_preserves_platform_agent_config(self) -> None:
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
@@ -275,6 +308,39 @@ class TestCreateDeployment:
         assert resp.status_code == 400
         assert "runs on 'docker'" in resp.json()["detail"]
         # The controller would have failed this on reconcile; nothing should persist.
+        mock_entity_client.create.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("config", "expected"),
+        [
+            ({"executors": {}}, "Set 'deployments.docker_executor' or 'deployments.default_executor'"),
+            ({"executors": {"local": "docker"}, "docker_executor": "typo"}, "'typo', which is not configured"),
+            (
+                {"executors": {"local": "docker"}, "default_executor": "local", "docker_available": False},
+                "Docker daemon unreachable",
+            ),
+        ],
+    )
+    def test_create_refuses_a_docker_mode_that_cannot_run(
+        self, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any], expected: str
+    ) -> None:
+        _configure_deployments(monkeypatch, **config)
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={
+                "agent": "fabric-agent",
+                "name": "fabric-dep",
+                "deployment_mode": "docker",
+                "image": "registry.example/agent:1.0",
+            },
+        )
+
+        assert resp.status_code == 400
+        assert expected in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
     def test_create_rejects_container_deployment_with_no_resolvable_image(self) -> None:
@@ -611,36 +677,13 @@ class TestDeleteDeployment:
 
 class TestListDeploymentModes:
     @staticmethod
-    def _configure(
-        monkeypatch: pytest.MonkeyPatch,
-        *,
-        executors: dict[str, str],
-        default_executor: str | None = None,
-        docker_executor: str | None = None,
-        k8s_executor: str | None = None,
-        default_image: str | None = None,
-    ) -> None:
-        from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
-
-        deployments_cfg = DeploymentsConfig(
-            executors=[ExecutorConfigEntry(name=name, backend=backend) for name, backend in executors.items()]
-        )
-        monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: deployments_cfg))
-        agents_cfg = AgentsConfig.get()
-        monkeypatch.setattr(agents_cfg.deployments, "default_executor", default_executor)
-        monkeypatch.setattr(agents_cfg.deployments, "docker_executor", docker_executor)
-        monkeypatch.setattr(agents_cfg.deployments, "k8s_executor", k8s_executor)
-        monkeypatch.setattr(agents_cfg.deployments, "default_image", default_image)
-        monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
-
-    @staticmethod
     def _modes() -> dict[str, dict[str, Any]]:
         resp = _test_client(AsyncMock()).get("/apis/agents/v2/workspaces/default/deployment-modes")
         assert resp.status_code == 200
         return {entry["mode"]: entry for entry in resp.json()["data"]}
 
     def test_only_subprocess_is_enabled_without_executors(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._configure(monkeypatch, executors={})
+        _configure_deployments(monkeypatch, executors={})
 
         assert self._modes() == {
             "subprocess": {"mode": "subprocess", "enabled": True, "requires_image": False},
@@ -651,7 +694,7 @@ class TestListDeploymentModes:
     def test_k8s_is_disabled_when_it_would_fall_back_to_a_docker_executor(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        self._configure(monkeypatch, executors={"local": "docker"}, default_executor="local")
+        _configure_deployments(monkeypatch, executors={"local": "docker"}, default_executor="local")
 
         modes = self._modes()
 
@@ -659,7 +702,7 @@ class TestListDeploymentModes:
         assert modes["k8s"]["enabled"] is False
 
     def test_each_container_mode_is_enabled_by_its_own_executor(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._configure(
+        _configure_deployments(
             monkeypatch,
             executors={"local": "docker", "cluster": "k8s"},
             docker_executor="local",
@@ -671,8 +714,27 @@ class TestListDeploymentModes:
         assert modes["docker"]["enabled"] is True
         assert modes["k8s"]["enabled"] is True
 
+    def test_docker_is_disabled_when_the_daemon_is_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _configure_deployments(
+            monkeypatch,
+            executors={"local": "docker", "cluster": "k8s"},
+            docker_executor="local",
+            k8s_executor="cluster",
+            docker_available=False,
+        )
+
+        modes = self._modes()
+
+        assert modes["docker"]["enabled"] is False
+        assert modes["k8s"]["enabled"] is True
+
+    def test_a_mode_naming_an_unconfigured_executor_is_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _configure_deployments(monkeypatch, executors={"local": "docker"}, docker_executor="typo")
+
+        assert self._modes()["docker"]["enabled"] is False
+
     def test_a_default_image_means_container_modes_need_no_image(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._configure(
+        _configure_deployments(
             monkeypatch,
             executors={"local": "docker"},
             default_executor="local",
@@ -684,8 +746,20 @@ class TestListDeploymentModes:
         assert modes["docker"]["requires_image"] is False
         assert modes["k8s"]["requires_image"] is False
 
-    def test_an_enabled_mode_passes_create_validation(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._configure(monkeypatch, executors={"local": "docker"}, default_executor="local")
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"executors": {}},
+            {"executors": {"local": "docker"}, "default_executor": "local"},
+            {"executors": {"local": "docker"}, "docker_executor": "typo"},
+            {"executors": {"local": "docker"}, "default_executor": "local", "docker_available": False},
+            {"executors": {"local": "docker", "cluster": "k8s"}, "docker_executor": "local", "k8s_executor": "cluster"},
+        ],
+    )
+    def test_create_accepts_exactly_the_enabled_modes(
+        self, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]
+    ) -> None:
+        _configure_deployments(monkeypatch, **config)
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
         mock_entity_client.create = AsyncMock(side_effect=lambda deployment: deployment)
@@ -701,4 +775,4 @@ class TestListDeploymentModes:
                     "image": "registry.example/agent:1.0",
                 },
             )
-            assert (resp.status_code == 201) is availability["enabled"], mode
+            assert (resp.status_code == 201) is availability["enabled"], (mode, resp.text)
