@@ -33,6 +33,11 @@ class PluginConfig:
         if opts is None:
             return None
 
+        # A virtual workspace member isn't installed, so discover_services() can't find it.
+        if data.get("tool", {}).get("uv", {}).get("package") is False:
+            print(f"Skipping OpenAPI spec for plugin '{pyproject_path.parent.name}': tool.uv.package = false")
+            return None
+
         services = (data.get("project", {}).get("entry-points", {}) or {}).get("nemo.services", {})
         if not services:
             return None
