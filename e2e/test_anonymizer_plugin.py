@@ -34,7 +34,6 @@ from nemo_anonymizer_plugin.sdk.job_resources import (
     AnonymizerJobResource,
 )
 from nemo_anonymizer_plugin.sdk.resources import AnonymizerPreviewResult, AnonymizerResource
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -387,10 +386,10 @@ def anonymizer_fileset(
 
 
 @pytest.fixture(scope="module")
-def mock_model_provider(sdk: NeMoHelix, anonymizer_workspace: str) -> str:
+def mock_model_provider(client: NemoClient, anonymizer_workspace: str) -> str:
     name = short_unique_name("anon-model")
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=anonymizer_workspace,
         name=name,
         mock_response_body_by_model={

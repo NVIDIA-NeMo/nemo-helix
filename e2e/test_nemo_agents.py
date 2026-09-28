@@ -13,7 +13,6 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
@@ -481,12 +480,12 @@ def test_agent_gateway_missing_deployment_returns_not_found(client: NemoClient, 
 
 
 @pytest.mark.container_only
-def test_agent_deployment_reaches_running(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_agent_deployment_reaches_running(client: NemoClient, workspace: str) -> None:
     agent_name = _unique_name("running-agent")
     deployment_name = _unique_name("running-deployment")
     model_name = _unique_name("agent-model")
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("agent-provider"),
         mock_response_body_by_model={
