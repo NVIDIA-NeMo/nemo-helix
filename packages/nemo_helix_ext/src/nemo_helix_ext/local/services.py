@@ -624,7 +624,7 @@ def start_embedded_services(
     *,
     env: MutableMapping[str, str] | None = None,
 ) -> EmbeddedServiceHandle:
-    """Start platform services in the current process.
+    """Start Helix services in the current process.
 
     Args:
         env: Environment mapping passed to :func:`build_platform_app`.

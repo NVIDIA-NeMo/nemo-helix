@@ -93,7 +93,7 @@ nemo skills install --agent claude --skill inference""",
     ),
     TopLevelEntry(
         import_path="nemo_helix_ext.cli.commands.services.cli:services_app",
-        help="Run platform services locally.",
+        help="Run Helix services locally.",
         name="services",
         panel="Setup",
         kind="group",

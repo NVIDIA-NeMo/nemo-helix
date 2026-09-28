@@ -138,7 +138,7 @@ def _available_service_names(config: AuthServiceConfig) -> set[str]:
 
         names.update(get_available_services().keys())
     except Exception:
-        logger.debug("Could not load platform service registry for service principal allowlist", exc_info=True)
+        logger.debug("Could not load Helix service registry for service principal allowlist", exc_info=True)
     return names
 
 

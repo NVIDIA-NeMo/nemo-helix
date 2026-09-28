@@ -10,7 +10,7 @@ from nemo_helix_plugin.service import NemoService, RouterSpec
 
 class NemoService(_NamedPlugin):
     name: ClassVar[str]                    # REQUIRED — kebab-case; becomes URL prefix /apis/<name>
-    dependencies: ClassVar[list[str]] = [] # platform services that must be ready before startup
+    dependencies: ClassVar[list[str]] = [] # Helix services that must be ready before startup
 
     @abstractmethod
     def get_routers(self) -> list[RouterSpec]: ...  # MUST implement
@@ -41,7 +41,7 @@ class RouterSpec:
 
 Example: `name="my-plugin"`, `prefix="/v2/workspaces/{workspace}"`, route `/widgets` → `/apis/my-plugin/v2/workspaces/{workspace}/widgets`
 
-Platform convention: `/apis/<name>/v2/workspaces/{workspace}/<resource>` — follow this for consistency with core platform services.
+Platform convention: `/apis/<name>/v2/workspaces/{workspace}/<resource>` — follow this for consistency with core Helix services.
 
 ## Response schemas
 

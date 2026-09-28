@@ -540,7 +540,7 @@ class NemoHelixConfig(ServiceConfig):
     loopback_address: str | None = Field(
         default=None,
         description=(
-            "Optional loopback address override for job containers to reach platform services. "
+            "Optional loopback address override for job containers to reach Helix services. "
             "If not specified, automatically determined based on platform: "
             "macOS uses 'host.docker.internal', Docker containers use container hostname, "
             "Linux host network uses no override. Can be set via config file or "

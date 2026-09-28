@@ -134,7 +134,7 @@ The `client_id` in NeMo Helix config doesn't match the application in your IdP.
 
 3. Check that auth headers are stripped from external requests. Try sending a request with `X-NHX-Principal-Id` or `X-NHX-Scopes` from outside the cluster — those headers should be stripped by the gateway.
 
-4. Verify the PDP is reachable from platform services. If using external OPA, check that the OPA sidecar/service is running and the bundle endpoint is accessible.
+4. Verify the PDP is reachable from Helix services. If using external OPA, check that the OPA sidecar/service is running and the bundle endpoint is accessible.
 
 ## "Role Change Doesn't Take Effect"
 

@@ -47,7 +47,7 @@ from nhx.platform_runner.config import (
 
 logger = logging.getLogger(__name__)
 
-services_app = create_typer_app(name="services", help="Run platform services locally.")
+services_app = create_typer_app(name="services", help="Run Helix services locally.")
 
 _HEALTH_TIMEOUT_SECONDS = 60
 _HEALTH_POLL_INTERVAL = 2.0
@@ -73,7 +73,7 @@ def _require_services_extra() -> None:
     if importlib.util.find_spec("pyleak") is not None:
         return
     typer.echo(
-        "Running local platform services needs extra components that aren't installed yet.\n"
+        "Running local Helix services needs extra components that aren't installed yet.\n"
         "\n"
         "Install them with:\n"
         f"  {services_extra_install_command()}\n",
@@ -225,7 +225,7 @@ def run_services(
         ),
     ] = None,
 ) -> None:
-    """Run platform services in the foreground.  Ctrl-C to stop."""
+    """Run Helix services in the foreground.  Ctrl-C to stop."""
     _require_services_extra()
     _warn_bind_all(host)
 
@@ -346,7 +346,7 @@ def start_services(
         ),
     ] = None,
 ) -> None:
-    """Start platform services in the background.
+    """Start Helix services in the background.
 
     Detaches the process, polls /status, then returns.
 
@@ -385,7 +385,7 @@ def start_services(
     )
     require_docker_for_default_local(platform_config)
 
-    typer.echo("Starting platform services...")
+    typer.echo("Starting Helix services...")
     proc = start_background(platform_config)
 
     if not _wait_for_healthy(host, port):
@@ -430,7 +430,7 @@ def stop_services_cmd(
         typer.Option("--force", help="Stop even if the instance is running in the foreground."),
     ] = False,
 ) -> None:
-    """Stop running platform services.
+    """Stop running Helix services.
 
     Sends SIGTERM to the running service process and waits for it to exit.
     Falls back to SIGKILL after a timeout.  Foreground instances (started
@@ -453,7 +453,7 @@ def stop_services_cmd(
         typer.echo("Platform services are not running.")
         return
     pids_str = ", ".join(str(p) for p in result.stopped_pids)
-    msg = f"Stopped platform services (pid {pids_str})"
+    msg = f"Stopped Helix services (pid {pids_str})"
     if result.swept_children:
         n = len(result.swept_children)
         noun = "process" if n == 1 else "processes"
@@ -534,7 +534,7 @@ def restart_services(
         ),
     ] = None,
 ) -> None:
-    """Restart platform services.
+    """Restart Helix services.
 
     Stops any running services and relaunches them.  Without flags, preserves
     the service set from the previous run.  Errors if no previously tracked
@@ -614,7 +614,7 @@ def restart_services(
     # Preflight before stop so a missing Docker daemon does not tear down a healthy instance.
     require_docker_for_default_local(platform_config)
 
-    typer.echo("Stopping platform services...")
+    typer.echo("Stopping Helix services...")
     # restart always produces a background instance, so force=True is
     # appropriate even for foreground targets.
     stop_instance(scope, base_dir=base_dir, force=True)
@@ -623,7 +623,7 @@ def restart_services(
 
     _ensure_port_available(effective_host, effective_port, scope, base_dir=base_dir)
 
-    typer.echo("Starting platform services...")
+    typer.echo("Starting Helix services...")
     proc = start_background(platform_config)
 
     if not _wait_for_healthy(effective_host, effective_port):
@@ -660,7 +660,7 @@ def status_services(
         typer.Option("--port", help="Port (used for scope computation if --instance not given)."),
     ] = _DEFAULT_PORT,
 ) -> None:
-    """Show status of the platform services instance for this scope."""
+    """Show status of the Helix services instance for this scope."""
     scope = compute_scope(port=port, explicit_scope=instance)
     base_dir_str = _effective_base_dir()
     base_dir = Path(base_dir_str) if base_dir_str else None

@@ -74,7 +74,7 @@ The gateway (e.g., Envoy with `ext_authz`) authenticates the bearer token before
 3. Gateway forwards the request with those trusted headers
 4. Services skip bearer-token re-validation and run their normal PDP authorization checks
 
-This rejects unauthenticated requests before they reach platform services while keeping authorization decisions in the normal service middleware path.
+This rejects unauthenticated requests before they reach Helix services while keeping authorization decisions in the normal service middleware path.
 
 ## Principal Model
 

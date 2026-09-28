@@ -196,7 +196,7 @@ export NHX_IMAGE_TAG=<tag>
 
 **Automodel** — also set `NHX_AUTOMODEL_IMAGE_REGISTRY=$NHX_IMAGE_REGISTRY`.
 
-**Unsloth** — set `NHX_UNSLOTH_TRAINING_IMAGE` (and optionally `NHX_UNSLOTH_TASKS_IMAGE`) to the full built ref, then restart platform services so the env var takes effect.
+**Unsloth** — set `NHX_UNSLOTH_TRAINING_IMAGE` (and optionally `NHX_UNSLOTH_TASKS_IMAGE`) to the full built ref, then restart Helix services so the env var takes effect.
 
 ### Build on the target host (unsloth)
 
@@ -225,7 +225,7 @@ After the image is on the target, re-submit the same job JSON (use a fresh `outp
 
 When submit or poll returns a missing-image error and the base URL is **user-overridden**, start with the **Report to user** template in `references/reporting.md` (status `error`, **Output adapter fileset (planned):**, Notes quoting the pull error and naming the target host). Then append these sections:
 
-**What you need to do on the target host** — build or load the training image on the machine running the NeMo Helix (where `docker info` works for the platform's daemon), set `NHX_UNSLOTH_TRAINING_IMAGE` or automodel image env vars, and restart platform services. Full steps: `docker/unsloth/README.md` (unsloth) or automodel docker docs.
+**What you need to do on the target host** — build or load the training image on the machine running the NeMo Helix (where `docker info` works for the platform's daemon), set `NHX_UNSLOTH_TRAINING_IMAGE` or automodel image env vars, and restart Helix services. Full steps: `docker/unsloth/README.md` (unsloth) or automodel docker docs.
 
 **Re-submit after the image is available:**
 

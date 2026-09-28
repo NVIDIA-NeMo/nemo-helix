@@ -4,7 +4,7 @@
 """Task integration testing utilities for NeMo Helix.
 
 This module provides the test_task_harness async context manager for testing
-task modules in isolation with mocked platform services via ASGI transport.
+task modules in isolation with mocked Helix services via ASGI transport.
 
 Example:
     from nhx.hello_world.service import HelloWorldService
@@ -165,7 +165,7 @@ async def task_harness(
     access_log: bool = False,
     workspace: str | None = None,
 ) -> AsyncGenerator[TaskContext, None]:
-    """Async context manager for testing task modules with mocked platform services.
+    """Async context manager for testing task modules with mocked Helix services.
 
     Uses create_test_client internally to set up a FastAPI app with the specified
     services using ASGI in-process transport.
