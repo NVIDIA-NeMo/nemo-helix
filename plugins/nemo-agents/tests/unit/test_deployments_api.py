@@ -30,7 +30,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.capabilities import ProbeResult
+from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
@@ -143,11 +143,12 @@ def _configure_deployments(
     monkeypatch.setattr(agents_cfg.deployments, "k8s_executor", k8s_executor)
     monkeypatch.setattr(agents_cfg.deployments, "default_image", default_image)
     monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
-    probe = ProbeResult(available=docker_available, detail=None if docker_available else "Docker daemon unreachable")
-    monkeypatch.setattr(
-        "nemo_agents_plugin.runner.deployments_backend.probe_docker",
-        lambda **_: probe,
-    )
+
+    def _require_docker(**_: Any) -> None:
+        if not docker_available:
+            raise CapabilityUnavailableError("Docker daemon unreachable (tcp://10.20.0.5:2376)")
+
+    monkeypatch.setattr("nemo_agents_plugin.runner.deployments_backend.require_docker", _require_docker)
 
 
 class TestSpecRevisionSnapshot:
@@ -280,16 +281,7 @@ class TestCreateDeployment:
         assert created_deployment.use_image_entrypoint is True
 
     def test_create_rejects_a_mode_the_executor_will_not_honour(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
-
-        # A standalone config: DeploymentsConfig.get() is a cached singleton, and
-        # assigning to it would outlive this test.
-        deployments_cfg = DeploymentsConfig(executors=[ExecutorConfigEntry(name="default-exec", backend="docker")])
-        monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: deployments_cfg))
-        agents_cfg = AgentsConfig.get()
-        monkeypatch.setattr(agents_cfg.deployments, "default_executor", "default-exec")
-        monkeypatch.setattr(agents_cfg.deployments, "k8s_executor", None)
-        monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
+        _configure_deployments(monkeypatch, executors={"default-exec": "docker"}, default_executor="default-exec")
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
 
@@ -313,11 +305,11 @@ class TestCreateDeployment:
     @pytest.mark.parametrize(
         ("config", "expected"),
         [
-            ({"executors": {}}, "Set 'deployments.docker_executor' or 'deployments.default_executor'"),
-            ({"executors": {"local": "docker"}, "docker_executor": "typo"}, "'typo', which is not configured"),
+            ({"executors": {}}, "Set 'agents.deployments.docker_executor' or 'agents.deployments.default_executor'"),
+            ({"executors": {"local": "docker"}, "docker_executor": "typo"}, "'typo', which is not listed"),
             (
                 {"executors": {"local": "docker"}, "default_executor": "local", "docker_available": False},
-                "Docker daemon unreachable",
+                "Docker daemon for executor 'local' was unreachable when last checked",
             ),
         ],
     )
@@ -341,6 +333,7 @@ class TestCreateDeployment:
 
         assert resp.status_code == 400
         assert expected in resp.json()["detail"]
+        assert "10.20.0.5" not in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
     def test_create_rejects_container_deployment_with_no_resolvable_image(self) -> None:
@@ -361,9 +354,12 @@ class TestCreateDeployment:
     def test_create_allows_container_deployment_without_image_when_a_default_is_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        config = AgentsConfig.get()
-        monkeypatch.setattr(config.deployments, "default_image", "registry.example/agent:pinned")
-        monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: config))
+        _configure_deployments(
+            monkeypatch,
+            executors={"local": "docker"},
+            default_executor="local",
+            default_image="registry.example/agent:pinned",
+        )
 
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
@@ -754,11 +750,10 @@ class TestListDeploymentModes:
             {"executors": {"local": "docker"}, "docker_executor": "typo"},
             {"executors": {"local": "docker"}, "default_executor": "local", "docker_available": False},
             {"executors": {"local": "docker", "cluster": "k8s"}, "docker_executor": "local", "k8s_executor": "cluster"},
+            {"executors": {"local": "docker"}, "default_executor": "local", "default_image": "registry.example/a:1"},
         ],
     )
-    def test_create_accepts_exactly_the_enabled_modes(
-        self, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]
-    ) -> None:
+    def test_create_agrees_with_the_listing(self, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]) -> None:
         _configure_deployments(monkeypatch, **config)
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
@@ -766,13 +761,13 @@ class TestListDeploymentModes:
         client = _test_client(mock_entity_client)
 
         for mode, availability in self._modes().items():
-            resp = client.post(
+            request = {"agent": "fabric-agent", "name": f"fabric-{mode}", "deployment_mode": mode}
+            with_image = client.post(
                 "/apis/agents/v2/workspaces/default/deployments",
-                json={
-                    "agent": "fabric-agent",
-                    "name": f"fabric-{mode}",
-                    "deployment_mode": mode,
-                    "image": "registry.example/agent:1.0",
-                },
+                json={**request, "image": "registry.example/agent:1.0"},
             )
-            assert (resp.status_code == 201) is availability["enabled"], (mode, resp.text)
+            assert with_image.status_code == (201 if availability["enabled"] else 400), (mode, with_image.text)
+            if availability["enabled"]:
+                without_image = client.post("/apis/agents/v2/workspaces/default/deployments", json=request)
+                expected = 400 if availability["requires_image"] else 201
+                assert without_image.status_code == expected, (mode, without_image.text)

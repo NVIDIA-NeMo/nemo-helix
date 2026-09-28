@@ -16,6 +16,7 @@ process and removes the entity.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from typing import Any, get_args
@@ -110,10 +111,9 @@ async def create_deployment(
             detail="use_image_entrypoint requires deployment_mode 'docker' or 'k8s'.",
         )
 
-    # The controller refuses this too, but only on its next reconcile — by which
-    # point a pending deployment exists and the caller has had its 201.
+    # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
     try:
-        require_deployment_mode_available(AgentsConfig.get().deployments, body.deployment_mode)
+        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get().deployments, body.deployment_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -223,8 +223,11 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
 )
 async def list_deployment_modes(workspace: str) -> DeploymentModeList:
     """List every deployment mode and whether this platform can run it."""
-    runner_config = AgentsConfig.get().deployments
-    return DeploymentModeList(data=[_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)])
+    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get().deployments))
+
+
+def _all_mode_availability(runner_config: DeploymentsRunnerConfig) -> list[DeploymentModeAvailability]:
+    return [_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)]
 
 
 def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:

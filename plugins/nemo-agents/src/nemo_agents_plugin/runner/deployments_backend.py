@@ -65,7 +65,7 @@ from nemo_helix_plugin.auth.workload_identity import (
     get_workload_identity_token_audience,
     is_workload_identity_token_exchange_enabled,
 )
-from nemo_helix_plugin.capabilities import probe_docker
+from nemo_helix_plugin.capabilities import CapabilityUnavailableError, require_docker
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.base import parse_qualified_name
@@ -385,41 +385,46 @@ def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) ->
     backend = executor_backend(executor)
     if backend is None or backend == mode:
         return
+    raise _backend_mismatch(executor, backend, mode)
+
+
+def _backend_mismatch(executor: str | None, backend: str, mode: DeploymentMode) -> ValueError:
     alternative = f", or deploy with deployment_mode {backend!r}" if backend in CONTAINER_DEPLOYMENT_MODES else ""
-    raise ValueError(
+    return ValueError(
         f"deployment_mode {mode!r} resolved to executor {executor!r}, which runs on "
-        f"{backend!r}. Set 'deployments.{mode}_executor' to an executor whose backend "
+        f"{backend!r}. Set 'agents.deployments.{mode}_executor' to an executor whose backend "
         f"is {mode!r}{alternative}."
     )
 
 
 def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> None:
-    """Refuse a mode this platform cannot run, before anything is persisted.
-
-    Stricter than ``require_executor_matches_mode``: an executor that cannot be
-    resolved, or a Docker daemon that is unreachable, is refused here instead of
-    surfacing as a failed deployment after the caller has had its 201.
-    """
-    if mode not in CONTAINER_DEPLOYMENT_MODES:
+    """Refuse a mode that could not run, before a deployment is persisted for it."""
+    if mode == "subprocess":
         return
     executor = _resolve_executor_name(executor_for_mode(config, mode))
     entry = _executor_entry(executor)
     if entry is None:
         if executor:
             raise ValueError(
-                f"deployment_mode {mode!r} resolved to executor {executor!r}, which is not configured "
+                f"deployment_mode {mode!r} resolved to executor {executor!r}, which is not listed "
                 "in 'deployments.executors'."
             )
         raise ValueError(
-            f"deployment_mode {mode!r} has no executor. Set 'deployments.{mode}_executor' or "
-            "'deployments.default_executor'."
+            f"deployment_mode {mode!r} has no executor. Set 'agents.deployments.{mode}_executor' or "
+            "'agents.deployments.default_executor'."
         )
-    require_executor_matches_mode(entry.name, mode)
+    if entry.backend != mode:
+        raise _backend_mismatch(entry.name, entry.backend, mode)
     if mode == "docker":
-        probe = probe_docker(docker_host=entry.config.get("docker_host"))
-        if not probe.available:
-            detail = probe.detail or "Docker daemon is unavailable"
-            raise ValueError(f"deployment_mode 'docker' resolved to executor {entry.name!r}, but: {detail}.")
+        try:
+            require_docker(docker_host=entry.config.get("docker_host"))
+        except CapabilityUnavailableError as exc:
+            logger.debug("Docker executor %r is unavailable: %s", entry.name, exc)
+            # The probe result is cached per process, as the deployments plugin's executor registry is.
+            raise ValueError(
+                f"The Docker daemon for executor {entry.name!r} was unreachable when last checked. "
+                "Start Docker, then restart the platform."
+            ) from exc
 
 
 _HTTP_PROTOCOLS = frozenset({"http", "https"})
