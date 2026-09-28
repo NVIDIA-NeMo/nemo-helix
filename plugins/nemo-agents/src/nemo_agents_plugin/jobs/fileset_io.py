@@ -89,7 +89,7 @@ def resolve_staged_config(
 
     if sdk is None:
         raise LocalRunError(
-            f"Staging {kind} from a fileset requires a sync platform client ('sdk'), but none "
+            f"Staging {kind} from a fileset requires a sync platform client, but none "
             "was available. Set NHX_BASE_URL before using fileset inputs."
         )
 
@@ -153,7 +153,7 @@ def resolve_output(
 
     if sdk is None:
         raise LocalRunError(
-            f"Uploading {kind} results to a fileset requires a sync platform client ('sdk'), but none "
+            f"Uploading {kind} results to a fileset requires a sync platform client, but none "
             "was available. Set NHX_BASE_URL or use a local output directory instead."
         )
 

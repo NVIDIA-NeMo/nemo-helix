@@ -404,7 +404,7 @@ def _publish_results(
     ws, name = split_fileset_ref(FilesetRef(output), workspace)
     if sdk is None:
         raise LocalRunError(
-            f"Publishing optimize results to fileset '{ws}/{name}' requires a sync platform client ('sdk'), "
+            f"Publishing optimize results to fileset '{ws}/{name}' requires a sync platform client, "
             "but none was available. Set NHX_BASE_URL or use a local output directory instead."
         )
     upload_to_fileset(artifacts, fileset=name, workspace=ws, sdk=sdk)

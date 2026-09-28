@@ -349,7 +349,7 @@ class EvaluateAgentJob(NemoJob):
 
         if sdk is None:
             raise LocalRunError(
-                "EvaluateAgentJob.run requires a sync platform client ('sdk') to download "
+                "EvaluateAgentJob.run requires a sync platform client to download "
                 "eval_config_fileset contents, but no platform client was available. "
                 "Set NHX_BASE_URL before using fileset inputs."
             )
@@ -442,7 +442,7 @@ class EvaluateAgentJob(NemoJob):
 
         if sdk is None:
             raise LocalRunError(
-                "EvaluateAgentJob.run requires a sync platform client ('sdk') to upload "
+                "EvaluateAgentJob.run requires a sync platform client to upload "
                 "results to a fileset, but no platform client was available. "
                 "Set NHX_BASE_URL or use --output <path> to write results to a local directory instead."
             )
