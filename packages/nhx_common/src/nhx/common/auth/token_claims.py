@@ -9,6 +9,7 @@ from typing import cast
 
 from nhx.common.config import AuthConfig
 
+from .authz_format import is_valid_nhx_scope_id
 from .json_payload import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,25 @@ def scopes_from_claim(value: object) -> list[str]:
     return []
 
 
+def normalize_token_scopes(scopes: list[str], config: AuthConfig) -> list[str]:
+    """Normalize token scopes for NeMo authorization.
+
+    ``scope_prefix`` identifies a provider/resource prefix that should be
+    stripped before policy evaluation. Only normalized NeMo scope IDs
+    (``area:verb``) are retained; provider-specific scopes such as ``openid`` or
+    dotted IdP scopes are ignored instead of being sent to the PDP.
+    """
+    prefix = config.oidc.scope_prefix
+    normalized: list[str] = []
+    for scope in scopes:
+        if prefix:
+            scope = scope.removeprefix(prefix)
+        if not is_valid_nhx_scope_id(scope):
+            continue
+        normalized.append(scope)
+    return normalized
+
+
 class TokenClaimsExtractor:
     """Project decoded JWT claim objects into explicit auth claim types."""
 
@@ -70,10 +90,7 @@ class TokenClaimsExtractor:
         email_value = claims.get(self.config.oidc.email_claim)
         email = email_value if isinstance(email_value, str) else None
 
-        scopes = scopes_from_claim(claims.get("scope") or claims.get("scp"))
-        prefix = self.config.oidc.scope_prefix
-        if prefix:
-            scopes = [scope.removeprefix(prefix) for scope in scopes]
+        scopes = normalize_token_scopes(scopes_from_claim(claims.get("scope") or claims.get("scp")), self.config)
 
         return TokenClaims(
             subject=subject,

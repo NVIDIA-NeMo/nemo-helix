@@ -20,7 +20,7 @@ def auth_config() -> AuthConfig:
             email_claim="mail",
             groups_claim="roles",
             subject_claim="preferred_username",
-            scope_prefix="nhx:",
+            scope_prefix="api://nhx/",
         ),
     )
 
@@ -30,7 +30,7 @@ def test_token_claims_extractor_projects_configured_claims(auth_config: AuthConf
         "preferred_username": "alice",
         "mail": "alice@example.com",
         "roles": "admins, developers",
-        "scope": "nhx:read write",
+        "scope": "api://nhx/models:read platform:write openid profile.email",
         "act": {
             "sub": "system:serviceaccount:nemo-runs:job-runner",
             "roles": [" system:serviceaccounts ", 42, "nemo-jobs"],
@@ -43,7 +43,7 @@ def test_token_claims_extractor_projects_configured_claims(auth_config: AuthConf
     assert token_claims.subject == "alice"
     assert token_claims.email == "alice@example.com"
     assert token_claims.groups == ["admins", "developers"]
-    assert token_claims.scopes == ["read", "write"]
+    assert token_claims.scopes == ["models:read", "platform:write"]
     assert token_claims.raw_claims is claims
     assert token_claims.actor == ActorClaims(
         subject="system:serviceaccount:nemo-runs:job-runner",
@@ -76,6 +76,40 @@ def test_token_claims_extractor_projects_configured_role_map_claim(auth_config: 
 
     assert token_claims is not None
     assert token_claims.groups == ["admins", "developers"]
+
+
+def test_token_claims_extractor_ignores_unknown_scopes_after_prefix_stripping() -> None:
+    config = AuthConfig(
+        enabled=True,
+        policy_decision_point_base_url="http://localhost:8181",
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            client_id="test-client",
+            scope_prefix="api://primary/",
+        ),
+    )
+    claims: JsonObject = {
+        "sub": "alice",
+        "scope": "openid profile.email api://primary/models:read custom.audit.read",
+    }
+
+    token_claims = TokenClaimsExtractor(config).extract(claims)
+
+    assert token_claims is not None
+    assert token_claims.scopes == ["models:read"]
+
+
+def test_token_claims_extractor_keeps_valid_nhx_scopes_even_when_unknown_to_platform(auth_config: AuthConfig) -> None:
+    claims: JsonObject = {
+        "preferred_username": "alice",
+        "scope": "api://nhx/not-a-real-service:read imaginary:write",
+    }
+
+    token_claims = TokenClaimsExtractor(auth_config).extract(claims)
+
+    assert token_claims is not None
+    assert token_claims.scopes == ["not-a-real-service:read", "imaginary:write"]
 
 
 def test_token_claims_extractor_returns_none_without_valid_subject(auth_config: AuthConfig) -> None:

@@ -41,6 +41,7 @@ def oidc_config():
         device_authorization_requires_device_id=True,
         device_authorization_display_name="NeMo Helix CLI",
         device_token_request_includes_scope=False,
+        scope_prefix="api://primary/",
         userinfo_endpoint="https://sso.example.com/userinfo",
         workload_token_exchange_enabled=True,
         workload_client_id="test-workload-client",
@@ -200,6 +201,7 @@ class TestGetAuthDiscovery:
             assert result.oidc.device_authorization_requires_device_id is True
             assert result.oidc.device_authorization_display_name == "NeMo Helix CLI"
             assert result.oidc.device_token_request_includes_scope is False
+            assert result.oidc.scope_prefix == "api://primary/"
             assert result.oidc.authorization_endpoint == "https://sso.example.com/authorize"
             assert result.oidc.token_endpoint == "https://sso.example.com/token"
             assert result.oidc.device_authorization_endpoint == "https://sso.example.com/device/code"

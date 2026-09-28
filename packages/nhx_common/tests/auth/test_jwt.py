@@ -357,7 +357,7 @@ class TestJWTValidator:
                 "sub": "user123",
                 "email": "user@example.com",
                 "groups": ["admin"],
-                "scope": "openid profile",
+                "scope": "workspace:read openid profile",
                 "iat": now,
                 "nbf": now,
                 "exp": now + 3600,
@@ -372,7 +372,7 @@ class TestJWTValidator:
         assert result.subject == "user123"
         assert result.email == "user@example.com"
         assert result.groups == ["admin"]
-        assert result.scopes == ["openid", "profile"]
+        assert result.scopes == ["workspace:read"]
 
     @pytest.mark.asyncio
     async def test_validate_unsigned_token_future_iat_when_allowed(self):
@@ -433,7 +433,7 @@ class TestJWTValidator:
             "sub": "user123",
             "email": "user@example.com",
             "groups": ["admin", "users"],
-            "scope": "openid profile email",
+            "scope": "open.id models:read email",
             "exp": int(time.time()) + 3600,
             "iat": int(time.time()),
             "aud": "test-audience",
@@ -454,7 +454,7 @@ class TestJWTValidator:
             assert result.subject == "user123"
             assert result.email == "user@example.com"
             assert result.groups == ["admin", "users"]
-            assert result.scopes == ["openid", "profile", "email"]
+            assert result.scopes == ["models:read"]
 
     @pytest.mark.asyncio
     async def test_validate_token_with_actor_claim(self, jwt_validator):
@@ -881,7 +881,7 @@ class TestOpaqueTokenIntrospection:
             "sub": "user123",
             "email": "user@example.com",
             "groups": ["admin"],
-            "scope": "openid profile",
+            "scope": "secrets:write openid profile",
         }
 
         mock_response = MagicMock()
@@ -897,7 +897,7 @@ class TestOpaqueTokenIntrospection:
         assert result.subject == "user123"
         assert result.email == "user@example.com"
         assert result.groups == ["admin"]
-        assert result.scopes == ["openid", "profile"]
+        assert result.scopes == ["secrets:write"]
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args
         assert call_args[0][0] == "https://sso.example.com/introspect"
