@@ -20,8 +20,7 @@ API testing:
 Utilities:
 - short_unique_name: Helper for generating unique names with length constraints
 - unique_email: Helper for generating unique test user emails
-- as_user: Helper for creating SDK client authenticated as a specific user
-- as_service_for: Helper for creating SDK client authenticated as a service principal
+- as_user: Helper for deriving a typed client authenticated as a specific user
 - grant_workspace_role: Helper for granting workspace roles in auth-enabled tests
 - add_mock_provider: Helper for adding mock providers to IGW model cache
 - MockProviderResponse: Wrapper to configure dynamic mock LLM responses
@@ -72,7 +71,6 @@ from .utils import (
     MockProviderResponse,
     NemoRun,
     add_mock_provider,
-    as_service_for,
     as_user,
     assert_exit_0,
     get_repo_root,
@@ -100,7 +98,6 @@ __all__ = [
     # Utilities
     "short_unique_name",
     "unique_email",
-    "as_service_for",
     "as_user",
     "grant_workspace_role",
     "add_mock_provider",

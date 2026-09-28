@@ -127,12 +127,13 @@ def test_create_test_client_creates_default_workspace():
 # =============================================================================
 
 
-def test_as_user_returns_new_sdk():
-    """Test that as_user returns a new SDK client."""
+def test_as_user_returns_new_client():
+    """Test that as_user returns a new typed client carrying the principal headers."""
     with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
-        user_sdk = as_user(ctx.sdk, "test@example.com")
-        # Should be a different SDK instance
-        assert user_sdk is not ctx.sdk
+        user_client = as_user(ctx.client, "test@example.com")
+        assert user_client is not ctx.client
+        assert user_client.default_headers["X-NHX-Principal-Id"] == "test@example.com"
+        assert "X-NHX-Principal-Id" not in ctx.client.default_headers
 
 
 # =============================================================================
