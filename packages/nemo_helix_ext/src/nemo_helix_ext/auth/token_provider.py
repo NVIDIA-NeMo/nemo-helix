@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 import httpx
 from typing_extensions import Self
 
-from nemo_helix_ext.auth.helpers import decode_jwt_claims
+from nemo_helix_ext.auth.helpers import BearerTokenSource, decode_jwt_claims, parse_bearer_token_source
 from nemo_helix_ext.client.tls import httpx_tls_config_from_env
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,35 @@ class TokenRefreshError(RuntimeError):
         super().__init__(f"Token refresh failed: {error} - {error_description}")
 
 
+class TokenPersistenceError(RuntimeError):
+    """Raised when a rotated refresh token cannot be persisted safely."""
+
+
 def _validate_expires_in(expires_in: object) -> int | float | None:
     if isinstance(expires_in, bool):
         return None
-    return expires_in if isinstance(expires_in, int | float) else None
+    if not isinstance(expires_in, int | float):
+        return None
+    if not math.isfinite(expires_in):
+        raise ValueError("expires_in must be finite")
+    return expires_in
+
+
+def _validate_expires_at(expires_at: object, *, field_name: str = "expires_at") -> float | None:
+    if isinstance(expires_at, bool) or not isinstance(expires_at, int | float):
+        return None
+    value = float(expires_at)
+    if not math.isfinite(value):
+        raise ValueError(f"{field_name} must be finite")
+    return value
+
+
+def _select_bearer_token(token_data: dict, source: BearerTokenSource) -> str:
+    source = parse_bearer_token_source(source)
+    token = token_data.get(source)
+    if not isinstance(token, str) or not token:
+        raise RuntimeError(f"OIDC refresh response did not include the configured {source}")
+    return token
 
 
 def refresh_token_grant(
@@ -80,42 +106,51 @@ def refresh_token_grant(
 
 @dataclass
 class TokenSet:
-    """A pair of access + refresh tokens with expiry metadata."""
+    """An API bearer + refresh token pair with expiry metadata.
+
+    ``access_token`` keeps its historical name but may contain the configured
+    ID token when that is the bearer accepted by the platform.
+    """
 
     access_token: str
     refresh_token: str | None = None
     expires_at: float | None = None
 
-    @staticmethod
+    @classmethod
     def from_access_token(
+        cls,
         access_token: str,
         refresh_token: str | None = None,
         expires_in: object = None,
+        expires_at: object = None,
     ) -> Self:
-        """Create a TokenSet, extracting expiry from the JWT's `exp` claim."""
-        expires_at = None
+        """Create a TokenSet, preferring JWT expiry over persisted or relative expiry metadata."""
         claims = decode_jwt_claims(access_token)
-        if claims:
-            expires_at = claims.get("exp")
+        jwt_expires_at = _validate_expires_at(claims.get("exp"), field_name="JWT exp") if claims else None
+        persisted_expires_at = _validate_expires_at(expires_at)
         validated_expires_in = _validate_expires_in(expires_in)
-        if expires_at is None and validated_expires_in is not None:
-            expires_at = time.time() + float(validated_expires_in)
-        return TokenSet(
+
+        resolved_expires_at = jwt_expires_at
+        if resolved_expires_at is None:
+            resolved_expires_at = persisted_expires_at
+        if resolved_expires_at is None and validated_expires_in is not None:
+            resolved_expires_at = time.time() + float(validated_expires_in)
+        return cls(
             access_token=access_token,
             refresh_token=refresh_token,
-            expires_at=float(expires_at) if expires_at is not None else None,
+            expires_at=resolved_expires_at,
         )
 
     def is_expired(self, margin_seconds: float = DEFAULT_REFRESH_MARGIN_SECONDS) -> bool:
         """Check if the access token is expired or about to expire."""
         if self.expires_at is None:
             return False
-        return time.time() >= (self.expires_at - margin_seconds)
+        return not math.isfinite(self.expires_at) or time.time() >= (self.expires_at - margin_seconds)
 
 
 @dataclass
 class OIDCTokenProvider:
-    """Provides access tokens with automatic refresh via the OAuth2 refresh_token grant.
+    """Provides API bearer tokens with automatic refresh via the OAuth2 refresh_token grant.
 
     This is the core component for SDK-level token management. It:
     - Holds the current access + refresh tokens
@@ -146,6 +181,7 @@ class OIDCTokenProvider:
     load_tokens: Callable[[], TokenSet | None] | None = None
     refresh_lock: Callable[[], AbstractContextManager[None]] | None = None
     on_tokens_refreshed: Callable[[TokenSet], None] | None = None
+    bearer_token_source: BearerTokenSource = "access_token"
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def get_access_token(self) -> str:
@@ -239,9 +275,11 @@ class OIDCTokenProvider:
                     certificate_authority=self.certificate_authority,
                 )
 
-            new_access_token = token_data["access_token"]
+            new_access_token = _select_bearer_token(token_data, self.bearer_token_source)
             # The IdP may rotate the refresh token.
-            new_refresh_token = token_data.get("refresh_token", self.tokens.refresh_token)
+            old_refresh_token = self.tokens.refresh_token
+            new_refresh_token = token_data.get("refresh_token", old_refresh_token)
+            refresh_token_rotated = new_refresh_token != old_refresh_token
 
             self.tokens = TokenSet.from_access_token(
                 new_access_token,
@@ -253,7 +291,14 @@ class OIDCTokenProvider:
             if self.on_tokens_refreshed:
                 try:
                     self.on_tokens_refreshed(self.tokens)
-                except Exception:
+                except Exception as exc:
+                    if refresh_token_rotated:
+                        # The previous refresh token may already be invalid. Do not hide
+                        # a failure to persist its replacement.
+                        raise TokenPersistenceError(
+                            "The identity provider rotated the refresh token, but the refreshed credentials "
+                            "could not be saved. Re-authenticate before attempting another refresh."
+                        ) from exc
                     logger.warning("Failed to persist refreshed tokens", exc_info=True)
 
     def force_refresh(self) -> str:

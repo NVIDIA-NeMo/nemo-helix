@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
-from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -187,14 +187,14 @@ def test_create_job_forwards_transformed_spec_in_json_mode() -> None:
     )
     app = FastAPI()
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
-    app.dependency_overrides[get_sdk_client] = lambda: MagicMock()
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
 
     mock_jobs = _RecordingJobsClient()
 
     client = TestClient(app)
     with patch(
-        "nemo_helix_plugin.jobs.api_factory.client_from_platform",
+        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
         return_value=mock_jobs,
     ):
         response = client.post("/apis/widgets/v2/workspaces/default/jobs", json={"spec": {"label": "metric"}})
@@ -221,14 +221,14 @@ def test_create_job_stamps_plugin_telemetry_custom_fields() -> None:
     )
     app = FastAPI()
     app.include_router(router, prefix="/apis/data-designer/v2/workspaces/{workspace}")
-    app.dependency_overrides[get_sdk_client] = lambda: MagicMock()
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
 
     mock_jobs = _RecordingJobsClient()
 
     client = TestClient(app)
     with patch(
-        "nemo_helix_plugin.jobs.api_factory.client_from_platform",
+        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
         return_value=mock_jobs,
     ):
         response = client.post(
@@ -295,7 +295,7 @@ def test_create_job_forwards_profile_and_options_to_compiler() -> None:
     )
     app = FastAPI()
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
-    app.dependency_overrides[get_sdk_client] = lambda: MagicMock()
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
 
     async def _create_job(*, workspace: str, body: object) -> MagicMock:
@@ -306,7 +306,7 @@ def test_create_job_forwards_profile_and_options_to_compiler() -> None:
 
     client = TestClient(app)
     with patch(
-        "nemo_helix_plugin.jobs.api_factory.client_from_platform",
+        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
         return_value=mock_jobs,
     ):
         response = client.post(
@@ -331,7 +331,7 @@ def test_create_job_rejects_unsupported_profile_and_options() -> None:
     )
     app = FastAPI()
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
-    app.dependency_overrides[get_sdk_client] = lambda: MagicMock()
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
 
     client = TestClient(app)

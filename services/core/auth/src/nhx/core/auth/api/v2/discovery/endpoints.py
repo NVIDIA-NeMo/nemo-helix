@@ -5,6 +5,7 @@
 
 import logging
 import time
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Request
@@ -31,6 +32,11 @@ class OIDCDiscoveryResponse(BaseModel):
     device_authorization_endpoint: str | None = None
     userinfo_endpoint: str | None = None
     client_id: str
+    cli_client_id: str | None = None
+    bearer_token_source: Literal["access_token", "id_token"] = "access_token"
+    device_authorization_requires_device_id: bool = False
+    device_authorization_display_name: str | None = None
+    device_token_request_includes_scope: bool = True
     default_scopes: str = "openid profile email offline_access"
     scope_prefix: str | None = None
     workload_token_exchange_enabled: bool = False
@@ -115,6 +121,11 @@ need to authenticate with this NeMo Helix deployment.
   - `device_authorization_endpoint`: Device flow authorization endpoint (for CLI)
   - `userinfo_endpoint`: UserInfo endpoint
   - `client_id`: OAuth client ID to use
+  - `cli_client_id`: Optional OAuth client ID dedicated to interactive CLI authentication
+  - `bearer_token_source`: Token response field clients send to NeMo Helix APIs
+  - `device_authorization_requires_device_id`: Whether CLI device requests must include a generated `device_id`
+  - `device_authorization_display_name`: Optional device name shown during device authorization
+  - `device_token_request_includes_scope`: Whether CLI device token requests include the requested scopes
   - `default_scopes`: OAuth scopes to request during authentication
   - `scope_prefix`: Prefix to prepend to custom scopes (those with ':' or '.default')
   - `workload_token_exchange_enabled`: Whether SDK workload identity token exchange is enabled
@@ -150,6 +161,11 @@ async def get_auth_discovery(request: Request | None = None) -> AuthDiscoveryRes
             ),
             userinfo_endpoint=config.oidc.userinfo_endpoint or discovery.get("userinfo_endpoint"),
             client_id=config.oidc.client_id,
+            cli_client_id=config.oidc.cli_client_id,
+            bearer_token_source=config.oidc.bearer_token_source,
+            device_authorization_requires_device_id=config.oidc.device_authorization_requires_device_id,
+            device_authorization_display_name=config.oidc.device_authorization_display_name,
+            device_token_request_includes_scope=config.oidc.device_token_request_includes_scope,
             default_scopes=config.oidc.default_scopes,
             scope_prefix=config.oidc.scope_prefix,
             workload_token_exchange_enabled=config.oidc.workload_token_exchange_enabled,

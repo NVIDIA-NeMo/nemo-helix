@@ -67,11 +67,16 @@ paths:
         \ browser-based flows\n  - `token_endpoint`: Token exchange endpoint\n  -\
         \ `device_authorization_endpoint`: Device flow authorization endpoint (for\
         \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
-        \ client ID to use\n  - `default_scopes`: OAuth scopes to request during authentication\n\
-        \  - `scope_prefix`: Prefix to prepend to custom scopes (those with ':' or\
-        \ '.default')\n  - `workload_token_exchange_enabled`: Whether SDK workload\
-        \ identity token exchange is enabled\n  - `workload_client_id`: OAuth client\
-        \ ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
+        \ client ID to use\n  - `cli_client_id`: Optional OAuth client ID dedicated\
+        \ to interactive CLI authentication\n  - `bearer_token_source`: Token response\
+        \ field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
+        \ Whether CLI device requests must include a generated `device_id`\n  - `device_authorization_display_name`:\
+        \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
+        \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\
+        \ OAuth scopes to request during authentication\n  - `scope_prefix`: Prefix\
+        \ to prepend to custom scopes (those with ':' or '.default')\n  - `workload_token_exchange_enabled`:\
+        \ Whether SDK workload identity token exchange is enabled\n  - `workload_client_id`:\
+        \ OAuth client ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
         \ Token endpoint to use only for workload identity token exchange\n  - `workload_audience`:\
         \ RFC 8693 audience for exchanged workload tokens\n  - `workload_scope`: OAuth\
         \ scopes for exchanged workload tokens"
@@ -17673,6 +17678,27 @@ components:
         client_id:
           type: string
           title: Client Id
+        cli_client_id:
+          title: Cli Client Id
+          type: string
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        device_authorization_requires_device_id:
+          type: boolean
+          title: Device Authorization Requires Device Id
+          default: false
+        device_authorization_display_name:
+          title: Device Authorization Display Name
+          type: string
+        device_token_request_includes_scope:
+          type: boolean
+          title: Device Token Request Includes Scope
+          default: true
         default_scopes:
           type: string
           title: Default Scopes

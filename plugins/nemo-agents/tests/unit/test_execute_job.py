@@ -55,7 +55,7 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 )
 from nemo_agents_plugin.telemetry import intake_export
 from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
-from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -1276,7 +1276,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     entity_client.get.return_value = _agent()
     sdk = _sdk_with_files()
     app.dependency_overrides[get_entity_client] = lambda: entity_client
-    app.dependency_overrides[get_sdk_client] = lambda: sdk
+    app.dependency_overrides[get_nemo_client] = lambda: sdk
 
     captured_body: dict[str, Any] = {}
 
@@ -1303,7 +1303,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
 
     fake_jobs = SimpleNamespace(create_job=_create_job)
     with (
-        patch("nemo_helix_plugin.jobs.api_factory.client_from_platform", return_value=fake_jobs),
+        patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=fake_jobs),
         patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
     ):
         response = TestClient(app).post(
@@ -1380,7 +1380,7 @@ def test_execute_job_create_route_maps_reserved_secret_env_to_422() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = _get
     app.dependency_overrides[get_entity_client] = lambda: entity_client
-    app.dependency_overrides[get_sdk_client] = lambda: _sdk_with_files()
+    app.dependency_overrides[get_nemo_client] = lambda: _sdk_with_files()
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
         get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -297,6 +298,43 @@ class TestOIDCTokenProvider:
             verify="/tmp/nemo-ca.pem",
         )
 
+    def test_discover_nhx_config_rejects_unknown_bearer_token_source(self):
+        with patch("nemo_helix_plugin.client.oidc.httpx.get") as mock_get:
+            mock_get.return_value = httpx.Response(
+                200,
+                json={"auth_enabled": True, "oidc": {"bearer_token_source": "refresh_token"}},
+                request=httpx.Request("GET", "https://nemo.example.com/apis/auth/discovery"),
+            )
+
+            with pytest.raises(ValueError, match="bearer_token_source"):
+                discover_nhx_config("https://nemo.example.com")
+
+    @pytest.mark.parametrize(
+        ("token", "kwargs", "field"),
+        [
+            (
+                generate_unsigned_jwt("user", expires_in_seconds=None, extra_claims={"exp": float("nan")}),
+                {},
+                "JWT exp",
+            ),
+            (generate_unsigned_jwt("user", expires_in_seconds=None), {"expires_at": float("inf")}, "expires_at"),
+            (
+                generate_unsigned_jwt("user", expires_in_seconds=None),
+                {"expires_in": float("-inf")},
+                "expires_in",
+            ),
+        ],
+    )
+    def test_token_set_rejects_non_finite_expiry(self, token, kwargs, field):
+        with pytest.raises(ValueError, match=rf"{field} must be finite"):
+            TokenSet.from_access_token(token, **kwargs)
+
+    @pytest.mark.parametrize("expires_at", [float("nan"), float("inf"), float("-inf")])
+    def test_token_set_treats_non_finite_expiry_as_expired(self, expires_at):
+        tokens = TokenSet(access_token="token", expires_at=expires_at)
+
+        assert tokens.is_expired() is True
+
     def test_returns_token_when_not_expired(self):
         token = _make_jwt(exp=time.time() + 3600)
         provider = OIDCTokenProvider(
@@ -322,6 +360,43 @@ class TestOIDCTokenProvider:
 
         assert result == new_token
         mock_grant.assert_called_once()
+
+    def test_refresh_selects_configured_id_token(self):
+        expired_token = _make_jwt(exp=time.time() - 100)
+        new_id_token = _make_jwt(exp=time.time() + 3600)
+        provider = OIDCTokenProvider(
+            token_endpoint="https://idp/token",
+            client_id="client",
+            tokens=TokenSet(access_token=expired_token, refresh_token="refresh-me", expires_at=time.time() - 100),
+            bearer_token_source="id_token",
+        )
+
+        with patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_grant:
+            mock_grant.return_value = {
+                "access_token": "opaque-access-token",
+                "id_token": new_id_token,
+                "refresh_token": "rotated-refresh",
+            }
+            result = provider.get_access_token()
+
+        assert result == new_id_token
+        assert provider.tokens.refresh_token == "rotated-refresh"
+
+    def test_refresh_requires_configured_id_token(self):
+        expired_token = _make_jwt(exp=time.time() - 100)
+        provider = OIDCTokenProvider(
+            token_endpoint="https://idp/token",
+            client_id="client",
+            tokens=TokenSet(access_token=expired_token, refresh_token="refresh-me", expires_at=time.time() - 100),
+            bearer_token_source="id_token",
+        )
+
+        with (
+            patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_grant,
+            pytest.raises(RuntimeError, match="configured id_token"),
+        ):
+            mock_grant.return_value = {"access_token": "opaque-access-token"}
+            provider.get_access_token()
 
     def test_persists_rotated_tokens(self):
         expired_token = _make_jwt(exp=time.time() - 100)
@@ -698,18 +773,90 @@ class TestFromConfig:
         config_file = tmp_path / "config.yaml"
         config_file.write_text(yaml.safe_dump(config_data))
 
-        with patch("nemo_helix_plugin.client.oidc._discover_oidc_client_settings") as mock_discover:
+        with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
             from nemo_helix_plugin.client.oidc import NHXOIDCConfig
 
             mock_discover.return_value = NHXOIDCConfig(
                 auth_enabled=True,
-                client_id="test-client",
+                client_id="web-client",
+                cli_client_id="cli-client",
+                bearer_token_source="id_token",
                 token_endpoint="https://idp/token",
             )
             client = NemoClient.from_config(config_path=config_file)
 
         assert client.base_url == "http://localhost:9090"
-        assert client._auth is not None
+        assert isinstance(client._auth, OIDCTokenProvider)
+        assert client._auth.client_id == "cli-client"
+        assert client._auth.bearer_token_source == "id_token"
+
+    def test_from_config_restores_opaque_token_expiry(self, tmp_path):
+        expires_at = time.time() + 3600
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [
+                {
+                    "name": "test-user",
+                    "type": "oauth",
+                    "token": "opaque-access-token",
+                    "refresh_token": "refresh-token",
+                    "expires_at": expires_at,
+                }
+            ],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+
+        with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
+            mock_discover.return_value = NHXOIDCConfig(
+                auth_enabled=True,
+                client_id="cli-client",
+                token_endpoint="https://idp/token",
+            )
+            client = NemoClient.from_config(config_path=config_file)
+
+        assert isinstance(client._auth, OIDCTokenProvider)
+        assert client._auth.tokens.expires_at == expires_at
+
+    def test_from_config_does_not_downgrade_discovery_validation_failure(self, tmp_path):
+        token = _make_jwt()
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [{"name": "test-user", "type": "oauth", "token": token}],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+
+        with patch(
+            "nemo_helix_plugin.client.oidc.discover_nhx_config",
+            side_effect=ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'"),
+        ):
+            with pytest.raises(ValueError, match="bearer_token_source"):
+                NemoClient.from_config(config_path=config_file)
+
+    def test_from_config_falls_back_for_non_json_discovery(self, tmp_path):
+        token = _make_jwt()
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [{"name": "test-user", "type": "oauth", "token": token}],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+
+        with patch(
+            "nemo_helix_plugin.client.oidc.discover_nhx_config",
+            side_effect=json.JSONDecodeError("Expecting value", "<html>", 0),
+        ):
+            client = NemoClient.from_config(config_path=config_file)
+
+        assert isinstance(client._auth, OIDCTokenProvider)
+        assert client._auth.tokens.access_token == token
 
     def test_from_config_with_no_auth(self, tmp_path):
         config_data = {

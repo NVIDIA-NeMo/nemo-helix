@@ -11,15 +11,15 @@ config file.
 
 import json
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.testing import assert_exit_0, run_nemo_local
 
 from e2e.auditor.utils import minimal_audit_config, minimal_audit_target, unique_name
 
 
-def test_cli_config_create_list_delete(sdk: NeMoHelix, workspace: str) -> None:
+def test_cli_config_create_list_delete(client: NemoClient, workspace: str) -> None:
     name = unique_name("cli-cfg")
-    base_url = str(sdk.base_url)
+    base_url = client.base_url
 
     result = run_nemo_local(
         "auditor",
@@ -49,9 +49,9 @@ def test_cli_config_create_list_delete(sdk: NeMoHelix, workspace: str) -> None:
     assert all(item["name"] != name for item in listed["data"])
 
 
-def test_cli_target_create_list_delete(sdk: NeMoHelix, workspace: str) -> None:
+def test_cli_target_create_list_delete(client: NemoClient, workspace: str) -> None:
     name = unique_name("cli-tgt")
-    base_url = str(sdk.base_url)
+    base_url = client.base_url
 
     result = run_nemo_local(
         "auditor",
@@ -75,9 +75,9 @@ def test_cli_target_create_list_delete(sdk: NeMoHelix, workspace: str) -> None:
     assert_exit_0(result, "CLI delete target")
 
 
-def test_cli_config_update(sdk: NeMoHelix, workspace: str) -> None:
+def test_cli_config_update(client: NemoClient, workspace: str) -> None:
     name = unique_name("cli-upd")
-    base_url = str(sdk.base_url)
+    base_url = client.base_url
 
     result = run_nemo_local(
         "auditor",

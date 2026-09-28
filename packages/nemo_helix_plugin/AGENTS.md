@@ -25,7 +25,7 @@ Before writing any plugin code, load the relevant skill. Skills contain exact im
 - **`plugin-service`** → adding HTTP routes with `NemoService`, `RouterSpec`, response schemas, pagination
 - **`plugin-authz`** → declaring HTTP authorization on plugin routes: `@path_rule`, `AuthzScope` / `PermissionSet`, caller-kind (`PRINCIPAL` vs `SERVICE_PRINCIPAL`), the `hard_fail` bundle build, migrating off `get_authz_contribution`
 - **`plugin-controller`** → background reconcile loops with `NemoController`, `on_startup()` patterns, service-principal clients
-- **`plugin-platform-services`** → calling platform services (jobs, files, secrets, models, inference gateway, auth) from a plugin
+- **`plugin-platform-services`** → calling Helix services (jobs, files, secrets, models, inference gateway, auth) from a plugin
 - **`plugin-testing`** → writing tests for any plugin surface — entity client mocking, service route tests, job tests, config overrides
 
 ## Python Conventions

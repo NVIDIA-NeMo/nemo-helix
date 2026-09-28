@@ -44,6 +44,7 @@ class _ProviderCacheKey:
     token_endpoint: str
     client_id: str
     refresh_scope: str | None
+    bearer_token_source: str
 
 
 # Process-wide cache: (config_path, context) → shared OIDCTokenProvider.
@@ -57,7 +58,10 @@ def _make_config_persister(context_name: str, config_path: Path | None = None) -
         from nemo_helix_plugin.client.config.config import Config
         from nemo_helix_plugin.client.config.models import ConfigParams
 
-        params: ConfigParams = {"access_token": tokens.access_token}
+        params: ConfigParams = {
+            "access_token": tokens.access_token,
+            "expires_at": tokens.expires_at,
+        }
         if tokens.refresh_token:
             params["refresh_token"] = tokens.refresh_token
         Config.write(params, context_name=context_name, config_path=config_path)
@@ -87,6 +91,7 @@ def _make_config_token_loader(context_name: str, config_path: Path) -> Callable[
         return TokenSet.from_access_token(
             resolved.user.token.get_secret_value(),
             resolved.user.refresh_token.get_secret_value() if resolved.user.refresh_token else None,
+            expires_at=resolved.user.expires_at,
         )
 
     return load_tokens
@@ -151,6 +156,7 @@ def resolve_oidc_provider(
     context_name: str,
     access_token: str,
     refresh_token: str | None,
+    expires_at: float | None,
     config_exists: bool,
     config_path: Path,
     explicit_access_token: bool = False,
@@ -160,10 +166,10 @@ def resolve_oidc_provider(
     This is the bridge between ``NemoClient.from_config()`` and the OIDC machinery.
     """
     oidc_config = _discover_oidc_client_settings(base_url)
-    tokens = TokenSet.from_access_token(access_token, refresh_token)
+    tokens = TokenSet.from_access_token(access_token, refresh_token, expires_at=expires_at)
 
     token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.client_id or ""
+    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
     refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
 
     if refresh_token and (not token_endpoint or not client_id):
@@ -185,6 +191,7 @@ def resolve_oidc_provider(
             token_endpoint=token_endpoint,
             client_id=client_id,
             refresh_scope=refresh_scope,
+            bearer_token_source=oidc_config.bearer_token_source,
         )
         on_refreshed = _make_config_persister(context_name, config_path)
         load_tokens_cb = _make_config_token_loader(context_name, config_path)
@@ -198,6 +205,7 @@ def resolve_oidc_provider(
                 tokens=tokens,
                 refresh_margin_seconds=DEFAULT_REFRESH_MARGIN_SECONDS,
                 refresh_scope=refresh_scope,
+                bearer_token_source=oidc_config.bearer_token_source,
                 load_tokens=load_tokens_cb,
                 refresh_lock=refresh_lock,
                 on_tokens_refreshed=on_refreshed,
@@ -211,6 +219,7 @@ def resolve_oidc_provider(
         tokens=tokens,
         refresh_margin_seconds=DEFAULT_REFRESH_MARGIN_SECONDS,
         refresh_scope=refresh_scope,
+        bearer_token_source=oidc_config.bearer_token_source,
     )
 
 

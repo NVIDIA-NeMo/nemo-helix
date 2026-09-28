@@ -68,7 +68,7 @@ describe('AgentDetailRoute', () => {
     expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Configuration' })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Run evaluation' })).toHaveLength(2);
+      expect(screen.getAllByRole('button', { name: 'Run Evaluation' })).toHaveLength(2);
     });
     expect(screen.getByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -89,7 +89,7 @@ describe('AgentDetailRoute', () => {
     await user.click(await screen.findByRole('tab', { name: 'Details' }));
 
     expect(await screen.findByRole('button', { name: 'Deploy' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Run evaluation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Evaluation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open traces' })).not.toBeInTheDocument();
   });
 

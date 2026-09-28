@@ -45,11 +45,11 @@ Use the Safe Synthesizer plugin to create jobs through the platform Jobs service
 ## Related Links
 
 - `docs/safe-synthesizer/about/jobs.mdx`
-- `docs/safe-synthesizer/about/reference.md`
+- `docs/safe-synthesizer/about/reference.mdx`
 - `plugins/nemo-safe-synthesizer/scripts/setup_model_filesets.py`
 
 ## Next Steps
 
-- Review the architecture reference: `docs/safe-synthesizer/about/reference.md`.
+- Review the architecture reference: `docs/safe-synthesizer/about/reference.mdx`.
 - Run the model setup script: `plugins/nemo-safe-synthesizer/scripts/setup_model_filesets.py`.
 - Retrieve job artifacts: `plugins/nemo-safe-synthesizer/src/nemo_safe_synthesizer_plugin/skills/safe-synthesizer/workflows/artifacts.md`.

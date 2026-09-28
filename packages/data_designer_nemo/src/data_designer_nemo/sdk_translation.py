@@ -4,7 +4,7 @@
 """Helpers for bridging sync and async NeMo Helix SDK entry points.
 
 ``sync_to_async_sdk`` exists because Data Designer validation and provider
-resolution are async-first: they call platform services to validate filesets,
+resolution are async-first: they call Helix services to validate filesets,
 secrets, personas, and model providers before handing work to the upstream
 Data Designer engine, and in the case of preview this work happens within the
 FastAPI process with an injected ``AsyncNeMoHelix``. However, some legitimate

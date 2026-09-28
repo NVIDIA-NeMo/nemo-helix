@@ -45,6 +45,25 @@ def install_rename_tools(path: Path) -> None:
     shutil.copy2(README, tools_dir / README.name)
 
 
+def test_codeowners_team_slugs_are_preserved(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+    install_rename_tools(repo)
+
+    codeowners = repo / ".github/CODEOWNERS"
+    codeowners.parent.mkdir()
+    owners = "* @NVIDIA-NeMo/nmp_team @NVIDIA-NeMo/nmp_maintainers\n/.github/ @NVIDIA-NeMo/nmp_devops\n"
+    codeowners.write_text(owners)
+    run(["git", "add", "."], repo)
+    run(["git", "commit", "-m", "initial"], repo)
+
+    run([str(repo / "tools/rename/rename-to-nemo-helix.sh"), "--repo-dir", str(repo)], tmp_path)
+    assert codeowners.read_text() == owners
+    verify = run([str(repo / "tools/rename/verify-nemo-helix-rename.sh"), "--repo-dir", str(repo)], tmp_path)
+    assert "No legacy product" in verify.stdout
+
+
 def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

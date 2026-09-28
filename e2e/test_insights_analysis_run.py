@@ -26,13 +26,15 @@ from typing import Any
 
 import pytest
 from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.intake.types import DirectSpanInput, DirectSpansIngestRequest
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
+from nemo_insights_plugin.sdk import InsightsPluginResource
 from nhx.testing import MockProviderResponse, add_mock_provider, wait_for_model_entity
 
 from e2e.agents_deploy_helpers import unique_name
@@ -130,7 +132,7 @@ def _plain_response(model: str, content: str) -> dict[str, Any]:
     }
 
 
-def _mock_analyst_models(sdk: NeMoHelix, workspace: str) -> tuple[str, str]:
+def _mock_analyst_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> tuple[str, str]:
     """Register the Analyst's default/fast Model Entity pair against a mock provider.
 
     The pair must be workspace-qualified Model Entity refs — the Analyst
@@ -167,7 +169,7 @@ def _mock_analyst_models(sdk: NeMoHelix, workspace: str) -> tuple[str, str]:
     # asynchronously, so relying on it races the run we are about to submit --
     # and the Analyst resolves Model Entities, not served-model ids. This is the
     # same create-then-wait the evaluator e2e does for the same reason.
-    models = client_from_platform(sdk, ModelsClient)
+    models = ModelsClient.from_client(client)
     for name in (default_model, fast_model):
         models.create_model(
             workspace=workspace,
@@ -183,7 +185,12 @@ def _mock_analyst_models(sdk: NeMoHelix, workspace: str) -> tuple[str, str]:
     return f"{workspace}/{default_model}", f"{workspace}/{fast_model}"
 
 
-def _job_diagnostics(sdk: NeMoHelix, workspace: str, job_name: str, prefix: str) -> str:
+def _insights(client: NemoClient) -> InsightsPluginResource:
+    """High-level insights resource driven by the typed platform client."""
+    return InsightsPluginResource(client)  # ty: ignore[invalid-argument-type]
+
+
+def _job_diagnostics(client: NemoClient, workspace: str, job_name: str, prefix: str) -> str:
     """Explain a failed run with the backing job's own error details and logs."""
     parts = [prefix]
     # Fabric reports an adapter failure as a failed *result*, not an exception,
@@ -191,18 +198,18 @@ def _job_diagnostics(sdk: NeMoHelix, workspace: str, job_name: str, prefix: str)
     # own error lives only in these results.
     for result_name in (FABRIC_ERROR_RESULT_NAME, FABRIC_RUN_RESULT_NAME):
         try:
-            parts.append(f"{result_name}: {_download_job_result(sdk, workspace, job_name, result_name)}")
+            parts.append(f"{result_name}: {_download_job_result(client, workspace, job_name, result_name)}")
         except Exception as error:
             parts.append(f"Could not fetch {result_name}: {error}")
     try:
-        job = sdk.agents.jobs.execute.get(job_name, workspace=workspace)
+        job = AgentsClient.from_client(client).get_execute_job(name=job_name, workspace=workspace).data()
         for field in ("error_details", "status_details"):
             if detail := job.get(field):
                 parts.append(f"{field}: {json.dumps(detail, indent=2, default=str)}")
     except Exception as error:
         parts.append(f"Could not fetch the job: {error}")
     try:
-        logs = client_from_platform(sdk, JobsClient).list_job_logs(workspace=workspace, name=job_name)
+        logs = JobsClient.from_client(client).list_job_logs(workspace=workspace, name=job_name)
         for entry in logs.items():
             parts.append(f"  - {entry.message}")
     except Exception as error:
@@ -210,29 +217,26 @@ def _job_diagnostics(sdk: NeMoHelix, workspace: str, job_name: str, prefix: str)
     return "\n".join(parts)
 
 
-def _list_job_results(sdk: NeMoHelix, workspace: str, job_name: str) -> dict[str, Any]:
-    url = f"{str(sdk.base_url).rstrip('/')}/apis/agents/v2/workspaces/{workspace}/jobs/execute/{job_name}/results"
-    response = sdk._client.get(url)
-    assert response.status_code == 200, f"Failed to list results for {job_name}: {response.text}"
-    return response.json()
+def _list_job_results(client: NemoClient, workspace: str, job_name: str) -> dict[str, Any]:
+    return AgentsClient.from_client(client).list_execute_job_results(name=job_name, workspace=workspace).data()
 
 
-def _download_job_result(sdk: NeMoHelix, workspace: str, job_name: str, result_name: str) -> str:
-    url = (
-        f"{str(sdk.base_url).rstrip('/')}/apis/agents/v2/workspaces/{workspace}"
-        f"/jobs/execute/{job_name}/results/{result_name}/download"
-    )
-    response = sdk._client.get(url)
+def _download_job_result(client: NemoClient, workspace: str, job_name: str, result_name: str) -> str:
+    url = f"{client.base_url}/apis/agents/v2/workspaces/{workspace}/jobs/execute/{job_name}/results/{result_name}/download"
+    response = client._client.get(url)
     assert response.status_code == 200, f"Failed to download {result_name!r} for {job_name}: {response.text}"
     return response.text
 
 
-def _wait_for_spans(sdk: NeMoHelix, *, workspace: str, agent_name: str, timeout: float = 120.0) -> list[Any]:
+def _wait_for_spans(client: NemoClient, *, workspace: str, agent_name: str, timeout: float = 120.0) -> list[Any]:
     """Poll Intake: Relay posts as the run ends and ingest is asynchronous."""
+    intake = IntakeClient.from_client(client)
     deadline = time.monotonic() + timeout
     while True:
-        page = sdk.intake.spans.list(workspace=workspace, filter={"agent_name": agent_name}, page_size=50)
-        spans = list(page.data or [])
+        page = intake.list_spans(
+            workspace=workspace, query_params={"filter": {"agent_name": agent_name}, "page_size": 50}
+        ).page()
+        spans = list(page.items)
         if spans or time.monotonic() >= deadline:
             return spans
         time.sleep(2.0)
@@ -251,10 +255,12 @@ def _created_insight_id(report: str) -> str:
     return match.group("insight_id")
 
 
-def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoHelix, workspace: str) -> None:
+def test_analysis_run_persists_insights_and_saves_its_report(
+    sdk: NeMoHelix, client: NemoClient, workspace: str
+) -> None:
     """One analysis run, end to end, through the supported API surface."""
     target_agent = unique_name("analyzed-agent")
-    intake = client_from_platform(sdk, IntakeClient)
+    intake = IntakeClient.from_client(client)
     now = datetime.now(timezone.utc) - timedelta(seconds=5)
     intake.create_spans(
         workspace=workspace,
@@ -288,9 +294,9 @@ def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoHelix, wor
         time.sleep(1)
     else:
         pytest.fail("Seeded traces did not become queryable")
-    default_model, fast_model = _mock_analyst_models(sdk, workspace)
+    default_model, fast_model = _mock_analyst_models(sdk, client, workspace)
 
-    created = sdk.insights.analysis_runs.create(
+    created = _insights(client).analysis_runs.create(
         workspace=workspace,
         agent=target_agent,
         default_model=default_model,
@@ -306,26 +312,26 @@ def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoHelix, wor
     assert created.job is not None
     assert created.job["name"] == run_name
 
-    final = sdk.insights.analysis_runs.wait(
+    final = _insights(client).analysis_runs.wait(
         workspace=workspace,
         name=run_name,
         timeout=JOB_TIMEOUT_SECONDS,
         poll_interval=2.0,
     )
     assert final.job_status == "completed", _job_diagnostics(
-        sdk, workspace, run_name, f"Analysis run {run_name} finished with job status {final.job_status!r}"
+        client, workspace, run_name, f"Analysis run {run_name} finished with job status {final.job_status!r}"
     )
 
     # The run survives as a queryable record, not just as a job.
-    listed = sdk.insights.analysis_runs.list_runs(workspace=workspace, agent=target_agent)
+    listed = _insights(client).analysis_runs.list_runs(workspace=workspace, agent=target_agent)
     assert run_name in {run.name for run in listed.data}
     assert final.run.default_model == default_model
     assert final.run.fast_model == fast_model
 
     # The execute extension saves a durable report of what the run did.
-    result_names = {str(result["name"]) for result in _list_job_results(sdk, workspace, run_name)["data"]}
+    result_names = {str(result["name"]) for result in _list_job_results(client, workspace, run_name)["data"]}
     assert REPORT_RESULT_NAME in result_names, f"Saved results: {sorted(result_names)}"
-    report = _download_job_result(sdk, workspace, run_name, REPORT_RESULT_NAME)
+    report = _download_job_result(client, workspace, run_name, REPORT_RESULT_NAME)
     assert ANALYST_SUMMARY in report
     assert INSIGHT_TITLE in report
 
@@ -335,11 +341,11 @@ def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoHelix, wor
     # Relay carries the Analyst's own trajectory to Intake. Nothing in this
     # test configures telemetry: the agents plugin wires the export, Fabric
     # resolves it, and the adapter activates it.
-    spans = _wait_for_spans(sdk, workspace=workspace, agent_name="insights-analyst")
+    spans = _wait_for_spans(client, workspace=workspace, agent_name="insights-analyst")
     assert spans, "the Analyst ran but its trajectory never reached Intake"
 
     insight_id = _created_insight_id(report)
-    filed = sdk.insights.insights.get(workspace=workspace, insight_id=insight_id)
+    filed = _insights(client).insights.get(workspace=workspace, insight_id=insight_id)
     assert filed.title == INSIGHT_TITLE
     assert filed.description == INSIGHT_DESCRIPTION
     assert filed.agent == target_agent

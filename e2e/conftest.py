@@ -74,13 +74,14 @@ from collections.abc import Iterator
 
 import pytest
 from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing.e2e.jobs import wait_budget
+from pydantic import SecretStr
 
 from e2e.services_pool_fixtures import (  # noqa: F401
     _services,
@@ -90,6 +91,7 @@ from e2e.services_pool_fixtures import (  # noqa: F401
     append_services_pool_report_sections,
     configure_services_pool,
     register_services_pool_items,
+    services_pool_client,
     services_pool_sdk,
 )
 
@@ -127,11 +129,13 @@ def ngc_api_key() -> str:
 
 
 @pytest.fixture
-def ngc_secret(sdk: NeMoHelix, workspace: str, ngc_api_key: str) -> Iterator[str]:
+def ngc_secret(client: NemoClient, workspace: str, ngc_api_key: str) -> Iterator[str]:
     """Create a secret containing the NGC API key, cleaned up after test."""
     secret_name = f"e2e-ngc-key-{uuid.uuid4().hex[:8]}"
-    secrets = client_from_platform(sdk, SecretsClient)
-    secrets.create_secret(workspace=workspace, body=HelixSecretCreateRequest(name=secret_name, value=ngc_api_key))
+    secrets = SecretsClient.from_client(client)
+    secrets.create_secret(
+        workspace=workspace, body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(ngc_api_key))
+    )
     yield secret_name
     try:
         secrets.delete_secret(workspace=workspace, name=secret_name)
@@ -197,20 +201,26 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # noqa
 
 @pytest.fixture(scope="module", name="sdk")
 def e2e_sdk(request: pytest.FixtureRequest) -> NeMoHelix:
-    """Provide the conventional e2e SDK fixture name."""
+    """Generated SDK handle, kept only for the nhx.testing helpers that still take one."""
     return request.getfixturevalue("services_pool_sdk")
 
 
+@pytest.fixture(scope="module", name="client")
+def e2e_client(request: pytest.FixtureRequest) -> NemoClient:
+    """Typed platform client for the module's pooled services instance."""
+    return request.getfixturevalue("services_pool_client")
+
+
 @pytest.fixture(scope="module")
-def files_client(sdk: NeMoHelix) -> FilesClient:
-    """Provide a FilesClient derived from the SDK."""
-    return client_from_platform(sdk, FilesClient)
+def files_client(client: NemoClient) -> FilesClient:
+    """Provide a FilesClient sharing the typed client's transport."""
+    return FilesClient.from_client(client)
 
 
 @pytest.fixture(scope="function")
-def workspace(sdk: NeMoHelix) -> Iterator[str]:
+def workspace(client: NemoClient) -> Iterator[str]:
     """Create a unique workspace for each test, deleted on teardown."""
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+    workspaces = WorkspacesClient.from_client(client)
     name = f"e2e-{uuid.uuid4().hex[:8]}"
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
     yield name

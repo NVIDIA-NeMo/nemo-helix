@@ -33,9 +33,14 @@ def oidc_config():
         enabled=True,
         issuer="https://sso.example.com",
         client_id="test-client",
+        cli_client_id="test-cli-client",
+        bearer_token_source="id_token",
         authorization_endpoint="https://sso.example.com/authorize",
         token_endpoint="https://sso.example.com/token",
         device_authorization_endpoint="https://sso.example.com/device/code",
+        device_authorization_requires_device_id=True,
+        device_authorization_display_name="NeMo Helix CLI",
+        device_token_request_includes_scope=False,
         userinfo_endpoint="https://sso.example.com/userinfo",
         workload_token_exchange_enabled=True,
         workload_client_id="test-workload-client",
@@ -88,6 +93,11 @@ class TestOIDCDiscoveryResponse:
             device_authorization_endpoint="https://sso.example.com/device/code",
             userinfo_endpoint="https://sso.example.com/userinfo",
             client_id="test-client",
+            cli_client_id="test-cli-client",
+            bearer_token_source="id_token",
+            device_authorization_requires_device_id=True,
+            device_authorization_display_name="NeMo Helix CLI",
+            device_token_request_includes_scope=False,
         )
 
         assert response.issuer == "https://sso.example.com"
@@ -96,6 +106,11 @@ class TestOIDCDiscoveryResponse:
         assert response.device_authorization_endpoint == "https://sso.example.com/device/code"
         assert response.userinfo_endpoint == "https://sso.example.com/userinfo"
         assert response.client_id == "test-client"
+        assert response.cli_client_id == "test-cli-client"
+        assert response.bearer_token_source == "id_token"
+        assert response.device_authorization_requires_device_id is True
+        assert response.device_authorization_display_name == "NeMo Helix CLI"
+        assert response.device_token_request_includes_scope is False
 
     def test_oidc_discovery_response_optional_fields(self):
         """Test OIDCDiscoveryResponse with optional fields."""
@@ -109,6 +124,11 @@ class TestOIDCDiscoveryResponse:
         assert response.token_endpoint is None
         assert response.device_authorization_endpoint is None
         assert response.userinfo_endpoint is None
+        assert response.cli_client_id is None
+        assert response.bearer_token_source == "access_token"
+        assert response.device_authorization_requires_device_id is False
+        assert response.device_authorization_display_name is None
+        assert response.device_token_request_includes_scope is True
 
     def test_oidc_discovery_response_includes_workload_exchange_fields(self):
         """Test OIDCDiscoveryResponse includes workload identity token exchange fields."""
@@ -175,6 +195,11 @@ class TestGetAuthDiscovery:
             assert result.oidc is not None
             assert result.oidc.issuer == "https://sso.example.com"
             assert result.oidc.client_id == "test-client"
+            assert result.oidc.cli_client_id == "test-cli-client"
+            assert result.oidc.bearer_token_source == "id_token"
+            assert result.oidc.device_authorization_requires_device_id is True
+            assert result.oidc.device_authorization_display_name == "NeMo Helix CLI"
+            assert result.oidc.device_token_request_includes_scope is False
             assert result.oidc.authorization_endpoint == "https://sso.example.com/authorize"
             assert result.oidc.token_endpoint == "https://sso.example.com/token"
             assert result.oidc.device_authorization_endpoint == "https://sso.example.com/device/code"

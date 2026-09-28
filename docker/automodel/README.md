@@ -84,11 +84,7 @@ Override registry: `export WHEELS_REGISTRY=...` and `export IMAGE_REGISTRY=...` 
 
 **Base (`nhx-automodel-base`):** NGC PyTorch 26.05, Automodel `uv sync --locked`, pinned `transformers`/`torch`.
 
-**Automodel cherry-picks:** Platform-specific patches under `docker/automodel/cherry-picks/` are applied after `update_pyproject_pytorch.sh` and before `uv sync`. Re-pin or drop patches when upstream `r0.x.y` absorbs the same changes.
-
-| Patch | Purpose |
-|-------|---------|
-| `3d98f6e3.diff` | Drop old media deps (`decord`, `imageio-ffmpeg`) from Automodel extras, remove Automodel's unconditional `opencv-python-headless` dependency, and stop selecting `mistral-common`'s image extra for text training. The container skips Automodel's VLM extra, so FFmpeg-bearing `av` / `opencv-python-headless` wheels are not installed. |
+**Media dependencies:** The base syncs only the Automodel extras text training needs (`extra`, `delta-databricks`). Since r0.6.0, Automodel keeps `opencv-python-headless` and FFmpeg-bearing wheels (`av`, `imageio-ffmpeg`, `decord`) in the opt-in `vlm-media` / `diffusion-media` extras, so they are not installed. Earlier releases needed a local cherry-pick (`3d98f6e3.diff`) to get the same result.
 
 **Customizer tasks image (`nhx-customizer-tasks`):** `uv sync --package nhx-customization-common --package nhx-models --no-dev --inexact` from the customizer workspace slice (`docker/customizer/`). Hosts shared CPU steps (`file_io`, `model_entity`, `model_spec`, LoRA sidecar) for all customization backends.
 

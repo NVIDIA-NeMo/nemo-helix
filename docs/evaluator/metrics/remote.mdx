@@ -20,7 +20,7 @@ Remote metrics support two types:
 | **Generic Remote** (`remote`) | Custom endpoints with configurable request body and score extraction | User-defined Jinja template |
 | **NeMo Agent Toolkit Remote** (`nemo-agent-toolkit-remote`) | NeMo Agent Toolkit evaluator endpoints | Fixed: `{evaluator_name, item}` |
 
-The Evaluator plugin SDK runs either type as a durable platform job through `evaluator.submit(metric=metric, dataset=dataset)`. To iterate on a metric in-process without platform services, use the standalone `nemo_evaluator_sdk.Evaluator` instead.
+The Evaluator plugin SDK runs either type as a durable platform job through `evaluator.submit(metric=metric, dataset=dataset)`. To iterate on a metric in-process without Helix services, use the standalone `nemo_evaluator_sdk.Evaluator` instead.
 
 ## Prerequisites
 

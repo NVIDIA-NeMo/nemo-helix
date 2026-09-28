@@ -17,11 +17,13 @@
 
 from typing import Dict, Optional
 from datetime import datetime
+from typing_extensions import Literal, TypeAlias
 
 from ..._models import BaseModel
-from ..intake.span_status import SpanStatus
 
-__all__ = ["EvaluationSessionResponse"]
+__all__ = ["EvaluationSessionResponse", "SpanStatus"]
+
+SpanStatus: TypeAlias = Literal["success", "error", "cancelled", "unknown"]
 
 
 class EvaluationSessionResponse(BaseModel):

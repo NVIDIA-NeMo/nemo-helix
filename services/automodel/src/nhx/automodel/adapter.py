@@ -41,6 +41,7 @@ def _build_peft(training: dict[str, Any]) -> LoRAParams | None:
         target_modules=lora.get("target_modules"),
         exclude_modules=lora.get("exclude_modules"),
         use_triton=lora.get("use_triton", True),
+        use_memory_efficient_lora=lora.get("use_memory_efficient_lora"),
     )
 
 
@@ -72,6 +73,11 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "progress_reporting": schedule.get("progress_reporting") or ProgressReportingConfig(),
         "sequence_packing": batch.get("sequence_packing", False),
         "sequence_packing_max_samples": batch.get("sequence_packing_max_samples", 1000),
+        "packed_sequence_size": batch.get("packed_sequence_size"),
+        "activation_checkpointing": training.get("activation_checkpointing", False),
+        "mtp": training.get("mtp"),
+        "backend": training.get("backend"),
+        "shuffle": (spec.get("dataset") or {}).get("shuffle", True) if isinstance(spec.get("dataset"), dict) else True,
         "max_seq_length": training.get("max_seq_length", 2048),
         "precision": training.get("precision"),
         "attn_implementation": training.get("attn_implementation", "sdpa"),
@@ -85,6 +91,7 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
             context_parallel_size=parallelism.get("context_parallel_size", 1),
             expert_parallel_size=parallelism.get("expert_parallel_size"),
             sequence_parallel=parallelism.get("sequence_parallel", False),
+            pipeline=parallelism.get("pipeline"),
         ),
         "execution_profile": training.get("execution_profile"),
     }

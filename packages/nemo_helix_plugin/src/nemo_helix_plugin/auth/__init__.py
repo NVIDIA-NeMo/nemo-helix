@@ -218,7 +218,7 @@ def platform_auth_enabled() -> bool:
     (the deployment controller, which runs *inside* the platform image): a
     missing config file resolves to defaults (``enabled=False``) rather than
     raising, and a malformed/invalid config file would have already crashed the
-    platform service at startup before any deployment is reconciled. The config
+    Helix service at startup before any deployment is reconciled. The config
     read is cached from that successful startup load. We therefore accept the
     narrow, largely theoretical fail-open window rather than propagate and block
     deployments on a transient/unexpected error.
@@ -233,7 +233,7 @@ def platform_auth_enabled() -> bool:
 
 
 def is_service_principal_id(principal_id: str) -> bool:
-    """Return True for a well-formed platform service principal.
+    """Return True for a well-formed Helix service principal.
 
     When running in the platform process this delegates to the shared parser.
     Standalone plugin installs use the same reserved ``service:<name>`` shape

@@ -32,10 +32,13 @@ from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.entities import DEFAULT_WORKSPACE, parse_qualified_name
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.refs import model_entity_route_openai_url
 from nemo_helix_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
@@ -165,43 +168,10 @@ def _provider_type_for_connection(name: str, host_url: str) -> str:
     return "custom"
 
 
-# ---------------------------------------------------------------------------
-# Onboarding paths — shown after setup completes
-# ---------------------------------------------------------------------------
-
-
-_NEMO_DOCS_ROOT_URL = "https://docs.nvidia.com/nemo-helix"
-_NEMO_DOCS_URL = f"{_NEMO_DOCS_ROOT_URL}/documentation"
-
-
-@dataclass(frozen=True)
-class OnboardingPath:
-    """A goal-oriented onboarding option shown at the end of interactive setup."""
-
-    value: str
-    label: str
-    skill_prompt: str
-    docs_url: str
-    note: str | None = None
-
-
-ONBOARDING_PATHS: tuple[OnboardingPath, ...] = (
-    OnboardingPath(
-        value="optimize",
-        label="Build and optimize agents",
-        skill_prompt="Build and optimize an agent using NeMo Helix",
-        docs_url=f"{_NEMO_DOCS_URL}/agents",
-        note="Open a coding agent session in your agent's project directory",
-    ),
-    OnboardingPath(
-        value="explore",
-        label="Explore the platform",
-        skill_prompt="What can I do with NeMo Helix?",
-        docs_url=_NEMO_DOCS_URL,
-    ),
+_POST_SETUP_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("sample", "Create a sample workspace and demo agent"),
+    ("explore", "I would like to explore NeMo Helix on my own"),
 )
-
-_ONBOARDING_PATHS_BY_VALUE: dict[str, OnboardingPath] = {p.value: p for p in ONBOARDING_PATHS}
 
 
 @dataclass(frozen=True)
@@ -294,6 +264,15 @@ _POST_START_REACHABLE_RETRIES = 6
 _POST_START_REACHABLE_DELAY = 2.0
 
 _DEMO_AGENT_NAME = "calculator-agent"
+_SAMPLE_AGENT_NAME = "email-security-triage"
+_SAMPLE_AGENT_DESCRIPTION = "Email security triage sample agent created by the NeMo setup flow."
+_SAMPLE_DATASET_FILESET = "esec-eval-data"
+_SAMPLE_DATASET_FILENAME = "dataset.jsonl"
+_SAMPLE_DATASET_DESCRIPTION = "Evaluation dataset for the NeMo setup sample email security agent."
+_SAMPLE_EVAL_CONFIG_SOURCE = "eval-config.dataset-driven.yml"
+_SAMPLE_EVAL_CONFIG_FILENAME = "eval-config.yaml"
+_SAMPLE_WORKSPACE_NAME = "sample"
+_SAMPLE_WORKSPACE_DESCRIPTION = "Sample workspace created by the NeMo setup flow."
 _LOCAL_CONTEXT_NAME = "local"
 
 
@@ -1349,7 +1328,7 @@ def _maybe_start_services(
     require_docker_for_default_local(console=console)
 
     if already_running:
-        console.print("  Restarting platform services...")
+        console.print("  Restarting Helix services...")
         _kill_existing_services(base_url)
         deadline = time.time() + _KILL_WAIT_TIMEOUT
         while time.time() < deadline and _check_platform_reachable(
@@ -1359,7 +1338,7 @@ def _maybe_start_services(
         ):
             _pause(1)
     else:
-        console.print("  Starting platform services...")
+        console.print("  Starting Helix services...")
     _ensure_port_available_for_start(base_url)
     proc = _start_services_background(base_url, data_dir=data_dir)
 
@@ -1792,18 +1771,133 @@ def _agent_config_path() -> Traversable | None:
     return None
 
 
+def _sample_asset_path(name: str) -> Traversable | None:
+    """Return a packaged Email Security Triage asset, or None."""
+    try:
+        from email_security_triage.resources import sample_file
+
+        candidate = sample_file(name)
+        if candidate.is_file():
+            return candidate
+    except (ImportError, ModuleNotFoundError):
+        logger.debug("email_security_triage package not importable; sample assets unavailable", exc_info=True)
+
+    return None
+
+
+def _sample_agent_config_path() -> Traversable | None:
+    """Return the packaged Email Security Triage config YAML, or None."""
+    return _sample_asset_path("agent.yaml")
+
+
+def _upload_sample_dataset(files_client: FilesClient, workspace: str) -> bool:
+    """Create the sample dataset fileset and upload its packaged JSONL data."""
+    dataset = _sample_asset_path(_SAMPLE_DATASET_FILENAME)
+    if dataset is None:
+        console.print(f"  {WARN} Could not find Email Security Triage dataset, skipping dataset upload")
+        return False
+
+    try:
+        fileset = files_client.create_fileset(
+            workspace=workspace,
+            body=CreateFilesetRequest(
+                name=_SAMPLE_DATASET_FILESET,
+                description=_SAMPLE_DATASET_DESCRIPTION,
+                purpose=FilesetPurpose.DATASET,
+            ),
+            exist_ok=True,
+        ).data()
+        if fileset.purpose != FilesetPurpose.DATASET:
+            files_client.update_fileset(
+                workspace=workspace,
+                name=_SAMPLE_DATASET_FILESET,
+                body=UpdateFilesetRequest(purpose=FilesetPurpose.DATASET),
+            ).data()
+        files_client.upload_file(
+            workspace=workspace,
+            name=_SAMPLE_DATASET_FILESET,
+            path=_SAMPLE_DATASET_FILENAME,
+            content=dataset.read_bytes(),
+        ).data()
+    except Exception as exc:
+        console.print(f"  {WARN} Sample dataset upload failed: {exc}")
+        return False
+
+    console.print(f"  {CHECK} Uploaded dataset '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}'")
+    return True
+
+
+def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> bool:
+    """Upload the sample's dataset-driven evaluation config for later use."""
+    config_asset = _sample_asset_path(_SAMPLE_EVAL_CONFIG_SOURCE)
+    if config_asset is None:
+        console.print(f"  {WARN} Could not find Email Security Triage eval config, skipping config upload")
+        return False
+
+    try:
+        config = _yaml.safe_load(config_asset.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("packaged eval config must be a mapping")
+        config["dataset"] = f"{workspace}/{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}"
+        files_client.upload_file(
+            workspace=workspace,
+            name=_SAMPLE_DATASET_FILESET,
+            path=_SAMPLE_EVAL_CONFIG_FILENAME,
+            content=_yaml.safe_dump(config, sort_keys=False).encode(),
+        ).data()
+    except Exception as exc:
+        console.print(f"  {WARN} Sample eval config upload failed: {exc}")
+        return False
+
+    console.print(f"  {CHECK} Uploaded evaluation config '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_EVAL_CONFIG_FILENAME}'")
+    return True
+
+
+def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
+    """Print the sample workspace completion card."""
+    studio_url = f"{base_url.rstrip('/')}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
+    remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
+    if complete:
+        status = f"{CHECK} [green bold]Sample workspace ready[/green bold]"
+        message = "Explore the sample agent, dataset, and evaluation configuration in Studio."
+        border_style = "green"
+    else:
+        status = f"{WARN} [yellow bold]Sample workspace setup incomplete[/yellow bold]"
+        message = "Review the warnings above, then run [cyan]nemo setup[/cyan] again to retry."
+        border_style = "yellow"
+    lines = [
+        status,
+        "",
+        message,
+        "",
+        f"[bold]Studio:[/bold] [link={studio_url}]{studio_url}[/link]",
+        f"[bold]Remove:[/bold] [cyan]{remove_command}[/cyan]",
+    ]
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Sample agent[/bold]",
+            title_align="left",
+            border_style=border_style,
+            box=box.ROUNDED,
+            padding=(1, 1),
+        )
+    )
+
+
 def _agent_exists(
     base_url: str,
     workspace: str,
     headers: dict[str, str] | None = None,
     *,
+    agent_name: str = _DEMO_AGENT_NAME,
     certificate_authority: str | None = None,
 ) -> bool:
-    """Return True if the demo agent already exists on the platform."""
+    """Return True if the named agent already exists on the platform."""
     tls_config = httpx_tls_config_from_env(certificate_authority)
     try:
         resp = httpx.get(
-            f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}/agents/{_DEMO_AGENT_NAME}",
+            f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}/agents/{agent_name}",
             headers=headers,
             timeout=10.0,
             **tls_config,
@@ -1841,9 +1935,11 @@ def _deploy_demo_agent(
     default_model: str,
     headers: dict[str, str] | None = None,
     *,
+    agent_name: str = _DEMO_AGENT_NAME,
+    description: str = "Demo calculator agent",
     certificate_authority: str | None = None,
 ) -> bool:
-    """Deploy the demo agent and emit one ``agent_deployed`` event.
+    """Deploy a packaged setup agent and emit one ``agent_deployed`` event.
 
     Telemetry wrapper around :func:`_deploy_demo_agent_impl`: COMPLETED when the
     deployment reaches running, ERROR when it fails, times out, or raises.
@@ -1855,6 +1951,8 @@ def _deploy_demo_agent(
             config_path,
             default_model,
             headers=headers,
+            agent_name=agent_name,
+            description=description,
             certificate_authority=certificate_authority,
         )
     except Exception:
@@ -1874,19 +1972,45 @@ def _deploy_demo_agent_impl(
     default_model: str,
     headers: dict[str, str] | None = None,
     *,
+    agent_name: str = _DEMO_AGENT_NAME,
+    description: str = "Demo calculator agent",
     certificate_authority: str | None = None,
 ) -> bool:
-    """Create and deploy the demo calculator agent. Returns True on success."""
+    """Create and deploy a packaged setup agent. Returns True on success."""
     # Optional plugin: import here so ``nemo setup`` works without nemo-agents installed.
     from nemo_agents_plugin.utils import expand_env_vars
 
     api_base = base_url.rstrip("/")
     tls_config = httpx_tls_config_from_env(certificate_authority)
 
-    if not _agent_exists(base_url, workspace, headers=headers, certificate_authority=certificate_authority):
+    if not _agent_exists(
+        base_url,
+        workspace,
+        headers=headers,
+        agent_name=agent_name,
+        certificate_authority=certificate_authority,
+    ):
         config_dict = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config_dict = expand_env_vars(config_dict, vars_dict={"NEMO_DEFAULT_MODEL": default_model})
-        payload = {"name": _DEMO_AGENT_NAME, "description": "Demo calculator agent", "config": config_dict}
+        config_format = config_dict.get("config_format", "nat-workflow-v1")
+        if config_format == "nemo-agents-spec-v1":
+            # Fabric sends ``model`` to the OpenAI-compatible endpoint, where a
+            # workspace-qualified entity ID is invalid. Bind the exact entity
+            # route so an agent in ``sample`` can still use a model in ``default``.
+            model_workspace, model_name = parse_qualified_name(default_model)
+            model_config = config_dict["models"]["default"]
+            model_config["model"] = model_name
+            model_config["base_url"] = model_entity_route_openai_url(
+                base_url=base_url,
+                workspace=model_workspace,
+                name=model_name,
+            )
+        payload = {
+            "name": agent_name,
+            "description": description,
+            "config": config_dict,
+            "config_format": config_format,
+        }
         resp = httpx.post(
             f"{api_base}/apis/agents/v2/workspaces/{workspace}/agents",
             headers=headers,
@@ -1895,34 +2019,34 @@ def _deploy_demo_agent_impl(
             **tls_config,
         )
         resp.raise_for_status()
-        console.print(f"  {CHECK} Created agent '{_DEMO_AGENT_NAME}'")
+        console.print(f"  {CHECK} Created agent '{agent_name}'")
     else:
-        console.print(f"  {CHECK} Agent '{_DEMO_AGENT_NAME}' already exists")
+        console.print(f"  {CHECK} Agent '{agent_name}' already exists")
 
     resp = httpx.post(
         f"{api_base}/apis/agents/v2/workspaces/{workspace}/deployments",
         headers=headers,
-        json={"agent": _DEMO_AGENT_NAME},
+        json={"agent": agent_name},
         timeout=30.0,
         **tls_config,
     )
     if resp.status_code == 409:
-        console.print(f"  {CHECK} Agent '{_DEMO_AGENT_NAME}' already deployed")
+        console.print(f"  {CHECK} Agent '{agent_name}' already deployed")
         return True
 
     resp.raise_for_status()
     deployment_name = resp.json().get("name", "")
-    console.print(f"  {CHECK} Deployed agent '{_DEMO_AGENT_NAME}'")
 
     # Poll the specific deployment we just created by name, not the full
     # list.  Previous runs may leave stale "failed" deployments that would
     # confuse a list-and-scan approach.
     start = time.monotonic()
     deadline = start + _AGENT_DEPLOY_TIMEOUT_SECONDS
-    with console.status("[bold cyan]Waiting for agent deployment...") as spinner:
+    terminal_status: str | None = None
+    with console.status(f"[bold cyan]Deploying agent '{agent_name}'...") as spinner:
         while time.monotonic() < deadline:
             elapsed = int(time.monotonic() - start)
-            spinner.update(f"[bold cyan]Waiting for agent deployment... ({elapsed}s)")
+            spinner.update(f"[bold cyan]Deploying agent '{agent_name}'... ({elapsed}s)")
             try:
                 dep_resp = httpx.get(
                     f"{api_base}/apis/agents/v2/workspaces/{workspace}/deployments/{deployment_name}",
@@ -1932,17 +2056,94 @@ def _deploy_demo_agent_impl(
                 )
                 if dep_resp.status_code == 200:
                     dep_status = dep_resp.json().get("status", "")
-                    if dep_status == "running":
-                        return True
-                    if dep_status == "failed":
-                        console.print(f"  {CROSS} Agent deployment failed")
-                        return False
+                    if dep_status in {"running", "failed"}:
+                        terminal_status = dep_status
+                        break
             except Exception:
                 logger.debug("Agent deployment status poll failed", exc_info=True)
             _pause(_AGENT_DEPLOY_POLL_INTERVAL)
 
+    if terminal_status == "running":
+        console.print(f"  {CHECK} Deployed agent '{agent_name}'")
+        return True
+    if terminal_status == "failed":
+        console.print(f"  {CROSS} Agent deployment failed")
+        return False
+
     console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
     return False
+
+
+def _wait_for_agents_api(
+    base_url: str,
+    workspace: str,
+    headers: dict[str, str] | None = None,
+    *,
+    certificate_authority: str | None = None,
+) -> bool:
+    """Wait for the agents API to become ready."""
+    start = time.monotonic()
+    deadline = start + _AGENT_API_READINESS_TIMEOUT
+    with console.status("[bold cyan]Waiting for agents API...") as spinner:
+        while time.monotonic() < deadline:
+            elapsed = int(time.monotonic() - start)
+            spinner.update(f"[bold cyan]Waiting for agents API... ({elapsed}s)")
+            if _agents_api_ready(
+                base_url,
+                workspace,
+                headers=headers,
+                certificate_authority=certificate_authority,
+            ):
+                return True
+            _pause(_AGENT_API_READINESS_POLL_INTERVAL)
+    return False
+
+
+def _maybe_deploy_sample_agent(
+    base_url: str,
+    workspace: str,
+    default_model: str | None,
+    headers: dict[str, str] | None = None,
+    *,
+    certificate_authority: str | None = None,
+) -> bool:
+    """Create and deploy the packaged Fabric sample agent when prerequisites are available."""
+    if not _agents_plugin_available():
+        console.print(f"  {WARN} nemo-agents plugin not installed, skipping sample agent deployment")
+        return False
+
+    if not default_model:
+        console.print(f"  {WARN} No default model selected, skipping sample agent deployment")
+        return False
+
+    config_path = _sample_agent_config_path()
+    if config_path is None:
+        console.print(f"  {WARN} Could not find Email Security Triage config YAML, skipping sample agent deployment")
+        return False
+
+    if not _wait_for_agents_api(
+        base_url,
+        workspace,
+        headers=headers,
+        certificate_authority=certificate_authority,
+    ):
+        console.print(f"  {WARN} Agents API not ready at {base_url}, skipping sample agent deployment")
+        return False
+
+    try:
+        return _deploy_demo_agent(
+            base_url,
+            workspace,
+            config_path,
+            default_model,
+            headers=headers,
+            agent_name=_SAMPLE_AGENT_NAME,
+            description=_SAMPLE_AGENT_DESCRIPTION,
+            certificate_authority=certificate_authority,
+        )
+    except Exception as exc:
+        console.print(f"  {WARN} Sample agent deployment failed: {exc}")
+        return False
 
 
 def _maybe_deploy_agent(
@@ -2001,23 +2202,12 @@ def _maybe_deploy_agent(
         console.print(f"  {WARN} Could not find calculator-agent config YAML, skipping agent deployment")
         return False
 
-    start = time.monotonic()
-    deadline = start + _AGENT_API_READINESS_TIMEOUT
-    api_ready = False
-    with console.status("[bold cyan]Waiting for agents API...") as spinner:
-        while time.monotonic() < deadline:
-            elapsed = int(time.monotonic() - start)
-            spinner.update(f"[bold cyan]Waiting for agents API... ({elapsed}s)")
-            if _agents_api_ready(
-                base_url,
-                workspace,
-                headers=headers,
-                certificate_authority=certificate_authority,
-            ):
-                api_ready = True
-                break
-            _pause(_AGENT_API_READINESS_POLL_INTERVAL)
-    if not api_ready:
+    if not _wait_for_agents_api(
+        base_url,
+        workspace,
+        headers=headers,
+        certificate_authority=certificate_authority,
+    ):
         console.print(f"  {WARN} Agents API not ready at {base_url}, skipping agent deployment")
         console.print("  Ensure the agents service is running (e.g. [cyan]nemo services run --services agents[/cyan])")
         return False
@@ -2464,7 +2654,7 @@ def setup_command(
     ] = None,
     start_services: Annotated[
         bool | None,
-        typer.Option("--start-services/--no-start-services", help="Start local platform services"),
+        typer.Option("--start-services/--no-start-services", help="Start local Helix services"),
     ] = None,
     install_skills: Annotated[
         bool | None,
@@ -2515,7 +2705,10 @@ def setup_command(
     ] = None,
     deploy_agent: Annotated[
         bool | None,
-        typer.Option("--deploy-agent/--no-deploy-agent", help="Deploy the demo calculator agent"),
+        typer.Option(
+            "--deploy-agent/--no-deploy-agent",
+            help="Deploy the demo calculator agent in --auto mode",
+        ),
     ] = None,
     resume: Annotated[
         bool,
@@ -2536,8 +2729,8 @@ def setup_command(
 
     Uses an already-running platform, starts local services, or connects the
     CLI to an existing remote deployment. Then selects and registers an
-    inference provider, picks default and fast agent models, installs coding
-    agent skills, and optionally deploys a demo agent.
+    inference provider, picks default and fast agent models, and installs
+    coding agent skills. Auto mode can optionally deploy a demo agent.
 
     The active config context remembers the Platform URL. When a remote
     deployment is already reachable, setup asks whether to continue with it,
@@ -2564,7 +2757,7 @@ def setup_command(
       nemo setup --auto --start-services --ready-timeout 360
       NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
       nemo setup --workspace my-workspace
-      nemo setup --no-install-skills --no-deploy-agent
+      nemo setup --no-install-skills
       nemo --base-url http://localhost:8080 setup
     """
     cli_context: CLIContext = ctx.obj
@@ -2679,7 +2872,6 @@ def setup_command(
                 workspace,
                 base_url,
                 install_skills,
-                deploy_agent,
                 skills_agents=skills_agents_list,
                 skills_scope=skills_scope,
                 skills_from=skills_from_list,
@@ -2810,14 +3002,13 @@ def _run_interactive_mode(
     workspace: str,
     base_url: str,
     install_skills: bool | None,
-    deploy_agent: bool | None,
     *,
     skills_agents: list[str] | None = None,
     skills_scope: Scope | None = None,
     skills_from: list[str] | None = None,
     skills_path: Path | None = None,
     certificate_authority: str | None = None,
-) -> None:
+) -> str:
     """Walk the user through provider selection, credential entry, and model choice."""
     try:
         provider_name, host_url, api_key, auth_header_format, default_extra_headers = _interactive_collect_provider()
@@ -2884,25 +3075,43 @@ def _run_interactive_mode(
             skills_path=skills_path,
         )
 
-        console.print("\n[bold]Step 7: Demo agent (optional)[/bold]\n")
-        demo_deployed = _maybe_deploy_agent(
-            base_url,
-            workspace,
-            auto=False,
-            deploy_agent=deploy_agent,
-            default_model=default_model,
-            headers=_platform_request_headers(cli_context),
-            certificate_authority=certificate_authority,
-        )
-
-        _print_onboarding(
+        _print_setup_complete(
             base_url,
             provider_name,
             default_model,
             fast_model=model_pair.fast if model_pair else None,
-            demo_deployed=demo_deployed,
             certificate_authority=certificate_authority,
         )
+
+        selected_path = _prompt_post_setup_path()
+        if selected_path == "sample":
+            workspaces_client = cli_context.typed_client(WorkspacesClient)
+            try:
+                workspace_created = _ensure_workspace_exists(
+                    workspaces_client,
+                    _SAMPLE_WORKSPACE_NAME,
+                    description=_SAMPLE_WORKSPACE_DESCRIPTION,
+                )
+            except Exception as exc:
+                console.print(f"  {WARN} Could not create workspace '{_SAMPLE_WORKSPACE_NAME}': {exc}")
+                return selected_path
+            if workspace_created:
+                console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
+            agent_ready = _maybe_deploy_sample_agent(
+                base_url,
+                _SAMPLE_WORKSPACE_NAME,
+                default_model,
+                headers=_platform_request_headers(cli_context),
+                certificate_authority=certificate_authority,
+            )
+            files_client = cli_context.typed_client(FilesClient)
+            dataset_ready = _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME)
+            eval_config_ready = dataset_ready and _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
+            _print_sample_setup_complete(
+                base_url,
+                complete=all((agent_ready, dataset_ready, eval_config_ready)),
+            )
+        return selected_path
 
     except UserCancelled:
         console.print(f"\n{WARN} Setup cancelled.")
@@ -2937,25 +3146,28 @@ def _interactive_collect_provider() -> tuple[str, str, str | None, str | None, d
     return selected.name, selected.host_url, api_key, selected.auth_header_format, selected.default_extra_headers
 
 
-def _render_onboarding_card(value: str) -> None:
-    """Print a Rich Panel card for the selected onboarding path."""
-    path = _ONBOARDING_PATHS_BY_VALUE.get(value)
-    if path is None:
-        return
+def _print_setup_complete(
+    base_url: str,
+    provider_name: str,
+    default_model: str | None,
+    *,
+    fast_model: str | None = None,
+    certificate_authority: str | None = None,
+) -> None:
+    """Verify platform health and print the setup summary."""
+    if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
+        raise typer.Exit(1)
 
-    lines: list[str] = []
-    if path.note:
-        lines.append(f"  [bold]{path.note}[/bold]")
-        lines.append("")
-    lines.append("  [bold]Ask your coding agent:[/bold]")
-    lines.append(f'  [cyan]"{path.skill_prompt}"[/cyan]')
-    lines.append("")
-    lines.append(f"  [bold]Docs:[/bold]  [link={path.docs_url}]{path.docs_url}[/link]")
+    lines = [f"[bold]Provider:[/bold] {provider_name}"]
+    if default_model:
+        lines.append(f"[bold]Default model:[/bold] {_display_model_name(default_model)}")
+    if fast_model:
+        lines.append(f"[bold]Fast model:[/bold] {_display_model_name(fast_model)}")
 
     console.print(
         Panel(
             "\n".join(lines),
-            title=f"[bold]{path.label}[/bold]",
+            title="[bold]Setup complete[/bold]",
             title_align="left",
             border_style="green",
             box=box.ROUNDED,
@@ -2964,37 +3176,34 @@ def _render_onboarding_card(value: str) -> None:
     )
 
 
-def _print_onboarding(
-    base_url: str,
-    provider_name: str,
-    default_model: str | None,
+def _ensure_workspace_exists(
+    workspaces_client: WorkspacesClient,
+    name: str,
     *,
-    fast_model: str | None = None,
-    demo_deployed: bool = False,
-    certificate_authority: str | None = None,
-) -> None:
-    """Print setup summary, then present goal-oriented onboarding paths."""
-    if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
-        raise typer.Exit(1)
+    description: str | None = None,
+) -> bool:
+    """Ensure a workspace exists and return whether it was created."""
+    try:
+        workspaces_client.get_workspace(name=name).data()
+        return False
+    except Exception:
+        try:
+            workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=name, description=description)).data()
+            return True
+        except Exception as create_err:
+            # Treat a workspace created concurrently as success without hiding real failures.
+            try:
+                workspaces_client.get_workspace(name=name).data()
+                return False
+            except Exception:
+                raise create_err from None
 
-    console.print(f"\n{CHECK} [green bold]Setup complete![/green bold]")
-    console.print(f"  Provider: {provider_name}")
-    if default_model:
-        console.print(f"  Default model: {_display_model_name(default_model)}")
-    if fast_model:
-        console.print(f"  Fast model: {_display_model_name(fast_model)}")
-    if demo_deployed:
-        console.print(f"  Demo agent: {_DEMO_AGENT_NAME}")
 
-    console.print("\n[bold cyan]Getting started[/bold cyan]")
-
-    options = [(p.value, p.label) for p in ONBOARDING_PATHS]
-    selected = prompt_choice(
-        "Select how you would like to get started",
-        options,
-        default="optimize",
+def _prompt_post_setup_path() -> str:
+    """Prompt for the next path without starting it."""
+    return prompt_choice(
+        "How would you like to get started?",
+        _POST_SETUP_OPTIONS,
+        default="sample",
         indent=2,
     )
-
-    console.print()
-    _render_onboarding_card(selected)

@@ -15,12 +15,19 @@ from typing import Any, cast
 
 import httpx
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix.types.inference import ContainerExecutorConfigParam, ModelDeploymentConfigModelSpecParam
-from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,14 +198,14 @@ def save_job_logs_to_file(jobs: JobsClient, job_name: str, workspace: str) -> tu
     return None, None
 
 
-def get_job_failure_details(sdk: NeMoHelix, job_name: str, workspace: str) -> str:
+def get_job_failure_details(client: NemoClient, job_name: str, workspace: str) -> str:
     """Get detailed failure information for a failed job.
 
     Fetches job logs and status to help diagnose failures.
     Also saves complete logs to a file for CI artifact collection.
     """
     details = [f"Job {job_name} failed. Details:"]
-    jobs = client_from_platform(sdk, JobsClient)
+    jobs = JobsClient.from_client(client)
 
     try:
         job_status = jobs.get_job_status(name=job_name, workspace=workspace).data()
@@ -239,7 +246,7 @@ def _log_training_progress(status) -> None:
 
 
 def wait_for_customization_job(
-    sdk: NeMoHelix,
+    client: NemoClient,
     job_name: str,
     workspace: str,
     timeout: float = 2700,
@@ -248,12 +255,11 @@ def wait_for_customization_job(
 ):
     """Wait for a customization job to reach a terminal state.
 
-    Uses ``client_from_platform(sdk, JobsClient).get_job_status()`` to poll, logs training
-    progress from the steps structure, and returns the full job object
-    via ``sdk.customization.jobs.retrieve()`` once terminal.
+    Uses ``JobsClient.get_job_status()`` to poll, logs training progress from
+    the steps structure, and returns the full job once terminal.
 
     Args:
-        sdk: NeMo Helix SDK client.
+        client: Typed platform client.
         job_name: Customization job name.
         workspace: Workspace name.
         timeout: Maximum seconds to wait before raising ``TimeoutError``.
@@ -262,7 +268,7 @@ def wait_for_customization_job(
             before giving up.
 
     Returns:
-        The final ``CustomizationJob`` object from ``sdk.customization.jobs.retrieve()``.
+        The final job response.
 
     Raises:
         TimeoutError: If the job doesn't reach a terminal state within *timeout*.
@@ -270,7 +276,7 @@ def wait_for_customization_job(
     start_time = time.time()
     last_status = None
     consecutive_errors = 0
-    jobs = client_from_platform(sdk, JobsClient)
+    jobs = JobsClient.from_client(client)
 
     while True:
         elapsed = time.time() - start_time
@@ -313,7 +319,7 @@ def wait_for_customization_job(
 
 
 def wait_for_model_spec(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     model_entity_name: str,
     timeout: int = 600,
@@ -328,7 +334,7 @@ def wait_for_model_spec(
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        me = client_from_platform(sdk, ModelsClient).get_model(name=model_entity_name, workspace=workspace).data()
+        me = ModelsClient.from_client(client).get_model(name=model_entity_name, workspace=workspace).data()
         if me.spec is not None:
             logger.info(
                 f"✓ Model spec populated for {model_entity_name}: checkpoint_model_name={me.spec.checkpoint_model_name}"
@@ -386,7 +392,7 @@ def _build_inference_messages(training_type: str, data_format: str) -> list[dict
 
 
 def run_inference_test(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     deployment_name: str,
     model_identifier: str,
@@ -396,7 +402,7 @@ def run_inference_test(
     """Send a test prompt via the provider gateway and validate the response.
 
     Args:
-        sdk: NeMo Helix SDK client.
+        client: Typed platform client.
         workspace: Workspace name.
         deployment_name: Provider deployment name to route the request.
         model_identifier: Model string passed in the ``model`` field of the
@@ -404,15 +410,21 @@ def run_inference_test(
         training_type: Training type used (e.g. "sft", "dpo", "distillation").
         data_format: Dataset format used for training (e.g. "prompt_completion", "chat_format").
     """
-    inference_response = sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=deployment_name,
-        workspace=workspace,
-        body={
-            "model": model_identifier,
-            "messages": _build_inference_messages(training_type, data_format),
-            "max_tokens": 250,
-        },
+    inference_response = (
+        InferenceGatewayClient.from_client(client)
+        .provider_post(
+            trailing_uri="v1/chat/completions",
+            name=deployment_name,
+            workspace=workspace,
+            body=JsonBody(
+                {
+                    "model": model_identifier,
+                    "messages": _build_inference_messages(training_type, data_format),
+                    "max_tokens": 250,
+                }
+            ),
+        )
+        .data()
     )
 
     logger.info("✓ Inference successful")
@@ -429,7 +441,7 @@ def run_inference_test(
 
 
 def deploy_and_test_model(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     model_name: str,
     nim_image_name: str | None = None,
@@ -454,47 +466,39 @@ def deploy_and_test_model(
 
     try:
         logger.info(f"Creating deployment config: {deployment_config_name}")
-        model_spec_params: ModelDeploymentConfigModelSpecParam = {
-            "model_name": model_name,
-            "model_namespace": workspace,
-        }
-        executor_config_params: ContainerExecutorConfigParam = {
-            "gpu": 1,
-            "additional_envs": {
-                "NIM_MODEL_PROFILE": "vllm",
-            },
-        }
-        if nim_image_name:
-            executor_config_params["image_name"] = nim_image_name
-        if nim_image_tag:
-            executor_config_params["image_tag"] = nim_image_tag
-
-        deployment_config = sdk.inference.deployment_configs.create(
+        models = ModelsClient.from_client(client)
+        deployment_config = models.create_deployment_config(
             workspace=workspace,
-            name=deployment_config_name,
-            description=f"E2E test deployment config for {model_name}",
-            model_entity_id=model_name,
-            engine="nim",
-            model_spec=model_spec_params,
-            executor_config=executor_config_params,
-        )
+            body=CreateModelDeploymentConfigRequest(
+                name=deployment_config_name,
+                description=f"E2E test deployment config for {model_name}",
+                model_entity_id=model_name,
+                engine=Engine.NIM,
+                model_spec=ModelDeploymentConfigModelSpec(model_name=model_name, model_namespace=workspace),
+                executor_config=ContainerExecutorConfig(
+                    gpu=1,
+                    additional_envs={"NIM_MODEL_PROFILE": "vllm"},
+                    image_name=nim_image_name,
+                    image_tag=nim_image_tag,
+                ),
+            ),
+        ).data()
         logger.info(f"✓ Deployment config created: {deployment_config.name}")
 
         logger.info(f"Creating deployment: {deployment_name}")
-        deployment = sdk.inference.deployments.create(
+        deployment = models.create_deployment(
             workspace=workspace,
-            name=deployment_name,
-            config=deployment_config_name,
-        )
+            body=CreateModelDeploymentRequest(name=deployment_name, config=deployment_config_name),
+        ).data()
         logger.info(f"✓ Deployment created: {deployment.name}")
         logger.info(f"Initial deployment status: {deployment.status}")
 
-        _wait_for_deployment_ready(sdk, workspace, deployment_name)
-        _wait_for_gateway_ready(sdk, workspace, deployment_name)
+        _wait_for_deployment_ready(client, workspace, deployment_name)
+        _wait_for_gateway_ready(client, workspace, deployment_name)
 
         logger.info("Testing inference on deployed model...")
         run_inference_test(
-            sdk,
+            client,
             workspace,
             deployment_name,
             f"{workspace}/{model_name}",
@@ -504,18 +508,18 @@ def deploy_and_test_model(
         logger.info("✓ Model deployment and inference test passed")
 
     finally:
-        _cleanup_deployment(sdk, workspace, deployment_name)
+        _cleanup_deployment(client, workspace, deployment_name)
 
         logger.info(f"Cleaning up deployment config: {deployment_config_name}")
         try:
-            sdk.inference.deployment_configs.delete(deployment_config_name, workspace=workspace)
+            models.delete_deployment_config(name=deployment_config_name, workspace=workspace)
             logger.info(f"✓ Deployment config deleted: {deployment_config_name}")
         except Exception as e:
             logger.warning(f"Failed to delete deployment config {deployment_config_name}: {e}")
 
 
 def wait_and_test_auto_deployment(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     deployment_name: str,
     output_model_name: str,
@@ -531,16 +535,16 @@ def wait_and_test_auto_deployment(
     logger.info(f"Deployment name: {deployment_name}")
     logger.info("=" * 80)
 
-    _wait_for_deployment_ready(sdk, workspace, deployment_name, ready_statuses=("READY", "RUNNING"))
-    _wait_for_gateway_ready(sdk, workspace, deployment_name)
+    _wait_for_deployment_ready(client, workspace, deployment_name, ready_statuses=("READY", "RUNNING"))
+    _wait_for_gateway_ready(client, workspace, deployment_name)
 
     logger.info("Testing inference on auto-deployed LoRA model...")
-    run_inference_test(sdk, workspace, deployment_name, output_model_name)
+    run_inference_test(client, workspace, deployment_name, output_model_name)
     logger.info("✓ Auto-deployed LoRA model inference test passed")
 
 
 def _wait_for_gateway_ready(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     deployment_name: str,
     timeout: int = 60,
@@ -553,7 +557,17 @@ def _wait_for_gateway_ready(
     until it confirms the provider is routable.
     """
     logger.info("Waiting for inference gateway to sync...")
-    if not sdk.models.wait_for_gateway(deployment_name, workspace=workspace, timeout=timeout):
+    gateway = InferenceGatewayClient.from_client(client)
+    deadline = time.time() + timeout
+    ready = False
+    while time.time() < deadline:
+        try:
+            gateway.provider_ready(name=deployment_name, workspace=workspace)
+            ready = True
+            break
+        except (NotFoundError, NemoTransportError):
+            time.sleep(1)
+    if not ready:
         pytest.fail(
             f"Inference gateway did not become ready for deployment '{deployment_name}' "
             f"within {timeout}s. The deployment's model provider may not have been created. "
@@ -563,7 +577,7 @@ def _wait_for_gateway_ready(
 
 
 def _wait_for_deployment_ready(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     deployment_name: str,
     timeout: int = 3600,
@@ -578,7 +592,9 @@ def _wait_for_deployment_ready(
 
     while True:
         try:
-            deployment_status = sdk.inference.deployments.retrieve(deployment_name, workspace=workspace)
+            deployment_status = (
+                ModelsClient.from_client(client).get_deployment(name=deployment_name, workspace=workspace).data()
+            )
             consecutive_errors = 0
         except (httpx.TimeoutException, httpx.ConnectError, ConnectionError, OSError) as exc:
             consecutive_errors += 1
@@ -612,10 +628,11 @@ def _wait_for_deployment_ready(
     logger.info("✓ Deployment is ready")
 
 
-def _cleanup_deployment(sdk: NeMoHelix, workspace: str, deployment_name: str) -> None:
+def _cleanup_deployment(client: NemoClient, workspace: str, deployment_name: str) -> None:
     """Delete a deployment unless it is in an error state (left for log collection)."""
+    models = ModelsClient.from_client(client)
     try:
-        dep_status = sdk.inference.deployments.retrieve(deployment_name, workspace=workspace)
+        dep_status = models.get_deployment(name=deployment_name, workspace=workspace).data()
         if dep_status.status in ("ERROR", "LOST"):
             logger.warning(
                 f"Skipping cleanup of deployment {deployment_name} "
@@ -623,7 +640,7 @@ def _cleanup_deployment(sdk: NeMoHelix, workspace: str, deployment_name: str) ->
             )
         else:
             logger.info(f"Cleaning up deployment: {deployment_name}")
-            sdk.inference.deployments.delete(deployment_name, workspace=workspace)
+            models.delete_deployment(name=deployment_name, workspace=workspace)
             logger.info(f"✓ Deployment deleted: {deployment_name}")
             logger.info("Waiting 60s for deployment deletion")
             time.sleep(60)

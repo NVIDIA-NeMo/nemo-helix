@@ -386,6 +386,7 @@ def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.Monk
         "nemo.optimizer.experiment_id": "exp-test",
         "nemo.optimizer.trial_number": 7,
         "nemo.optimizer.rep": 0,
+        "name": "trial-007",
     }
     assert "profiles" not in captured["runtime"]
     assert captured["runtime"]["config"]["models"]["default"]["temperature"] == 0.2

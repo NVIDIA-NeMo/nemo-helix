@@ -87,7 +87,7 @@ The Inference Gateway (IGW) provides unified access to model inference, supporti
 
 **Inference Routes** (agent may use any):
 - `nemo inference gateway provider post v1/chat/completions <provider> --body '{...}'`
-- `nemo chat <model> "<prompt>" --provider <provider>`
+- `nemo chat --model <model> "<prompt>" --provider <provider>`
 
 **Prerequisites**:
 - NeMo Helix running (quickstart)

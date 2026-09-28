@@ -21,14 +21,14 @@ NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and 
 Quick install from PyPI:
 
 ```bash
-curl -LsSf https://astral.sh/uv/0.9.30/install.sh | sh
+curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install "nemo-helix[all]"
 
 nemo setup
 ```
 
-`uv tool install` gives you a global `nemo` command in its own isolated environment, with nothing to activate. The `all` extra adds the platform services, so `nemo services run` works; without it you get the SDK and CLI only. To import the SDK from your own code, `uv pip install "nemo-helix[all]"` into a virtual environment instead.
+`uv tool install` gives you a global `nemo` command in its own isolated environment, with nothing to activate. The `all` extra adds the Helix services, so `nemo services run` works; without it you get the SDK and CLI only. To import the SDK from your own code, `uv pip install "nemo-helix[all]"` into a virtual environment instead.
 
 Source checkout for development:
 
@@ -67,7 +67,7 @@ the managed ClickHouse container before deleting any bind-mounted data.
 ```bash
 nemo --help                # All commands
 nemo models list           # Available models
-nemo chat <model-name>     # Chat directly with a model
+nemo chat                  # Chat with your default model
 nemo services status       # Platform health
 nemo skills list           # Skills installed on the platform
 ```
@@ -78,7 +78,7 @@ Every capability is also available via REST API. Model inference uses the model 
 http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions
 ```
 
-To run platform services in the foreground in a separate terminal (instead of the background process `nemo setup` starts):
+To run Helix services in the foreground in a separate terminal (instead of the background process `nemo setup` starts):
 
 ```bash
 nemo services run

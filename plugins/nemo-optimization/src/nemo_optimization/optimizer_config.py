@@ -21,6 +21,7 @@ from nemo_optimization.search_space import (
 )
 
 PositiveInt = Annotated[int, Field(strict=True, gt=0)]
+AtLeastTwoInt = Annotated[int, Field(strict=True, ge=2)]
 NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 Rate = Annotated[FiniteFloat, Field(ge=0, le=1)]
 NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
@@ -69,22 +70,22 @@ class PromptPhaseConfig(BaseModel):
     enabled: StrictBool
     backend: str = "ga"
     model: str
-    population_size: PositiveInt = 10
-    generations: PositiveInt = 5
-    crossover_rate: Rate = 0.7
-    mutation_rate: Rate = 0.1
+    population_size: AtLeastTwoInt = 24
+    generations: PositiveInt = 15
+    crossover_rate: Rate = 0.8
+    mutation_rate: Rate = 0.3
     elitism: NonNegativeInt | None = None
     selection_method: Literal["tournament", "roulette"] = "tournament"
-    tournament_size: PositiveInt = 3
+    tournament_size: AtLeastTwoInt = 3
     diversity_lambda: NonNegativeFloat = 0.0
     seed: int | None = None
     oracle_feedback_mode: Literal["never", "always", "failing_only", "adaptive"] = "never"
     oracle_feedback_worst_n: PositiveInt = 5
     oracle_feedback_max_chars: PositiveInt = 4000
-    oracle_feedback_fitness_threshold: NonNegativeFloat = 0.3
+    oracle_feedback_fitness_threshold: Rate = 0.3
     oracle_feedback_stagnation_generations: PositiveInt = 3
     oracle_feedback_fitness_variance_threshold: NonNegativeFloat = 0.01
-    oracle_feedback_diversity_threshold: NonNegativeFloat = 0.5
+    oracle_feedback_diversity_threshold: Rate = 0.5
 
     @model_validator(mode="after")
     def _validate_elitism(self) -> PromptPhaseConfig:
@@ -102,7 +103,7 @@ class _OptimizerInput(BaseModel):
 
     numeric: NumericPhaseConfig | None = None
     prompt: PromptPhaseConfig | None = None
-    reps_per_param_set: PositiveInt = 1
+    reps_per_param_set: PositiveInt = 3
     target: FiniteFloat | None = None
     multi_objective_combination_mode: Literal["harmonic", "weighted_sum", "chebyshev"] = "harmonic"
     eval_metrics: dict[str, _MetricInput] = Field(default_factory=dict)

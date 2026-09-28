@@ -39,7 +39,7 @@ class TestIdentity:
         assert contributor.name == "unsloth"
 
     def test_dependencies_match_submit_path(self, contributor: CustomizationContributor) -> None:
-        # Remote container submit needs the same set of platform services
+        # Remote container submit needs the same set of Helix services
         # automodel needs: workspace/auth, jobs API, secrets, files + models.
         for required in ("entities", "auth", "jobs", "files", "secrets", "models"):
             assert required in contributor.dependencies, f"{required!r} missing from {contributor.dependencies!r}"

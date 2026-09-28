@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { User } from 'oidc-client-ts';
-import { getStoredOidcBearerToken, selectOidcBearerToken } from './oidcBearerToken';
+import {
+  getOidcIdTokenExpiresAt,
+  getStoredOidcBearerToken,
+  selectOidcBearerToken,
+} from './oidcBearerToken';
 
 const futureExpiry = (): number => Math.floor(Date.now() / 1000) + 3600;
 
@@ -34,6 +38,17 @@ const createUser = ({
       token_type: 'Bearer',
     })
   );
+
+describe('getOidcIdTokenExpiresAt', () => {
+  it('returns the JWT expiration claim', () => {
+    const expiresAt = futureExpiry();
+    expect(getOidcIdTokenExpiresAt(createIdToken(expiresAt))).toBe(expiresAt);
+  });
+
+  it('returns undefined for malformed tokens', () => {
+    expect(getOidcIdTokenExpiresAt('not-a-jwt')).toBeUndefined();
+  });
+});
 
 describe('selectOidcBearerToken', () => {
   it('does not return a token without a current OIDC user', () => {

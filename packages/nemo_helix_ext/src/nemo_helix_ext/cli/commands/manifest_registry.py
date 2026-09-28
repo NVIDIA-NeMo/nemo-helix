@@ -29,8 +29,8 @@ Set up NeMo Helix: connect or start services, configure a provider, install skil
 
 Uses an already-running platform, starts local services, or connects the
 CLI to an existing remote deployment. Then selects and registers an
-inference provider, picks default and fast agent models, installs coding
-agent skills, and optionally deploys a demo agent.
+inference provider, picks default and fast agent models, and installs
+coding agent skills. Auto mode can optionally deploy a demo agent.
 
 The active config context remembers the Platform URL. When a remote
 deployment is already reachable, setup asks whether to continue with it,
@@ -57,7 +57,7 @@ Examples:
   nemo setup --auto --start-services --ready-timeout 360
   NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
   nemo setup --workspace my-workspace
-  nemo setup --no-install-skills --no-deploy-agent
+  nemo setup --no-install-skills
   nemo --base-url http://localhost:8080 setup""",
         name="setup",
         panel="Setup",
@@ -93,7 +93,7 @@ nemo skills install --agent claude --skill inference""",
     ),
     TopLevelEntry(
         import_path="nemo_helix_ext.cli.commands.services.cli:services_app",
-        help="Run platform services locally.",
+        help="Run Helix services locally.",
         name="services",
         panel="Setup",
         kind="group",
@@ -111,11 +111,14 @@ nemo skills install --agent claude --skill inference""",
         help="""\
 Start an interactive chat session with a model.
 
+Without --model, chats with the default model chosen during 'nemo setup'
+(or NEMO_DEFAULT_MODEL). Use --fast for the fast model (NEMO_FAST_MODEL).
+
 By default, uses model entity routing where the model name should match
 what's shown in 'nemo models list'.
 
-Use --provider for direct provider routing, where the model argument is
-passed directly to the provider's API.
+Use --provider for direct provider routing, where --model is passed
+directly to the provider's API. --provider requires --model.
 
 Passing PROMPT sends one message and exits unless --interactive is set.
 Omitting PROMPT in a TTY starts the interactive chat UI. In non-TTY
@@ -124,12 +127,14 @@ before sending. If both PROMPT and piped stdin are provided, PROMPT takes
 precedence.
 
 Examples:
-  nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5
-  nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 "What is machine learning?"
-  nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 "What is machine learning?" --interactive
-  echo "What is machine learning?" | nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5
-  nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 "What is machine learning?" -f json
-  nemo chat nvidia/llama-3.3-nemotron-super-49b-v1.5 --provider nvidia-build""",
+  nemo chat
+  nemo chat "What is machine learning?"
+  nemo chat "What is machine learning?" --fast
+  nemo chat -m nvidia-llama-3-3-nemotron-super-49b-v1-5 "What is machine learning?"
+  nemo chat "What is machine learning?" --interactive
+  echo "What is machine learning?" | nemo chat
+  nemo chat "What is machine learning?" -f json
+  nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1.5 --provider nvidia-build""",
         name="chat",
         panel="CLI functions",
         kind="command",

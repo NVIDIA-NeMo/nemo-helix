@@ -91,13 +91,19 @@ class OIDCConfig(BaseSettings):
 
     client_id: str = Field(
         default="",
-        description="OAuth client ID for this NeMo Helix deployment. Used for device flow and token audience validation.",
+        description="OAuth client ID for this NeMo Helix deployment and its default interactive login flows.",
+    )
+
+    cli_client_id: str | None = Field(
+        default=None,
+        description="OAuth client ID for interactive CLI user authentication. Defaults to client_id when unset.",
     )
 
     bearer_token_source: Literal["access_token", "id_token"] = Field(
         default="access_token",
-        description="OIDC user token Studio sends to NeMo Helix APIs. Use 'access_token' for standard OAuth "
-        "resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer.",
+        description="Token returned by the identity provider that clients send to NeMo Helix APIs. "
+        "Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider "
+        "documents its signed ID token as the backend bearer.",
     )
 
     # Optional: Override endpoints if not using standard discovery
@@ -114,6 +120,23 @@ class OIDCConfig(BaseSettings):
     device_authorization_endpoint: str | None = Field(
         default=None,
         description="Override device authorization endpoint (defaults to discovery).",
+    )
+
+    device_authorization_requires_device_id: bool = Field(
+        default=False,
+        description="Include a stable, locally generated device_id parameter in CLI device authorization requests. "
+        "Enable only for identity providers that require this extension.",
+    )
+
+    device_authorization_display_name: str | None = Field(
+        default=None,
+        description="Optional display_name sent with CLI device authorization requests.",
+    )
+
+    device_token_request_includes_scope: bool = Field(
+        default=True,
+        description="Include the requested scope in CLI device-flow token polling requests. "
+        "Disable for identity providers whose token endpoint rejects this extension.",
     )
 
     jwks_uri: str | None = Field(

@@ -4,7 +4,8 @@
 """Task entrypoint for ``agents.evaluate`` (``python -m nemo_agents_plugin.tasks.evaluate``).
 
 Loads the step config, builds :class:`~nemo_helix_plugin.job_context.JobContext`,
-and calls :meth:`EvaluateAgentJob.run` with its concrete ``ctx``/``sdk`` signature.
+and calls :meth:`EvaluateAgentJob.run` with its concrete ``ctx``/``sdk`` signature,
+handing the task's :class:`~nemo_helix_plugin.client.client.NemoClient` in the ``sdk`` slot.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.errors import LocalRunError
-from nemo_helix_plugin.sdk_provider import get_task_sdk
 from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
 from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 
@@ -32,24 +33,24 @@ def _shutdown_handler(signum: int, frame: FrameType | None) -> None:
 
 
 def main() -> int:
-    """Build the on-behalf-of SDK and run ``EvaluateAgentJob``.
+    """Build the on-behalf-of task client and run ``EvaluateAgentJob``.
 
-    SDK construction lives here (not as an inline argument to
-    the job call) so failures during ``get_task_sdk`` collapse to the
+    Client construction lives here (not as an inline argument to
+    the job call) so failures during ``get_task_nemo_client`` collapse to the
     same setup-error exit code as env and step-config setup failures.
     """
     configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
-        sdk = get_task_sdk("agents")
-        ctx = build_ctx_from_env(sdk)
+        client = get_task_nemo_client("agents")
+        ctx = build_ctx_from_env(client)
         config = read_step_config()
         job = EvaluateAgentJob()
     except Exception:
         logger.exception("Failed to prepare task for agents")
         return 2
     try:
-        return exit_code_for(job.run(config, ctx=ctx, sdk=sdk))
+        return exit_code_for(job.run(config, ctx=ctx, sdk=client))
     except LocalRunError:
         raise
     except Exception:
