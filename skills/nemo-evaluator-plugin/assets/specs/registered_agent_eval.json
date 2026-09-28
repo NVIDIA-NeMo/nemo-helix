@@ -1,0 +1,62 @@
+{
+  "tasks": [
+    {
+      "id": "multiply-17-3",
+      "intent": "Multiply two integers and return only the number.",
+      "inputs": {
+        "instruction": "What is 17 * 3? Reply with only the number."
+      },
+      "reference": {
+        "expected": "51"
+      },
+      "metrics": [
+        {
+          "bundle_kind": "metric-bundle",
+          "bundle_format_version": "v1",
+          "metric_type": "exact-match",
+          "metadata": {
+            "description": null,
+            "labels": {}
+          },
+          "outputs": [
+            {
+              "name": "exact-match",
+              "description": null,
+              "value_json_schema": {
+                "description": "Continuous numeric metric value.",
+                "title": "ContinuousScore",
+                "type": "number"
+              }
+            }
+          ],
+          "secrets": {},
+          "payload": {
+            "metric": {
+              "type": "exact-match",
+              "description": null,
+              "labels": {},
+              "supported_job_types": [
+                "online",
+                "offline"
+              ],
+              "reference": "{{reference.expected}}",
+              "candidate": "{{sample.output_text | trim}}"
+            },
+            "digest": "48aaddb52bcee22ead8f91a74fb9fd8170b8921c0be772805447bf91e9c1ecb8",
+            "kind": "inline"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "kind": "fabric",
+    "agent": "calculator-agent",
+    "capture_trajectory": true
+  },
+  "max_concurrent_tasks": 1,
+  "fail_fast": true,
+  "labels": {
+    "benchmark": "registered-agent-smoke"
+  }
+}
