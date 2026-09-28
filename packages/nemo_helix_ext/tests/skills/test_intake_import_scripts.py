@@ -273,26 +273,66 @@ def test_intake_writer_uses_sdk_factory_for_context_and_oauth(monkeypatch: pytes
     sdk._client = Mock()
     factory = Mock(return_value=sdk)
     monkeypatch.setattr(common, "create_client", factory)
+    intake_client = Mock()
+    adapter = Mock(return_value=intake_client)
+    monkeypatch.setattr(common, "client_from_platform", adapter)
 
     writer = common.IntakeWriter(base_url=None, workspace=None)
 
     assert writer.base_url == "https://platform.example.com"
     assert writer.workspace == "oauth-workspace"
     factory.assert_called_once_with(base_url=None, access_token=None, timeout=60.0, max_retries=0)
+    adapter.assert_called_once_with(sdk, common.IntakeClient)
     verify_spans = Mock()
     monkeypatch.setattr(writer, "_verify_spans", verify_spans)
     span = {"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}
 
     writer.write(common.ImportBundle(source="langsmith", spans=[span]), batch_size=500)
 
-    sdk.intake.ingest.spans.create.assert_called_once_with(
-        workspace="oauth-workspace",
-        source="langsmith",
-        spans=[span],
-    )
+    intake_client.create_spans.assert_called_once()
+    call = intake_client.create_spans.call_args
+    assert call.kwargs["workspace"] == "oauth-workspace"
+    body = call.kwargs["body"]
+    assert isinstance(body, common.DirectSpansIngestRequest)
+    assert body.source == "langsmith"
+    assert [item.span_id for item in body.spans] == ["span-1"]
     verify_spans.assert_called_once_with([span], source="langsmith")
     writer.close()
     sdk.close.assert_called_once_with()
+
+
+def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_helix import NeMoHelix
+
+    common = importlib.import_module("_import_common")
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(201)
+
+    # The SDK factory seeds Authorization into default_headers; mirror that here.
+    sdk = NeMoHelix(
+        base_url="https://platform.example.com",
+        workspace="typed-workspace",
+        default_headers={"Authorization": "Bearer test-token"},
+        http_client=httpx.Client(transport=httpx.MockTransport(handle)),
+    )
+    monkeypatch.setattr(common, "create_client", Mock(return_value=sdk))
+    span = {"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}
+
+    with common.IntakeWriter(base_url=None, workspace=None) as writer:
+        monkeypatch.setattr(writer, "_verify_spans", Mock())
+        summary = writer.write(common.ImportBundle(source="langsmith", spans=[span]), batch_size=500)
+
+    assert summary["spans"] == 1
+    assert [request.method for request in captured] == ["POST"]
+    assert captured[0].url.path == "/apis/intake/v2/workspaces/typed-workspace/ingest/spans"
+    assert captured[0].headers["authorization"] == "Bearer test-token"
+    payload = json.loads(captured[0].content)
+    assert payload["source"] == "langsmith"
+    assert payload["spans"][0]["span_id"] == "span-1"
+    assert payload["spans"][0]["trace_id"] == "trace-1"
 
 
 def test_intake_writer_reports_only_new_annotation_writes(monkeypatch: pytest.MonkeyPatch) -> None:
