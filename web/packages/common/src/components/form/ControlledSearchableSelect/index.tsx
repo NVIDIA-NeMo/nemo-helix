@@ -20,7 +20,16 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import { Filter } from 'lucide-react';
-import { ChangeEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChangeEvent,
+  FC,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useController } from 'react-hook-form';
 
 /**
@@ -28,6 +37,61 @@ import { useController } from 'react-hook-form';
  * string is treated as “unset”. Use ZWSP when the consumer wants no visible placeholder.
  */
 const INVISIBLE_TRIGGER_PLACEHOLDER = '\u200b';
+
+let measureCanvasContext: CanvasRenderingContext2D | null = null;
+
+function measureTextWidth(text: string, font: string): number {
+  measureCanvasContext ??= document.createElement('canvas').getContext('2d');
+  if (!measureCanvasContext) return text.length * 8;
+  measureCanvasContext.font = font;
+  return measureCanvasContext.measureText(text).width;
+}
+
+/** Shrinks from whichever side is longer so the trailing, most-distinguishing part of similar values survives. */
+function truncateMiddleToWidth(text: string, font: string, maxWidth: number): string {
+  if (measureTextWidth(text, font) <= maxWidth) return text;
+  const ellipsis = '\u2026';
+  let head = Math.ceil(text.length / 2);
+  let tail = text.length - head;
+  while (head + tail > 0) {
+    const candidate = `${text.slice(0, head)}${ellipsis}${text.slice(text.length - tail)}`;
+    if (measureTextWidth(candidate, font) <= maxWidth) return candidate;
+    if (head > tail) head -= 1;
+    else tail -= 1;
+  }
+  return ellipsis;
+}
+
+/**
+ * Renders `text`, ellipsizing from the middle to fit its own allocated width instead of the end --
+ * so values sharing a long common prefix (e.g. `nvidia-nemotron-3-super-120b-a12b` vs.
+ * `...-ultra-550b-a55b`) stay distinguishable once selected. `w-full` makes its layout box track
+ * the trigger's own already-constrained width rather than shrink-wrapping to the text content.
+ */
+const MiddleTruncatedText: FC<{ text: string }> = ({ text }) => {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [display, setDisplay] = useState(text);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const recompute = () => {
+      const width = el.getBoundingClientRect().width;
+      if (width === 0) return;
+      setDisplay(truncateMiddleToWidth(text, getComputedStyle(el).font, width));
+    };
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <span ref={ref} className="block w-full text-left">
+      {display}
+    </span>
+  );
+};
 
 export interface SelectItemOption {
   /** The value to be stored in the form */
@@ -230,7 +294,8 @@ export const ControlledSearchableSelect = ({
       if (Array.isArray(currentValue)) {
         return currentValue.map((v) => resolveLabel(v) ?? v).join(', ');
       }
-      return currentValue ? (resolveLabel(currentValue) ?? currentValue) : undefined;
+      if (!currentValue) return undefined;
+      return <MiddleTruncatedText text={resolveLabel(currentValue) ?? currentValue} />;
     },
     [resolveLabel]
   );

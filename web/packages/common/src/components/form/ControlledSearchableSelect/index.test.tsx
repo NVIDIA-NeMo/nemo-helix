@@ -68,6 +68,38 @@ describe('ControlledSearchableSelect', () => {
       expect(combobox).not.toHaveTextContent('banana');
     });
 
+    it('should ellipsize a too-long selected label from the middle, keeping the distinguishing suffix', async () => {
+      const longOptions: SelectItemOption[] = [
+        { value: 'a', label: 'nvidia-nemotron-3-super-120b-a12b' },
+        { value: 'b', label: 'nvidia-nemotron-3-ultra-550b-a55b' },
+      ];
+
+      const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+        measureText: (text: string) => ({ width: text.length * 10 }),
+      } as unknown as CanvasRenderingContext2D);
+      const rectSpy = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockReturnValue({ width: 150 } as DOMRect);
+
+      renderWithForm(
+        <ControlledSearchableSelect options={longOptions} useControllerProps={{ name: 'model' }} />,
+        { defaultValues: { model: 'b' } }
+      );
+
+      const combobox = await screen.findByRole('combobox');
+      const text = combobox.textContent ?? '';
+      // 150px / 10px-per-char budget keeps ~15 of the label's 34 chars -- just enough to check
+      // it ellipsizes in the middle and keeps the tail that differs from the other option, not
+      // the exact character count (that's the truncation algorithm's business, not this test's).
+      expect(text).toContain('…');
+      expect(text.endsWith('a55b')).toBe(true);
+      expect(text).not.toBe('nvidia-nemotron-3-ultra-550b-a55b');
+      expect(text.length).toBeLessThan('nvidia-nemotron-3-ultra-550b-a55b'.length);
+
+      rectSpy.mockRestore();
+      getContextSpy.mockRestore();
+    });
+
     it('should show loading placeholder when isLoading is true', () => {
       renderWithForm(
         <ControlledSearchableSelect
