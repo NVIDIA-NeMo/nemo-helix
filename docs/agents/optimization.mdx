@@ -50,35 +50,6 @@ Before running the optimizer, make sure you have:
 1. At least one deployed platform-managed agent.
 1. An evaluation baseline before promoting a candidate agent.
 
-If you need a demo agent, start the platform and create the ReAct example:
-
-```bash
-nemo services run
-```
-
-In another terminal:
-
-```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
-cd plugins/nemo-agents
-
-printf '%s' "$NVIDIA_API_KEY" | nemo secrets create ngc-api-key --from-file -
-nemo inference providers create nvidia-build \
-  --host-url https://integrate.api.nvidia.com \
-  --api-key-secret-name ngc-api-key
-nemo wait inference provider nvidia-build
-
-nemo agents create \
-  --name react-agent \
-  --agent-config examples/react-agent/react-agent.yml
-nemo agents deploy --agent react-agent
-nemo agents deployments wait --agent react-agent
-```
-
-The example agent uses `nvidia-nemotron-3-nano-30b-a3b`, so it can produce a
-model optimization suggestion when the workspace model catalog contains a
-smaller compatible model.
-
 ## Optimize with Switchyard Routing
 
 Switchyard is the inference middleware that lets a virtual model split traffic

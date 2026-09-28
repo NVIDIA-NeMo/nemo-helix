@@ -15,9 +15,8 @@
 # `nat serve --override llms.llm.model_name <id>` (robust; no env dependency),
 # and you can alternatively set NEMO_DEFAULT_MODEL on the container env.
 #
-# NOTE: no `general.telemetry` block. The stock react-agent example enables the
-# `nemo_files` tracing plugin, which is NOT installed in the packaged sandbox
-# image, so `nat serve` would reject the config.
+# NOTE: no `general.telemetry` block. The `nemo_files` tracing plugin is NOT
+# installed in the packaged sandbox image, so `nat serve` would reject it.
 
 functions:
   wiki:

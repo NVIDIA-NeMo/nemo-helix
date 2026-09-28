@@ -104,7 +104,6 @@ RUN /app/.venv/bin/python -c "import nhx.core.jobs; import nhx.core.entities; pr
 # - nvidia-nat-eval: nat eval / optimize support.
 # - nvidia-nat-mcp: mcp_client function type support.
 # - plugins/nemo-agents: exposes `nemo agents ...` commands.
-# - examples/calculator-agent: registers `_type: calculator` function group.
 #
 # All nvidia-nat* packages MUST be pinned to the same version. The CLI/meta
 # package historically lagged the plugin packages (e.g. nvidia-nat==1.4.3 vs
@@ -116,7 +115,6 @@ RUN uv pip install --python /app/.venv/bin/python \
         --prerelease=allow \
         "nvidia-nat[mcp,eval,langchain]==1.8.0" nvidia-nat-atif==1.8.0 nvidia-nat-eval==1.8.0 nvidia-nat-mcp==1.8.0 && \
     uv pip install --python /app/.venv/bin/python -e /app/plugins/nemo-agents && \
-    uv pip install --python /app/.venv/bin/python -e /app/plugins/nemo-agents/examples/calculator-agent && \
     chown -R harbor:harbor /app/.venv
 
 # Set environment variable for NeMo Helix API base URL

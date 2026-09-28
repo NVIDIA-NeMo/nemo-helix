@@ -124,12 +124,11 @@ export NVIDIA_API_KEY="<your NVIDIA API key>"
 export NHX_BASE_URL=http://localhost:8080
 ```
 
-Start ClickHouse for Intake, then set up NeMo Helix without deploying the
-default demo agent:
+Start ClickHouse for Intake, then set up NeMo Helix:
 
 ```bash
 services/intake/scripts/spans/run_clickhouse.sh
-nemo setup --auto --start-services --install-skills --no-deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 Confirm that the Platform is ready before continuing:
@@ -686,210 +685,6 @@ nemo --help   # should show "agents" under Plugins
 nat --help    # should show run, eval, optimize, start, …
 ```
 
-> **Working directory:** All example commands that reference `examples/` use
-> paths relative to the plugin directory.  Run them from `plugins/nemo-agents/`:
->
-> ```bash
-> cd plugins/nemo-agents/
-> ```
-
----
-
-### ReAct agent demo — Wikipedia search + datetime tools
-
-`examples/react-agent.yml` uses `meta/llama-3.1-70b-instruct` with:
-
-- `wiki_search` — searches Wikipedia (no API key needed)
-- `current_datetime` — returns current UTC time
-
-When deployed via the platform, the Inference Gateway URL is injected
-automatically into the agent config — you only need to:
-
-1. Create an `nvidia-build` inference provider pointing at NVIDIA Build
-2. Create the agent and deploy it
-3. Invoke through the gateway
-
-#### NAT Step 1 — Start the platform
-
-Run this in a **dedicated terminal** — it stays in the foreground.  Use a
-separate terminal for all subsequent steps.
-
-```bash
-nemo services run
-```
-
-#### NAT Step 2 — Create an inference provider
-
-In a new terminal, export the base URL once so all subsequent `nemo` commands
-pick it up automatically:
-
-```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
-cd plugins/nemo-agents/
-```
-
-In production the `system/nvidia-build` provider is created automatically by
-the platform seed job. For local development, create it manually:
-
-```bash
-# Store the API key as a secret
-nemo secrets create ngc-api-key \
-    --value "$NVIDIA_API_KEY"
-
-# Create the model provider
-nemo inference providers create nvidia-build \
-    --host-url https://integrate.api.nvidia.com \
-    --api-key-secret-name ngc-api-key
-```
-
-Wait for the models controller to discover served models and register model
-entities:
-
-```bash
-nemo wait inference provider nvidia-build
-```
-
-#### NAT Step 3 — Create and deploy the agent
-
-```bash
-# Register the agent config with the platform
-nemo agents create \
-    --name react-agent \
-    --agent-config examples/react-agent/react-agent.yml
-
-# Deploy it.  ``deploy`` waits for the spawned subprocess to reach a
-# terminal state (``running`` or ``failed``) by default and exits 0 only
-# when the agent is actually serving — so the exit code reflects the
-# real outcome instead of just "the API call succeeded".
-nemo agents deploy --agent react-agent
-
-# Container mode (docker): requires the nemo-deployments controller plus a
-# configured docker executor (see agents.deployments / deployments.executors).
-# Build an image first, then deploy with that tag:
-#   nemo agents package --agent-config examples/react-agent/react-agent.yml --tag react-agent:local
-#   nemo agents deploy --agent react-agent --mode docker --image react-agent:local
-#
-# --mode k8s needs a k8s executor and a registry-reachable image; in-cluster
-# inference-gateway wiring is still evolving — prefer docker for local smoke.
-```
-
-The deploy command prints a status line each time the deployment changes
-state:
-
-```
-Waiting for deployment 'react-agent-e5e29e05' (timeout=300s)...
-  [  0s] status: pending
-  [  1s] status: starting
-  [ 38s] status: running
-Deployment 'react-agent-e5e29e05' is running at http://127.0.0.1:49152
-```
-
-If the subprocess dies during startup, the command exits 1 with the failure
-reason from the deployment entity (e.g. ``Process exited with code 1``).
-Use ``nemo agents logs --agent react-agent`` to inspect the subprocess log
-afterwards (see [Inspecting agent logs](#inspecting-agent-logs)).
-
-For scripted pipelines that prefer to poll separately, pass ``--no-wait``
-to restore the legacy fire-and-forget behaviour:
-
-```bash
-nemo agents deploy --agent react-agent --no-wait
-nemo agents deployments wait --agent react-agent
-```
-
-#### NAT Step 4 — Invoke through the gateway
-
-```bash
-nemo agents invoke \
-    --agent react-agent \
-    --input "Who invented the telephone? Also, what time is it right now?"
-```
-
-Expected response:
-```json
-{
-  "choices": [{
-    "message": {
-      "content": "Alexander Graham Bell invented the telephone. The current time is 2026-03-23 23:17:08 +0000.",
-      "role": "assistant"
-    }
-  }]
-}
-```
-
-The gateway URL is:
-```
-http://127.0.0.1:8080/apis/agents/v2/workspaces/default/agents/react-agent/-/v1/chat/completions
-```
-
-You can call it directly with any OpenAI-compatible client using the same path.
-
-Requests without ``X-Nemo-Session-Id`` use a one-shot Fabric runtime that is
-stopped when the response or response stream completes. To retain runtime
-context across turns, send a stable session ID in that header; the registered
-runtime then follows the Platform session lifecycle.
-
-The agent is still running — continue to the [Evaluation](#evaluation) section
-below, or see [Cleanup](#cleanup-optional) to tear everything down.
-
----
-
-### Evaluation
-
-Evaluation delegates to `nat eval`, which sends dataset questions to the
-agent's `/generate/full` endpoint and scores responses with a judge LLM.
-
-The agent must be deployed and running (see NAT Step 3 above) before evaluating.
-
-```bash
-nemo agents evaluate \
-    --eval-config examples/test-eval.yml \
-    --agent react-agent
-```
-
-The `--agent` flag resolves the running deployment endpoint automatically and
-passes it to `nat eval --endpoint`.
-
-Expected output:
-```
-=== EVALUATION SUMMARY ===
-Workflow Status: COMPLETED (workflow_output.json)
-Total Runtime: ~1.8s
-
-Per evaluator results:
-| Evaluator   |   Avg Score | Output File         |
-|-------------|-------------|---------------------|
-| runtime     |        ~0.9 | runtime_output.json |
-```
-
-A non-zero `Avg Score` and `Total Runtime` confirms requests reached the agent
-successfully.  (The `avg_workflow_runtime` metric reports average seconds per
-request, so the score varies with network latency.)
-
-#### LLM-judge evaluation (requires a judge LLM)
-
-`examples/calculator-agent/calculator-eval.yml` uses `tunable_rag_evaluator`
-with an LLM judge. The judge's `model_name` is `${NEMO_DEFAULT_MODEL}`, which
-resolves to whichever model your platform context has set as the default
-(see `nemo_helix.config.get_context().default_model`); `base_url` and
-`api_key` are auto-injected by the platform to route through the Inference
-Gateway. Set the env var, or edit `llms.judge_llm.model_name` to pin a
-specific VirtualModel registered in your workspace, then run:
-
-```bash
-export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b   # or any registered VirtualModel
-nemo agents evaluate \
-    --eval-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-eval.yml \
-    --agent calculator-agent
-```
-
-The job pre-flights every LLM `model_name` against
-`sdk.inference.virtual_models.retrieve` before invoking `nat eval`, so a
-missing or mistyped model fails fast with a message naming the model and
-suggesting recovery options instead of an opaque subprocess error.
-
----
-
 ### Packaging NAT workflows
 
 NAT workflows use the same progressive pipeline, flags, build-context rules,
@@ -902,14 +697,8 @@ Pass `--nat-version` to make the installed NAT runtime reproducible. The value
 defaults to `NAT_VERSION` and then to the CLI's built-in version (`1.8.0`). This
 option is valid only for NAT workflows.
 
-From `plugins/nemo-agents/`, build the ReAct example with:
-
-```bash
-nemo agents package \
-  --agent examples/react-agent/react-agent.yml \
-  --nat-version 1.8.0 \
-  --tag react-agent:local
-```
+Build a NAT workflow by passing its config file to `nemo agents package` and setting
+`--nat-version` to the desired runtime version.
 
 #### NAT workflow validation
 
@@ -946,29 +735,6 @@ runtime version.
 
 Agent configs are standard NAT workflow YAML files. The platform stores them
 as `nat-workflow-v1` entities. All NAT component types are supported.
-
-**ReAct agent with tools** (`examples/react-agent.yml`):
-
-```yaml
-functions:
-  wiki:
-    _type: wiki_search           # Wikipedia search, no API key
-  clock:
-    _type: current_datetime      # current UTC time
-
-llms:
-  llm:
-    _type: openai
-    api_key: not-used            # injected by platform at deploy time
-    model_name: nvidia-nemotron-3-nano-30b-a3b  # IGW entity name
-    temperature: 0.0
-
-workflow:
-  _type: react_agent
-  tool_names: [wiki, clock]
-  llm_name: llm
-  parse_agent_response_max_retries: 3
-```
 
 #### base_url injection
 

@@ -37,7 +37,7 @@ and runs the benign suite. Use it to compare selections without touching the
 agent.
 
 ```bash
-nemo agent-hardener sanity-check --manifest-id react-agent \
+nemo agent-hardener sanity-check --manifest-id my-agent \
   --mitigations mitigations.json \
   --replay-hitlog <fileset-ref> \
   --keep custom_guardrail_1
@@ -145,7 +145,7 @@ directly comparable. Run the cycle again after applying and compare the attack
 block rate and the benign pass rate against the earlier run:
 
 ```bash
-nemo agent-hardener run --manifest-id react-agent
+nemo agent-hardener run --manifest-id my-agent
 nemo agent-hardener status --limit 5
 ```
 

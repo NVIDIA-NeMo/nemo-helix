@@ -596,9 +596,9 @@ def merge_agent_config(
 
     Args:
         agent_config: The YAML-equivalent dict stored on the platform's
-            ``Agent`` entity (i.e. the contents of ``react-agent.yml``).
+            ``Agent`` entity (the agent's workflow YAML).
         optimize_config: The user-authored optimize config dict (i.e. the
-            contents of ``react-optimize.yml``).
+            contents of the optimize YAML).
 
     Returns:
         A new merged dict suitable for passing to ``nat optimize
