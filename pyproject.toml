@@ -622,6 +622,8 @@ extra-paths = [
   "plugins/nemo-agent-hardener/src",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
+  # So ``_insights_cli`` (the insights CLI test harness) resolves in its tests.
+  "plugins/nemo-insights/tests",
   # nemo-evaluator plugin is not a workspace member; add its src so ty can
   # resolve nemo_evaluator imports when checking plugin test files.
   "plugins/nemo-evaluator/src",

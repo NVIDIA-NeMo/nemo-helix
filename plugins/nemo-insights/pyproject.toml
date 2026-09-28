@@ -63,5 +63,5 @@ asyncio_mode = "auto"
 markers = [
     "integration: service integration tests",
 ]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "tests"]
 testpaths = ["tests"]
