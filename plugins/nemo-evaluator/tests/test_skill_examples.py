@@ -569,9 +569,10 @@ def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:
     """The skill's own eval must not grade highest for what the skill tells you not to do.
 
     Two contradictions have lived here. ``evals.json`` expected
-    ``nemo evaluator evaluate run --spec`` while SKILL.md routes durable platform evaluation through
-    the plugin-specific job commands, and it expected the agent to require manual ``.venv`` activation
-    while SKILL.md routes a checkout through ``uv run`` and says installed usage needs no activation at all.
+    ``nemo evaluator evaluate run --spec`` and later ``nemo evaluator evaluate submit --spec`` while
+    SKILL.md routes durable platform evaluation through the plugin-specific job commands, and it
+    expected the agent to require manual ``.venv`` activation while SKILL.md routes a checkout through
+    ``uv run`` and says installed usage needs no activation at all.
 
     Both are the same failure: the eval and the guidance drifting apart with nothing comparing them.
     """
@@ -581,6 +582,7 @@ def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:
     assert graded, "evals.json defines no graded expectations"
     for text in graded:
         assert "evaluate run" not in text, f"eval rewards the retired local run verb: {text}"
+        assert "evaluate submit" not in text, f"eval rewards the retired submit verb: {text}"
         assert "activating the Python virtual environment" not in text, (
             f"eval rewards manual .venv activation, which SKILL.md disclaims: {text}"
         )

@@ -135,6 +135,7 @@ class ProcessJob(NemoJob):
     description: ClassVar[str] = "Process an input and return a result."
     spec_schema: ClassVar[type[BaseModel]] = ProcessSpec
     container: ClassVar[str] = "cpu-tasks"
+    generate_legacy_verbs: ClassVar[bool] = False
 
     def run(self, config: dict) -> dict:
         cfg = ProcessSpec.model_validate(config)
@@ -146,13 +147,10 @@ class ProcessJob(NemoJob):
         ...
 ```
 
-The platform auto-generates three CLI verbs per job:
+The platform auto-generates a flat submit command and an `explain` helper:
 
 ```bash
-nemo my-plugin process run --spec '{"input": "hello"}'
-# { "status": "done", "result": "HELLO" }
-
-nemo my-plugin process submit --profile default --spec '{"input": "hello"}'
+nemo my-plugin process --profile default --spec '{"input": "hello"}'
 # Posts the job to the plugin service; the cluster runs it.
 
 nemo my-plugin process explain

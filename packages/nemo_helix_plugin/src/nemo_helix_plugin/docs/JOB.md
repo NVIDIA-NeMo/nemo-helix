@@ -3,19 +3,19 @@
 
 # Job Surface (NemoJob)
 
-A `NemoJob` is a unit of work you can execute locally, submit to a cluster, or introspect — the same class drives all three. The platform auto-generates three CLI verbs per job: `run`, `submit`, `explain`.
+A `NemoJob` is a unit of work you can submit to a cluster or introspect. For new plugin job commands, set `generate_legacy_verbs = False` and expose the job name itself as the submit command:
 
 ```
-nemo <plugin> <job> run      [--spec '{...}' | --spec-file FILE]
-nemo <plugin> <job> submit   [--profile <p>] [--cluster <c>] \
+nemo <plugin> <job>          [--profile <p>] [--cluster <c>] \
                              [--spec '{...}' | --spec-file FILE] \
                              [-o <backend>.<key>=<value> ...] [--options-file FILE]
 nemo <plugin> <job> explain  [--profile <p>]
 ```
 
-- `run` — executes `job.run()` in-process. No platform needed.
-- `submit` — POSTs the job to the plugin service, which compiles it into a `HelixJobSpec` and hands it off to the Jobs service for cluster execution.
+- flat `<job>` command — POSTs the job to the plugin service, which compiles it into a `HelixJobSpec` and hands it off to the Jobs service for cluster execution.
 - `explain` — prints the job's schemas and submit route. Reads locally, no network.
+
+The older generated CLI shape used nested `<job> run` and `<job> submit` verbs. `NemoJob.generate_legacy_verbs` still defaults to `True` for compatibility with existing jobs, but new plugin job surfaces should opt into the flat command shape.
 
 ## Declaring a NemoJob
 
@@ -36,6 +36,7 @@ class GenerateJob(NemoJob):
     description: ClassVar[str] = "Generate synthetic rows."
     spec_schema: ClassVar[type[BaseModel]] = GenerateSpec
     container: ClassVar[str] = "cpu-tasks"
+    generate_legacy_verbs: ClassVar[bool] = False
 
     def run(self, config: dict) -> dict:
         cfg = GenerateSpec.model_validate(config)

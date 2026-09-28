@@ -114,7 +114,7 @@ At startup, for every plugin that registers both `nemo.cli` and `nemo.jobs`, the
 - `submit` delegates to `NemoJobScheduler.submit_remote` — POSTs to the plugin service's per-job endpoint; the cluster executes.
 - `explain` delegates to `NemoJobScheduler.explain` — reads schemas locally from the `NemoJob` class.
 
-Jobs can set `generate_legacy_verbs = False` to expose submission as a flat command named after the job instead of a nested `<job> submit` command. The `<job> explain` command remains available for compatibility.
+New jobs should set `generate_legacy_verbs = False` to expose submission as a flat command named after the job instead of a nested `<job> submit` command. The `<job> explain` command remains available. The legacy `run` / `submit` shape remains available only for existing jobs that still need compatibility.
 
 Plugin services mount the matching POST/GET/LIST/DELETE endpoints with the `add_job_routes(job_cls)` helper from `nemo_helix_plugin.jobs.routes` — a one-liner that replaces the multi-arg `job_route_factory(...)` pattern.
 
