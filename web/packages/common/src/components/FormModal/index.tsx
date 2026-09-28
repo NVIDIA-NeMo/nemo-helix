@@ -54,9 +54,6 @@ export interface FormModalProps {
   onClose: () => void;
   styles?: React.CSSProperties;
   className?: string;
-  /** Rendered between the heading and the scrollable body, so it stays in view
-   *  while the body scrolls and keeps its height when the dialog is short. For
-   *  chrome such as a wizard stepper. */
   slotAboveBody?: ReactNode;
   slotFooterLeft?: ReactNode;
   slotFooterRight?: ReactNode;
