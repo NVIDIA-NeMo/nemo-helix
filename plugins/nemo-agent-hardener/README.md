@@ -14,6 +14,63 @@ need the same one-time setup below.
 
 ---
 
+## Quickstart
+
+The whole path, from a bootstrapped repo to a finished war-game against the bundled example agent.
+Assumes Docker and OpenShell are installed — if not, do [What you need](#what-you-need) first
+(~15 min, mostly those two). Each step is explained in [One-time setup](#one-time-setup).
+
+```bash
+export INFERENCE_API_KEY=<your-nvapi-key>
+export NHX_BASE_URL=http://localhost:8080
+
+# 1. Start the platform (logs to a file — backgrounding alone still prints over your prompt)
+uv run nemo services run --service-group all --controllers models,jobs \
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
+until curl -sf http://localhost:8080/health/ready >/dev/null; do sleep 2; done; echo ready
+
+# 2. Give it a model provider  (409 "already exists" just means you've run these before)
+printf '%s' "$INFERENCE_API_KEY" | \
+  uv run nemo secrets create nvidia-inference-key --from-file - --workspace default
+uv run nemo inference providers create nvidia-inference --workspace default \
+  --host-url "https://inference-api.nvidia.com/v1" \
+  --api-key-secret-name nvidia-inference-key
+
+# 3. Register the example agent. NEMO_DEFAULT_MODEL must be set *now* — it is baked into
+#    the stored config. Use a model entity name from `nemo models list`, not a provider id.
+uv run nemo models list --workspace default | grep nemotron
+export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-nano-30b-a3b   # example — use what you saw
+uv run nemo agents create --name react-agent \
+  --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
+
+# 4. War-game it
+uv run nemo agent-hardener setup                                      # once per machine
+uv run nemo agent-hardener doctor                                     # everything should be green
+uv run nemo agent-hardener init --agent react-agent                   # save a target
+uv run nemo agent-hardener synth-benign --manifest-id react-agent     # interview — you answer
+uv run nemo agent-hardener run --manifest-id react-agent              # attack → defend → validate
+uv run nemo agent-hardener status --limit 5
+```
+
+Three things that trip people up, each covered in full below:
+
+- **`synth-benign` is mandatory.** `run` only *consumes* a benign suite and never generates one;
+  without one it fails immediately. Add `--yes` to accept the interview's suggested answers, or
+  `--no-interactive` in CI. [More](#run-it-from-the-cli)
+- **`--egress <host>` is how the agent's tools reach the internet.** The sandbox drops anything not
+  allow-listed, and a blocked tool looks like a *passing* run because the model answers from its own
+  knowledge. Omitted above because `react-agent`'s `current_datetime` needs no network, and its
+  `wiki_search` is broken upstream regardless (see the egress note in
+  [One-time setup](#one-time-setup)). Your own agent almost certainly needs it.
+  [More](#run-it-from-the-cli)
+- **The Studio entry appears as soon as the plugin is installed** — the UI ships inside the plugin
+  as a Studio bundle, so there is no flag to set. [More](#run-it-in-the-ui)
+
+Got your own agent instead? `init --agent <name>` works for any registered agent, and
+`init --project-dir <path>` war-games a local NAT project with nothing registered at all.
+
+---
+
 ## What you need
 
 Two environment variables. `nemo agent-hardener setup` installs agent-hardener itself, into its own venv.
@@ -166,11 +223,34 @@ uv run nemo inference providers create nvidia-inference --workspace default \
   --api-key-secret-name nvidia-inference-key
 ```
 
-Register your NAT agent before creating a war-game manifest. Use
-`nemo agents create --name my-agent --agent-config /path/to/agent.yml` with
-its required model and secrets configured. The victim sandbox blocks outbound
-traffic unless the manifest allow-lists it; declare any hosts used by tools
-with `--egress host[:port]` when initializing the manifest.
+Register an agent to attack. This example ships with the repo and needs no extra packages:
+
+```bash
+# The config references ${NEMO_DEFAULT_MODEL}. It must be a *model entity* name the platform
+# discovered — not a provider model id. Entity names are lowercase-and-hyphens only; a slash gets
+# rejected by the Inference Gateway with "Invalid model".
+uv run nemo models list --workspace default | grep nemotron      # pick one
+export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-nano-30b-a3b  # example — use what you saw
+
+uv run nemo agents create --name react-agent \
+  --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
+```
+
+> **Egress.** The victim sandbox blocks outbound traffic unless the manifest allow-lists it, and
+> agent-hardener can only auto-discover hosts by scanning a project's source — a config-only agent keeps
+> its tool hosts in packaged code, so you must declare them. Entries are `host[:port]` and a bare
+> host opens **443 only**; a tool using plain HTTP needs `host:80` too. Without this the victim's
+> calls are dropped and tool-using attacks silently no-op while the run still reports success.
+>
+> `react-agent`'s `wiki_search` is a known exception: it fails even with egress open, because the
+> `wikipedia` package sends no User-Agent and Wikimedia now rejects that
+> ([T400119](https://phabricator.wikimedia.org/T400119)). Upstream, not agent-hardener. Its other tool,
+> `current_datetime`, needs no network and exercises the tool path fine.
+
+> `NEMO_DEFAULT_MODEL` must be set **when you run `agents create`** — the config references it as
+> `${NEMO_DEFAULT_MODEL}` and the platform resolves it into the stored agent. Register it unset and
+> the victim later starts with an unresolved model name. It is not needed afterwards; Agent Hardener
+> reads the already-resolved config.
 
 ---
 
@@ -191,7 +271,7 @@ uv run nemo services run --service-group all --controllers models,jobs \
 Open **http://localhost:8080/studio/** → **Governance → Agent Hardener**. If the entry is missing,
 confirm the plugin is installed (`curl -s localhost:8080/apis/plugins`) and hard-reload (⌘⇧R).
 
-1. **Manifests → New Manifest** — pick `my-agent`, accept the detected port and secrets, add any
+1. **Manifests → New Manifest** — pick `react-agent`, accept the detected port and secrets, add any
    **egress** hosts the agent calls (same rule as the CLI, see the warning above), **Create**.
 2. **Run war-game** on the manifest. The run opens on its **Swarm** tab.
 3. Watch the graph light up per phase, with the live agent feed beside it. Click any node for its
@@ -208,9 +288,9 @@ Redeploy the agent for the guardrails to take effect.
 ## Run it from the CLI
 
 ```bash
-uv run nemo agent-hardener init --agent my-agent                  # manifest + saved entity
-uv run nemo agent-hardener synth-benign --manifest-id my-agent --yes   # required, see below
-uv run nemo agent-hardener run --manifest-id my-agent             # attack → defend → validate
+uv run nemo agent-hardener init --agent react-agent                  # manifest + saved entity
+uv run nemo agent-hardener synth-benign --manifest-id react-agent --yes   # required, see below
+uv run nemo agent-hardener run --manifest-id react-agent             # attack → defend → validate
 uv run nemo agent-hardener status --limit 5                          # recent runs
 ```
 
@@ -224,7 +304,7 @@ help?" answer depends on. Editing the agent afterwards (new model, new tool, red
 change an existing manifest. Take those changes deliberately:
 
 ```bash
-uv run nemo agent-hardener refresh --manifest-id my-agent
+uv run nemo agent-hardener refresh --manifest-id react-agent
 ```
 
 Your egress, secrets, models, defenders and cached benign suite are all preserved; only the target
@@ -236,7 +316,7 @@ If your agent calls the internet, allow-list the hosts at init time — the sand
 else, and a blocked tool usually looks like a working run because the model answers from memory:
 
 ```bash
-uv run nemo agent-hardener init --agent my-agent --egress api.example.com
+uv run nemo agent-hardener init --agent react-agent --egress en.wikipedia.org
 ```
 
 A bare host opens **443 only**; write `host:80` for plain HTTP. Hosts can't be auto-discovered for a
@@ -246,7 +326,7 @@ If the agent reads non-secret environment variables — a host-backend URL, a fe
 at init too:
 
 ```bash
-uv run nemo agent-hardener init --agent my-agent --env BACKEND_URL=http://host.docker.internal:8086
+uv run nemo agent-hardener init --agent react-agent --env BACKEND_URL=http://host.docker.internal:8086
 ```
 
 `--env` is repeatable and only the first `=` splits, so values may contain `=`. **Keep credentials out
@@ -260,9 +340,9 @@ pure consumer of it — it never generates one. Without a suite it fails immedia
 manifest for every later run:
 
 ```bash
-uv run nemo agent-hardener synth-benign --manifest-id my-agent          # interview, you answer
-uv run nemo agent-hardener synth-benign --manifest-id my-agent --yes    # interview, defaults accepted
-uv run nemo agent-hardener synth-benign --manifest-id my-agent --no-interactive   # CI: rules only
+uv run nemo agent-hardener synth-benign --manifest-id react-agent          # interview, you answer
+uv run nemo agent-hardener synth-benign --manifest-id react-agent --yes    # interview, defaults accepted
+uv run nemo agent-hardener synth-benign --manifest-id react-agent --no-interactive   # CI: rules only
 ```
 
 ### War-game a local NAT project
@@ -287,7 +367,7 @@ Prefer `run --manifest-id` over `run --config`: the cached suite is looked up by
 After a run produces mitigations, freeze a chosen subset and replay the recorded attacks against it:
 
 ```bash
-uv run nemo agent-hardener sanity-check --manifest-id my-agent \
+uv run nemo agent-hardener sanity-check --manifest-id react-agent \
   --mitigations mitigations.json --replay-hitlog <fileset-ref> --keep custom_guardrail_1
 ```
 

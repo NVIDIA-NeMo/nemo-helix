@@ -685,6 +685,44 @@ nemo --help   # should show "agents" under Plugins
 nat --help    # should show run, eval, optimize, start, …
 ```
 
+### ReAct example — Wikipedia search and datetime tools
+
+The bundled ReAct example includes an agent config, evaluation dataset and
+config, and optimization config under `examples/react-agent/`. Start the
+platform and set up an inference provider first. Then, from
+`plugins/nemo-agents/`, choose a model entity shown by `nemo models list`:
+
+```bash
+export NEMO_DEFAULT_MODEL=your-model-entity-name
+nemo agents create --name react-agent \
+  --agent-config examples/react-agent/react-agent.yml
+nemo agents deploy --agent react-agent
+nemo agents invoke --agent react-agent \
+  --input "What time is it right now?"
+```
+
+Set `NEMO_DEFAULT_MODEL` before `agents create`: the platform stores the
+resolved config. The deployment must be running before you evaluate or
+optimize it. The supplied evaluation and optimization configs pin separate
+agent and judge models; check that both are available in your workspace and
+adjust their `model_name` values if needed.
+
+```bash
+nemo agents evaluate --agent react-agent \
+  --eval-config examples/react-agent/react-eval.yml
+
+nemo agents optimize prepare-fileset \
+  --source examples/react-agent \
+  --optimize-config react-optimize.yml \
+  --fileset react-optimize
+nemo agents optimize --agent react-agent \
+  --optimize-config-fileset default/react-optimize \
+  --optimize-config react-optimize.yml
+```
+
+For the governance walkthrough, see the
+[Agent Hardener quickstart](../nemo-agent-hardener/README.md#quickstart).
+
 ### Packaging NAT workflows
 
 NAT workflows use the same progressive pipeline, flags, build-context rules,
@@ -697,8 +735,12 @@ Pass `--nat-version` to make the installed NAT runtime reproducible. The value
 defaults to `NAT_VERSION` and then to the CLI's built-in version (`1.8.0`). This
 option is valid only for NAT workflows.
 
-Build a NAT workflow by passing its config file to `nemo agents package` and setting
-`--nat-version` to the desired runtime version.
+For example, from `plugins/nemo-agents/`:
+
+```bash
+nemo agents package --agent examples/react-agent/react-agent.yml \
+  --nat-version 1.8.0 --tag react-agent:local
+```
 
 #### NAT workflow validation
 
@@ -735,6 +777,9 @@ runtime version.
 
 Agent configs are standard NAT workflow YAML files. The platform stores them
 as `nat-workflow-v1` entities. All NAT component types are supported.
+
+The [ReAct config](examples/react-agent/react-agent.yml) demonstrates a
+`react_agent` workflow with `wiki_search` and `current_datetime` tools.
 
 #### base_url injection
 

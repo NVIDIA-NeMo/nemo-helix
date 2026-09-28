@@ -199,7 +199,7 @@ Use the checked-in demo config `plugins/nemo-deployments/examples/openshell/agen
 Two properties of this config are mandatory for the sandbox path, so preserve them if you start from your own agent instead:
 
 - **LLM points at `inference.local`.** `base_url: https://inference.local/v1`, and `api_key` is a non-empty placeholder (`not-used`): it MUST be non-empty because the gateway swaps in the real credential, but an empty string makes NAT reject the config.
-- **No `general.telemetry` / `nemo_files` block.** The tracing plugin is NOT installed in the packaged sandbox image, so `nat serve` rejects configs that enable it and the deployment lands in `FAILED`. Remove the whole block before packaging. (The demo config already has it removed.)
+- **No `general.telemetry` / `nemo_files` block.** The stock `react-agent.yml` example enables the `nemo_files` tracing plugin, which is NOT installed in the packaged sandbox image, so `nat serve` rejects the config and exits, and the deployment lands in `FAILED` with the config error in its status message. Remove the whole `general.telemetry` block before packaging. (The demo config already has it removed.)
 
 The `wiki` tool is registered in the demo config but its egress to Wikipedia is blocked under the zero-egress policy, so only the `current_datetime` path is exercised below. Trim the `wiki` tool from `tool_names`/`functions` if you want no dead tools.
 
@@ -327,7 +327,7 @@ docker compose -f plugins/nemo-deployments/examples/openshell/docker-compose.yml
 ## Gotchas (all verified against a live gateway)
 
 - **The `inference.local` route must be wired before invoke.** The agent hits `https://inference.local/v1`; if you never ran `openshell provider create` + `openshell inference set` (Step 1), the gateway has no route and `nat serve`'s model calls fail. `openshell inference get` should show the `nemo-igw` provider and your model.
-- **Remove `general.telemetry` / `nemo_files` before packaging.** The tracer is not installed in the sandbox image, so `nat serve` rejects configs that enable it and the deployment goes `FAILED`. The shipped `agent/config.yaml` already omits it.
+- **Remove `general.telemetry` / `nemo_files` before packaging.** The stock `react-agent.yml` enables the `nemo_files` tracer, which is not installed in the sandbox image, so `nat serve` rejects the config and the deployment goes `FAILED`. The shipped `agent/config.yaml` already removes it.
 - **Keep `api_key` non-empty.** `base_url: https://inference.local/v1` with an empty `api_key` makes NAT reject the config. Use a placeholder like `not-used`; the gateway injects the real credential.
 - **Serve workdir must be sandbox-writable.** The image owns `/workspace` as its `agent` user, which the `sandbox` user cannot write. `serve_workdir` is `/home/sandbox`; the policy grants read-write on `/home/sandbox`, `/tmp`, and `/dev/shm` (Dask needs POSIX semaphores under `/dev/shm`).
 - **Model choice matters for ReAct, and the model must exist on the Inference Gateway.** Use a `model_name` your `nemo models list --all-pages` actually shows; switchyard names drift between platforms and a missing one makes `nat serve` exit (endpoint 502). A gpt-4o-mini-class model gives clean tool-calling; verbose reasoning models can emit empty content that breaks the ReAct loop.

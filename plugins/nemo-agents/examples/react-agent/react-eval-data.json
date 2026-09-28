@@ -1,0 +1,17 @@
+[
+    {
+        "id": 1,
+        "question": "Who invented the telephone, and what is the current time?",
+        "answer": "Answer must mention Alexander Graham Bell as the inventor of the telephone and include the current time"
+    },
+    {
+        "id": 2,
+        "question": "What is the capital of France, and what day of the week is it today?",
+        "answer": "Answer must state that the capital of France is Paris and include the current day of the week"
+    },
+    {
+        "id": 3,
+        "question": "When was the theory of general relativity published, and what is today's date?",
+        "answer": "Answer must mention 1915 as the year general relativity was published and include today's date"
+    }
+]

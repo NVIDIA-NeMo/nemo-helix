@@ -58,7 +58,7 @@ the result, so every later run attacks the same thing.
 <Tab title="Registered agent">
 
 ```bash
-nemo agent-hardener init --agent my-agent
+nemo agent-hardener init --agent react-agent
 ```
 
 The agent must be registered with `nemo agents create`. It does not have to be
@@ -73,7 +73,7 @@ effect there.
 Declare the hosts your agent's tools call:
 
 ```bash
-nemo agent-hardener init --agent my-agent --egress api.example.com
+nemo agent-hardener init --agent react-agent --egress en.wikipedia.org
 ```
 
 A bare host opens port 443 only. Write `host:80` for plain HTTP. Hosts cannot
@@ -83,7 +83,7 @@ package, so declare them here.
 If the agent reads non-secret environment variables, set them at the same time:
 
 ```bash
-nemo agent-hardener init --agent my-agent \
+nemo agent-hardener init --agent react-agent \
   --env BACKEND_URL=http://host.docker.internal:8086
 ```
 
@@ -155,7 +155,7 @@ after hardening. `nemo agent-hardener run` consumes a suite and never generates 
 so create it before the first run:
 
 ```bash
-nemo agent-hardener synth-benign --manifest-id my-agent
+nemo agent-hardener synth-benign --manifest-id react-agent
 ```
 
 This opens an interview about what the agent does, then lets you review and
@@ -165,8 +165,8 @@ later runs.
 Two non-interactive forms:
 
 ```bash
-nemo agent-hardener synth-benign --manifest-id my-agent --yes
-nemo agent-hardener synth-benign --manifest-id my-agent --no-interactive
+nemo agent-hardener synth-benign --manifest-id react-agent --yes
+nemo agent-hardener synth-benign --manifest-id react-agent --no-interactive
 ```
 
 `--yes` accepts the interview's suggested answers. `--no-interactive` skips the
@@ -175,7 +175,7 @@ interview and generates from rules alone, which suits CI.
 ## 3. Run the Cycle
 
 ```bash
-nemo agent-hardener run --manifest-id my-agent
+nemo agent-hardener run --manifest-id react-agent
 ```
 
 The run attacks a sandboxed copy of the agent, generates fixes with both
@@ -196,7 +196,7 @@ run can deviate from the frozen baseline without breaking comparability. To
 change the stored defaults instead:
 
 ```bash
-nemo agent-hardener manifest set my-agent --rounds 2 --attack-intensity thorough
+nemo agent-hardener manifest set react-agent --rounds 2 --attack-intensity thorough
 ```
 
 Check recent runs:
@@ -211,7 +211,7 @@ Editing the agent does not change an existing manifest. Pick up the changes
 deliberately:
 
 ```bash
-nemo agent-hardener refresh --manifest-id my-agent
+nemo agent-hardener refresh --manifest-id react-agent
 ```
 
 Egress, secrets, models, defenders and the cached benign suite are all

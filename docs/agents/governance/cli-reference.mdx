@@ -247,8 +247,8 @@ client = NeMoHelix(
     workspace="default",
 )
 
-manifest = client.agent_hardener.manifests.get("my-agent")
-result = client.agent_hardener.run(manifest_id="my-agent")
+manifest = client.agent_hardener.manifests.get("react-agent")
+result = client.agent_hardener.run(manifest_id="react-agent")
 
 for run in client.agent_hardener.runs.list(limit=5):
     print(run["name"], run["status"])

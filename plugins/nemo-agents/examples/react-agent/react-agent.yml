@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# nemotron-agent.yml
+#
+# A ReAct agent with Wikipedia search and datetime tools, backed by
+# nvidia/nemotron-3.5-lightning-30b-a3b — a compact reasoning model from NVIDIA.
+#
+# Quick local test (no platform, requires NVIDIA API key):
+#   export NVIDIA_API_KEY=nvapi-...
+#   nat run --config_file examples/react-agent/react-agent.yml \
+#       --override llms.llm.base_url https://integrate.api.nvidia.com/v1 \
+#       --override llms.llm.api_key $NVIDIA_API_KEY \
+#       --input "Who invented the telephone? Also what time is it?"
+#
+# Platform-managed deployment (controller injects Inference Gateway URL):
+#   nemo agents create --name react-agent --agent-config examples/react-agent/react-agent.yml
+#   nemo agents deploy  --agent react-agent
+#   nemo agents invoke  --agent react-agent \
+#       --input "Who invented the telephone? Also what time is it?"
+#
+# Model entity name (auto-created by models controller from nvidia-build discovery):
+#   nvidia/nemotron-3.5-lightning-30b-a3b  →  nvidia-nemotron-3-5-lightning-30b-a3b
+
+functions:
+  wiki:
+    _type: wiki_search
+  clock:
+    _type: current_datetime
+
+llms:
+  llm:
+    _type: openai
+    # base_url and api_key are injected by the platform controller at deploy time.
+    # For local runs, pass them via --override (see usage above).
+    api_key: not-used
+    model_name: ${NEMO_DEFAULT_MODEL}
+    temperature: 0.0
+
+workflow:
+  _type: react_agent
+  tool_names: [wiki, clock]
+  llm_name: llm
+  verbose: false
+  parse_agent_response_max_retries: 3
+
+general:
+  telemetry:
+    tracing:
+      nemo_trace:
+        _type: nemo_files
+        # workspace and agent_name are injected at deploy time
+        batch_size: 128
