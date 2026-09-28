@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,7 @@ class FabricCandidateEvaluator:
         general = general if isinstance(general, Mapping) else {}
         self._parallelism = int(general.get("max_concurrency", 4))
         self._trace_map: list[dict[str, Any]] = []
+        self._trace_lock = threading.Lock()
         # Validate dataset/metrics once at construction so config errors fail before the study loop.
         build_agent_eval_tasks(self._payload)
 
@@ -78,7 +80,7 @@ class FabricCandidateEvaluator:
         trial_overlay: dict[str, Any],
         rep: int,
     ) -> CandidateEvaluationResult:
-        del trial_overlay  # reserved for profile overlays; runtime uses path-resolved payload
+        overlay_metadata = _trial_overlay_metadata(trial_overlay)
         # ``suggestions`` are Fabric dotted paths.
         trial_payload = apply_suggestions(self._payload, suggestions)
         # Rebuild tasks from the path-resolved payload so search-space paths under
@@ -90,11 +92,14 @@ class FabricCandidateEvaluator:
             work_root=self._trial_work_root(trial_number, rep),
             timeout_s=self._timeout_s,
             capture_trajectory=self._capture_trajectory,
-            trajectory_extra=build_atif_trial_tags(
-                experiment_id=self._experiment_id,
-                trial_number=trial_number,
-                rep=rep,
-            ),
+            trajectory_extra={
+                **build_atif_trial_tags(
+                    experiment_id=self._experiment_id,
+                    trial_number=trial_number,
+                    rep=rep,
+                ),
+                **overlay_metadata,
+            },
         )
         result = AgentEvaluator().run_sync(
             tasks=tasks,
@@ -110,8 +115,9 @@ class FabricCandidateEvaluator:
         # ``run`` no longer stores the bundle; keep writing one per trial as before. No dashboard —
         # each trial bundle is intermediate evidence for the study, not something anyone opens.
         result.persist(write_dashboard=False)
-        self._record_traces(result, trial_number=trial_number, rep=rep)
-        self._write_trace_map()
+        with self._trace_lock:
+            self._record_traces(result, trial_number=trial_number, rep=rep, metadata=overlay_metadata)
+            self._write_trace_map()
         return CandidateEvaluationResult(
             aggregate_metrics=reduce_agent_eval_scores(result.scores, self._metric_names),
             scores=tuple(result.scores),
@@ -123,7 +129,14 @@ class FabricCandidateEvaluator:
     def _trial_output_dir(self, trial_number: int, rep: int) -> Path:
         return self._output_dir / "agent_eval" / f"trial-{trial_number:03d}" / f"rep-{rep:03d}"
 
-    def _record_traces(self, result: AgentEvalResult, *, trial_number: int, rep: int) -> None:
+    def _record_traces(
+        self,
+        result: AgentEvalResult,
+        *,
+        trial_number: int,
+        rep: int,
+        metadata: Mapping[str, Any],
+    ) -> None:
         for trial in result.trials:
             trace = trial.evidence.descriptors.get(EVIDENCE_TRACE) if trial.evidence is not None else None
             if trace is None:
@@ -138,6 +151,7 @@ class FabricCandidateEvaluator:
                     "trial_id": trial.id,
                     "trace_ref": trace.ref,
                     "trace_format": trace.format,
+                    **metadata,
                 }
             )
 
@@ -369,6 +383,15 @@ def _eval_config(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     if not isinstance(eval_config, Mapping):
         raise CandidateEvaluationError("Fabric optimize payload must include an eval mapping for real trial execution.")
     return eval_config
+
+
+def _trial_overlay_metadata(trial_overlay: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(trial_overlay, Mapping):
+        return {}
+    metadata = trial_overlay.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return {}
+    return {str(key): value for key, value in metadata.items()}
 
 
 def _runtime_agent_config(config: Mapping[str, Any]) -> dict[str, Any]:
