@@ -5,7 +5,7 @@
 
 In-process tests mirror a live e2e flow: four workspaces, direct membership on A/B, a
 shared group on C, a single owner on D, then model/adapter create checks across those
-workspaces. The first class uses the NeMoHelix SDK; the second issues hand-built
+workspaces. The first class uses the typed clients; the second issues hand-built
 HTTP to the same routes using a ``requests`` Session (see
 :class:`_TestClientToRequestsAdapter`) that forwards to the Starlette ``TestClient``,
 since CPython ``requests`` cannot open an in-process ASGI app directly.
@@ -24,8 +24,7 @@ from uuid import uuid4
 import pytest
 import requests
 from fastapi.testclient import TestClient
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -126,16 +125,16 @@ def models_auth_context() -> Generator[ClientContext, None, None]:
 
 
 @pytest.fixture(scope="module")
-def sdk(models_auth_context: ClientContext) -> NeMoHelix:
-    return models_auth_context.sdk
+def client(models_auth_context: ClientContext) -> NemoClient:
+    return models_auth_context.client
 
 
 @pytest.mark.integration
-class TestWorkspaceIamIsolationSDK:
-    """End-to-end style IAM check using the NeMoHelix ``models`` / ``adapters`` SDK."""
+class TestWorkspaceIamIsolationTypedClient:
+    """End-to-end style IAM check using the typed ``models`` / ``adapters`` clients."""
 
     @pytest.mark.usefixtures("models_auth_context")
-    def test_model_and_adapter_iam(self, sdk: NeMoHelix) -> None:
+    def test_model_and_adapter_iam(self, client: NemoClient) -> None:
         user_a = unique_email("user-a")
         user_b = unique_email("user-b")
         owner_d = unique_email("owner-d")
@@ -145,8 +144,8 @@ class TestWorkspaceIamIsolationSDK:
         ws_d = short_unique_name("wks-d")
         shared_group = f"team-{uuid4().hex[:12]}"
 
-        admin: NeMoHelix = as_user(sdk, TEST_ADMIN_EMAIL)
-        workspaces = client_from_platform(admin, WorkspacesClient)
+        admin = as_user(client, TEST_ADMIN_EMAIL)
+        workspaces = WorkspacesClient.from_client(admin)
 
         workspaces.create_workspace(
             query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),
@@ -161,9 +160,10 @@ class TestWorkspaceIamIsolationSDK:
             body=CreateWorkspaceRequest(name=ws_c, description="shared via group"),
         ).data()
 
-        as_user(sdk, owner_d).workspaces.create(
-            name=ws_d, description="isolated from A and B", wait_role_propagation=True
-        )
+        WorkspacesClient.from_client(as_user(client, owner_d)).create_workspace(
+            query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),
+            body=CreateWorkspaceRequest(name=ws_d, description="isolated from A and B"),
+        ).data()
 
         grant_workspace_role(admin, workspace=ws_a, principal=user_a, roles=["Editor"])
         grant_workspace_role(admin, workspace=ws_b, principal=user_b, roles=["Editor"])
@@ -171,35 +171,27 @@ class TestWorkspaceIamIsolationSDK:
 
         model_a = short_unique_name("mdl-a")
         model_b = short_unique_name("mdl-b")
-        ua: NeMoHelix = as_user(sdk, user_a)
-        ub: NeMoHelix = as_user(sdk, user_b)
-        uac: NeMoHelix = as_user(sdk, user_a, groups=[shared_group])
-        ubc: NeMoHelix = as_user(sdk, user_b, groups=[shared_group])
+        ua = as_user(client, user_a)
+        ub = as_user(client, user_b)
+        uac = as_user(client, user_a, groups=[shared_group])
+        ubc = as_user(client, user_b, groups=[shared_group])
 
-        client_from_platform(ua, ModelsClient).create_model(
-            workspace=ws_a, body=CreateModelEntityRequest(name=model_a)
-        ).data()
-        client_from_platform(ub, ModelsClient).create_model(
-            workspace=ws_b, body=CreateModelEntityRequest(name=model_b)
-        ).data()
-        client_from_platform(uac, ModelsClient).create_model(
+        ModelsClient.from_client(ua).create_model(workspace=ws_a, body=CreateModelEntityRequest(name=model_a)).data()
+        ModelsClient.from_client(ub).create_model(workspace=ws_b, body=CreateModelEntityRequest(name=model_b)).data()
+        ModelsClient.from_client(uac).create_model(
             workspace=ws_c, body=CreateModelEntityRequest(name=short_unique_name("mdl-c-a"))
         ).data()
         model_c_b = short_unique_name("mdl-c-b")
-        client_from_platform(ubc, ModelsClient).create_model(
-            workspace=ws_c, body=CreateModelEntityRequest(name=model_c_b)
-        ).data()
+        ModelsClient.from_client(ubc).create_model(workspace=ws_c, body=CreateModelEntityRequest(name=model_c_b)).data()
 
-        od: NeMoHelix = as_user(sdk, owner_d)
+        od = as_user(client, owner_d)
         model_d = short_unique_name("mdl-d")
-        client_from_platform(od, ModelsClient).create_model(
-            workspace=ws_d, body=CreateModelEntityRequest(name=model_d)
-        ).data()
+        ModelsClient.from_client(od).create_model(workspace=ws_d, body=CreateModelEntityRequest(name=model_d)).data()
 
         # Filesets: fileset in C (for allow with group); fileset in D (for deny in C)
         fs_c = short_unique_name("fs-c")
         fs_d = short_unique_name("fs-d")
-        admin_files = client_from_platform(admin, FilesClient)
+        admin_files = FilesClient.from_client(admin)
         admin_files.create_fileset(workspace=ws_c, body=CreateFilesetRequest(name=fs_c))
         admin_files.create_fileset(workspace=ws_d, body=CreateFilesetRequest(name=fs_d))
         admin_files.upload_file(workspace=ws_c, name=fs_c, path="a.txt", content=b"x")
@@ -207,7 +199,7 @@ class TestWorkspaceIamIsolationSDK:
 
         # 13: adapter in C with a fileset in D is denied (no access to D fileset)
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(uac, ModelsClient).create_model_adapter(
+            ModelsClient.from_client(uac).create_model_adapter(
                 model_name=model_c_b,
                 workspace=ws_c,
                 body=CreateModelAdapterRequest(
@@ -218,7 +210,7 @@ class TestWorkspaceIamIsolationSDK:
             )
 
         # Adapter in ws_a on local model, LoRA data in ws_c: allowed (user A can read C).
-        client_from_platform(uac, ModelsClient).create_model_adapter(
+        ModelsClient.from_client(uac).create_model_adapter(
             model_name=model_a,
             workspace=ws_a,
             body=CreateModelAdapterRequest(
@@ -229,7 +221,7 @@ class TestWorkspaceIamIsolationSDK:
         )
         # Same local model, LoRA / base storage in ws_d: denied (no D access; targets D "base").
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(uac, ModelsClient).create_model_adapter(
+            ModelsClient.from_client(uac).create_model_adapter(
                 model_name=model_a,
                 workspace=ws_a,
                 body=CreateModelAdapterRequest(
@@ -239,19 +231,19 @@ class TestWorkspaceIamIsolationSDK:
                 ),
             )
 
-        client_from_platform(uac, ModelsClient).create_model(
+        ModelsClient.from_client(uac).create_model(
             workspace=ws_c, body=CreateModelEntityRequest(name=short_unique_name("mdl-into-c-a"))
         ).data()
-        client_from_platform(ubc, ModelsClient).create_model(
+        ModelsClient.from_client(ubc).create_model(
             workspace=ws_c, body=CreateModelEntityRequest(name=short_unique_name("mdl-into-c-b"))
         ).data()
 
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(uac, ModelsClient).create_model(
+            ModelsClient.from_client(uac).create_model(
                 workspace=ws_d, body=CreateModelEntityRequest(name=short_unique_name("deny-a-into-d"))
             ).data()
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(ubc, ModelsClient).create_model(
+            ModelsClient.from_client(ubc).create_model(
                 workspace=ws_d, body=CreateModelEntityRequest(name=short_unique_name("deny-b-into-d"))
             ).data()
 
@@ -389,8 +381,8 @@ class TestWorkspaceIamIsolationHttpRequests:
 
         fs_c = short_unique_name("fs-c")
         fs_d = short_unique_name("fs-d")
-        admin_sdk = as_user(models_auth_context.sdk, TEST_ADMIN_EMAIL)
-        files = client_from_platform(admin_sdk, FilesClient)
+        admin_client = as_user(models_auth_context.client, TEST_ADMIN_EMAIL)
+        files = FilesClient.from_client(admin_client)
         files.create_fileset(workspace=ws_c, body=CreateFilesetRequest(name=fs_c))
         files.create_fileset(workspace=ws_d, body=CreateFilesetRequest(name=fs_d))
         files.upload_file(workspace=ws_c, name=fs_c, path="a.txt", content=b"x")
