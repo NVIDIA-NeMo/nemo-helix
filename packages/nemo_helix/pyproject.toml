@@ -251,7 +251,8 @@ models-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-agent-config-example-email-security-triage = []
+nemo-agent-config-example-email-security-triage = [
+]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-example-calculator = [
