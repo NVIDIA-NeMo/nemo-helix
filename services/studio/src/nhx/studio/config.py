@@ -16,6 +16,51 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
+class StudioConfidentialOidcConfig(BaseModel):
+    """Server-side OIDC configuration for Studio confidential-client mode."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable Studio's server-side OIDC authorization-code flow for confidential clients.",
+    )
+    client_id: str = Field(
+        default="",
+        description="Optional Studio-specific OIDC client ID. Defaults to auth.oidc.client_id when unset.",
+    )
+    client_secret_env_var: str = Field(
+        default="NHX_STUDIO_OIDC_CLIENT_SECRET",
+        description="Environment variable containing the confidential OIDC client secret.",
+    )
+    authorization_endpoint: str = Field(
+        default="",
+        description="Optional OIDC authorization endpoint. Defaults to auth.oidc.authorization_endpoint when unset.",
+    )
+    token_endpoint: str = Field(
+        default="",
+        description="Optional OIDC token endpoint. Defaults to auth.oidc.token_endpoint when unset.",
+    )
+    redirect_uri: str = Field(
+        default="",
+        description="Optional externally visible redirect URI for Studio's confidential OIDC callback.",
+    )
+    scope: str = Field(
+        default="",
+        description="Optional scopes requested by the confidential flow. Defaults to auth.oidc.default_scopes.",
+    )
+    bearer_token_source: str = Field(
+        default="",
+        description="Token response field the browser should use as the platform bearer token.",
+    )
+    session_cookie_name: str = Field(
+        default="nhx_studio_oidc_session",
+        description="HTTP-only cookie name holding the Studio confidential OIDC session ID.",
+    )
+    post_login_redirect_path: str = Field(
+        default="/studio/",
+        description="Path where Studio redirects the browser after confidential OIDC login succeeds.",
+    )
+
+
 class StudioOtelConfig(BaseModel):
     """OpenTelemetry configuration for Studio UI browser telemetry."""
 
@@ -79,6 +124,10 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
     otel: StudioOtelConfig = Field(
         default_factory=StudioOtelConfig,
         description="Studio UI OpenTelemetry settings.",
+    )
+    confidential_oidc: StudioConfidentialOidcConfig = Field(
+        default_factory=StudioConfidentialOidcConfig,
+        description="Studio server-side OIDC settings for confidential clients.",
     )
 
     @cached_property

@@ -4,6 +4,10 @@
 import axios from 'axios';
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import qs from 'qs';
+import {
+  getConfidentialOidcBearerToken,
+  isConfidentialOidcMode,
+} from '../../src/utils/confidentialOidcToken';
 import { getStoredOidcBearerToken } from '../../src/utils/oidcBearerToken';
 import { resolveBrowserBaseUrl } from '../../src/utils/url';
 
@@ -16,11 +20,19 @@ interface RequestOptions extends AxiosRequestConfig {
 }
 
 // Add X-Source header and OIDC Bearer token to ALL requests
-axios.interceptors.request.use((config) => {
+axios.interceptors.request.use(async (config) => {
   Object.assign(config.headers, headers);
 
   // If Authorization is already set (e.g. via axios.defaults in a Web Worker), skip OIDC lookup
   if (config.headers.Authorization) {
+    return config;
+  }
+
+  if (isConfidentialOidcMode(import.meta.env.VITE_AUTH_MODE)) {
+    const bearerToken = await getConfidentialOidcBearerToken();
+    if (bearerToken) {
+      config.headers.Authorization = `Bearer ${bearerToken}`;
+    }
     return config;
   }
 

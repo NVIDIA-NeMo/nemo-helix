@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getConfidentialOidcBearerToken,
+  isConfidentialOidcMode,
+} from '@nemo/sdk/src/utils/confidentialOidcToken';
 import { getStoredOidcBearerToken } from '@nemo/sdk/src/utils/oidcBearerToken';
 import { BASE_URL, PLATFORM_BASE_URL } from '@studio/constants/environment';
 import {
@@ -43,13 +47,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const assistantApiUrl = (path: string): string =>
   `${PLATFORM_BASE_URL}${ASSISTANT_API_BASE_PATH}${path}`;
 
-const assistantFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const bearerToken = getStoredOidcBearerToken({
-    authority: import.meta.env.VITE_AUTH_AUTHORITY,
-    clientId: import.meta.env.VITE_AUTH_CLIENT_ID,
-    configuredSource: import.meta.env.VITE_AUTH_BEARER_TOKEN_SOURCE,
-    storage: typeof localStorage === 'undefined' ? undefined : localStorage,
-  });
+const assistantFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const bearerToken = isConfidentialOidcMode(import.meta.env.VITE_AUTH_MODE)
+    ? await getConfidentialOidcBearerToken()
+    : getStoredOidcBearerToken({
+        authority: import.meta.env.VITE_AUTH_AUTHORITY,
+        clientId: import.meta.env.VITE_AUTH_CLIENT_ID,
+        configuredSource: import.meta.env.VITE_AUTH_BEARER_TOKEN_SOURCE,
+        storage: typeof localStorage === 'undefined' ? undefined : localStorage,
+      });
   if (!bearerToken) return fetch(input, init);
 
   const headers = new Headers(init?.headers);

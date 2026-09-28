@@ -938,4 +938,26 @@ studio:
     allowed_origins:
     - http://localhost
     - http://localhost:*
+  # Studio server-side OIDC settings for confidential clients.
+  confidential_oidc:
+    # Enable Studio's server-side OIDC authorization-code flow for confidential clients. | default: False
+    enabled: false
+    # Optional Studio-specific OIDC client ID. Defaults to auth.oidc.client_id when unset. | default: ''
+    client_id: ''
+    # Environment variable containing the confidential OIDC client secret. | default: 'NHX_STUDIO_OIDC_CLIENT_SECRET'
+    client_secret_env_var: NHX_STUDIO_OIDC_CLIENT_SECRET
+    # Optional OIDC authorization endpoint. Defaults to auth.oidc.authorization_endpoint when unset. | default: ''
+    authorization_endpoint: ''
+    # Optional OIDC token endpoint. Defaults to auth.oidc.token_endpoint when unset. | default: ''
+    token_endpoint: ''
+    # Optional externally visible redirect URI for Studio's confidential OIDC callback. | default: ''
+    redirect_uri: ''
+    # Optional scopes requested by the confidential flow. Defaults to auth.oidc.default_scopes. | default: ''
+    scope: ''
+    # Token response field the browser should use as the platform bearer token. | default: ''
+    bearer_token_source: ''
+    # HTTP-only cookie name holding the Studio confidential OIDC session ID. | default: 'nhx_studio_oidc_session'
+    session_cookie_name: nhx_studio_oidc_session
+    # Path where Studio redirects the browser after confidential OIDC login succeeds. | default: '/studio/'
+    post_login_redirect_path: /studio/
 ```

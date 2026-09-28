@@ -42,6 +42,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(marker="STUDIO_UI_VITE_AUTH_AUTHORITY", config_path="auth.oidc.issuer"),
     EnvMapping(marker="STUDIO_UI_VITE_AUTH_CLIENT_ID", config_path="auth.oidc.client_id"),
     EnvMapping(
+        marker="STUDIO_UI_VITE_AUTH_MODE",
+        config_path="studio.confidential_oidc.enabled",
+        default="false",
+    ),
+    EnvMapping(
         marker="STUDIO_UI_VITE_AUTH_BEARER_TOKEN_SOURCE",
         config_path="auth.oidc.bearer_token_source",
         default="access_token",
