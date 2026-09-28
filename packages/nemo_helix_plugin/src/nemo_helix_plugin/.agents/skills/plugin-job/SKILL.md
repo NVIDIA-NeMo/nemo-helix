@@ -3,22 +3,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-job
-description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding the three CLI verbs (run / submit / explain), or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, three verbs, run, submit, explain, NemoJobScheduler.
+description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding flat job CLI generation and generate_legacy_verbs, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, flat job CLI, submit, explain, generate_legacy_verbs, NemoJobScheduler.
 ---
 
 # Plugin Jobs (NemoJob)
 
-A `NemoJob` drives three CLI verbs that the platform auto-generates from the class:
+A `NemoJob` drives job CLI commands that the platform auto-generates from the class. New jobs should set `generate_legacy_verbs = False` and expose submission as the job command itself:
 
 ```
-nemo <plugin> <job> run      [--spec '{...}' | --spec-file FILE]
-nemo <plugin> <job> submit   [--profile <p>] [--cluster <c>] \
+nemo <plugin> <job>          [--profile <p>] [--cluster <c>] \
                              [--spec '{...}' | --spec-file FILE] \
                              [-o <backend>.<key>=<value> ...] [--options-file FILE]
 nemo <plugin> <job> explain  [--profile <p>]
 ```
 
-`run` is in-process (no platform); `submit` POSTs to the plugin service, which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally.
+The flat job command POSTs to the plugin service, which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling. Leaving `generate_legacy_verbs` at its default `True` preserves the older nested `<job> submit` / `<job> explain` command group for compatibility.
 
 ## Class Signature
 
@@ -36,6 +35,7 @@ class GenerateJob(NemoJob):
     description: ClassVar[str] = "Generate rows."
     spec_schema: ClassVar[type[BaseModel]] = GenerateSpec
     container: ClassVar[str] = "cpu-tasks"
+    generate_legacy_verbs: ClassVar[bool] = False
 
     def run(self, config: dict) -> dict:
         cfg = GenerateSpec.model_validate(config)
@@ -136,7 +136,7 @@ that turns the validated spec into the concrete step / container / resources des
 
 ## Submit body wire shape (informational)
 
-When the CLI runs `nemo ... submit`, the body POSTed to the plugin service looks like:
+When the CLI submits a job with the flat `nemo <plugin> <job>` command, the body POSTed to the plugin service looks like:
 
 ```json
 {
@@ -245,7 +245,7 @@ No mocking, no FastAPI, no platform needed. See the `plugin-testing` skill for s
 
 - **`name` is the suffix only**: For entry-point key `"data-designer.generate"`, `NemoJob.name = "generate"`. Setting the full key logs a warning at startup.
 - **`spec_schema` is required**: `add_job_routes` raises `TypeError` if `spec_schema` is `None`. Declare it before mounting routes.
-- **`compile()` default raises `NotImplementedError`**: Jobs that haven't overridden it fail at `submit` time with a clear 422. Local `run` doesn't need `compile`.
+- **`compile()` default raises `NotImplementedError`**: Jobs that haven't overridden it fail at remote submission time with a clear 422. Local `run` doesn't need `compile`.
 - **`run()` must be synchronous**: Use `asyncio.run()` for async work inside.
 - **`run()` returns a JSON-serializable dict**: No datetime, no Pydantic models, no custom classes.
 - **Jobs are stateless**: A new instance is constructed per call; don't store state on `self`.

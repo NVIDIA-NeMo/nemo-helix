@@ -15,7 +15,7 @@ nemo <plugin> <job> explain  [--profile <p>]
 - flat `<job>` command — POSTs the job to the plugin service, which compiles it into a `HelixJobSpec` and hands it off to the Jobs service for cluster execution.
 - `explain` — prints the job's schemas and submit route. Reads locally, no network.
 
-The older generated CLI shape used nested `<job> run` and `<job> submit` verbs. `NemoJob.generate_legacy_verbs` still defaults to `True` for compatibility with existing jobs, but new plugin job surfaces should opt into the flat command shape.
+The older generated CLI shape used a nested `<job> submit` verb. `NemoJob.generate_legacy_verbs` still defaults to `True` for compatibility with existing jobs, but new plugin job surfaces should opt into the flat command shape.
 
 ## Declaring a NemoJob
 
