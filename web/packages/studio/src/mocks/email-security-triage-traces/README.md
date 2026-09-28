@@ -21,6 +21,10 @@ uv run nemo insights analysis enable --agent email-security-triage \
   --default-model default/<model> --fast-model default/<model>
 ```
 
+The default model runs the analysis itself. The fast model only summarizes long trace
+context before it reaches the default model, so pick something cheaper and quicker; if
+unset, the default model does both.
+
 ## Sample traces
 
 Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
