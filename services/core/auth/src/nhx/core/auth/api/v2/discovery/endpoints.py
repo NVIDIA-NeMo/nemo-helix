@@ -127,7 +127,7 @@ need to authenticate with this NeMo Helix deployment.
   - `device_authorization_display_name`: Optional device name shown during device authorization
   - `device_token_request_includes_scope`: Whether CLI device token requests include the requested scopes
   - `default_scopes`: OAuth scopes to request during authentication
-  - `scope_prefix`: Prefix to prepend to custom scopes (those with ':' or '.default')
+  - `scope_prefix`: Prefix clients prepend to NeMo Helix API scopes and NeMo Helix strips from returned token scopes
   - `workload_token_exchange_enabled`: Whether SDK workload identity token exchange is enabled
   - `workload_client_id`: OAuth client ID to use for workload identity token exchange
   - `workload_token_endpoint`: Token endpoint to use only for workload identity token exchange
