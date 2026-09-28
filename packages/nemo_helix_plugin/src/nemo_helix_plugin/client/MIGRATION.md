@@ -456,9 +456,9 @@ playbook.
 - [ ] **Update the service's own test fixtures** to hand out the new client instead of
       `NeMoHelix(...)`. Check for *local* fixtures in individual test files too (they override
       conftest). Mocked-secrets tests need re-wiring (patch `client_from_platform`, `.data()`-wrap).
-- [ ] **If you touched `nemo_helix_ext`** (e.g. `setup.py` helpers, a use-case command), run
-      `make vendor-nemo-helix-ext` — that package is vendored into `sdk/python/nemo-helix`, and
-      the CLI runs from the vendored copy. Vendored `sdk/python` is ruff-excluded, so don't chase its
+- [ ] **If you touched `nemo_helix_ext` dependencies or entry points**, run `make vendor` to
+      refresh the `nemo-helix` wheel metadata. The wheel bundles the package from source, so code
+      changes need no vendoring step. `sdk/python` is ruff-excluded, so don't chase its
       pre-existing lint errors.
 - [ ] **Preserve auth semantics** — privileged routers, on-behalf-of checks, scopes.
 - [ ] **Run** `uv run --frozen ty check`, `uv run ruff check`, `make test-package PACKAGE=nemo_helix_plugin`,

@@ -3,7 +3,7 @@
 
 [project]
 name = "nemo-helix-ext"
-description = "A package that contains modules that extend the Stainless' generated nemo-helix SDK. This includes high-level interfaces, CLI, quickstart functionality."
+description = "The nemo CLI and client-side extensions for NeMo Helix: high-level interfaces, CLI, quickstart functionality."
 license = "Apache-2.0"
 authors = [{name = "NVIDIA Corporation"}]
 dependencies = [
