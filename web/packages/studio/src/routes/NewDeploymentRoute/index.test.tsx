@@ -64,7 +64,6 @@ describe('NewDeploymentRoute', () => {
     // The page has its own "Name" field, so scope the modal's inputs to the dialog.
     const dialog = within(await screen.findByRole('dialog', { name: 'Create Secret' }));
     await user.type(await dialog.findByRole('textbox', { name: 'Name' }), 'hf-token');
-    // Masked input — rendered as a password field, so it has no `textbox` role.
     // Masked input — a password field, so no `textbox` role; the label also matches the
     // field's help text, hence `selector`.
     await user.type(await dialog.findByLabelText('Value', { selector: 'input' }), 'hf_value');
