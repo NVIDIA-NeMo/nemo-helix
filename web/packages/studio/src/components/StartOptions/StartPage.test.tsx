@@ -205,6 +205,35 @@ describe('StartPage selection', () => {
     expect(screen.getByText('Registering model')).toBeInTheDocument();
   });
 
+  it('takes the busy tile out of play without dimming it like an unavailable one', async () => {
+    const onSelect = vi.fn();
+    render(
+      <TestProviders>
+        <StartPage
+          heading="Page Title"
+          headingDescription="Page Description"
+          options={OPTIONS}
+          templateGroups={[group()]}
+          onSelect={onSelect}
+          disabled
+          busyId="t1"
+          busyLabel="Registering model"
+        />
+      </TestProviders>
+    );
+
+    const busyTile = screen.getByRole('button', { name: /Template One/ });
+    await userEvent.click(busyTile);
+
+    // Clicking again must not start a second setup, but the tile doing the work should
+    // read as active rather than unavailable, so it keeps the undimmed styling.
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(busyTile).toBeDisabled();
+    expect(busyTile).toHaveAttribute('aria-busy', 'true');
+    expect(busyTile).not.toHaveClass('opacity-50');
+    expect(screen.getByRole('button', { name: /Build from scratch/ })).toHaveClass('opacity-50');
+  });
+
   it('swaps the busy tile description for the status, keeping its name', () => {
     render(
       <TestProviders>

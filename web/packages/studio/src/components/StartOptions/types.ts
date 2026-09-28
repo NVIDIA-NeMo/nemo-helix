@@ -74,7 +74,8 @@ export interface StartTileProps {
   slotEnd?: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
-  /** Swaps the icon for a spinner and the description for `busyLabel`. */
+  /** Swaps the icon for a spinner and the description for `busyLabel`, and blocks
+   * the click without dimming the tile — this is the one doing the work. */
   busy?: boolean;
   busyLabel?: string;
   labelKind?: ComponentProps<typeof Text>['kind'];

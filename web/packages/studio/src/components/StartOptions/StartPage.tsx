@@ -66,7 +66,7 @@ export const StartPage: FC<StartPageProps> = ({
                   labelKind={TILE_LABEL_KIND}
                   descriptionKind={TILE_DESCRIPTION_KIND}
                   className={TILE_RADIUS}
-                  disabled={disabled || !option.enabled}
+                  disabled={busyId !== option.id && (disabled || !option.enabled)}
                 />
               ))}
             </Stack>
@@ -122,7 +122,7 @@ export const StartPage: FC<StartPageProps> = ({
                               labelKind={TILE_LABEL_KIND}
                               descriptionKind={TILE_DESCRIPTION_KIND}
                               className={TILE_RADIUS}
-                              disabled={disabled}
+                              disabled={busyId !== template.id && disabled}
                             />
                           ))}
                     </div>

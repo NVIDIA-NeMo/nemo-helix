@@ -35,18 +35,24 @@ export const StartTile: FC<StartTileProps> = ({
 
   const contentClass = `[&_.nv-card-content]:grid [&_.nv-card-content]:grid-cols-[auto_1fr] [&_.nv-card-content]:grid-rows-[auto_auto] [&_.nv-card-content]:items-center! [&_.nv-card-content]:w-full [&_.nv-card-content]:p-3! ${gapClass}`;
 
+  // Busy and disabled both take the tile out of play, but they mean different things:
+  // disabled is unavailable and reads dimmed, busy is the one doing the work and reads
+  // normal. Only the button's `disabled` stops the click; nothing overrides pointers.
+  const inert = disabled || busy;
+
   return (
     <button
       type="button"
       onClick={onSelect}
-      disabled={disabled}
+      disabled={inert}
+      aria-busy={busy || undefined}
       className={cn('group block w-full text-left', disabled && 'cursor-not-allowed opacity-50')}
     >
       <Card
         className={cn(
           'w-full',
           busy && 'border-interaction-selected',
-          !disabled && 'cursor-pointer hover:bg-interaction-hover',
+          !inert && 'cursor-pointer hover:bg-interaction-hover',
           contentClass,
           className
         )}
