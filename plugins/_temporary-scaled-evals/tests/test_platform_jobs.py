@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import json
 import re
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+import typer
+from nemo_helix_plugin.commands import add_job_commands
+from typer.testing import CliRunner
 
 pytest.importorskip("nemo_scaled_evals_plugin")
 
@@ -151,7 +155,8 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     worker = MagicMock()
     worker.run.return_value = True
     worker_factory = MagicMock(return_value=worker)
-    monkeypatch.setattr(build_job_module, "TaskBuildWorker", worker_factory)
+    monkeypatch.setattr(build_job_module, "_task_build_worker_cls", lambda: worker_factory)
+    monkeypatch.setattr(build_job_module, "_backend_task_build_job_cls", lambda: SimpleNamespace)
     assert TaskImageBuildJob().run(_build_spec().model_dump()) == {"status": "completed"}
     worker_factory.assert_called_once_with(worker_id="scaled-evals-build-task_1-r2-a3")
     backend_job = worker.run.call_args.args[0]
@@ -161,7 +166,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     assert TaskImageBuildJob().run(_build_spec().model_dump()) == {"status": "failed"}
 
     dispatcher = MagicMock()
-    monkeypatch.setattr(evaluation_job_module, "Dispatcher", lambda: dispatcher)
+    monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
     assert EvaluationExecutionJob().run(_evaluation_spec().model_dump()) == {
         "status": "completed",
         "evaluation_id": "eval_1",
@@ -179,6 +184,31 @@ def test_jobs_are_discovered_from_plugin_entry_points() -> None:
     assert jobs["scaled-evals.task-image-build"] is TaskImageBuildJob
     assert jobs["scaled-evals.evaluation-execution"] is EvaluationExecutionJob
     assert discover_controllers()["scaled-evals-jobs"] is ScaledEvalsJobsController
+
+
+def test_platform_jobs_use_flat_generated_cli() -> None:
+    app = typer.Typer()
+
+    @app.callback()
+    def _noop() -> None:
+        pass
+
+    add_job_commands(
+        app,
+        {
+            "scaled-evals.task-image-build": TaskImageBuildJob,
+            "scaled-evals.evaluation-execution": EvaluationExecutionJob,
+        },
+    )
+    runner = CliRunner()
+
+    for command in ("task-image-build", "evaluation-execution"):
+        help_result = runner.invoke(app, [command, "--help"])
+        assert help_result.exit_code == 0
+        assert "explain" in help_result.output
+
+        legacy_submit = runner.invoke(app, [command, "submit", "--help"])
+        assert legacy_submit.exit_code != 0
 
 
 def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) -> None:  # noqa: ANN001

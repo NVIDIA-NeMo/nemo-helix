@@ -24,9 +24,19 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_scaled_evals_plugin.jobs.naming import task_image_build_job_name
 from nemo_scaled_evals_plugin.jobs.specs import TaskImageBuildSpec
 from pydantic import BaseModel
-from scaled_evals.api.build.queue_worker import TaskBuildWorker
-from scaled_evals.api.repositories.build_repository import TaskBuildJob as BackendTaskBuildJob
 from scaled_evals.api.settings import settings
+
+
+def _task_build_worker_cls() -> type[Any]:
+    from scaled_evals.api.build.queue_worker import TaskBuildWorker
+
+    return TaskBuildWorker
+
+
+def _backend_task_build_job_cls() -> type[Any]:
+    from scaled_evals.api.repositories.build_repository import TaskBuildJob
+
+    return TaskBuildJob
 
 
 class TaskImageBuildJob(NemoJob):
@@ -34,6 +44,7 @@ class TaskImageBuildJob(NemoJob):
 
     name: ClassVar[str] = "task-image-build"
     description: ClassVar[str] = "Build or resolve a scaled-evals task image."
+    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = TaskImageBuildSpec
 
     @classmethod
@@ -69,7 +80,7 @@ class TaskImageBuildJob(NemoJob):
     def run(self, config: dict[str, Any]) -> dict[str, Any]:
         """Execute the frozen backend operation and persist its terminal state."""
         spec = TaskImageBuildSpec.model_validate(config)
-        worker = TaskBuildWorker(
+        worker = _task_build_worker_cls()(
             worker_id=task_image_build_job_name(
                 spec.task_id,
                 spec.revision,
@@ -77,7 +88,7 @@ class TaskImageBuildJob(NemoJob):
             )
         )
         completed = worker.run(
-            BackendTaskBuildJob(
+            _backend_task_build_job_cls()(
                 task_id=spec.task_id,
                 revision=spec.revision,
                 backend=spec.backend,
