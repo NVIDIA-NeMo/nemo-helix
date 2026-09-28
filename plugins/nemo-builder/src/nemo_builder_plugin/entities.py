@@ -91,6 +91,17 @@ class JobOrigin(BaseModel):
             "pushed."
         )
     )
+    request_digest: str | None = Field(
+        default=None,
+        pattern=DIGEST_PATTERN,
+        description=(
+            "sha256 of the canonical JSON of the `BuildSet` that wrote this row. What lets a "
+            "resubmission of the same `(name, revision)` tell a retry of the same request, which "
+            "adopts this row, from a different request under a reused revision, which is refused: "
+            "the row name alone cannot, so without this an adopted row would describe a request "
+            "the job never built."
+        ),
+    )
 
 
 Origin = Annotated[RegisteredOrigin | JobOrigin, Field(discriminator="type")]
