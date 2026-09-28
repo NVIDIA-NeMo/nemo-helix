@@ -6,11 +6,10 @@
 These pin the three behaviours that make ``nemo agents`` usable against a
 remote, secured, multi-workspace platform:
 
-- **Base URL** resolves through the shared CLI context the rest of the CLI
-  uses (``nemo config set --base-url`` / ``NHX_BASE_URL``), with an explicit
-  ``--base-url`` / ``NEMO_BASE_URL`` still taking precedence, and the resolved
-  target echoed to stderr so a mis-pointed command is visible instead of
-  silently hitting localhost.
+- **Base URL** resolves only through the shared CLI context the rest of the
+  CLI uses (``nemo --base-url`` / ``nemo config set --base-url`` /
+  ``NHX_BASE_URL``), with the resolved target echoed to stderr so a
+  mis-pointed command is visible instead of silently hitting localhost.
 - **Workspace** resolves through the active CLI context (``nemo config
   use-context`` / ``$NHX_WORKSPACE``) when ``--workspace`` is omitted, instead
   of silently acting on ``default`` — with an explicit ``--workspace`` still
@@ -109,27 +108,27 @@ class _FakeCLIContext:
     def get_base_url(self, default: str | None = None) -> str | None:
         return str(self._sdk.cluster.base_url)
 
+    def get_output_format(self, override: str | None = None, *, apply_non_tty_default: bool = True) -> str:
+        return override or "json"
+
+    def get_no_truncate(self, override: bool | None = None) -> bool:
+        return bool(override)
+
+    def get_timestamp_format(self, override: str | None = None) -> str:
+        return override or "iso8601"
+
 
 # ---------------------------------------------------------------------------
 # Base URL resolution
 # ---------------------------------------------------------------------------
 
 
-def test_base_url_flag_overrides_configured_context() -> None:
-    """An explicit ``--base-url`` wins over the configured context base URL."""
-    captured: list[httpx.Request] = []
-    app = AgentsCLI().get_cli()
-    with _install_mock_transport(_capturing(captured)):
-        result = CliRunner().invoke(
-            app,
-            ["list", "--base-url", "http://flag-host:1111"],
-            obj=_FakeCLIContext(base_url="http://config-host:9999"),
-        )
+def test_per_command_base_url_flag_is_gone() -> None:
+    """The platform comes from the global ``nemo --base-url``, not a per-command flag."""
+    result = CliRunner().invoke(AgentsCLI().get_cli(), ["list", "--base-url", "http://flag-host:1111"])
 
-    assert result.exit_code == 0, result.stdout + (result.stderr or "")
-    assert captured, "expected a request to be issued"
-    assert captured[0].url.host == "flag-host"
-    assert captured[0].url.port == 1111
+    assert result.exit_code == 2
+    assert "No such option" in result.output
 
 
 def test_base_url_falls_back_to_configured_context() -> None:
@@ -152,8 +151,8 @@ def test_base_url_falls_back_to_configured_context() -> None:
     assert captured[0].url.port == 9999
 
 
-def test_base_url_env_overrides_configured_context() -> None:
-    """``NEMO_BASE_URL`` (command-level env) still takes precedence over config."""
+def test_nemo_base_url_env_is_not_consulted() -> None:
+    """``NEMO_BASE_URL`` was the removed flag's env var; the context decides now."""
     captured: list[httpx.Request] = []
     app = AgentsCLI().get_cli()
     with _install_mock_transport(_capturing(captured)):
@@ -165,8 +164,29 @@ def test_base_url_env_overrides_configured_context() -> None:
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
-    assert captured[0].url.host == "env-host"
-    assert captured[0].url.port == 2222
+    assert captured[0].url.host == "config-host"
+
+
+def test_commands_use_the_cli_state_client_when_it_offers_one() -> None:
+    """Under ``nemo`` the shared client (base URL, auth, token refresh) is used as-is."""
+    from nemo_helix_plugin.client.client import NemoClient
+
+    captured: list[httpx.Request] = []
+    shared = NemoClient(
+        base_url="http://shared-host:7777",
+        default_headers={"Authorization": "Bearer shared-token"},
+        http_client=httpx.Client(transport=httpx.MockTransport(_capturing(captured))),
+    )
+
+    class _StateWithClients(_FakeCLIContext):
+        def typed_client(self, client_cls: type[NemoClient], timeout: float = 60.0) -> Any:
+            return client_cls.from_client(shared)
+
+    result = CliRunner().invoke(AgentsCLI().get_cli(), ["list"], obj=_StateWithClients(token=None))
+
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert captured[0].url.host == "shared-host"
+    assert captured[0].headers.get("authorization") == "Bearer shared-token"
 
 
 def test_base_url_defaults_to_localhost_without_context() -> None:
@@ -187,12 +207,12 @@ def test_resolved_target_is_echoed_to_stderr_only() -> None:
     with _install_mock_transport(_capturing([])):
         result = CliRunner().invoke(
             app,
-            ["list", "--base-url", "http://flag-host:1234", "-o", "json"],
+            ["list", "--output-format", "json"],
             obj=_FakeCLIContext(),
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
-    assert "Targeting http://flag-host:1234" in (result.stderr or "")
+    assert "Targeting http://config-host:9999" in (result.stderr or "")
     assert "Targeting" not in result.stdout
 
 
@@ -208,7 +228,7 @@ def test_auth_header_attached_from_context() -> None:
     with _install_mock_transport(_capturing(captured)):
         result = CliRunner().invoke(
             app,
-            ["list", "--base-url", "http://h:1"],
+            ["list"],
             obj=_FakeCLIContext(token="secret-token"),
         )
 
@@ -221,7 +241,7 @@ def test_no_auth_header_without_context() -> None:
     captured: list[httpx.Request] = []
     app = AgentsCLI().get_cli()
     with _install_mock_transport(_capturing(captured)):
-        result = CliRunner().invoke(app, ["list", "--base-url", "http://h:1"])
+        result = CliRunner().invoke(app, ["list"])
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     assert "authorization" not in captured[0].headers
@@ -270,7 +290,7 @@ def _invoke_capturing(args: list[str], **kwargs: Any) -> tuple[Any, list[httpx.R
     captured: list[httpx.Request] = []
     app = AgentsCLI().get_cli()
     with _install_mock_transport(_capturing(captured)):
-        result = CliRunner().invoke(app, [*args, "--base-url", "http://h:1"], **kwargs)
+        result = CliRunner().invoke(app, [*args], **kwargs)
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     assert captured, "expected a request to be issued"
     return result, captured

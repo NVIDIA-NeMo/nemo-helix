@@ -14,7 +14,7 @@ validates.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, ClassVar, Optional
+from typing import ClassVar
 
 import typer
 from nemo_agent_optimization_plugin.client import AgentOptimizationClient
@@ -29,19 +29,6 @@ logger = logging.getLogger(__name__)
 #: How long to wait on the platform. Short on purpose: this is a listing command,
 #: and an unreachable platform should cost a noticeable pause, not a hang.
 STRATEGIES_TIMEOUT_SECONDS = 10.0
-
-#: Same flag and env var as ``nemo_agents_plugin.cli_context.BaseUrlOption``. Declared
-#: here rather than imported because typer resolves annotations against module globals,
-#: and that module is deliberately not imported at module scope (see
-#: :func:`_remote_strategy_names`).
-BaseUrlOption = Annotated[
-    Optional[str],
-    typer.Option(
-        "--base-url",
-        envvar="NEMO_BASE_URL",
-        help="Platform to ask. Defaults to the same target as every other `nemo` command.",
-    ),
-]
 
 #: Entry-point group a plugin joins to hang its own verbs off this group.
 #:
@@ -75,7 +62,7 @@ class AgentOptimizeCLI(NemoCLI):
         add_job_commands(app, {"agent-optimization.run-strategy": RunStrategyJob}, cli=self)
 
         @app.command("list-strategies")
-        def list_strategies(base_url: BaseUrlOption = None) -> None:
+        def list_strategies() -> None:
             """List the strategies `--strategy` accepts, one name per line.
 
             Only the platform is asked, because only the platform runs the job: a
@@ -89,7 +76,7 @@ class AgentOptimizeCLI(NemoCLI):
             target is announced once on stderr by the shared base-URL resolver.
             """
             try:
-                names, target = _remote_strategy_names(base_url)
+                names, target = _remote_strategy_names()
             except NemoClientError as exc:
                 # Covers all three failure modes the typed client distinguishes: transport,
                 # HTTP status, and a response body that does not match the schema.
@@ -128,22 +115,29 @@ def _register_contributed_subcommands(group: typer.Typer) -> None:
             logger.warning("Optimize CLI contribution %r failed to register", name, exc_info=True)
 
 
-def _remote_strategy_names(base_url: str | None) -> tuple[list[str], str]:
+def _remote_strategy_names() -> tuple[list[str], str]:
     """Ask the platform for its installed strategies. Raises if it cannot answer.
 
-    The target and auth headers resolve the way the rest of ``nemo agents`` does.
+    The platform comes from the global ``nemo --base-url`` / ``nemo --context``, and
+    under ``nemo`` the request uses the CLI's shared client, the way the rest of
+    ``nemo agents`` does.
     ``nemo_agents_plugin.cli_context`` is imported lazily and is not a declared
     dependency: this group is only ever reached through the ``nemo.cli.agents``
     entry point, so the agents plugin is installed whenever this code runs, and
     declaring it would drag the whole agents stack into service-only installs.
     """
-    from nemo_agents_plugin.cli_context import resolve_base_url, resolve_context_headers
+    from nemo_agents_plugin.cli_context import resolve_base_url, resolve_context_headers, shared_cli_client
 
-    target = resolve_base_url(base_url)
-    with AgentOptimizationClient(
-        base_url=target,
-        default_headers=resolve_context_headers(),
-        timeout=STRATEGIES_TIMEOUT_SECONDS,
-    ) as client:
-        listing = client.list_strategies().data()
+    target = resolve_base_url()
+    # The CLI owns the shared client's connection pool, so it is not closed here.
+    shared = shared_cli_client(AgentOptimizationClient, timeout=STRATEGIES_TIMEOUT_SECONDS)
+    if shared is not None:
+        listing = shared.list_strategies().data()
+    else:
+        with AgentOptimizationClient(
+            base_url=target,
+            default_headers=resolve_context_headers(),
+            timeout=STRATEGIES_TIMEOUT_SECONDS,
+        ) as client:
+            listing = client.list_strategies().data()
     return [strategy.name for strategy in listing.data], target
