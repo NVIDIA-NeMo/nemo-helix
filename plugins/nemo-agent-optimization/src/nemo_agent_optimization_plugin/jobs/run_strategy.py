@@ -128,8 +128,15 @@ def _resolve_strategy(strategy: str, *, error: type[Exception]) -> type[NemoJob]
 
 
 def _strategy_payload(spec: RunStrategySpec) -> dict[str, Any]:
-    """The router's fields minus ``strategy``, which the strategy job already knows."""
-    payload = spec.model_dump(mode="json")
+    """Everything submitted but ``strategy``, which the strategy job already knows.
+
+    Fields the router declares but the submitter left unset are omitted rather
+    than forwarded as ``null``, so the strategy's own schema decides whether each
+    is required or what it defaults to -- a strategy that takes no
+    ``optimize_config`` never hears of one.  Fields the router does not declare
+    ride along as submitted: the spec keeps extras precisely so they reach here.
+    """
+    payload = spec.model_dump(mode="json", exclude_none=True)
     payload.pop("strategy", None)
     return payload
 

@@ -73,6 +73,34 @@ def test_run_strategy_takes_a_strategy_flag(monkeypatch: pytest.MonkeyPatch) -> 
     assert "--optimize-config" in result.output
 
 
+def test_run_strategy_carries_fields_it_has_no_flag_for_through_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A strategy's own inputs have no generated flag; ``--spec`` must deliver them to the platform intact."""
+    install(monkeypatch)
+    submitted: dict[str, Any] = {}
+
+    def _submit_remote(_self: object, _job_cls: type, spec: dict, **_kwargs: Any) -> dict[str, Any]:
+        submitted.update(spec)
+        return {"id": "job-1"}
+
+    monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote)
+
+    result = CliRunner().invoke(
+        AgentOptimizeCLI().get_cli(),
+        [
+            "run-strategy",
+            "--strategy",
+            "custom",
+            "--spec",
+            '{"dataset": "my-dataset", "objective": "accuracy"}',
+            "--base-url",
+            "http://platform.test",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert submitted == {"strategy": "custom", "dataset": "my-dataset", "objective": "accuracy"}
+
+
 def test_a_contributing_plugin_hangs_its_own_verb_off_the_group(monkeypatch: pytest.MonkeyPatch) -> None:
     group = optimize_group(monkeypatch, {"fake-prepare": _register_a_verb})
     assert "fake-prepare" in group.commands

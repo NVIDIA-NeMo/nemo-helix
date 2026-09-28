@@ -74,10 +74,18 @@ To add a strategy:
    This is independent of step 2: a plugin can contribute a verb without
    shipping a strategy job, and can ship a strategy job without contributing a verb.
 
-The router forwards every field but `strategy` to your job's own `spec_schema`
-and validates it there, so your job keeps full ownership of what its inputs
-mean — a config that must be fileset-relative, an output target you cannot
-write, and so on. A mismatch surfaces as a 422 on the submit.
+The router forwards every submitted field but `strategy` to your job's own
+input schema (`input_spec_schema`, else `spec_schema`) and then its `to_spec`,
+so your job keeps full ownership of what its inputs are and mean. The fields
+the router declares itself (`optimize_config`, `optimize_config_fileset`,
+`agent`, `output`) are the shared shape most strategies use; declaring them is
+what gives them `--flags` and typed SDK fields, but none is required by the
+router — your schema decides that, and one the submitter leaves unset is not
+forwarded at all, so your own defaults apply. Fields the router does not
+declare are kept and forwarded as submitted, so a strategy with inputs of its
+own (a dataset, an objective) simply declares them in its schema; on the CLI
+they travel through `--spec` / `--spec-file`. A mismatch surfaces as a 422 on
+the submit.
 
 ## Discover the installed strategies
 

@@ -917,13 +917,15 @@ components:
           description: Installed optimization strategy to run, e.g. 'legacy'. List
             what this platform has with `nemo agents optimize list-strategies`.
         optimize_config:
+          title: Optimize Config
+          description: "Location of the strategy's configuration YAML, for strategies\
+            \ that take one.  With optimize_config_fileset set \u2014 required for\
+            \ remote submission \u2014 this is a path relative to the fileset root.\
+            \  Without it (programmatic local runs only) it is an absolute path on\
+            \ the host running the job.  Whether it is required is the selected strategy's\
+            \ call."
           type: string
           minLength: 1
-          title: Optimize Config
-          description: "Location of the strategy's configuration YAML.  With optimize_config_fileset\
-            \ set \u2014 required for remote submission \u2014 this is a path relative\
-            \ to the fileset root.  Without it (programmatic local runs only) it is\
-            \ an absolute path on the host running the job."
         optimize_config_fileset:
           title: Optimize Config Fileset
           description: 'Fileset holding the optimization bundle: the config named
@@ -951,10 +953,10 @@ components:
           description: Workspace for the agent, the bundle fileset, and any entity
             the strategy resolves.
           default: default
+      additionalProperties: true
       type: object
       required:
       - strategy
-      - optimize_config
       title: RunStrategySpec
       description: "Canonical stored spec \u2014 the submitted fields plus the resolved\
         \ workspace."
@@ -967,13 +969,15 @@ components:
           description: Installed optimization strategy to run, e.g. 'legacy'. List
             what this platform has with `nemo agents optimize list-strategies`.
         optimize_config:
+          title: Optimize Config
+          description: "Location of the strategy's configuration YAML, for strategies\
+            \ that take one.  With optimize_config_fileset set \u2014 required for\
+            \ remote submission \u2014 this is a path relative to the fileset root.\
+            \  Without it (programmatic local runs only) it is an absolute path on\
+            \ the host running the job.  Whether it is required is the selected strategy's\
+            \ call."
           type: string
           minLength: 1
-          title: Optimize Config
-          description: "Location of the strategy's configuration YAML.  With optimize_config_fileset\
-            \ set \u2014 required for remote submission \u2014 this is a path relative\
-            \ to the fileset root.  Without it (programmatic local runs only) it is\
-            \ an absolute path on the host running the job."
         optimize_config_fileset:
           title: Optimize Config Fileset
           description: 'Fileset holding the optimization bundle: the config named
@@ -995,12 +999,17 @@ components:
             \ './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
             \  Filesets are created on demand if missing."
           type: string
+      additionalProperties: true
       type: object
       required:
       - strategy
-      - optimize_config
       title: RunStrategySubmitSpec
-      description: Client-submitted fields; ``workspace`` is added server-side.
+      description: 'Client-submitted fields; ``workspace`` is added server-side.
+
+
+        Fields the router does not declare are preserved, not discarded: the
+
+        selected strategy''s own schema is what validates them.'
     StringFilter:
       additionalProperties: false
       properties:

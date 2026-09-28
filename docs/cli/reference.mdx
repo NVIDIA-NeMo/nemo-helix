@@ -7493,7 +7493,7 @@ nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
 **Job Spec:**
 
 * `--strategy`: Installed optimization strategy to run, e.g. 'legacy'. List what this platform has with `nemo agents optimize list-strategies`.
-* `--optimize-config`: Location of the strategy's configuration YAML.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.
+* `--optimize-config`: Location of the strategy's configuration YAML, for strategies that take one.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.  Whether it is required is the selected strategy's call.
 * `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references.  Stage one with `nemo agents optimize prepare-fileset`.  Required for remote submissions, where the job has no access to the client's filesystem.
 * `--agent`: Platform agent to optimize ('name' or 'workspace/name'). Strategies that can take the agent under test from the config itself may leave this unset.
 * `--output PATH | FILESET_REF`: Where the strategy should publish its artifacts once the run succeeds — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.

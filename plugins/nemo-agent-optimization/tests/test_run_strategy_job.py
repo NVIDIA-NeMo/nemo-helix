@@ -22,7 +22,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     SubprocessExecutionProviderSpec,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 #: What every test submits: the router's own fields, one strategy deep.
 SUBMITTED: dict[str, Any] = {
@@ -178,6 +178,51 @@ class _ResolvingStrategyJob(_FakeStrategyJob):
         return _FakeResolvedSpec.model_validate({**payload, "agent_id": f"agent-{agent}", "workspace": workspace})
 
 
+class _CustomStrategySpec(BaseModel):
+    """A shape the router does not know: no bundle, its own required field and its own default.
+
+    ``extra="forbid"`` makes the router's forwarding visible: a router field forwarded as
+    ``null`` because the submitter never set it would be rejected here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: str
+    objective: str = "accuracy"
+    workspace: str = "default"
+
+
+class _CustomStrategyJob(_FakeStrategyJob):
+    name: ClassVar[str] = "custom"
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="custom")
+    spec_schema: ClassVar[type[BaseModel]] = _CustomStrategySpec
+
+    @classmethod
+    async def compile(  # ty: ignore[invalid-method-override]
+        cls,
+        *,
+        workspace: str,
+        spec: _CustomStrategySpec,
+        entity_client: object,
+        job_name: str | None,
+        async_sdk: object,
+        profile: str | None = None,
+        options: dict | None = None,
+    ) -> HelixJobSpec:
+        cls.compiled_with = {"workspace": workspace, "spec": spec, "profile": profile, "options": options}
+        return HelixJobSpec(
+            steps=[
+                HelixJobStep(
+                    name="custom-study",
+                    executor=SubprocessExecutionProviderSpec(
+                        provider="subprocess", profile="default", command=["python", "-m", "fake.task"]
+                    ),
+                    config=spec.model_dump(mode="json"),
+                )
+            ]
+        )
+
+
 @pytest.fixture(autouse=True)
 def installed_strategies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin discovery to the fakes above so no real plugin install can change a result."""
@@ -232,6 +277,22 @@ def test_the_submit_spec_carries_no_workspace() -> None:
     assert "workspace" not in RunStrategySubmitSpec.model_fields
 
 
+@pytest.mark.asyncio
+async def test_to_spec_keeps_fields_the_router_does_not_declare() -> None:
+    """A strategy's own inputs must survive the router's submit lifecycle to reach the strategy's."""
+    submitted = RunStrategySubmitSpec.model_validate(
+        {"strategy": "custom", "dataset": "my-dataset", "objective": "latency"}
+    )
+
+    spec = await RunStrategyJob.to_spec(
+        submitted, workspace="default", entity_client=MagicMock(), async_sdk=MagicMock(), is_local=False
+    )
+
+    stored = spec.model_dump(mode="json")
+    assert stored["dataset"] == "my-dataset"
+    assert stored["objective"] == "latency"
+
+
 # ---------------------------------------------------------------------------
 # compile — delegation
 # ---------------------------------------------------------------------------
@@ -282,6 +343,52 @@ async def test_a_strategy_without_a_spec_schema_gets_the_raw_payload(monkeypatch
     forwarded = _NoSchemaStrategyJob.compiled_with["spec"]
     assert isinstance(forwarded, dict)
     assert "strategy" not in forwarded
+
+
+# ---------------------------------------------------------------------------
+# compile — the strategy owns its input shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def custom_strategy(monkeypatch: pytest.MonkeyPatch) -> type[_CustomStrategyJob]:
+    monkeypatch.setattr(run_strategy, "discover_strategy_jobs", lambda: {"custom": _CustomStrategyJob})
+    _CustomStrategyJob.compiled_with = {}
+    return _CustomStrategyJob
+
+
+@pytest.mark.asyncio
+async def test_compile_forwards_fields_the_router_does_not_declare(
+    custom_strategy: type[_CustomStrategyJob],
+) -> None:
+    """The reviewer's case: ``dataset`` and ``objective`` are nobody's fields but the strategy's."""
+    spec = RunStrategySpec.model_validate(
+        {"strategy": "custom", "dataset": "my-dataset", "objective": "latency", "workspace": "default"}
+    )
+
+    await compile_spec(spec)
+
+    forwarded = custom_strategy.compiled_with["spec"]
+    assert isinstance(forwarded, _CustomStrategySpec)
+    assert forwarded.dataset == "my-dataset"
+    assert forwarded.objective == "latency"
+
+
+@pytest.mark.asyncio
+async def test_compile_leaves_what_is_required_and_what_defaults_to_the_strategy(
+    custom_strategy: type[_CustomStrategyJob],
+) -> None:
+    """No ``optimize_config`` for a strategy that takes none; its own default and its own required field hold."""
+    await compile_spec(RunStrategySpec.model_validate({"strategy": "custom", "dataset": "d", "workspace": "default"}))
+
+    forwarded = custom_strategy.compiled_with["spec"]
+    assert isinstance(forwarded, _CustomStrategySpec)
+    # The router's unset fields (optimize_config, agent, output, ...) were not forwarded as null,
+    # or ``extra="forbid"`` would have refused them; the strategy's own default applied instead.
+    assert forwarded.objective == "accuracy"
+
+    with pytest.raises(HelixJobCompilationError, match=r"(?s)not valid for optimization strategy 'custom'.*dataset"):
+        await compile_spec(RunStrategySpec.model_validate({"strategy": "custom", "workspace": "default"}))
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +533,22 @@ def test_run_forwards_every_dependency_to_a_strategy_that_takes_kwargs(monkeypat
     assert captured == {"sdk": sdk, "client": client}
 
 
+def test_run_forwards_fields_the_router_does_not_declare(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(run_strategy, "discover_strategy_jobs", lambda: {"custom": _CustomStrategyJob})
+    captured: dict[str, Any] = {}
+
+    def _run(_self: object, spec: dict, *, ctx: JobContext) -> dict[str, Any]:
+        captured.update(spec)
+        return {"delegated": True}
+
+    monkeypatch.setattr(_CustomStrategyJob, "run", _run)
+
+    RunStrategyJob().run({"strategy": "custom", "dataset": "my-dataset", "workspace": "default"}, ctx=MagicMock())
+
+    # Exactly what was submitted (plus the workspace): no ``strategy``, no null router fields.
+    assert captured == {"dataset": "my-dataset", "workspace": "default"}
+
+
 def test_run_rejects_an_uninstalled_strategy() -> None:
     with pytest.raises(LocalRunError, match=r"'nope' is not installed"):
         RunStrategyJob().run(submitted_spec(strategy="nope").model_dump(mode="json"), ctx=MagicMock())
@@ -433,3 +556,17 @@ def test_run_rejects_an_uninstalled_strategy() -> None:
 
 def test_strategy_is_required() -> None:
     assert RunStrategySubmitSpec.model_fields["strategy"].is_required()
+
+
+def test_only_the_strategy_is_required_of_the_submitter() -> None:
+    """Whether ``optimize_config`` (or anything else) is required is the selected strategy's call."""
+    required = {name for name, field in RunStrategySubmitSpec.model_fields.items() if field.is_required()}
+    assert required == {"strategy"}
+
+
+def test_the_submit_spec_keeps_fields_it_does_not_declare() -> None:
+    """Pydantic drops undeclared fields by default; here they are the strategy's inputs and must survive."""
+    submitted = RunStrategySubmitSpec.model_validate({"strategy": "custom", "dataset": "my-dataset"})
+
+    assert submitted.model_dump()["dataset"] == "my-dataset"
+    assert RunStrategySubmitSpec.model_json_schema()["additionalProperties"] is True
