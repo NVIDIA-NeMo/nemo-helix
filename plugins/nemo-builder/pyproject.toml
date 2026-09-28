@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-builder-plugin"
+description = "In-cluster container image builds for NeMo Helix (RFC 001)."
+requires-python = ">=3.11,<3.15"
+version = "0.1.0"
+# Runtime dependencies of the THREE STEP BINARIES, which is what the nhx-build image installs:
+# a platform client, the Kubernetes client, pydantic. Nothing else runs in a build pod.
+dependencies = ["nemo-helix-plugin", "pydantic>=2.0.0", "kubernetes>=29.0.0"]
+
+[tool.uv.sources]
+nemo-helix = { path = "../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_builder_plugin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src"]
