@@ -6,10 +6,10 @@ import pytest
 from nemo_helix_ext.auth.helpers import discover_nhx_config
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
 from tests.auth_idp.device_flow import authenticate_authentik_device_flow, with_url_origin
-from tests.auth_idp.helpers import grant_workspace_role
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, TokenSet
 
 pytestmark = [

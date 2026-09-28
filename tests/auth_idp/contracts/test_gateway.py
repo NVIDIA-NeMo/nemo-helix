@@ -7,9 +7,9 @@ import uuid
 import httpx
 import pytest
 from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
-from tests.auth_idp.helpers import grant_workspace_role
 
 pytestmark = [
     pytest.mark.auth_idp,
