@@ -26,7 +26,7 @@ The combo of `config/local.yaml` and `config/local.env` will place all relevant 
 ### Downloads
 The tests assume there's some data locally on your machine:
 
-- `~/Downloads/gpt-oss-120b`, needed for `e2e_filesets_api.py`. Download on [HuggingFace](https://huggingface.co/openai/gpt-oss-120b). The only files needed for this script are the safetensors files, `hf download openai/gpt-oss-120b --local-dir ~/Downloads/gpt-oss-120b --include *.safetensors`
+- `~/Downloads/gpt-oss-120b`, needed for `e2e_filesets_api.py`. Download on [HuggingFace](https://huggingface.co/openai/gpt-oss-120b). The only files needed for this script are the safetensors files, `hf download openai/gpt-oss-120b --local-dir ~/Downloads/gpt-oss-120b --include '*.safetensors'`
 - `~/Downloads/en_US.parquet`, needed for `e2e_duckdb_httpfs.py`. Provide a local Parquet file with the columns expected by that script.
 ### Usage
 
