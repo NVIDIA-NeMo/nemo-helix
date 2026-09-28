@@ -32,6 +32,27 @@ describe('NewDeploymentRoute', () => {
     expect(await screen.findByRole('radio', { name: /model/i })).toBeChecked();
   });
 
+  /**
+   * Regression guard matching the fine-tune wizard's: `CreateSecretModal` renders its own
+   * `<form>`, and a form nested inside this page's `<form>` never receives its submit event
+   * (whatwg/dom#756), so React never runs its `onSubmit` and submitting it navigated the
+   * page instead of creating a secret. jsdom bubbles the nested submit and so cannot
+   * reproduce the navigation — assert the structure that caused it.
+   */
+  it('renders the create-secret modal outside the wizard form', async () => {
+    const user = userEvent.setup();
+    renderPage('/workspaces/default/deployments/~new');
+
+    await user.click(await screen.findByRole('radio', { name: 'HuggingFace' }));
+    await user.click(await screen.findByRole('combobox', { name: /HuggingFace Secret/i }));
+    await user.click(await screen.findByRole('menuitem', { name: 'New Secret' }));
+
+    expect(await screen.findByText('Create Secret')).toBeInTheDocument();
+    // Testing Library has no query for DOM structure, and structure is the whole point here.
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('form form')).toBeNull();
+  });
+
   it('returns to the deployments list on Cancel', async () => {
     const user = userEvent.setup();
     renderPage('/workspaces/default/deployments/~new');

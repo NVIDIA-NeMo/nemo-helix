@@ -14,9 +14,8 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { EngineFields } from '@studio/routes/NewDeploymentRoute/EngineFields';
 import { GPULoraFields } from '@studio/routes/NewDeploymentRoute/GPULoraFields';
 import type { WizardFormValues } from '@studio/routes/NewDeploymentRoute/schema';
-import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
-import { FC, useState } from 'react';
+import { FC } from 'react';
 import { Control, FieldErrors } from 'react-hook-form';
 
 export type HuggingFaceSourceFieldsProps = {
@@ -24,6 +23,14 @@ export type HuggingFaceSourceFieldsProps = {
   queryEnabled: boolean;
   control: Control<WizardFormValues>;
   errors: FieldErrors<WizardFormValues>;
+  /**
+   * Asks the route to open the create-secret modal. These fields render inside the
+   * deployment wizard's `<form>`, and `CreateSecretModal` renders a `<form>` of its own;
+   * a nested form never receives its own submit event (whatwg/dom#756), so React never
+   * runs its `onSubmit`, nothing calls `preventDefault`, and the browser navigates away.
+   * The route renders the modal outside the form instead.
+   */
+  onRequestNewSecret: () => void;
 };
 
 export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
@@ -31,9 +38,8 @@ export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
   queryEnabled,
   control,
   errors,
+  onRequestNewSecret,
 }) => {
-  const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
-
   return (
     <>
       <ControlledTextInput
@@ -50,7 +56,7 @@ export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
         triggerPlaceholder=""
         queryEnabled={queryEnabled}
         useControllerProps={{ control, name: 'hfTokenSecret' }}
-        onRequestNewSecret={() => setCreateSecretModalOpen(true)}
+        onRequestNewSecret={onRequestNewSecret}
         formFieldProps={{
           slotLabel: 'HuggingFace Secret',
           slotInfo: 'Required for private or gated models; stored as a workspace secret.',
@@ -59,11 +65,6 @@ export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
       />
       <EngineFields control={control} errors={errors} />
       <GPULoraFields control={control} errors={errors} />
-      <CreateSecretModal
-        workspace={workspace}
-        open={createSecretModalOpen}
-        onClose={() => setCreateSecretModalOpen(false)}
-      />
     </>
   );
 };
