@@ -52,6 +52,7 @@ from nemo_evaluator.jobs.agent_spec import (
 )
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, EvaluateJob
 from nemo_evaluator.metric_refs import MetricRef
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
@@ -61,12 +62,13 @@ from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.scheduler import NemoJobScheduler
-from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing import add_mock_provider
@@ -191,12 +193,12 @@ def _unique(prefix: str) -> str:
 def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp_path: Path) -> None:
     # dim 1 (Model endpoint target): generate a trial against an IGW mock provider that returns
     # "DONE" (no real model/key), then score the trial output with the inline metric.
-    sdk = NeMoHelix(base_url=subprocess_platform, max_retries=2)
-    client_from_platform(sdk, WorkspacesClient).create_workspace(
+    client = NemoClient(base_url=subprocess_platform, retry=RetryPolicy(max_retries=2))
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
     model_name = _unique("model-judge")
-    add_mock_provider(sdk, workspace=WORKSPACE, name=model_name, mock_response_body=_chat_completion("DONE"))
+    add_mock_provider(client, workspace=WORKSPACE, name=model_name, mock_response_body=_chat_completion("DONE"))
 
     input_spec = AgentEvalInputSpec(
         tasks=[
@@ -243,12 +245,12 @@ def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp
 def test_sync_job_agent_target_scores_a_real_trial(subprocess_platform: str, tmp_path: Path) -> None:
     # dim 1 (Agent endpoint target): a generic-HTTP agent posts to an IGW mock provider returning
     # "DONE"; response_path extracts the assistant content, then the inline metric scores it.
-    sdk = NeMoHelix(base_url=subprocess_platform, max_retries=2)
-    client_from_platform(sdk, WorkspacesClient).create_workspace(
+    client = NemoClient(base_url=subprocess_platform, retry=RetryPolicy(max_retries=2))
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
     agent_name = _unique("agent-judge")
-    add_mock_provider(sdk, workspace=WORKSPACE, name=agent_name, mock_response_body=_chat_completion("DONE"))
+    add_mock_provider(client, workspace=WORKSPACE, name=agent_name, mock_response_body=_chat_completion("DONE"))
 
     agent = GenericAgent(
         url=_igw_chat_url(subprocess_platform, agent_name),
@@ -385,8 +387,8 @@ def test_mixed_job_types_list_endpoints_do_not_cross_render(subprocess_platform:
     which would otherwise still cross-render into the row list.
     """
     workspace = _unique("mixed-list")
-    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    client = NemoClient(base_url=subprocess_platform, retry=RetryPolicy(max_retries=2))
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=workspace)
     ).data()
 
@@ -444,8 +446,9 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
     # an agent eval whose `tasks` is a TasksetRef (no inline tasks). Server-side to_spec must load the
     # taskset, expand BOTH member tasks, and resolve each task's stored MetricRef — all against the
     # live entity store — before the job runs. A Model target -> IGW mock provider keeps it hermetic.
-    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    client = NemoClient(base_url=subprocess_platform, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2))
+    evaluator = Evaluator(EvaluatorClient.from_client(client))
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
 
@@ -456,7 +459,7 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
     # count/mean (a boolean output would land in nan_count and obscure whether scoring succeeded). The
     # cloudpickle packager is explicit: storing a custom metric to the service requires opting in.
     metric_name = _unique("done-score")
-    client.evaluator.metrics.create(
+    evaluator.metrics.create(
         metric_name,
         metric=_OutputScoreMetric("DONE"),
         metric_bundle_packager=CloudpickleMetricBundlePackager(),
@@ -466,7 +469,7 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
     # Store two tasks that reference the metric, then group them in a taskset.
     task_names = [_unique("ask-a"), _unique("ask-b")]
     for name in task_names:
-        client.evaluator.tasks.create(
+        evaluator.tasks.create(
             name,
             task=TaskInput(
                 spec=EvaluatorTaskDefinition(
@@ -478,7 +481,7 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
             ),
         )
     taskset_name = _unique("done-suite")
-    client.evaluator.tasksets.create(
+    evaluator.tasksets.create(
         taskset_name,
         taskset=TasksetInput(tasks=[TaskRef(f"{WORKSPACE}/{name}") for name in task_names]),
     )
@@ -584,12 +587,14 @@ def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess
     # inference client (AgentEvalJob._build_evaluator) — otherwise the IGW returns 401 and the job
     # fails. A clean completion proves the forwarded service-principal headers authenticate online
     # inference under auth, with no bearer. (Probed directly too: service headers -> 200, none -> 401.)
-    sdk = NeMoHelix(base_url=auth_subprocess_platform, default_headers=SERVICE_PRINCIPAL_HEADERS, max_retries=2)
-    client_from_platform(sdk, WorkspacesClient).create_workspace(
+    client = NemoClient(
+        base_url=auth_subprocess_platform, default_headers=SERVICE_PRINCIPAL_HEADERS, retry=RetryPolicy(max_retries=2)
+    )
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
     model_name = _unique("auth-model")
-    add_mock_provider(sdk, workspace=WORKSPACE, name=model_name, mock_response_body=_chat_completion("DONE"))
+    add_mock_provider(client, workspace=WORKSPACE, name=model_name, mock_response_body=_chat_completion("DONE"))
 
     spec = AgentEvalInputSpec(
         tasks=[
@@ -620,14 +625,14 @@ def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess
     job_name = response.get("name") or response.get("id")
     assert job_name, f"submit response carried no job name/id: {response}"
 
-    job = wait_for_platform_job(sdk, job_name, WORKSPACE, timeout=360)
+    job = wait_for_platform_job(client, job_name, WORKSPACE, timeout=360)
     assert job.status == "completed", f"job {job_name} ended {job.status!r}: {getattr(job, 'status_details', None)}"
 
     # Persistence under auth: the result-entity write goes through the job's async task SDK
     # (get_async_task_nemo_client) as service:evaluator on-behalf-of the creator. A retrievable record here
     # proves that delegated identity actually authorized the entity write end-to-end (not just the
     # IGW inference call) — the key validation of the async task-SDK identity parity.
-    result = sdk.evaluator.agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
+    result = Evaluator(EvaluatorClient.from_client(client)).agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
     assert result.job_id == job_name
     assert (result.target_kind, result.target_name) == ("model", model_name)
     assert result.bundle_ref
@@ -636,8 +641,8 @@ def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess
 @pytest.mark.timeout(300)
 def test_submit_harbor_target_to_docker_backend_fails_fast(docker_platform: str) -> None:
     workspace = _unique("harbor-docker-guard")
-    client = NeMoHelix(base_url=docker_platform, max_retries=2)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    client = NemoClient(base_url=docker_platform, retry=RetryPolicy(max_retries=2))
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=workspace)
     ).data()
 
@@ -682,8 +687,8 @@ def test_submit_to_docker_backend_runs_agent_eval(docker_platform: str) -> None:
     # from the cpu-tasks image); it fails today because that image predates this work — hence xfail.
     # An offline trials spec keeps the task self-contained in-container, so this isolates the
     # backend-wiring + entrypoint condition rather than also depending on a live model endpoint.
-    client = NeMoHelix(base_url=docker_platform, max_retries=2)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    client = NemoClient(base_url=docker_platform, retry=RetryPolicy(max_retries=2))
+    WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
 
