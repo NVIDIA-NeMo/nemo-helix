@@ -17,6 +17,7 @@ from nemo_platform_plugin.authz import Permission
 from nmp.common.http_clients import shared_async_http_client
 from nmp.common.service import RouterConfig, Service
 from nmp.studio import assistant
+from nmp.studio.confidential_oidc import build_confidential_oidc_router
 from nmp.studio.config import StudioConfig
 from nmp.studio.plugins import build_plugins_router, discover_plugins
 from nmp.studio.static_files import SPAStaticFiles, build_csp
@@ -136,12 +137,19 @@ class StudioService(Service[StudioConfig]):
         """
         self._mount_telemetry_proxy(app)
         self._mount_assistant_mcp(app)
+        self._mount_confidential_oidc(app)
         self._mount_static_files(app)
         self._configure_plugins(app)
 
     def _mount_assistant_mcp(self, app: FastAPI) -> None:
         """Mount the auth-bypassed MCP callback before the /studio static app."""
         assistant.mount_public_mcp_route(app)
+
+    def _mount_confidential_oidc(self, app: FastAPI) -> None:
+        """Mount server-side OIDC endpoints before the /studio static app."""
+        config = self._get_config()
+        if config.confidential_oidc.enabled:
+            app.include_router(build_confidential_oidc_router(config))
 
     def _get_config(self) -> StudioConfig:
         """Get the studio config, creating a default if none is set.
