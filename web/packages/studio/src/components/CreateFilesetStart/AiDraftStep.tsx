@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
-import { Block, Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { DescribeWithAiPanel } from '@studio/components/CreateFilesetStart/DescribeWithAiPanel';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useState, type FC } from 'react';
@@ -25,19 +25,19 @@ export const AiDraftStep: FC<Props> = ({ workspace, onBack, onContinue }) => {
 
   return (
     <Stack className="h-full">
-      <Block className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Stack className="min-h-0 flex-1 overflow-hidden">
         <Stack gap="density-2xl" padding="density-2xl" className="min-h-0 flex-1">
           <PageHeader
             slotHeading="Describe your fileset"
             slotDescription="Say what you need in plain language. AI drafts the columns and prompts, and you refine everything on the next screen."
           />
           <Flex justify="center" className="min-h-0 w-full flex-1">
-            <div className="flex min-h-0 w-full max-w-[768px] flex-1 flex-col">
+            <Stack className="min-h-0 w-full max-w-[768px] flex-1">
               <DescribeWithAiPanel workspace={workspace} onValidConfig={handleValidConfig} />
-            </div>
+            </Stack>
           </Flex>
         </Stack>
-      </Block>
+      </Stack>
 
       <Flex justify="center" className="shrink-0 border-t border-base bg-surface-base px-10 py-3">
         <Flex align="center" justify="between" className="w-full max-w-[768px]">
