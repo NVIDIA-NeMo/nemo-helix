@@ -51,7 +51,9 @@
   ],
   "target": {
     "kind": "fabric",
-    "agent": "calculator-agent",
+    "source": {
+      "agent": "calculator-agent"
+    },
     "capture_trajectory": true
   },
   "max_concurrent_tasks": 1,

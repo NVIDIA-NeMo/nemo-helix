@@ -164,9 +164,9 @@ target is a `ModelTarget`, `AgentTarget`, `FabricRunnerTarget`,
 `HarborRunnerTarget`, or `GymRunnerTarget`; alternatively provide precomputed
 `trials`. Provide exactly one of `target` or `trials`.
 
-A `FabricRunnerTarget` may name a registered agent (`nemo agents create`)
-instead of describing one: `{"kind": "fabric", "agent": "<name>"}` in place
-of `config`. At submit time the service resolves
+A `FabricRunnerTarget`'s `source` is an inline config (`{"kind": "fabric",
+"source": {"config": {...}}}`) or a registered agent (`nemo agents create`):
+`{"kind": "fabric", "source": {"agent": "<name>"}}`. At submit time the service resolves
 the agent exactly as a deployment would — models bound to the workspace
 Inference Gateway, no credentials in the spec — and runs it fresh for every
 trial; it never calls an existing deployment. An optional `environment` (the

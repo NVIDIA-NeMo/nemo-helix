@@ -76,46 +76,71 @@ class AgentTarget(BaseModel):
     )
 
 
-class FabricRunnerTarget(BaseModel):
-    """Generate trials by driving an agent harness through the NeMo Fabric runtime.
-
-    Fabric is harness-agnostic: the harness (Codex, Hermes, ...) is selected by the supplied
-    config's ``harness.adapter_id`` and is never inferred from ``model``. ``model`` is applied as the
-    config's default model when given.
-
-    A run is described by one complete ``config`` — given inline, or resolved at submit from a
-    registered platform ``agent`` (``nemo agents create``) with the same resolution a deployment gets:
-    environment merge, Inference Gateway binding, translation of the platform ``agent.yaml``. The
-    canonical spec then carries the resolved ``config`` alongside the ``agent`` it came from; the job
-    never looks the agent up. Fabric 0.1.0rc2 removed profile overlays, so the former ``profiles`` field
-    is gone — fold any overlay into ``config``.
-    """
+class FabricConfigSource(BaseModel):
+    """An agent described inline: one complete Fabric ``agent.yaml`` as a JSON-shaped mapping."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["fabric"] = "fabric"
-    config: dict[str, Any] | None = Field(
-        default=None,
+    config: dict[str, Any] = Field(
         description="Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped mapping). Its "
-        "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex. Submit either this "
-        "or `agent`; a resolved registered agent carries both.",
-    )
-    agent: AgentRef | None = Field(
-        default=None,
-        description="A registered platform agent to run instead of an inline `config`: `workspace/name`, or "
-        "`name` in the submission workspace. Resolved at submit into `config` and kept, qualified, as the run's "
-        "provenance. The agent runs fresh for every trial; an existing deployment is never called.",
-    )
-    environment: EnvironmentSpecInline | None = Field(
-        default=None,
-        description="Environment to evaluate a registered `agent` in, merged onto its config exactly as a "
-        "deployment would: MCP fulfilments (url/env/secrets) for servers the agent declares, process env, secret "
-        "refs, and Fabric environment settings. Requires `agent`.",
+        "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex.",
     )
     model: str | None = Field(
         default=None,
         description="Optional ``provider/model`` slug applied as the config's default model; the harness "
         "default is used when omitted.",
+    )
+
+
+class FabricRegisteredAgentSource(BaseModel):
+    """An agent registered on the platform (``nemo agents create``), resolved at submit.
+
+    The model is part of what the agent is, so there is no model override; what an evaluation shapes is
+    the ``environment`` the agent runs in.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: AgentRef = Field(
+        description="The registered agent to run: `workspace/name`, or `name` in the submission workspace. "
+        "Rewritten to the qualified form at submit. The agent runs fresh for every trial; an existing "
+        "deployment is never called.",
+    )
+    environment: EnvironmentSpecInline | None = Field(
+        default=None,
+        description="Environment to evaluate the agent in, merged onto its config exactly as a deployment "
+        "would: MCP fulfilments (url/env/secrets) for servers the agent declares, process env, secret refs, "
+        "and Fabric environment settings.",
+    )
+
+
+#: What a Fabric run is made from. The two shapes share no field, so a document is one or the other.
+FabricSource: TypeAlias = FabricConfigSource | FabricRegisteredAgentSource
+
+
+class FabricRunnerTarget(BaseModel):
+    """Generate trials by driving an agent harness through the NeMo Fabric runtime.
+
+    Fabric is harness-agnostic: the harness (Codex, Hermes, ...) is selected by the config's
+    ``harness.adapter_id`` and is never inferred from a model. The config comes from ``source``: given
+    inline, or resolved at submit from a registered platform agent with the same resolution a deployment
+    gets (environment merge, Inference Gateway binding, translation of the platform ``agent.yaml``). A
+    resolved registered agent's config is carried as ``resolved_config`` next to its source, so the job
+    never looks the agent up. Fabric 0.1.0rc2 removed profile overlays, so the former ``profiles`` field
+    is gone — fold any overlay into the config.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["fabric"] = "fabric"
+    source: FabricSource = Field(
+        description="The agent to run: an inline `config` (with an optional `model`), or a registered `agent` "
+        "(with an optional `environment`)."
+    )
+    resolved_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Set by submit-time resolution of a registered `agent`, never by the submitter: the Fabric "
+        "config the agent resolved to, which is what the job runs.",
     )
     timeout_s: int = Field(default=600, ge=1, description="Per-task timeout for the Fabric run, in seconds.")
     capture_trajectory: bool = Field(
@@ -131,18 +156,46 @@ class FabricRunnerTarget(BaseModel):
         "server's `env`). No credential is stored on the spec or the run bundle.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_flat_config(cls, data: Any) -> Any:
+        """Accept the pre-``source`` inline shape, ``{"config": ..., "model": ...}``, for one release.
+
+        Deprecated since 0.8; remove in 0.9. Persisted jobs and saved specs from before the ``source``
+        union carry ``config``/``model`` at the top level.
+        """
+        if not isinstance(data, dict) or "source" in data or "config" not in data:
+            return data
+        lifted = {key: value for key, value in data.items() if key not in ("config", "model")}
+        lifted["source"] = {
+            "config": data["config"],
+            **({"model": data["model"]} if data.get("model") is not None else {}),
+        }
+        logger.warning(
+            "FabricRunnerTarget: top-level `config`/`model` is deprecated; put them under `source`. "
+            "This shape stops being accepted in the release after 0.8."
+        )
+        return lifted
+
     @model_validator(mode="after")
-    def _config_or_registered_agent(self) -> Self:
-        if self.config is None and self.agent is None:
-            raise ValueError("provide `config` (inline Fabric agent config) or `agent` (a registered agent)")
-        if self.environment is not None and self.agent is None:
-            raise ValueError("`environment` applies to a registered `agent`; fold it into an inline `config` instead")
-        if self.agent is not None and self.model is not None:
+    def _resolved_config_belongs_to_a_registered_agent(self) -> Self:
+        if self.resolved_config is not None and not isinstance(self.source, FabricRegisteredAgentSource):
             raise ValueError(
-                "`model` cannot be combined with `agent`: a registered agent's model is part of what it is, so a "
-                "different model is a different registered agent"
+                "`resolved_config` is the resolution of a registered `agent`; an inline `config` needs none"
             )
         return self
+
+    @property
+    def config(self) -> dict[str, Any] | None:
+        """The Fabric config the job runs: the inline one, or the registered agent's once resolved."""
+        if isinstance(self.source, FabricConfigSource):
+            return self.source.config
+        return self.resolved_config
+
+    @property
+    def model(self) -> str | None:
+        """The inline source's model override; a registered agent's model is part of the agent."""
+        return self.source.model if isinstance(self.source, FabricConfigSource) else None
 
 
 class HarborBuiltinAgentSource(BaseModel):
@@ -425,24 +478,26 @@ Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
 
 def registered_agent_name(target: Target | None) -> str | None:
     """The bare name of the registered agent a Fabric target names, if any."""
-    if isinstance(target, FabricRunnerTarget) and target.agent is not None:
-        return target.agent.root.rpartition("/")[2]
+    if isinstance(target, FabricRunnerTarget) and isinstance(target.source, FabricRegisteredAgentSource):
+        return target.source.agent.root.rpartition("/")[2]
     return None
 
 
 def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
     """The Ethos FileSet a resolved registered agent's config needs on disk, if it refers to files at all.
 
-    Only a resolved target qualifies: its ``agent`` is workspace-qualified and its ``config`` is the
-    translated one, so both the FileSet's home and whether relative paths exist are known without a lookup.
+    Only a resolved target qualifies: its ``agent`` is workspace-qualified and ``resolved_config`` is the
+    translated config, so both the FileSet's home and whether relative paths exist are known without a lookup.
     """
-    if target.agent is None or target.config is None or "/" not in target.agent.root:
+    source = target.source
+    if not isinstance(source, FabricRegisteredAgentSource) or "/" not in source.agent.root:
         return None
-    skills = target.config.get("skills") or {}
-    discovery = target.config.get("discovery") or {}
+    config = target.resolved_config or {}
+    skills = config.get("skills") or {}
+    discovery = config.get("discovery") or {}
     if not skills.get("paths") and not discovery.get("local_paths"):
         return None
-    workspace, _, name = target.agent.root.partition("/")
+    workspace, _, name = source.agent.root.partition("/")
     return FilesetRef(root=f"{workspace}/{ethos_fileset_name(name)}")
 
 
@@ -664,15 +719,9 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
         return self
 
     @model_validator(mode="after")
-    def _reject_config_alongside_agent(self) -> Self:
-        if (
-            isinstance(self.target, FabricRunnerTarget)
-            and self.target.config is not None
-            and self.target.agent is not None
-        ):
-            raise ValueError(
-                "provide exactly one of `config` (inline Fabric agent config) or `agent` (a registered agent)"
-            )
+    def _reject_resolved_config_on_submit(self) -> Self:
+        if isinstance(self.target, FabricRunnerTarget) and self.target.resolved_config is not None:
+            raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
         return self
 
 
@@ -687,8 +736,8 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     def _reject_unresolved_registered_agent(self) -> Self:
         if isinstance(self.target, FabricRunnerTarget) and self.target.config is None:
             raise ValueError(
-                f"AgentEvalSpec Fabric target names registered agent {self.target.agent!r} but has no `config`; "
-                "it must be resolved before run"
+                f"AgentEvalSpec Fabric target names registered agent {registered_agent_name(self.target)!r} but has "
+                "no `resolved_config`; it must be resolved before run"
             )
         return self
 

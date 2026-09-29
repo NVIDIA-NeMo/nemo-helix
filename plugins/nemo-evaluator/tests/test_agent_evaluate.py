@@ -33,6 +33,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
+    FabricConfigSource,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
@@ -137,7 +138,9 @@ def _task_spec() -> ResolvedTask:
 def _runner_target(model: str | None = None) -> FabricRunnerTarget:
     """A minimal agent-runner target, for tests about runners in general rather than a specific one."""
     return FabricRunnerTarget(
-        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}, model=model
+        source=FabricConfigSource(
+            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}, model=model
+        )
     )
 
 
@@ -437,8 +440,10 @@ def _agent() -> Agent:
 def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path) -> None:
     ctx = _job_context(tmp_path)
     fabric_target = FabricRunnerTarget(
-        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-        model="openai/gpt-5.4",
+        source=FabricConfigSource(
+            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+            model="openai/gpt-5.4",
+        )
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(fabric_target, ctx)
     assert isinstance(target, FabricAgentRuntime)
@@ -1048,7 +1053,11 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
     ("target", "expected_kind", "expected_endpoint_name", "expected_image_name", "expected_entrypoint"),
     [
         (
-            FabricRunnerTarget(config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}),
+            FabricRunnerTarget(
+                source=FabricConfigSource(
+                    config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+                )
+            ),
             "fabric",
             None,
             "nhx-tasks",
@@ -2124,7 +2133,7 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
         None,
         ModelTarget(model=Model(url="http://model.test", name="test")),
         AgentTarget(agent=_agent()),
-        FabricRunnerTarget(config={}),
+        FabricRunnerTarget(source=FabricConfigSource(config={})),
         HarborRunnerTarget(),
     ],
 )

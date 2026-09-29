@@ -158,11 +158,13 @@ def build_fabric_agent_eval_spec() -> dict[str, Any]:
         ],
         "target": {
             "kind": "fabric",
-            "config": {
-                "metadata": {"name": "readme-fabric-smoke"},
-                "harness": {"adapter_id": "nvidia.fabric.codex"},
+            "source": {
+                "config": {
+                    "metadata": {"name": "readme-fabric-smoke"},
+                    "harness": {"adapter_id": "nvidia.fabric.codex"},
+                },
+                "model": "<provider>/<model>",
             },
-            "model": "<provider>/<model>",
             "capture_trajectory": False,
         },
         "max_concurrent_tasks": 1,
@@ -190,11 +192,11 @@ def build_registered_agent_eval_spec() -> dict[str, Any]:
                 ],
             }
         ],
-        # `agent` instead of `config`: resolved at submit into the config a deployment of this agent
+        # A registered agent as the source: resolved at submit into the config a deployment of this agent
         # would run. The agent must already exist (`nemo agents create -n calculator-agent -c agent.yaml`).
         "target": {
             "kind": "fabric",
-            "agent": "calculator-agent",
+            "source": {"agent": "calculator-agent"},
             "capture_trajectory": True,
         },
         "max_concurrent_tasks": 1,

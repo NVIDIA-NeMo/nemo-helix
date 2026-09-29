@@ -100,6 +100,7 @@ from nemo_evaluator.api.schemas import TaskInputs
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalTaskInput,
+    FabricConfigSource,
     FabricRunnerTarget,
 )
 
@@ -113,10 +114,12 @@ spec = AgentEvalInputSpec(
         )
     ],
     target=FabricRunnerTarget(
-        config={
-            "metadata": {"name": "geography-smoke"},
-            "harness": {"adapter_id": "nvidia.fabric.codex"},
-        }
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "geography-smoke"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+            }
+        )
     ),
     max_concurrent_tasks=2,
     fail_fast=False,
@@ -153,17 +156,18 @@ reported score. See
 `AgentTarget` owns its agent request configuration. Runner targets are resolved
 to an `AgentTaskRunner` inside the job runtime.
 
-A Fabric runner target may name a **registered agent** instead of describing
-one. The service resolves it at submit: it looks the agent up, binds its models
-to the workspace Inference Gateway exactly as a deployment would, merges the
-optional `environment` spec, and translates the platform `agent.yaml` into the
-target's own `config`, kept next to the qualified `agent` ref. The agent runs
-fresh for every trial; an existing deployment is never called.
+A Fabric runner target's `source` is either an inline config or a **registered
+agent**; the two shapes share no field. With an agent, the service resolves it
+at submit: it looks the agent up, binds its models to the workspace Inference
+Gateway exactly as a deployment would, merges the optional `environment` spec,
+and translates the platform `agent.yaml` into the target's `resolved_config`,
+kept next to the qualified `agent` ref. The agent runs fresh for every trial;
+an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricRegisteredAgentSource, FabricRunnerTarget
 
-target = FabricRunnerTarget(agent="calculator-agent")  # or "workspace/name"
+target = FabricRunnerTarget(source=FabricRegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
 ```
 
 There is no model override — a different model is a different registered
@@ -180,14 +184,16 @@ For [Fabric](https://github.com/nvidia/nemo-fabric), pass one complete `agent.ya
 `harness.adapter_id` selects the harness:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
 target = FabricRunnerTarget(
-    config={
-        "metadata": {"name": "regression-suite"},
-        "harness": {"adapter_id": "nvidia.fabric.codex"},
-    },
-    model="<provider>/<model>",
+    source=FabricConfigSource(
+        config={
+            "metadata": {"name": "regression-suite"},
+            "harness": {"adapter_id": "nvidia.fabric.codex"},
+        },
+        model="<provider>/<model>",
+    )
 )
 ```
 

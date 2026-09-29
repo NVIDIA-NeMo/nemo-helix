@@ -19,6 +19,8 @@ from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evaluator.jobs import result_persistence
 from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
+    FabricConfigSource,
+    FabricRegisteredAgentSource,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborImportedAgentSource,
@@ -85,13 +87,18 @@ def _agent() -> Agent:
         (AgentTarget(agent=_agent()), ("agent", "my-agent", "http://agent.test")),
         (
             FabricRunnerTarget(
-                config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-                model="openai/gpt-5.4",
+                source=FabricConfigSource(
+                    config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+                    model="openai/gpt-5.4",
+                )
             ),
             ("fabric", "openai/gpt-5.4", None),
         ),
         (
-            FabricRunnerTarget(agent=AgentRef(root="dev/calculator-agent"), config={"harness": {"adapter_id": "x"}}),
+            FabricRunnerTarget(
+                source=FabricRegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                resolved_config={"harness": {"adapter_id": "x"}},
+            ),
             ("fabric", "calculator-agent", None),
         ),
         (
@@ -187,8 +194,10 @@ def test_persist_agent_eval_result_builds_entity_and_saves(tmp_path: Path, mocke
     persist_agent_eval_result(
         _agent_result(),
         target=FabricRunnerTarget(
-            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-            model="openai/gpt-5.4",
+            source=FabricConfigSource(
+                config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+                model="openai/gpt-5.4",
+            )
         ),
         ctx=_ctx(tmp_path, "job-1"),
         bundle_ref="fileset://dev/agent-eval-results#b",

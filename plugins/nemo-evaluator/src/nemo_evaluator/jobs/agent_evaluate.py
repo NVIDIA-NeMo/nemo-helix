@@ -47,6 +47,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
     AgentTarget,
+    FabricRegisteredAgentSource,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborRunnerTarget,
@@ -214,7 +215,11 @@ async def _load_registered_agent(
         config=fabric_config.model_dump(mode="json", exclude_none=True),
         env_secrets={env_name: SecretRef(root=ref) for env_name, ref in merged.secrets.items()},
     )
-    fileset = registered_agent_files(FabricRunnerTarget(agent=resolved_agent.ref, config=resolved_agent.config))
+    fileset = registered_agent_files(
+        FabricRunnerTarget(
+            source=FabricRegisteredAgentSource(agent=resolved_agent.ref), resolved_config=resolved_agent.config
+        )
+    )
     if fileset is not None:
         files = client_from_platform(async_sdk, AsyncFilesClient)
         try:
@@ -235,20 +240,22 @@ async def _resolve_registered_agent(
 ) -> Target | None:
     """Fill a Fabric runner target that names a registered ``agent`` with what that agent is.
 
-    The target keeps the ``agent``, workspace-qualified, next to the ``config`` it resolved to; the job
-    runs the agent fresh per trial without ever looking it up itself.
+    The source keeps its ``agent``, workspace-qualified, and the config it resolved to becomes
+    ``resolved_config``; the job runs the agent fresh per trial without ever looking it up itself.
     """
-    if not isinstance(target, FabricRunnerTarget) or target.agent is None or target.config is not None:
+    if not isinstance(target, FabricRunnerTarget) or target.resolved_config is not None:
+        return target
+    source = target.source
+    if not isinstance(source, FabricRegisteredAgentSource):
         return target
 
     agent = await _load_registered_agent(
-        target.agent.root, target.environment, workspace=workspace, async_sdk=async_sdk
+        source.agent.root, source.environment, workspace=workspace, async_sdk=async_sdk
     )
     return target.model_copy(
         update={
-            "agent": agent.ref,
-            "config": agent.config,
-            "environment": None,
+            "source": source.model_copy(update={"agent": agent.ref}),
+            "resolved_config": agent.config,
             "env_secrets": {**target.env_secrets, **agent.env_secrets},
         }
     )

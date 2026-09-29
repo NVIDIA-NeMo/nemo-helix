@@ -4038,6 +4038,54 @@ components:
       - kind
       title: EvidenceDescriptor
       description: Descriptor for a candidate trace, source, or artifact.
+    FabricConfigSource:
+      properties:
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped
+            mapping). Its ``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex``
+            for Codex.
+        model:
+          title: Model
+          description: Optional ``provider/model`` slug applied as the config's default
+            model; the harness default is used when omitted.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - config
+      title: FabricConfigSource
+      description: 'An agent described inline: one complete Fabric ``agent.yaml``
+        as a JSON-shaped mapping.'
+    FabricRegisteredAgentSource:
+      properties:
+        agent:
+          allOf:
+          - $ref: '#/components/schemas/AgentRef'
+          description: 'The registered agent to run: `workspace/name`, or `name` in
+            the submission workspace. Rewritten to the qualified form at submit. The
+            agent runs fresh for every trial; an existing deployment is never called.'
+        environment:
+          allOf:
+          - $ref: '#/components/schemas/EnvironmentSpecInline'
+          description: 'Environment to evaluate the agent in, merged onto its config
+            exactly as a deployment would: MCP fulfilments (url/env/secrets) for servers
+            the agent declares, process env, secret refs, and Fabric environment settings.'
+      additionalProperties: false
+      type: object
+      required:
+      - agent
+      title: FabricRegisteredAgentSource
+      description: 'An agent registered on the platform (``nemo agents create``),
+        resolved at submit.
+
+
+        The model is part of what the agent is, so there is no model override; what
+        an evaluation shapes is
+
+        the ``environment`` the agent runs in.'
     FabricRunnerTarget:
       properties:
         kind:
@@ -4045,33 +4093,20 @@ components:
           const: fabric
           title: Kind
           default: fabric
-        config:
-          title: Config
-          description: Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped
-            mapping). Its ``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex``
-            for Codex. Submit either this or `agent`; a resolved registered agent
-            carries both.
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/FabricConfigSource'
+          - $ref: '#/components/schemas/FabricRegisteredAgentSource'
+          title: Source
+          description: 'The agent to run: an inline `config` (with an optional `model`),
+            or a registered `agent` (with an optional `environment`).'
+        resolved_config:
+          title: Resolved Config
+          description: 'Set by submit-time resolution of a registered `agent`, never
+            by the submitter: the Fabric config the agent resolved to, which is what
+            the job runs.'
           additionalProperties: true
           type: object
-        agent:
-          allOf:
-          - $ref: '#/components/schemas/AgentRef'
-          description: 'A registered platform agent to run instead of an inline `config`:
-            `workspace/name`, or `name` in the submission workspace. Resolved at submit
-            into `config` and kept, qualified, as the run''s provenance. The agent
-            runs fresh for every trial; an existing deployment is never called.'
-        environment:
-          allOf:
-          - $ref: '#/components/schemas/EnvironmentSpecInline'
-          description: 'Environment to evaluate a registered `agent` in, merged onto
-            its config exactly as a deployment would: MCP fulfilments (url/env/secrets)
-            for servers the agent declares, process env, secret refs, and Fabric environment
-            settings. Requires `agent`.'
-        model:
-          title: Model
-          description: Optional ``provider/model`` slug applied as the config's default
-            model; the harness default is used when omitted.
-          type: string
         timeout_s:
           type: integer
           minimum: 1.0
@@ -4097,19 +4132,19 @@ components:
             bundle.'
       additionalProperties: false
       type: object
+      required:
+      - source
       title: FabricRunnerTarget
       description: "Generate trials by driving an agent harness through the NeMo Fabric\
         \ runtime.\n\nFabric is harness-agnostic: the harness (Codex, Hermes, ...)\
-        \ is selected by the supplied\nconfig's ``harness.adapter_id`` and is never\
-        \ inferred from ``model``. ``model`` is applied as the\nconfig's default model\
-        \ when given.\n\nA run is described by one complete ``config`` \u2014 given\
-        \ inline, or resolved at submit from a\nregistered platform ``agent`` (``nemo\
-        \ agents create``) with the same resolution a deployment gets:\nenvironment\
-        \ merge, Inference Gateway binding, translation of the platform ``agent.yaml``.\
-        \ The\ncanonical spec then carries the resolved ``config`` alongside the ``agent``\
-        \ it came from; the job\nnever looks the agent up. Fabric 0.1.0rc2 removed\
-        \ profile overlays, so the former ``profiles`` field\nis gone \u2014 fold\
-        \ any overlay into ``config``."
+        \ is selected by the config's\n``harness.adapter_id`` and is never inferred\
+        \ from a model. The config comes from ``source``: given\ninline, or resolved\
+        \ at submit from a registered platform agent with the same resolution a deployment\n\
+        gets (environment merge, Inference Gateway binding, translation of the platform\
+        \ ``agent.yaml``). A\nresolved registered agent's config is carried as ``resolved_config``\
+        \ next to its source, so the job\nnever looks the agent up. Fabric 0.1.0rc2\
+        \ removed profile overlays, so the former ``profiles`` field\nis gone \u2014\
+        \ fold any overlay into the config."
     FieldMapping:
       properties:
         input:

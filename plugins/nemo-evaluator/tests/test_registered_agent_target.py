@@ -19,6 +19,8 @@ from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob, _resolve_registered
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
+    FabricConfigSource,
+    FabricRegisteredAgentSource,
     FabricRunnerTarget,
     registered_agent_files,
     registered_agent_name,
@@ -40,6 +42,15 @@ from pytest_mock import MockerFixture
 pytestmark = pytest.mark.usefixtures("_platform_base_url")
 
 _AGENT = AgentRef(root="calculator-agent")
+_INLINE = FabricConfigSource(config={"harness": {"adapter_id": "x"}})
+
+
+def _by_agent(
+    agent: AgentRef = _AGENT, environment: EnvironmentSpecInline | None = None, **kwargs: Any
+) -> FabricRunnerTarget:
+    return FabricRunnerTarget(source=FabricRegisteredAgentSource(agent=agent, environment=environment), **kwargs)
+
+
 #: A canonical task snapshot, in the shape `AgentEvalSpec.tasks` carries after submission.
 _RESOLVED_TASK: dict[str, Any] = {"id": "t", "spec": {"kind": "evaluator", "intent": "x", "inputs": {}, "metrics": []}}
 
@@ -120,14 +131,14 @@ async def _resolve(target: FabricRunnerTarget, workspace: str = "dev") -> Any:
 async def test_fabric_target_by_agent_becomes_the_config_a_deployment_would_run(mocker: MockerFixture) -> None:
     agents = _platform(mocker, _agent())
 
-    resolved = await _resolve(FabricRunnerTarget(agent=_AGENT, timeout_s=120))
+    resolved = await _resolve(_by_agent(timeout_s=120))
 
     agents.get_agent.assert_awaited_once_with(workspace="dev", name="calculator-agent")
     assert isinstance(resolved, FabricRunnerTarget)
-    assert resolved.agent == AgentRef(root="dev/calculator-agent")  # kept, qualified, as provenance
-    assert resolved.environment is None  # merged into the config, not re-applied
+    assert isinstance(resolved.source, FabricRegisteredAgentSource)
+    assert resolved.source.agent == AgentRef(root="dev/calculator-agent")  # kept, qualified, as provenance
     assert resolved.timeout_s == 120
-    assert resolved.config is not None
+    assert resolved.config is not None and resolved.config is resolved.resolved_config
     # The platform agent.yaml became a Fabric config: harness selected by adapter id, ...
     assert resolved.config["harness"]["adapter_id"] == "nvidia.fabric.langchain.deepagents"
     # ... and the model bound to the *agent's* workspace gateway, exactly as a deployment would be.
@@ -143,7 +154,7 @@ async def test_fabric_target_by_agent_becomes_the_config_a_deployment_would_run(
 async def test_a_qualified_ref_names_the_agents_workspace(mocker: MockerFixture) -> None:
     agents = _platform(mocker, _agent())
 
-    resolved = await _resolve(FabricRunnerTarget(agent=AgentRef(root="shared/calculator-agent")))
+    resolved = await _resolve(_by_agent(AgentRef(root="shared/calculator-agent")))
 
     agents.get_agent.assert_awaited_once_with(workspace="shared", name="calculator-agent")
     assert isinstance(resolved, FabricRunnerTarget) and resolved.config is not None
@@ -155,7 +166,7 @@ async def test_an_agent_whose_config_refers_to_files_stages_its_ethos_fileset(mo
     config["skills"] = {"paths": ["skills/arithmetic"]}
     _platform(mocker, _agent(config), ethos_fileset=True)
 
-    resolved = await _resolve(FabricRunnerTarget(agent=_AGENT))
+    resolved = await _resolve(_by_agent())
 
     assert isinstance(resolved, FabricRunnerTarget)
     assert registered_agent_files(resolved) == FilesetRef(root="dev/calculator-agent-ethos")
@@ -167,7 +178,7 @@ async def test_skills_without_an_ethos_fileset_are_a_submit_error(mocker: Mocker
     _platform(mocker, _agent(config), ethos_fileset=False)
 
     with pytest.raises(ValueError, match="refers to files by relative path but has no Ethos FileSet"):
-        await _resolve(FabricRunnerTarget(agent=_AGENT))
+        await _resolve(_by_agent())
 
 
 async def test_a_missing_agent_is_a_submit_error(mocker: MockerFixture) -> None:
@@ -175,14 +186,14 @@ async def test_a_missing_agent_is_a_submit_error(mocker: MockerFixture) -> None:
     agents.get_agent = AsyncMock(side_effect=_not_found())
 
     with pytest.raises(ValueError, match="registered agent dev/missing does not exist"):
-        await _resolve(FabricRunnerTarget(agent=AgentRef(root="missing")))
+        await _resolve(_by_agent(AgentRef(root="missing")))
 
 
 async def test_a_legacy_nat_agent_is_rejected_rather_than_guessed_at(mocker: MockerFixture) -> None:
     _platform(mocker, _agent({"workflow": {}}, config_format="nat-workflow-v1"))
 
     with pytest.raises(ValueError, match="nat-workflow-v1"):
-        await _resolve(FabricRunnerTarget(agent=_AGENT))
+        await _resolve(_by_agent())
 
 
 async def test_the_published_agent_name_survives_resolution(mocker: MockerFixture) -> None:
@@ -195,7 +206,7 @@ async def test_the_published_agent_name_survives_resolution(mocker: MockerFixtur
     input_spec = AgentEvalInputSpec.model_validate(
         {
             "tasks": [{"id": "t", "intent": "x", "inputs": {"instruction": "hi"}, "metrics": [metric]}],
-            "target": {"kind": "fabric", "agent": "calculator-agent"},
+            "target": {"kind": "fabric", "source": {"agent": "calculator-agent"}},
             "publication": {"intake": {"evaluation_id": "eval-1"}},
         }
     )
@@ -210,8 +221,10 @@ async def test_the_published_agent_name_survives_resolution(mocker: MockerFixtur
 
 
 async def test_inline_targets_pass_through_untouched() -> None:
-    target = FabricRunnerTarget(config={"harness": {"adapter_id": "nvidia.fabric.codex"}})
+    target = FabricRunnerTarget(source=_INLINE)
     assert await _resolve_registered_agent(target, workspace="dev", async_sdk=None) is target
+    resolved = _by_agent(AgentRef(root="dev/calc"), resolved_config={"harness": {"adapter_id": "x"}})
+    assert await _resolve_registered_agent(resolved, workspace="dev", async_sdk=None) is resolved
     assert await _resolve_registered_agent(None, workspace="dev", async_sdk=None) is None
 
 
@@ -226,7 +239,7 @@ async def test_environment_spec_reshapes_the_agent_exactly_as_a_deployment_would
         mcp={"calculator": McpFulfillment(url="http://mock-calculator.test/mcp")},
     )
 
-    resolved = await _resolve(FabricRunnerTarget(agent=_AGENT, environment=environment))
+    resolved = await _resolve(_by_agent(environment=environment))
 
     assert isinstance(resolved, FabricRunnerTarget) and resolved.config is not None
     # The declared MCP server now points at the mock. (Per-server ``env`` is a stdio-only Fabric
@@ -245,7 +258,7 @@ async def test_environment_spec_only_fulfils_servers_the_agent_declares(mocker: 
     _platform(mocker, _agent())
     environment = EnvironmentSpecInline(mcp={"exfil": McpFulfillment(url="http://attacker.test/mcp")})
 
-    resolved = await _resolve(FabricRunnerTarget(agent=_AGENT, environment=environment))
+    resolved = await _resolve(_by_agent(environment=environment))
 
     assert isinstance(resolved, FabricRunnerTarget) and resolved.config is not None
     # Mock what exists; an environment cannot hand the agent a tool it never had.
@@ -258,63 +271,76 @@ async def test_conflicting_environment_secret_bindings_are_a_submit_error(mocker
     environment = EnvironmentSpecInline(env={"CALC_TOKEN": "plain"}, secrets={"CALC_TOKEN": "dev/calc-token"})
 
     with pytest.raises(ValueError, match="cannot be run through Fabric"):
-        await _resolve(FabricRunnerTarget(agent=_AGENT, environment=environment))
+        await _resolve(_by_agent(environment=environment))
 
 
 # --- Spec boundary -------------------------------------------------------------------------------------
 
 
-def test_a_submitted_fabric_target_needs_exactly_one_of_config_or_agent() -> None:
-    with pytest.raises(ValidationError, match="provide `config`"):
-        FabricRunnerTarget()
-    # Both together is what a *resolved* target looks like, so only the input spec refuses it.
-    both = {"kind": "fabric", "config": {"harness": {"adapter_id": "x"}}, "agent": "calc"}
-    with pytest.raises(ValidationError, match="exactly one of `config`"):
-        AgentEvalInputSpec.model_validate({"tasks": [{"id": "t", "intent": "x", "inputs": {}}], "target": both})
+def test_a_fabric_source_is_one_shape_or_the_other() -> None:
+    """The wire type cannot express a config and an agent at once; the schema, not a validator, says so."""
+    for source in ({}, {"config": {"harness": {}}, "agent": "calc"}, {"agent": "calc", "model": "nvidia/other"}):
+        with pytest.raises(ValidationError):
+            FabricRunnerTarget.model_validate({"source": source})
+    with pytest.raises(ValidationError):
+        FabricRunnerTarget.model_validate({"source": {"config": {"harness": {}}, "environment": {}}})
 
 
-def test_a_registered_agents_model_is_not_overridable() -> None:
-    # A different model is a different registered agent.
-    with pytest.raises(ValidationError, match="different model is a different registered agent"):
-        FabricRunnerTarget(agent=_AGENT, model="nvidia/other")
+def test_the_legacy_flat_inline_shape_is_lifted_into_source_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """One release of tolerance for specs and persisted jobs written before `source` existed."""
+    legacy = {"kind": "fabric", "config": {"harness": {"adapter_id": "x"}}, "model": "p/m", "timeout_s": 30}
+    with caplog.at_level("WARNING", logger="nemo_evaluator.jobs.agent_spec"):
+        target = FabricRunnerTarget.model_validate(legacy)
+    assert target.source == FabricConfigSource(config={"harness": {"adapter_id": "x"}}, model="p/m")
+    assert target.timeout_s == 30
+    assert "deprecated" in caplog.text
+    # Only the inline shape is lifted; the pre-release flat `agent` shape never shipped.
+    with pytest.raises(ValidationError):
+        FabricRunnerTarget.model_validate({"kind": "fabric", "agent": "calc"})
+
+
+def test_resolved_config_is_derived_never_submitted() -> None:
+    with pytest.raises(ValidationError, match="an inline `config` needs none"):
+        FabricRunnerTarget(source=_INLINE, resolved_config={"harness": {}})
+    submitted = {"kind": "fabric", "source": {"agent": "calc"}, "resolved_config": {"harness": {}}}
+    with pytest.raises(ValidationError, match="not the submitter"):
+        AgentEvalInputSpec.model_validate({"tasks": [{"id": "t", "intent": "x", "inputs": {}}], "target": submitted})
 
 
 def test_staged_files_are_derived_from_a_resolved_agent_never_named_by_the_submitter() -> None:
     """Only a qualified ``agent`` plus a config with relative paths yields a FileSet; nothing is settable."""
     with_skills = {"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}}
-    assert registered_agent_files(FabricRunnerTarget(config=with_skills)) is None
-    assert registered_agent_files(FabricRunnerTarget(agent=AgentRef(root="calc"), config=with_skills)) is None
-    assert registered_agent_files(FabricRunnerTarget(agent=AgentRef(root="ws/calc"), config={"harness": {}})) is None
-    assert registered_agent_files(FabricRunnerTarget(agent=AgentRef(root="ws/calc"), config=with_skills)) == FilesetRef(
+    assert registered_agent_files(FabricRunnerTarget(source=FabricConfigSource(config=with_skills))) is None
+    assert registered_agent_files(_by_agent(AgentRef(root="calc"), resolved_config=with_skills)) is None
+    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config={"harness": {}})) is None
+    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config=with_skills)) == FilesetRef(
         root="ws/calc-ethos"
     )
     with_discovery = {"harness": {"adapter_id": "x"}, "discovery": {"local_paths": ["adapters"]}}
-    assert registered_agent_files(FabricRunnerTarget(agent=AgentRef(root="ws/calc"), config=with_discovery)) is not None
+    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config=with_discovery)) is not None
     assert "agent_files" not in FabricRunnerTarget.model_fields
-
-
-def test_environment_requires_a_registered_agent() -> None:
-    with pytest.raises(ValidationError, match="`environment` applies to a registered `agent`"):
-        FabricRunnerTarget(config={"harness": {"adapter_id": "x"}}, environment=EnvironmentSpecInline())
 
 
 @pytest.mark.parametrize("ref", ["", "a/b/c", "/calc", "calc/", "has space", "ws/name#rev"])
 def test_agent_ref_is_validated_at_the_spec_boundary(ref: str) -> None:
     # Same charset and shape as MetricRef: a malformed ref is a 422 on submit, not a lookup failure.
     with pytest.raises(ValidationError):
-        FabricRunnerTarget.model_validate({"agent": ref})
+        FabricRunnerTarget.model_validate({"source": {"agent": ref}})
 
 
 def test_a_registered_agent_names_the_agent_for_publication() -> None:
-    assert registered_agent_name(FabricRunnerTarget(agent=AgentRef(root="shared/calc"))) == "calc"
-    assert target_agent_identity(FabricRunnerTarget(agent=AgentRef(root="shared/calc"))) == ("calc", None)
-    assert registered_agent_name(FabricRunnerTarget(config={"harness": {"adapter_id": "x"}})) is None
+    assert registered_agent_name(_by_agent(AgentRef(root="shared/calc"))) == "calc"
+    assert target_agent_identity(_by_agent(AgentRef(root="shared/calc"))) == ("calc", None)
+    assert registered_agent_name(FabricRunnerTarget(source=_INLINE)) is None
+    assert target_agent_identity(FabricRunnerTarget(source=FabricConfigSource(config={}, model="p/m"))) == (None, "p/m")
 
 
 def test_canonical_spec_refuses_an_unresolved_registered_agent() -> None:
     with pytest.raises(ValidationError, match="must be resolved before run"):
-        AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": {"kind": "fabric", "agent": "calc"}})
-    resolved = {"kind": "fabric", "agent": "dev/calc", "config": {"harness": {"adapter_id": "x"}}}
+        AgentEvalSpec.model_validate(
+            {"tasks": [_RESOLVED_TASK], "target": {"kind": "fabric", "source": {"agent": "calc"}}}
+        )
+    resolved = {"kind": "fabric", "source": {"agent": "dev/calc"}, "resolved_config": {"harness": {"adapter_id": "x"}}}
     AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved})
 
 
@@ -329,7 +355,7 @@ def test_fabric_env_secrets_reach_the_job_environment_through_the_compiler() -> 
     spec = _spec(
         {
             "kind": "fabric",
-            "config": {"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}},
+            "source": {"config": {"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}}},
             "env_secrets": {"CALC_TOKEN": "dev/calc-token"},
         }
     )
@@ -342,15 +368,24 @@ def test_a_resolved_agent_with_files_adds_a_staging_step_before_the_evaluation()
     assert [step.name for step in job.steps] == ["stage-environment", "agent-evaluate"]
     assert job.steps[0].config == {"environment": "dev/calculator-agent-ethos"}
 
-    config_only = _spec({"kind": "fabric", "agent": "dev/calculator-agent", "config": {"harness": {"adapter_id": "x"}}})
+    config_only = _spec(
+        {
+            "kind": "fabric",
+            "source": {"agent": "dev/calculator-agent"},
+            "resolved_config": {"harness": {"adapter_id": "x"}},
+        }
+    )
     assert [step.name for step in compile_agent_eval_job(config_only, use_subprocess=True).steps] == ["agent-evaluate"]
 
 
 def _resolved_target_with_files() -> dict[str, Any]:
     return {
         "kind": "fabric",
-        "agent": "dev/calculator-agent",
-        "config": {"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}, "skills": {"paths": ["skills/a"]}},
+        "source": {"agent": "dev/calculator-agent"},
+        "resolved_config": {
+            "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+            "skills": {"paths": ["skills/a"]},
+        },
     }
 
 
