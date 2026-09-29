@@ -48,6 +48,8 @@ HARBOR_CARRIED_VALUES = {
     "artifacts": ["/app/output"],
     "trace_dir": "/app/traces",
     "reward_key": "score",
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_timeout_multiplier": 5.0,
 }
 HARBOR_REJECTED_VALUES = {
     "job_name": "existing-job",
@@ -55,9 +57,7 @@ HARBOR_REJECTED_VALUES = {
     "quiet": False,
     "agent_dir": Path("local-agent"),
     "timeout_multiplier": 2.0,
-    "agent_timeout_multiplier": 2.0,
     "verifier_timeout_multiplier": 2.0,
-    "agent_setup_timeout_multiplier": 2.0,
     "environment_build_timeout_multiplier": 2.0,
 }
 
@@ -76,15 +76,6 @@ def test_harbor_configuration_survives_submission_without_local_storage(tmp_path
         "source": {"import_path": "custom_agent:Agent", "model_name": "model"},  # the import path wins
         **HARBOR_CARRIED_VALUES,
     }
-
-
-def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
-    runner = HarborAgentTaskRunner(
-        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
-    )
-    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
-    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
-        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 _FAKE_KEY = "sk-not-a-real-key-0123456789"
@@ -118,6 +109,15 @@ def test_nested_harbor_target_error_does_not_echo_the_value():
         )
     assert "plaintext credentials" in str(excinfo.value)
     assert _FAKE_KEY not in str(excinfo.value)
+
+
+def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
+    )
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 def test_every_harbor_runtime_field_has_a_submission_policy():

@@ -233,12 +233,12 @@ def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> li
 def _staged_fileset(spec: AgentEvalSpec) -> FilesetRef | None:
     """The FileSet the evaluation step needs on job storage before it starts, if any.
 
-    A Gym target stages its environment package; a Fabric target running a registered agent stages
-    that agent's Ethos files (skills and prompts its config refers to by relative path).
+    A Gym target stages its environment package; a Fabric or Harbor target running a registered agent
+    stages that agent's Ethos files (skills and prompts its config refers to by relative path).
     """
     if isinstance(spec.target, GymRunnerTarget):
         return spec.target.environment
-    if isinstance(spec.target, FabricRunnerTarget):
+    if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget)):
         return registered_agent_files(spec.target)
     return None
 

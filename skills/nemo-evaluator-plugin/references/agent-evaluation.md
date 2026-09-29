@@ -165,10 +165,14 @@ kept next to the qualified `agent` ref. The agent runs fresh for every trial;
 an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget, HarborRunnerTarget
 
-target = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+on_host = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+in_task_containers = HarborRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))
 ```
+
+On Harbor the resolved agent runs as the SDK's installed Fabric agent with its
+config in `agent_kwargs.fabric_config`; a registered source has no `model_name`.
 
 There is no model override — a different model is a different registered
 agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the

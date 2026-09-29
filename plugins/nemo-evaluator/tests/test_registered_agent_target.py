@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A registered platform agent as the source of a Fabric runner target."""
+"""A registered platform agent as the source of a Fabric or Harbor runner target."""
 
 from __future__ import annotations
 
@@ -17,10 +17,14 @@ from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_compiler import _secret_refs, compile_agent_eval_job
 from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob, _resolve_registered_agent
 from nemo_evaluator.jobs.agent_spec import (
+    REGISTERED_AGENT_HARBOR_IMPORT_PATH,
     AgentEvalInputSpec,
     AgentEvalSpec,
     FabricConfigSource,
     FabricRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
+    HarborRunnerTarget,
     RegisteredAgentSource,
     registered_agent_config_needs_files,
     registered_agent_files,
@@ -31,6 +35,7 @@ from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator_sdk import ExactMatchMetric
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline, McpFulfillment
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -135,7 +140,7 @@ def _agent(config: dict[str, Any] | None = None, *, config_format: str = "nemo-a
     return SimpleNamespace(name="calculator-agent", config_format=config_format, config=config or _calculator_config())
 
 
-async def _resolve(target: FabricRunnerTarget, workspace: str = "dev") -> Any:
+async def _resolve(target: FabricRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
     return await _resolve_registered_agent(target, workspace=workspace, async_sdk=_async_platform())
 
 
@@ -352,6 +357,174 @@ async def test_the_submitters_env_secret_wins_over_the_agents_with_a_warning(
         "eval-key" in r.getMessage() or "agent-key" in r.getMessage() or "NVIDIA_API_KEY" in r.getMessage()
         for r in caplog.records
     )
+
+
+# --- Harbor ------------------------------------------------------------------------------------------
+
+
+def _harbor_by_agent(
+    agent: AgentRef = _AGENT, environment: EnvironmentSpecInline | None = None, **kwargs: Any
+) -> HarborRunnerTarget:
+    return HarborRunnerTarget(source=RegisteredAgentSource(agent=agent, environment=environment), **kwargs)
+
+
+async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_the_whole_config(
+    mocker: MockerFixture,
+) -> None:
+    _platform(mocker, _agent())
+
+    resolved = await _resolve(_harbor_by_agent(n_attempts=2, agent_kwargs={"fabric_workspace": "/app"}))
+
+    assert isinstance(resolved, HarborRunnerTarget)
+    assert isinstance(resolved.source, RegisteredAgentSource)
+    assert resolved.source.agent == AgentRef(root="dev/calculator-agent")  # kept, qualified
+    assert resolved.agent_import_path == REGISTERED_AGENT_HARBOR_IMPORT_PATH
+    assert resolved.agent_name is None
+    assert resolved.n_attempts == 2
+    kwargs = resolved.agent_kwargs
+    # The agent travels whole: identity, harness, gateway-bound model -- nothing flattened to keywords.
+    config = kwargs["fabric_config"]
+    assert isinstance(config, dict)
+    assert config["metadata"]["name"] == "calculator-agent"
+    assert config["harness"]["adapter_id"] == "nvidia.fabric.langchain.deepagents"
+    assert "/inference-gateway/" in config["models"]["default"]["base_url"]
+    # The gateway placeholder stays out of the persisted kwargs; the agent re-adds it per trial from
+    # ``api_key_env``, so the target still passes Harbor's credential check job-side.
+    assert config["models"]["default"]["api_key_env"] == "NVIDIA_API_KEY"
+    assert "NVIDIA_API_KEY" not in config["environment"]["env"]
+    HarborRuntimeConfig(jobs_dir=Path("/tmp/x"), agent_import_path="x:Y", agent_kwargs=kwargs)
+    # The harness extra is derived from the adapter and pinned to this service's Fabric version.
+    package = kwargs["fabric_package"]
+    assert isinstance(package, str) and package.startswith("nemo-fabric[deepagents,relay]==")
+    # Caller-supplied install/run knobs survive.
+    assert kwargs["fabric_workspace"] == "/app"
+    # Resolution is idempotent: a resolved target is left alone.
+    assert await _resolve(resolved) is resolved
+
+
+async def test_harbor_caller_may_pin_the_fabric_package(mocker: MockerFixture) -> None:
+    _platform(mocker, _agent())
+
+    resolved = await _resolve(_harbor_by_agent(agent_kwargs={"fabric_package": "nemo-fabric[deepagents]==9.9.9"}))
+
+    assert isinstance(resolved, HarborRunnerTarget)
+    assert resolved.agent_kwargs["fabric_package"] == "nemo-fabric[deepagents]==9.9.9"
+
+
+async def test_harbor_environment_secrets_join_the_targets_own(mocker: MockerFixture) -> None:
+    _platform(mocker, _agent())
+    environment = EnvironmentSpecInline(secrets={"CALC_TOKEN": "dev/calc-token"})
+
+    resolved = await _resolve(
+        _harbor_by_agent(environment=environment, env_secrets={"OTHER": SecretRef(root="dev/other")})
+    )
+
+    assert isinstance(resolved, HarborRunnerTarget)
+    assert resolved.env_secrets == {
+        "OTHER": SecretRef(root="dev/other"),
+        "CALC_TOKEN": SecretRef(root="dev/calc-token"),
+    }
+
+
+async def test_a_harbor_agent_whose_config_refers_to_files_snapshots_its_ethos_fileset(mocker: MockerFixture) -> None:
+    config = _calculator_config()
+    config["skills"] = {"paths": ["skills/arithmetic"]}
+    files = _platform(mocker, _agent(config), ethos_fileset=True).files
+
+    resolved = await _resolve(_harbor_by_agent())
+
+    assert isinstance(resolved, HarborRunnerTarget)
+    snapshot = registered_agent_files(resolved)
+    assert snapshot is not None and snapshot.root == f"dev/{files.create_fileset.await_args.kwargs['body'].name}"
+
+
+def test_harbor_fabric_config_may_name_a_credential_variable_but_not_hold_one() -> None:
+    HarborRunnerTarget(
+        source=HarborImportedAgentSource(import_path="x:Y"),
+        agent_kwargs={"fabric_config": {"models": {"default": {"api_key_env": "K"}}}},
+    )
+
+    for value in ("nvapi-" + "a" * 60, "not-used"):
+        leaked = {"environment": {"env": {"NVIDIA_API_KEY": value}}}
+        with pytest.raises(ValidationError, match="look like plaintext credentials"):
+            HarborRunnerTarget(
+                source=HarborImportedAgentSource(import_path="x:Y"), agent_kwargs={"fabric_config": leaked}
+            )
+
+
+def test_a_registered_agent_is_one_of_the_harbor_sources_and_excludes_the_others() -> None:
+    """The union admits a registered `agent` next to a built-in `name` or an `import_path`, never two of them."""
+    for source in (
+        {"name": "oracle", "agent": "calc"},
+        {"import_path": "x:Y", "agent": "calc"},
+        {"agent": "calc", "model_name": "m"},
+    ):
+        with pytest.raises(ValidationError):
+            HarborRunnerTarget.model_validate({"source": source})
+    registered = _harbor_by_agent(AgentRef(root="calc"))
+    assert (registered.agent_name, registered.agent_import_path, registered.agent_model_name) == (
+        None,
+        REGISTERED_AGENT_HARBOR_IMPORT_PATH,
+        None,
+    )
+    assert target_agent_identity(registered) == ("calc", None)
+    assert HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex")).agent_import_path is None
+
+
+def test_a_submitted_harbor_registered_agent_owns_its_fabric_config() -> None:
+    tasks = [{"id": "t", "intent": "x", "inputs": {}}]
+    target = {"kind": "harbor", "source": {"agent": "calc"}, "agent_kwargs": {"fabric_config": {}}}
+    with pytest.raises(ValidationError, match="derived from the registered `agent`"):
+        AgentEvalInputSpec.model_validate({"tasks": tasks, "target": target})
+    AgentEvalInputSpec.model_validate({"tasks": tasks, "target": {**target, "source": {"import_path": "x:Y"}}})
+
+
+def test_canonical_spec_refuses_an_unresolved_harbor_registered_agent() -> None:
+    with pytest.raises(ValidationError, match="must be resolved before run"):
+        AgentEvalSpec.model_validate(
+            {"tasks": [_RESOLVED_TASK], "target": {"kind": "harbor", "source": {"agent": "calc"}}}
+        )
+    resolved = {
+        "kind": "harbor",
+        "source": {"agent": "dev/calc"},
+        "agent_kwargs": {"fabric_config": {"harness": {"adapter_id": "x"}}},
+    }
+    AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved})
+
+
+def test_harbor_timeout_multipliers_reach_the_runtime(tmp_path: Path) -> None:
+    ctx = _job_context(tmp_path)
+    target = HarborRunnerTarget(
+        source=HarborImportedAgentSource(import_path="x:Y"),
+        agent_setup_timeout_multiplier=12.0,
+        agent_timeout_multiplier=5.0,
+    )
+    runtime, _, _ = AgentEvalJob._resolve_target(target, ctx)
+    config = getattr(runtime, "_config")
+    assert (config.agent_setup_timeout_multiplier, config.agent_timeout_multiplier) == (12.0, 5.0)
+
+
+def test_staged_harbor_agent_files_become_the_fabric_config_bundle(tmp_path: Path) -> None:
+    ctx = _job_context(tmp_path)
+    target = HarborRunnerTarget.model_validate(
+        {
+            "source": {"agent": "dev/calculator-agent", "files": "dev/agent-files-0123abcd4567"},
+            "agent_kwargs": {"fabric_config": {"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}}},
+        }
+    )
+    with pytest.raises(ValueError, match="were not staged"):
+        AgentEvalJob._resolve_target(target, ctx)
+    (ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR).mkdir()
+    runtime, _, _ = AgentEvalJob._resolve_target(target, ctx)
+    config = getattr(runtime, "_config")
+    assert config.agent_kwargs["fabric_config_bundle"] == str(ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR)
+    spec = AgentEvalSpec.model_validate(
+        {"tasks": [_RESOLVED_TASK], "target": {"kind": "harbor", **target.model_dump(mode="json", exclude={"kind"})}}
+    )
+    assert [step.name for step in compile_agent_eval_job(spec, use_subprocess=True).steps] == [
+        "stage-environment",
+        "agent-evaluate",
+    ]
 
 
 # --- Spec boundary -------------------------------------------------------------------------------------

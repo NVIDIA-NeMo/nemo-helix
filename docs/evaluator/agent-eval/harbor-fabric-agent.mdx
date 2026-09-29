@@ -288,6 +288,42 @@ trajectory-aware metrics.
 - **Telemetry**: leave `telemetry`/`relay` out of the config with deepagents; that adapter does not
   support Fabric's Relay observability configuration.
 
+## Run a registered agent
+
+An agent registered on the platform with `nemo agents create` can be the Harbor target's `source`,
+in place of a built-in `name` or your own `import_path`:
+
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "source": {"agent": "calculator-agent"},
+    "n_attempts": 2,
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_kwargs": {"fabric_workspace": "/app"}
+  }
+}
+```
+
+At submit time the service resolves the agent exactly as `nemo agents deploy` would — its models bound
+to the workspace's Inference Gateway, the optional `environment` merged on top — and fills the target
+in: the agent runs as the SDK's `FabricInstalledAgent` (so any task image works) and
+`agent_kwargs.fabric_config` carries the whole translated config, with `fabric_package` derived from
+the harness and pinned to the platform's Fabric version unless you set it. Installing the agent into
+each task container takes minutes the first time, so raise `agent_setup_timeout_multiplier` as the
+example does — Harbor's default is tuned for prebuilt agents. The persisted job spec
+shows the filled-in target with `source.agent` qualified; the job never looks the agent up.
+If the agent's config refers to skills or prompts by relative path, its Ethos FileSet is staged into the
+job and uploaded into every task container as the Fabric config bundle.
+
+`source.environment` takes the same spec a deployment does — redirect the agent's declared MCP servers to
+mocks, add process env, bind secrets by reference — with one Harbor-specific caveat: fulfilment URLs
+must be reachable from *inside* the task container, so `localhost` on the host is not. The same is
+true of the Inference Gateway itself on a laptop, where the platform binds to `localhost`: point
+`environment.model_provider_override.base_url` at the gateway through `host.docker.internal` for a
+local run. A registered agent carries no `model_name`: its model is part of what it is, and a different model
+is a different registered agent.
+
 ## Next steps
 
 <Cards>
