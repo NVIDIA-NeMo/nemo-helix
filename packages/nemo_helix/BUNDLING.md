@@ -55,7 +55,7 @@ becomes this in the final wheel metadata:
 Requires-Dist: nemo-helix[nhx-common]
 ```
 
-A dependency with extras and a marker, such as `nemo-evaluator-sdk[harbor] ; python_version >= "3.12"`, becomes `nemo-helix[nemo-evaluator-sdk,harbor] ; python_version >= "3.12"`.
+With extras, `nemo-evaluator-sdk[harbor]` becomes `nemo-helix[nemo-evaluator-sdk,harbor]`.
 
 ### `make vendor` (vendor tool)
 
