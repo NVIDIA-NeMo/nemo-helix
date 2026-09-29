@@ -309,7 +309,10 @@ At submit time the service resolves the agent exactly as `nemo agents deploy` wo
 to the workspace's Inference Gateway, the optional `environment` merged on top — and fills the target
 in: the agent runs as the SDK's `FabricInstalledAgent` (so any task image works) and
 `agent_kwargs.fabric_config` carries the whole translated config, with `fabric_package` derived from
-the harness and pinned to the platform's Fabric version unless you set it. Installing the agent into
+the harness and pinned to the platform's Fabric version unless you set it. For the deepagents harness
+the pin also covers `mcp` and `langchain-mcp-adapters` at the platform's versions, because a clean
+install otherwise resolves an `mcp` major the adapter cannot import. `fabric_package` accepts several
+whitespace-separated requirements, so your own pin can do the same. Installing the agent into
 each task container takes minutes the first time, so raise `agent_setup_timeout_multiplier` as the
 example does — Harbor's default is tuned for prebuilt agents. The persisted job spec
 shows the filled-in target with `source.agent` qualified; the job never looks the agent up.

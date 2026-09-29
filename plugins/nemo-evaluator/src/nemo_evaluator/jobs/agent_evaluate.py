@@ -173,16 +173,32 @@ _FABRIC_ADAPTER_EXTRAS: dict[str, str] = {
     "nvidia.fabric.hermes": "hermes-agent",
 }
 
+#: Distributions a harness leaves unpinned that must match the service anyway. The deepagents adapter
+#: speaks MCP through ``langchain-mcp-adapters``, whose ``mcp`` floor admits a major it cannot import.
+_HARNESS_COMPANION_PINS: dict[str, tuple[str, ...]] = {
+    "nvidia.fabric.langchain.deepagents": ("mcp", "langchain-mcp-adapters"),
+}
+
 
 def _default_fabric_package(adapter_id: str) -> str:
-    """The ``nemo-fabric`` requirement that installs ``adapter_id``'s harness, pinned to this service's Fabric."""
+    """The requirements that install ``adapter_id``'s harness, pinned to this service's own versions.
+
+    One or more whitespace-separated specifiers: the ``nemo-fabric`` extra, plus any companion
+    distribution the harness needs at the version the service runs, when the service has it.
+    """
     extra = _FABRIC_ADAPTER_EXTRAS.get(adapter_id)
     if extra is None:
         raise ValueError(
             f"no known Fabric package extra installs harness {adapter_id!r}; set `agent_kwargs.fabric_package` "
             "to the requirement that does"
         )
-    return f"nemo-fabric[{extra},relay]=={importlib.metadata.version('nemo-fabric')}"
+    requirements = [f"nemo-fabric[{extra},relay]=={importlib.metadata.version('nemo-fabric')}"]
+    for name in _HARNESS_COMPANION_PINS.get(adapter_id, ()):
+        try:
+            requirements.append(f"{name}=={importlib.metadata.version(name)}")
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return " ".join(requirements)
 
 
 def _without_gateway_placeholders(config: dict[str, Any]) -> dict[str, Any]:

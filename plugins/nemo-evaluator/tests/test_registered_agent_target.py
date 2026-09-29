@@ -394,9 +394,12 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert config["models"]["default"]["api_key_env"] == "NVIDIA_API_KEY"
     assert "NVIDIA_API_KEY" not in config["environment"]["env"]
     HarborRuntimeConfig(jobs_dir=Path("/tmp/x"), agent_import_path="x:Y", agent_kwargs=kwargs)
-    # The harness extra is derived from the adapter and pinned to this service's Fabric version.
+    # The harness extra is derived from the adapter and pinned to this service's Fabric version, and so is
+    # the MCP client stack deepagents leaves unpinned (a clean install picks an `mcp` major it cannot import).
     package = kwargs["fabric_package"]
     assert isinstance(package, str) and package.startswith("nemo-fabric[deepagents,relay]==")
+    assert f"mcp=={importlib.metadata.version('mcp')}" in package.split()
+    assert f"langchain-mcp-adapters=={importlib.metadata.version('langchain-mcp-adapters')}" in package.split()
     # Caller-supplied install/run knobs survive.
     assert kwargs["fabric_workspace"] == "/app"
     # Resolution is idempotent: a resolved target is left alone.
