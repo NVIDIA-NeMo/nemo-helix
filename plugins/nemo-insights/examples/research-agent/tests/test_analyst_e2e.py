@@ -297,7 +297,6 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
                 WORKSPACE,
                 "--no-start-services",
                 "--no-install-skills",
-                "--no-deploy-agent",
             ),
             cwd=str(EXAMPLE_DIR),
             env=env,

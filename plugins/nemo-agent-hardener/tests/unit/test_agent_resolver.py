@@ -275,8 +275,6 @@ def test_resolve_missing_agent_raises(tmp_path):
 
 
 # --------------------------------------------------------------------------- platform telemetry
-REPO_ROOT = Path(__file__).resolve().parents[4]
-REACT_AGENT = REPO_ROOT / "plugins/nemo-agents/examples/react-agent/react-agent.yml"
 
 
 def test_the_victims_relay_telemetry_is_preserved(tmp_path):

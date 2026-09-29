@@ -100,7 +100,7 @@ If `make bootstrap` reports that Studio asset bootstrap did not complete, the AP
 export NVIDIA_API_KEY=nvapi...
 export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b
 export NEMO_FAST_MODEL="$NEMO_DEFAULT_MODEL"
-nemo setup --auto --start-services --install-skills --deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 </details>
@@ -144,54 +144,11 @@ nemo skills install --path ~/.my-agent/skills
 nemo setup --install-skills --skills-path ~/.my-agent/skills
 ```
 
-## Try the demo agent
+## Try the sample agent
 
-`nemo setup --deploy-agent` deploys a demo calculator agent you can use to
-explore the platform's evaluate / optimize loop.
-
-```bash
-nemo agents invoke --agent calculator-agent --input "what is 12 * 8?"
-```
-
-The calculator-agent package is installed automatically (`plugins/nemo-agents/examples/calculator-agent/`).
-
-<details>
-<summary>Deploy it manually</summary>
-```bash
-nemo agents create --name calculator-agent \
-  --agent-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-agent.yml
-nemo agents deploy --agent calculator-agent
-nemo agents deployments wait --agent calculator-agent
-```
-</details>
-
-<details>
-<summary>Evaluate the agent</summary>
-```bash
-nemo agents evaluate \
-  --eval-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-eval.yml \
-  --agent calculator-agent
-```
-</details>
-
-<details>
-<summary>Optimize the agent</summary>
-```bash
-BUNDLE="$(pwd)/plugins/nemo-agents/examples/calculator-agent/src/calculator_agent"
-nemo agents optimize prepare-fileset \
-  --source "$BUNDLE" \
-  --optimize-config calculator-optimize.yml \
-  --fileset calculator-optimize \
-  --agent calculator-agent
-nemo agents optimize run-strategy \
-  --strategy legacy \
-  --optimize-config-fileset default/calculator-optimize \
-  --optimize-config calculator-optimize.yml \
-  --agent calculator-agent
-```
-</details>
-
-The demo agent uses `${NEMO_DEFAULT_MODEL}` for both execution and the judge LLM. To select different models for either/both, update the yaml config files.
+Interactive `nemo setup` can create a `sample` workspace with a Fabric-based
+email security agent and evaluation artifacts. Open the Studio link printed at
+the end of setup to explore them.
 
 ## Documentation
 

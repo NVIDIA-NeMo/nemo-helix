@@ -4,7 +4,7 @@
 """Interactive setup wizard for NeMo Helix.
 
 Full onboarding flow: start local services, register an inference provider,
-install AI agent skills, and optionally deploy a demo agent.
+install AI agent skills, and optionally create a sample workspace and agent.
 Supports both interactive and non-interactive (``--auto``) modes.
 """
 
@@ -19,7 +19,6 @@ import sys
 import time
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -263,7 +262,6 @@ _CONTROLLER_HEALTH_RETRY_DELAY = 3.0
 _POST_START_REACHABLE_RETRIES = 6
 _POST_START_REACHABLE_DELAY = 2.0
 
-_DEMO_AGENT_NAME = "calculator-agent"
 _SAMPLE_AGENT_NAME = "email-security-triage"
 _SAMPLE_AGENT_DESCRIPTION = "Email security triage sample agent created by the NeMo setup flow."
 _SAMPLE_DATASET_FILESET = "esec-eval-data"
@@ -1579,9 +1577,8 @@ def _maybe_install_skills(
     ``--install-skills`` is the master opt-in. ``--skills-agents``,
     ``--skills-scope``, and ``--skills-from`` are filters that narrow what
     gets installed when the master is set; on their own they do nothing in
-    non-interactive mode. This mirrors ``_maybe_deploy_agent`` and
-    ``_maybe_start_services``, which also require their boolean master flag
-    to be explicitly True under ``--auto``.
+    non-interactive mode. This mirrors ``_maybe_start_services``, which
+    requires its boolean master flag to be explicitly True under ``--auto``.
 
     ``--skills-from`` selects by *source* (the built-in ``nemo-helix`` set
     or a plugin name) rather than by individual skill name. Picking one source
@@ -1641,7 +1638,7 @@ def _maybe_install_skills(
 
     if non_interactive:
         # Non-interactive path requires the master switch to be explicitly True.
-        # Filter flags alone don't opt in (matches --start-services / --deploy-agent).
+        # Filter flags alone don't opt in (matches --start-services).
         if install_skills is not True:
             return
         chosen_agents = skills_agents or detected_names
@@ -1757,18 +1754,6 @@ def _maybe_install_skills(
 def _agents_plugin_available() -> bool:
     """Return True if the nemo-agents plugin is importable."""
     return importlib.util.find_spec("nemo_agents_plugin") is not None
-
-
-def _agent_config_path() -> Traversable | None:
-    """Return the path to the calculator-agent demo config YAML, or None."""
-    try:
-        candidate = files("calculator_agent").joinpath("calculator-agent.yml")
-        if candidate.is_file():
-            return candidate
-    except (ImportError, ModuleNotFoundError):
-        logger.debug("calculator_agent package not importable; demo agent config unavailable", exc_info=True)
-
-    return None
 
 
 def _sample_asset_path(name: str) -> Traversable | None:
@@ -1890,7 +1875,7 @@ def _agent_exists(
     workspace: str,
     headers: dict[str, str] | None = None,
     *,
-    agent_name: str = _DEMO_AGENT_NAME,
+    agent_name: str = _SAMPLE_AGENT_NAME,
     certificate_authority: str | None = None,
 ) -> bool:
     """Return True if the named agent already exists on the platform."""
@@ -1928,24 +1913,24 @@ def _agents_api_ready(
         return False
 
 
-def _deploy_demo_agent(
+def _deploy_setup_agent(
     base_url: str,
     workspace: str,
     config_path: Traversable,
     default_model: str,
     headers: dict[str, str] | None = None,
     *,
-    agent_name: str = _DEMO_AGENT_NAME,
-    description: str = "Demo calculator agent",
+    agent_name: str = _SAMPLE_AGENT_NAME,
+    description: str = _SAMPLE_AGENT_DESCRIPTION,
     certificate_authority: str | None = None,
 ) -> bool:
     """Deploy a packaged setup agent and emit one ``agent_deployed`` event.
 
-    Telemetry wrapper around :func:`_deploy_demo_agent_impl`: COMPLETED when the
+    Telemetry wrapper around :func:`_deploy_setup_agent_impl`: COMPLETED when the
     deployment reaches running, ERROR when it fails, times out, or raises.
     """
     try:
-        deployed = _deploy_demo_agent_impl(
+        deployed = _deploy_setup_agent_impl(
             base_url,
             workspace,
             config_path,
@@ -1965,15 +1950,15 @@ def _deploy_demo_agent(
     return deployed
 
 
-def _deploy_demo_agent_impl(
+def _deploy_setup_agent_impl(
     base_url: str,
     workspace: str,
     config_path: Traversable,
     default_model: str,
     headers: dict[str, str] | None = None,
     *,
-    agent_name: str = _DEMO_AGENT_NAME,
-    description: str = "Demo calculator agent",
+    agent_name: str = _SAMPLE_AGENT_NAME,
+    description: str = _SAMPLE_AGENT_DESCRIPTION,
     certificate_authority: str | None = None,
 ) -> bool:
     """Create and deploy a packaged setup agent. Returns True on success."""
@@ -1992,19 +1977,18 @@ def _deploy_demo_agent_impl(
     ):
         config_dict = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config_dict = expand_env_vars(config_dict, vars_dict={"NEMO_DEFAULT_MODEL": default_model})
-        config_format = config_dict.get("config_format", "nat-workflow-v1")
-        if config_format == "nemo-agents-spec-v1":
-            # Fabric sends ``model`` to the OpenAI-compatible endpoint, where a
-            # workspace-qualified entity ID is invalid. Bind the exact entity
-            # route so an agent in ``sample`` can still use a model in ``default``.
-            model_workspace, model_name = parse_qualified_name(default_model)
-            model_config = config_dict["models"]["default"]
-            model_config["model"] = model_name
-            model_config["base_url"] = model_entity_route_openai_url(
-                base_url=base_url,
-                workspace=model_workspace,
-                name=model_name,
-            )
+        config_format = config_dict["config_format"]
+        # Fabric sends ``model`` to the OpenAI-compatible endpoint, where a
+        # workspace-qualified entity ID is invalid. Bind the exact entity
+        # route so an agent in ``sample`` can still use a model in ``default``.
+        model_workspace, model_name = parse_qualified_name(default_model)
+        model_config = config_dict["models"]["default"]
+        model_config["model"] = model_name
+        model_config["base_url"] = model_entity_route_openai_url(
+            base_url=base_url,
+            workspace=model_workspace,
+            name=model_name,
+        )
         payload = {
             "name": agent_name,
             "description": description,
@@ -2131,7 +2115,7 @@ def _maybe_deploy_sample_agent(
         return False
 
     try:
-        return _deploy_demo_agent(
+        return _deploy_setup_agent(
             base_url,
             workspace,
             config_path,
@@ -2143,86 +2127,6 @@ def _maybe_deploy_sample_agent(
         )
     except Exception as exc:
         console.print(f"  {WARN} Sample agent deployment failed: {exc}")
-        return False
-
-
-def _maybe_deploy_agent(
-    base_url: str,
-    workspace: str,
-    auto: bool,
-    deploy_agent: bool | None,
-    default_model: str | None = None,
-    headers: dict[str, str] | None = None,
-    *,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Optionally deploy the demo calculator agent.
-
-    In interactive mode (auto=False), prompts the user if deploy_agent is None.
-    Default is **no** -- the demo is opt-in for users who don't have their own
-    agent yet.  In auto mode, only deploys if deploy_agent is explicitly True.
-
-    Returns True if the agent was deployed (used by CTA messaging).
-    """
-    if not _agents_plugin_available():
-        console.print(f"  {WARN} nemo-agents plugin not installed, skipping agent deployment")
-        console.print("  Run [cyan]make bootstrap[/cyan] from the repo root to install all plugins,")
-        console.print("  then re-run: [cyan]nemo setup --deploy-agent[/cyan]")
-        return False
-
-    should_deploy = deploy_agent
-    if should_deploy is None:
-        if auto:
-            return False
-        console.print(
-            "  NeMo Helix optimizes AI agents. If you don't have your own\n"
-            "  agent yet, you can deploy a demo calculator agent to try things out.\n"
-        )
-        should_deploy = (
-            prompt_choice(
-                message="Deploy the demo agent?",
-                options=[("no", "No, skip"), ("yes", "Yes, deploy it")],
-                default="no",
-            )
-            == "yes"
-        )
-
-    if not should_deploy:
-        return False
-
-    if not default_model:
-        console.print(
-            f"  {WARN} No default model selected, skipping agent deployment "
-            "(the demo agent template needs a resolved model)"
-        )
-        return False
-
-    config_path = _agent_config_path()
-    if config_path is None:
-        console.print(f"  {WARN} Could not find calculator-agent config YAML, skipping agent deployment")
-        return False
-
-    if not _wait_for_agents_api(
-        base_url,
-        workspace,
-        headers=headers,
-        certificate_authority=certificate_authority,
-    ):
-        console.print(f"  {WARN} Agents API not ready at {base_url}, skipping agent deployment")
-        console.print("  Ensure the agents service is running (e.g. [cyan]nemo services run --services agents[/cyan])")
-        return False
-
-    try:
-        return _deploy_demo_agent(
-            base_url,
-            workspace,
-            config_path,
-            default_model=default_model,
-            headers=headers,
-            certificate_authority=certificate_authority,
-        )
-    except Exception as exc:
-        console.print(f"  {WARN} Agent deployment failed: {exc}")
         return False
 
 
@@ -2703,13 +2607,6 @@ def setup_command(
             resolve_path=True,
         ),
     ] = None,
-    deploy_agent: Annotated[
-        bool | None,
-        typer.Option(
-            "--deploy-agent/--no-deploy-agent",
-            help="Deploy the demo calculator agent in --auto mode",
-        ),
-    ] = None,
     resume: Annotated[
         bool,
         typer.Option(
@@ -2730,7 +2627,8 @@ def setup_command(
     Uses an already-running platform, starts local services, or connects the
     CLI to an existing remote deployment. Then selects and registers an
     inference provider, picks default and fast agent models, and installs
-    coding agent skills. Auto mode can optionally deploy a demo agent.
+    coding agent skills. Interactive mode can create a sample workspace and
+    Fabric email security agent.
 
     The active config context remembers the Platform URL. When a remote
     deployment is already reachable, setup asks whether to continue with it,
@@ -2753,7 +2651,7 @@ def setup_command(
     Examples:
       nemo setup
       nemo setup --auto
-      nemo setup --auto --start-services --install-skills --deploy-agent
+      nemo setup --auto --start-services --install-skills
       nemo setup --auto --start-services --ready-timeout 360
       NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
       nemo setup --workspace my-workspace
@@ -2858,7 +2756,6 @@ def setup_command(
                 workspace,
                 base_url,
                 install_skills,
-                deploy_agent,
                 skills_agents=skills_agents_list,
                 skills_scope=skills_scope,
                 skills_from=skills_from_list,
@@ -2898,7 +2795,6 @@ def _run_auto_mode(
     workspace: str,
     base_url: str,
     install_skills: bool | None,
-    deploy_agent: bool | None,
     *,
     skills_agents: list[str] | None = None,
     skills_scope: Scope | None = None,
@@ -2976,16 +2872,6 @@ def _run_auto_mode(
         skills_from=skills_from,
         skills_path=skills_path,
     )
-    _maybe_deploy_agent(
-        base_url,
-        workspace,
-        auto=True,
-        deploy_agent=deploy_agent,
-        default_model=model_pair.default if model_pair else "",
-        headers=_platform_request_headers(cli_context),
-        certificate_authority=certificate_authority,
-    )
-
     if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
         raise typer.Exit(1)
 
