@@ -130,6 +130,17 @@ For patch or nonstandard cases, use object form to map a branch to the exact fut
 }
 ```
 
+If a released version needs docs-only fixes that should come from the release branch instead of the immutable tag, use the option-object form with `source: "branch"`. This replaces the tag snapshot for that version while the override is present, and does not mark the version as a preview when the tag already exists:
+
+```json
+{
+  "release/0.6": {
+    "tag": "0.6.0",
+    "source": "branch"
+  }
+}
+```
+
 The allowlist is not read by Fern itself, so it isn't subject to `docs.yml`'s schema (which is `additionalProperties: false`). It's optional: an absent file or empty array/object is a no-op. A listed branch that isn't already fetched locally is pulled from `origin` on demand (anonymously — this repo is public, so no token is needed), then treated the same as any other local ref. This is the same code path everywhere it runs, so no extra CI step is needed: `npm run materialize:versions` behaves identically locally, in `publish-fern-docs.yaml`, and in `fern-docs-preview-build.yaml` (so a PR's Fern preview shows the same version selector, including selected pre-release branches, that a real publish would produce — not just `main`). A confirmed-absent branch is a soft skip; any other fetch failure (network, auth) fails the run instead of silently dropping the preview version.
 
 ## Gated (unready) features
