@@ -306,8 +306,8 @@ class CreateRenderer(CLIRenderer):
         if num_records is not None:
             rows.append(("Records", str(num_records)))
 
-        # --workspace is always spelled out; other overrides (--base-url,
-        # --cluster) are left to the user. Workspace is the one where omitting
+        # --workspace is always spelled out; the platform (nemo --base-url /
+        # --context) is left to the user. Workspace is the one where omitting
         # the flag actively misleads: see _workspace_flag.
         ws = _workspace_flag(frame, ctx)
         rows.extend(

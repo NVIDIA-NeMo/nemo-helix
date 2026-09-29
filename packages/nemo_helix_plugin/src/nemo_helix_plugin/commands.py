@@ -25,8 +25,11 @@ Plugin authors do **not** call this themselves — it is called automatically
 by the platform's CLI loader. Jobs that set ``generate_legacy_verbs = False``
 become available as::
 
-    nemo <plugin> <job-name>          [--profile ...] [--cluster ...] [-o ...]
-    nemo <plugin> <job-name> explain  [--profile ...] [--cluster ...]
+    nemo <plugin> <job-name>          [--profile ...] [-o ...]
+    nemo <plugin> <job-name> explain  [--profile ...]
+
+The platform comes from the global ``nemo --base-url`` / ``nemo --context``
+flags and the active CLI context, like every other ``nemo`` command.
 
 Legacy jobs that keep ``generate_legacy_verbs = True`` use
 ``nemo <plugin> <job-name> submit`` for remote submission instead.
@@ -114,9 +117,8 @@ from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
-# Submit host resolution for both functions and jobs:
-# ``--base-url`` > ``--cluster`` (resolved from CLI config) > active context
-# base URL > ``$NHX_BASE_URL`` > localhost.
+# Submit host resolution for both functions and jobs: active CLI context base
+# URL (``nemo --base-url`` / ``nemo --context``) > ``$NHX_BASE_URL`` > localhost.
 _DEFAULT_BASE_URL_ENV_VAR = "NHX_BASE_URL"
 _DEFAULT_BASE_URL = "http://localhost:8080"
 
@@ -133,18 +135,25 @@ _PANEL_SUBMISSION: str = "Submission"
 # set; they remain reachable via ``--spec`` / ``--spec-file``. ``run``
 # is deliberately permissive — only the JSON-passing flags and the
 # context-input ``workspace`` flag are reserved. ``submit`` layers on
-# the URL-routing flags + the request-id surface.
+# the request-id surface and the retired routing names (see below).
 _FN_RUN_RESERVED_FLAGS: frozenset[str] = frozenset({"spec", "spec_file", "workspace"})
-_FN_SUBMIT_RESERVED_FLAGS: frozenset[str] = _FN_RUN_RESERVED_FLAGS | frozenset({"cluster", "base_url", "request_id"})
+
+# ``submit`` used to take ``--cluster`` / ``--base-url``; the global ``nemo``
+# flags replaced them. The names stay reserved so a spec field called
+# ``base_url`` does not quietly become a ``--base-url`` flag that an old
+# command line would now feed into the spec instead of routing the request.
+_RETIRED_ROUTING_FLAGS: frozenset[str] = frozenset({"cluster", "base_url"})
+_FN_SUBMIT_RESERVED_FLAGS: frozenset[str] = _FN_RUN_RESERVED_FLAGS | _RETIRED_ROUTING_FLAGS | frozenset({"request_id"})
 
 # Static flag names declared by each job submit command. The spec-source
 # flags plus deprecated ``--config`` / ``--config-file`` aliases are reserved,
-# as are submission-routing flags (``--profile`` / ``--cluster`` /
-# ``--base-url`` / ``--workspace``) and options-passthrough flags (``-o`` /
-# ``--options-file``). Reserved spec fields remain reachable via ``--spec`` /
-# ``--spec-file`` JSON.
-_JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = frozenset({"spec", "spec_file", "config", "config_file"}) | frozenset(
-    {"options", "options_file", "profile", "cluster", "base_url", "workspace"}
+# as are submission flags (``--profile`` / ``--workspace``), options-passthrough
+# flags (``-o`` / ``--options-file``), and the retired routing names. Reserved
+# spec fields remain reachable via ``--spec`` / ``--spec-file`` JSON.
+_JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = (
+    frozenset({"spec", "spec_file", "config", "config_file"})
+    | frozenset({"options", "options_file", "profile", "workspace"})
+    | _RETIRED_ROUTING_FLAGS
 )
 
 
@@ -408,8 +417,8 @@ def _add_submit_command(
     """Register the ``submit`` verb. Generates per-field flags + static submit flags.
 
     Static flags (``--spec`` / ``--spec-file``, ``-o`` / ``--options-file``,
-    ``--profile``, ``--cluster``, ``--base-url``, ``--workspace``, plus the
-    hidden ``--config`` / ``--config-file`` deprecated aliases) come first;
+    ``--profile``, ``--workspace``, plus the hidden ``--config`` /
+    ``--config-file`` deprecated aliases) come first;
     spec fields whose names collide with any of those are dropped from
     the auto-generated set and remain reachable via ``--spec`` /
     ``--spec-file``.
@@ -436,8 +445,6 @@ def _add_submit_command(
         options: list[str] = cast("list[str]", kwargs.pop("options", []))
         options_file: Path | None = cast("Path | None", kwargs.pop("options_file", None))
         profile: str | None = cast("str | None", kwargs.pop("profile", None))
-        cluster: str | None = cast("str | None", kwargs.pop("cluster", None))
-        base_url: str | None = cast("str | None", kwargs.pop("base_url", None))
         workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
         original_kwargs["workspace"] = workspace
         config: str | None = cast("str | None", kwargs.pop("config", None))
@@ -462,7 +469,7 @@ def _add_submit_command(
             elif cli is not None:
                 renderer_resolved = cli.get_job_renderer(job_cls, verb="submit")
 
-        resolved_base_url = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+        resolved_base_url = resolve_submit_base_url(typer_ctx)
         submitted: SubmittedJob | None = None
 
         def _do_submit() -> Any:
@@ -615,26 +622,6 @@ def _build_job_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signatur
             ),
         ),
         kw(
-            "cluster",
-            Optional[str],
-            typer.Option(
-                None,
-                "--cluster",
-                help="Configured cluster name to resolve via the NeMo CLI config.",
-                rich_help_panel=_PANEL_SUBMISSION,
-            ),
-        ),
-        kw(
-            "base_url",
-            Optional[str],
-            typer.Option(
-                None,
-                "--base-url",
-                help=("Explicit plugin-service base URL (overrides --cluster and all other submit host resolution)."),
-                rich_help_panel=_PANEL_SUBMISSION,
-            ),
-        ),
-        kw(
             "workspace",
             Optional[str],
             workspace_option(
@@ -689,14 +676,8 @@ def _add_explain_command(
             "--profile",
             help="Annotate the bundle with this profile.",
         ),
-        cluster: Optional[str] = typer.Option(
-            None,
-            "--cluster",
-            help="Accepted for forward compatibility.",
-        ),
     ) -> None:
         """Print schemas for the job (spec / input_spec / options)."""
-        del cluster  # reserved for execution-profile lookup when supported
         bundle = scheduler.explain(job_cls, profile=profile)
         typer.echo(json.dumps(bundle, indent=2))
 
@@ -1052,8 +1033,6 @@ def _add_function_submit_command(
         original_kwargs = dict(kwargs)
         spec_str: str = cast(str, kwargs.pop("spec", "{}"))
         spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
-        cluster: str | None = cast("str | None", kwargs.pop("cluster", None))
-        base_url: str | None = cast("str | None", kwargs.pop("base_url", None))
         workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
         original_kwargs["workspace"] = workspace
         request_id: str | None = cast("str | None", kwargs.pop("request_id", None))
@@ -1067,13 +1046,7 @@ def _add_function_submit_command(
             typer.echo(f"Error: invalid spec for {fn_cls.name}: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        url = _build_function_submit_url(
-            typer_ctx,
-            fn_cls,
-            base_url=base_url,
-            cluster=cluster,
-            workspace=workspace,
-        )
+        url = _build_function_submit_url(typer_ctx, fn_cls, workspace=workspace)
         headers = resolve_submit_auth_headers(typer_ctx)
         if request_id is not None:
             headers["X-Request-ID"] = request_id
@@ -1132,26 +1105,6 @@ def _build_function_submit_signature(leaves: list[SpecLeafField]) -> inspect.Sig
                 "--spec-file",
                 help="Path to a YAML or JSON spec file (used as base; per-flag values override).",
                 rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-        kw(
-            "cluster",
-            Optional[str],
-            typer.Option(
-                None,
-                "--cluster",
-                help="Configured cluster name to resolve via the NeMo CLI config.",
-                rich_help_panel=_PANEL_SUBMISSION,
-            ),
-        ),
-        kw(
-            "base_url",
-            Optional[str],
-            typer.Option(
-                None,
-                "--base-url",
-                help=("Explicit plugin-service base URL (overrides --cluster and all other submit host resolution)."),
-                rich_help_panel=_PANEL_SUBMISSION,
             ),
         ),
         kw(
@@ -1237,31 +1190,12 @@ def _post_function_submit(
 # ---- helpers ----------------------------------------------------- #
 
 
-def _resolve_cluster_name_to_base_url(cluster_name: str) -> str:
-    """Resolve a configured cluster name to its base URL."""
-    from nemo_helix_ext.config.config import Config
+def resolve_submit_base_url(typer_ctx: typer.Context) -> str:
+    """Resolve the platform host for function and job submit.
 
-    config = Config.load()
-    for cluster in config.get_config_file().clusters:
-        if cluster.name == cluster_name:
-            return str(cluster.base_url)
-    raise ValueError(
-        f"Unknown cluster '{cluster_name}'. Use `nemo config view --all-contexts` to inspect configured clusters or pass `--base-url`."
-    )
-
-
-def resolve_submit_base_url(
-    typer_ctx: typer.Context,
-    *,
-    base_url: str | None,
-    cluster: str | None,
-) -> str:
-    """Resolve submit host precedence shared by function and job submit."""
-    if base_url is not None:
-        return base_url
-    if cluster is not None:
-        return _resolve_cluster_name_to_base_url(cluster)
-
+    The active CLI context decides (``nemo --base-url`` / ``nemo --context``);
+    without one, ``$NHX_BASE_URL`` and then localhost apply.
+    """
     state = typer_ctx.obj
     if state is not None and hasattr(state, "get_base_url"):
         resolved = state.get_base_url(default=None)
@@ -1275,20 +1209,16 @@ def _build_function_submit_url(
     typer_ctx: typer.Context,
     fn_cls: type[NemoFunction],
     *,
-    base_url: str | None,
-    cluster: str | None,
     workspace: str,
 ) -> str:
     """Resolve the full POST URL for *fn_cls*.
 
-    Precedence for the host: explicit ``--base-url`` > configured
-    ``--cluster`` > active context base URL > ``$NHX_BASE_URL`` >
-    localhost. The path is the canonical
+    The host comes from :func:`resolve_submit_base_url`. The path is the canonical
     ``/apis/<plugin>/v2/workspaces/<ws>/<name>``, with
     :attr:`NemoFunction.endpoint` substituting the trailing segment
     when set.
     """
-    host = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+    host = resolve_submit_base_url(typer_ctx)
     api_segment = _api_segment_for_function(fn_cls)
     trailing = (fn_cls.endpoint or DEFAULT_FUNCTION_PATH).replace("{name}", fn_cls.name)
     if not trailing.startswith("/"):

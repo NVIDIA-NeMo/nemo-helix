@@ -6,7 +6,7 @@
 A `NemoJob` is a unit of work you can submit to a cluster, run in a task container, or introspect. When a job sets `generate_legacy_verbs = False`, the generated CLI exposes submission as the job command itself:
 
 ```
-nemo <plugin> <job>          [--profile <p>] [--cluster <c>] \
+nemo <plugin> <job>          [--profile <p>] \
                              [--spec '{...}' | --spec-file FILE] \
                              [-o <backend>.<key>=<value> ...] [--options-file FILE]
 nemo <plugin> <job> explain  [--profile <p>]
@@ -16,6 +16,9 @@ nemo <plugin> <job> explain  [--profile <p>]
 - `explain` — prints the job's schemas and submit route. Reads locally, no network.
 
 Leaving `NemoJob.generate_legacy_verbs` at its default `True` preserves the generated nested `<job> submit` / `<job> explain` command group for compatibility. This is per-job generated CLI behavior, not a global plugin naming convention.
+
+Submission targets the platform selected by the global `nemo --base-url` / `nemo --context` flags and
+the active CLI context, like every other `nemo` command.
 
 ## Declaring a NemoJob
 

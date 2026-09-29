@@ -15,6 +15,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -275,9 +276,8 @@ def test_cli_analyze_only_flag_flows_through_direct_command() -> None:
                 "--evals",
                 "/tmp/x",
                 "--analyze-only",
-                "--base-url",
-                "http://test",
             ],
+            obj=SimpleNamespace(get_base_url=lambda default=None: "http://test"),
         )
 
     assert result.exit_code == 0, _guard_message(result)
@@ -317,9 +317,8 @@ def test_cli_analyze_only_from_spec_file_flows_through_direct_command(tmp_path: 
                 "optimize-skills",
                 "--spec-file",
                 str(config),
-                "--base-url",
-                "http://test",
             ],
+            obj=SimpleNamespace(get_base_url=lambda default=None: "http://test"),
         )
 
     assert result.exit_code == 0, _guard_message(result)

@@ -206,15 +206,13 @@ def _preview_app(captured: dict[str, object], monkeypatch: pytest.MonkeyPatch) -
         typer_ctx: typer.Context,
         spec: str = typer.Option("", "--spec"),
         spec_file: str | None = typer.Option(None, "--spec-file"),
-        cluster: str | None = typer.Option(None, "--cluster"),
-        base_url: str | None = typer.Option(None, "--base-url"),
         workspace: str | None = typer.Option(None, "--workspace"),
         request_id: str | None = typer.Option(None, "--request-id"),
         non_interactive: bool = typer.Option(False, "--non-interactive"),
         save_results: bool = typer.Option(False, "--save-results"),
         artifact_path: str | None = typer.Option(None, "--artifact-path"),
     ) -> None:
-        del typer_ctx, spec, spec_file, cluster, base_url
+        del typer_ctx, spec, spec_file
         del request_id, non_interactive, save_results, artifact_path
         captured["workspace"] = workspace
 

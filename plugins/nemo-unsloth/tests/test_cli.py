@@ -14,6 +14,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -27,6 +28,11 @@ from typer.testing import CliRunner
 
 FIXTURES = Path(__file__).parent / "fixtures"
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _platform(base_url: str) -> SimpleNamespace:
+    """Stand-in CLI state: the platform comes from ``nemo --base-url`` / the active context."""
+    return SimpleNamespace(get_base_url=lambda default=None: base_url)
 
 
 def _plain(text: str) -> str:
@@ -114,7 +120,7 @@ class TestSubmitOverride:
         assert "JOB_JSON" in plain
         assert "--workspace" in plain or "-w " in plain
         assert "--profile" in plain
-        assert "--base-url" in plain
+        assert "--base-url" not in plain
 
     def test_submit_delegates_with_validated_spec(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``submit JOB.json -w ws`` forwards workspace + base-url to submit_remote."""
@@ -158,9 +164,8 @@ class TestSubmitOverride:
                 str(path),
                 "--workspace",
                 "acme-corp",
-                "--base-url",
-                "https://nhx.test",
             ],
+            obj=_platform("https://nhx.test"),
         )
 
         assert result.exit_code == 0, result.stdout + result.stderr

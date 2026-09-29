@@ -92,9 +92,9 @@ def test_run_strategy_carries_fields_it_has_no_flag_for_through_spec(monkeypatch
             "custom",
             "--spec",
             '{"dataset": "my-dataset", "objective": "accuracy"}',
-            "--base-url",
-            "http://platform.test",
         ],
+        # The platform comes from the global ``nemo --base-url`` / active context.
+        obj=SimpleNamespace(get_base_url=lambda default=None: "http://platform.test"),
     )
 
     assert result.exit_code == 0, result.output

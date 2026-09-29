@@ -11,13 +11,13 @@ description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use wh
 A `NemoJob` drives job CLI commands that the platform auto-generates from the class. When a job sets `generate_legacy_verbs = False`, submission is exposed as the job command itself:
 
 ```
-nemo <plugin> <job>          [--profile <p>] [--cluster <c>] \
+nemo <plugin> <job>          [--profile <p>] \
                              [--spec '{...}' | --spec-file FILE] \
                              [-o <backend>.<key>=<value> ...] [--options-file FILE]
 nemo <plugin> <job> explain  [--profile <p>]
 ```
 
-The generated submit command POSTs to the plugin service, which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling. Leaving `generate_legacy_verbs` at its default `True` preserves the nested `<job> submit` / `<job> explain` command group for compatibility.
+The generated submit command POSTs to the plugin service (on the platform selected by the global `nemo --base-url` / `nemo --context` flags), which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling. Leaving `generate_legacy_verbs` at its default `True` preserves the nested `<job> submit` / `<job> explain` command group for compatibility.
 
 ## Class Signature
 
