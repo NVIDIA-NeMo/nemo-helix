@@ -8,8 +8,7 @@ from typing import Generator
 from unittest.mock import patch
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -67,14 +66,15 @@ def patched_authz_data(build_fn):
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoHelix, None, None]:
+def client() -> Generator[NemoClient, None, None]:
     """Auth-enabled test stack with Files + Secrets services."""
     with create_test_client(
         FilesService,
         SecretsService,
         auth_enabled=True,
-    ) as sdk:
-        yield sdk
+        client_type=NemoClient,
+    ) as client:
+        yield client
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def no_hf_network(monkeypatch):
 class TestFilesetCreateWithSecretAuth:
     def test_editor_can_create_hf_fileset_with_token_secret(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         no_hf_network,
     ):
         workspace = short_unique_name("hf-ok")
@@ -104,23 +104,21 @@ class TestFilesetCreateWithSecretAuth:
         secret_name = short_unique_name("hf-token")
         fileset_name = short_unique_name("fileset")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, SecretsClient).create_secret(
+        admin_client = as_user(client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        SecretsClient.from_client(admin_client).create_secret(
             body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("hf_dummy_token")),
             workspace=workspace,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
-        files = client_from_platform(editor_sdk, FilesClient)
+        editor_client = as_user(client, editor_email)
+        files = FilesClient.from_client(editor_client)
         created = files.create_fileset(
             workspace=workspace,
             body=CreateFilesetRequest(
@@ -140,7 +138,7 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_custom_role_without_secrets_read_denied_with_token_secret(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         no_hf_network,
     ):
         with patched_authz_data(_build_authorization_data_without_secrets_read):
@@ -148,23 +146,23 @@ class TestFilesetCreateWithSecretAuth:
             user_email = unique_email("nosecrets")
             secret_name = short_unique_name("hf-token")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
+            SecretsClient.from_client(admin_client).create_secret(
                 body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("hf_dummy_token")),
                 workspace=workspace,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoSecrets"],
             )
 
-            user_sdk = as_user(sdk, user_email)
-            user_files = client_from_platform(user_sdk, FilesClient)
+            user_client = as_user(client, user_email)
+            user_files = FilesClient.from_client(user_client)
             with pytest.raises(NemoHTTPError) as exc_info:
                 user_files.create_fileset(
                     workspace=workspace,
@@ -185,25 +183,23 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_missing_secret_returns_secret_not_found_error(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         no_hf_network,
     ):
         workspace = short_unique_name("hf-miss")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
-        editor_files = client_from_platform(editor_sdk, FilesClient)
+        editor_client = as_user(client, editor_email)
+        editor_files = FilesClient.from_client(editor_client)
         with pytest.raises(NemoHTTPError) as exc_info:
             editor_files.create_fileset(
                 workspace=workspace,
@@ -224,26 +220,24 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_public_hf_without_token_secret_succeeds(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         no_hf_network,
     ):
         workspace = short_unique_name("hf-public")
         editor_email = unique_email("editor")
         fileset_name = short_unique_name("fileset")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
-        editor_files = client_from_platform(editor_sdk, FilesClient)
+        editor_client = as_user(client, editor_email)
+        editor_files = FilesClient.from_client(editor_client)
         created = editor_files.create_fileset(
             workspace=workspace,
             body=CreateFilesetRequest(
@@ -263,7 +257,7 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_editor_can_list_files_from_hf_fileset_with_token_secret(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         no_hf_network,
         monkeypatch,
     ):
@@ -277,23 +271,21 @@ class TestFilesetCreateWithSecretAuth:
 
         monkeypatch.setattr(HuggingfaceStorageImpl, "list_files", _list_files_noop)
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, SecretsClient).create_secret(
+        admin_client = as_user(client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        SecretsClient.from_client(admin_client).create_secret(
             body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("hf_dummy_token")),
             workspace=workspace,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
-        editor_files = client_from_platform(editor_sdk, FilesClient)
+        editor_client = as_user(client, editor_email)
+        editor_files = FilesClient.from_client(editor_client)
         editor_files.create_fileset(
             workspace=workspace,
             body=CreateFilesetRequest(
@@ -308,5 +300,5 @@ class TestFilesetCreateWithSecretAuth:
             ),
         )
 
-        files = editor_sdk.files.list(fileset=fileset_name, workspace=workspace)
+        files = editor_files.list_files(workspace=workspace, name=fileset_name).data()
         assert files.data == []

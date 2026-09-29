@@ -201,7 +201,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # noqa
 
 @pytest.fixture(scope="module", name="sdk")
 def e2e_sdk(request: pytest.FixtureRequest) -> NeMoHelix:
-    """Generated SDK handle, kept only for the nhx.testing helpers that still take one."""
+    """Generated SDK handle for the Data Designer engine probes that still take one."""
     return request.getfixturevalue("services_pool_sdk")
 
 

@@ -21,7 +21,6 @@ Platform, where this module's local harness configuration would be ignored.
 
 import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 
 from e2e.agents_deploy_helpers import run_agent_deploy_and_invoke, wait_for_agent_spans
@@ -35,10 +34,9 @@ pytestmark = [
 ]
 
 
-def test_nat_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_nat_agent_deploys_and_invokes_through_gateway(client: NemoClient, workspace: str) -> None:
     """Deploy a NAT agent as a subprocess and invoke it through the gateway."""
     run_agent_deploy_and_invoke(
-        sdk,
         client,
         workspace=workspace,
         deployment_mode="subprocess",
@@ -46,7 +44,7 @@ def test_nat_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, client: N
     )
 
 
-def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_fabric_agent_deploys_and_invokes_through_gateway(client: NemoClient, workspace: str) -> None:
     """Deploy a Fabric-backed agent as a subprocess and invoke it through the gateway.
 
     The agent config names no export destination, so reaching Intake proves the
@@ -64,7 +62,6 @@ def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, client
         assert spans, "the agent ran but no trajectory reached Intake"
 
     run_agent_deploy_and_invoke(
-        sdk,
         client,
         workspace=workspace,
         deployment_mode="subprocess",
@@ -73,10 +70,9 @@ def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoHelix, client
     )
 
 
-def test_fabric_agent_streams_through_gateway(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_fabric_agent_streams_through_gateway(client: NemoClient, workspace: str) -> None:
     """A default Fabric deployment supports SSE chat completions."""
     run_agent_deploy_and_invoke(
-        sdk,
         client,
         workspace=workspace,
         deployment_mode="subprocess",
@@ -85,10 +81,9 @@ def test_fabric_agent_streams_through_gateway(sdk: NeMoHelix, client: NemoClient
     )
 
 
-def test_fabric_agent_invokes_with_persisted_session(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_fabric_agent_invokes_with_persisted_session(client: NemoClient, workspace: str) -> None:
     """A persisted session can start its streaming-enabled Fabric runtime."""
     run_agent_deploy_and_invoke(
-        sdk,
         client,
         workspace=workspace,
         deployment_mode="subprocess",

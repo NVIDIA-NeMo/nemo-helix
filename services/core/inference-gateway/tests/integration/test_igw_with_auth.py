@@ -119,10 +119,10 @@ class TestIGWViewerAccess:
         workspace = short_unique_name("igw-vl")
         viewer_email = unique_email("viewer")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=viewer_email,
             roles=["Viewer"],
@@ -141,16 +141,16 @@ class TestIGWViewerAccess:
         viewer_email = unique_email("viewer")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=viewer_email,
             roles=["Viewer"],
@@ -170,16 +170,16 @@ class TestIGWViewerAccess:
         viewer_email = unique_email("viewer")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=viewer_email,
             roles=["Viewer"],
@@ -198,16 +198,16 @@ class TestIGWViewerAccess:
         workspace = short_unique_name("igw-vp")
         viewer_email = unique_email("viewer")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name="test-prov",
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=viewer_email,
             roles=["Viewer"],
@@ -226,16 +226,16 @@ class TestIGWViewerAccess:
         workspace = short_unique_name("igw-vr")
         viewer_email = unique_email("viewer")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name="ready-prov",
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=viewer_email,
             roles=["Viewer"],
@@ -259,10 +259,10 @@ class TestIGWEditorAccess:
         workspace = short_unique_name("igw-el")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
@@ -281,16 +281,16 @@ class TestIGWEditorAccess:
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
@@ -310,16 +310,16 @@ class TestIGWEditorAccess:
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
@@ -338,16 +338,16 @@ class TestIGWEditorAccess:
         workspace = short_unique_name("igw-ep")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name="test-editor-prov",
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
@@ -366,16 +366,16 @@ class TestIGWEditorAccess:
         workspace = short_unique_name("igw-er")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name="ready-editor-prov",
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
@@ -399,7 +399,6 @@ class TestIGWUnauthorizedWorkspace:
         workspace = short_unique_name("igw-nl")
         norole_email = unique_email("norole")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
@@ -414,7 +413,6 @@ class TestIGWUnauthorizedWorkspace:
         workspace = short_unique_name("igw-no")
         norole_email = unique_email("norole")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
@@ -430,7 +428,6 @@ class TestIGWUnauthorizedWorkspace:
         workspace = short_unique_name("igw-nm")
         norole_email = unique_email("norole")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/model/any-model/-/v1/chat/completions",
@@ -446,7 +443,6 @@ class TestIGWUnauthorizedWorkspace:
         workspace = short_unique_name("igw-np")
         norole_email = unique_email("norole")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/any-provider/-/v1/chat/completions",
@@ -462,7 +458,6 @@ class TestIGWUnauthorizedWorkspace:
         workspace = short_unique_name("igw-nr")
         norole_email = unique_email("norole")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/any-provider/ready",
@@ -549,10 +544,10 @@ class TestIGWScopeChecks:
             workspace = short_unique_name("igw-sr")
             viewer_email = unique_email("viewer")
 
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
             _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=viewer_email,
                 roles=["Viewer"],
@@ -570,16 +565,16 @@ class TestIGWScopeChecks:
             viewer_email = unique_email("viewer")
             model_name = short_unique_name("mdl")
 
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
             _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             add_mock_provider(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 name=model_name,
                 mock_response_body=MOCK_CHAT_RESPONSE,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=viewer_email,
                 roles=["Viewer"],
@@ -598,16 +593,16 @@ class TestIGWScopeChecks:
             viewer_email = unique_email("viewer")
             model_name = short_unique_name("mdl")
 
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
             _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             add_mock_provider(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 name=model_name,
                 mock_response_body=MOCK_CHAT_RESPONSE,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=viewer_email,
                 roles=["Viewer"],
@@ -625,16 +620,16 @@ class TestIGWScopeChecks:
             workspace = short_unique_name("igw-spr")
             viewer_email = unique_email("viewer")
 
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
             _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
             provider = add_mock_provider(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 name="ready-prov",
                 mock_response_body=MOCK_CHAT_RESPONSE,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=viewer_email,
                 roles=["Viewer"],
@@ -662,7 +657,6 @@ class TestIGWServicePrincipalAccess:
     def test_service_principal_can_list_openai_models(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-l")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         # Intentionally no workspace membership granted to service:evaluator
 
@@ -676,10 +670,10 @@ class TestIGWServicePrincipalAccess:
         workspace = short_unique_name("igw-svc-o")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
@@ -697,10 +691,10 @@ class TestIGWServicePrincipalAccess:
         workspace = short_unique_name("igw-svc-m")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
@@ -716,10 +710,10 @@ class TestIGWServicePrincipalAccess:
     def test_service_principal_can_call_provider_proxy(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-p")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         provider = add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name="svc-prov",
             mock_response_body=MOCK_CHAT_RESPONSE,
@@ -737,7 +731,6 @@ class TestIGWServicePrincipalAccess:
         workspace = short_unique_name("igw-svc-d")
         norole_email = unique_email("norole")
 
-        as_user(ctx.sdk, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
 
         response = ctx.test_client.get(
@@ -775,10 +768,10 @@ class TestIGWDelegatedServicePrincipalAccess:
         workspace = short_unique_name("igw-obo-d")
         obo_email = unique_email("obo-norole")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=short_unique_name("mdl"),
             mock_response_body=MOCK_CHAT_RESPONSE,
@@ -795,9 +788,9 @@ class TestIGWDelegatedServicePrincipalAccess:
         workspace = short_unique_name("igw-obo-a")
         obo_email = unique_email("obo-viewer")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
-        grant_workspace_role(admin_sdk, workspace=workspace, principal=obo_email, roles=["Viewer"])
+        grant_workspace_role(admin_client, workspace=workspace, principal=obo_email, roles=["Viewer"])
 
         response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
@@ -810,10 +803,10 @@ class TestIGWDelegatedServicePrincipalAccess:
         model_name = short_unique_name("mdl")
         obo_email = unique_email("obo-norole")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
@@ -831,15 +824,15 @@ class TestIGWDelegatedServicePrincipalAccess:
         model_name = short_unique_name("mdl")
         obo_email = unique_email("obo-editor")
 
-        admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         add_mock_provider(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
-        grant_workspace_role(admin_sdk, workspace=workspace, principal=obo_email, roles=["Editor"])
+        grant_workspace_role(admin_client, workspace=workspace, principal=obo_email, roles=["Editor"])
 
         response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",
