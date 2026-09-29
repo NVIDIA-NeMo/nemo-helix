@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evaluator.jobs import result_persistence
 from nemo_evaluator.jobs.agent_spec import (
@@ -88,6 +89,10 @@ def _agent() -> Agent:
                 model="openai/gpt-5.4",
             ),
             ("fabric", "openai/gpt-5.4", None),
+        ),
+        (
+            FabricRunnerTarget(agent=AgentRef(root="dev/calculator-agent"), config={"harness": {"adapter_id": "x"}}),
+            ("fabric", "calculator-agent", None),
         ),
         (
             GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),

@@ -4049,7 +4049,8 @@ components:
           title: Config
           description: Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped
             mapping). Its ``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex``
-            for Codex. Exactly one of `config` or `agent`.
+            for Codex. Submit either this or `agent`; a resolved registered agent
+            carries both.
           additionalProperties: true
           type: object
         agent:
@@ -4057,8 +4058,8 @@ components:
           - $ref: '#/components/schemas/AgentRef'
           description: 'A registered platform agent to run instead of an inline `config`:
             `workspace/name`, or `name` in the submission workspace. Resolved at submit
-            into `config`. The agent runs fresh for every trial; an existing deployment
-            is never called.'
+            into `config` and kept, qualified, as the run''s provenance. The agent
+            runs fresh for every trial; an existing deployment is never called.'
         environment:
           allOf:
           - $ref: '#/components/schemas/EnvironmentSpecInline'
@@ -4066,12 +4067,6 @@ components:
             its config exactly as a deployment would: MCP fulfilments (url/env/secrets)
             for servers the agent declares, process env, secret refs, and Fabric environment
             settings. Requires `agent`.'
-        agent_files:
-          allOf:
-          - $ref: '#/components/schemas/FilesetRef'
-          description: 'Set by resolution, not by the submitter: the registered agent''s
-            Ethos FileSet, staged into the job before the run so relative `skills.paths`
-            resolve.'
         model:
           title: Model
           description: Optional ``provider/model`` slug applied as the config's default
@@ -4107,13 +4102,14 @@ components:
         \ runtime.\n\nFabric is harness-agnostic: the harness (Codex, Hermes, ...)\
         \ is selected by the supplied\nconfig's ``harness.adapter_id`` and is never\
         \ inferred from ``model``. ``model`` is applied as the\nconfig's default model\
-        \ when given.\n\nA run is described by exactly one complete ``config`` \u2014\
-        \ given inline, or resolved at submit from a\nregistered platform ``agent``\
-        \ (``nemo agents create``) with the same resolution a deployment gets:\nenvironment\
+        \ when given.\n\nA run is described by one complete ``config`` \u2014 given\
+        \ inline, or resolved at submit from a\nregistered platform ``agent`` (``nemo\
+        \ agents create``) with the same resolution a deployment gets:\nenvironment\
         \ merge, Inference Gateway binding, translation of the platform ``agent.yaml``.\
-        \ Either way\nthe canonical spec carries a plain ``config``; the job never\
-        \ looks an agent up. Fabric 0.1.0rc2\nremoved profile overlays, so the former\
-        \ ``profiles`` field is gone \u2014 fold any overlay into ``config``."
+        \ The\ncanonical spec then carries the resolved ``config`` alongside the ``agent``\
+        \ it came from; the job\nnever looks the agent up. Fabric 0.1.0rc2 removed\
+        \ profile overlays, so the former ``profiles`` field\nis gone \u2014 fold\
+        \ any overlay into ``config``."
     FieldMapping:
       properties:
         input:

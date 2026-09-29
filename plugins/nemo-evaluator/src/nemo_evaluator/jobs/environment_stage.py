@@ -71,9 +71,9 @@ class EnvironmentStageJob(NemoJob):
                 workspace_fallback=ctx.workspace,
             )
         except FilesetPathError as exc:
-            raise ValueError(f"invalid Gym environment FileSet reference: {spec.environment.root!r}") from exc
+            raise ValueError(f"invalid environment FileSet reference: {spec.environment.root!r}") from exc
         if file_path:
-            raise ValueError("Gym environment FileSet references must not include a file fragment")
+            raise ValueError("environment FileSet references must not include a file fragment")
 
         destination = ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR
         staging = ctx.storage.persistent / ENVIRONMENT_STAGING_DIR

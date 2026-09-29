@@ -35,6 +35,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
 )
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.config import get_config
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.harbor.resolution import map_with_limited_concurrency
@@ -52,7 +53,7 @@ from nemo_evaluator.jobs.agent_spec import (
     ModelTarget,
     ResolvedTask,
     Target,
-    registered_agent_name,
+    registered_agent_files,
     validate_task_collection,
 )
 from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
@@ -151,18 +152,17 @@ def _profile_dependency_unavailable(profile: str) -> HelixJobDependencyUnavailab
     )
 
 
-#: The only registered-agent config format with a runner. ``nat-workflow-v1`` (the legacy default)
-#: describes a NAT workflow, which nothing in agent-eval can run.
+#: The only registered-agent config format a runner exists for; ``nat-workflow-v1`` describes a NAT workflow.
 _FABRIC_AGENT_CONFIG_FORMAT = "nemo-agents-spec-v1"
 
 
 @dataclass(frozen=True)
 class _ResolvedRegisteredAgent:
-    """A registered agent turned into what a runner needs: its Fabric config, secret refs, and files."""
+    """A registered agent turned into what a runner needs: where it lives, its Fabric config, its secret refs."""
 
+    ref: AgentRef
     config: dict[str, Any]
     env_secrets: dict[str, SecretRef]
-    files: FilesetRef | None
 
 
 async def _load_registered_agent(
@@ -172,13 +172,11 @@ async def _load_registered_agent(
     workspace: str,
     async_sdk: AsyncHelixClient | None,
 ) -> _ResolvedRegisteredAgent:
-    """Look a registered agent up and resolve it exactly as ``nemo agents deploy`` would.
+    """Look a registered agent up and resolve it as ``nemo agents deploy`` would.
 
-    Inference Gateway binding and trace-name injection first, then the environment spec merged on top
-    (MCP fulfilments, env, secret refs), then translation of the platform ``agent.yaml`` into a Fabric
-    config. The agents plugin owns the format, the merge, and the translation; this is the one place
-    the evaluator plugin depends on it. The agent's Ethos FileSet, when it has one, is returned so the
-    job can stage the files its config refers to by relative path.
+    Inference Gateway binding first, then the environment spec merged on top, then translation of the
+    platform ``agent.yaml`` into a Fabric config. A config that refers to files by relative path must have
+    the agent's Ethos FileSet to stage them from; that is checked here, once, rather than in every job.
     """
     parsed = parse_entity_ref(agent_ref, workspace)
     agent_workspace, agent_name = parsed.workspace, parsed.name
@@ -211,25 +209,22 @@ async def _load_registered_agent(
             f"registered agent {agent_workspace}/{agent_name} cannot be run through Fabric: {exc}"
         ) from exc
 
-    # Config-only agents have no Ethos FileSet; one that references skills must have it.
-    files = client_from_platform(async_sdk, AsyncFilesClient)
-    fileset_name = ethos_fileset_name(agent_name)
-    try:
-        await files.get_fileset(workspace=agent_workspace, name=fileset_name)
-        agent_files: FilesetRef | None = FilesetRef(root=f"{agent_workspace}/{fileset_name}")
-    except NotFoundError:
-        agent_files = None
-        if merged.config.get("skills", {}).get("paths"):
-            raise ValueError(
-                f"registered agent {agent_workspace}/{agent_name} references skills but has no Ethos FileSet "
-                f"{agent_workspace}/{fileset_name} to stage them from"
-            ) from None
-
-    return _ResolvedRegisteredAgent(
+    resolved_agent = _ResolvedRegisteredAgent(
+        ref=AgentRef(root=f"{agent_workspace}/{agent_name}"),
         config=fabric_config.model_dump(mode="json", exclude_none=True),
         env_secrets={env_name: SecretRef(root=ref) for env_name, ref in merged.secrets.items()},
-        files=agent_files,
     )
+    fileset = registered_agent_files(FabricRunnerTarget(agent=resolved_agent.ref, config=resolved_agent.config))
+    if fileset is not None:
+        files = client_from_platform(async_sdk, AsyncFilesClient)
+        try:
+            await files.get_fileset(workspace=agent_workspace, name=ethos_fileset_name(agent_name))
+        except NotFoundError:
+            raise ValueError(
+                f"registered agent {agent_workspace}/{agent_name} refers to files by relative path but has no "
+                f"Ethos FileSet {fileset.root} to stage them from"
+            ) from None
+    return resolved_agent
 
 
 async def _resolve_registered_agent(
@@ -240,10 +235,10 @@ async def _resolve_registered_agent(
 ) -> Target | None:
     """Fill a Fabric runner target that names a registered ``agent`` with what that agent is.
 
-    The canonical spec never carries the ref: the target ends up with a plain ``config``, and the job
+    The target keeps the ``agent``, workspace-qualified, next to the ``config`` it resolved to; the job
     runs the agent fresh per trial without ever looking it up itself.
     """
-    if not isinstance(target, FabricRunnerTarget) or target.agent is None:
+    if not isinstance(target, FabricRunnerTarget) or target.agent is None or target.config is not None:
         return target
 
     agent = await _load_registered_agent(
@@ -251,10 +246,9 @@ async def _resolve_registered_agent(
     )
     return target.model_copy(
         update={
+            "agent": agent.ref,
             "config": agent.config,
-            "agent": None,
             "environment": None,
-            "agent_files": agent.files,
             "env_secrets": {**target.env_secrets, **agent.env_secrets},
         }
     )
@@ -424,11 +418,7 @@ class JobEnvSecretResolver:
 
 
 def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
-    """Check the service resolved every ``env_secrets`` entry into this job's environment.
-
-    On the host the Fabric harness inherits the job process's environment and reads each credential by
-    name, so there is nothing to forward — only something to verify before a trial fails opaquely.
-    """
+    """Check the service resolved every ``env_secrets`` entry into this job's environment."""
     missing = sorted(name for name in target.env_secrets if name not in os.environ)
     if missing:
         raise ValueError(
@@ -439,12 +429,13 @@ def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
 
 def _staged_agent_files(target: FabricRunnerTarget, ctx: JobContext) -> Path | None:
     """Where the preceding staging step put a registered agent's Ethos files, once it is verified present."""
-    if target.agent_files is None:
+    fileset = registered_agent_files(target)
+    if fileset is None:
         return None
     staged = ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR
     if not staged.is_dir():
         raise ValueError(
-            f"registered agent files {target.agent_files.root!r} were not staged at {staged}; the stage-environment "
+            f"registered agent files {fileset.root!r} were not staged at {staged}; the stage-environment "
             "step did not run or did not complete"
         )
     return staged
@@ -488,30 +479,12 @@ class _AgentEvalJobBase(NemoJob):
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
-        # A registered agent carries the identity its published trajectories should be recorded under;
-        # the runner target it resolves to names only a harness, so pin the name before resolving.
-        publication = submit_spec.publication
-        agent_name = registered_agent_name(submit_spec.target)
-        if (
-            agent_name is not None
-            and publication is not None
-            and publication.intake is not None
-            and publication.intake.agent_name is None
-        ):
-            publication = publication.model_copy(
-                update={"intake": publication.intake.model_copy(update={"agent_name": agent_name})}
-            )
         target = await _resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
         if isinstance(target, GymRunnerTarget):
             target = await prepare_gym_submission(resolved_tasks, target, ctx)
         validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
-        return AgentEvalSpec(
-            tasks=resolved_tasks,
-            target=target,
-            publication=publication,
-            **submit_spec.model_dump(exclude={"tasks", "target", "publication"}),
-        )
+        return AgentEvalSpec(tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"}))
 
     @classmethod
     async def compile(
@@ -704,8 +677,6 @@ class _AgentEvalJobBase(NemoJob):
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
                 work_root=ctx.storage.persistent / "fabric",
-                # A registered agent's files were staged by the preceding step; relative skill paths in
-                # the config resolve against that tree.
                 base_dir=_staged_agent_files(target, ctx),
             )
             return fabric_runtime, None, None

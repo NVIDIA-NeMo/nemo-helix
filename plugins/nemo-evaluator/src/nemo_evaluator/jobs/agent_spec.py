@@ -21,6 +21,7 @@ from typing import Annotated, Any, Literal, Self, TypeAlias
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
+from nemo_agents_plugin.entities import ethos_fileset_name
 from nemo_evaluator.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinition
@@ -82,11 +83,12 @@ class FabricRunnerTarget(BaseModel):
     config's ``harness.adapter_id`` and is never inferred from ``model``. ``model`` is applied as the
     config's default model when given.
 
-    A run is described by exactly one complete ``config`` — given inline, or resolved at submit from a
+    A run is described by one complete ``config`` — given inline, or resolved at submit from a
     registered platform ``agent`` (``nemo agents create``) with the same resolution a deployment gets:
-    environment merge, Inference Gateway binding, translation of the platform ``agent.yaml``. Either way
-    the canonical spec carries a plain ``config``; the job never looks an agent up. Fabric 0.1.0rc2
-    removed profile overlays, so the former ``profiles`` field is gone — fold any overlay into ``config``.
+    environment merge, Inference Gateway binding, translation of the platform ``agent.yaml``. The
+    canonical spec then carries the resolved ``config`` alongside the ``agent`` it came from; the job
+    never looks the agent up. Fabric 0.1.0rc2 removed profile overlays, so the former ``profiles`` field
+    is gone — fold any overlay into ``config``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -95,25 +97,20 @@ class FabricRunnerTarget(BaseModel):
     config: dict[str, Any] | None = Field(
         default=None,
         description="Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped mapping). Its "
-        "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex. Exactly one of "
-        "`config` or `agent`.",
+        "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex. Submit either this "
+        "or `agent`; a resolved registered agent carries both.",
     )
     agent: AgentRef | None = Field(
         default=None,
         description="A registered platform agent to run instead of an inline `config`: `workspace/name`, or "
-        "`name` in the submission workspace. Resolved at submit into `config`. The agent runs fresh for every "
-        "trial; an existing deployment is never called.",
+        "`name` in the submission workspace. Resolved at submit into `config` and kept, qualified, as the run's "
+        "provenance. The agent runs fresh for every trial; an existing deployment is never called.",
     )
     environment: EnvironmentSpecInline | None = Field(
         default=None,
         description="Environment to evaluate a registered `agent` in, merged onto its config exactly as a "
         "deployment would: MCP fulfilments (url/env/secrets) for servers the agent declares, process env, secret "
         "refs, and Fabric environment settings. Requires `agent`.",
-    )
-    agent_files: FilesetRef | None = Field(
-        default=None,
-        description="Set by resolution, not by the submitter: the registered agent's Ethos FileSet, staged into "
-        "the job before the run so relative `skills.paths` resolve.",
     )
     model: str | None = Field(
         default=None,
@@ -136,10 +133,8 @@ class FabricRunnerTarget(BaseModel):
 
     @model_validator(mode="after")
     def _config_or_registered_agent(self) -> Self:
-        if (self.config is None) == (self.agent is None):
-            raise ValueError(
-                "provide exactly one of `config` (inline Fabric agent config) or `agent` (a registered agent)"
-            )
+        if self.config is None and self.agent is None:
+            raise ValueError("provide `config` (inline Fabric agent config) or `agent` (a registered agent)")
         if self.environment is not None and self.agent is None:
             raise ValueError("`environment` applies to a registered `agent`; fold it into an inline `config` instead")
         if self.agent is not None and self.model is not None:
@@ -435,6 +430,22 @@ def registered_agent_name(target: Target | None) -> str | None:
     return None
 
 
+def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
+    """The Ethos FileSet a resolved registered agent's config needs on disk, if it refers to files at all.
+
+    Only a resolved target qualifies: its ``agent`` is workspace-qualified and its ``config`` is the
+    translated one, so both the FileSet's home and whether relative paths exist are known without a lookup.
+    """
+    if target.agent is None or target.config is None or "/" not in target.agent.root:
+        return None
+    skills = target.config.get("skills") or {}
+    discovery = target.config.get("discovery") or {}
+    if not skills.get("paths") and not discovery.get("local_paths"):
+        return None
+    workspace, _, name = target.agent.root.partition("/")
+    return FilesetRef(root=f"{workspace}/{ethos_fileset_name(name)}")
+
+
 def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
     """``(agent_name, model_name)`` derivable from a target, for publishing to Intake.
 
@@ -652,6 +663,18 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
             raise ValueError("provide at least one task, or a `tasks` taskset reference")
         return self
 
+    @model_validator(mode="after")
+    def _reject_config_alongside_agent(self) -> Self:
+        if (
+            isinstance(self.target, FabricRunnerTarget)
+            and self.target.config is not None
+            and self.target.agent is not None
+        ):
+            raise ValueError(
+                "provide exactly one of `config` (inline Fabric agent config) or `agent` (a registered agent)"
+            )
+        return self
+
 
 class AgentEvalSpec(_AgentEvalSpecCommon):
     """Canonical evaluation containing self-contained, resolved task snapshots."""
@@ -662,16 +685,11 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
 
     @model_validator(mode="after")
     def _reject_unresolved_registered_agent(self) -> Self:
-        # A registered agent is resolved into the runner's own fields during spec resolution; the job must
-        # never have to look an agent up itself.
-        if isinstance(self.target, FabricRunnerTarget):
-            if self.target.agent is not None:
-                raise ValueError(
-                    f"AgentEvalSpec target names registered agent {self.target.agent.root!r}; it must be resolved "
-                    "before run"
-                )
-            if self.target.config is None:
-                raise ValueError("AgentEvalSpec Fabric target has no `config`; resolution did not run")
+        if isinstance(self.target, FabricRunnerTarget) and self.target.config is None:
+            raise ValueError(
+                f"AgentEvalSpec Fabric target names registered agent {self.target.agent!r} but has no `config`; "
+                "it must be resolved before run"
+            )
         return self
 
     @model_validator(mode="after")

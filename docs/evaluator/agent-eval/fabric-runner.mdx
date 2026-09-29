@@ -255,9 +255,10 @@ If the agent is already registered with `nemo agents create`, name it in place o
 
 At submit time the service looks the agent up, applies the same resolution a deployment gets — its
 models are bound to the workspace's Inference Gateway, so no credential travels in the spec — and
-translates the platform `agent.yaml` into the `config` above. The persisted job spec therefore shows a
-plain `config`; the job never looks an agent up. It runs the agent fresh for every trial and never
-calls an existing deployment, so the evaluation is independent of what is (or is not) deployed.
+translates the platform `agent.yaml` into the `config` above. The persisted job spec shows that resolved
+`config` next to the `agent` it came from; the job never looks the agent up. It runs the agent fresh
+for every trial and never calls an existing deployment, so the evaluation is independent of what is (or
+is not) deployed.
 
 | Field | Required | Notes |
 |---|---|---|

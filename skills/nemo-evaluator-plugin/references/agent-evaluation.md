@@ -157,8 +157,8 @@ A Fabric runner target may name a **registered agent** instead of describing
 one. The service resolves it at submit: it looks the agent up, binds its models
 to the workspace Inference Gateway exactly as a deployment would, merges the
 optional `environment` spec, and translates the platform `agent.yaml` into the
-target's own `config`. The persisted job spec never carries the ref. The agent
-runs fresh for every trial; an existing deployment is never called.
+target's own `config`, kept next to the qualified `agent` ref. The agent runs
+fresh for every trial; an existing deployment is never called.
 
 ```python
 from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget

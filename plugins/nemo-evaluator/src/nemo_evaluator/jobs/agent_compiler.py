@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.agent_spec import (
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    registered_agent_files,
 )
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evaluator.jobs.gym_sandbox import GYM_SANDBOX_PLAN_ENVVAR, SandboxPlan, resolve_sandbox_plan
@@ -78,8 +79,6 @@ def compile_agent_eval_job(
 
     sandbox_plan = _sandbox_plan(spec)
     steps = []
-    # FileSets are downloaded onto job storage first: a Gym environment before the Gym host mounts the
-    # tree read-only, a registered agent's files before the Fabric harness resolves its skills.
     staged = _staged_fileset(spec)
     if staged is not None:
         steps.append(_environment_stage_step(staged, profile, use_subprocess=use_subprocess))
@@ -240,7 +239,7 @@ def _staged_fileset(spec: AgentEvalSpec) -> FilesetRef | None:
     if isinstance(spec.target, GymRunnerTarget):
         return spec.target.environment
     if isinstance(spec.target, FabricRunnerTarget):
-        return spec.target.agent_files
+        return registered_agent_files(spec.target)
     return None
 
 
