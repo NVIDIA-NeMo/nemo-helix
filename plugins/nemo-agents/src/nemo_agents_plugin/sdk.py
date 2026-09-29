@@ -55,7 +55,7 @@ Usage (once the SDK hub is wired up)::
     results = nemo.agents.jobs.execute.list_results(job["name"])
     run = nemo.agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
-An async namespace is mounted as ``client.agents`` on ``AsyncNeMoHelix``.
+An async namespace is mounted as ``client.agents`` on ``AsyncNemoClient``.
 It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
 remain sync-only.
 """
@@ -72,7 +72,6 @@ from nemo_agents_plugin.entities import (
     EnvironmentSpecInline,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.agents.client import AgentsClient, AsyncAgentsClient
 from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
@@ -84,7 +83,7 @@ from nemo_helix_plugin.agents.types import (
     InvokeAgentRequest,
     JsonMap,
 )
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
@@ -132,15 +131,15 @@ def _contains_default_model_placeholder(value: object) -> bool:
     return False
 
 
-def _agents_client_from_platform(platform: NeMoHelix) -> AgentsClient:
-    client = client_from_platform(platform, AgentsClient)
+def _agents_client_from_platform(platform: NemoClient) -> AgentsClient:
+    client = AgentsClient.from_client(platform)
     if client.workspace is None:
         return client.with_workspace(_DEFAULT_WORKSPACE)
     return client
 
 
-def _async_agents_client_from_platform(platform: AsyncNeMoHelix) -> AsyncAgentsClient:
-    async_client = client_from_platform(platform, AsyncAgentsClient)
+def _async_agents_client_from_platform(platform: AsyncNemoClient) -> AsyncAgentsClient:
+    async_client = AsyncAgentsClient.from_client(platform)
     if async_client.workspace is None:
         return async_client.with_workspace(_DEFAULT_WORKSPACE)
     return async_client
@@ -149,13 +148,13 @@ def _async_agents_client_from_platform(platform: AsyncNeMoHelix) -> AsyncAgentsC
 class AgentsResource:
     """SDK namespace for ``nemo.agents.*``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         """
         Args:
-            platform: The generated ``NeMoHelix`` client. The Agents resource
-                adapts it to the typed ``AgentsClient`` while sharing the same
-                base URL, default workspace, auth headers, timeout, retry policy,
-                and underlying HTTP transport.
+            platform: The typed ``NemoClient``. The Agents resource derives an
+                ``AgentsClient`` from it while sharing the same base URL, default
+                workspace, auth headers, timeout, retry policy, and underlying
+                HTTP transport.
         """
         self._platform = platform
         self._client = _agents_client_from_platform(platform)
@@ -737,7 +736,7 @@ class AsyncAgentsResource:
     remain sync-only on :class:`AgentsResource`.
     """
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
         self._client = _async_agents_client_from_platform(platform)
         self._jobs: _AsyncJobsResource | None = None
