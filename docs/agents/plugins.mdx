@@ -20,7 +20,7 @@ can contribute one or more surfaces:
 |---------|-------------------|--------------|
 | HTTP service | `nemo.services` | FastAPI routers mounted under `/apis/<name>/...` — every route must declare authorization (see [Writing Plugins](#writing-plugins)) |
 | CLI | `nemo.cli` | `nemo <plugin> ...` commands |
-| Job | `nemo.jobs` | Local or submitted jobs with generated `run`, `submit`, and `explain` verbs |
+| Job | `nemo.jobs` | Submitted jobs with generated submit and `explain` commands |
 | Controller | `nemo.controllers` | Background reconciliation loops |
 | Inference middleware | `nemo.inference_middleware` | Virtual-model request or response middleware |
 | Entity | plugin code | Entity definitions stored in Entity Store |
