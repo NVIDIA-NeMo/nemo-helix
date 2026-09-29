@@ -692,6 +692,9 @@ Replace the model and secret reference with values available to your account. Th
 network access and the system tools Harbor's Codex adapter uses to install the CLI. The CLI version
 above is an explicit reproducibility pin, not a platform-wide default.
 
+For a complete runnable example, see the
+[Harbor taskset evaluation notebook](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-evaluator/examples/harbor_taskset/harbor_taskset_e2e.ipynb).
+
 ## How scoring works
 
 1. Harbor runs each task in its sandbox and writes a `<task>__<hash>/result.json` per trial, including
