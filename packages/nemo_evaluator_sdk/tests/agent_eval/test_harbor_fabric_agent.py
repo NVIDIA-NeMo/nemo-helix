@@ -13,7 +13,7 @@ pytest.importorskip("harbor", reason="NemoFabricAgent subclasses Harbor's BaseAg
 from harbor.models.task.config import MCPServerConfig
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import FLAT_CONFIG_KWARGS, NemoFabricAgent
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig
-from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
+from nemo_evaluator_sdk.agent_eval.runtimes.provenance import credential_shaped_settings, redact_credentials
 from nemo_fabric import RelayAtifConfig, RelayAtofConfig
 from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT
 
@@ -253,6 +253,8 @@ def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value
         ("NVIDIA_API_KEY", "nvapi-" + "a" * 60),
         ("MY_API_KEY", "an-unrecognised-real-secret"),
         ("NVIDIA_API_KEY", "not-used"),
+        ("MY_API_KEY_ENV", "SUPER_SECRET_VALUE_123"),  # a user's key that happens to end in _ENV
+        ("api_key_env", "SUPER_SECRET_VALUE_123"),  # even Fabric's own field name, under the env map
     ]:
         leaked = _registered_agent_config()
         leaked["environment"]["env"][name] = value
@@ -264,6 +266,15 @@ def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value
     misnamed["models"]["default"]["api_key_env"] = "an-unrecognised-real-secret"
     with pytest.raises(ValueError, match="fabric_config.models.default.api_key_env"):
         HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs={"fabric_config": misnamed})
+
+
+def test_only_fabrics_own_name_fields_are_exempt_from_the_marker_checks() -> None:
+    """The exemption is a list of Fabric fields, not an ``_env`` suffix: a harness setting a user named
+    ``token_env`` is a value under a credential-marked key and is reported like any other."""
+    assert credential_shaped_settings({"fabric_config": {"harness": {"token_env": "SUPER_SECRET_VALUE_123"}}}) == [
+        "fabric_config.harness.token_env"
+    ]
+    assert credential_shaped_settings({"fabric_config": {"models": {"m": {"api_key_env": "MY_KEY"}}}}) == []
 
 
 def test_provenance_redaction_keeps_variable_names_and_redacts_values() -> None:

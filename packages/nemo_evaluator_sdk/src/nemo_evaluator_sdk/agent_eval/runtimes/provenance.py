@@ -43,16 +43,21 @@ _CREDENTIAL_VALUE_MIN_CHARS = 16
 
 
 _ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+#: Fabric's fields that hold the *name* of an environment variable rather than a value.
+_VARIABLE_NAME_FIELDS = frozenset({"api_key_env", "client_secret_env", "header_env"})
 
 
 def _names_a_variable(path: str, value: Any) -> bool:
-    """A ``*_env`` key (Fabric's ``api_key_env``) holds the *name* of an environment variable, not a value.
+    """Whether ``path`` is one of Fabric's variable-name fields holding something shaped like a name.
 
-    The exemption needs both halves: a key that says "name" and a value shaped like one. A token
-    written where the name belongs is not a name and takes the ordinary marker route.
+    The exemption needs both halves. Matching the field by name rather than by an ``_env`` suffix keeps
+    a user's own ``environment.env.MY_API_KEY_ENV`` entry -- a value under a key they chose -- inside
+    the checks, and a token written where a name belongs takes the ordinary marker route too.
     """
+    head, _, field = path.rpartition(".")
     return (
-        path.rpartition(".")[2].casefold().endswith("_env")
+        field in _VARIABLE_NAME_FIELDS
+        and head.rpartition(".")[2] != "env"
         and isinstance(value, str)
         and _ENV_VAR_NAME.fullmatch(value) is not None
     )
