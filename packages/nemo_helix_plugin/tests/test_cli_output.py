@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 import click
 import pytest
 import yaml
-from nemo_helix_ext.cli.core.formatters import (
+from nemo_helix_plugin.cli_output import (
     Column,
     _extract_items_from_response,
     format_csv,
@@ -58,7 +58,7 @@ def test_model_to_dict_with_pydantic_model():
     mock_model.model_dump.assert_called_once_with(mode="json")
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_json_no_highlighting(mock_is_tty):
     """Test JSON formatting without syntax highlighting."""
     mock_is_tty.return_value = False
@@ -71,7 +71,7 @@ def test_format_json_no_highlighting(mock_is_tty):
     assert result == expected
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_json_with_highlighting(mock_is_tty):
     """Test JSON formatting with syntax highlighting in TTY."""
     mock_is_tty.return_value = True
@@ -164,7 +164,7 @@ def test_validate_stream_output_format_rejects_table_output():
         validate_stream_output_format("table", True)
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_yaml_no_highlighting(mock_is_tty):
     """Test YAML formatting without syntax highlighting."""
     mock_is_tty.return_value = False
@@ -177,7 +177,7 @@ def test_format_yaml_no_highlighting(mock_is_tty):
     assert parsed == data
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_yaml_with_highlighting(mock_is_tty):
     """Test YAML formatting with syntax highlighting in TTY."""
     mock_is_tty.return_value = True
@@ -751,7 +751,7 @@ def test_format_output_simple_formats(mock_print, output_format):
         ("csv", "Test"),
     ],
 )
-@patch("nemo_helix_ext.cli.core.table_config.resolve_and_validate_columns")
+@patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
 @patch("builtins.print")
 def test_format_output_table_formats(
     mock_print,
@@ -784,7 +784,7 @@ def test_format_output_table_fallback_to_json(mock_print):
     assert "key" in call_args
 
 
-@patch("nemo_helix_ext.cli.core.table_config.resolve_and_validate_columns")
+@patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
 @patch("builtins.print")
 def test_format_output_with_no_truncate(mock_print, mock_resolve_cols):
     """Test format_output with no_truncate enabled."""
@@ -803,7 +803,7 @@ def test_format_output_with_no_truncate(mock_print, mock_resolve_cols):
     assert "x" * 70 in call_args  # Should show more than default 50 char limit
 
 
-@patch("nemo_helix_ext.cli.core.table_config.resolve_and_validate_columns")
+@patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
 @patch("builtins.print")
 def test_format_output_with_custom_columns(mock_print, mock_resolve_cols):
     """Test format_output with custom output_columns."""
@@ -826,7 +826,7 @@ def test_format_output_with_custom_columns(mock_print, mock_resolve_cols):
     assert "Test" in call_args
 
 
-@patch("nemo_helix_ext.cli.core.table_config.resolve_and_validate_columns")
+@patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
 @patch("builtins.print")
 def test_format_output_switches_to_markdown_for_many_columns(mock_print, mock_resolve_cols):
     """Test format_output switches to markdown when too many columns with no_truncate."""
@@ -890,7 +890,7 @@ def test_format_stream_event_with_nested_data(mock_print):
     assert parsed == event
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_json_soft_wrap_preserves_long_strings(mock_is_tty):
     """Test that JSON formatting with syntax highlighting preserves long strings without truncation.
 
@@ -909,7 +909,7 @@ def test_format_json_soft_wrap_preserves_long_strings(mock_is_tty):
     assert long_value in result
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_yaml_soft_wrap_preserves_long_strings(mock_is_tty):
     """Test that YAML formatting with syntax highlighting preserves long strings without truncation.
 
@@ -928,7 +928,7 @@ def test_format_yaml_soft_wrap_preserves_long_strings(mock_is_tty):
     assert long_value in result
 
 
-@patch("nemo_helix_ext.cli.core.formatters.is_tty")
+@patch("nemo_helix_plugin.cli_output.is_tty")
 def test_format_json_soft_wrap_with_nested_long_strings(mock_is_tty):
     """Test that nested long strings in JSON are fully preserved."""
     mock_is_tty.return_value = True

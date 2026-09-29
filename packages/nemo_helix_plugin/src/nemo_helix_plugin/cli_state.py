@@ -35,11 +35,11 @@ Example::
 
 import logging
 import os
-import sys
 from typing import Any, Protocol, TypeVar, cast
 
 import typer
 from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
+from nemo_helix_plugin.cli_output import is_tty
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
 
@@ -80,6 +80,10 @@ class CLIState(Protocol):
 
     def get_no_truncate(self, override: bool | None = None) -> bool: ...
 
+    def get_agent_hints(self, command_path: str) -> list[str]:
+        """Hints printed after a command in agent mode; called by :func:`~nemo_helix_plugin.cli_warnings.collect_warnings`."""
+        ...
+
 
 def cli_state(typer_ctx: typer.Context) -> CLIState:
     """Return the ``nemo`` CLI state for *typer_ctx*.
@@ -113,7 +117,7 @@ def resolve_output_format(typer_ctx: typer.Context, explicit: ListOutputFormat |
     state = typer_ctx.obj
     if state is not None:
         return cast(CLIState, state).get_output_format()
-    return "table" if sys.stdout.isatty() else "json"
+    return "table" if is_tty() else "json"
 
 
 def resolve_local_cli_sdks(

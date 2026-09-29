@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
@@ -15,15 +16,35 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 
 
 def test_cli_context_implements_the_plugin_cli_state_protocol():
-    """Plugin commands depend on ``CLIState``; ty rejects this assignment if ``CLIContext`` drifts from it."""
+    """Plugin commands depend on ``CLIState``, so ``CLIContext`` must keep matching it.
+
+    ty skips ``packages/nemo_helix_ext``, so the annotated assignment only helps
+    when this file is checked explicitly; the signature comparison runs in CI.
+    """
     state: CLIState = CLIContext()
     assert state is not None
+
+    members = [name for name, value in vars(CLIState).items() if callable(value) and not name.startswith("_")]
+    assert members, "CLIState declares no members"
+    for name in members:
+        expected = inspect.signature(getattr(CLIState, name)).parameters
+        actual = inspect.signature(getattr(CLIContext, name)).parameters
+        assert [(p.name, p.kind, p.default is p.empty) for p in actual.values()] == [
+            (p.name, p.kind, p.default is p.empty) for p in expected.values()
+        ], f"CLIContext.{name} does not match CLIState.{name}"
 
 
 def test_plugin_resolve_output_format_follows_cli_context_rules():
     """The shared resolver must give plugin commands the same answer core commands get."""
     typer_ctx = cast(typer.Context, SimpleNamespace(obj=CLIContext(agent_mode=True)))
     assert resolve_output_format(typer_ctx) == "markdown"
+
+
+def test_agent_hints_only_in_agent_mode():
+    assert CLIContext().get_agent_hints("workspaces list") == []
+    assert CLIContext(agent_mode=True).get_agent_hints("workspaces list") == [
+        "To learn more about workspaces, run: nemo docs get-started/concepts/workspaces",
+    ]
 
 
 def test_context_instances_are_independent():

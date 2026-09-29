@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import json
-import sys
 from typing import Any
 
 import typer
+from nemo_helix_plugin.cli_output import is_tty as is_tty  # re-exported for core commands
 
 from nemo_helix_ext.cli.core.errors import InvalidSearchPatternError
 
@@ -170,8 +170,3 @@ def parse_resource_id(
         raise typer.Exit(code=1)
 
     return (name, namespace)
-
-
-def is_tty() -> bool:
-    """Check if stdout is a TTY (terminal)."""
-    return sys.stdout.isatty()
