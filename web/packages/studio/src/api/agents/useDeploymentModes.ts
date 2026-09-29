@@ -22,7 +22,7 @@ export const IMAGE_DEPLOYMENT_MODES: readonly DeploymentMode[] = [
 export type DeploymentModes =
   | { status: 'loading' }
   | { status: 'unknown' }
-  | { status: 'ready'; enabled: DeploymentMode[] };
+  | { status: 'ready'; enabled: DeploymentMode[]; withoutImage: DeploymentMode[] };
 
 export const useDeploymentModes = (
   workspace: string,
@@ -31,9 +31,11 @@ export const useDeploymentModes = (
   const { data, isError } = useAgentsListDeploymentModes(workspace, { query: queryOptions });
   return useMemo<DeploymentModes>(() => {
     if (data) {
+      const enabled = data.data.filter((mode) => mode.enabled);
       return {
         status: 'ready',
-        enabled: data.data.filter((mode) => mode.enabled).map((mode) => mode.mode),
+        enabled: enabled.map((mode) => mode.mode),
+        withoutImage: enabled.filter((mode) => !mode.requires_image).map((mode) => mode.mode),
       };
     }
     return isError ? { status: 'unknown' } : { status: 'loading' };
