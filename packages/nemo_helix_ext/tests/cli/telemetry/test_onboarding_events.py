@@ -20,7 +20,7 @@ from nemo_helix_ext.cli.commands.setup import (
     SetupClients,
     _bucket_model_count,
     _create_provider,
-    _deploy_demo_agent,
+    _deploy_setup_agent,
     _run_skill_install,
     _update_provider,
     _wait_for_models,
@@ -245,25 +245,25 @@ class TestRunSkillInstallTelemetry:
         assert "codex" in event.skills_target
 
 
-class TestDeployDemoAgentTelemetry:
+class TestDeploySampleAgentTelemetry:
     def _responses(self, *, status_sequence):
         create_resp = MagicMock(status_code=200)
         create_resp.raise_for_status = MagicMock()
         deploy_resp = MagicMock(status_code=200)
         deploy_resp.raise_for_status = MagicMock()
-        deploy_resp.json.return_value = {"name": "calculator-agent-abc12345"}
+        deploy_resp.json.return_value = {"name": "email-security-triage-abc12345"}
         status_resps = []
         for s in status_sequence:
             r = MagicMock(status_code=200)
-            r.json.return_value = {"name": "calculator-agent-abc12345", "status": s}
+            r.json.return_value = {"name": "email-security-triage-abc12345", "status": s}
             status_resps.append(r)
         return [create_resp, deploy_resp] + status_resps
 
     @pytest.mark.usefixtures("spinner_console")
     @patch(EMIT_TARGET)
     def test_success_emits_completed_true(self, emit, tmp_path):
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text("config_format: nemo-agents-spec-v1\nmodels:\n  default:\n    model: bundled-model\n")
         responses = self._responses(status_sequence=["running"])
         with (
             patch(f"{SETUP_MOD}.httpx.get", side_effect=responses[2:]),
@@ -272,7 +272,7 @@ class TestDeployDemoAgentTelemetry:
             patch(f"{SETUP_MOD}._pause"),
             patch(f"{SETUP_MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3]),
         ):
-            result = _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
         assert result is True
         assert emit.call_count == 1
         event = emit.call_args[0][0]
@@ -283,8 +283,8 @@ class TestDeployDemoAgentTelemetry:
     @pytest.mark.usefixtures("spinner_console")
     @patch(EMIT_TARGET)
     def test_failure_emits_error_and_reraises(self, emit, tmp_path):
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text("config_format: nemo-agents-spec-v1\nmodels:\n  default:\n    model: bundled-model\n")
         create_resp = MagicMock(status_code=500)
         create_resp.raise_for_status = MagicMock(side_effect=RuntimeError("http 500"))
         with (
@@ -292,7 +292,7 @@ class TestDeployDemoAgentTelemetry:
             patch(f"{SETUP_MOD}._agent_exists", return_value=False),
         ):
             with pytest.raises(RuntimeError):
-                _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+                _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
         assert emit.call_count == 1
         event = emit.call_args[0][0]
         assert event.step == "agent_deployed"
@@ -301,10 +301,10 @@ class TestDeployDemoAgentTelemetry:
 
     @patch(EMIT_TARGET)
     def test_false_deploy_outcome_emits_error_false(self, emit, tmp_path):
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
-        with patch(f"{SETUP_MOD}._deploy_demo_agent_impl", return_value=False):
-            result = _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+        config = tmp_path / "agent.yaml"
+        config.write_text("config_format: nemo-agents-spec-v1\nmodels:\n  default:\n    model: bundled-model\n")
+        with patch(f"{SETUP_MOD}._deploy_setup_agent_impl", return_value=False):
+            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
 
         assert result is False
         assert emit.call_count == 1
