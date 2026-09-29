@@ -9,9 +9,19 @@ version = "0.1.0"
 # `cryptography` parses the public key signatures are verified against.
 dependencies = ["nemo-helix-plugin", "pydantic>=2.0.0", "cryptography>=42.0.0"]
 
+[project.optional-dependencies]
+# The API-process half. `service.py` annotates a FastAPI dependency as `AsyncNeMoHelix`, and
+# FastAPI evaluates that annotation at runtime, so the full SDK is a real requirement *there*.
+# It is not one in a build pod -- no step binary imports it. Splitting it keeps the step image
+# small and keeps the dependency graph honest about what actually runs in a job.
+service = ["nemo-helix"]
+
 [tool.uv.sources]
 nemo-helix = { path = "../../packages/nemo_helix", editable = true }
 nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+
+[project.entry-points."nemo.services"]
+builder = "nemo_builder_plugin.service:BuilderService"
 
 [build-system]
 requires = ["hatchling"]
