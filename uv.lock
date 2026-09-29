@@ -2089,7 +2089,7 @@ http = [
 
 [[package]]
 name = "garak-api"
-version = "0.16.0"
+version = "0.17.0"
 source = { editable = "packages/garak_api" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
