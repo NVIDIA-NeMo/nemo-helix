@@ -12,7 +12,12 @@ from typing import Any, Generic, TypeVar, overload
 
 import httpx
 from nemo_helix_plugin.client.errors import NemoResponseValidationError, NemoTransportError, raise_for_status
-from nemo_helix_plugin.client.types import OffsetPagination, PaginationStrategy, PreparedRequest
+from nemo_helix_plugin.client.types import (
+    RESPONSE_VALIDATION_CONTEXT,
+    OffsetPagination,
+    PaginationStrategy,
+    PreparedRequest,
+)
 from pydantic import BaseModel, ValidationError
 from typing_extensions import TypeVar as TypeVarExt
 
@@ -36,7 +41,7 @@ def _validated_page(
 
     try:
         raw_items = strategy.extract_items(body)
-        items = [model_type.model_validate(item) for item in raw_items]
+        items = [model_type.model_validate(item, context=dict(RESPONSE_VALIDATION_CONTEXT)) for item in raw_items]
         metadata = strategy.extract_metadata(body)
     except (KeyError, TypeError, ValueError, ValidationError) as exc:
         raise NemoResponseValidationError(response, exc) from exc
@@ -217,7 +222,9 @@ class NemoStreamResponse(Generic[ModelT]):
                         payload = _parse_stream_line(line, raw.headers)
                         if payload is not None:
                             try:
-                                yield self._model_type.model_validate_json(payload)
+                                yield self._model_type.model_validate_json(
+                                    payload, context=dict(RESPONSE_VALIDATION_CONTEXT)
+                                )
                             except (ValueError, ValidationError) as exc:
                                 raise NemoResponseValidationError(raw, exc) from exc
 
@@ -329,7 +336,9 @@ class AsyncNemoStreamResponse(Generic[ModelT]):
                         payload = _parse_stream_line(line, raw.headers)
                         if payload is not None:
                             try:
-                                yield self._model_type.model_validate_json(payload)
+                                yield self._model_type.model_validate_json(
+                                    payload, context=dict(RESPONSE_VALIDATION_CONTEXT)
+                                )
                             except (ValueError, ValidationError) as exc:
                                 raise NemoResponseValidationError(raw, exc) from exc
 

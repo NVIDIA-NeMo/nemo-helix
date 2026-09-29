@@ -68,7 +68,7 @@ RUN uv venv --no-project --python /usr/local/bin/python /app/.garak_venv
 # litellm: CVE-2026-35029 (affects <1.83.0)
 # langchain-core: CVE-2025-68664 (affects <1.2.5) + GHSA-qh6h-p6c9-ff54 (affects <1.2.22)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip --no-config install garak==0.15.1 --python /app/.garak_venv/bin/python && \
+    uv pip --no-config install garak==0.17.0 --python /app/.garak_venv/bin/python && \
     uv pip install --python /app/.garak_venv/bin/python "setuptools>=78.1.1" && \
     uv pip install --no-deps --python /app/.garak_venv/bin/python \
     "litellm>=1.83.0" \

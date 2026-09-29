@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -58,9 +59,16 @@ from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_expo
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.routes import add_job_routes
 from pydantic import ValidationError
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 
 class _TypedFilesResponse:
@@ -945,6 +953,27 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
     payload = json.loads((ctx.storage.persistent / "results" / FABRIC_RUN_RESULT_NAME).read_text())
     assert payload["metadata"] == {"adapter_runner": "python"}
     assert payload["runtime_id"] == "runtime-1"
+
+
+def test_run_reports_terminal_fabric_token_usage(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+    )
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        return FabricRuntimeResult(
+            status="succeeded",
+            output={"response": "done", "usage": {"input_tokens": 21, "output_tokens": 8}},
+        )
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert isinstance(ctx.usage, LocalJobUsageReporter)
+    assert ctx.usage.latest is not None
+    assert ctx.usage.latest.input_tokens == 21
+    assert ctx.usage.latest.output_tokens == 8
 
 
 def test_run_threads_custom_timeout_to_fabric(ctx: JobContext) -> None:
@@ -2028,6 +2057,7 @@ def test_an_unrecognized_telemetry_section_is_left_alone(monkeypatch: pytest.Mon
     assert config["telemetry"] == {"enabled": True, "not_a_real_field": 1}
 
 
+@requires_hermes_adapter
 def test_relay_support_is_read_from_the_adapter_descriptor(tmp_path: Path) -> None:
     """The bundled harnesses advertise relay with an ATIF output."""
     assert supports_intake_atif_export(_fabric_agent_config(), base_dir=tmp_path) is True
@@ -2062,6 +2092,7 @@ def test_an_adapter_without_the_atif_output_is_not_wired(
     assert "not its ATIF output" in caplog.text
 
 
+@requires_hermes_adapter
 def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2097,6 +2128,7 @@ def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     assert "header_env" not in storage
 
 
+@requires_hermes_adapter
 def test_an_auth_disabled_platform_exports_straight_to_the_platform(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2182,6 +2214,7 @@ def test_a_telemetry_only_job_runs_untraced_rather_than_failing(
     assert "without credentials" in caplog.text
 
 
+@requires_hermes_adapter
 def test_a_telemetry_only_job_completes_when_the_proxy_cannot_start(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

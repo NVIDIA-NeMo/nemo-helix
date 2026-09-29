@@ -85,6 +85,16 @@ class _FlatGreetJob(_GreetJob):
 runner = CliRunner()
 
 
+class _BaseUrlState:
+    """Stand-in CLI state carrying the platform URL (``nemo --base-url`` / the active context)."""
+
+    def __init__(self, base_url: str) -> None:
+        self._base_url = base_url
+
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return self._base_url
+
+
 def _typer_context_with_obj(obj: object | None) -> typer.Context:
     return cast(typer.Context, SimpleNamespace(obj=obj))
 
@@ -170,7 +180,7 @@ class TestSubgroupRegistration:
         help_result = runner.invoke(app, ["greet", "--help"])
         assert help_result.exit_code == 0
         output = _plain(help_result.output)
-        assert "--base-url" in output
+        assert "--base-url" not in output
         assert "--profile" in output
         assert "explain" in output
 
@@ -214,33 +224,21 @@ class TestBareFormBreaks:
 
 class TestSubmitVerb:
     @pytest.mark.parametrize(
-        ("args", "env_base_url", "context_base_url", "expected_base_url"),
+        ("env_base_url", "context_base_url", "expected_base_url"),
         [
-            (
-                ["--base-url", "http://from-flag:9999", "--cluster", "configured-cluster"],
-                "http://from-env:1234",
-                "http://from-context:7777",
-                "http://from-flag:9999",
-            ),
-            (
-                ["--cluster", "configured-cluster"],
-                "http://from-env:1234",
-                "http://from-context:7777",
-                "http://from-cluster:8888",
-            ),
-            ([], "http://from-env:1234", "http://from-context:7777", "http://from-context:7777"),
-            ([], "http://from-env:1234", None, "http://from-env:1234"),
-            ([], None, None, "http://localhost:8080"),
+            ("http://from-env:1234", "http://from-context:7777", "http://from-context:7777"),
+            ("http://from-env:1234", None, "http://from-env:1234"),
+            (None, None, "http://localhost:8080"),
         ],
     )
     def test_submit_host_resolution_precedence(
         self,
         monkeypatch,
-        args: list[str],
         env_base_url: str | None,
         context_base_url: str | None,
         expected_base_url: str,
     ) -> None:
+        """The CLI context (``nemo --base-url`` / ``--context``) > ``$NHX_BASE_URL`` > localhost."""
         captured: dict[str, object] = {}
 
         def _capture(_self, _job_cls, _spec, *, base_url=None, **_kwargs) -> dict:
@@ -254,25 +252,31 @@ class TestSubmitVerb:
             def get_base_url(self, default: str | None = None) -> str | None:
                 return self._resolved_base_url if self._resolved_base_url is not None else default
 
-        class _FakeConfig:
-            def get_config_file(self) -> SimpleNamespace:
-                return SimpleNamespace(
-                    clusters=[SimpleNamespace(name="configured-cluster", base_url="http://from-cluster:8888")]
-                )
-
         if env_base_url is None:
             monkeypatch.delenv("NHX_BASE_URL", raising=False)
         else:
             monkeypatch.setenv("NHX_BASE_URL", env_base_url)
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
-        monkeypatch.setattr("nemo_helix_ext.config.config.Config.load", lambda: _FakeConfig())
 
         app = _app_with_jobs(_GreetJob)
-        state = _State(context_base_url)
-        result = runner.invoke(app, ["greet", "submit", *args], obj=state)
+        result = runner.invoke(app, ["greet", "submit"], obj=_State(context_base_url))
 
         assert result.exit_code == 0, result.output
         assert captured == {"base_url": expected_base_url}
+
+    @pytest.mark.parametrize("flag", ["--base-url", "--cluster"])
+    @pytest.mark.parametrize("kind", ["job", "function"])
+    def test_submit_rejects_the_retired_routing_flags(self, flag: str, kind: str) -> None:
+        """The platform comes from the global ``nemo --base-url`` / ``--context`` flags."""
+        if kind == "job":
+            app, argv = _app_with_jobs(_GreetJob), ["greet", "submit"]
+        else:
+            app, argv = _app_with_functions(_GreetFunction), ["greet", "submit", "--spec", '{"name": "x"}']
+
+        result = runner.invoke(app, [*argv, flag, "http://elsewhere"])
+
+        assert result.exit_code == 2
+        assert "No such option" in _plain(result.output)
 
     def test_submit_returns_exit_code_2_on_connect_error(self, monkeypatch) -> None:
         request = httpx.Request("POST", "http://test/apis/tests/v2/workspaces/default/jobs/greet")
@@ -283,7 +287,7 @@ class TestSubmitVerb:
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _raise_connect)
 
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--base-url", "http://test"])
+        result = runner.invoke(app, ["greet", "submit"], obj=_BaseUrlState("http://test"))
 
         assert result.exit_code == 2
         combined = (result.output or "") + (result.stderr or "")
@@ -293,13 +297,14 @@ class TestSubmitVerb:
         assert "nemo config view" in combined
         assert "Traceback" not in combined
 
-    def test_submit_accepts_profile_and_cluster_flags(self) -> None:
+    def test_submit_accepts_profile_but_not_routing_flags(self) -> None:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(app, ["greet", "submit", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "--profile" in output
-        assert "--cluster" in output
+        assert "--cluster" not in output
+        assert "--base-url" not in output
 
     def test_submit_passes_cli_auth_headers(self, monkeypatch) -> None:
         captured: dict[str, object] = {}
@@ -323,7 +328,7 @@ class TestSubmitVerb:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--base-url", "http://127.0.0.1:8080"],
+            ["greet", "submit"],
             obj=_State(),
         )
 
@@ -346,7 +351,7 @@ class TestSubmitVerb:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--base-url", "http://127.0.0.1:8080"],
+            ["greet", "submit"],
             obj=_State(),
         )
 
@@ -372,7 +377,8 @@ class TestSubmitVerb:
         app = _app_with_jobs(_FlatGreetJob)
         result = runner.invoke(
             app,
-            ["greet", "--spec", '{"name": "Ada"}', "--base-url", "http://platform", "--workspace", "team-alpha"],
+            ["greet", "--spec", '{"name": "Ada"}', "--workspace", "team-alpha"],
+            obj=_BaseUrlState("http://platform"),
         )
 
         assert result.exit_code == 0, result.output
@@ -414,13 +420,13 @@ class TestExplainVerb:
         bundle = json.loads(result.output)
         assert bundle["profile"] == "research"
 
-    def test_explain_accepts_profile_and_cluster_flags(self) -> None:
+    def test_explain_accepts_profile_but_not_cluster(self) -> None:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(app, ["greet", "explain", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "--profile" in output
-        assert "--cluster" in output
+        assert "--cluster" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +699,7 @@ class TestFunctionSubgroupRegistration:
         assert help_result.exit_code == 0
         output = _plain(help_result.output)
         assert "COMMAND" not in output
-        assert "--base-url" in output
+        assert "--base-url" not in output
         assert "--request-id" in output
 
 
@@ -802,8 +808,8 @@ class TestFunctionSubmitVerb:
         output = _plain(result.output)
         assert "--spec" in output
         assert "--spec-file" in output
-        assert "--cluster" in output
-        assert "--base-url" in output
+        assert "--cluster" not in output
+        assert "--base-url" not in output
         assert "--workspace" in output
         # No `--profile` / `-o` for functions: those are job-only knobs.
         assert "--profile" not in output
@@ -864,13 +870,12 @@ class TestFunctionSubmitVerb:
                 "submit",
                 "--spec",
                 '{"name": "Ada"}',
-                "--base-url",
-                "http://my-platform:9090",
                 "--workspace",
                 "team-alpha",
                 "--request-id",
                 "req-42",
             ],
+            obj=_BaseUrlState("http://my-platform:9090"),
         )
         assert result.exit_code == 0, result.output
         # Canonical URL shape from `resources-jobs-functions.md`. The
@@ -907,7 +912,8 @@ class TestFunctionSubmitVerb:
         app = _app_with_functions(_CountFunction)
         result = runner.invoke(
             app,
-            ["count", "submit", "--spec", '{"upto": 1}', "--base-url", "http://test"],
+            ["count", "submit", "--spec", '{"upto": 1}'],
+            obj=_BaseUrlState("http://test"),
         )
         assert result.exit_code == 0, result.output
         lines = [line for line in result.output.splitlines() if line.strip()]
@@ -947,7 +953,8 @@ class TestFunctionSubmitVerb:
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--spec", '{"name": "x"}', "--base-url", "http://test"],
+            ["greet", "submit", "--spec", '{"name": "x"}'],
+            obj=_BaseUrlState("http://test"),
         )
         # Exit 2 marks "transport / server reported failure" — distinct
         # from exit 1 (CLI-side validation) so wrapper scripts can branch.
@@ -958,7 +965,7 @@ class TestFunctionSubmitVerb:
         assert "Request: POST http://test/" in combined
         assert "Target:" not in combined
 
-    def test_submit_uses_nhx_base_url_env_when_no_flags(self, monkeypatch) -> None:
+    def test_submit_uses_nhx_base_url_env_without_a_cli_context(self, monkeypatch) -> None:
         captured_url: list[str] = []
 
         def _fake_post(url: str, body: dict, *, headers: dict, timeout: float = 30.0, **_kwargs) -> None:  # noqa: ARG001
@@ -992,11 +999,10 @@ class TestFunctionSubmitVerb:
                 "greet",
                 "--spec",
                 '{"name": "Ada"}',
-                "--base-url",
-                "http://platform",
                 "--workspace",
                 "team-alpha",
             ],
+            obj=_BaseUrlState("http://platform"),
         )
 
         assert result.exit_code == 0, result.output

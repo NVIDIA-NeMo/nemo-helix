@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
-import { agentsCreateOptimizeJob } from '@nemo/sdk/generated/agents/agents';
-import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema/OptimizeJob';
+import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
   filesCreateFileset,
   filesDeleteFileset,
@@ -22,6 +22,15 @@ export interface LaunchOptimizeStudyParams {
   optimizeConfig: string;
 }
 
+/**
+ * The optimization strategy Studio submits a staged bundle to.
+ *
+ * `run-strategy` is strategy-agnostic, but the bundle Studio stages here — an optimize YAML plus
+ * the assets it references — is the input the `legacy` strategy takes, so the choice is fixed
+ * rather than offered as a picker.
+ */
+export const STUDIO_OPTIMIZE_STRATEGY = 'legacy';
+
 // Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
 const STUDIO_BUNDLE_FIELD = 'studio_bundle_fileset';
 
@@ -36,13 +45,13 @@ const STUDIO_BUNDLE_FIELD = 'studio_bundle_fileset';
  */
 const STUDIO_BUNDLE_STAMP = 'studio_optimize_bundle';
 
-export const studioBundleFileset = (job: OptimizeJob): string | undefined => {
+export const studioBundleFileset = (job: RunStrategyJob): string | undefined => {
   const name = job.custom_fields?.[STUDIO_BUNDLE_FIELD];
   return typeof name === 'string' && name ? name : undefined;
 };
 
 /** Does the study actually run from this fileset, or does it merely claim it? */
-const runsFromFileset = (job: OptimizeJob, workspace: string, filesetName: string): boolean => {
+const runsFromFileset = (job: RunStrategyJob, workspace: string, filesetName: string): boolean => {
   const configFileset = job.spec?.optimize_config_fileset;
   return configFileset === filesetName || configFileset === `${workspace}/${filesetName}`;
 };
@@ -67,7 +76,7 @@ const isStagedBundle = (fileset: FilesetOutput): boolean =>
  */
 export const deleteStudioBundleFileset = async (
   workspace: string,
-  job: OptimizeJob
+  job: RunStrategyJob
 ): Promise<void> => {
   const filesetName = studioBundleFileset(job);
   if (!filesetName || !runsFromFileset(job, workspace, filesetName)) return;
@@ -94,7 +103,7 @@ export const launchOptimizeStudy = async ({
   agentName,
   entries,
   optimizeConfig,
-}: LaunchOptimizeStudyParams): Promise<OptimizeJob> => {
+}: LaunchOptimizeStudyParams): Promise<RunStrategyJob> => {
   const filesetName = optimizeBundleFilesetName(agentName);
 
   await filesCreateFileset(workspace, {
@@ -107,12 +116,12 @@ export const launchOptimizeStudy = async ({
   try {
     await uploadFilesetEntries(workspace, filesetName, entries);
 
-    return await agentsCreateOptimizeJob(workspace, {
+    return await agentOptimizationCreateRunStrategyJob(workspace, {
       spec: {
+        strategy: STUDIO_OPTIMIZE_STRATEGY,
         optimize_config: optimizeConfig,
         optimize_config_fileset: `${workspace}/${filesetName}`,
         agent: agentName,
-        workspace,
       },
       custom_fields: { [STUDIO_BUNDLE_FIELD]: filesetName },
     });
@@ -123,7 +132,7 @@ export const launchOptimizeStudy = async ({
 };
 
 export type UseLaunchOptimizeStudyOptions = Omit<
-  UseMutationOptions<OptimizeJob, Error, LaunchOptimizeStudyParams>,
+  UseMutationOptions<RunStrategyJob, Error, LaunchOptimizeStudyParams>,
   'mutationFn'
 >;
 

@@ -82,14 +82,14 @@ def mock_provider_test_clients() -> Generator[ClientContext, None, None]:
 
     This is the recommended fixture for testing services that need to make
     inference calls through IGW. It provides:
-    - A TestClient to back typed clients (see ``_gateway``) and ``ctx.sdk`` for add_mock_provider()
+    - A TestClient to back typed clients (see ``_gateway``) and ``ctx.client`` for add_mock_provider()
     - Use add_mock_provider() to add mock providers
     - Auto-prefixing of provider names with 'igw-mock-'
 
     Example:
         def test_my_llm_service(mock_provider_test_clients: ClientContext):
             provider = add_mock_provider(
-                mock_provider_test_clients.sdk,
+                mock_provider_test_clients.client,
                 workspace="default",
                 name="judge",  # Becomes "igw-mock-judge"
                 mock_response_body={"id": "chatcmpl-mock", "choices": [...]},
@@ -123,7 +123,7 @@ def provider_in_cache(mock_provider_test_clients: ClientContext) -> tuple[str, s
     served_model_name = "mock-served-model"
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("test-provider"),
         served_models={model_entity_name: served_model_name},
@@ -144,7 +144,7 @@ def provider_with_default_response(mock_provider_test_clients: ClientContext) ->
     served_model_name = "served-with-defaults"
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("provider-with-defaults"),
         mock_response_body={
@@ -203,7 +203,7 @@ def test_example_chat_completion_with_provider_default(mock_provider_test_client
     # The name (without igw-mock- prefix) becomes the default model entity name
     entity_name = _unique_name("chat-provider")
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=entity_name,
         mock_response_body=chat_completion_response,
@@ -298,7 +298,7 @@ def test_example_simulate_rate_limit_error(mock_provider_test_clients: ClientCon
     - 503: Service unavailable
     """
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="rate-limited-provider",  # Becomes "igw-mock-rate-limited-provider"
         mock_response_body={
@@ -325,7 +325,7 @@ def test_example_simulate_rate_limit_error(mock_provider_test_clients: ClientCon
 def test_example_simulate_server_error(mock_provider_test_clients: ClientContext):
     """Example: Simulate a 500 Internal Server Error."""
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="error-provider",  # Becomes "igw-mock-error-provider"
         mock_response_body={
@@ -376,7 +376,7 @@ def test_example_chat_completion_multiple_choices(mock_provider_test_clients: Cl
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="multi-choice-provider",  # Becomes "igw-mock-multi-choice-provider"
         mock_response_body=multi_choice_response,
@@ -417,7 +417,7 @@ def test_example_embeddings_response(mock_provider_test_clients: ClientContext):
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="embeddings-provider",  # Becomes "igw-mock-embeddings-provider"
         mock_response_body=embeddings_response,
@@ -477,7 +477,7 @@ def test_example_llm_judge_with_json_output(mock_provider_test_clients: ClientCo
     # Create the judge provider - entity_name becomes the model entity name for routing
     entity_name = _unique_name("llm-judge")
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=entity_name,
         mock_response_body=judge_response,
@@ -613,7 +613,7 @@ def test_example_dynamic_per_model_responses(mock_provider_test_clients: ClientC
     """
     workspace = DEFAULT_WORKSPACE
     add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=workspace,
         name=_unique_name("multi-model"),
         mock_response_body_by_model={
@@ -691,7 +691,7 @@ def test_example_header_overrides_provider_default(mock_provider_test_clients: C
     """
     # Provider has a default response
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("override-example"),
         mock_response_body={"source": "provider_default", "score": 3},
@@ -1166,7 +1166,7 @@ def test_llm_judge_e2e_use_case(mock_provider_test_clients: ClientContext):
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("mock-judge"),
         mock_response_body=judge_response,
@@ -1237,7 +1237,7 @@ def test_fixture_add_provider(mock_provider_test_clients: ClientContext):
     The provider name is auto-prefixed with 'igw-mock-'.
     """
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="fixture-test-provider",  # Will become "igw-mock-fixture-test-provider"
         mock_response_body={
@@ -1270,7 +1270,7 @@ def test_fixture_add_provider_with_error_status(mock_provider_test_clients: Clie
     This is useful for testing error handling in your service.
     """
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="error-provider",  # Becomes "igw-mock-error-provider"
         mock_response_body={"error": "rate limited"},
@@ -1295,7 +1295,7 @@ def test_fixture_add_provider_with_model_entity_routing(mock_provider_test_clien
     to the /model/{model_entity_name}/ route to be routed to your mock provider.
     """
     add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="model-provider",  # Becomes "igw-mock-model-provider"
         mock_response_body={"id": "via-model-entity"},
@@ -1326,7 +1326,7 @@ def test_fixture_remove_provider(mock_provider_test_clients: ClientContext):
     from nhx.core.inference_gateway.api.dependencies import global_model_cache
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="to-remove",
         mock_response_body={"temporary": True},
@@ -1401,7 +1401,7 @@ def test_fixture_llm_judge_pattern(mock_provider_test_clients: ClientContext):
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="llm-judge",  # Becomes "igw-mock-llm-judge"
         mock_response_body=judge_response,
@@ -1439,7 +1439,7 @@ def test_fixture_isolation(mock_provider_test_clients: ClientContext):
     """
     # Add a provider in this test
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="isolated-provider",  # Becomes "igw-mock-isolated-provider"
         mock_response_body={"context": 1},

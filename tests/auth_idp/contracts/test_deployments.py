@@ -7,6 +7,7 @@ import uuid
 
 import httpx
 import pytest
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import (
     managed_workload_workspace_get_command,
@@ -14,7 +15,6 @@ from tests.auth_idp.common import (
     require_capability,
     runtime_tls_config,
 )
-from tests.auth_idp.helpers import grant_workspace_role
 from tests.auth_idp.runtime_contract import AuthIdpRuntime, JsonObject
 
 pytestmark = [

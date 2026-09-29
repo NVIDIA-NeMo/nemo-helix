@@ -146,18 +146,17 @@ class ProcessJob(NemoJob):
         ...
 ```
 
-The platform auto-generates three CLI verbs per job:
+The platform auto-generates a submit command and an `explain` helper:
 
 ```bash
-nemo my-plugin process run --spec '{"input": "hello"}'
-# { "status": "done", "result": "HELLO" }
-
 nemo my-plugin process submit --profile default --spec '{"input": "hello"}'
 # Posts the job to the plugin service; the cluster runs it.
 
 nemo my-plugin process explain
 # Prints the job's schemas and submit route.
 ```
+
+If `ProcessJob` sets `generate_legacy_verbs = False`, the generated submit command is `nemo my-plugin process --spec ...` instead.
 
 Mount the routes from your service:
 

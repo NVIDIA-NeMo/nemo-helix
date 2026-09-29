@@ -149,7 +149,8 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-chatonly \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -228,7 +229,8 @@ nemo agents optimize prepare-fileset \
   --agent hermes-optimize-chatonly \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly-via-agent \
   --optimize-config optimize-chatonly-via-agent.yaml \
   --agent hermes-optimize-chatonly \
@@ -237,6 +239,12 @@ nemo agents optimize \
 
 **Success:** same as Example 1 (`status: completed`, `n_trials: 2`), with log
 line `Resolved agent 'hermes-optimize-chatonly' to platform agent ...`.
+
+The overlay turns the judge's thinking off with
+`inference.extra_body.chat_template_kwargs.enable_thinking: false`. A thinking
+judge can spend its token budget before writing the JSON score, and every trial
+then scores 0 with `Error in evaluator from parsing judge LLM response`. Options
+outside the OpenAI client's signature must go under `extra_body`.
 
 To replace the stored config after editing `agent.yaml`:
 
@@ -286,7 +294,8 @@ The command that `prepare-fileset` prints, with `--optimize-config` now relative
 to the fileset root:
 
 ```bash
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -409,7 +418,8 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-mcp \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default

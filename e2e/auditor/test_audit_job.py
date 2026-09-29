@@ -19,7 +19,6 @@ from collections.abc import Iterator
 from contextlib import suppress
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.auditor.client import AuditorClient
 from nemo_helix_plugin.auditor.types import CreateAuditConfigRequest, CreateAuditTargetRequest, SubmitAuditRequest
 from nemo_helix_plugin.client.client import NemoClient
@@ -78,11 +77,11 @@ def _submit_audit(client: NemoClient, workspace: str, *, config: dict | str, tar
     )
 
 
-def _add_mock_provider_or_skip(sdk: NeMoHelix, workspace: str, name: str) -> str:
+def _add_mock_provider_or_skip(client: NemoClient, workspace: str, name: str) -> str:
     """Create a mock inference provider, skipping the test if the deployment doesn't support one."""
     try:
         provider = add_mock_provider(
-            sdk,
+            client,
             workspace=workspace,
             name=name,
             mock_response_body=_chat_completion(),
@@ -114,10 +113,10 @@ def audit_workspace(client: NemoClient) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module")
-def mock_provider_name(sdk: NeMoHelix, audit_workspace: str) -> str:
+def mock_provider_name(client: NemoClient, audit_workspace: str) -> str:
     """Create a canned-response mock provider for the module; workspace deletion cascades cleanup."""
     provider_name = short_unique_name("audit-mock")
-    return _add_mock_provider_or_skip(sdk, audit_workspace, provider_name)
+    return _add_mock_provider_or_skip(client, audit_workspace, provider_name)
 
 
 @pytest.fixture(scope="module")

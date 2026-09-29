@@ -51,6 +51,26 @@ def test_token_claims_extractor_projects_configured_claims(auth_config: AuthConf
     )
 
 
+def test_token_claims_extractor_preserves_external_scope_list(auth_config: AuthConfig) -> None:
+    scope_claim = [
+        "vendor:tenant:service:Admin",
+        "app.default",
+        "licenses.read",
+        "openid",
+        "profile",
+        "email",
+    ]
+    claims: JsonObject = {
+        "preferred_username": "alice",
+        "scope": scope_claim,
+    }
+
+    token_claims = TokenClaimsExtractor(auth_config).extract(claims)
+
+    assert token_claims is not None
+    assert token_claims.scopes == scope_claim
+
+
 def test_token_claims_extractor_uses_cognito_groups_fallback(auth_config: AuthConfig) -> None:
     claims: JsonObject = {
         "preferred_username": "alice",

@@ -98,14 +98,12 @@ def test_agent_invoked_audit() -> None:
     session = get_session()
     commands = session.get_bash_commands()
 
-    has_audit_run = any(
-        _has_token_sequence(cmd, "auditor", "audit", "run") and CONFIG_REF in cmd and TARGET_REF in cmd
+    has_audit = any(
+        _has_token_sequence(cmd, "auditor", "audit", "--spec") and CONFIG_REF in cmd and TARGET_REF in cmd
         for cmd in commands
     )
 
-    assert has_audit_run, (
-        f"Agent never invoked auditor audit run with '{CONFIG_REF}' and '{TARGET_REF}'. Commands: {commands}"
-    )
+    assert has_audit, f"Agent never invoked auditor audit with '{CONFIG_REF}' and '{TARGET_REF}'. Commands: {commands}"
 
 
 def test_agent_created_target() -> None:

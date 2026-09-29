@@ -165,6 +165,30 @@ def test_explicit_model_refs_win_over_the_configured_pair(app: typer.Typer, monk
     assert runs.create_calls[0]["fast_model"] == "default/small"
 
 
+@pytest.mark.parametrize(
+    ("configured_fast", "expected_fast"),
+    [("default/configured-fast", "default/configured-fast"), (None, "default/explicit-big")],
+)
+def test_default_model_flag_needs_no_configured_default(
+    app: typer.Typer, monkeypatch: pytest.MonkeyPatch, configured_fast: str | None, expected_fast: str
+) -> None:
+    def no_configured_default() -> ConfiguredModelRefs:
+        raise ValueError("No default model is configured. Run `nemo setup` and select agent models.")
+
+    monkeypatch.setattr(cli, "configured_model_refs", no_configured_default)
+    monkeypatch.setattr(cli, "configured_fast_model", lambda: configured_fast)
+    runs = _StubAnalysisRuns()
+    _install_client(monkeypatch, runs)
+
+    result = runner.invoke(
+        app, ["analysis-runs", "create", "--agent", "demo-agent", "--default-model", "default/explicit-big"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert runs.create_calls[0]["default_model"] == "default/explicit-big"
+    assert runs.create_calls[0]["fast_model"] == expected_fast
+
+
 def test_create_passes_the_requested_read_scope(app: typer.Typer, monkeypatch: pytest.MonkeyPatch) -> None:
     runs = _StubAnalysisRuns()
     _install_client(monkeypatch, runs)

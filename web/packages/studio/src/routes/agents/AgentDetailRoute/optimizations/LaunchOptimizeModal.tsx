@@ -4,8 +4,8 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getAgentsListOptimizeJobsQueryKey } from '@nemo/sdk/generated/agents/agents';
-import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema/OptimizeJob';
+import { getAgentOptimizationListRunStrategyJobsQueryKey } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
   Banner,
   Select,
@@ -104,10 +104,10 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
     isPending,
     reset: resetLaunch,
   } = useLaunchOptimizeStudy({
-    onSuccess: (job: OptimizeJob) => {
+    onSuccess: (job: RunStrategyJob) => {
       toast.success(`Optimization study "${job.name}" submitted`);
       void queryClient.invalidateQueries({
-        queryKey: getAgentsListOptimizeJobsQueryKey(workspace),
+        queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
       onClose();
       if (job.name) navigate(getAgentOptimizationDetailRoute(workspace, job.name));

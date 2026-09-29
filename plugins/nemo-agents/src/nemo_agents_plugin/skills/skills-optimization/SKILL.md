@@ -34,7 +34,7 @@ When both are given, `--spec-file` wins.
 
 ## Self-referential example: improve NeMo itself
 
-The Platform repo ships a canonical `.agent-improver.yml` at its root. Running
+The NeMo Helix repo ships a canonical `.agent-improver.yml` at its root. Running
 `nemo agents optimize-skills --spec-file .agent-improver.yml` with absolute
 path overrides from the repo root improves the skills under `.agents/skills/`
 based on the `tests/agentic-use/` Harbor evals. This supplants the older

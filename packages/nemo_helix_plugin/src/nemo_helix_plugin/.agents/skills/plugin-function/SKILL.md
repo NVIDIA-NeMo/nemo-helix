@@ -13,11 +13,11 @@ A `NemoFunction` is the third primitive on a plugin, alongside `NemoResource` an
 ```text
 nemo <plugin> <fn> run    [--spec '{...}' | --spec-file FILE] [--workspace W] [<spec-flag>...]
 nemo <plugin> <fn> submit [--spec '{...}' | --spec-file FILE] \
-                          [--base-url URL | --cluster URL] \
                           [--workspace W] [--request-id ID] [<spec-flag>...]
 ```
 
-`run` is local (in-process); `submit` POSTs to the plugin service's auto-derived route. Two verbs only — no `explain`. A function's only schema is `spec_schema`, and `--help` is the introspection surface.
+`run` is local (in-process); `submit` POSTs to the plugin service's auto-derived route on the platform
+selected by the global `nemo --base-url` / `nemo --context` flags and the active CLI context. Two verbs only — no `explain`. A function's only schema is `spec_schema`, and `--help` is the introspection surface.
 
 ## CLI introspection — auto-generated per-field flags
 

@@ -37,8 +37,8 @@ nhx auditor configs create <name> -d '{"description": "<description>", "system":
 nhx auditor configs get <name>
 nhx auditor targets get <name>
 
-# Run an audit locally
-nhx auditor audit run --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
+# Submit an audit job
+nhx auditor audit --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
 ```
 
 ## Success Criteria
@@ -46,5 +46,5 @@ nhx auditor audit run --spec '{"config": "default/<config-name>", "target": "def
 The task is complete when:
 - An audit target named `custom-audit-target` exists referencing the model through the provider
 - An audit config named `custom-probes-config` exists with the three specified probes
-- The audit run command has been invoked with the custom config and target
+- The audit command has been invoked with the custom config and target
 - The CLI output has been reviewed for result artifact paths or errors

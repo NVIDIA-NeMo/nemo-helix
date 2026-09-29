@@ -74,9 +74,10 @@ paths:
         \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
         \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\
         \ OAuth scopes to request during authentication\n  - `scope_prefix`: Prefix\
-        \ to prepend to custom scopes (those with ':' or '.default')\n  - `workload_token_exchange_enabled`:\
-        \ Whether SDK workload identity token exchange is enabled\n  - `workload_client_id`:\
-        \ OAuth client ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
+        \ clients prepend to NeMo Helix API scopes and NeMo Helix strips from returned\
+        \ token scopes\n  - `workload_token_exchange_enabled`: Whether SDK workload\
+        \ identity token exchange is enabled\n  - `workload_client_id`: OAuth client\
+        \ ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
         \ Token endpoint to use only for workload identity token exchange\n  - `workload_audience`:\
         \ RFC 8693 audience for exchanged workload tokens\n  - `workload_scope`: OAuth\
         \ scopes for exchanged workload tokens"

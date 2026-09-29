@@ -28,7 +28,6 @@ import httpx
 import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_agents_plugin.sdk import AgentsResource
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
@@ -324,7 +323,6 @@ def _assert_persisted_session_invocation(
 
 
 def run_agent_deploy_and_invoke(
-    sdk: NeMoHelix,
     client: NemoClient,
     *,
     workspace: str,
@@ -371,7 +369,7 @@ def run_agent_deploy_and_invoke(
     model_name = unique_name("calc-model")
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("calc-provider"),
         mock_response_body_by_model={
@@ -457,7 +455,6 @@ def run_agent_deploy_and_invoke(
 
 
 def run_container_agent_deploy_and_invoke(
-    sdk: NeMoHelix,
     client: NemoClient,
     *,
     workspace: str,
@@ -470,7 +467,6 @@ def run_container_agent_deploy_and_invoke(
 ) -> None:
     """Deploy a mock-backed container agent and invoke it through the gateway."""
     run_agent_deploy_and_invoke(
-        sdk,
         client,
         workspace=workspace,
         deployment_mode=deployment_mode,

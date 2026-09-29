@@ -247,6 +247,7 @@ agents-deepagents-e2e-services = [
 cpu-tasks = [
   { include-group = "nhx-base" },
   { include-group = "nhx-task-runtime" },
+  "nemo-agent-optimization-plugin",
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[all]",
@@ -440,6 +441,7 @@ nemo-agent-config-example-email-security-triage = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
 nemo-automodel-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nhx-automodel = { workspace = true }
@@ -504,6 +506,7 @@ members = [
   "plugins/nemo-customizer",
   "plugins/nemo-automodel",
   "plugins/nemo-optimization",
+  "plugins/nemo-agent-optimization",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "services/automodel",
@@ -621,6 +624,8 @@ extra-paths = [
   "plugins/nemo-guardrails/src",
   # So ``integration.*`` and ``from .utils import`` resolve in plugin tests (PEP 420).
   "plugins/nemo-guardrails/tests",
+  # agent-hardener is a virtual workspace member (not installed by default); add its src so ty resolves it.
+  "plugins/nemo-agent-hardener/src",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
   # nemo-evaluator plugin is not a workspace member; add its src so ty can

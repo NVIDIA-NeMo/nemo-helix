@@ -27,7 +27,6 @@ import pytest  # noqa: E402
 from nhx.testing.pytest_outcomes import pytest_skip as skip_test  # noqa: E402
 
 from tests.auth_idp.xdist import append_xdist_group_suffix  # noqa: E402
-from tests.discovery_exclusions import TEST_DISCOVERY_EXCLUSIONS  # noqa: E402
 
 # Set test environment variables BEFORE any imports
 # This must happen at module level, before pytest even starts processing
@@ -171,19 +170,6 @@ def mock_env_vars(monkeypatch) -> dict:
 # ============================================================================
 # Pytest hooks
 # ============================================================================
-
-
-def pytest_ignore_collect(collection_path: Path, config) -> bool:
-    """Skip test trees with explicit temporary root-CI discovery exclusions."""
-    try:
-        relative_path = collection_path.relative_to(Path(__file__).parent)
-    except ValueError:
-        return False
-
-    return any(
-        relative_path == excluded_path or excluded_path in relative_path.parents
-        for excluded_path in TEST_DISCOVERY_EXCLUSIONS
-    )
 
 
 def pytest_load_initial_conftests(early_config, parser, args):

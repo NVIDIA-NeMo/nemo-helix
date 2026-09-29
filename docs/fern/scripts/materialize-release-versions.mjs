@@ -187,8 +187,9 @@ function discoverReleaseTags() {
 
 // Optional docs/fern/release-branches.json selects release branches to preview
 // before their tags are cut. Array entries derive release/x.y -> x.y.0; object
-// entries map branch -> tag for patch or nonstandard cases. A real tag always
-// wins once it exists; see docs/fern/README.md#release-versioning.
+// entries map branch -> tag for patch or nonstandard cases. A real tag wins
+// once it exists unless the entry explicitly says to keep sourcing that version
+// from the branch; see docs/fern/README.md#release-versioning.
 function discoverBranchReleases() {
   if (!existsSync(branchConfigPath)) {
     return [];
@@ -196,7 +197,8 @@ function discoverBranchReleases() {
 
   const releases = [];
 
-  for (const [branch, tag] of readBranchReleaseEntries()) {
+  for (const [branch, options] of readBranchReleaseEntries()) {
+    const { tag, source } = options;
     if (!tag) {
       console.log(
         `Skipping release branch "${branch}": branch names must be release/x.y or release/x.y.z unless explicitly mapped`,
@@ -210,7 +212,8 @@ function discoverBranchReleases() {
       continue;
     }
 
-    if (gitOk(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`])) {
+    const tagExists = gitOk(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]);
+    if (tagExists && source !== "branch") {
       console.log(`Skipping branch ${branch}: tag ${tag} already exists`);
       continue;
     }
@@ -229,7 +232,7 @@ function discoverBranchReleases() {
     releases.push({
       ...release,
       ref,
-      availability: branchReleaseAvailability,
+      ...(tagExists ? { overridesTag: true } : { availability: branchReleaseAvailability }),
     });
   }
 
@@ -246,7 +249,7 @@ function readBranchReleaseEntries() {
         throw new Error(`${branchConfigPath} array entries must be branch names`);
       }
 
-      return [branch, tagForReleaseBranch(branch)];
+      return [branch, { tag: tagForReleaseBranch(branch) }];
     });
   }
 
@@ -254,12 +257,24 @@ function readBranchReleaseEntries() {
     throw new Error(`${branchConfigPath} must be a branch-name array or branch-to-tag object`);
   }
 
-  return Object.entries(config).map(([branch, tag]) => {
-    if (typeof tag !== "string") {
-      throw new Error(`${branchConfigPath} object values must be tag names`);
+  return Object.entries(config).map(([branch, value]) => {
+    if (typeof value === "string") {
+      return [branch, { tag: value }];
     }
 
-    return [branch, tag];
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${branchConfigPath} object values must be tag names or option objects`);
+    }
+
+    const { tag, source } = value;
+    if (typeof tag !== "string") {
+      throw new Error(`${branchConfigPath} option object values must include a string tag`);
+    }
+    if (source !== undefined && source !== "branch") {
+      throw new Error(`${branchConfigPath} option object source must be "branch" when set`);
+    }
+
+    return [branch, { tag, source }];
   });
 }
 
@@ -602,7 +617,12 @@ if (checkTag !== undefined) {
   process.exit(0);
 }
 
-const releases = [...discoverReleaseTags(), ...discoverBranchReleases()].sort(compareReleaseTags);
+const branchReleases = discoverBranchReleases();
+const overriddenTags = new Set(
+  branchReleases.filter((release) => release.overridesTag).map((release) => release.tag),
+);
+const tagReleases = discoverReleaseTags().filter((release) => !overriddenTags.has(release.tag));
+const releases = [...tagReleases, ...branchReleases].sort(compareReleaseTags);
 assertGeneratedVersionPathsAreUnique(releases);
 assertGeneratedVersionNavsAreWritable(releases);
 const previousGeneratedVersionPaths = existingGeneratedVersionPaths();

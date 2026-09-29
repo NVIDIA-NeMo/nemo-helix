@@ -16,7 +16,6 @@ import uuid
 from typing import Any, cast
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
@@ -37,10 +36,10 @@ def _unique_name(prefix: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_provider_create_and_list(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_provider_create_and_list(client: NemoClient, workspace: str):
     """Create a mock provider and verify it appears in the provider list."""
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("crud-provider"),
         mock_response_body={"id": "chatcmpl-test", "choices": []},
@@ -51,10 +50,10 @@ def test_provider_create_and_list(sdk: NeMoHelix, client: NemoClient, workspace:
     assert provider.name in names
 
 
-def test_provider_create_and_delete(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_provider_create_and_delete(client: NemoClient, workspace: str):
     """Create then delete a mock provider."""
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("delete-provider"),
         mock_response_body={"id": "chatcmpl-test", "choices": []},
@@ -73,7 +72,7 @@ def test_provider_create_and_delete(sdk: NeMoHelix, client: NemoClient, workspac
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_provider_route(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_chat_completion_via_provider_route(client: NemoClient, workspace: str):
     """Send a chat completion request routed by provider name."""
     gateway = InferenceGatewayClient.from_client(client)
     chat_response = {
@@ -90,7 +89,7 @@ def test_chat_completion_via_provider_route(sdk: NeMoHelix, client: NemoClient, 
     }
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("provider-chat"),
         mock_response_body=chat_response,
@@ -114,7 +113,7 @@ def test_chat_completion_via_provider_route(sdk: NeMoHelix, client: NemoClient, 
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_chat_completion_via_model_entity_route(client: NemoClient, workspace: str):
     """Send a chat completion request routed by model entity name."""
     gateway = InferenceGatewayClient.from_client(client)
     entity_name = _unique_name("model-entity")
@@ -131,7 +130,7 @@ def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, client: NemoClie
     }
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body=chat_response,
@@ -154,7 +153,7 @@ def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, client: NemoClie
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_openai_route(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_chat_completion_via_openai_route(client: NemoClient, workspace: str):
     """Send a chat completion request via the OpenAI-compatible route."""
     gateway = InferenceGatewayClient.from_client(client)
     entity_name = _unique_name("openai-model")
@@ -171,7 +170,7 @@ def test_chat_completion_via_openai_route(sdk: NeMoHelix, client: NemoClient, wo
     }
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body=chat_response,
@@ -198,7 +197,7 @@ def test_chat_completion_via_openai_route(sdk: NeMoHelix, client: NemoClient, wo
 # ---------------------------------------------------------------------------
 
 
-def test_streaming_chat_completion(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_streaming_chat_completion(client: NemoClient, workspace: str):
     """Streaming chat completion returns SSE chunks with content."""
     chat_response = {
         "id": "chatcmpl-stream",
@@ -213,7 +212,7 @@ def test_streaming_chat_completion(sdk: NeMoHelix, client: NemoClient, workspace
     }
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("stream-provider"),
         mock_response_body=chat_response,
@@ -245,7 +244,7 @@ def test_streaming_chat_completion(sdk: NeMoHelix, client: NemoClient, workspace
 # ---------------------------------------------------------------------------
 
 
-def test_model_list_via_openai_route(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_model_list_via_openai_route(client: NemoClient, workspace: str):
     """The OpenAI /v1/models endpoint lists routable VirtualModels.
 
     Adding a mock provider creates a model entity, for which the reconciler
@@ -255,7 +254,7 @@ def test_model_list_via_openai_route(sdk: NeMoHelix, client: NemoClient, workspa
     gateway = InferenceGatewayClient.from_client(client)
     entity_name = _unique_name("listable-model")
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body={"id": "chatcmpl-test", "choices": []},
@@ -272,11 +271,11 @@ def test_model_list_via_openai_route(sdk: NeMoHelix, client: NemoClient, workspa
 # ---------------------------------------------------------------------------
 
 
-def test_mock_provider_error_simulation(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_mock_provider_error_simulation(client: NemoClient, workspace: str):
     """Mock providers can simulate HTTP error responses."""
     gateway = InferenceGatewayClient.from_client(client)
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("error-provider"),
         mock_response_body={"error": {"message": "simulated failure", "type": "server_error"}},
@@ -299,14 +298,14 @@ def test_mock_provider_error_simulation(sdk: NeMoHelix, client: NemoClient, work
 # ---------------------------------------------------------------------------
 
 
-def test_per_model_sequential_responses(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_per_model_sequential_responses(client: NemoClient, workspace: str):
     """Mock providers support different sequential responses per model."""
     gateway = InferenceGatewayClient.from_client(client)
     entity_main = _unique_name("main-llm")
     entity_safety = _unique_name("safety-llm")
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("multi-model"),
         mock_response_body_by_model={
@@ -380,11 +379,11 @@ def test_per_model_sequential_responses(sdk: NeMoHelix, client: NemoClient, work
 # ---------------------------------------------------------------------------
 
 
-def test_virtual_model_created_by_mock_provider(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_virtual_model_created_by_mock_provider(client: NemoClient, workspace: str):
     """add_mock_provider creates a passthrough VirtualModel for each served entity."""
     entity_name = _unique_name("vm-check")
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body={"id": "chatcmpl-test", "choices": []},

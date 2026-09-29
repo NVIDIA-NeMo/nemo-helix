@@ -210,8 +210,6 @@ def _invoke_root(args: list[str], monkeypatch: pytest.MonkeyPatch) -> Any:
         ["--exist-ok"],
         ["--workspace", "team-a"],
         ["-w", "team-a"],
-        ["--base-url", "https://nhx.test"],
-        ["--cluster", "prod"],
         ["--hf-token-secret", "hf-token"],
     ],
     ids=lambda args: args[0],

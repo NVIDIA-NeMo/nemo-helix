@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -36,6 +37,12 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStag
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
 from nemo_helix_plugin.config import Configuration, nhx_user_data_dir
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 STAGED_SHA = "1" * 40
 
@@ -775,6 +782,7 @@ def platform_base_url(monkeypatch: pytest.MonkeyPatch) -> str:
     return "http://platform.test:8080"
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("platform_base_url")
 async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tmp_path: Path) -> None:
@@ -791,6 +799,7 @@ async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tm
     }
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("platform_base_url")
 async def test_fabric_deployment_omits_header_env(tmp_path: Path) -> None:
@@ -831,6 +840,7 @@ async def test_fabric_deployment_preserves_declared_atif_storage(tmp_path: Path)
     assert staged["telemetry"] == declared
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("platform_base_url")
 async def test_fabric_deployment_does_not_mutate_the_caller_config(tmp_path: Path) -> None:

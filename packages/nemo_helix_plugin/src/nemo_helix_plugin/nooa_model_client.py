@@ -84,6 +84,19 @@ def configured_model_refs() -> ConfiguredModelRefs:
     return ConfiguredModelRefs(default=default, fast=fast)
 
 
+def configured_fast_model() -> str | None:
+    """The configured fast model (falling back to the configured default), or None if neither is set.
+
+    Unlike :func:`configured_model_refs`, a missing default model is not an error here.
+    """
+    context = get_context()
+    fast = context.fast_model or context.default_model
+    if not fast:
+        return None
+    _validate_configured_ref(fast, "NEMO_FAST_MODEL" if context.fast_model else "NEMO_DEFAULT_MODEL")
+    return fast
+
+
 def _validate_configured_ref(model_ref: str, env_var: str) -> None:
     """Reject an unqualified model ref where the operator can still act on it.
 

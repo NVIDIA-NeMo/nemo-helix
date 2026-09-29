@@ -43,8 +43,8 @@ packages/nemo_helix_ext/src/nemo_helix_ext/cli/
 ## Running the CLI During Development
 
 ```bash
-uv run _nemo --help                 # runs from packages/nemo_helix_ext, no vendoring needed
-make update-cli                     # vendor into sdk/python/nemo-helix + regenerate reference docs
+uv run _nemo --help                 # runs from packages/nemo_helix_ext
+make update-cli                     # regenerate the CLI reference docs
 ```
 
 ## Adding or Changing a Command Group
