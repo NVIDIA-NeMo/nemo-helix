@@ -715,7 +715,7 @@ def create_server(working_dir: str | None = None) -> FastMCP:
                             test-policy, test-jobs-launcher, test-gpu-integration
                    SDK/CLI: refresh-openapi, update-sdk, update-cli,
                             generate-cli-reference-docs, generate-config-reference-docs
-                   Vendoring: vendor, vendor-nemo-helix-ext
+                   Vendoring: vendor
                    Policy: build-policy, check-policy
                    Licenses: update-licenses, check-licenses
                    Build: build-jobs-launcher
@@ -763,7 +763,6 @@ def create_server(working_dir: str | None = None) -> FastMCP:
             "generate-config-reference-docs",
             # Vendoring
             "vendor",
-            "vendor-nemo-helix-ext",
             # Policy operations
             "build-policy",
             "check-policy",
