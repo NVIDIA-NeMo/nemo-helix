@@ -17,9 +17,11 @@ is written via :func:`~nemo_evaluator.jobs.result_persistence.persist_agent_eval
 
 from __future__ import annotations
 
+import copy
 import importlib.metadata
 import logging
 import os
+import re
 import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -271,7 +273,7 @@ async def _load_registered_agent(
             f"registered agent {agent_workspace}/{agent_name} cannot be run through Fabric: {exc}"
         ) from exc
 
-    config = fabric_config.model_dump(mode="json", exclude_none=True)
+    config = _template_mcp_secret_env(fabric_config.model_dump(mode="json", exclude_none=True), environment)
     files: FilesetRef | None = None
     if registered_agent_config_needs_files(config):
         files_client = client_from_platform(async_sdk, AsyncFilesClient)
@@ -311,6 +313,53 @@ def _merge_env_secrets(
             overridden,
         )
     return {**agent_secrets, **target_secrets}
+
+
+#: ``${NAME}`` as it appears in a stdio MCP server's ``env`` after resolution.
+_ENV_TEMPLATE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpecInline | None) -> dict[str, Any]:
+    """Name each stdio MCP server's bound secrets in its ``env`` as ``${NAME}`` templates.
+
+    An MCP stdio server is spawned with a fixed default environment plus the server's own ``env``; it
+    does not inherit the harness process's environment, so a secret that reaches the process as
+    ``NAME`` still never reaches the server. The environment merge keeps secret names out of the
+    server config on purpose (values must not be persisted), so the resolver adds the *template*
+    here and the runtime that holds the value expands it at launch. A template is not a credential.
+    """
+    if environment is None or not environment.mcp:
+        return config
+    servers = ((config.get("mcp") or {}).get("servers")) or {}
+    for name, fulfillment in environment.mcp.items():
+        server = servers.get(name)
+        if not isinstance(server, dict) or server.get("transport") != "stdio" or not fulfillment.secrets:
+            continue
+        server["env"] = {
+            **(server.get("env") or {}),
+            **{env_name: f"${{{env_name}}}" for env_name in fulfillment.secrets},
+        }
+    return config
+
+
+def _expand_mcp_secret_env(config: dict[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
+    """A copy of ``config`` with stdio MCP server ``env`` templates filled from ``values``.
+
+    Only the in-memory config handed to the host runtime is expanded; the persisted spec keeps the
+    templates. Templates naming a variable ``values`` lacks are left as they are.
+    """
+    servers = ((config.get("mcp") or {}).get("servers")) or {}
+    if not any(isinstance(s, dict) and s.get("transport") == "stdio" and s.get("env") for s in servers.values()):
+        return config
+    expanded = copy.deepcopy(config)
+    for server in expanded["mcp"]["servers"].values():
+        if not isinstance(server, dict) or server.get("transport") != "stdio":
+            continue
+        for key, value in list((server.get("env") or {}).items()):
+            match = _ENV_TEMPLATE.match(value) if isinstance(value, str) else None
+            if match and match.group(1) in values:
+                server["env"][key] = values[match.group(1)]
+    return expanded
 
 
 async def _resolve_registered_agent(
@@ -783,7 +832,7 @@ class _AgentEvalJobBase(NemoJob):
             _require_fabric_env_secrets_resolved(target)
             assert target.config is not None  # canonical spec guarantees resolution ran
             fabric_runtime = FabricAgentRuntime(
-                config=target.config,
+                config=_expand_mcp_secret_env(target.config, os.environ),
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,

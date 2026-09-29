@@ -325,6 +325,62 @@ async def test_environment_spec_only_fulfils_servers_the_agent_declares(mocker: 
     assert resolved.config["mcp"]["servers"] == {}
 
 
+async def test_a_stdio_servers_bound_secret_is_named_in_its_env_as_a_template(mocker: MockerFixture) -> None:
+    """The MCP SDK spawns stdio servers without the harness's environment; the server must name the variable."""
+    config = _calculator_with_mcp_config()
+    config["mcp"]["servers"]["calculator"] = {"transport": "stdio", "url": "/usr/bin/python3", "args": ["srv.py"]}
+    config["mcp"]["servers"]["remote"] = {"transport": "streamable-http", "url": "http://calc.internal/mcp"}
+    _platform(mocker, _agent(config))
+    environment = EnvironmentSpecInline(
+        mcp={
+            "calculator": McpFulfillment(url="/usr/bin/python3", secrets={"CALC_TOKEN": "dev/calc-token"}),
+            "remote": McpFulfillment(url="http://mock/mcp", secrets={"REMOTE_TOKEN": "dev/remote-token"}),
+        }
+    )
+
+    resolved = await _resolve(_by_agent(environment=environment))
+
+    assert isinstance(resolved, FabricRunnerTarget) and resolved.config is not None
+    servers = resolved.config["mcp"]["servers"]
+    assert servers["calculator"]["env"] == {"CALC_TOKEN": "${CALC_TOKEN}"}
+    assert "env" not in servers["remote"]  # nothing to spawn; the secret still reaches the process env
+    assert resolved.env_secrets == {
+        "CALC_TOKEN": SecretRef(root="dev/calc-token"),
+        "REMOTE_TOKEN": SecretRef(root="dev/remote-token"),
+    }
+
+
+def test_the_host_runtime_expands_stdio_env_templates_only_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _job_context(tmp_path)
+    monkeypatch.setenv("CALC_TOKEN", "sekrit")
+    config = {
+        "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+        "mcp": {
+            "servers": {
+                "calculator": {
+                    "transport": "stdio",
+                    "url": "python3",
+                    "env": {"CALC_TOKEN": "${CALC_TOKEN}", "OTHER": "${UNSET_VAR}"},
+                }
+            }
+        },
+    }
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(config=config), env_secrets={"CALC_TOKEN": SecretRef(root="dev/calc-token")}
+    )
+
+    runtime, _, _ = AgentEvalJob._resolve_target(target, ctx)
+
+    launched = getattr(runtime, "_config")
+    assert launched["mcp"]["servers"]["calculator"]["env"] == {"CALC_TOKEN": "sekrit", "OTHER": "${UNSET_VAR}"}
+    assert (
+        target.config is not None
+        and target.config["mcp"]["servers"]["calculator"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"
+    )
+
+
 async def test_conflicting_environment_secret_bindings_are_a_submit_error(mocker: MockerFixture) -> None:
     _platform(mocker, _agent())
     # Bound both as a secret ref and as plaintext env: the merge refuses rather than picking an order.

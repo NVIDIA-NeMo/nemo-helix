@@ -304,7 +304,10 @@ servers at mocks, add process env, and bind secrets by reference:
 
 Only servers the agent already declares are fulfilled — an environment can redirect a tool, not hand
 the agent one it never had. Secret values never enter the spec: the refs travel as `env_secrets` on the
-resolved Fabric target and the service injects them into the job's environment.
+resolved Fabric target and the service injects them into the job's environment. A secret bound to a
+**stdio** server is also named in that server's `env` as a `${NAME}` template, because an MCP stdio
+server does not inherit the harness's environment; the host runtime fills the template at launch and
+the persisted spec keeps only the template.
 
 Only agents with `config_format: nemo-agents-spec-v1` resolve. A legacy `nat-workflow-v1` agent is
 rejected at submit — it describes a NeMo Agent Toolkit workflow, which has no runner here. When the

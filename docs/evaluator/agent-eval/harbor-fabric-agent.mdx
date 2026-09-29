@@ -327,6 +327,12 @@ true of the Inference Gateway itself on a laptop, where the platform binds to `l
 local run. A registered agent carries no `model_name`: its model is part of what it is, and a different model
 is a different registered agent.
 
+One limitation inside the task container: a secret bound to a **stdio** MCP server through
+`mcp.<name>.secrets` reaches the agent's environment but not the server itself. The resolver names it in
+the server's `env` as a `${NAME}` template, which the host Fabric runner expands at launch, but the
+runner inside the task container does not. Use a network-transport server, or pass the value another
+way, until that runner learns to.
+
 ## Next steps
 
 <Cards>
