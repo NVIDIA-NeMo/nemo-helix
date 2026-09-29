@@ -1,3 +1,4 @@
+---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -57,14 +58,14 @@ and deeper Studio agent-onboarding and Customizer workflows.
   Harbor, and can run Fabric harnesses on Harbor tasks that ship no Python.
 - Gym runner submissions can include secret references and a placement
   target, and agent evaluations can be submitted from the async plugin SDK.
-- Trial measurements are now typed, and Fabric sandbox and Relay trials can
-  capture their own OTLP export so container trials carry a trace.
-- Harbor agent credentials route through env-secrets instead of inline
-  configuration, and `HarborRunnerTarget` exposes `agent_kwargs`.
+- Fabric sandbox and Relay evaluation trials now capture their own OTLP trace,
+  so runs using those Harbor targets show up alongside other traced trials.
+- Harbor agent evaluation credentials are supplied through env-secrets instead
+  of inline configuration, keeping credentials out of evaluation config files.
 - Intake can import Gym rollout trajectories.
-- `nemo-sandboxed-gym` is now released independently of the platform, and the
-  sandboxed Gym runtime vendors the Hugging Face cache into its writable work
-  directory.
+- The sandboxed Gym runtime now vendors its Hugging Face cache into its
+  writable work directory, so sandboxed Gym tasks no longer need external
+  Hugging Face access to run.
 
 ### Studio
 
@@ -115,9 +116,6 @@ and deeper Studio agent-onboarding and Customizer workflows.
 
 ## Maintenance
 
-- The repository, Python packages, container images (including the remaining
-  `nmp-*` container IDs), and Helm chart complete their rename from
-  `nemo-platform` to `nemo-helix`.
 - The CLI's typed-client plumbing no longer depends on Stainless-generated
   code.
 - Fabric-backed agent workflows upgrade to Fabric 0.3.0.
@@ -130,9 +128,8 @@ activation, the system-toolchain fallback, and provider configuration.
 
 For self-managed Kubernetes, start with
 [Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install).
-The Helm chart, and all first-party container images, now use `nemo-helix`
-and `nhx-*` naming throughout; update any pinned chart name or image
-references from `nemo-platform`/`nmp-*` before upgrading.
+If you are updating pinned chart or image references from an earlier release,
+see the upgrade steps below.
 
 ## Upgrade from v0.6.x
 
@@ -169,7 +166,7 @@ legacy` (or another installed strategy), staging remote bundles first with
 
 ## Compatibility
 
-- Python 3.12-3.13
+- Python 3.12, 3.13, or 3.14
 - macOS and Linux for local CLI, SDK, Studio, and hosted-provider workflows
 - Linux x86_64 for local NVIDIA GPU workloads
 - CUDA 13-capable NVIDIA drivers for local GPU workloads
@@ -206,8 +203,8 @@ legacy` (or another installed strategy), staging remote bundles first with
 - **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
   have a local Docker fallback. DPO remains full-weight only.
 - **Agent intent migration.** `AGENT-SPEC.md` is legacy. Use `ETHOS.md` for
-  new work and run `nemo agents ethos migrate` for platform-owned legacy
-  packages before relying on optimizer workflows.
+  new work, and migrate a platform-owned legacy `AGENT-SPEC.md` package to
+  `ETHOS.md` before relying on optimizer workflows.
 - **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
   from a developer workstation. It is not available as a horizontally scaled
   cluster service in this release.
