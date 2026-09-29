@@ -17,8 +17,10 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
-def runner() -> CliRunner:
+def runner(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     """CLI runner for ``nemo agents`` command tests."""
+    # The CLI sizes the table from the terminal; pin a wide one so output doesn't depend on the host.
+    monkeypatch.setenv("COLUMNS", "122")
     return CliRunner()
 
 

@@ -75,6 +75,19 @@ def _reset_api_error_streaks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(register, "_preflight_guardrail_model", lambda *_args, **_kwargs: None)
 
 
+@pytest.fixture(autouse=True)
+def _restore_fabric_compat_patches(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The fabric_compat shims patch module globals for the agent's process lifetime. Record the
+    # originals so pytest restores them and later tests in the worker see unpatched Fabric code.
+    from nemo_agents_plugin.fabric import translator
+    from nemo_fabric_adapters.deepagents import adapter
+
+    monkeypatch.setattr(translator, "_skills_config", translator._skills_config)
+    monkeypatch.setattr(adapter, "resolve_skills", adapter.resolve_skills)
+    monkeypatch.setattr(adapter, "_mcp_connection", adapter._mcp_connection)
+    monkeypatch.setattr(adapter.common_utils, "capability_plan", adapter.common_utils.capability_plan)
+
+
 def test_agent_config_translates_to_fabric_deepagents() -> None:
     apply_platform_skill_translation_compatibility()
     config = load_agent_config(AGENT_ROOT / "agent.yaml")
