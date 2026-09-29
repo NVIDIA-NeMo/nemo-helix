@@ -71,6 +71,7 @@ members = [
     "nhx-platform-runner",
     "nhx-platform-seed",
     "nhx-rl",
+    "nhx-sandbox",
     "nhx-secrets",
     "nhx-studio",
     "nhx-testing",
@@ -7723,6 +7724,7 @@ dev = [
     { name = "nhx-hello-world", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-intake", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nhx-sandbox", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-secrets", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-testing", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nox", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7985,6 +7987,7 @@ dev = [
     { name = "nhx-hello-world", editable = "services/hello-world" },
     { name = "nhx-intake", editable = "services/intake" },
     { name = "nhx-platform", editable = "packages/nhx_platform" },
+    { name = "nhx-sandbox", editable = "packages/nhx_sandbox" },
     { name = "nhx-secrets", editable = "services/core/secrets" },
     { name = "nhx-testing", editable = "packages/nhx_testing" },
     { name = "nox" },
@@ -9050,6 +9053,17 @@ dev = [
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=0.25.3" },
 ]
+
+[[package]]
+name = "nhx-sandbox"
+version = "0.0.0"
+source = { editable = "packages/nhx_sandbox" }
+dependencies = [
+    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.10.0" }]
 
 [[package]]
 name = "nhx-secrets"
