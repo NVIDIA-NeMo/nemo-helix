@@ -36,10 +36,10 @@ COPY plugins/nemo-builder ./plugins/nemo-builder
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-cache ./plugins/nemo-builder
 
-# Proves the console script resolves and each step module imports, at BUILD time rather than
+# Proves the console script resolves and each module it runs imports, at BUILD time rather than
 # twenty minutes into a job. A missing transitive dependency is otherwise discovered by a pod.
-RUN nhx-build --help 2>&1 | grep -q 'fetch|supervise|push' \
- && python -c "import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push" \
+RUN nhx-build --help 2>&1 | grep -q 'fetch|supervise|push|broker' \
+ && python -c "import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push, nemo_builder_plugin.run.broker, nemo_builder_plugin.run.token_server" \
  && crane version && cosign version 2>&1 | head -3
 
 WORKDIR /

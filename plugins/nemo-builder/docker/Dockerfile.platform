@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# nhx-api plus this plugin.
+#
+# The plugin is not a workspace member and is not in `enabled-plugins`, so a stock nhx-api does
+# not carry it. Adding it there is the right long-term move and it is NOT what this does: that
+# edit requires a `uv lock` refresh, which is a change to the whole repo's dependency graph for
+# the sake of a proof of concept.
+#
+# Instead the wheel is built separately and dropped into the runtime venv's site-packages.
+# Entry points are read from `<dist-info>/entry_points.txt` in site-packages, so copying the
+# package and its dist-info together is enough for `nemo.services` and `nemo.controllers`
+# discovery to find it -- no reinstall, and nothing else in the image moves.
+ARG NHX_API_IMAGE=my-registry/nhx-api:local
+ARG VENV_PY=python3.13
+# The uv the repo's lockfile is maintained with (`make toolchain-versions`).
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.10.10
+
+FROM ${UV_IMAGE} AS uv
+
+# The base the repo's own images build on (docker-bake.hcl).
+FROM python:3.13.15-slim-trixie AS pkg
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /src
+COPY plugins/nemo-builder ./plugins/nemo-builder
+# `--no-deps`: every dependency is already in the api image. Installing them again here would
+# shadow the image's pinned versions with whatever resolves today, which is how a derived image
+# quietly stops being the thing it was derived from. `--no-sources`: the plugin's path sources
+# exist to resolve those dependencies, and none are resolved here. The build backend is held to
+# the version uv.lock pins, rather than whatever PyPI serves on the day.
+RUN echo "hatchling==1.31.0" > /tmp/build-constraints.txt \
+ && uv pip install --no-cache --target /pkg --no-deps --no-sources \
+      --build-constraints /tmp/build-constraints.txt ./plugins/nemo-builder \
+ && test -f /pkg/nemo_builder_plugin/service.py \
+ && ls -d /pkg/nemo_builder_plugin-*.dist-info \
+ && grep -q "nemo.services" /pkg/nemo_builder_plugin-*.dist-info/entry_points.txt
+
+FROM ${NHX_API_IMAGE}
+ARG VENV_PY
+COPY --from=pkg /pkg/ /app/.venv/lib/${VENV_PY}/site-packages/
+# Fails the build if the api image's Python is not `VENV_PY`: the files would then sit where it
+# never looks, and without this the image would build anyway, with no builder in it. Exec form,
+# because the api image is distroless and a shell is not something to rely on.
+RUN ["/app/.venv/bin/python", "-c", "import importlib.metadata as m, nemo_builder_plugin.service, nemo_builder_plugin.controller; assert any(e.name == 'builder' for e in m.entry_points(group='nemo.services')), 'builder service entry point not found'"]

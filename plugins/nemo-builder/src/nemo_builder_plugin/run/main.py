@@ -9,6 +9,9 @@ deliberately has no way to pick an identity or widen what a step may do.
 
 ``broker`` is not a step. It runs as its own Deployment, under its own ServiceAccount, and is the
 only process that holds the registry credential and the signing key (``run/broker.py``).
+
+``token-server`` is not part of the design at all: a local-only stand-in for a registry's token
+service, for the minikube quickstart (``run/token_server.py``).
 """
 
 from __future__ import annotations
@@ -40,6 +43,10 @@ def _load(name: str, rest: list[str]) -> Callable[[], int]:
         from nemo_builder_plugin.run.broker import main as broker_main
 
         return lambda: broker_main(rest)
+    if name == "token-server":
+        from nemo_builder_plugin.run.token_server import main as token_server_main
+
+        return lambda: token_server_main(rest)
     raise KeyError(name)
 
 
@@ -47,12 +54,12 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = sys.argv[1:] if argv is None else argv
     if not args or args[0] in ("-h", "--help"):
-        print("usage: nhx-build {fetch|supervise|push|broker}", file=sys.stderr)
+        print("usage: nhx-build {fetch|supervise|push|broker|token-server}", file=sys.stderr)
         return 2
     try:
         command = _load(args[0], args[1:])
     except KeyError:
-        print(f"unknown command {args[0]!r}; expected fetch, supervise, push or broker", file=sys.stderr)
+        print(f"unknown command {args[0]!r}; expected fetch, supervise, push, broker or token-server", file=sys.stderr)
         return 2
     return command()
 

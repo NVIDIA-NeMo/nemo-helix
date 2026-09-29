@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# A registry for LOCAL verification only, deliberately in its own directory so that
+# `kubectl apply -f ../` does not pull it into a real deployment.
+#
+# Not part of the design: RFC 001 Requirement 5 says the platform must not require operating a
+# registry that holds build output, and a real deployment points at a tenant registry. It lives in
+# a namespace of its own, `nhx-registry`, to say so.
+#
+# It uses TOKEN AUTH, as GAR, Harbor and Artifactory do: an anonymous request is answered `401`
+# with `Bearer realm=...`, and the realm is a token service -- here the local stand-in,
+# token-server.yaml, whose key the registry trusts through the `registry-token-jwks` ConfigMap
+# (derived from that key in the README's quickstart). So a green local run exercises the broker's
+# token-specification client, and a push to anything but a job's own destinations is refused by
+# the registry itself.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nhx-registry
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: nhx-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: registry }
+  template:
+    metadata:
+      labels: { app: registry }
+    spec:
+      containers:
+        - name: registry
+          image: registry:3.0.0
+          ports: [{ containerPort: 5000 }]
+          env:
+            - { name: REGISTRY_STORAGE_DELETE_ENABLED, value: "true" }
+            - { name: REGISTRY_AUTH, value: token }
+            - name: REGISTRY_AUTH_TOKEN_REALM
+              value: http://nhx-token-server.nhx-registry.svc.cluster.local:8080/token
+            # The tokens' audience. The token server issues for this value alone, and the builder's
+            # `registry` names the same host.
+            - { name: REGISTRY_AUTH_TOKEN_SERVICE, value: "registry.nhx-registry.svc.cluster.local:5000" }
+            - { name: REGISTRY_AUTH_TOKEN_ISSUER, value: nhx-local-token-server }
+            - { name: REGISTRY_AUTH_TOKEN_JWKS, value: /etc/distribution/auth/jwks.json }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/registry }
+            - { name: jwks, mountPath: /etc/distribution/auth, readOnly: true }
+          resources:
+            requests: { cpu: "50m", memory: 128Mi }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: jwks
+          configMap: { name: registry-token-jwks }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: nhx-registry
+spec:
+  selector: { app: registry }
+  ports:
+    - port: 5000
+      targetPort: 5000

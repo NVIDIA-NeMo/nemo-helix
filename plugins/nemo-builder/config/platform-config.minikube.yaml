@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Platform config for the local minikube verification. Becomes the `nemo-helix-config`
+# ConfigMap; see ../deploy/local/platform.yaml.
+#
+# LOCAL ONLY. Each of the following is something this environment cannot verify, and each must
+# change before this file is a starting point for any shared cluster:
+#
+#   - auth is off (`auth.enabled: false`, `allow_unsigned_jwt: true`), so every request acts as
+#     the admin -- `fetch` reading filesets as the submitter, and every permission check, go
+#     unexercised
+#   - `secrets.allow_key_creation` generates the encryption key on the pod's own disk
+#   - the registry is in-cluster and plain HTTP, and its token service is a local stand-in
+#     (deploy/local/token-server.yaml) rather than a real registry's
+#   - the credential broker reads rows anonymously, which works only with auth off; with auth
+#     on it exchanges each step's token for the submitter's (deploy/local/broker.yaml)
+#   - `repository_prefix` is empty; see "Configuration" in the README for why a real one is not
+#   - finished jobs keep their pods and work directories for an hour, so their logs can be read
+#   - the sandbox is sized for a laptop
+#   - the platform images and the kaniko image are side-loaded with `minikube image load`, so there
+#     is no image pull secret; the registry and every base image come from public registries
+
+platform:
+  runtime: "kubernetes"
+  base_url: "http://nemo-helix.nhx-platform.svc.cluster.local:8080"
+
+service: {}
+
+auth:
+  enabled: false
+  allow_unsigned_jwt: true
+  policy_decision_point_provider: embedded
+  policy_decision_point_base_url: "http://127.0.0.1:8080"
+  admin_email: "admin@example.com"
+
+entities: {}
+
+secrets:
+  allow_key_creation: true
+  local_key_creation_path: "/var/lib/nemo/nhx-encryption-key.txt"
+
+files:
+  default_storage_config:
+    type: local
+    path: "/var/lib/nemo/files_storage"
+
+jobs:
+  executors:
+    # The trust split: three profiles, three ServiceAccounts, one job.
+    - provider: cpu
+      profile: build-fetch
+      backend: kubernetes_job
+      config: &build_profile
+        namespace: nhx-builds
+        service_account_name: nhx-build-fetch
+        # The platform image ships the launcher at /tools/jobs-launcher, as the Helm chart relies on.
+        launcher_image: nhx-api-builder:local
+        default_task_image: nhx-build:local
+        storage:
+          pvc_name: nhx-build-work
+        node_selector:
+          nhx.nvidia.com/build-node: "true"
+        cleanup_completed_jobs_immediately: false
+        ttl_seconds_after_finished: 3600
+        resources:
+          requests:
+            cpu: "100m"
+            memory: 256Mi
+
+    - provider: cpu
+      profile: build-control
+      backend: kubernetes_job
+      config:
+        <<: *build_profile
+        service_account_name: nhx-build-control
+
+    - provider: cpu
+      profile: build-push
+      backend: kubernetes_job
+      config:
+        <<: *build_profile
+        service_account_name: nhx-build-push
+
+  executor_defaults:
+    kubernetes_job:
+      cleanup_completed_jobs_immediately: false
+      ttl_seconds_after_finished: 3600
+
+builder:
+  namespace: nhx-builds
+  work_pvc: nhx-build-work
+  # Built from docker/Dockerfile.kaniko and side-loaded.
+  sandbox_image: nhx-kaniko:local
+
+  # The one registry every image goes to; a caller cannot name another. A Service name, which
+  # only resolves inside the cluster -- so this config is not usable from outside it. That is
+  # fine here and is the reason the control plane moved in-cluster.
+  #
+  # Plain HTTP (`http://`). Never do this against anything holding real artifacts: the digest an
+  # HTTP registry reports is unauthenticated, and the broker signs the digest it reads.
+  registry: http://registry.nhx-registry.svc.cluster.local:5000
+  # Images land at <repository_prefix>/<workspace>/<output.repository>, or at
+  # <repository_prefix>/<workspace>/<set>/<spec> for a spec that names no output. Empty here, so a
+  # build in `default` asking for `demo/hello` publishes `default/demo/hello`.
+  repository_prefix: ""
+
+  # The local token service follows the specification: it grants the intersection of what the
+  # broker asks for and what the broker holds.
+  registry_narrows_scope: true
+
+  # Every credential the push step uses, and every signature, comes from here. No step holds a
+  # standing credential or a key, and nhx-build-push holds no RBAC.
+  credential_broker: http://nhx-build-broker.nhx-build-broker.svc.cluster.local:8080
+  # `signing_public_key`, the key signatures are verified against, comes from the
+  # `nhx-build-signing-public-key` ConfigMap as an environment variable (deploy/local/platform.yaml).
+
+  # Sized for a laptop. On a real deployment this is the default 2 / 8Gi.
+  sandbox_cpu: "500m"
+  sandbox_memory: 1Gi
+
+  # Rows go `ready` when their signature is delivered; the sweep only fails the ones whose job
+  # ended without any.
+  sweep_interval_seconds: 10

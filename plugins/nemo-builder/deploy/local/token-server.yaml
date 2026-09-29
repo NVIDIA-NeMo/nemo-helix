@@ -1,0 +1,130 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The local registry's token service, for LOCAL verification only (run/token_server.py).
+#
+# It stands in for what GAR's, Harbor's or Artifactory's token service is in production, so that
+# the credential broker's token-specification client runs locally. Callers authenticate with a
+# ServiceAccount token bound to the `nhx-local-token-server` audience, and are granted the
+# intersection of what they ask for and their entry below. The broker may pull and push; a reader
+# the quickstart checks results with may pull; anything else -- a push step presenting its own
+# token here -- gets a token for nothing.
+#
+# Needs its signing key in the `nhx-token-server-key` Secret, and the registry needs the matching
+# JWKS in `registry-token-jwks` -- both created by hand in the README's quickstart.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nhx-token-server
+  namespace: nhx-registry
+---
+# Pull-only, for reading results back in the quickstart (`kubectl create token`).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nhx-registry-reader
+  namespace: nhx-registry
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nhx-token-server-token-review
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nhx-token-server-token-review
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nhx-token-server-token-review
+subjects:
+  - kind: ServiceAccount
+    name: nhx-token-server
+    namespace: nhx-registry
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nhx-token-server-config
+  namespace: nhx-registry
+data:
+  config.yaml: |
+    # Must match the registry's auth.token.service and auth.token.issuer (registry.yaml).
+    service: registry.nhx-registry.svc.cluster.local:5000
+    issuer: nhx-local-token-server
+    key_file: /var/run/nhx-token-server/key/key.pem
+    audience: nhx-local-token-server
+    ttl_seconds: 900
+    grants:
+      # The credential broker, and nothing else. `repositories` is a prefix; empty is every
+      # repository -- the builder's `repository_prefix` is empty here too.
+      - subject: system:serviceaccount:nhx-build-broker:nhx-build-broker
+        repositories: ""
+        actions: [pull, push]
+      - subject: system:serviceaccount:nhx-registry:nhx-registry-reader
+        repositories: ""
+        actions: [pull]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nhx-token-server
+  namespace: nhx-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: nhx-token-server }
+  template:
+    metadata:
+      labels: { app: nhx-token-server }
+    spec:
+      serviceAccountName: nhx-token-server
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532  # the key file is 0440: readable by this group, and no one else
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: token-server
+          # The step image: `nhx-build token-server` is a subcommand of the same binary.
+          image: nhx-build:local
+          imagePullPolicy: IfNotPresent
+          command: ["nhx-build", "token-server"]
+          env:
+            - { name: NHX_TOKEN_SERVER_CONFIG, value: /etc/nhx-token-server/config.yaml }
+            - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/nhx-token-server, readOnly: true }
+            - { name: key, mountPath: /var/run/nhx-token-server/key, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "50m", memory: 96Mi }
+      volumes:
+        - name: config
+          configMap: { name: nhx-token-server-config }
+        - name: key
+          secret: { secretName: nhx-token-server-key, defaultMode: 0440 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nhx-token-server
+  namespace: nhx-registry
+spec:
+  selector: { app: nhx-token-server }
+  ports:
+    - { port: 8080, targetPort: 8080 }

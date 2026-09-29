@@ -17,7 +17,7 @@
 # step's own token, or anonymously where platform auth is off.
 #
 # The Deployment itself is deployment-specific -- it mounts the credential, the key and the
-# platform's `builder:` config -- so it is not here.
+# platform's `builder:` config -- so it is not here. deploy/local/broker.yaml runs it on minikube.
 apiVersion: v1
 kind: Namespace
 metadata:

@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The credential broker, run on minikube (run/broker.py). Its namespace, ServiceAccount and RBAC
+# are ../50-broker.yaml; this is the deployment-specific rest.
+#
+# It reads two configs: its own (below), and the platform's `builder:` section -- the same
+# `nemo-helix-config` the platform reads, created in this namespace too by the quickstart -- so the
+# two cannot disagree about the registry, the prefix, or the push step's identity.
+#
+# What it holds, and nothing in `nhx-builds` can read:
+#   - the cosign key, in the `nhx-build-broker-cosign-key` Secret (created by hand, see README);
+#   - its registry credential: its own ServiceAccount token, projected for the local token
+#     service's audience and re-read on every use, since the kubelet rotates it. In production
+#     this is a token service's credential -- a GAR key or workload identity, a Harbor robot.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nhx-build-broker-config
+  namespace: nhx-build-broker
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+data:
+  config.yaml: |
+    # Where the builder's routes are: a job's rows are read from its list route.
+    platform_url: http://nemo-helix.nhx-platform.svc.cluster.local:8080
+    # Platform auth is off in this quickstart, so a step presents its ordinary ServiceAccount
+    # token (no `step_token_audience`) and rows are read anonymously (no `token_exchange`). With
+    # auth on, both are set: the workload identity audience Jobs projects, and the platform's
+    # token exchange, through which rows are read as the submitter.
+    registry_username: nhx-build-broker
+    registry_password_file: /var/run/secrets/nhx-token-server/token
+    signing_key: /var/run/nhx-build-broker/cosign/cosign.key
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nhx-build-broker
+  namespace: nhx-build-broker
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  # One replica: nothing it decides is kept between requests, but the quickstart needs no more.
+  replicas: 1
+  selector:
+    matchLabels: { app: nhx-build-broker }
+  template:
+    metadata:
+      labels: { app: nhx-build-broker }
+    spec:
+      serviceAccountName: nhx-build-broker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532  # the key file is 0440: readable by this group, and no one else
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: broker
+          # The step image: `nhx-build broker` is a subcommand of the same binary the steps run.
+          image: nhx-build:local
+          imagePullPolicy: IfNotPresent
+          command: ["nhx-build", "broker"]
+          env:
+            - { name: NHX_BROKER_CONFIG, value: /etc/nhx-build-broker/config.yaml }
+            - { name: NHX_CONFIG_FILE_PATH, value: /etc/nhx/config.yaml }
+            - { name: NHX_CONFIG_WARNINGS_DISABLED, value: "1" }
+            - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
+            # crane and cosign write to $HOME and to temp files; the root filesystem is read-only.
+            - { name: HOME, value: /tmp }
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/nhx-build-broker, readOnly: true }
+            - { name: platform-config, mountPath: /etc/nhx, readOnly: true }
+            - { name: cosign, mountPath: /var/run/nhx-build-broker/cosign, readOnly: true }
+            - { name: registry-token, mountPath: /var/run/secrets/nhx-token-server, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "50m", memory: 160Mi }
+      volumes:
+        - name: config
+          configMap: { name: nhx-build-broker-config }
+        - name: platform-config
+          configMap: { name: nemo-helix-config }
+        - name: cosign
+          secret: { secretName: nhx-build-broker-cosign-key, defaultMode: 0440 }
+        - name: registry-token
+          projected:
+            sources:
+              - serviceAccountToken: { audience: nhx-local-token-server, path: token, expirationSeconds: 3600 }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nhx-build-broker
+  namespace: nhx-build-broker
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  selector: { app: nhx-build-broker }
+  ports:
+    - { port: 8080, targetPort: 8080 }
