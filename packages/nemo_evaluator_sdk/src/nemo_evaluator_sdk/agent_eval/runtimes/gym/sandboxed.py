@@ -30,6 +30,7 @@ token off the descriptor, and hand them to this runner.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import tempfile
@@ -158,6 +159,14 @@ class SandboxedGymRuntimeConfig(BaseModel):
         "instance an agent config's top-level key defines (`rewoo_agent`), not the component it configures "
         "(`simple_agent`).",
     )
+    num_repeats: int = Field(default=1, ge=1, description="Attempts per row; each attempt becomes one trial.")
+    concurrency: int = Field(
+        default=4,
+        ge=1,
+        description="Rollouts the host runs at once, as `--concurrency` does for `gym eval run`. Bounds "
+        "parallelism, not the number of rollouts. Distinct from AgentEvalRunConfig.parallelism, which bounds "
+        "concurrent scoring.",
+    )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from each rollout record.")
 
 
@@ -191,6 +200,8 @@ class SandboxedGymAgentTaskRunner:
                 "mode": "sandboxed",
                 "rollout_url": cfg.rollout_url,
                 "agent_ref_name": cfg.agent_ref_name,
+                "num_repeats": cfg.num_repeats,
+                "concurrency": cfg.concurrency,
                 "reward_key": cfg.reward_key,
                 "timeout_s": cfg.timeout_s,
             },
@@ -262,7 +273,7 @@ class SandboxedGymAgentTaskRunner:
         async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
             response = await client.post(
                 self._config.rollout_url,
-                json={"examples": examples},
+                json={"examples": examples, "concurrency": self._config.concurrency},
                 headers=self._request_headers(),
             )
         elapsed = time.monotonic() - started
@@ -321,6 +332,7 @@ class SandboxedGymAgentTaskRunner:
             # which is how multi-agent Gym datasets are meant to work.
             for example in examples:
                 example.setdefault("agent_ref", {"name": cfg.agent_ref_name})
+        examples = [copy.deepcopy(example) for example in examples for _ in range(cfg.num_repeats)]
         _stamp_rollout_indices(examples)
         logger.info(
             "Collecting %d example(s) from %s via sandboxed Gym host %s.",

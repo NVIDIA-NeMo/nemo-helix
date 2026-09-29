@@ -53,11 +53,12 @@ def _tasks(tmp_path: Path) -> list:
     return discover_gym_tasks(dataset)
 
 
-def _target() -> GymRunnerTarget:
+def _target(**overrides: Any) -> GymRunnerTarget:
     return GymRunnerTarget(
         agent="simple_agent",
         agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
         resources_server="mcqa",
+        **overrides,
     )
 
 
@@ -95,6 +96,7 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
 
     #: Set by the fixture; the spec the provider was asked to create a host for.
     received_specs: list[Any] = []
+    received_payloads: list[dict[str, Any]] = []
 
     def log_message(self, *args: Any) -> None:  # keep pytest output readable
         return
@@ -109,11 +111,12 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])).decode())
-        # Echo the caller's own index back, which is what a real Gym host does with a stamped row.
+        self.received_payloads.append(payload)
+        # Echo the caller's own indices back, which is what a real Gym host does with a stamped row.
         results = [
             {
                 NG_TASK_INDEX: example[NG_TASK_INDEX],
-                NG_ROLLOUT_INDEX: 0,
+                NG_ROLLOUT_INDEX: example[NG_ROLLOUT_INDEX],
                 "reward": float(example[NG_TASK_INDEX]),
                 "response": f"answer-{example[NG_TASK_INDEX]}",
             }
@@ -169,6 +172,7 @@ class _StubHostProvider:
 
 @pytest.fixture
 def stub_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[_StubHostProvider]:
+    _StubGymHostHandler.received_payloads = []
     provider = _StubHostProvider()
     # Patched where the orchestrator looks it up, so the orchestrator itself stays untouched.
     monkeypatch.setattr("sandboxed_gym.orchestrator.get_host_provider", lambda *a, **k: provider)
@@ -187,6 +191,23 @@ async def test_a_sandboxed_run_provisions_a_host_and_returns_attributed_trials(
     rewards = {trial.task_id: trial.metadata["reward"] for trial in trials}
     assert rewards[tasks[0].id] == 0.0
     assert rewards[tasks[1].id] == 1.0, "each trial must carry its own task's reward, not a neighbour's"
+
+
+async def test_the_targets_repeats_and_concurrency_reach_the_host(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    tasks = _tasks(tmp_path)
+    runner = SessionBackedGymRunner(
+        target=_target(num_repeats=5, concurrency=2), plan=_plan(), job_id="eval-job-repeats"
+    )
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    (payload,) = _StubGymHostHandler.received_payloads
+    assert payload["concurrency"] == 2
+    assert len(trials) == 10
+    for task in tasks:
+        assert sorted(t.metadata[NG_ROLLOUT_INDEX] for t in trials if t.task_id == task.id) == [0, 1, 2, 3, 4]
 
 
 async def test_the_host_is_created_from_the_deployment_config_and_the_targets_selection(

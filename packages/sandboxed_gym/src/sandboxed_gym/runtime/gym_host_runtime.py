@@ -790,10 +790,12 @@ async def _collect_rollout_results(
     rollout_helper: Any,
     capture_dir: str | None = None,
     capture_budget: int = 0,
+    concurrency: int | None = None,
 ) -> list[dict]:
     results: list[dict] = []
     remaining = capture_budget
-    for task in rollout_helper.run_examples(examples=examples, head_server_config=head_server_config):
+    bound = {} if concurrency is None else {"semaphore": asyncio.Semaphore(concurrency)}
+    for task in rollout_helper.run_examples(examples=examples, head_server_config=head_server_config, **bound):
         row, nemo_gym_result = await task
         result = _with_row_identity(nemo_gym_result, row)
         if capture_dir is not None:
@@ -825,6 +827,7 @@ def submit_rollouts(
     rollout_helper: Any,
     capture_dir: str | None = None,
     capture_budget: int = 0,
+    concurrency: int | None = None,
 ) -> concurrent.futures.Future[list[dict]]:
     """Start ``examples`` on the shared loop and return without waiting.
 
@@ -834,7 +837,9 @@ def submit_rollouts(
     # Handler threads hand work to the one loop, so concurrent /rollouts/run calls interleave on
     # it rather than each running a loop of its own.
     return asyncio.run_coroutine_threadsafe(
-        _collect_rollout_results(examples, head_server_config, rollout_helper, capture_dir, capture_budget),
+        _collect_rollout_results(
+            examples, head_server_config, rollout_helper, capture_dir, capture_budget, concurrency
+        ),
         _ensure_event_loop(),
     )
 
@@ -915,6 +920,15 @@ class Handler(BaseHTTPRequestHandler):
                 _runtime_error("internal", "examples must be a list"),
             )
             return
+        concurrency = request.get("concurrency")
+        if concurrency is not None and (
+            isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1
+        ):
+            self._send_json(
+                400,
+                _runtime_error("internal", f"concurrency must be a positive integer, got {concurrency!r}"),
+            )
+            return
 
         # The only progress signal this process emits: log_message is silenced below, and both Gym
         # servers filter their own 200s.
@@ -930,6 +944,7 @@ class Handler(BaseHTTPRequestHandler):
             # into "every result lost". Half leaves the records themselves the same room they
             # have today; past it, captures stop and rollouts still return.
             capture_budget=self.max_response_bytes // 2,
+            concurrency=concurrency,
         )
 
         # Committed to 200 before the work is done, so the first byte leaves immediately and no hop

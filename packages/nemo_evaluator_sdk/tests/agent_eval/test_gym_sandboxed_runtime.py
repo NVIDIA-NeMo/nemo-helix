@@ -59,6 +59,7 @@ class _FakeHost:
     ) -> None:
         self.requests: list[httpx.Request] = []
         self.posted: list[dict[str, Any]] = []
+        self.payload: dict[str, Any] = {}
         self._status = status
         self._body = body
         self._content = content
@@ -68,7 +69,8 @@ class _FakeHost:
     def transport(self) -> httpx.MockTransport:
         def handle(request: httpx.Request) -> httpx.Response:
             self.requests.append(request)
-            self.posted = json.loads(request.content.decode())["examples"]
+            self.payload = json.loads(request.content.decode())
+            self.posted = self.payload["examples"]
             if self._content is not None:
                 return httpx.Response(self._status, content=self._content)
             if self._body is not None or self._status >= 400:
@@ -132,6 +134,30 @@ async def test_the_examples_posted_carry_the_index_we_stamped(tasks, tmp_path, m
 
     assert [example[NG_TASK_INDEX] for example in host.posted] == [0, 1]
     assert all("responses_create_params" in example for example in host.posted)
+
+
+async def test_each_repeat_becomes_its_own_trial(tasks, tmp_path, monkeypatch) -> None:
+    host = _FakeHost()
+    runner = runner_against(host, monkeypatch, num_repeats=3)
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert len(host.requests) == 1
+    assert len(trials) == 6
+    for task in tasks:
+        task_trials = [trial for trial in trials if trial.task_id == task.id]
+        assert sorted(trial.metadata[NG_ROLLOUT_INDEX] for trial in task_trials) == [0, 1, 2]
+    assert len({trial.id for trial in trials}) == 6, "repeats of one task must not share a trial id"
+
+
+async def test_concurrency_is_sent_to_the_host(tasks, tmp_path, monkeypatch) -> None:
+    host = _FakeHost()
+    runner = runner_against(host, monkeypatch, num_repeats=5, concurrency=2)
+
+    await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert host.payload["concurrency"] == 2
+    assert len(host.posted) == 10, "concurrency bounds parallelism, never the number of rollouts"
 
 
 async def test_the_auth_token_is_sent_as_the_proxy_header(tasks, tmp_path, monkeypatch) -> None:
@@ -319,7 +345,9 @@ async def test_a_task_the_host_never_answered_fails_the_run(tasks, tmp_path, mon
 
 def test_runner_info_records_the_host_but_not_the_token() -> None:
     runner = SandboxedGymAgentTaskRunner(
-        config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL, auth_token="sk-secret-value")
+        config=SandboxedGymRuntimeConfig(
+            rollout_url=ROLLOUT_URL, auth_token="sk-secret-value", num_repeats=3, concurrency=2
+        )
     )
 
     info = runner.runner_info()
@@ -327,6 +355,8 @@ def test_runner_info_records_the_host_but_not_the_token() -> None:
     assert info.name == "gym"
     assert info.config["mode"] == "sandboxed"
     assert info.config["rollout_url"] == ROLLOUT_URL
+    assert info.config["num_repeats"] == 3
+    assert info.config["concurrency"] == 2
     assert "sk-secret-value" not in json.dumps(info.config), "the token must not reach the run bundle"
 
 

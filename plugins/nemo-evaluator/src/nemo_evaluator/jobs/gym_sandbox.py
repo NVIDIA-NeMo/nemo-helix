@@ -478,6 +478,8 @@ class SessionBackedGymRunner:
                     auth_token=descriptor.rollout_auth_token,
                     headers=dict(descriptor.headers),
                     agent_ref_name=self._target.agent_ref_name or self._target.agent,
+                    num_repeats=self._target.num_repeats,
+                    concurrency=self._target.concurrency,
                     reward_key=self._target.reward_key,
                 )
             )
