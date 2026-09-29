@@ -2291,8 +2291,12 @@ components:
       properties:
         name:
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           title: Name
-          description: Unique template name within the workspace.
+          description: The name of the template. Name must start with a lowercase
+            letter, be 2-63 characters, and use lowercase letters, digits, hyphens,
+            and dots (no consecutive hyphens, cannot end with a hyphen).
         backend:
           type: string
           title: Backend
