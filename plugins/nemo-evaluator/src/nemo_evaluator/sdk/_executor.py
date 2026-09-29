@@ -8,7 +8,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from models import parse_workspace_name_ref
 from nemo_evaluator.api.schemas import MetricInline, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement
@@ -48,6 +47,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.evaluator.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 
 _DEFAULT_POLL_INTERVAL_SECONDS = 10.0
 _DEFAULT_JOB_TIMEOUT_SECONDS = 3600.0

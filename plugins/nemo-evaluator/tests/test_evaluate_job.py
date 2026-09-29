@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import nemo_evaluator.cli as evaluator_cli
 import pytest
-from models import ResolvedModelReference
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.evaluate import (
@@ -65,6 +64,7 @@ from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.refs import ResolvedModelReference
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner

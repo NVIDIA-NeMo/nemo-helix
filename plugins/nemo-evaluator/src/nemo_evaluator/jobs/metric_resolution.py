@@ -16,7 +16,6 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from models import parse_workspace_name_ref
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
 from nemo_evaluator.shared.metric_bundles.bundles import (
@@ -33,6 +32,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 
 
 def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
