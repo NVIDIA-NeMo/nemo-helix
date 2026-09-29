@@ -257,14 +257,14 @@ def test_create_app_mounted_services_drive_sdk_local_routing_without_services_en
         monkeypatch.setattr(server, "get_auth_config", lambda: auth_cfg)
 
         import nhx.common.auth.middleware as auth_middleware
-        from nhx.common.sdk_factory import get_platform_sdk
+        from nhx.common.client_factory import get_nemo_client
 
         monkeypatch.setattr(auth_middleware, "get_auth_config", lambda: auth_cfg)
 
         server.create_app(services=[PluginService()])
 
-        with get_platform_sdk() as sdk:
-            transport = sdk._client._transport
+        with get_nemo_client() as client:
+            transport = client._http._transport
 
         assert platform_cfg.services == "agents"
         assert isinstance(transport, _SyncHelixEndpointRoutingTransport)
