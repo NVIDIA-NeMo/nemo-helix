@@ -22,8 +22,7 @@ import sys
 from urllib.parse import urlparse
 
 import pytest
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 
 sys.path.insert(0, "/tests/shared")
@@ -48,14 +47,14 @@ def _make_unsigned_jwt() -> str:
     return f"{header}.{payload}."
 
 
-def _get_nhx_client() -> NeMoHelix:
-    """Get NeMoHelix client for the eval workspace."""
+def _get_nhx_client() -> NemoClient:
+    """Get the typed platform client for the eval workspace."""
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+    return NemoClient(base_url=nhx_base_url, workspace=WORKSPACE, auth=_make_unsigned_jwt())
 
 
 def _get_files_client() -> FilesClient:
-    return client_from_platform(_get_nhx_client(), FilesClient)
+    return FilesClient.from_client(_get_nhx_client())
 
 
 # --- Dataset checks ---
