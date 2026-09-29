@@ -130,14 +130,14 @@ pythonpath = ["src"]
 ```python
 # src/nemo_my_plugin/cli.py
 import typer
-from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
 class MyCLI(NemoCLI):
     name = "my-plugin"
     description = "My plugin commands."
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help=self.description)
+        app = create_typer_app(help=self.description)
 
         @app.command()
         def greet(name: str = typer.Option("world")) -> None:

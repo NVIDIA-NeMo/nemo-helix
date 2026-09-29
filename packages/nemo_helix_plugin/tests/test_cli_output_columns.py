@@ -5,8 +5,8 @@
 
 from unittest.mock import Mock
 
-from nemo_helix_ext.cli.core.formatters import Column
-from nemo_helix_ext.cli.core.table_config import (
+from nemo_helix_plugin.cli_output import Column
+from nemo_helix_plugin.cli_output_columns import (
     get_available_nested_fields,
     get_nested_value,
     is_timestamp_field,

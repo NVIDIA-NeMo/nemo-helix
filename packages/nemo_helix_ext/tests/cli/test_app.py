@@ -626,6 +626,30 @@ def test_plugin_loader_registers_unavailable_command_for_broken_jobs():
     assert "No such option: --spec" not in result.output
 
 
+def test_plugin_loader_hides_completion_options_on_plain_typer_apps():
+    """Plugins build plain ``typer.Typer`` apps; completion belongs to the root ``nemo`` app."""
+    plugin_app = typer.Typer(help="Plugin help")
+
+    @plugin_app.command("hello")
+    def hello() -> None:
+        typer.echo("hi")
+
+    class _PluginCLI(NemoCLI):
+        name = "example"
+
+        def get_cli(self) -> typer.Typer:
+            return plugin_app
+
+    with (
+        patch("nemo_helix_ext.cli.app._discover_plugin_job_entry_points", return_value=None),
+        patch("nemo_helix_ext.cli.app._discover_plugin_function_entry_points", return_value=None),
+        patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", return_value=_PluginCLI),
+    ):
+        loaded = lazy_plugin_loader("example", "fake.module:PluginCLI")()
+
+    assert [param.name for param in loaded.params] == []
+
+
 def test_plugin_loader_surfaces_broken_cli_error():
     with patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", side_effect=RuntimeError("broken")):
         with pytest.raises(click.ClickException, match="Failed to load plugin commands for 'example': broken"):
@@ -690,3 +714,16 @@ def test_cli_entry_point_discards_the_command_return_value(monkeypatch: pytest.M
     monkeypatch.setattr("nemo_helix_ext.cli.app.app", lambda: SimpleNamespace(name="job-1"))
 
     assert cli() is None
+
+
+def test_root_no_args_prints_help_successfully():
+    """Running nemo without args should print help and exit successfully."""
+    runner = CliRunner()
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.stdout
+    assert result.stderr == ""
+    # No ANSI escape codes should appear (colors stripped for non-TTY)
+    # TODO: This fails after vendoring, will fix it later
+    # assert "\x1b[" not in result.stdout

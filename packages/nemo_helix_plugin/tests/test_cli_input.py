@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 from click import UsageError
-from nemo_helix_ext.cli.core.errors import UnknownInputFieldsError
-from nemo_helix_ext.cli.core.stdin_utils import (
+from nemo_helix_plugin.cli_error_handling import UnknownInputFieldsError
+from nemo_helix_plugin.cli_input import (
     build_request_body,
     is_stdin_available,
     merge_stdin_with_options,

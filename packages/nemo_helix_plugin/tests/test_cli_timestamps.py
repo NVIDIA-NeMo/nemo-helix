@@ -5,7 +5,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from nemo_helix_ext.cli.core.timestamp_formatter import (
+from nemo_helix_plugin.cli_timestamps import (
     format_relative_time,
     format_simple_datetime,
     format_timestamp,

@@ -92,7 +92,7 @@ nemo services run
 ```python
 # src/nemo_my_plugin/cli.py
 import typer
-from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
 
 class MyCLI(NemoCLI):
@@ -100,7 +100,7 @@ class MyCLI(NemoCLI):
     description = "My plugin commands."
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help="My plugin commands.")
+        app = create_typer_app(help="My plugin commands.")
 
         @app.command()
         def greet(name: str = typer.Option("world", help="Name to greet.")) -> None:

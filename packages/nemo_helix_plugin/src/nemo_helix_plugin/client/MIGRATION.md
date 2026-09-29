@@ -350,10 +350,10 @@ the template when adding commands for a newly migrated service, and keep
 
 Output-shape points for new commands:
 - **List**: the typed `list_<x>()` returns a `NemoPaginatedResponse`; use `collect_offset_pages` /
-  `collect_cursor_pages` from `cli/core/pagination.py` plus `warn_if_more_pages`.
-- **Single-entity commands** return a `NemoResponse`; `format_output` unwraps it.
+  `collect_cursor_pages` from `nemo_helix_plugin.cli_pagination` plus `warn_if_more_pages`.
+- **Single-entity commands** return a `NemoResponse`; `nemo_helix_plugin.cli_output.format_output` unwraps it.
 - **Missing-workspace error**: the typed client's `ValueError("Missing path parameter 'workspace'
-  ...")` is already mapped to the friendly exit-2 message by `cli/core/errors.py`.
+  ...")` is already mapped to the friendly exit-2 message by `nemo_helix_plugin.cli_error_handling`.
 
 ---
 

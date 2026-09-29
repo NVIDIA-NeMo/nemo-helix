@@ -3,17 +3,14 @@
 
 """Tests for core CLI utilities."""
 
-from unittest.mock import patch
-
 import pytest
 import typer
-from nemo_helix_ext.cli.core.api import (
+from nemo_helix_plugin.cli_error_handling import InvalidSearchPatternError
+from nemo_helix_plugin.cli_kwargs import (
     build_kwargs,
-    is_tty,
     merge_filter_dict,
     parse_resource_id,
 )
-from nemo_helix_ext.cli.core.errors import InvalidSearchPatternError
 
 
 def test_build_kwargs_filters_none_values():
@@ -32,20 +29,6 @@ def test_build_kwargs_no_none():
     """Test build_kwargs with no None values."""
     result = build_kwargs(a=1, b=2, c=3)
     assert result == {"a": 1, "b": 2, "c": 3}
-
-
-@patch("sys.stdout.isatty")
-def test_is_tty_true(mock_isatty):
-    """Test is_tty when stdout is a TTY."""
-    mock_isatty.return_value = True
-    assert is_tty() is True
-
-
-@patch("sys.stdout.isatty")
-def test_is_tty_false(mock_isatty):
-    """Test is_tty when stdout is not a TTY."""
-    mock_isatty.return_value = False
-    assert is_tty() is False
 
 
 def test_parse_resource_id_with_slash():

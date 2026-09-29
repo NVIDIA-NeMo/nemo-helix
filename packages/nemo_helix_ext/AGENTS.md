@@ -17,7 +17,10 @@ All the operations that the CLI provides fall in one of these categories:
 ## Structure
 
 - `app.py` - Entry point, command registration, global options (`--context`, `--base-url`, `--output-format`)
-- `core/` - Shared utilities: error handling, output formatting, input parsing, pagination, CLIContext
+- `core/` - CLI host internals: `CLIContext` (the concrete CLI state), help rendering (`NhxGroup`), lazy loading, waiters.
+  The helpers commands are built from (output formatting, options, pagination, error handling, input parsing,
+  `-f code`) live in `nemo_helix_plugin` (`cli`, `cli_state`, `cli_options`, `cli_output`, ...) so plugin
+  commands share them; the old `core/` module paths re-export them for existing core commands.
 - `commands/` - Command implementations:
   - `config.py` - kubectl-style config management
   - `quickstart/` - local deployment commands
@@ -48,8 +51,8 @@ this and runs the CLI with `nemo_helix` un-importable.
 - Functional groups ship with the package that owns the service as `nemo.cli` entry points
   (`guardrail` in `plugins/nemo-guardrails`, `intake` and `experiments` in `services/intake`), so they
   appear only when that package is installed.
-- Commands obtain a service client with `state.typed_client(<Client>)`; `--output-format code`
-  renders the typed-client call via `cli/core/code_generator.py`.
+- Commands obtain a service client with `cli_state(ctx).typed_client(<Client>)`; `--output-format code`
+  renders the typed-client call via `nemo_helix_plugin.cli_codegen`. See the `nhx-cli` skill.
 
 Use `commands/secrets.py` and `tests/cli/commands/test_secrets.py` as the reference when adding a group:
 mirror the structure, add wire-level tests (real Typer app over a recorded `httpx.MockTransport`) and,
