@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 
 
 class CustomizationJobTemplate(NemoEntity, entity_type="customization_job_template"):

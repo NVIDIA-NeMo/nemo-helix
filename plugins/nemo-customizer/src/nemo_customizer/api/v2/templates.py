@@ -23,15 +23,15 @@ from nemo_customizer.api.v2.schemas import (
     UpdateCustomizationJobTemplateRequest,
 )
 from nemo_customizer.entities import CustomizationJobTemplate
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
-from nemo_platform_plugin.log_utils import sanitize_for_log
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.schema import PaginationData
 
 router = APIRouter()
 
@@ -176,7 +176,6 @@ async def delete_job_template(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> None:
     """Delete a job template."""
-    await _get_template_or_404(entity_client, workspace, name)
     try:
         await entity_client.delete(CustomizationJobTemplate, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
