@@ -3,7 +3,7 @@
 
 # SDK Maintenance Tools
 
-This package contains repo-local commands for keeping the `nemo-helix` wheel metadata, vendored packages, and license metadata in sync.
+This package contains repo-local commands for keeping the `nemo-helix` wheel metadata and license metadata in sync.
 
 ## Wrapper bundle metadata
 
@@ -13,16 +13,9 @@ Refresh the generated extras, scripts, and entry points of the `nemo-helix` wrap
 uv run --no-sync nemo-helix-sdk-tools vendor bundle-metadata
 ```
 
-## SDK Vendoring
+## License headers
 
-Vendor configured platform packages into the checked-in Python SDK tree and refresh the wrapper metadata:
-
-```sh
-uv run --no-sync nemo-helix-sdk-tools vendor all-from-configs \
-  nemo_helix_ext models filesets nemo_evaluator_sdk
-```
-
-Run post-generation updates:
+Refresh SPDX license headers:
 
 ```sh
 uv run --no-sync nemo-helix-sdk-tools post-generation update-license-headers

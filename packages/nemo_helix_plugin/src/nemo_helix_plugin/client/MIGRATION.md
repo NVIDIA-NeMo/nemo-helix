@@ -458,7 +458,7 @@ playbook.
       conftest). Mocked-secrets tests need re-wiring (patch `client_from_platform`, `.data()`-wrap).
 - [ ] **If you touched `nemo_helix_ext` dependencies or entry points**, run `make vendor` to
       refresh the `nemo-helix` wheel metadata. The wheel bundles the package from source, so code
-      changes need no vendoring step. `sdk/python` is ruff-excluded, so don't chase its
+      changes need no metadata step. `sdk/python` is ruff-excluded, so don't chase its
       pre-existing lint errors.
 - [ ] **Preserve auth semantics** — privileged routers, on-behalf-of checks, scopes.
 - [ ] **Run** `uv run --frozen ty check`, `uv run ruff check`, `make test-package PACKAGE=nemo_helix_plugin`,

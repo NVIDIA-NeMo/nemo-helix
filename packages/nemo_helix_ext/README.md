@@ -241,7 +241,7 @@ See [docs/overview.md](docs/overview.md) for architecture details.
 `nemo_helix` SDK. Functional groups (`guardrail`, `intake`, `experiments`, ...) are
 `nemo.cli` entry points shipped by the owning package.
 
-To vendor the CLI and regenerate its reference docs (from repo root):
+To regenerate the CLI reference docs (from repo root):
 ```shell
 make update-cli
 ```

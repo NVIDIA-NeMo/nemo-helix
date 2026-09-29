@@ -22,12 +22,3 @@ test-unit:
 .PHONY: test-integration
 test-integration:
 	uv run --frozen pytest tests/ -m integration
-
-.PHONY: vendor-only
-vendor-only:
-	@echo "📦 Vendoring nemo-helix-ext to nemo-helix SDK..."
-	cd ${NHX_ROOT_PATH} && uv run --no-sync nemo-helix-sdk-tools vendor from-config nemo_helix_ext
-
-.PHONY: vendor
-vendor: vendor-only
-	cd ${NHX_ROOT_PATH} && uv run --no-sync nemo-helix-sdk-tools post-generation update-license-headers
