@@ -13,13 +13,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import typer
 from nemo_example_plugin.jobs.say_hello import (
     DEFAULT_FILE_NAME,
     DEFAULT_RESULT_NAME,
     SayHelloJob,
 )
+from nemo_helix_plugin.commands import add_job_commands
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
+from typer.testing import CliRunner
 
 
 def _job_context(tmp_path: Path) -> JobContext:
@@ -63,3 +66,22 @@ def test_greeting_text_lands_under_persistent(tmp_path: Path) -> None:
         ctx=ctx,
     )
     assert (ctx.storage.persistent / DEFAULT_FILE_NAME).read_text() == "Hello, Razvan!"
+
+
+def test_say_hello_job_uses_flat_generated_cli() -> None:
+    app = typer.Typer()
+
+    @app.callback()
+    def _noop() -> None:
+        pass
+
+    add_job_commands(app, {"example.say-hello": SayHelloJob})
+    runner = CliRunner()
+
+    help_result = runner.invoke(app, ["say-hello", "--help"])
+    assert help_result.exit_code == 0
+    assert "explain" in help_result.output
+
+    legacy_submit = runner.invoke(app, ["say-hello", "submit", "--help"])
+    assert legacy_submit.exit_code != 0
+    assert "No such command 'submit'." in legacy_submit.output
