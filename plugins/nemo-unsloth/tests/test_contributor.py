@@ -120,7 +120,7 @@ class TestCLI:
         assert "JOB_JSON" in plain
         assert "--workspace" in plain or "-w" in plain
         assert "--profile" in plain
-        assert "--base-url" in plain
+        assert "--base-url" not in plain
 
 
 class TestSDK:

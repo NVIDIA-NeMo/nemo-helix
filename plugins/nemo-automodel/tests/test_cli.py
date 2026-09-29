@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -15,6 +16,11 @@ from nemo_helix_plugin.scheduler import NemoJobScheduler, submit_path_for
 from typer.testing import CliRunner
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _platform(base_url: str) -> SimpleNamespace:
+    """Stand-in CLI state: the platform comes from ``nemo --base-url`` / the active context."""
+    return SimpleNamespace(get_base_url=lambda default=None: base_url)
 
 
 def test_submit_path_includes_workspace() -> None:
@@ -95,9 +101,8 @@ def test_cli_submit_accepts_job_json_file(monkeypatch: pytest.MonkeyPatch) -> No
             str(FIXTURES / "minimal_sft_lora.json"),
             "--workspace",
             "acme-corp",
-            "--base-url",
-            "https://nhx.test",
         ],
+        obj=_platform("https://nhx.test"),
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     assert submitted["workspace"] == "acme-corp"
@@ -150,9 +155,8 @@ def test_cli_submit_prints_studio_link_when_available(monkeypatch: pytest.Monkey
             str(FIXTURES / "minimal_sft_lora.json"),
             "--workspace",
             "acme-corp",
-            "--base-url",
-            "https://nhx.test",
         ],
+        obj=_platform("https://nhx.test"),
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     # Link + tracking hints go to stderr; stdout stays pure JSON.
@@ -201,9 +205,8 @@ def test_cli_submit_omits_studio_link_when_unavailable(monkeypatch: pytest.Monke
             str(FIXTURES / "minimal_sft_lora.json"),
             "--workspace",
             "acme-corp",
-            "--base-url",
-            "https://nhx.test",
         ],
+        obj=_platform("https://nhx.test"),
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "View in Studio" not in result.stderr
