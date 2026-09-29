@@ -15,11 +15,13 @@ import { useLocation, useSearchParams } from 'react-router';
 /**
  * The full fine-tuning form on its own URL.
  *
- * Values seeded by a template or by Clone arrive in `location.state`, which a reload
- * discards — by design. The URL is the durable part; what a template put in place
- * (registered models, uploaded dataset) is durable too, so re-picking the recipe from
- * the selection page is cheap. Re-running setup from a query param on every refresh
- * would not be.
+ * Values seeded by a template or by Clone arrive in `location.state`. React Router keeps
+ * that in the history entry (`window.history.state.usr`) and reads it back on startup, so
+ * a reload — or a trip through back and forward — holds on to them. What it cannot
+ * reconstruct is a fresh navigation: a new tab, a pasted link, or a bookmark lands on the
+ * blank form with defaults. Encoding the recipe in the URL would cover that case, at the
+ * price of re-running template setup, dataset download and all, on every such visit.
+ * History state confines that cost to the times the user deliberately picks a recipe.
  */
 export const NewCustomizationFormRoute = () => {
   const workspace = useWorkspaceFromPath();
