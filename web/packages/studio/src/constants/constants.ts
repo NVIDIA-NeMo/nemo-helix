@@ -21,7 +21,13 @@ export const DEFAULT_API_ERR_MSG = 'Invalid API response. Please try again later
 export const DEFAULT_TOOLS_FILE_NAME = 'tools.json';
 export const EMPTY_FIELD_VALUE = '-';
 export const EMPTY_FIELD_EMDASH_VALUE = '—';
-export const DEFAULT_BUILD_MODEL_NAME = 'nvidia-nemotron-3.5-lightning-30b-a3b';
+/**
+ * Model *entity* names, not served model names: the models service normalizes discovered model
+ * ids to entity names (`normalize_model_entity_name`), turning `/` and `.` into `-` — so
+ * `nvidia/nemotron-3.5-lightning-30b-a3b` is stored as `nvidia-nemotron-3-5-lightning-30b-a3b`.
+ * Templates look models up by entity name, so a dotted name here never resolves.
+ */
+export const DEFAULT_BUILD_MODEL_NAME = 'nvidia-nemotron-3-5-lightning-30b-a3b';
 export const DEFAULT_EMBEDDER_MODEL_NAME = 'nvidia-nv-embedqa-e5-v5';
 
 /**

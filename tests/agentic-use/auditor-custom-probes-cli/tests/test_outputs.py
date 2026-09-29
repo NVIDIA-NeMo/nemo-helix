@@ -115,22 +115,23 @@ def test_custom_config_has_selected_probes(client: AuditorClient) -> None:
 # --- Audit invocation checks ---
 
 
+def _has_token_sequence(cmd: str, *tokens: str) -> bool:
+    words = cmd.split()
+    return any(tuple(words[i : i + len(tokens)]) == tokens for i in range(len(words) - len(tokens) + 1))
+
+
 def test_agent_invoked_audit_with_custom_config() -> None:
     """Verify the agent invoked the audit with the custom config and target."""
     session = get_session()
     commands = session.get_bash_commands()
 
-    has_audit_run = any(
-        _has_token(cmd, "auditor")
-        and _has_token(cmd, "audit")
-        and _has_token(cmd, "run")
-        and CONFIG_NAME in cmd
-        and TARGET_NAME in cmd
+    has_audit = any(
+        _has_token_sequence(cmd, "auditor", "audit", "--spec") and CONFIG_NAME in cmd and TARGET_NAME in cmd
         for cmd in commands
     )
 
-    assert has_audit_run, (
-        f"Agent never invoked auditor audit run with '{CONFIG_NAME}' and '{TARGET_NAME}'. Commands: {commands}"
+    assert has_audit, (
+        f"Agent never invoked auditor audit with '{CONFIG_NAME}' and '{TARGET_NAME}'. Commands: {commands}"
     )
 
 

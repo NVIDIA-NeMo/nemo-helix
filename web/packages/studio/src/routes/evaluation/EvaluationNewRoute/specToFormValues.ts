@@ -42,12 +42,12 @@ const findMetric = (
 const toPanelScore = (raw: unknown): PanelScoreFormData => {
   const score = asRecord(raw);
   const name = asString(score.name) ?? '';
-  const description = asString(score.description);
+  const description = asString(score.description) ?? '';
   if (Array.isArray(score.rubric)) {
     return {
       scoreType: 'rubric',
       name,
-      ...(description ? { description } : {}),
+      description,
       rubric: score.rubric.map((entry) => {
         const level = asRecord(entry);
         const levelDescription = asString(level.description);
@@ -62,7 +62,7 @@ const toPanelScore = (raw: unknown): PanelScoreFormData => {
   return {
     scoreType: 'range',
     name,
-    ...(description ? { description } : {}),
+    description,
     minimum: Number(score.minimum),
     maximum: Number(score.maximum),
   } as PanelScoreFormData;

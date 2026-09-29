@@ -154,9 +154,9 @@ class NemoJob(_NamedPlugin):
         :type: bool
 
         Temporary CLI compatibility knob. ``True`` keeps the generated
-        ``<job> run|submit|explain`` command group. ``False`` registers
-        ``<job>`` itself as the remote submit command and omits the legacy
-        ``run``, ``submit``, and ``explain`` verbs.
+        ``<job> submit|explain`` command group. ``False`` registers
+        ``<job>`` itself as the remote submit command and keeps
+        ``<job> explain`` for schema introspection.
 
     Plugin-owned options:
 

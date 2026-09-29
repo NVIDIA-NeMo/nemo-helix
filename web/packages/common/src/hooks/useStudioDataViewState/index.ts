@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
+import {
+  decodeColumnFiltersParam,
+  FILTERS_SEARCH_PARAM,
+} from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useDebounce } from 'use-debounce';
@@ -235,9 +239,9 @@ export const useStudioDataViewState = <FilterType = Record<string, unknown>>(
           // Handle filters
           if (filters !== undefined) {
             if (filters === null) {
-              next.delete('filters');
+              next.delete(FILTERS_SEARCH_PARAM);
             } else {
-              next.set('filters', encodeURIComponent(filters));
+              next.set(FILTERS_SEARCH_PARAM, encodeURIComponent(filters));
             }
           }
 
@@ -251,15 +255,11 @@ export const useStudioDataViewState = <FilterType = Record<string, unknown>>(
 
   // Parse search and filters from URL
   const urlSearch = searchParams.get('s') ?? '';
-  const urlFiltersParam = searchParams.get('filters');
-  const urlColumnFilters = useMemo<DataView.TanstackTable.ColumnFiltersState>(() => {
-    if (!urlFiltersParam) return [];
-    try {
-      return JSON.parse(decodeURIComponent(urlFiltersParam));
-    } catch {
-      return [];
-    }
-  }, [urlFiltersParam]);
+  const urlFiltersParam = searchParams.get(FILTERS_SEARCH_PARAM);
+  const urlColumnFilters = useMemo<DataView.TanstackTable.ColumnFiltersState>(
+    () => decodeColumnFiltersParam(urlFiltersParam),
+    [urlFiltersParam]
+  );
 
   // Initialize DataView with pagination, sorting, search, and filters from URL.
   // Default column pinning is set first so consumers can override via options.

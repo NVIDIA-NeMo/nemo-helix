@@ -14,11 +14,12 @@ instance.
 - ``invoke``   — single invocation
 - ``run``      — start a persistent local FastAPI server
 
-The ``evaluate`` command is auto-generated from the
-``EvaluateAgentJob`` registered under the
-``nemo.jobs`` entry-point group — the platform injects it into this CLI
-group at startup. Numeric optimize is likewise auto-injected from
-``agents.optimize`` (``OptimizeJob`` in ``nemo-optimization``).
+Job commands such as ``evaluate`` are auto-generated from the ``agents.*``
+jobs registered under the ``nemo.jobs`` entry-point group — the platform
+injects them into this CLI group at startup. ``optimize`` is not one of them:
+it is a command group contributed through the ``nemo.cli.agents`` entry-point
+group by ``nemo-agent-optimization-plugin``, which dispatches
+``run-strategy`` to whichever optimization strategy plugins are installed.
 
 **Agent Resources commands (require a running cluster):**
 
@@ -124,7 +125,6 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.job import NemoJob
 from pydantic import ValidationError
 from typer.main import get_command as _typer_get_command
 
@@ -297,70 +297,6 @@ class AgentsCLI(NemoCLI):
         register_usage_commands(app)
         return app
 
-    def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
-        """Amend generated job commands with job-specific subcommands.
-
-        ``optimize`` gains ``prepare-fileset``: the remote optimize command requires an
-        already-staged bundle, so the staging step belongs next to the job command that
-        consumes it.
-        """
-        if job_cls.name != "optimize":
-            return
-        try:
-            from nemo_agents_plugin.jobs.optimize_cli import register_prepare_fileset_command
-        except ImportError:
-            logger.warning("nemo-optimization unavailable; skipping optimize prepare-fileset", exc_info=True)
-            return
-
-        if not job_cls.generate_legacy_verbs:
-            _replace_flat_job_command_with_group(
-                group,
-                job_cls=job_cls,
-                register_subcommands=register_prepare_fileset_command,
-            )
-            return
-        register_prepare_fileset_command(group)
-
-
-def _replace_flat_job_command_with_group(
-    app: typer.Typer,
-    *,
-    job_cls: type[NemoJob],
-    register_subcommands: Callable[[typer.Typer], None],
-) -> None:
-    """Keep ``nemo agents <job>`` as remote submit while allowing job-specific subcommands."""
-    command_info = next((command for command in app.registered_commands if command.name == job_cls.name), None)
-    if command_info is None or command_info.callback is None:
-        if getattr(app.info, "name", None) == job_cls.name:
-            register_subcommands(app)
-            return
-        logger.warning("Cannot extend generated job command %r because it was not registered", job_cls.name)
-        return
-
-    original = command_info.callback
-    app.registered_commands = [command for command in app.registered_commands if command is not command_info]
-
-    job_group = typer.Typer(
-        name=job_cls.name,
-        help=job_cls.description or f"Manage the {job_cls.name} job.",
-        epilog=command_info.epilog,
-        no_args_is_help=False,
-    )
-
-    def submit(typer_ctx: typer.Context, **kwargs: object) -> None:
-        if typer_ctx.invoked_subcommand is not None:
-            return
-        original(typer_ctx, **kwargs)
-
-    submit.__doc__ = getattr(original, "__doc__", None)
-    signature = getattr(original, "__signature__", None)
-    if signature is not None:
-        setattr(submit, "__signature__", signature)
-    job_group.callback(invoke_without_command=True)(submit)
-
-    register_subcommands(job_group)
-    app.add_typer(job_group, name=job_cls.name, rich_help_panel="Jobs")
-
 
 # ---------------------------------------------------------------------------
 # Local commands — no platform required
@@ -499,8 +435,9 @@ def _register_local_commands(app: typer.Typer) -> None:
             raise typer.Exit(code=1)
 
 
-# Note: job commands such as ``evaluate`` and ``optimize`` are auto-generated
-# from ``nemo.jobs`` entry points.
+# Note: job commands such as ``evaluate`` are auto-generated from ``agents.*``
+# ``nemo.jobs`` entry points. ``optimize`` is a sibling plugin's ``nemo.cli.agents``
+# contribution, mounted alongside the other ``nemo.cli.agents`` entries in ``AgentsCLI.get_cli``.
 
 
 # ---------------------------------------------------------------------------

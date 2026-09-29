@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { agentsCreateOptimizeJob } from '@nemo/sdk/generated/agents/agents';
-import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema/OptimizeJob';
+import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
   filesCreateFileset,
   filesDeleteFileset,
@@ -16,9 +16,11 @@ import {
   optimizeBundleFilesetName,
 } from '@studio/api/agents/useLaunchOptimizeStudy';
 
-vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agents')>()),
-  agentsCreateOptimizeJob: vi.fn(),
+vi.mock('@nemo/sdk/generated/agent-optimization/agent-optimization', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@nemo/sdk/generated/agent-optimization/agent-optimization')
+  >()),
+  agentOptimizationCreateRunStrategyJob: vi.fn(),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
@@ -49,7 +51,7 @@ beforeEach(() => {
   vi.mocked(filesUploadFile).mockResolvedValue({} as never);
   vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
   vi.mocked(filesRetrieveFileset).mockResolvedValue(stagedBundle() as never);
-  vi.mocked(agentsCreateOptimizeJob).mockResolvedValue({ name: 'study-1' } as never);
+  vi.mocked(agentOptimizationCreateRunStrategyJob).mockResolvedValue({ name: 'study-1' } as never);
 });
 
 afterEach(() => {
@@ -77,12 +79,12 @@ describe('launchOptimizeStudy', () => {
         .mock.calls.map((call) => call[2])
         .sort()
     ).toEqual(['dataset.json', 'optimize.yaml']);
-    expect(agentsCreateOptimizeJob).toHaveBeenCalledWith('ws', {
+    expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
       spec: {
+        strategy: 'legacy',
         optimize_config: 'optimize.yaml',
         optimize_config_fileset: `ws/${filesetName}`,
         agent: 'hermes',
-        workspace: 'ws',
       },
       custom_fields: { studio_bundle_fileset: filesetName },
     });
@@ -90,7 +92,7 @@ describe('launchOptimizeStudy', () => {
   });
 
   it('removes the staged fileset when the submit fails', async () => {
-    vi.mocked(agentsCreateOptimizeJob).mockRejectedValue(new Error('boom'));
+    vi.mocked(agentOptimizationCreateRunStrategyJob).mockRejectedValue(new Error('boom'));
 
     await expect(launchOptimizeStudy(params())).rejects.toThrow('boom');
 
@@ -116,7 +118,7 @@ describe('deleteStudioBundleFileset', () => {
       name: 'study-1',
       spec: { optimize_config: 'optimize.yaml', optimize_config_fileset: 'ws/hermes-optimize-abc' },
       custom_fields: customFields,
-    }) as unknown as OptimizeJob;
+    }) as unknown as RunStrategyJob;
 
   /** A study pointing at the bundle Studio staged for it. */
   const ownBundle = () => study({ studio_bundle_fileset: 'hermes-optimize-abc' });
