@@ -147,7 +147,7 @@ class EvaluatorPluginService(NemoService):
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(
-                # POST /apis/evaluator/v2/workspaces/{workspace}/live.
+                # POST /apis/evaluator/v2/workspaces/{workspace}/evaluate/live.
                 router=live_routes.router,
                 tag="Evaluator Plugin Live Evaluation Route",
                 description="Single-row evaluation run in-process, without creating a job.",

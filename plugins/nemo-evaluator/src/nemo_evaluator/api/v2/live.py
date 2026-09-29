@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Direct in-process evaluation under /apis/evaluator/v2/workspaces/{workspace}/live.
+"""Direct in-process evaluation under /apis/evaluator/v2/workspaces/{workspace}/evaluate/live.
 
 One dataset row, scored inline: no job record, no result artifacts, no Intake publish. This is the
 interactive path behind Studio's Live Test panel.
 
+Sibling of ``evaluate/jobs``: the same row evaluation, run in-process instead of as a job.
 Every other long-running evaluation in this plugin is offloaded to a Job worker. This route
 deliberately breaks that pattern, so three constraints keep it from reintroducing the blocking that
 pattern exists to avoid:
@@ -42,7 +43,7 @@ from nemo_evaluator_sdk.values import FieldMapping, Model
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.params import RunConfig, RunConfigOnlineModel
 from nemo_evaluator_sdk.values.results import AggregateScore
-from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
@@ -52,6 +53,11 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+#: Deliberately the same permission the ``evaluate/jobs`` submit route derives. Scoring one row
+#: in-process is a weaker capability than submitting a job, so a caller who can do the latter
+#: needs no separate grant for this.
+_CREATE_EVALUATION = scope.permission("create", description="Create an evaluation")
 
 #: Ceiling on the whole handler, matching what the Live Test panel allows.
 LIVE_TIMEOUT_S = 120
@@ -69,12 +75,6 @@ MAX_MODEL_BACKED_METRICS = 4
 MAX_CONCURRENT = 4
 
 _SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
-
-
-class LivePerms(PermissionSet, namespace="evaluator.live"):
-    """Permissions for the direct in-process evaluation route."""
-
-    RUN = perm("Run a single-row evaluation directly, without creating a job")
 
 
 class LiveScoreRequest(BaseModel):
@@ -160,7 +160,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/live",
+    "/evaluate/live",
     summary="Run Live Evaluation",
     response_description="Score one row inline, without creating a job",
     status_code=status.HTTP_200_OK,
@@ -170,7 +170,7 @@ router = APIRouter()
     },
 )
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[LivePerms.RUN])
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[_CREATE_EVALUATION])
 async def run_live_evaluation(
     workspace: str,
     request: LiveScoreRequest,

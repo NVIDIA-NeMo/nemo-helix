@@ -1077,7 +1077,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/evaluator/v2/workspaces/{workspace}/live:
+  /apis/evaluator/v2/workspaces/{workspace}/evaluate/live:
     post:
       tags:
       - Evaluator Plugin Live Evaluation Route
@@ -1137,7 +1137,7 @@ paths:
         past the overall
 
         time limit it fails with 504.'
-      operationId: run_live_evaluation_apis_evaluator_v2_workspaces__workspace__live_post
+      operationId: run_live_evaluation_apis_evaluator_v2_workspaces__workspace__evaluate_live_post
       parameters:
       - name: workspace
         in: path

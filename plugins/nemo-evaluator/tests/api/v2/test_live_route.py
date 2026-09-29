@@ -39,7 +39,7 @@ from nemo_helix_plugin.entity_client import get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
-_BASE = "/v2/workspaces/default/live"
+_BASE = "/v2/workspaces/default/evaluate/live"
 
 
 def _exact_match_metric() -> dict[str, Any]:
