@@ -307,7 +307,7 @@ def test_sync_resource_rejects_non_object_plugin_status() -> None:
 _EVALUATOR_PUBLIC_RESOURCE_NAMES = {
     "agent_eval_results",
     "eval_results",
-    "from_sdk",
+    "from_client",
     "get_job_resource",
     "metrics",
     "plugin_status",

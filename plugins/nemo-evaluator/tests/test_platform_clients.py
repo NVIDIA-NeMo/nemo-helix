@@ -6,14 +6,14 @@ from __future__ import annotations
 import httpx
 import pytest
 from nemo_evaluator.sdk.resources import AsyncEvaluator, Evaluator, evaluator_sdk_resources
-from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE = "http://test"
 
 
-def test_evaluator_sdk_sync_resource_accepts_generated_platform_client() -> None:
+def test_evaluator_sdk_sync_resource_accepts_typed_platform_client() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = NeMoHelix(
+    platform = NemoClient(
         base_url=BASE,
         workspace="default",
         default_headers={"X-NHX-Principal-Id": "service:evaluator"},
@@ -30,11 +30,11 @@ def test_evaluator_sdk_sync_resource_accepts_generated_platform_client() -> None
 
 
 @pytest.mark.asyncio
-async def test_evaluator_sdk_async_resource_accepts_generated_platform_client() -> None:
+async def test_evaluator_sdk_async_resource_accepts_typed_platform_client() -> None:
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
     ) as http_client:
-        platform = AsyncNeMoHelix(
+        platform = AsyncNemoClient(
             base_url=BASE,
             workspace="default",
             default_headers={"X-NHX-Principal-Id": "service:evaluator"},

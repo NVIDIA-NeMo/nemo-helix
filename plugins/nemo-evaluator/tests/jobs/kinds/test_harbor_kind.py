@@ -11,7 +11,7 @@ from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext
 from nemo_evaluator.revisions import publish_revision
 from nemo_evaluator.task_refs import load_tasks, snapshot_task
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
 async def test_harbor_adapter_snapshot_and_offline_preparation(entity_store, tmp_path, monkeypatch):
@@ -31,7 +31,7 @@ async def test_harbor_adapter_snapshot_and_offline_preparation(entity_store, tmp
     )
     await entity_store.create(task)
     revision, _, _ = await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
-    async with AsyncNeMoHelix(base_url="http://unused.test") as sdk:
+    async with AsyncNemoClient(base_url="http://unused.test") as sdk:
         ctx = SubmitContext("default", entity_store, sdk, KIND_ADAPTERS)
         loaded = await load_tasks([TaskRef("other/stored")], ctx)
         definition = await HarborTaskAdapter().resolve(loaded[0], ctx)

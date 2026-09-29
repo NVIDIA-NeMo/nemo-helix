@@ -39,10 +39,10 @@ from nemo_evaluator_sdk.values import (
     SecretRef,
 )
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_helix import APIError, AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client import errors as files_errors
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
@@ -108,16 +108,16 @@ def configure_example_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 
-async def _new_client() -> AsyncNeMoHelix:
+async def _new_client() -> AsyncNemoClient:
     """Create a platform client and verify the evaluator plugin is reachable."""
-    client = AsyncNeMoHelix(
+    client = AsyncNemoClient(
         base_url=os.getenv("NHX_BASE_URL", DEFAULT_BASE_URL),
         workspace=DEFAULT_WORKSPACE,
         timeout=30000.0,
     )
     try:
         await cast(AsyncEvaluator, client.evaluator).plugin_status()
-    except APIError as e:
+    except NemoClientError as e:
         await _close_client(client)
         raise RuntimeError(
             "Failed to connect to evaluator plugin. Ensure nemo-evaluator plugin is running along with "
@@ -126,16 +126,16 @@ async def _new_client() -> AsyncNeMoHelix:
     return client
 
 
-def _new_sync_client() -> NeMoHelix:
+def _new_sync_client() -> NemoClient:
     """Create a sync platform client and verify the evaluator plugin is reachable."""
-    client = NeMoHelix(
+    client = NemoClient(
         base_url=os.getenv("NHX_BASE_URL", DEFAULT_BASE_URL),
         workspace=DEFAULT_WORKSPACE,
         timeout=30000.0,
     )
     try:
         cast(SyncEvaluator, client.evaluator).plugin_status()
-    except APIError as e:
+    except NemoClientError as e:
         client.close()
         raise RuntimeError(
             "Failed to connect to evaluator plugin. Ensure nemo-evaluator plugin is running along with "
@@ -144,7 +144,7 @@ def _new_sync_client() -> NeMoHelix:
     return client
 
 
-async def _close_client(client: AsyncNeMoHelix) -> None:
+async def _close_client(client: AsyncNemoClient) -> None:
     """Close the platform client while tolerating local-run loop shutdown."""
     try:
         await client.close()
@@ -182,10 +182,10 @@ def write_local_helpsteer2_dataset(dataset_path: Path, *, row_count: int) -> Non
     dataset_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-async def ensure_example_fileset(client: AsyncNeMoHelix) -> FilesetRef:
+async def ensure_example_fileset(client: AsyncNemoClient) -> FilesetRef:
     """Create or reuse the HelpSteer2 fileset, then verify the selected split downloads."""
     workspace = client.workspace or DEFAULT_WORKSPACE
-    files = client_from_platform(client, AsyncFilesClient)
+    files = AsyncFilesClient.from_client(client)
 
     try:
         fileset = (
@@ -218,10 +218,10 @@ async def ensure_example_fileset(client: AsyncNeMoHelix) -> FilesetRef:
     return FilesetRef(root=f"{fileset.workspace}/{fileset.name}").with_fragment(HELPSTEER2_REMOTE_PATH)
 
 
-def ensure_example_fileset_sync(client: NeMoHelix) -> FilesetRef:
+def ensure_example_fileset_sync(client: NemoClient) -> FilesetRef:
     """Create or reuse the HelpSteer2 fileset with a sync client, then verify the selected split downloads."""
     workspace = client.workspace or DEFAULT_WORKSPACE
-    files = client_from_platform(client, FilesClient)
+    files = FilesClient.from_client(client)
 
     try:
         fileset = files.create_fileset(
@@ -251,10 +251,10 @@ def ensure_example_fileset_sync(client: NeMoHelix) -> FilesetRef:
     return FilesetRef(root=f"{fileset.workspace}/{fileset.name}").with_fragment(HELPSTEER2_REMOTE_PATH)
 
 
-async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNeMoHelix) -> str:
+async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNemoClient) -> str:
     """Resolve an API key secret name and ensure it exists on the platform."""
     secret_name = DEFAULT_API_KEY_SECRET.lower().replace("_", "-")
-    secrets = client_from_platform(client, AsyncSecretsClient)
+    secrets = AsyncSecretsClient.from_client(client)
     try:
         await secrets.get_secret(name=secret_name, workspace=workspace)
     except ClientNotFoundError:
@@ -280,17 +280,17 @@ async def ensure_submit_evaluator_api_key_secret(workspace: str, client: AsyncNe
 async def model_with_valid_secret(
     *,
     workspace: str,
-    client: AsyncNeMoHelix,
+    client: AsyncNemoClient,
 ) -> Model:
     """Return a model carrying the API-key secret that a submitted platform job needs."""
     secret_name = await ensure_submit_evaluator_api_key_secret(workspace, client)
     return model.model_copy(update={"api_key_secret": SecretRef(root=secret_name)})
 
 
-def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NeMoHelix) -> str:
+def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NemoClient) -> str:
     """Sync mirror of :func:`ensure_submit_evaluator_api_key_secret`."""
     secret_name = DEFAULT_API_KEY_SECRET.lower().replace("_", "-")
-    secrets = client_from_platform(client, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     try:
         secrets.get_secret(name=secret_name, workspace=workspace)
     except ClientNotFoundError:
@@ -313,7 +313,7 @@ def ensure_submit_evaluator_api_key_secret_sync(workspace: str, client: NeMoHeli
     return secret_name
 
 
-def model_with_valid_secret_sync(*, workspace: str, client: NeMoHelix) -> Model:
+def model_with_valid_secret_sync(*, workspace: str, client: NemoClient) -> Model:
     """Sync mirror of :func:`model_with_valid_secret`.
 
     The module-level ``model`` names an environment variable, which was correct while the plugin
@@ -483,7 +483,7 @@ def extract_helpfulness_scores(
 
 async def _run_online_metric_example_body(
     *,
-    client: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     dataset: PluginDatasetInput,
     workflow_label: str,
     is_online: bool,
