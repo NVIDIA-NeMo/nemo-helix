@@ -3,7 +3,7 @@
 
 """SDK resources for the insights plugin.
 
-Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.insights`` via
+Mounted on :class:`~nemo_helix_plugin.client.client.NemoClient` as ``client.insights`` via
 the ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
 
 - ``client.insights.analysis_configs.{enable,disable,list_configs,get,update}``
@@ -23,8 +23,7 @@ Modeled on ``nemo_auditor.sdk`` — same shape, same hand-written CRUD-only
 resource pattern. No Stainless codegen.
 """
 
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from nemo_insights_plugin.client import AsyncInsightsClient, InsightsClient
 from nemo_insights_plugin.sdk_resources.analysis_configs import (
@@ -46,9 +45,9 @@ from nemo_insights_plugin.sdk_resources.insights import (
 class InsightsPluginResource:
     """Sync SDK namespace mounted as ``client.insights``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         self._platform = platform
-        self._client = client_from_platform(platform, InsightsClient)
+        self._client = InsightsClient.from_client(platform)
         self._insights: _InsightResource | None = None
         self._analysis_configs: _AnalysisConfigResource | None = None
         self._analysis_runs: _AnalysisRunResource | None = None
@@ -82,9 +81,9 @@ class InsightsPluginResource:
 class AsyncInsightsPluginResource:
     """Async SDK namespace mounted as ``client.insights``."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
-        self._client = client_from_platform(platform, AsyncInsightsClient)
+        self._client = AsyncInsightsClient.from_client(platform)
         self._insights: _AsyncInsightResource | None = None
         self._analysis_configs: _AsyncAnalysisConfigResource | None = None
         self._analysis_runs: _AsyncAnalysisRunResource | None = None

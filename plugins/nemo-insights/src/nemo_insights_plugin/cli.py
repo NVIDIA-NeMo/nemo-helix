@@ -15,10 +15,11 @@ from typing import Any, ClassVar, TypeVar
 
 import httpx
 import typer
-from nemo_helix import AsyncNeMoHelix, NeMoHelixError
 from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.nooa_model_client import configured_fast_model, configured_model_refs
 from nemo_insights_plugin.contracts.profile import (
@@ -56,7 +57,7 @@ def _run_command(coro: Coroutine[Any, Any, _T]) -> _T:
         ValueError,
         AnalysisRunNotSubmittedError,
         AnalysisRunTimeoutError,
-        NeMoHelixError,
+        NemoClientError,
         httpx.HTTPError,
     ) as exc:
         typer.echo(f"Error: {_one_line_error(exc)}", err=True)
@@ -433,7 +434,7 @@ async def _analysis_config_command(
 
 
 @asynccontextmanager
-async def _client(base_url: str) -> AsyncIterator[AsyncNeMoHelix]:
+async def _client(base_url: str) -> AsyncIterator[AsyncNemoClient]:
     """Open a platform client for one CLI command and always close it."""
     client = make_client(base_url)
     try:
@@ -585,7 +586,7 @@ async def _get_analysis_run(
 
 
 async def _wait_for_run(
-    client: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     *,
     workspace: str,
     name: str,
