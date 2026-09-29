@@ -170,7 +170,7 @@ _FABRIC_ADAPTER_EXTRAS: dict[str, str] = {
     "nvidia.fabric.langchain.deepagents": "deepagents",
     "nvidia.fabric.codex": "codex",
     "nvidia.fabric.claude": "claude",
-    "nvidia.fabric.hermes": "hermes",
+    "nvidia.fabric.hermes": "hermes-agent",
 }
 
 

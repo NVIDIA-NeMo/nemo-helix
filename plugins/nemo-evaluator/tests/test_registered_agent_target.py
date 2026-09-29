@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,7 +16,7 @@ import pytest
 from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_compiler import _secret_refs, compile_agent_eval_job
-from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob, _resolve_registered_agent
+from nemo_evaluator.jobs.agent_evaluate import _FABRIC_ADAPTER_EXTRAS, AgentEvalJob, _resolve_registered_agent
 from nemo_evaluator.jobs.agent_spec import (
     REGISTERED_AGENT_HARBOR_IMPORT_PATH,
     AgentEvalInputSpec,
@@ -400,6 +401,13 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert kwargs["fabric_workspace"] == "/app"
     # Resolution is idempotent: a resolved target is left alone.
     assert await _resolve(resolved) is resolved
+
+
+def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric() -> None:
+    """`pip install nemo-fabric[<extra>]` only warns on an unknown extra; the container would run without its harness."""
+    provided = set(importlib.metadata.distribution("nemo-fabric").metadata.get_all("Provides-Extra") or [])
+    assert set(_FABRIC_ADAPTER_EXTRAS.values()) <= provided, set(_FABRIC_ADAPTER_EXTRAS.values()) - provided
+    assert "relay" in provided
 
 
 async def test_harbor_caller_may_pin_the_fabric_package(mocker: MockerFixture) -> None:
