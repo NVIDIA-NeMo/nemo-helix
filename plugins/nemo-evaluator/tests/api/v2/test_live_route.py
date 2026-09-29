@@ -529,3 +529,64 @@ def test_stored_metric_reference_is_resolved_and_scored(monkeypatch: pytest.Monk
     assert [m["metric"] for m in body["metrics"]] == ["exact-match"]
     assert body["metrics"][0]["scores"][0]["mean"] == pytest.approx(1.0)
     assert entities.lookups == [("default", "stored-exact")]
+
+
+def test_targeted_run_keeps_sibling_scores_when_one_metric_fails(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a target, a failing metric reports its own error and the others still score."""
+
+    async def fake_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
+        del model, request, max_retries, kwargs
+        return _chat_response("Paris")
+
+    monkeypatch.setattr(benchmark_execution, "make_inference_request", fake_inference)
+
+    broken = MetricInline.model_validate_json(
+        bundle_metric(
+            ToolCallingMetric(reference="{{item.expected}}"), CloudpickleMetricBundlePackager()
+        ).model_dump_json()
+    ).model_dump(mode="json")
+
+    resp = client.post(
+        _BASE,
+        json={
+            "dataset": [{"expected": "Paris", "question": "Capital of France?"}],
+            "metrics": [_exact_match_metric(), broken],
+            "target": {"url": "http://models.test/v1/chat/completions", "name": "test-model"},
+            "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    by_metric = {m["metric"]: m for m in resp.json()["metrics"]}
+    assert by_metric["exact-match"]["error"] is None
+    assert by_metric["exact-match"]["scores"][0]["mean"] == pytest.approx(1.0)
+    assert by_metric["tool-calling"]["scores"] == []
+    assert "tool call" in by_metric["tool-calling"]["error"].lower()
+
+
+def test_failed_target_generation_is_not_reported_as_metric_errors(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row the target never answered for fails the request, not each metric separately."""
+
+    async def failing_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
+        del model, request, max_retries, kwargs
+        raise RuntimeError("upstream returned 503 Service Unavailable")
+
+    monkeypatch.setattr(benchmark_execution, "make_inference_request", failing_inference)
+
+    resp = client.post(
+        _BASE,
+        json={
+            "dataset": [{"expected": "Paris", "question": "Capital of France?"}],
+            "metrics": [_exact_match_metric()],
+            "target": {"url": "http://models.test/v1/chat/completions", "name": "test-model"},
+            "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
+        },
+    )
+
+    assert resp.status_code == 502, resp.text
+    assert "target generation failed" in resp.text
+    assert "503 Service Unavailable" in resp.text

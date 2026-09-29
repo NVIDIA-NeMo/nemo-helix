@@ -294,10 +294,10 @@ def _live_params(
 ) -> RunConfig | RunConfigOnlineModel:
     """Return execution params with the interactive settings pinned.
 
-    The SDK's defaults are built for batch jobs: retries with backoff hide the upstream status, an
-    unbounded request timeout outlives the handler, and ``ignore_request_failure`` would report a
-    NaN score for a request that never succeeded. A model target is widened to
-    ``RunConfigOnlineModel``, which carries those three knobs.
+    The SDK's defaults are built for batch jobs: retries with backoff hide the upstream status and
+    an unbounded request timeout outlives the handler. ``ignore_request_failure`` is on so one
+    failing metric does not abort its siblings; a failed *generation* is caught separately and never
+    reported as a score. A model target is widened to ``RunConfigOnlineModel``, which carries those.
     """
     if target is not None and not isinstance(params, RunConfigOnlineModel):
         params = RunConfigOnlineModel.model_validate(params.model_dump() if params is not None else {})
@@ -307,7 +307,7 @@ def _live_params(
         pinned |= {
             "max_retries": 0,
             "request_timeout": LIVE_REQUEST_TIMEOUT_S,
-            "ignore_request_failure": False,
+            "ignore_request_failure": True,
         }
     return resolved.model_copy(update=pinned)
 
@@ -324,17 +324,29 @@ async def _score(
     Offline, each metric runs on its own, so a failure names the metric that caused it and leaves
     the others' scores intact: the SDK aborts a whole run on the first failure, and the offline
     ``RunConfig`` cannot tolerate failures. Online the run stays single, because the target must
-    generate exactly once, so a metric failure there fails the request as a whole.
+    generate exactly once, and per-metric errors come from the run itself, which tolerates them.
     """
     if isinstance(request.target, Model):
         result = await _run(metrics, request=request, params=params, secret_resolver=secret_resolver)
+        row = result.row_scores[0] if result.row_scores else None
+        # A row the target never answered for has nothing to score, so it fails the request rather
+        # than every metric individually.
+        generation_error = row.sample.get("inference_error") if row is not None else None
+        if generation_error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"target generation failed: {generation_error}",
+            )
         # Regroup the namespaced scores so the response matches the offline path.
         keys = unique_metric_keys(metrics)
+        errors = (row.metric_errors or {}) if row is not None else {}
         by_key: dict[str, list[AggregateScore]] = {key: [] for key in keys}
         for score in result.aggregate_scores.scores:
-            key = score.name.split(".", 1)[0]
-            by_key.setdefault(key, []).append(score)
-        return _output_of(result), [LiveMetricResult(metric=key, scores=by_key[key]) for key in keys]
+            by_key.setdefault(score.name.split(".", 1)[0], []).append(score)
+        return _output_of(result), [
+            LiveMetricResult(metric=key, scores=[] if key in errors else by_key[key], error=errors.get(key))
+            for key in keys
+        ]
 
     output: str | None = None
     results: list[LiveMetricResult] = []
