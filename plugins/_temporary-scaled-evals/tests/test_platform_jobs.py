@@ -81,6 +81,7 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
         "scaled-evals-credentials-encryption-key",
     )
     monkeypatch.setattr(settings, "platform_jobs_registry_auth_secret", "scaled-evals-registry-auth")
+    monkeypatch.setattr(settings, "platform_jobs_opensandbox_api_key_secret", "scaled-evals-opensandbox-api-key")
     build = await TaskImageBuildJob.compile(
         workspace="default",
         spec=_build_spec(),
@@ -127,6 +128,7 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
         "PGPASSWORD": "scaled-evals-postgres-password",
         "CREDENTIALS_ENCRYPTION_KEY": "scaled-evals-credentials-encryption-key",
         "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
+        "OPENSANDBOX_API_KEY": "scaled-evals-opensandbox-api-key",
     }
     assert evaluation_step.executor.resources.requests.cpu == "50m"
     assert evaluation_step.executor.resources.limits.memory == "1Gi"

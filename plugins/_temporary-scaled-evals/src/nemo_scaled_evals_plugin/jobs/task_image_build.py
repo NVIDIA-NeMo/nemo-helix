@@ -139,13 +139,27 @@ def resolve_executor(
     return executor if resources is None else executor.model_copy(update={"resources": resources})
 
 
-def resolve_secret_environment() -> list[EnvironmentVariable] | None:
-    """Reference deployment secrets needed by isolated Platform Job containers."""
-    refs = {
+def _shared_secret_refs() -> dict[str, str]:
+    return {
         "PGPASSWORD": settings.platform_jobs_postgres_password_secret,
         "CREDENTIALS_ENCRYPTION_KEY": settings.platform_jobs_credentials_encryption_key_secret,
         "TASK_IMAGE_REGISTRY_AUTH_JSON": settings.platform_jobs_registry_auth_secret,
     }
+
+
+def resolve_secret_environment() -> list[EnvironmentVariable] | None:
+    """Reference deployment secrets needed by isolated Platform Job containers."""
+    return _secret_environment(_shared_secret_refs())
+
+
+def resolve_evaluation_secret_environment() -> list[EnvironmentVariable] | None:
+    """Secrets for evaluation Jobs: the shared set plus runtime credentials builds never need."""
+    return _secret_environment(
+        {**_shared_secret_refs(), "OPENSANDBOX_API_KEY": settings.platform_jobs_opensandbox_api_key_secret}
+    )
+
+
+def _secret_environment(refs: dict[str, str]) -> list[EnvironmentVariable] | None:
     environment = [
         EnvironmentVariable(name=name, from_secret=EnvironmentVariableFromSecret(name=secret))
         for name, secret in refs.items()

@@ -560,7 +560,7 @@ def _runtime(row: Mapping[str, Any], *, backend: str | None, handle: str | None)
         if runtime.startswith("gym"):
             runner_image_ref = runner_image_ref or _first_env("GYM_RUNNER_IMAGE")
             runner_image_digest = runner_image_digest or _first_env("GYM_RUNNER_IMAGE_DIGEST")
-    if runtime == "sandbox_k8s":
+    if runtime in ("sandbox_k8s", "harbor_opensandbox"):
         runner_image_ref = runner_image_ref or _first_env("HARBOR_RUNNER_IMAGE")
         runner_image_digest = runner_image_digest or _first_env("HARBOR_RUNNER_IMAGE_DIGEST")
     return RuntimeProvenance(
