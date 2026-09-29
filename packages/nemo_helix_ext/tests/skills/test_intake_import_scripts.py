@@ -334,6 +334,56 @@ def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pyte
     assert payload["spans"][0]["trace_id"] == "trace-1"
 
 
+def test_intake_writer_bootstrap_branch_requests_through_the_client_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without an injected session the writer's raw requests ride the bootstrap client's own httpx
+    client: its Authorization header, repeated query params encoded by httpx, and a close() that
+    releases the transport.
+    """
+    common = importlib.import_module("_import_common")
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    # build_nemo_client puts the context's Authorization on the httpx client and owns it.
+    transport = httpx.Client(
+        transport=httpx.MockTransport(handle),
+        headers={"Authorization": "Bearer bootstrap-token"},
+    )
+    client = NemoClient(
+        base_url="https://platform.example.com",
+        workspace="bootstrap-workspace",
+        http_client=transport,
+        owns_http_client=True,
+    )
+    monkeypatch.setattr(common, "build_nemo_client", Mock(return_value=client))
+
+    writer = common.IntakeWriter(base_url=None, workspace=None)
+
+    assert writer.session is transport
+    assert writer.headers == {}
+
+    payload = writer._request(
+        "GET",
+        f"{writer.prefix}/annotations",
+        params=[("filter[trace_id]", "trace-1"), ("filter[trace_id]", "trace-2")],
+        expected={200},
+    )
+
+    assert payload == {"data": []}
+    request = captured[0]
+    assert request.url.path == "/apis/intake/v2/workspaces/bootstrap-workspace/annotations"
+    assert request.url.params.get_list("filter[trace_id]") == ["trace-1", "trace-2"]
+    assert request.headers["authorization"] == "Bearer bootstrap-token"
+
+    writer.close()
+
+    assert transport.is_closed
+
+
 def test_intake_writer_reports_only_new_annotation_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     common = importlib.import_module("_import_common")
     annotation = {

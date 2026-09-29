@@ -15,7 +15,6 @@ from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.nemotron_personas import WORKSPACE, get_resource_name_for_locale
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import FilesClient
@@ -360,7 +359,7 @@ def _single_model_config(provider_name: str, model: str) -> dd.DataDesignerConfi
     return builder
 
 
-def test_check_models_passes_for_servable_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_check_models_passes_for_servable_models(client: NemoClient, workspace: str) -> None:
     """The only place a real model probe runs: integration tests cannot, because
     the engine's HTTP client does not carry their ASGI transport.
     """
@@ -372,9 +371,7 @@ def test_check_models_passes_for_servable_models(sdk: NeMoHelix, client: NemoCli
     assert report.ok, [(e.error_type, e.message) for e in report.errors]
 
 
-def test_check_models_catches_model_the_provider_cannot_serve(
-    sdk: NeMoHelix, client: NemoClient, workspace: str
-) -> None:
+def test_check_models_catches_model_the_provider_cannot_serve(client: NemoClient, workspace: str) -> None:
     """validate can be green while check_models is red;
     only the latter makes a live inference call.
     """

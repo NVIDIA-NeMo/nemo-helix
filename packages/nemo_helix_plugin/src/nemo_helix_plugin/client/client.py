@@ -783,8 +783,10 @@ class NemoClient(BaseNemoClient[httpx.Client]):
     def to_async(self) -> AsyncNemoClient:
         """Return an :class:`AsyncNemoClient` with this client's configuration.
 
-        The async client builds and owns its own transport, so close it (or use
-        it as an async context manager) when done.
+        The async client builds and owns its own network transport, so close it
+        (or use it as an async context manager) when done. A custom ``http_client``
+        on this client (ASGI, Unix socket) is not carried over; build the async
+        twin yourself when the base URL is not reachable over the network.
         """
         return AsyncNemoClient(
             base_url=self.base_url,
