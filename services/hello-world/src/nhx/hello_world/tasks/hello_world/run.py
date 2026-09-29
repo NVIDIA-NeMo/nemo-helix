@@ -10,12 +10,11 @@ import time
 import traceback
 import types
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.jobs.config import get_job_id, get_task_config, get_workspace
-from nhx.common.sdk_factory import get_platform_sdk
 from nhx.hello_world.api.v2.jobs.schemas import HelloWorldJobConfig
 
 DEFAULT_FILE_PATH = "message.txt"
@@ -78,12 +77,12 @@ def busy_loop(duration_seconds: float) -> bool:
     return True
 
 
-def run(*, sdk: NeMoHelix | None = None) -> int:
+def run(*, client: NemoClient | None = None) -> int:
     """Execute the task to write the configured message to the file API.
 
     Args:
-        sdk: Optional SDK instance for dependency injection (for testing).
-            If None, uses get_platform_sdk().
+        client: Optional platform client for dependency injection (for testing).
+            If None, uses get_nemo_client().
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -100,7 +99,7 @@ def run(*, sdk: NeMoHelix | None = None) -> int:
 
         print(f"Writing message to {workspace}/{fileset_name}/{DEFAULT_FILE_PATH}")
 
-        sdk = sdk or get_platform_sdk()
+        client = client or get_nemo_client()
 
         # Busy loop to simulate work and allow for signal testing
         if not busy_loop(BUSY_LOOP_DURATION_SECONDS):
@@ -108,7 +107,7 @@ def run(*, sdk: NeMoHelix | None = None) -> int:
             return 0
 
         # Upload the message (creates fileset if it doesn't exist)
-        files = client_from_platform(sdk, FilesClient)
+        files = FilesClient.from_client(client)
         files.create_fileset(body=CreateFilesetRequest(name=fileset_name), workspace=workspace, exist_ok=True)
         files.upload_file(
             content=config.message,
