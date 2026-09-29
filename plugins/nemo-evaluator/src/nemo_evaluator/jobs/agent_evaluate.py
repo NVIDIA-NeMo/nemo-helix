@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -645,12 +646,16 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
+        bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
+        if bundle_dir.exists():
+            shutil.rmtree(bundle_dir)
         run_config = AgentEvalRunConfig(
             params=params,
             prompt_template=prompt_template,
             parallelism=spec.max_concurrent_tasks,
             labels=spec.labels,
             fail_fast=spec.fail_fast,
+            work_dir=bundle_dir,
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
