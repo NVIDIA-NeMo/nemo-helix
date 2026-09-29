@@ -714,7 +714,7 @@ def _sdk_vm_to_plugin_vm(vm: SDKVirtualModel) -> PluginVirtualModel:
             for c in calls
         ]
 
-    return PluginVirtualModel(
+    plugin_vm = PluginVirtualModel(
         name=vm.name or "",
         workspace=vm.workspace or "",
         default_model_entity=vm.default_model_entity,
@@ -727,6 +727,8 @@ def _sdk_vm_to_plugin_vm(vm: SDKVirtualModel) -> PluginVirtualModel:
         post_response_middleware=_to_middleware_calls(vm.post_response_middleware),
         override_proxy=vm.override_proxy,
     )
+    plugin_vm._id = vm.id
+    return plugin_vm
 
 
 # ---------------------------------------------------------------------------

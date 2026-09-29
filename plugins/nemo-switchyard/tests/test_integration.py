@@ -157,7 +157,7 @@ class TestSwitchyardRandomRoutingIntegration:
 
         # VM should be unregistered from all mappings
         assert (vm_key, "random_routing", "request") not in middleware_state.VM_NAME_TO_CONFIG_HASH
-        assert virtual_model.id not in middleware_state.VM_CONFIG_MAPPING
+        assert vm_key not in middleware_state.VM_CONFIG_MAPPING
         # And since no other VM uses this config, the factory should be unregistered
         assert config_hash not in middleware_state.FACTORIES_BY_CONFIG_HASH
 
