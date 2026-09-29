@@ -55,7 +55,7 @@ from pathlib import Path
 import pytest
 from nemo_evaluator.api.schemas import TasksetRef
 from nemo_evaluator.sdk.resources import Evaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRuntimeConfig,
     discover_harbor_tasks,

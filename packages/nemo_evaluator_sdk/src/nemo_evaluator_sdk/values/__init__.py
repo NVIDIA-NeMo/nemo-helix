@@ -7,7 +7,7 @@ The public interface resolves lazily (PEP 562), for the same reason the package 
 every ``from nemo_evaluator_sdk.values.X import ...`` runs this barrel first, so
 eagerly re-exporting all 97 names dragged ``.datasets``/``.results`` (pyarrow, numpy) and
 ``.metrics``/``.scores`` (jsonschema, jinja2) into ``agent_eval``, which uses none of them.
-Measured: 485 modules and +57 MB RSS for ``import agent_eval.runtimes.harbor_runtime`` before,
+Measured: 485 modules and +57 MB RSS for ``import agent_eval.runtimes.harbor.runtime`` before,
 300 modules and pydantic alone after.
 
 Add a new re-export to ``_LAZY_ATTRS``, the ``TYPE_CHECKING`` block and ``__all__`` — never as a

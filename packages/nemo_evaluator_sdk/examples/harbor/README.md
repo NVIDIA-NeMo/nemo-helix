@@ -27,7 +27,7 @@ The SDK owns the Harbor plumbing. Apart from imports, running a whole dataset is
 two lines — build a config, make one call:
 
 ```python
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborRuntimeConfig, run_harbor_eval,
 )
 
@@ -64,7 +64,7 @@ each `[task] name`).
 
 ## Under the hood
 
-The runtime is [`harbor_runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/runtimes/harbor_runtime.py):
+The runtime is [`harbor_runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/runtimes/harbor/runtime.py):
 
 - `HarborRuntimeConfig` — declarative config (agent, attempts, concurrency,
   timeouts, artifacts) mapped onto Harbor's `JobConfig` lazily.
@@ -111,7 +111,7 @@ export NVIDIA_API_KEY=...   # https://build.nvidia.com
 uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example
 ```
 
-The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`, a subclass
+The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent`, a subclass
 of `FabricAgent`, Fabric's custom Harbor agent, that runs the complete Fabric config passed as
 `agent_kwargs["fabric_config"]`: harness, model, endpoint, and the credential's variable name all come
 from it. The key reaches the container through `env_secrets`, so the job directory's
@@ -132,7 +132,7 @@ uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fa
 ```
 
 The only difference is the agent:
-`nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent`, which is
+`nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent`, which is
 built on Harbor's `BaseInstalledAgent` and provisions curl, `uv`, and a uv-managed CPython before
 installing Fabric. Pass `--dataset-dir` to point it at your own Harbor task. The image does need to be
 glibc-based: `nemo-fabric-runtime` ships no musllinux wheels, so Alpine tasks fail at `uv pip install`.

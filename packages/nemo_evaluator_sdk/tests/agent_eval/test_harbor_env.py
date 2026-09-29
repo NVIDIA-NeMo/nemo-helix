@@ -9,7 +9,7 @@ import logging
 import re
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_env import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import (
     HARBOR_SENSITIVE_ENV_KEY_RE,
     harbor_env_templates,
     validate_harbor_env,

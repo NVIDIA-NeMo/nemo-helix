@@ -63,8 +63,8 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
     SandboxedGymAgentTaskRunner,
     SandboxedGymRuntimeConfig,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_env import harbor_env_templates
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import harbor_env_templates
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTarget,

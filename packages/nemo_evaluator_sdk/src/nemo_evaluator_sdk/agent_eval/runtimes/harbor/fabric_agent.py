@@ -4,7 +4,7 @@
 """A Harbor agent that runs one complete NeMo Fabric agent config inside the task container.
 
 Point :class:`HarborRuntimeConfig.agent_import_path` (or the platform's ``HarborRunnerTarget``) at
-``nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`` and hand it the agent
+``nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent`` and hand it the agent
 through ``agent_kwargs["fabric_config"]`` -- a Fabric ``agent.yaml`` as a JSON-shaped mapping, the same
 document :class:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime.FabricAgentRuntime` runs on the
 host. The config is used **verbatim**: harness, models, instructions, skills, MCP servers, tools, and

@@ -4,7 +4,7 @@
 """Run a NeMo Fabric deepagents harness on a Nemotron model inside Harbor.
 
 Harbor owns the sandbox and the verifier; NeMo Fabric owns the agent harness. The bridge is
-:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent.NemoFabricAgent`, selected with
+:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent.NemoFabricAgent`, selected with
 ``agent_import_path`` and configured with ``agent_kwargs`` -- the same two fields a platform
 ``HarborRunnerTarget`` carries. The model API key never appears in the config: ``env_secrets``
 names it, Harbor resolves it from this process's environment when it creates the agent, and the job
@@ -28,8 +28,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NVIDIA_MODEL_BASE_URL
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NVIDIA_MODEL_BASE_URL
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import SecretRef
 from pydantic import JsonValue
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 #: hello-world on a `python:3.12-slim` image: the Fabric agent installs itself into the task container.
 FABRIC_HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "fabric_hello_world_dataset"
-NEMO_FABRIC_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent"
+NEMO_FABRIC_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent"
 DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 

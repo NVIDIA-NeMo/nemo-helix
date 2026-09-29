@@ -16,7 +16,7 @@ from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement, Gym
 from nemo_evaluator.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from pydantic import ValidationError

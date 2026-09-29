@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborRuntimeConfig,
     run_harbor_eval,
 )
@@ -234,7 +234,7 @@ async def test_nemo_fabric_agent_runs_deepagents_on_nemotron_inside_harbor(tmp_p
     config = HarborRuntimeConfig(
         jobs_dir=jobs_dir,
         job_name="fabric-deepagents",
-        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
+        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent",
         agent_kwargs={
             "fabric_config": {
                 "metadata": {"name": "fabric-deepagents-e2e"},

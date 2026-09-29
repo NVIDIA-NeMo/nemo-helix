@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymPlacement, GymRunnerTarget, HarborRunnerTarget
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError

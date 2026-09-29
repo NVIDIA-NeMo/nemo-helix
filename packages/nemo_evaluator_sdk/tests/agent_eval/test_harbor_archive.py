@@ -8,8 +8,8 @@ import subprocess
 import sys
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes import harbor_archive
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor import archive as harbor_archive
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import (
     capture_validated_task,
     local_task_identity,
     private_directory,
@@ -111,7 +111,7 @@ class Block:
         if fullname.split(".")[0] in {"harbor", "nemo_evaluator"}:
             raise ImportError(fullname)
 sys.meta_path.insert(0, Block())
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 """
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)
 
@@ -133,7 +133,7 @@ def test_non_table_task_section_is_a_value_error(tmp_path):
 
 
 def test_saved_trial_dirs_treat_case_only_duplicates_as_stale(tmp_path):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _task_dirs_for
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _task_dirs_for
     from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 
     for folder, name in (("a", "Foo"), ("b", "foo")):

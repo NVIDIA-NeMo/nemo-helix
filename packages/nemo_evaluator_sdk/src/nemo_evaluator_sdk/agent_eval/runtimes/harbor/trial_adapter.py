@@ -6,7 +6,7 @@
 This module owns the complete Harbor trial-data seam: identity, reward and error
 normalization, measurements, Harbor-valid result-file discovery, and
 collision-safe evidence discovery. Harbor job execution and cache orchestration
-remain in :mod:`harbor_runtime`.
+remain in :mod:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime`.
 """
 
 from __future__ import annotations

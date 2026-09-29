@@ -169,7 +169,7 @@ runs:
             - '.github/workflows/ci.yaml'  # the job definition itself
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
-            # Paths that can change what `import ...harbor_runtime` loads or how the smoke job runs.
+            # Paths that can change what `import ...harbor.runtime` loads or how the smoke job runs.
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure
             - 'packages/nemo_evaluator_sdk/tests/test_lazy_public_api.py'  # smoke test file
             - 'packages/nemo_evaluator_sdk/pyproject.toml'  # declared [project] dependencies
