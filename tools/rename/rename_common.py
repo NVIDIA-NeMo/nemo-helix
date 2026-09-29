@@ -17,6 +17,11 @@ COMMON_IMPL = Path("tools/rename/rename_common.py")
 PATCH_PATH = Path("docker/rl/patches/nemo-rl-gym-host-hf-cache.patch")
 TEST_PATH = Path("tests/tools/rename/test_rename_tools.py")
 GITIGNORE_PATH = Path(".gitignore")
+# The current release note documents the NeMo Platform to NeMo Helix rebrand
+# itself, so it legitimately names the pre-rename identifiers for readers
+# upgrading from an earlier release. Archived release-notes pages do not need
+# this exception once they stop being the current release.
+CURRENT_RELEASE_NOTE_PATH = Path("docs/about/release-notes/current-release.mdx")
 IGNORE_PATHS = {
     # These are existing GitHub team slugs, not product identifiers to rename.
     Path(".github/CODEOWNERS"),
@@ -28,6 +33,7 @@ IGNORE_PATHS = {
     PATCH_PATH,
     TEST_PATH,
     GITIGNORE_PATH,
+    CURRENT_RELEASE_NOTE_PATH,
 }
 
 PRODUCT_REPLACEMENTS = [
