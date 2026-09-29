@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import threading
 from collections.abc import Callable, Coroutine, Sequence
@@ -140,6 +141,7 @@ def run_sync(awaitable_factory: Callable[[], Coroutine[Any, Any, T]]) -> T:
 
     results: list[T] = []
     errors: list[BaseException] = []
+    context = contextvars.copy_context()
 
     def _runner() -> None:
         """Execute the coroutine inside a thread-local event loop.
@@ -150,7 +152,7 @@ def run_sync(awaitable_factory: Callable[[], Coroutine[Any, Any, T]]) -> T:
         try:
             # A separate thread gives notebook-style environments a fresh event loop
             # without nesting asyncio.run() inside the caller's running loop.
-            results.append(asyncio.run(awaitable_factory()))
+            results.append(context.run(lambda: asyncio.run(awaitable_factory())))
         except BaseException as exc:  # pragma: no cover - re-raised on caller thread
             errors.append(exc)
 
