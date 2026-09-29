@@ -218,22 +218,28 @@ response = InferenceGatewayClient.from_client(client).stream_openai(
     }),
 )
 
-# Parse Server-Sent Events (SSE) stream
+# Parse Server-Sent Events (SSE) stream incrementally: buffer partial lines
+# and parse each complete line as it arrives, so words print as they stream.
+buffer = b""
 with response.stream() as chunks:
-    for line in b"".join(chunks).decode().splitlines():
-        if line.startswith("data: "):
-            line = line[len("data: "):]
+    for chunk in chunks:
+        buffer += chunk
+        while b"\n" in buffer:
+            line, _, buffer = buffer.partition(b"\n")
+            line = line.decode()
+            if line.startswith("data: "):
+                line = line[len("data: "):]
 
-        if not line or line == "[DONE]":
-            continue
+            if not line or line == "[DONE]":
+                continue
 
-        try:
-            chunk = json.loads(line)
-            content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-            if content:
-                print(content, end="")
-        except json.JSONDecodeError:
-            continue
+            try:
+                payload = json.loads(line)
+                content = payload.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                if content:
+                    print(content, end="")
+            except json.JSONDecodeError:
+                continue
 ```
 
 **How it works:**
