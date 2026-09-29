@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { EntitiesSection } from '@studio/routes/AnonymizerBuilderRoute/components/EntitiesSection';
-import { ENTITY_MODE_AUTO } from '@studio/routes/AnonymizerBuilderRoute/constants';
+import {
+  ENTITY_MODE_AUTO,
+  ENTITY_MODE_CUSTOM,
+} from '@studio/routes/AnonymizerBuilderRoute/constants';
 import {
   type AnonymizerFormData,
   getAnonymizerFormDefaults,
@@ -48,7 +51,7 @@ describe('EntitiesSection', () => {
 
   it('offers the defaults checkbox in custom mode', async () => {
     render(
-      <TestWrapper>
+      <TestWrapper defaultValues={{ entityMode: ENTITY_MODE_CUSTOM }}>
         <EntitiesSection />
       </TestWrapper>
     );

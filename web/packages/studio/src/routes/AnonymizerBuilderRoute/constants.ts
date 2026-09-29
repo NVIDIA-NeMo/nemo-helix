@@ -101,8 +101,8 @@ export const ENTITY_MODE_AUTO = 'auto';
 export type EntityMode = typeof ENTITY_MODE_CUSTOM | typeof ENTITY_MODE_AUTO;
 
 export const ENTITY_MODE_OPTIONS: { value: EntityMode; children: string }[] = [
-  { value: ENTITY_MODE_CUSTOM, children: 'Custom' },
   { value: ENTITY_MODE_AUTO, children: 'Auto-detect' },
+  { value: ENTITY_MODE_CUSTOM, children: 'Custom' },
 ];
 
 /** The count comes from the entity-labels endpoint, so it is unknown until that call lands. */
