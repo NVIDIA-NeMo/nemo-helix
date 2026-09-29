@@ -68,7 +68,7 @@ if curl -fsS --connect-timeout 2 --max-time 5 \
   "$NHX_BASE_URL/health/ready" >/dev/null; then
   echo "Using the running NeMo Helix instance at $NHX_BASE_URL"
 else
-  nemo setup --auto --start-services --install-skills --no-deploy-agent
+  nemo setup --auto --start-services --install-skills
 fi
 
 curl -fsS --connect-timeout 2 --max-time 5 \

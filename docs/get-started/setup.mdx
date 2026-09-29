@@ -97,7 +97,7 @@ The wizard walks through each stage:
 4. **Discover models** — finds available models from your provider
 5. **Select agent models** — pick a default model for quality-critical work and a fast model for latency-sensitive work; reuse the default if one model is enough
 6. **Install skills** — adds NeMo skills to detected coding agents (Cursor, Claude Code, Codex)
-7. **Deploy agent** — optionally deploys a demo calculator agent on the platform
+7. **Choose a path** — optionally creates a sample workspace with a Fabric email security agent and evaluation artifacts
 
 Each stage is idempotent — you can re-run `nemo setup` at any time to add more providers or update your configuration.
 
@@ -112,7 +112,7 @@ Platform not reachable at http://localhost:8080. Start local services?
   3. No, I'll start them myself
 ```
 
-Choose the remote option and enter the deployment's base URL. Setup verifies the URL, saves it to the active CLI context, and starts the existing OIDC login flow when the deployment has authentication enabled. It then continues with provider, model, skills, and demo-agent setup.
+Choose the remote option and enter the deployment's base URL. Setup verifies the URL, saves it to the active CLI context, and starts the existing OIDC login flow when the deployment has authentication enabled. It then continues with provider, model, skills, and the optional sample workspace.
 
 This connects the local CLI to an existing deployment; it does not install the platform on a remote host.
 
@@ -147,13 +147,11 @@ nemo chat
 
 Use `--fast` for the fast model, or `--model <model-name>` for any other model from `nemo models list`.
 
-### Demo agent
+### Sample workspace
 
-If you accepted **Deploy agent** during setup, a demo calculator agent is running on the platform. Try it out:
-
-```bash
-nemo agents invoke --agent calculator-agent --input "What is 12 * 8?"
-```
+If you chose **Create a sample workspace and demo agent**, setup creates the
+`sample` workspace and deploys the Fabric email security agent. Use the Studio
+link printed at the end of setup to explore its dataset and evaluation config.
 
 ### Coding agent skills
 
@@ -198,7 +196,6 @@ nemo setup --auto --start-services
 | `--workspace`, `-w` | `default` | Target workspace |
 | `--start-services` / `--no-start-services` | prompt (interactive) or skip (auto) | Start local Helix services |
 | `--install-skills` / `--no-install-skills` | prompt (interactive) or skip (auto) | Install NeMo skills for detected coding agents |
-| `--deploy-agent` / `--no-deploy-agent` | prompt (interactive) or skip (auto) | Deploy the demo calculator agent |
 
 Override the default and fast models with `NEMO_DEFAULT_MODEL` and
 `NEMO_FAST_MODEL`. If the fast override is omitted, it reuses the default.
@@ -213,9 +210,9 @@ nemo setup --auto --start-services
 ### Examples
 
 ```bash
-# Full automation: services, skills, and agent
+# Full automation: services and skills
 export NVIDIA_API_KEY=nvapi-...
-nemo setup --auto --start-services --install-skills --deploy-agent
+nemo setup --auto --start-services --install-skills
 
 # Provider only (platform already running)
 export OPENAI_API_KEY=sk-...
@@ -227,8 +224,8 @@ export NHX_ACCESS_TOKEN=...
 export OPENAI_API_KEY=sk-...
 nemo setup --auto --no-start-services
 
-# Skip skills and agent
-nemo setup --no-install-skills --no-deploy-agent
+# Skip skills
+nemo setup --no-install-skills
 ```
 
 ## What to explore next

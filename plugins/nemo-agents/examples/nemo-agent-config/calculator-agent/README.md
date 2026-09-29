@@ -34,10 +34,10 @@ Start ClickHouse for Intake:
 services/intake/scripts/spans/run_clickhouse.sh
 ```
 
-Set up NeMo Helix without deploying the default demo agent:
+Set up NeMo Helix:
 
 ```bash
-nemo setup --auto --start-services --install-skills --no-deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 Use `nemo setup` without `--auto` for interactive provider and model selection.

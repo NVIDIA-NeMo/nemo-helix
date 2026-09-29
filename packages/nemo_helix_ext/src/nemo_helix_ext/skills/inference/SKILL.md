@@ -229,7 +229,7 @@ echo "$NEMO_DEFAULT_MODEL"
 # 3. If a NAT-style deployed agent's resolved config carries the upstream
 #    slash form in model_name, re-deploy with NEMO_DEFAULT_MODEL set to the
 #    entity ID. The .config.llms.agent.model_name path is specific to NAT
-#    workflows (e.g. the calculator-agent example); other workflow types store
+#    workflows; other workflow types store
 #    the model elsewhere.
 nemo agents deployments list --workspace default \
   | jq -r '.data[] | "\(.name)  model=\(.config.llms.agent.model_name // "n/a")"'
