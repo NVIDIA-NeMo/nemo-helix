@@ -26,7 +26,10 @@ const group = (over: Partial<StartTemplateGroup> = {}): StartTemplateGroup => ({
   ...over,
 });
 
-const renderPage = (groups: StartTemplateGroup[], onSelect: (id: string) => void = () => undefined) =>
+const renderPage = (
+  groups: StartTemplateGroup[],
+  onSelect: (id: string) => void = () => undefined
+) =>
   render(
     <TestProviders>
       <StartPage

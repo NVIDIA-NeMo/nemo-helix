@@ -1,7 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Block, Divider, Flex, PageHeader, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Badge,
+  Block,
+  Divider,
+  Flex,
+  PageHeader,
+  Skeleton,
+  Stack,
+  Text,
+} from '@nvidia/foundations-react-core';
 import { StartTile } from '@studio/components/StartOptions/StartTile';
 import type { StartPageProps } from '@studio/components/StartOptions/types';
 import type { FC } from 'react';

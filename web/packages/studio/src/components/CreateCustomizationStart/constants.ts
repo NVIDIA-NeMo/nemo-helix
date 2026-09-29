@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
-import type { StartOptionTag } from '@studio/components/StartOptions/types';
+import { ADVANCED, INTERMEDIATE } from '@studio/components/StartOptions/levels';
 import { Plus } from 'lucide-react';
 
 /**
@@ -15,7 +15,7 @@ export const START_OPTIONS: StartOption[] = [
     title: 'Build from scratch',
     description: 'Open the full form with sensible defaults and choose your own model and data.',
     icon: Plus,
-    tag: { label: 'Advanced', color: 'gray', kind: 'solid' },
+    tag: ADVANCED,
     enabled: true,
   },
 ];
@@ -23,9 +23,9 @@ export const START_OPTIONS: StartOption[] = [
 /** All templates share a task and method today, so they form one group. */
 export const TEMPLATE_GROUP_TITLE = 'Text-to-SQL, LoRA';
 
-/** A recipe provisions its own model and dataset, so it asks less of the user than the form. */
-export const TEMPLATES_TAG: StartOptionTag = {
-  label: 'Beginner',
-  color: 'gray',
-  kind: 'solid',
-};
+/**
+ * A recipe provisions its own model and dataset, so it asks less than the full form. This
+ * flow has no guided path, so nothing here is tagged Beginner — but the rung still has to
+ * match Data Designer's, where a template means the same thing.
+ */
+export const TEMPLATES_TAG = INTERMEDIATE;

@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StartOption, StartOptionTag } from '@studio/components/CreateFilesetStart/types';
+import type { StartOption } from '@studio/components/CreateFilesetStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
+import { ADVANCED, BEGINNER, INTERMEDIATE } from '@studio/components/StartOptions/levels';
 import { Plus, Sparkles } from 'lucide-react';
 
 /**
@@ -27,14 +28,8 @@ export const PROMPT_SUGGESTIONS: PromptSuggestion[] = [
   },
 ];
 
-/** Difficulty levels, kept together because they only mean anything relative to each other. */
-const BEGINNER: StartOptionTag = { label: 'Beginner', color: 'gray', kind: 'solid' };
-const ADVANCED: StartOptionTag = { label: 'Advanced', color: 'gray', kind: 'solid' };
-export const TEMPLATES_TAG: StartOptionTag = {
-  label: 'Intermediate',
-  color: 'gray',
-  kind: 'solid',
-};
+/** A template does more for you than the empty canvas, less than describing it in words. */
+export const TEMPLATES_TAG = INTERMEDIATE;
 
 /** The non-template ways in; templates are picked directly, below the divider. */
 export const START_OPTIONS: StartOption[] = [
