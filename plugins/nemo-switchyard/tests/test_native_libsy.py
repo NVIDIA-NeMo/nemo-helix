@@ -5,11 +5,19 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 import pytest
 
 pytestmark = pytest.mark.switchyard_native
 
-libsy = pytest.importorskip("switchyard_rust.libsy")
+# Linux CI must ship the native wheel via enabled-plugins; fail closed there.
+# Local macOS/dev may lack the wheel, so keep importorskip outside that gate.
+if os.environ.get("CI") and sys.platform.startswith("linux"):
+    import switchyard_rust.libsy as libsy
+else:
+    libsy = pytest.importorskip("switchyard_rust.libsy")
 
 from nemo_helix_plugin.inference_middleware import InferenceRequest  # noqa: E402
 from nemo_switchyard._native_config import build_native_algorithm, map_random_routing_config  # noqa: E402

@@ -207,7 +207,14 @@ async def run_native_stream(
     timeout: float = NATIVE_STREAM_TIMEOUT_SECONDS,
     lock: asyncio.Lock | None = None,
 ) -> InferenceRequest:
-    """Drive ``run_stream`` until Done. Does not call the user model on empty response."""
+    """Drive Switchyard routing steps until Done; not OpenAI SSE.
+
+    ``Algorithm.run_stream`` yields ``CallModel`` / ``Done`` routing steps. The
+    client's OpenAI Chat ``stream`` flag is preserved on the final routed body so
+    IGW still proxies both streaming and non-streaming modalities. Internal judge
+    ``CallModel`` hops force ``stream=false``. Does not call the user model when
+    ``Done`` carries an immediate response (that path is not wired).
+    """
     require_openai_chat_path(request.path)
     try:
         return await asyncio.wait_for(
