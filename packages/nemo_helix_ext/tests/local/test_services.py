@@ -467,13 +467,13 @@ def test_embedded_handle_async_client_uses_asgi_transport() -> None:
 
     with (
         patch("nemo_helix_ext.local.services.build_async_asgi_http_client", return_value=http_client) as build_client,
-        patch("nemo_helix_ext.local.services.AsyncNeMoHelix", return_value=client_value) as platform_cls,
+        patch("nemo_helix_ext.local.services.AsyncNemoClient", return_value=client_value) as platform_cls,
     ):
-        client = handle.async_client(access_token="test-token")
+        client = handle.async_client(auth="test-token")
 
     build_client.assert_called_once_with(app)
     platform_cls.assert_called_once_with(
-        access_token="test-token",
+        auth="test-token",
         http_client=http_client,
         base_url=services.EMBEDDED_BASE_URL,
     )
@@ -510,10 +510,10 @@ def test_connect_services_uses_selected_mode_handle_client() -> None:
     handle.client.return_value = client
 
     with patch("nemo_helix_ext.local.services.ensure_services", return_value=handle):
-        result = services.connect_services(cfg, access_token="test")
+        result = services.connect_services(cfg, auth="test")
 
     assert result is client
-    handle.client.assert_called_once_with(access_token="test")
+    handle.client.assert_called_once_with(auth="test")
 
 
 @pytest.mark.parametrize("mode", [services.ServiceMode.EMBEDDED, services.ServiceMode.DAEMON])
@@ -982,10 +982,10 @@ def test_daemon_service_handle_tcp_client_uses_tcp_base_url(tmp_path: Path) -> N
         runtime_dir=None,
     )
 
-    with patch("nemo_helix_ext.local.services.NeMoHelix") as sdk:
+    with patch("nemo_helix_ext.local.services.NemoClient") as client_cls:
         handle.client(timeout=12)
 
-    sdk.assert_called_once_with(timeout=12, base_url="http://localhost:9090")
+    client_cls.assert_called_once_with(timeout=12, base_url="http://localhost:9090")
 
 
 def test_daemon_service_handle_uds_client_requires_socket_path(tmp_path: Path) -> None:

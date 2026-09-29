@@ -10,7 +10,6 @@ from typing import TypedDict, TypeVar
 
 import httpx
 import pytest
-from nemo_helix import APIStatusError
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.response import AsyncNemoPaginatedResponse, NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.client.types import CursorPagination, PreparedRequest
@@ -514,12 +513,12 @@ def test_watch_job_stops_when_status_is_paused() -> None:
     assert len(client.log_calls) == 1
 
 
-def test_watch_job_retries_sdk_transient_status_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_watch_job_retries_transient_http_status_error(monkeypatch: pytest.MonkeyPatch) -> None:
     request = httpx.Request("GET", "http://test")
-    response = httpx.Response(503, request=request)
+    response = httpx.Response(503, request=request, json={"detail": "service unavailable"})
     client = _SyncJobsClient(
         statuses=[
-            APIStatusError("service unavailable", response=response, body=None),
+            NemoHTTPError(response),
             _status("completed"),
         ],
         log_results=[AssertionError("logs should not be fetched")],
@@ -529,7 +528,7 @@ def test_watch_job_retries_sdk_transient_status_error(monkeypatch: pytest.Monkey
     events = list(watch_job(client, "job-a", include_logs=False, poll_interval=0))
 
     assert [(event.kind, getattr(event, "status", None), getattr(event, "message", None)) for event in events] == [
-        ("warning", None, "Transient status check failed: service unavailable"),
+        ("warning", None, "Transient status check failed: HTTP 503: service unavailable"),
         ("status", "completed", None),
     ]
     assert client.log_calls == []
@@ -539,16 +538,16 @@ def test_watch_job_backs_off_and_deduplicates_consecutive_transient_status_error
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = httpx.Request("GET", "http://test")
-    response = httpx.Response(503, request=request)
+    response = httpx.Response(503, request=request, json={"detail": "service unavailable"})
     client = _SyncJobsClient(
         statuses=[
-            APIStatusError("service unavailable", response=response, body=None),
-            APIStatusError("service unavailable", response=response, body=None),
-            APIStatusError("service unavailable", response=response, body=None),
-            APIStatusError("service unavailable", response=response, body=None),
-            APIStatusError("service unavailable", response=response, body=None),
-            APIStatusError("service unavailable", response=response, body=None),
-            APIStatusError("service unavailable", response=response, body=None),
+            NemoHTTPError(response),
+            NemoHTTPError(response),
+            NemoHTTPError(response),
+            NemoHTTPError(response),
+            NemoHTTPError(response),
+            NemoHTTPError(response),
+            NemoHTTPError(response),
             _status("completed"),
         ],
         log_results=[AssertionError("logs should not be fetched")],
@@ -560,7 +559,7 @@ def test_watch_job_backs_off_and_deduplicates_consecutive_transient_status_error
 
     assert sleeps == [1, 2, 4, 8, 16, 30.0, 30.0]
     assert [(event.kind, getattr(event, "status", None), getattr(event, "message", None)) for event in events] == [
-        ("warning", None, "Transient status check failed: service unavailable"),
+        ("warning", None, "Transient status check failed: HTTP 503: service unavailable"),
         ("status", "completed", None),
     ]
     assert client.log_calls == []
