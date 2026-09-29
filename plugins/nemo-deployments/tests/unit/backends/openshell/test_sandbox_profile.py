@@ -16,6 +16,8 @@ def test_openshell_profile_shape() -> None:
     assert len(sandbox_users) == 1
     assert sandbox_users[0].system is True
     assert sandbox_users[0].resolved_home() == "/home/sandbox"
+    # The supervisor refuses an image whose WORKDIR the sandbox identity cannot write.
+    assert PROFILE.workdir_group == sandbox_users[0].resolved_group()
 
 
 def test_openshell_profile_is_discoverable() -> None:

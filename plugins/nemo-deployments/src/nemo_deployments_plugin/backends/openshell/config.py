@@ -39,16 +39,16 @@ class HelixEgressConfig(BaseModel):
 
     host: str = Field(default="host.docker.internal", description="Platform host reachable from inside a sandbox.")
     port: int = Field(default=8080, ge=1, description="Platform port (the inference gateway / API listener).")
-    # Value sets track openshell/proto/sandbox.proto (NetworkAccessRule), which is broader than
-    # the summaries above imply: protocol also allows "graphql" and "" (L4-only), tls allows
-    # "passthrough".
+    # Value sets track OpenShell's authored policy schema: protocol also allows "graphql" and
+    # "" (L4-only). OpenShell 0.1 removed tls "terminate"/"passthrough": omitted TLS is
+    # inspected automatically, and "skip" turns inspection off.
     protocol: Literal["rest", "websocket", "graphql", "sql", ""] = Field(
         default="rest",
         description='OpenShell L7 protocol: "rest", "websocket", "graphql", "sql", or "" for L4-only.',
     )
-    tls: Literal["terminate", "passthrough", ""] = Field(
+    tls: Literal["", "skip"] = Field(
         default="",
-        description='TLS handling: "terminate" for HTTPS L7 intercept, "passthrough" (or "") for no L7 interception.',
+        description='TLS handling: "" (default) for automatic inspection, "skip" to disable inspection.',
     )
     access: Literal["read-only", "read-write", "full"] = Field(
         default="full",
@@ -74,6 +74,10 @@ class OpenShellExecutorConfig(BaseModel):
             "OpenShell gateway endpoint as a URL (http://host:port or https://host:port). "
             "The gRPC target is the same host:port; http implies plaintext, https implies TLS."
         ),
+    )
+    workspace: str = Field(
+        default="default",
+        description="OpenShell gateway workspace that every sandbox RPC is scoped to. The gateway creates 'default'.",
     )
     insecure: bool | None = Field(
         default=None,
@@ -108,8 +112,8 @@ class OpenShellExecutorConfig(BaseModel):
         default="/home/sandbox",
         description=(
             "Working directory for the detached serve command. Must be writable by the sandbox "
-            "user: a packaged agent image chowns /workspace to its own 'agent' user, so NAT's "
-            "per-run temp dir is written here instead. Empty string disables the chdir."
+            "user: a packaged agent image's /workspace contents are owned by its 'agent' user, so "
+            "NAT's per-run temp dir is written here instead. Empty string disables the chdir."
         ),
     )
     serve_path: str = Field(

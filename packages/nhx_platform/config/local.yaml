@@ -156,18 +156,23 @@ deployments:
         # :17670 is OpenShell's documented docker-driver default. NOT :8080, which the
         # platform owns.
         gateway_endpoint: http://127.0.0.1:17670
-        # A packaged agent image chowns /workspace to its own 'agent' user, which the
-        # sandbox user cannot write, so `nat serve` runs from a sandbox-writable dir.
+        # A packaged agent image's /workspace contents are owned by its 'agent' user,
+        # so the serve command runs from a sandbox-writable dir.
         serve_workdir: /home/sandbox
-        # null grants the sandbox NO direct egress: the agent reaches models through
-        # OpenShell's gateway-managed inference.local route and the gateway makes the
-        # upstream call. Set a platform_egress block for direct egress instead, or
-        # default_policy_path to pin a hand-written policy. Route wiring:
-        # plugins/nemo-deployments/examples/openshell/DEMO.ipynb.
-        platform_egress: null
+        # The sandbox's only route to the platform (and its models, via the Inference
+        # Gateway). The docker supervisor runs on the host network, so this reaches the
+        # platform listening on :8080.
+        platform_egress:
+          host: host.docker.internal
+          port: 8080
   # Docker stays the default so ordinary deployments and the e2e harness keep their
   # docker/k8s path.
   default_executor: local-docker
+
+agents:
+  deployments:
+    # `nemo agents deploy --mode openshell` lands on the executor above.
+    openshell_executor: openshell-local
 
 models:
   controller:

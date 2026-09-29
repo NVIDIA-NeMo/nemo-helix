@@ -420,6 +420,25 @@ class TestCreateDeployment:
         assert "use_image_entrypoint requires deployment_mode" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
+    def test_create_rejects_image_entrypoint_for_openshell(self) -> None:
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={
+                "agent": "fabric-agent",
+                "name": "fabric-dep",
+                "deployment_mode": "openshell",
+                "use_image_entrypoint": True,
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "not supported for deployment_mode 'openshell'" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
     def test_create_with_environment_ref_snapshots_config_and_compute(self) -> None:
         agent = _make_agent()
         environment = AgentEnvironment(

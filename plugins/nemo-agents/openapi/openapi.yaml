@@ -3578,9 +3578,11 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
           description: Runtime backend for this deployment. 'subprocess' (default)
-            reads the loopback 'endpoint'; 'docker'/'k8s' read the projected 'endpoints'.
+            reads the loopback 'endpoint'; 'docker'/'k8s'/'openshell' read the projected
+            'endpoints'.
           default: subprocess
         endpoint:
           type: string
@@ -3597,7 +3599,7 @@ components:
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Empty for subprocess;
+          description: Container image for container modes. Empty for subprocess;
             falls back to AgentsConfig.deployments.default_image.
           default: ''
         use_image_entrypoint:
@@ -4468,13 +4470,15 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
-          description: 'Runtime backend: subprocess (default), docker, or k8s.'
+          description: 'Runtime backend: subprocess (default), docker, k8s, or openshell.'
           default: subprocess
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Ignored for subprocess.
+          description: Container image for docker/k8s/openshell modes. Ignored for
+            subprocess.
           default: ''
         use_image_entrypoint:
           type: boolean

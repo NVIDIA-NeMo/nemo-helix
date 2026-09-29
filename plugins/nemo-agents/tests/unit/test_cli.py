@@ -1030,6 +1030,54 @@ def test_deploy_rejects_image_entrypoint_for_subprocess() -> None:
     assert not called
 
 
+def test_deploy_rejects_image_entrypoint_for_openshell() -> None:
+    called = False
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                "--agent",
+                "a1",
+                "--mode",
+                "openshell",
+                "--use-image-entrypoint",
+                "--no-wait",
+                "--base-url",
+                "http://test",
+            ],
+        )
+
+    assert result.exit_code == 2
+    assert "--mode openshell needs the platform-injected serve command" in result.stderr
+    assert not called
+
+
+def test_deploy_accepts_openshell_mode() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app,
+            ["deploy", "--agent", "a1", "--mode", "openshell", "--no-wait", "--base-url", "http://test"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["body"]["deployment_mode"] == "openshell"
+
+
 def test_deploy_rejects_empty_environment() -> None:
     called = False
 

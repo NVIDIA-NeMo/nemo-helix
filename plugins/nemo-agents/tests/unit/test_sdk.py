@@ -170,6 +170,16 @@ def test_deployments_create_rejects_image_entrypoint_for_subprocess() -> None:
         client.deployments.create(agent="calc", use_image_entrypoint=True)
 
 
+def test_deployments_create_rejects_image_entrypoint_for_openshell() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST image entrypoint mode for openshell")
+
+    client = AgentsResource(_platform(handler))
+
+    with pytest.raises(ValueError, match="use_image_entrypoint"):
+        client.deployments.create(agent="calc", deployment_mode="openshell", use_image_entrypoint=True)
+
+
 def test_invoke_sends_session_id_as_header() -> None:
     captured: dict[str, Any] = {}
 

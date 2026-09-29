@@ -31,7 +31,7 @@ not-for:
   - nemo-status (use for a read-only health dashboard)
 compatibility: >-
   nemo-helix >= 0.1.0; requires the nemo-deployments plugin installed with the
-  openshell extra (`openshell>=0.0.92` from PyPI); a running OpenShell docker-driver
+  openshell extra (`openshell>=0.1.2` from PyPI); a running OpenShell docker-driver
   gateway on :17670 (not :8080, which the platform owns) whose JWT signing keys were
   generated once with `generate-certs`; a NeMo Helix reachable from inside a sandbox
   at the sandbox network's gateway address (`--host 0.0.0.0`) with the `openshell-local`
@@ -86,7 +86,7 @@ Commands below assume `nemo` and `openshell` are on your PATH. In a repo checkou
    # sandbox tokens (writes /var/lib/openshell/tls/jwt/*). Re-run only if the
    # /var/lib/openshell state dir is wiped.
    docker run --rm --user 0 -v /var/lib/openshell:/var/lib/openshell \
-     ghcr.io/nvidia/openshell/gateway:0.0.92 generate-certs \
+     ghcr.io/nvidia/openshell/gateway:0.1.2 generate-certs \
      --output-dir /var/lib/openshell/tls \
      --server-san 127.0.0.1 --server-san localhost --server-san host.openshell.internal
 

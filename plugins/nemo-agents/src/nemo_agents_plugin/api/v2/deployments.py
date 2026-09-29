@@ -33,6 +33,7 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     EnvironmentSpecInline,
     is_container_deployment_mode,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -43,6 +44,7 @@ from nemo_agents_plugin.environment_resolution import (
 )
 from nemo_agents_plugin.runner.deployments_backend import (
     executor_for_mode,
+    image_entrypoint_unsupported_message,
     require_executor_matches_mode,
 )
 from nemo_agents_plugin.schema import (
@@ -109,6 +111,8 @@ async def create_deployment(
             status_code=400,
             detail="use_image_entrypoint requires deployment_mode 'docker' or 'k8s'.",
         )
+    if body.use_image_entrypoint and not supports_image_entrypoint(body.deployment_mode):
+        raise HTTPException(status_code=400, detail=image_entrypoint_unsupported_message(body.deployment_mode))
 
     # The controller refuses this too, but only on its next reconcile — by which
     # point a pending deployment exists and the caller has had its 201.
