@@ -114,7 +114,7 @@ uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fa
 The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`, a subclass
 of `FabricAgent`, Fabric's custom Harbor agent, that runs the complete Fabric config passed as
 `agent_kwargs["fabric_config"]`: harness, model, endpoint, and the credential's variable name all come
-from it. The key reaches the container through `agent_env_from_host`, so the job directory's
+from it. The key reaches the container through `env_secrets`, so the job directory's
 `config.json` records `${NVIDIA_API_KEY}` rather than the value. See
 [Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
 for the platform job form.
@@ -187,7 +187,7 @@ this optional path. Then opt into Harbor's auth-file transport for a standalone 
 CODEX_FORCE_AUTH_JSON=1 uv run python your_harbor_run.py
 ```
 
-Set that flag in the host environment only; do not include it in `agent_env_from_host`.
+Set that flag in the host environment only; do not include it in `env_secrets` or `env_vars`.
 
 Configure that run with `agent_name="codex"`, an explicit `agent_model_name`, and optionally
 `agent_kwargs={"version": "0.153.0"}`. The adapter installs that Codex CLI version inside each task

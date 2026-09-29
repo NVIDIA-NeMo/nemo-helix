@@ -4347,7 +4347,16 @@ components:
             spec; the service resolves it into the job''s environment at compile time,
             and Harbor receives a `${ENV_NAME}` template it expands when the agent
             is created, so no credential is stored on the spec, the run bundle, or
-            the job dir''s `config.json`.'
+            the job dir''s `config.json`. A bare ref resolves in the job''s workspace.'
+        env_vars:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env Vars
+          description: Non-secret environment variables for the Harbor agent, as literal
+            values that travel in the spec and reach only the agent. Keys Harbor treats
+            as secrets (matching KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL or AUTH)
+            are rejected; use `env_secrets` for credentials.
         n_attempts:
           type: integer
           minimum: 1.0

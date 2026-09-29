@@ -78,8 +78,6 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
 
     ``jobs_dir`` is optional at construction and deliberately omitted from submission: workers
     supply job-owned storage. Standalone execution requires an explicit directory.
-    Host environment forwarding cannot become managed secret references implicitly; callers
-    needing ``env_secrets`` must submit a target spec, for example through the CLI.
     """
     config = runner._config
     if config is None:
@@ -105,18 +103,13 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
     for field, default in required_defaults.items():
         if getattr(config, field) != default:
             raise UnsubmittableRunnerError(f"Harbor {field} must retain its default for job submission.")
-    if config.agent_env_from_host:
-        raise UnsubmittableRunnerError(
-            "Harbor agent_env_from_host cannot be submitted through the runner-based API. "
-            "Submit a job specification through the nemo-evaluator plugin's SDK or CLI, setting "
-            "target.env_secrets to map environment variable names to Platform secret "
-            'references, e.g. {"OPENAI_API_KEY": "default/openai-key"}.'
-        )
     carried_fields = (
         "agent_name",
         "agent_import_path",
         "agent_model_name",
         "agent_kwargs",
+        "env_secrets",
+        "env_vars",
         "n_attempts",
         "n_concurrent_trials",
         "max_retries",
@@ -128,7 +121,10 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         target = HarborRunnerTarget(**{name: getattr(config, name) for name in carried_fields})
         target.model_dump(mode="json")
     except (ValidationError, PydanticSerializationError) as error:
-        raise UnsubmittableRunnerError("Harbor config cannot be represented as a valid JSON target spec.") from error
+        # Both models set `hide_input_in_errors`, so the text names the problem without echoing a value.
+        raise UnsubmittableRunnerError(
+            f"Harbor config cannot be represented as a valid JSON target spec: {error}"
+        ) from error
     return target
 
 

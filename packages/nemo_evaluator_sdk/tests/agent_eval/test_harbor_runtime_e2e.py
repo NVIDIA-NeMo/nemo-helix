@@ -22,6 +22,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     run_harbor_eval,
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
+from nemo_evaluator_sdk.values.common import SecretRef
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow, pytest.mark.skip_in_ci]
 
@@ -176,20 +177,23 @@ async def test_harbor_resumes_a_partial_job_with_a_custom_agent_dir(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_agent_env_from_host_reach_the_agent_and_persist_as_templates(
+async def test_env_secrets_reach_the_agent_and_persist_as_templates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A host variable named in ``agent_env_from_host`` reaches the agent, and only its name reaches disk.
+    """An ``env_secrets`` entry reaches the agent under its key, and only its source variable's name reaches disk.
 
-    Harbor resolves the ``${NAME}`` template when it constructs the agent and serializes the template
-    back into the job dir's ``config.json``. If either half broke, the platform's ``env_secrets`` route
-    would silently run the agent without its credential or persist that credential in plaintext.
+    The workspace ref is found in ``PROBE_WS_PROBE_TOKEN``, so the agent's ``PROBE_TOKEN`` is templated
+    from it. Harbor resolves the ``${NAME}`` template when it constructs the agent and serializes the
+    template back into the job dir's ``config.json``. If either half broke, the agent would run without
+    its credential or the credential would be persisted in plaintext.
     """
     pytest.importorskip("harbor")
     if not _docker_available():
         pytest.skip("Docker daemon is required to run a Harbor job")
 
-    monkeypatch.setenv("PROBE_TOKEN", "probe-value")
+    monkeypatch.delenv("PROBE_TOKEN", raising=False)
+    monkeypatch.setenv("PROBE_WS_PROBE_TOKEN", "probe-value")
+    environ_before = dict(os.environ)
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     (agent_dir / "harbor_wrapper.py").write_text(_ENV_PROBE_AGENT, encoding="utf-8")
@@ -199,7 +203,7 @@ async def test_agent_env_from_host_reach_the_agent_and_persist_as_templates(
         job_name="env-probe",
         agent_import_path="harbor_wrapper:WrappedAgent",
         agent_dir=agent_dir,
-        agent_env_from_host=["PROBE_TOKEN"],
+        env_secrets={"PROBE_TOKEN": SecretRef("probe-ws/probe-token")},
     )
 
     result = await run_harbor_eval(config, _DATASET_DIR)
@@ -207,7 +211,8 @@ async def test_agent_env_from_host_reach_the_agent_and_persist_as_templates(
     assert [trial.status for trial in result.trials] == [AgentEvalTrialStatus.COMPLETED]
     assert [(score.metric_type, score.outputs[0].value) for score in result.scores] == [("harbor_reward", 1.0)]
     persisted = json.loads((jobs_dir / "env-probe" / "config.json").read_text(encoding="utf-8"))
-    assert persisted["agents"][0]["env"] == {"PROBE_TOKEN": "${PROBE_TOKEN}"}
+    assert persisted["agents"][0]["env"] == {"PROBE_TOKEN": "${PROBE_WS_PROBE_TOKEN}"}
+    assert dict(os.environ) == environ_before, "the secret must never be written to os.environ"
     on_disk = [path for path in (jobs_dir / "env-probe").rglob("*") if path.is_file()]
     assert not any("probe-value" in path.read_text(encoding="utf-8", errors="ignore") for path in on_disk)
 
@@ -246,7 +251,7 @@ async def test_nemo_fabric_agent_runs_deepagents_on_nemotron_inside_harbor(tmp_p
             "fabric_package": "nemo-fabric[deepagents]==0.3.0",
             "fabric_workspace": "/app",
         },
-        agent_env_from_host=["NVIDIA_API_KEY"],
+        env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
         agent_setup_timeout_multiplier=8.0,
         agent_timeout_multiplier=5.0,
     )

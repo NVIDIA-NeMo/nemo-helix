@@ -97,6 +97,8 @@ container and reports model-side failures in its `RunResult` (for example
 Swap the import path:
 
 ```python
+from nemo_evaluator_sdk.values import SecretRef
+
 config = HarborRuntimeConfig(
     jobs_dir=Path("./harbor-jobs"),
     agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
@@ -105,7 +107,8 @@ config = HarborRuntimeConfig(
         "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
         "fabric_workspace": "/app",
     },
-    agent_env_from_host=["NVIDIA_API_KEY"],
+    # Standalone, an uppercase ref names the process env var directly: this reads NVIDIA_API_KEY.
+    env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     agent_setup_timeout_multiplier=12.0,
     agent_timeout_multiplier=5.0,
 )
@@ -175,6 +178,7 @@ import asyncio
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.values import SecretRef
 
 async def main() -> None:
     config = HarborRuntimeConfig(
@@ -185,9 +189,9 @@ async def main() -> None:
             "fabric_package": "nemo-fabric[deepagents]==0.3.0",
             "fabric_workspace": "/app",  # the task image's working directory
         },
-        # Forwarded to the agent as a `${NVIDIA_API_KEY}` template; Harbor resolves it from this
-        # process's environment and never writes the value into the job directory.
-        agent_env_from_host=["NVIDIA_API_KEY"],
+        # Standalone, an uppercase ref names the process env var directly: this reads NVIDIA_API_KEY.
+        # Harbor gets a `${NVIDIA_API_KEY}` template and never writes the value into the job directory.
+        env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
         # Installing Fabric and the harness in the container takes a few minutes the first time.
         agent_setup_timeout_multiplier=8.0,
         agent_timeout_multiplier=5.0,
@@ -214,7 +218,7 @@ against the task's `instruction.md`. The deepagents harness works in the Fabric 
 filesystem tools, so it writes `/app/hello.txt` and Harbor's verifier awards `reward: 1.0`.
 
 `agent_kwargs` is persisted verbatim by Harbor in the job directory's `config.json`, which is why the
-key travels through `agent_env_from_host` instead. Inspect the persisted agent entry after a run:
+key travels through `env_secrets` instead. Inspect the persisted agent entry after a run:
 
 ```json
 {
@@ -233,6 +237,14 @@ key travels through `agent_env_from_host` instead. Inspect the persisted agent e
 On the platform the target is a `HarborRunnerTarget`, the `target` of an `AgentEvalInputSpec`. The
 credential becomes an `env_secrets` entry: a NeMo Helix secret reference the service resolves into
 the job's environment at compile time, which the job then forwards exactly as above.
+
+Create the secret in your workspace first. Platform secret names are lowercase:
+
+```bash
+nemo secrets create nvidia-api-key --value "$NVIDIA_API_KEY" --workspace my-workspace
+```
+
+Then reference it as `my-workspace/nvidia-api-key`:
 
 ```json
 {

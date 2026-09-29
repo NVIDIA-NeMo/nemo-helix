@@ -17,7 +17,7 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
             "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
         },
-        agent_env_from_host=["NVIDIA_API_KEY"],
+        env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     )
 
 It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabric's install/run

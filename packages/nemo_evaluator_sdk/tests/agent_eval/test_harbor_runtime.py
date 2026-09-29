@@ -50,6 +50,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import (
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialError
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
+from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import (
     ATIFTraceHandle,
     OTLPTraceHandle,
@@ -113,7 +114,7 @@ def test_native_helpers_require_jobs_dir(helper, tmp_path):
             harbor_runtime._cache_stamp(config, tmp_path, [])
         else:
             harbor_runtime._build_native_job(
-                config, tmp_path, None, job_name="named" if helper == "build_named" else None
+                config, tmp_path, None, job_name="named" if helper == "build_named" else None, env_templates={}
             )
 
 
@@ -143,7 +144,7 @@ async def test_native_job_captures_validated_jobs_dir(tmp_path, monkeypatch):
         yield import_path
 
     monkeypatch.setattr(harbor_runtime, "scoped_harbor_agent_import", scoped_import)
-    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="named")
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="named", env_templates={})
     config.jobs_dir = None
     await run_job()
     assert captured[0].jobs_dir == jobs_dir
@@ -862,7 +863,7 @@ def test_runtime_config_refuses_plaintext_credentials_in_agent_kwargs() -> None:
             agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}},
         )
 
-    with pytest.raises(ValidationError, match="agent_env_from_host"):
+    with pytest.raises(ValidationError, match="env_secrets"):
         HarborRuntimeConfig(jobs_dir=Path("/jobs"), agent_kwargs={"auth": {"token": "tok"}})
 
 
@@ -902,7 +903,7 @@ async def test_run_refuses_credentials_injected_after_validation(tmp_path: Path)
     completed.mkdir(parents=True)
     (completed / "result.json").write_text("{}", encoding="utf-8")
     _, run_job = _build_native_job(
-        config.model_copy(update={"force_rerun": True}), tmp_path / "dataset", None, job_name="j"
+        config.model_copy(update={"force_rerun": True}), tmp_path / "dataset", None, job_name="j", env_templates={}
     )
 
     with pytest.raises(ValueError, match="api_key"):
@@ -1046,7 +1047,7 @@ def _spy_on_run_job(monkeypatch: pytest.MonkeyPatch, calls: list[bool]) -> None:
     """
     from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 
@@ -1125,7 +1126,7 @@ async def test_under_covered_job_resumes_when_harbor_can(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "agent_env_from_host", "task", "option"])
+@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "env_secrets", "env_vars", "task", "option"])
 async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str) -> None:
     # Each of these changes what a run would produce, so the stamped dir must not be
     # served. Reaching run_job (and failing there) is the observable signal.
@@ -1143,8 +1144,10 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
         )
     elif mutation == "agent_kwargs":
         config = config.model_copy(update={"agent_kwargs": {"fabric_telemetry": "relay"}})
-    elif mutation == "agent_env_from_host":
-        config = config.model_copy(update={"agent_env_from_host": ["AGENT_MODE"]})
+    elif mutation == "env_secrets":
+        config = config.model_copy(update={"env_secrets": {"OPENAI_API_KEY": SecretRef("openai-api-key")}})
+    elif mutation == "env_vars":
+        config = config.model_copy(update={"env_vars": {"AGENT_MODE": "fast"}})
     elif mutation == "task":
         (dataset_path / "t" / "task.toml").write_text('[task]\nname = "t"\nchanged = true\n')
     else:
@@ -1158,7 +1161,7 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
 async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_shape: str
 ) -> None:
-    """``agent_kwargs`` and ``agent_env_from_host`` must land on Harbor's ``AgentConfig`` for every agent shape.
+    """``agent_kwargs``, ``env_secrets`` and ``env_vars`` must land on Harbor's ``AgentConfig`` for every agent shape.
 
     Harbor merges ``AgentConfig.kwargs`` into the agent constructor and resolves ``AgentConfig.env``
     templates from the host environment for built-in and import-path agents alike, so a shape that
@@ -1171,7 +1174,8 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     jobs_dir.mkdir()
     agent_options: dict[str, object] = {
         "agent_kwargs": agent_kwargs,
-        "agent_env_from_host": ["OPENAI_API_KEY", "FABRIC_LOG"],
+        "env_secrets": {"OPENAI_API_KEY": SecretRef("my-workspace/openai-api-key")},
+        "env_vars": {"FABRIC_LOG": "debug"},
     }
     if agent_shape == "installed_import_path":
         agent_options["agent_import_path"] = "mypkg.agent:WrappedAgent"
@@ -1194,13 +1198,19 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
             return None
 
     monkeypatch.setattr(harbor.job, "Job", FakeJob)
-    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="kwargs-job")
+    _, run_job = _build_native_job(
+        config,
+        tmp_path / "dataset",
+        None,
+        job_name="kwargs-job",
+        env_templates={"OPENAI_API_KEY": "${MY_WORKSPACE_OPENAI_API_KEY}"},
+    )
     await run_job()
 
     assert len(created) == 1
     (agent_config,) = created[0].agents
     assert agent_config.kwargs == agent_kwargs
-    assert agent_config.env == {"OPENAI_API_KEY": "${OPENAI_API_KEY}", "FABRIC_LOG": "${FABRIC_LOG}"}
+    assert agent_config.env == {"OPENAI_API_KEY": "${MY_WORKSPACE_OPENAI_API_KEY}", "FABRIC_LOG": "debug"}
     if agent_shape == "builtin":
         assert agent_config.name == "oracle"
     else:
@@ -1327,7 +1337,7 @@ def test_build_native_job_rejects_escaping_job_name_before_rmtree(
 
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="../outside", force_rerun=True)
     with pytest.raises(ValueError, match="strict descendant"):
-        _build_native_job(config, tmp_path / "dataset", None, job_name="../outside", force_rerun=True)
+        _build_native_job(config, tmp_path / "dataset", None, job_name="../outside", force_rerun=True, env_templates={})
 
     assert rmtree_calls == []
     assert marker.read_text(encoding="utf-8") == "do not delete"
@@ -1560,7 +1570,7 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     config = config.model_copy(update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir})
     (job_dir / harbor_runtime.CACHE_STAMP_FILENAME).unlink()
 
-    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None):
+    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
         async def run_job() -> None:
             (agent_dir / "wrapper.py").write_text("v2-EDITED-MID-RUN\n")
 
@@ -1969,7 +1979,9 @@ async def test_harbor_refusing_to_resume_discards_and_reruns(
 
     _stub_harbor(monkeypatch, create)
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="pinned")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     with caplog.at_level(logging.WARNING):
         await run_job()
@@ -1992,7 +2004,9 @@ async def test_trace_dir_is_published_to_the_verifier_as_trace_dir_env(
 
     _stub_harbor(monkeypatch, create, verifier_calls)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="pinned", trace_dir="/app/traces")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     await run_job()
 
@@ -2012,7 +2026,9 @@ async def test_file_exists_error_without_a_job_dir_propagates(tmp_path: Path, mo
 
     _stub_harbor(monkeypatch, create)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="pinned")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     with pytest.raises(FileExistsError, match="something unrelated"):
         await run_job()
@@ -2043,7 +2059,9 @@ async def test_unrelated_file_exists_error_mid_run_leaves_the_job_dir_alone(
 
     _stub_harbor(monkeypatch, create)
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="pinned")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     with pytest.raises(FileExistsError):
         await run_job()
@@ -3228,3 +3246,261 @@ def test_typed_sources_reject_invalid_directories(tmp_path: Path, constructed: b
     )
     with pytest.raises(ValueError, match="Invalid Harbor source directory"):
         _typed_task_dirs([task])
+
+
+# --- env_secrets / env_vars -------------------------------------------------------------------------
+
+_WS_REF = SecretRef("my-workspace/probe-api-key")
+_PREFIXED = "MY_WORKSPACE_PROBE_API_KEY"
+_BARE = "PROBE_API_KEY"
+
+
+@pytest.fixture
+def clean_probe_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    for name in (_PREFIXED, _BARE, "LLM_API_KEY", "CUSTOM_SRC"):
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def _capture_env_templates(monkeypatch: pytest.MonkeyPatch, captured: list[Mapping[str, str]]) -> None:
+    """Replace the native job build, recording the templates ``run_tasks`` computed for it."""
+    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+        captured.append(dict(env_templates))
+
+        async def run_job() -> None:
+            return None
+
+        return config.jobs_dir / (job_name or "job"), run_job
+
+    monkeypatch.setattr(harbor_runtime, "_build_native_job", fake)
+
+
+def _forced_run_config(tmp_path: Path, **update: object) -> tuple[HarborRuntimeConfig, Path, AgentEvalTask]:
+    config, job_dir, task = _seed_cached_job(tmp_path)
+    config = HarborRuntimeConfig.model_validate({**config.model_dump(), "force_rerun": True, **update})
+    return config, job_dir, task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("env", "env_secrets", "expected"),
+    [
+        ({_PREFIXED: "a"}, {"OPENAI_API_KEY": _WS_REF}, {"OPENAI_API_KEY": f"${{{_PREFIXED}}}"}),
+        ({_BARE: "b"}, {"OPENAI_API_KEY": _WS_REF}, {"OPENAI_API_KEY": f"${{{_BARE}}}"}),
+        ({_PREFIXED: "a", _BARE: "b"}, {"OPENAI_API_KEY": _WS_REF}, {"OPENAI_API_KEY": f"${{{_PREFIXED}}}"}),
+        ({_BARE: "b"}, {"OPENAI_API_KEY": SecretRef("probe-api-key")}, {"OPENAI_API_KEY": f"${{{_BARE}}}"}),
+        # A stray export under the agent's key is never read: the template names the secret's source.
+        ({_PREFIXED: "a", "LLM_API_KEY": "z"}, {"LLM_API_KEY": _WS_REF}, {"LLM_API_KEY": f"${{{_PREFIXED}}}"}),
+    ],
+)
+async def test_env_secrets_are_templated_from_their_source_without_touching_os_environ(
+    tmp_path: Path,
+    clean_probe_env: pytest.MonkeyPatch,
+    env: dict[str, str],
+    env_secrets: dict[str, SecretRef],
+    expected: dict[str, str],
+) -> None:
+    for name, value in env.items():
+        clean_probe_env.setenv(name, value)
+    config, _job_dir, task = _forced_run_config(tmp_path, env_secrets=env_secrets)
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+    environ_before = dict(os.environ)
+
+    await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    assert captured == [expected]
+    assert dict(os.environ) == environ_before
+
+
+@pytest.mark.asyncio
+async def test_missing_secret_fails_before_the_job_dir_is_touched(
+    tmp_path: Path, clean_probe_env: pytest.MonkeyPatch
+) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+
+    config, job_dir, task = _forced_run_config(tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    build = Mock(side_effect=AssertionError("the job was built despite a missing secret"))
+    clean_probe_env.setattr(harbor_runtime, "_build_native_job", build)
+
+    with pytest.raises(ValueError, match=r"set the MY_WORKSPACE_PROBE_API_KEY \(or PROBE_API_KEY\) env var"):
+        await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    build.assert_not_called()
+    assert any(job_dir.rglob("result.json")), "force_rerun must not have cleared completed trials"
+
+
+class _FixedSource:
+    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
+        return "CUSTOM_SRC"
+
+    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
+        return "unused"
+
+
+class _ValueOnlyResolver:
+    async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
+        return "value"
+
+
+@pytest.mark.asyncio
+async def test_constructor_secret_resolver_is_used(tmp_path: Path, clean_probe_env: pytest.MonkeyPatch) -> None:
+    config, _job_dir, task = _forced_run_config(tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+
+    await HarborAgentTaskRunner(config=config, secret_resolver=_FixedSource()).run_tasks([task])
+
+    assert captured == [{"OPENAI_API_KEY": "${CUSTOM_SRC}"}]
+
+
+def test_a_resolver_that_cannot_name_an_env_var_is_refused_at_construction(tmp_path: Path) -> None:
+    config = HarborRuntimeConfig(jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    value_only = cast(Any, _ValueOnlyResolver())
+
+    with pytest.raises(TypeError, match="_ValueOnlyResolver can't name an env var"):
+        HarborAgentTaskRunner(config=config, secret_resolver=value_only)
+    # Without env_secrets the resolver is never consulted.
+    HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path), secret_resolver=value_only)
+
+
+@pytest.mark.asyncio
+async def test_a_reused_runner_looks_secrets_up_on_every_execution(
+    tmp_path: Path, clean_probe_env: pytest.MonkeyPatch
+) -> None:
+    config, _job_dir, task = _forced_run_config(tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+    runner = HarborAgentTaskRunner(config=config)
+
+    clean_probe_env.setenv(_PREFIXED, "a")
+    await runner.run_tasks([task])
+    clean_probe_env.delenv(_PREFIXED)
+    clean_probe_env.setenv(_BARE, "b")
+    await runner.run_tasks([task])
+    clean_probe_env.delenv(_BARE)
+    with pytest.raises(ValueError, match="is not found"):
+        await runner.run_tasks([task])
+
+    assert captured == [{"OPENAI_API_KEY": f"${{{_PREFIXED}}}"}, {"OPENAI_API_KEY": f"${{{_BARE}}}"}]
+
+
+@pytest.mark.asyncio
+async def test_a_cache_hit_needs_no_credentials(tmp_path: Path, clean_probe_env: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_stamp, _write_cache_stamp
+
+    config, job_dir, task = _seed_cached_job(tmp_path)
+    config = config.model_copy(update={"env_secrets": {"OPENAI_API_KEY": _WS_REF}})
+    _write_cache_stamp(job_dir, _cache_stamp(config, Path(str(task.metadata["harbor_dataset_path"])), [task]))
+    calls: list[bool] = []
+    _spy_on_run_job(clean_probe_env, calls)
+
+    trials = await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    assert calls == [] and len(trials) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_template_their_own_sources(tmp_path: Path, clean_probe_env: pytest.MonkeyPatch) -> None:
+    clean_probe_env.setenv("TEAM_A_PROBE_API_KEY", "a")
+    clean_probe_env.setenv("TEAM_B_PROBE_API_KEY", "b")
+    config_a, _, task_a = _forced_run_config(tmp_path / "a", env_secrets={"K": SecretRef("team-a/probe-api-key")})
+    config_b, _, task_b = _forced_run_config(tmp_path / "b", env_secrets={"K": SecretRef("team-b/probe-api-key")})
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+    environ_before = dict(os.environ)
+
+    await asyncio.gather(
+        HarborAgentTaskRunner(config=config_a).run_tasks([task_a]),
+        HarborAgentTaskRunner(config=config_b).run_tasks([task_b]),
+    )
+
+    assert sorted(t["K"] for t in captured) == ["${TEAM_A_PROBE_API_KEY}", "${TEAM_B_PROBE_API_KEY}"]
+    assert dict(os.environ) == environ_before
+
+
+def test_build_native_job_requires_templates_for_exactly_the_env_secrets(tmp_path: Path) -> None:
+    config = HarborRuntimeConfig(jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    with pytest.raises(ValueError, match="don't match env_secrets keys"):
+        _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+
+
+@pytest.mark.asyncio
+async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import harbor.job
+
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", env_vars={"DOCKER_HOST": "tcp://agent-only:2375"})
+    created: list[Any] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            created.append(job_config)
+            assert "DOCKER_HOST" not in os.environ
+            return cls()
+
+        async def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+    await run_job()
+
+    assert created[0].agents[0].env == {"DOCKER_HOST": "tcp://agent-only:2375"}
+    assert "DOCKER_HOST" not in os.environ
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "env_vars", [{"X": "${WORKER_VAR}"}, {"TOKENIZERS_PARALLELISM": "false"}, {"MODEL_CREDS": "sk-not-a-real-key-01"}]
+)
+async def test_run_refuses_env_vars_injected_after_validation(tmp_path: Path, env_vars: dict[str, str]) -> None:
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="j").model_copy(
+        update={"env_vars": env_vars, "force_rerun": True}
+    )
+    completed = tmp_path / "jobs" / "j" / "trial"
+    completed.mkdir(parents=True)
+    (completed / "result.json").write_text("{}", encoding="utf-8")
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+
+    with pytest.raises(ValueError, match="env_vars"):
+        await run_job()
+
+    assert (completed / "result.json").exists()
+
+
+def test_agent_env_from_host_is_gone() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs are not permitted"):
+        HarborRuntimeConfig.model_validate({"agent_env_from_host": ["OPENAI_API_KEY"]})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"env_vars": {"MODEL_CREDS": "sk-not-a-real-key-0123"}}, {"agent_kwargs": {"api_key": "sk-not-a-real-key-0123"}}],
+)
+def test_config_errors_do_not_echo_the_credential(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        HarborRuntimeConfig.model_validate(fields)
+    assert "sk-not-a-real-key-0123" not in str(excinfo.value)
+
+
+def test_a_cache_stamp_from_an_older_version_is_stale(tmp_path: Path) -> None:
+    """Existing job dirs re-run once after a stamp version bump, rather than serving results from other inputs."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+        CACHE_STAMP_FILENAME,
+        CACHE_STAMP_VERSION,
+        _cache_is_stale,
+        _cache_stamp,
+    )
+
+    config, job_dir, task = _seed_cached_job(tmp_path)
+    dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
+    stamp_file = job_dir / CACHE_STAMP_FILENAME
+    assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task])) is False
+
+    stamp_file.write_text(json.dumps({**json.loads(stamp_file.read_text()), "version": CACHE_STAMP_VERSION - 1}))
+
+    assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task])) is True
