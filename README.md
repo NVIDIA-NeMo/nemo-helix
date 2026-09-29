@@ -12,9 +12,11 @@
 
 Make the agents you ship faster, more accurate, and safer.
 
-NeMo Helix is an extensible OSS agentic control plane for building automated systems to improve and harden agents and agentic software. It builds on the NeMo OSS Libraries like Fabric, Evaluator, Guardrails, Data Designer, Automodel, and NeMo RL, exposing them as a cohesive set of interfaces locally or in Kubernetes. Everything is exposed programmatically through REST APIs, a CLI, and a Python SDK, which allows agents or other applications easy access. Helix also ships with NeMo Studio, a modern web UI for humans to monitor and orchestrate your system.
+NeMo Helix is an Apache 2.0-licensed OSS control plane for managing AI workflows that optimize and improve agentic software. Its plugin architecture exposes many popular AI libraries like NVIDIA's NeMo RL and Automodel for fine-tuning models, Guardrails for securing agents, and OpenShell for sandboxing. It also uses third-party libraries like LangChain Deep Agents or Hermes for agent harnesses and Harbor for evaluation and testing.
 
-Helix extends the NeMo Libraries by introducing common infrastructure primitives that allow multi-agent systems to operate at scale. These are designed as interoperable and modular plugins for common operations like agent execution, sandboxing with OpenShell, file storage, secrets management, auth, model management, and inference middleware. Each of these ships with a sane default, but can be easily replaced with your infrastructure of choice.
+These libraries are installed as plugins and exposed via Helix REST APIs, CLI commands, and Python SDK. A robust jobs management system allows users to orchestrate and monitor the long-running workloads agent improvement requires, either locally or in Kubernetes. Helix also ships with NeMo Studio, a lightweight web UI for observability and human accountability.
+
+Helix provides many common infrastructure primitives that AI workloads need to operate at scale. There are built-in plugins for agent execution, sandboxing, file storage, secrets management, auth, model management, and inference. Each of these ships with a default implementation that users can keep or replace with their own infrastructure of choice.
 
 ## Get started
 
