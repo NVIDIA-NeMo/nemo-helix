@@ -97,6 +97,8 @@ container and reports model-side failures in its `RunResult` (for example
 Swap the import path:
 
 ```python
+from nemo_evaluator_sdk.values import SecretRef
+
 config = HarborRuntimeConfig(
     jobs_dir=Path("./harbor-jobs"),
     agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
