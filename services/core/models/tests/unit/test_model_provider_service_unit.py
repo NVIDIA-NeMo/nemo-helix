@@ -264,6 +264,87 @@ async def test_upsert_model_provider_update_existing(
 
 
 @pytest.mark.asyncio
+async def test_upsert_resets_status_to_created_on_host_url_change(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Editing a READY provider's host_url must reset status to CREATED, ignoring any incoming
+    status (Studio's edit modal re-sends the old status), so the reconciler re-evaluates."""
+    # Existing provider is READY.
+    sample_provider_entity.host_url = "https://api.old.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-a"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.new.com/v1",  # changed
+        api_key_secret_name="secret-a",  # unchanged
+        status=ModelProviderStatus.READY,  # stale status re-sent by the edit modal
+        status_message="ready",
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.CREATED
+    assert updated.host_url == "https://api.new.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_upsert_resets_status_to_created_on_api_key_change(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Rotating a READY provider's api_key_secret_name must reset status to CREATED."""
+    sample_provider_entity.host_url = "https://api.example.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-old"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.example.com/v1",  # unchanged
+        api_key_secret_name="secret-new",  # rotated
+        status=ModelProviderStatus.READY,  # stale status re-sent
+        status_message="ready",
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.CREATED
+    assert updated.api_key_secret_name == "secret-new"
+
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_status_when_connection_unchanged(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """When neither host_url nor api_key_secret_name changes, an incoming status is honored
+    verbatim (no spurious reset) — e.g. a metadata-only edit of a READY provider stays READY."""
+    sample_provider_entity.host_url = "https://api.example.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-a"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.example.com/v1",  # unchanged
+        api_key_secret_name="secret-a",  # unchanged
+        description="just a description tweak",
+        status=ModelProviderStatus.READY,
+        status_message="ready",
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.READY
+
+
+@pytest.mark.asyncio
 async def test_delete_model_provider_success(model_provider_service, mock_entity_client, sample_provider_entity):
     """Test successful model provider deletion."""
     # Arrange

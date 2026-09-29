@@ -21,6 +21,7 @@ from nhx.core.models.controllers.provider_reconciler import (
     PROVIDER_ERROR_THRESHOLD_SECONDS,
     PROVIDER_LOST_THRESHOLD_SECONDS,
     ArtifactDetails,
+    DiscoveryAuthError,
     DiscoveryNonCompliant,
     DiscoverySuccess,
     DiscoveryTransientError,
@@ -502,8 +503,63 @@ async def test_query_available_models_gateway_404_provider_not_in_cache_is_trans
 
 @pytest.mark.asyncio
 async def test_query_available_models_424_upstream_rejected_is_non_compliant(reconciler, mock_models_sdk):
-    """424 whose detail carries the upstream-rejection marker means the backend rejected
-    GET /v1/models (no such route) — non-compliant."""
+    """424 whose detail carries the upstream-rejection marker AND a 404 upstream-status token
+    means the backend rejected GET /v1/models (no such route) — non-compliant."""
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(
+            424,
+            "Model provider 'p' at upstream 'https://x' rejected the request for model 'ws/m' "
+            "with HTTP status 404. This is a client-side error and will not resolve by retrying. "
+            "[nemo_upstream_status=404]",
+        )
+    )
+
+    model_provider = ModelProvider(
+        name="test-provider",
+        workspace="test-ns",
+        host_url="https://test-provider.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    result = await reconciler._discover_models(model_provider)
+
+    assert isinstance(result, DiscoveryNonCompliant)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("upstream_status", [401, 403])
+async def test_query_available_models_424_upstream_auth_failure_is_auth_error(
+    reconciler, mock_models_sdk, upstream_status
+):
+    """A 424 whose detail carries the upstream-rejection marker AND a 401/403 upstream-status
+    token is an authoritative credential rejection — the new DiscoveryAuthError path, NOT
+    the non-compliant (READY) bucket."""
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(
+            424,
+            f"Model provider 'p' at upstream 'https://x' rejected the request for model 'ws/m' "
+            f"with HTTP status {upstream_status}. This is a client-side error and will not resolve "
+            f"by retrying. [nemo_upstream_status={upstream_status}]",
+        )
+    )
+
+    model_provider = ModelProvider(
+        name="test-provider",
+        workspace="test-ns",
+        host_url="https://test-provider.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    result = await reconciler._discover_models(model_provider)
+
+    assert isinstance(result, DiscoveryAuthError)
+    assert result.status_code == upstream_status
+
+
+@pytest.mark.asyncio
+async def test_query_available_models_424_rejection_without_status_token_is_non_compliant(reconciler, mock_models_sdk):
+    """A rejection-marker 424 with NO machine-readable upstream-status token (e.g. an older IGW
+    that predates the token) must degrade to non-compliant, never mis-route to auth-error."""
     mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         side_effect=_status_error(
             424,
@@ -1648,6 +1704,81 @@ async def test_reconcile_clears_served_models_on_confirmed_non_compliant(reconci
     assert call_kwargs["served_models"] == []
     assert call_kwargs["status"] == "READY"
     assert "Non-OpenAI compliant" in call_kwargs["status_message"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ready_provider_demoted_to_error_on_auth_failure(reconciler):
+    """A READY provider whose discovery now returns DiscoveryAuthError (authoritative 401/403)
+    must be demoted to ERROR — the READY→ERROR authoritative-failure transition."""
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.served_models = [
+        ServedModelMapping(model_entity_id="test-ns/model-1", served_model_name="model-1"),
+    ]
+    provider.status = ModelProviderStatus.READY
+
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryAuthError(status_code=401, message="upstream rejected credentials (HTTP 401)"),
+    ):
+        with patch.object(reconciler, "_ensure_model_entity_for_provider") as mock_ensure:
+            await reconciler.reconcile_model_providers([ctx])
+
+    # Authoritative auth failure demotes to ERROR (no entity work on the failure path).
+    mock_ensure.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
+    assert call_kwargs["status"] == "ERROR"
+    assert "credentials" in call_kwargs["status_message"]
+    # served_models are deliberately NOT touched on an auth failure (config intact, key rejected).
+    assert "served_models" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ready_provider_stays_ready_on_transient_error(reconciler):
+    """Regression guard: a READY provider hitting a genuine transient/network error must NOT be
+    demoted (only authoritative auth failures demote; network blips preserve READY)."""
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.served_models = [
+        ServedModelMapping(model_entity_id="test-ns/model-1", served_model_name="model-1"),
+    ]
+    provider.status = ModelProviderStatus.READY
+
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryTransientError("Network error: connection refused"),
+    ):
+        with patch.object(reconciler, "_ensure_model_entity_for_provider") as mock_ensure:
+            await reconciler.reconcile_model_providers([ctx])
+
+    # A transient error on a READY provider preserves served_models and writes NOTHING.
+    mock_ensure.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
 
 
 @pytest.mark.asyncio

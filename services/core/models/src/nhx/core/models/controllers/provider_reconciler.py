@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from http import HTTPStatus
 from logging import getLogger
 from typing import Callable, TypedDict
 
@@ -57,9 +58,34 @@ _VALID_MODEL_ENTITY_NAME_PATTERN = re.compile(NAME_PATTERN)
 # _UPSTREAM_REJECTED_DETAIL_MARKER in the inference-gateway proxy
 # (services/core/inference-gateway/src/nhx/core/inference_gateway/api/proxy.py).
 _GATEWAY_UPSTREAM_REJECTED_DETAIL = "rejected the request"
+# IGW also embeds a machine-readable upstream-status token in the wrapped-rejection 424
+# detail, e.g. ``[nemo_upstream_status=401]``. Parsing it lets us tell a credential /
+# authorization rejection (401/403) apart from a missing GET /v1/models route (404)
+# WITHOUT scraping the human-readable prose. Keep this regex in lockstep with
+# _UPSTREAM_STATUS_TOKEN_PREFIX/_SUFFIX in the inference-gateway proxy
+# (services/core/inference-gateway/src/nhx/core/inference_gateway/api/proxy.py).
+_GATEWAY_UPSTREAM_STATUS_RE = re.compile(r"\[nemo_upstream_status=(\d{3})\]")
+# Upstream statuses that mean "the backend authoritatively rejected our credentials"
+# (as opposed to 404 = no GET /v1/models route, which stays non-compliant→READY).
+_UPSTREAM_AUTH_FAILURE_STATUSES = (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN)  # 401, 403
 # 424 Failed Dependency. This layer uses bare int status codes (no fastapi import in
 # the controller); named for readability, mirrors fastapi.status.HTTP_424_FAILED_DEPENDENCY.
 _HTTP_424_FAILED_DEPENDENCY = 424
+
+
+def _parse_upstream_status(detail: str) -> int | None:
+    """Extract the machine-readable upstream status from a wrapped-rejection 424 detail.
+
+    Returns the int upstream status (e.g. 401) embedded by IGW as
+    ``[nemo_upstream_status=NNN]``, or ``None`` when the token is absent (an older IGW
+    that predates the token, or a non-rejection detail). See
+    :data:`_GATEWAY_UPSTREAM_STATUS_RE`.
+    """
+    match = _GATEWAY_UPSTREAM_STATUS_RE.search(detail or "")
+    if match is None:
+        return None
+    return int(match.group(1))
+
 
 # Seconds a provider can stay in CREATED with transient failures before escalating to ERROR (~6 cycles at 5s)
 PROVIDER_ERROR_THRESHOLD_SECONDS = 30
@@ -147,6 +173,22 @@ class DiscoverySuccess(DiscoveryResult):
 
 class DiscoveryNonCompliant(DiscoveryResult):
     """Provider responded (or has no URL) but is not OpenAI-compliant."""
+
+
+class DiscoveryAuthError(DiscoveryResult):
+    """The upstream backend authoritatively rejected our credentials during discovery.
+
+    Distinct from :class:`DiscoveryNonCompliant` (a 404 / no GET /v1/models route, which
+    is a legitimate non-OpenAI-compliant backend and stays READY) and from
+    :class:`DiscoveryTransientError` (a network blip / unresolved-secret, which must not
+    demote a healthy provider). An auth failure is an *authoritative* negative answer
+    from the backend (401/403) and drives the provider to a non-READY status.
+    """
+
+    def __init__(self, status_code: int | None = None, message: str = "") -> None:
+        """Initialize with the upstream status (401/403) and an optional message."""
+        self.status_code = status_code
+        self.message = message
 
 
 class DiscoveryTransientError(DiscoveryResult):
@@ -464,6 +506,42 @@ class ModelProviderReconciler:
         match result:
             case DiscoveryTransientError() as err:
                 await self._on_transient_failure(provider, provider_id, err, now)
+                return
+            case DiscoveryAuthError() as auth_err:
+                # The backend authoritatively rejected our credentials (401/403). Unlike a
+                # transient/network error, this is a definitive negative answer, so we
+                # demote the provider to ERROR regardless of prior status — including a
+                # provider that was READY (this is the READY→ERROR authoritative-failure
+                # transition; genuine transient errors still preserve READY via
+                # _on_transient_failure). served_models are left untouched: the provider
+                # config is intact, only its credentials are being rejected, so keeping the
+                # last-known routes avoids churning entity links on a fixable auth problem.
+                status_message = (
+                    f"Provider discovery failed: {auth_err.message}"
+                    if auth_err.message
+                    else "Provider discovery failed: upstream rejected credentials"
+                )
+                if provider.status != ModelProviderStatus.ERROR:
+                    logger.warning(
+                        "Provider demoted to ERROR after authoritative upstream auth failure",
+                        extra={"provider": provider_id, "upstream_status": auth_err.status_code},
+                    )
+                try:
+                    ctx.model_provider = (
+                        await self._models_client.update_provider_status(
+                            name=provider.name,
+                            workspace=provider.workspace,
+                            body=UpdateModelProviderStatusRequest(
+                                status=ModelProviderStatus.ERROR,
+                                status_message=status_message,
+                            ),
+                        )
+                    ).data()
+                except Exception:
+                    logger.exception(
+                        "Failed to demote provider to ERROR after auth failure",
+                        extra={"provider": provider_id},
+                    )
                 return
             case DiscoveryNonCompliant():
                 logger.info(
@@ -838,11 +916,28 @@ class ModelProviderReconciler:
                 return DiscoveryTransientError("Provider not yet in gateway cache (404)")
             # IGW wraps an upstream backend rejection (401/403/404 — e.g. a NIM with no
             # GET /v1/models) as 424 Failed Dependency. A 424 whose detail carries the
-            # upstream-rejection marker means the backend answered "no" to discovery, so
-            # mark the provider non-compliant. (A 424 WITHOUT the marker is the platform-
-            # side unresolved-secret case, which falls through to transient below.)
+            # upstream-rejection marker means the backend answered "no" to discovery. IGW
+            # also embeds a machine-readable upstream-status token, which we parse to tell
+            # a credential/authorization rejection (401/403 — authoritative auth failure)
+            # apart from a missing GET /v1/models route (404 — legitimately non-compliant).
+            # (A 424 WITHOUT the rejection marker is the platform-side unresolved-secret
+            # case, which falls through to transient below.)
             if e.status_code == _HTTP_424_FAILED_DEPENDENCY and _GATEWAY_UPSTREAM_REJECTED_DETAIL in e.detail:
-                # Backend (NIM) rejected GET /v1/models — no such route. Mark non-compliant.
+                upstream_status = _parse_upstream_status(e.detail)
+                if upstream_status in _UPSTREAM_AUTH_FAILURE_STATUSES:
+                    # Backend authoritatively rejected our credentials (401/403). This is a
+                    # real auth failure, NOT a non-compliant endpoint — route it to the
+                    # auth-error path so the provider is driven to a non-READY status.
+                    logger.info(
+                        f"Backend for {provider_id} rejected discovery with upstream auth failure "
+                        f"(HTTP {upstream_status})"
+                    )
+                    return DiscoveryAuthError(
+                        status_code=upstream_status,
+                        message=f"upstream rejected credentials (HTTP {upstream_status})",
+                    )
+                # 404 / no upstream-status token (older IGW) — backend has no GET /v1/models
+                # route. Mark non-compliant (stays READY, model entity routing disabled).
                 logger.info(f"Backend for {provider_id} rejected GET /v1/models (424), disabling model entity routing")
                 return DiscoveryNonCompliant()
             # Other 4xx/5xx (e.g. 424 unresolved-secret, 502, 429, 5xx) — treat as transient

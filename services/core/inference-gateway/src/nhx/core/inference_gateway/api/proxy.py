@@ -385,6 +385,29 @@ _DEPENDENCY_FAILURE_STATUS = http_status.HTTP_424_FAILED_DEPENDENCY  # 424 Faile
 # token in services/core/models/.../controllers/provider_reconciler.py in lockstep.
 _UPSTREAM_REJECTED_DETAIL_MARKER = "rejected the request"
 
+# Machine-readable upstream status token embedded in every wrapped-upstream-rejection
+# 424 detail, e.g. ``[nemo_upstream_status=401]``. The human-readable marker above tells
+# a consumer *that* the upstream rejected the request; this token tells them *which*
+# upstream status it was, so a consumer can distinguish a credential/authorization
+# rejection (401/403) from a missing-route (404) WITHOUT parsing the prose. This is the
+# second half of the CROSS-SERVICE contract: the models provider-reconciler parses this
+# token to route 401/403 to an auth-failure (non-READY) path and 404 to the
+# non-compliant (READY) path. Keep the ``PREFIX``/``SUFFIX`` and the regex the reconciler
+# uses (``_GATEWAY_UPSTREAM_STATUS_RE`` in
+# services/core/models/.../controllers/provider_reconciler.py) in lockstep.
+_UPSTREAM_STATUS_TOKEN_PREFIX = "[nemo_upstream_status="
+_UPSTREAM_STATUS_TOKEN_SUFFIX = "]"
+
+
+def _upstream_status_token(status_code: int) -> str:
+    """Return the machine-readable upstream-status token for *status_code*.
+
+    e.g. ``_upstream_status_token(401) == "[nemo_upstream_status=401]"``. Embedded in the
+    424 detail alongside the human-readable marker so a consumer can machine-match the
+    originating upstream status. See :data:`_UPSTREAM_STATUS_TOKEN_PREFIX`.
+    """
+    return f"{_UPSTREAM_STATUS_TOKEN_PREFIX}{status_code}{_UPSTREAM_STATUS_TOKEN_SUFFIX}"
+
 
 @dataclass(frozen=True)
 class UpstreamProviderContext:
@@ -472,9 +495,13 @@ def _dependency_failure_detail(
         "credentials have access to it, and your request parameters. If this provider sits behind a gateway "
         "or proxy, check its logs for the originating upstream status and message."
     )
+    # Machine-readable upstream-status token (cross-service contract; see
+    # _UPSTREAM_STATUS_TOKEN_PREFIX). Placed after the human guidance so it never disrupts
+    # the readable message, but is always present for a programmatic consumer to parse.
+    status_token = _upstream_status_token(status_code)
     if error_body:
-        return f"{first} {guidance} Upstream response: {error_body}"
-    return f"{first} {guidance}"
+        return f"{first} {guidance} {status_token} Upstream response: {error_body}"
+    return f"{first} {guidance} {status_token}"
 
 
 async def proxy_request(
