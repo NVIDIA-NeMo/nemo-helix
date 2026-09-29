@@ -208,7 +208,7 @@ def test_platform_jobs_use_flat_generated_cli() -> None:
         assert "explain" in help_result.output
 
         legacy_submit = runner.invoke(app, [command, "submit", "--help"])
-        assert legacy_submit.exit_code != 0
+        assert legacy_submit.exit_code == 2
 
 
 def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) -> None:  # noqa: ANN001
