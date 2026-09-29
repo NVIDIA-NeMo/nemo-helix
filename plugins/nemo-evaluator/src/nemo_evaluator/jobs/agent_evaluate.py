@@ -62,6 +62,7 @@ from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
+from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
 from nemo_evaluator.task_refs import (
     groupby_kind,
@@ -652,7 +653,16 @@ class _AgentEvalJobBase(NemoJob):
             fail_fast=spec.fail_fast,
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
-        result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
+        with capture_evaluator_request_logs() as request_logs:
+            with capture_agent_evaluation_usage(
+                ctx.usage,
+                request_logs,
+                include_trial_measurements=include_trial_measurements,
+            ) as usage_capture:
+                result = usage_capture.record(
+                    evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+                )
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)

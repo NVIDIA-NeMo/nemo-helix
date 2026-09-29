@@ -68,8 +68,8 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     result = SimpleNamespace(
         synthetic_data=pd.DataFrame({"value": [1]}),
         summary=SimpleNamespace(
-            num_completion_tokens=37,
-            model_dump=lambda: {"row_count": 1, "num_completion_tokens": 37},
+            num_completion_tokens=42,
+            model_dump=lambda: {"row_count": 1, "num_completion_tokens": 42},
         ),
         evaluation_report_html=None,
     )
@@ -90,7 +90,7 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     jobs_client.update_status_details.assert_called_once_with(
         "safe-synth-job",
         workspace="test-workspace",
-        body={"output_tokens": 37},
+        body={"output_tokens": 42},
     )
 
     # create_job_result is called once per result; assert the adapter call, checking the
