@@ -20,12 +20,12 @@ from nemo_evaluator.jobs import result_persistence
 from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricConfigSource,
-    FabricRegisteredAgentSource,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
 )
 from nemo_evaluator.jobs.result_persistence import (
     _agent_target_fields,
@@ -96,7 +96,7 @@ def _agent() -> Agent:
         ),
         (
             FabricRunnerTarget(
-                source=FabricRegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
                 resolved_config={"harness": {"adapter_id": "x"}},
             ),
             ("fabric", "calculator-agent", None),

@@ -20,8 +20,8 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
     FabricConfigSource,
-    FabricRegisteredAgentSource,
     FabricRunnerTarget,
+    RegisteredAgentSource,
     registered_agent_files,
     registered_agent_name,
     target_agent_identity,
@@ -48,7 +48,7 @@ _INLINE = FabricConfigSource(config={"harness": {"adapter_id": "x"}})
 def _by_agent(
     agent: AgentRef = _AGENT, environment: EnvironmentSpecInline | None = None, **kwargs: Any
 ) -> FabricRunnerTarget:
-    return FabricRunnerTarget(source=FabricRegisteredAgentSource(agent=agent, environment=environment), **kwargs)
+    return FabricRunnerTarget(source=RegisteredAgentSource(agent=agent, environment=environment), **kwargs)
 
 
 #: A canonical task snapshot, in the shape `AgentEvalSpec.tasks` carries after submission.
@@ -135,7 +135,7 @@ async def test_fabric_target_by_agent_becomes_the_config_a_deployment_would_run(
 
     agents.get_agent.assert_awaited_once_with(workspace="dev", name="calculator-agent")
     assert isinstance(resolved, FabricRunnerTarget)
-    assert isinstance(resolved.source, FabricRegisteredAgentSource)
+    assert isinstance(resolved.source, RegisteredAgentSource)
     assert resolved.source.agent == AgentRef(root="dev/calculator-agent")  # kept, qualified, as provenance
     assert resolved.timeout_s == 120
     assert resolved.config is not None and resolved.config is resolved.resolved_config

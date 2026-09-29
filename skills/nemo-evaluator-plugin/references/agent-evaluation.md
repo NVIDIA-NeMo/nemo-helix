@@ -165,9 +165,9 @@ kept next to the qualified `agent` ref. The agent runs fresh for every trial;
 an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRegisteredAgentSource, FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget
 
-target = FabricRunnerTarget(source=FabricRegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+target = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
 ```
 
 There is no model override — a different model is a different registered

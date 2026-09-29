@@ -92,7 +92,7 @@ class FabricConfigSource(BaseModel):
     )
 
 
-class FabricRegisteredAgentSource(BaseModel):
+class RegisteredAgentSource(BaseModel):
     """An agent registered on the platform (``nemo agents create``), resolved at submit.
 
     The model is part of what the agent is, so there is no model override; what an evaluation shapes is
@@ -115,7 +115,7 @@ class FabricRegisteredAgentSource(BaseModel):
 
 
 #: What a Fabric run is made from. The two shapes share no field, so a document is one or the other.
-FabricSource: TypeAlias = FabricConfigSource | FabricRegisteredAgentSource
+FabricSource: TypeAlias = FabricConfigSource | RegisteredAgentSource
 
 
 class FabricRunnerTarget(BaseModel):
@@ -179,7 +179,7 @@ class FabricRunnerTarget(BaseModel):
 
     @model_validator(mode="after")
     def _resolved_config_belongs_to_a_registered_agent(self) -> Self:
-        if self.resolved_config is not None and not isinstance(self.source, FabricRegisteredAgentSource):
+        if self.resolved_config is not None and not isinstance(self.source, RegisteredAgentSource):
             raise ValueError(
                 "`resolved_config` is the resolution of a registered `agent`; an inline `config` needs none"
             )
@@ -478,7 +478,7 @@ Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
 
 def registered_agent_name(target: Target | None) -> str | None:
     """The bare name of the registered agent a Fabric target names, if any."""
-    if isinstance(target, FabricRunnerTarget) and isinstance(target.source, FabricRegisteredAgentSource):
+    if isinstance(target, FabricRunnerTarget) and isinstance(target.source, RegisteredAgentSource):
         return target.source.agent.root.rpartition("/")[2]
     return None
 
@@ -490,7 +490,7 @@ def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
     translated config, so both the FileSet's home and whether relative paths exist are known without a lookup.
     """
     source = target.source
-    if not isinstance(source, FabricRegisteredAgentSource) or "/" not in source.agent.root:
+    if not isinstance(source, RegisteredAgentSource) or "/" not in source.agent.root:
         return None
     config = target.resolved_config or {}
     skills = config.get("skills") or {}

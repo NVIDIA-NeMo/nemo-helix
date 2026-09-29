@@ -47,11 +47,11 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
     AgentTarget,
-    FabricRegisteredAgentSource,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
     ResolvedTask,
     Target,
     registered_agent_files,
@@ -217,7 +217,7 @@ async def _load_registered_agent(
     )
     fileset = registered_agent_files(
         FabricRunnerTarget(
-            source=FabricRegisteredAgentSource(agent=resolved_agent.ref), resolved_config=resolved_agent.config
+            source=RegisteredAgentSource(agent=resolved_agent.ref), resolved_config=resolved_agent.config
         )
     )
     if fileset is not None:
@@ -246,7 +246,7 @@ async def _resolve_registered_agent(
     if not isinstance(target, FabricRunnerTarget) or target.resolved_config is not None:
         return target
     source = target.source
-    if not isinstance(source, FabricRegisteredAgentSource):
+    if not isinstance(source, RegisteredAgentSource):
         return target
 
     agent = await _load_registered_agent(

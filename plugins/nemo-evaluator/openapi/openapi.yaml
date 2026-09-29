@@ -4059,33 +4059,6 @@ components:
       title: FabricConfigSource
       description: 'An agent described inline: one complete Fabric ``agent.yaml``
         as a JSON-shaped mapping.'
-    FabricRegisteredAgentSource:
-      properties:
-        agent:
-          allOf:
-          - $ref: '#/components/schemas/AgentRef'
-          description: 'The registered agent to run: `workspace/name`, or `name` in
-            the submission workspace. Rewritten to the qualified form at submit. The
-            agent runs fresh for every trial; an existing deployment is never called.'
-        environment:
-          allOf:
-          - $ref: '#/components/schemas/EnvironmentSpecInline'
-          description: 'Environment to evaluate the agent in, merged onto its config
-            exactly as a deployment would: MCP fulfilments (url/env/secrets) for servers
-            the agent declares, process env, secret refs, and Fabric environment settings.'
-      additionalProperties: false
-      type: object
-      required:
-      - agent
-      title: FabricRegisteredAgentSource
-      description: 'An agent registered on the platform (``nemo agents create``),
-        resolved at submit.
-
-
-        The model is part of what the agent is, so there is no model override; what
-        an evaluation shapes is
-
-        the ``environment`` the agent runs in.'
     FabricRunnerTarget:
       properties:
         kind:
@@ -4096,7 +4069,7 @@ components:
         source:
           anyOf:
           - $ref: '#/components/schemas/FabricConfigSource'
-          - $ref: '#/components/schemas/FabricRegisteredAgentSource'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
           description: 'The agent to run: an inline `config` (with an optional `model`),
             or a registered `agent` (with an optional `environment`).'
@@ -5733,6 +5706,33 @@ components:
       type: object
       title: ReasoningParams
       description: Custom settings that control the model's reasoning behavior.
+    RegisteredAgentSource:
+      properties:
+        agent:
+          allOf:
+          - $ref: '#/components/schemas/AgentRef'
+          description: 'The registered agent to run: `workspace/name`, or `name` in
+            the submission workspace. Rewritten to the qualified form at submit. The
+            agent runs fresh for every trial; an existing deployment is never called.'
+        environment:
+          allOf:
+          - $ref: '#/components/schemas/EnvironmentSpecInline'
+          description: 'Environment to evaluate the agent in, merged onto its config
+            exactly as a deployment would: MCP fulfilments (url/env/secrets) for servers
+            the agent declares, process env, secret refs, and Fabric environment settings.'
+      additionalProperties: false
+      type: object
+      required:
+      - agent
+      title: RegisteredAgentSource
+      description: 'An agent registered on the platform (``nemo agents create``),
+        resolved at submit.
+
+
+        The model is part of what the agent is, so there is no model override; what
+        an evaluation shapes is
+
+        the ``environment`` the agent runs in.'
     ResolvedEvaluatorTaskDefinition:
       properties:
         kind:
