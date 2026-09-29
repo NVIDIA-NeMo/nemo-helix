@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -171,7 +170,7 @@ def _mock_backed_workspace_agent_config(agent_name: str, model_name: str) -> dic
     return config
 
 
-def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_fabric_agent_invocation_job_runs_and_saves_results(client: NemoClient, workspace: str) -> None:
     agent_name = unique_name("execute-agent")
     job_name = unique_name("execute-job")
     model_name = unique_name("invoke-model")
@@ -179,7 +178,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoHelix, clie
     generated_report = "Fabric wrote this deterministic e2e report.\n"
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("invoke-provider"),
         mock_response_body_by_model={
@@ -283,7 +282,6 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoHelix, clie
 
 
 def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs(
-    sdk: NeMoHelix,
     client: NemoClient,
     workspace: str,
 ) -> None:
@@ -294,7 +292,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
     partial_report = "Fabric wrote this file before the model failed.\n"
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("invoke-provider"),
         mock_response_body_by_model={
@@ -409,12 +407,10 @@ def container_backed_execute(client: NemoClient) -> None:
         pytest.skip("cpu/default is diverted to the subprocess backend, which discards container.image")
 
 
-def _register_mock_backed_agent(
-    sdk: NeMoHelix, client: NemoClient, workspace: str, *, agent_name: str, model_name: str
-) -> None:
+def _register_mock_backed_agent(client: NemoClient, workspace: str, *, agent_name: str, model_name: str) -> None:
     """Register a deterministic agent whose single model is served by the mock provider."""
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("image-provider"),
         mock_response_body_by_model={
@@ -434,7 +430,6 @@ def _register_mock_backed_agent(
 
 @pytest.mark.container_only
 def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
-    sdk: NeMoHelix,
     client: NemoClient,
     workspace: str,
     container_backed_execute: None,
@@ -458,7 +453,7 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
     job_name = unique_name("image-job")
     model_name = unique_name("image-model")
 
-    _register_mock_backed_agent(sdk, client, workspace, agent_name=agent_name, model_name=model_name)
+    _register_mock_backed_agent(client, workspace, agent_name=agent_name, model_name=model_name)
 
     try:
         agents_resource(client).jobs.execute.create(

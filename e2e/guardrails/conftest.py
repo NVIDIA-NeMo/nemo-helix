@@ -6,7 +6,6 @@
 from collections.abc import Callable, Iterator
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 
 from e2e.guardrails.utils import (
@@ -25,7 +24,6 @@ from e2e.guardrails.utils import (
 
 @pytest.fixture
 def guardrails_chat_test_case(
-    sdk: NeMoHelix,
     client: NemoClient,
     workspace: str,
 ) -> Iterator[Callable[..., GuardrailsChatTestCase]]:
@@ -54,7 +52,7 @@ def guardrails_chat_test_case(
             rail_types=rail_types,
             streaming=streaming,
         )
-        setup_mock_provider(sdk, test_case)
+        setup_mock_provider(client, test_case)
         create_guarded_virtual_model(client=client, test_case=test_case, config_data=config_data)
         if config_mode == "referenced":
             created_configs.append((workspace, test_case.config_name))
@@ -71,7 +69,6 @@ def guardrails_chat_test_case(
 
 @pytest.fixture
 def guardrails_check_test_case(
-    sdk: NeMoHelix,
     client: NemoClient,
     workspace: str,
 ) -> Iterator[Callable[..., tuple[GuardrailsChatTestCase, dict]]]:
@@ -100,7 +97,7 @@ def guardrails_check_test_case(
             streaming=False,
         )
 
-        setup_mock_provider(sdk, test_case)
+        setup_mock_provider(client, test_case)
 
         if config_mode == "referenced":
             create_guardrail_config(

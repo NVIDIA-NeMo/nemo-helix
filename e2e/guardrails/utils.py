@@ -8,7 +8,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.guardrail.client import GuardrailClient
@@ -189,9 +188,9 @@ def content_safety_config(
     }
 
 
-def setup_mock_provider(sdk: NeMoHelix, test_case: GuardrailsChatTestCase) -> None:
+def setup_mock_provider(client: NemoClient, test_case: GuardrailsChatTestCase) -> None:
     add_mock_provider(
-        sdk,
+        client,
         workspace=test_case.workspace,
         name=unique_name("gr-provider"),
         # Register provider model entities by bare name; the provider already belongs
