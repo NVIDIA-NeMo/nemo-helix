@@ -8,7 +8,7 @@ Snapshot of [NVIDIA-dev/switchyard](https://github.com/NVIDIA-dev/switchyard) at
 ("ci: enforce conventional commits", 2026-05-11).
 
 Only `switchyard.lib` and `switchyard.telemetry` are vendored. The CLI, server,
-and experimental subpackages from upstream are intentionally omitted — Platform
+and experimental subpackages from upstream are intentionally omitted — NeMo Helix
 only depends on `switchyard.lib.*` and `switchyard.telemetry`.
 
 This vendor directory is installed in editable mode by the `nemo-switchyard`
