@@ -17,8 +17,8 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceRequest,
     NemoInferenceMiddleware,
 )
-from nemo_switchyard._native_availability import load_libsy, native_rust_available
-from nemo_switchyard._native_ir import (
+from nemo_switchyard._native_availability import load_libsy, native_rust_bindings_available
+from nemo_switchyard._openai_protocol import (
     apply_llm_request_to_openai_body,
     llm_request_to_openai_chat,
     openai_chat_to_agg,
@@ -71,7 +71,7 @@ def routing_headers(headers: Mapping[str, str]) -> dict[str, str]:
 
 def wrap_llm_response(payload: Mapping[str, Any]) -> Any:
     agg = openai_chat_to_agg(dict(payload))
-    if native_rust_available():
+    if native_rust_bindings_available():
         return load_libsy().LlmResponse.Agg(agg)
     return agg
 

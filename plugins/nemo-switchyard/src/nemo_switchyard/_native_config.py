@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
-from nemo_switchyard._native_availability import load_libsy, native_rust_available
+from nemo_switchyard._native_availability import load_libsy, native_rust_bindings_available
 
 NATIVE_CONFIG_TYPES = frozenset({"random_routing", "stage_router", "llm_classifier"})
 
@@ -18,8 +18,8 @@ _NATIVE_UNAVAILABLE = (
 )
 
 
-def require_native_rust(config_type: str) -> None:
-    if native_rust_available():
+def require_native_rust_bindings(config_type: str) -> None:
+    if native_rust_bindings_available():
         return
     raise InferenceMiddlewareError(
         _NATIVE_UNAVAILABLE.format(config_type=config_type),
@@ -155,7 +155,7 @@ def native_model_categories(config_type: str) -> tuple[str, ...]:
 
 
 def validate_native_config(config_type: str, config: Any) -> dict[str, Any]:
-    require_native_rust(config_type)
+    require_native_rust_bindings(config_type)
     payload = _require_mapping(config or {}, "config")
     if config_type == "random_routing":
         map_random_routing_config(payload)

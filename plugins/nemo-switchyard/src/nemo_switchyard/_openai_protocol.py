@@ -5,8 +5,8 @@
 
 libsy ``run_stream`` and ``ModelCall.respond`` speak Switchyard protocol JSON
 (``instructions``, ``outputs``, top-level tool ``name``). IGW and providers speak
-OpenAI Chat Completions. RC2 does not expose a Python translator, so the host
-does this conversion. This is not OpenAI ↔ Anthropic translation.
+OpenAI Chat Completions. The native wheel does not expose a Python translator, so
+the host does this conversion. This is not OpenAI ↔ Anthropic translation.
 """
 
 from __future__ import annotations
@@ -14,9 +14,41 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from difflib import SequenceMatcher
+from enum import StrEnum
 from typing import Any
 
 _OPENAI_CHAT = "openai_chat"
+_OPENAI_FUNCTION = "function"
+_OPENAI_IMAGE_URL = "image_url"
+
+
+class ContentBlock(StrEnum):
+    """Switchyard normalized content block types."""
+
+    TEXT = "text"
+    REASONING = "reasoning"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+    FILE = "file"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    REFUSAL = "refusal"
+    UNKNOWN = "unknown"
+
+
+class ToolChoice(StrEnum):
+    """String tool-choice modes shared by OpenAI Chat and the normalized request."""
+
+    AUTO = "auto"
+    REQUIRED = "required"
+    NONE = "none"
+    TOOL = "tool"
+
+
+_PASSTHROUGH_BLOCKS = frozenset(ContentBlock)
+_STRING_TOOL_CHOICES = frozenset({ToolChoice.AUTO, ToolChoice.REQUIRED, ToolChoice.NONE})
+_TOOL_BLOCKS = frozenset({ContentBlock.TOOL_CALL, ContentBlock.TOOL_RESULT})
 
 
 def openai_chat_to_llm_request(body: dict[str, Any]) -> dict[str, Any]:
@@ -32,7 +64,7 @@ def openai_chat_to_llm_request(body: dict[str, Any]) -> dict[str, Any]:
         role = str(raw.get("role") or "user")
         content = _openai_message_content(raw)
         if role in {"system", "developer"}:
-            instructions.append({"role": role, "content": content or [{"type": "text", "text": ""}]})
+            instructions.append({"role": role, "content": content or [{"type": ContentBlock.TEXT, "text": ""}]})
             continue
         messages.append({"role": role, "content": content})
 
@@ -56,12 +88,12 @@ def openai_chat_to_llm_request(body: dict[str, Any]) -> dict[str, Any]:
         "preservation": {},
     }
     tool_choice = body.get("tool_choice")
-    if isinstance(tool_choice, str) and tool_choice in {"auto", "required", "none"}:
-        request["tool_choice"] = {"type": tool_choice}
-    elif isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+    if isinstance(tool_choice, str) and tool_choice in _STRING_TOOL_CHOICES:
+        request["tool_choice"] = {"type": ToolChoice(tool_choice)}
+    elif isinstance(tool_choice, dict) and tool_choice.get("type") == _OPENAI_FUNCTION:
         name = (tool_choice.get("function") or {}).get("name")
         if name:
-            request["tool_choice"] = {"type": "tool", "data": {"name": name}}
+            request["tool_choice"] = {"type": ToolChoice.TOOL, "data": {"name": name}}
     return request
 
 
@@ -151,7 +183,7 @@ def apply_llm_request_to_openai_body(
     llm_request: dict[str, Any],
     original_llm_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Overlay routing-time IR rewrites onto the original OpenAI Chat body."""
+    """Overlay routing-time normalized-request rewrites onto the original OpenAI Chat body."""
     original = original_llm_request or openai_chat_to_llm_request(openai_body)
     rewritten = llm_request_to_openai_chat(llm_request, model=openai_body.get("model"))
     merged = deepcopy(openai_body)
@@ -172,7 +204,7 @@ def _merge_rewritten_messages(
     original: dict[str, Any],
     rewritten: dict[str, Any],
 ) -> list[Any]:
-    """Apply changed IR entries without round-tripping unchanged OpenAI messages."""
+    """Apply changed normalized-request entries without round-tripping unchanged OpenAI messages."""
     raw_messages = openai_body.get("messages")
     if not isinstance(raw_messages, list):
         return llm_request_to_openai_chat(rewritten, model=openai_body.get("model"))["messages"]
@@ -309,7 +341,7 @@ def _openai_message_content(message: dict[str, Any]) -> list[dict[str, Any]]:
             arguments = parsed
         blocks.append(
             {
-                "type": "tool_call",
+                "type": ContentBlock.TOOL_CALL,
                 "id": str(call.get("id") or ""),
                 "name": str(function.get("name") or ""),
                 "arguments": arguments if arguments is not None else {},
@@ -318,9 +350,9 @@ def _openai_message_content(message: dict[str, Any]) -> list[dict[str, Any]]:
     if message.get("role") == "tool" and message.get("tool_call_id"):
         blocks = [
             {
-                "type": "tool_result",
+                "type": ContentBlock.TOOL_RESULT,
                 "tool_call_id": str(message["tool_call_id"]),
-                "content": blocks or [{"type": "text", "text": ""}],
+                "content": blocks or [{"type": ContentBlock.TEXT, "text": ""}],
                 "is_error": None,
             }
         ]
@@ -331,45 +363,34 @@ def _content_to_blocks(content: Any) -> list[dict[str, Any]]:
     if content is None:
         return []
     if isinstance(content, str):
-        return [{"type": "text", "text": content}]
+        return [{"type": ContentBlock.TEXT, "text": content}]
     if not isinstance(content, list):
-        return [{"type": "unknown", "provider": _OPENAI_CHAT, "raw": content}]
+        return [{"type": ContentBlock.UNKNOWN, "provider": _OPENAI_CHAT, "raw": content}]
     blocks: list[dict[str, Any]] = []
     for item in content:
         if isinstance(item, str):
-            blocks.append({"type": "text", "text": item})
+            blocks.append({"type": ContentBlock.TEXT, "text": item})
             continue
         if not isinstance(item, dict):
             continue
         kind = item.get("type")
-        if kind == "text":
-            blocks.append({"type": "text", "text": str(item.get("text") or "")})
-        elif kind == "image_url":
-            image = item.get("image_url") if isinstance(item.get("image_url"), dict) else {}
+        if kind == ContentBlock.TEXT:
+            blocks.append({"type": ContentBlock.TEXT, "text": str(item.get("text") or "")})
+        elif kind == _OPENAI_IMAGE_URL:
+            image = item.get(_OPENAI_IMAGE_URL) if isinstance(item.get(_OPENAI_IMAGE_URL), dict) else {}
             blocks.append(
                 {
-                    "type": "image",
+                    "type": ContentBlock.IMAGE,
                     "source": {
                         "type": "url",
                         "data": {"url": str(image.get("url") or ""), "detail": image.get("detail")},
                     },
                 }
             )
-        elif kind in {
-            "text",
-            "reasoning",
-            "image",
-            "audio",
-            "video",
-            "file",
-            "tool_call",
-            "tool_result",
-            "refusal",
-            "unknown",
-        }:
+        elif kind in _PASSTHROUGH_BLOCKS:
             blocks.append(item)
         else:
-            blocks.append({"type": "unknown", "provider": _OPENAI_CHAT, "raw": item})
+            blocks.append({"type": ContentBlock.UNKNOWN, "provider": _OPENAI_CHAT, "raw": item})
     return blocks
 
 
@@ -381,23 +402,25 @@ def _blocks_to_openai_content(blocks: list[Any]) -> str | list[dict[str, Any]]:
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
-        if kind == "text":
+        if kind == ContentBlock.TEXT:
             text = str(block.get("text") or "")
             texts.append(text)
-            rich.append({"type": "text", "text": text})
-        elif kind == "image":
+            rich.append({"type": ContentBlock.TEXT, "text": text})
+        elif kind == ContentBlock.IMAGE:
             only_text = False
             source_value = block.get("source")
             source: dict[str, Any] = source_value if isinstance(source_value, dict) else {}
             data_value = source.get("data")
             data: dict[str, Any] = data_value if isinstance(data_value, dict) else {}
-            rich.append({"type": "image_url", "image_url": {"url": data.get("url"), "detail": data.get("detail")}})
-        elif kind == "unknown" and isinstance(block.get("raw"), dict):
+            rich.append(
+                {"type": _OPENAI_IMAGE_URL, _OPENAI_IMAGE_URL: {"url": data.get("url"), "detail": data.get("detail")}}
+            )
+        elif kind == ContentBlock.UNKNOWN and isinstance(block.get("raw"), dict):
             only_text = False
             rich.append(block["raw"])
-        elif kind not in {"tool_call", "tool_result"}:
+        elif kind not in _TOOL_BLOCKS:
             only_text = False
-            rich.append({"type": "text", "text": str(block)})
+            rich.append({"type": ContentBlock.TEXT, "text": str(block)})
     if only_text:
         return "".join(texts)
     return rich or "".join(texts)
@@ -405,9 +428,9 @@ def _blocks_to_openai_content(blocks: list[Any]) -> str | list[dict[str, Any]]:
 
 def _llm_message_to_openai(message: dict[str, Any]) -> dict[str, Any]:
     blocks = [block for block in message.get("content") or [] if isinstance(block, dict)]
-    tool_calls = [block for block in blocks if block.get("type") == "tool_call"]
-    tool_results = [block for block in blocks if block.get("type") == "tool_result"]
-    other = [block for block in blocks if block.get("type") not in {"tool_call", "tool_result"}]
+    tool_calls = [block for block in blocks if block.get("type") == ContentBlock.TOOL_CALL]
+    tool_results = [block for block in blocks if block.get("type") == ContentBlock.TOOL_RESULT]
+    other = [block for block in blocks if block.get("type") not in _TOOL_BLOCKS]
     if tool_results:
         result = tool_results[0]
         inner = result.get("content") if isinstance(result.get("content"), list) else []
@@ -424,7 +447,7 @@ def _llm_message_to_openai(message: dict[str, Any]) -> dict[str, Any]:
         out["tool_calls"] = [
             {
                 "id": call.get("id"),
-                "type": "function",
+                "type": _OPENAI_FUNCTION,
                 "function": {
                     "name": call.get("name"),
                     "arguments": call.get("arguments")
@@ -453,10 +476,10 @@ def _openai_tool_to_definition(tool: dict[str, Any]) -> dict[str, Any]:
 
 
 def _definition_to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
-    if tool.get("type") == "function":
+    if tool.get("type") == _OPENAI_FUNCTION:
         return tool
     return {
-        "type": "function",
+        "type": _OPENAI_FUNCTION,
         "function": {
             "name": tool.get("name"),
             "description": tool.get("description"),

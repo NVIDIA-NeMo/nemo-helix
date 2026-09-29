@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from nemo_switchyard._native_ir import (
+from nemo_switchyard._openai_protocol import (
     apply_llm_request_to_openai_body,
     llm_request_to_openai_chat,
     openai_chat_to_agg,

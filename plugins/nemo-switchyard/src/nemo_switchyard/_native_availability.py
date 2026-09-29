@@ -12,8 +12,8 @@ from types import ModuleType
 
 
 @cache
-def native_rust_available() -> bool:
-    """Return True when the ``switchyard_rust`` distribution is importable."""
+def native_rust_bindings_available() -> bool:
+    """Return True when the ``switchyard_rust`` bindings are importable."""
     return importlib.util.find_spec("switchyard_rust") is not None
 
 
