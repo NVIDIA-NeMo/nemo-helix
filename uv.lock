@@ -2089,7 +2089,7 @@ http = [
 
 [[package]]
 name = "garak-api"
-version = "0.16.0"
+version = "0.17.0"
 source = { editable = "packages/garak_api" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4215,7 +4215,7 @@ source = { editable = "plugins/nemo-agents/examples/nemo-agent-config/email-secu
 [[package]]
 name = "nemo-agent-hardener-plugin"
 version = "0.1.0"
-source = { editable = "plugins/nemo-agent-hardener" }
+source = { virtual = "plugins/nemo-agent-hardener" }
 dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-agents-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -8035,7 +8035,7 @@ dev = [
     { name = "mlflow-skinny", specifier = ">=3.15.0,<3.16.0" },
     { name = "mypy" },
     { name = "myst-parser", specifier = ">=4.0.0" },
-    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
+    { name = "nemo-agent-hardener-plugin", virtual = "plugins/nemo-agent-hardener" },
     { name = "nemo-agents-plugin", extras = ["deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },

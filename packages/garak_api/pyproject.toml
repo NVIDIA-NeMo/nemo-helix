@@ -7,7 +7,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "garak-api"
-version = "0.16.0"
+version = "0.17.0"
 authors = [
   { name = "Leon Derczynski", email="lderczynski@nvidia.com" },
   { name = "Jeffrey Martin", email="jemartin@nvidia.com" },
