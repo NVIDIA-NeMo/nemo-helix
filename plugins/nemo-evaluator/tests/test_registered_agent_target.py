@@ -469,6 +469,24 @@ def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric()
     assert "relay" in provided
 
 
+async def test_harbor_drops_stdio_env_templates_the_container_cannot_expand(mocker: MockerFixture) -> None:
+    config = _calculator_with_mcp_config()
+    config["mcp"]["servers"]["calculator"] = {"transport": "stdio", "url": "/usr/bin/python3", "args": ["srv.py"]}
+    _platform(mocker, _agent(config))
+    environment = EnvironmentSpecInline(
+        mcp={
+            "calculator": McpFulfillment(url="/usr/bin/python3", env={"MODE": "mock"}, secrets={"CALC_TOKEN": "dev/t"})
+        }
+    )
+
+    resolved = await _resolve(_harbor_by_agent(environment=environment))
+
+    assert isinstance(resolved, HarborRunnerTarget)
+    server = resolved.agent_kwargs["fabric_config"]["mcp"]["servers"]["calculator"]
+    assert server["env"] == {"MODE": "mock"}  # the plain env stays; the template that would arrive literal is gone
+    assert resolved.env_secrets["CALC_TOKEN"] == SecretRef(root="dev/t")  # the process still gets the secret
+
+
 async def test_harbor_caller_may_pin_the_fabric_package(mocker: MockerFixture) -> None:
     _platform(mocker, _agent())
 

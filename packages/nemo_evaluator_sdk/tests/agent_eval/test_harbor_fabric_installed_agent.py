@@ -163,14 +163,23 @@ async def test_install_provisions_curl_uv_and_the_fabric_venv_in_order(tmp_path:
 
 
 async def test_fabric_package_may_carry_several_requirements(tmp_path: Path) -> None:
-    """A harness's companions can be pinned next to Fabric; each specifier is its own shell word."""
-    agent = _agent(tmp_path, fabric_package="nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0 'a b==1'")
+    """A harness's companions can be pinned next to Fabric; a quoted specifier with a marker stays whole."""
+    agent = _agent(
+        tmp_path,
+        fabric_package="""nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
+    )
     environment = _RecordingEnvironment()
 
     await agent.install(cast(BaseEnvironment, environment))
 
     install = _ran(environment, "astral.sh/uv")
-    assert install.endswith("'nemo-fabric[deepagents,relay]==0.3.0' mcp==1.29.0 'a b==1'")
+    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.3.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
+
+
+async def test_a_blank_fabric_package_fails_before_any_install_command(tmp_path: Path) -> None:
+    agent = _agent(tmp_path, fabric_package="   ")
+    with pytest.raises(ValueError, match="at least one requirement"):
+        await agent.install(cast(BaseEnvironment, _RecordingEnvironment()))
 
 
 async def test_the_uv_installer_is_pinned_to_a_release(tmp_path: Path) -> None:

@@ -175,8 +175,8 @@ _FABRIC_ADAPTER_EXTRAS: dict[str, str] = {
     "nvidia.fabric.hermes": "hermes-agent",
 }
 
-#: Distributions a harness leaves unpinned that must match the service anyway. The deepagents adapter
-#: speaks MCP through ``langchain-mcp-adapters``, whose ``mcp`` floor admits a major it cannot import.
+#: Distributions a harness leaves unpinned but must match the service: deepagents' ``langchain-mcp-adapters``
+#: admits an ``mcp`` major it cannot import.
 _HARNESS_COMPANION_PINS: dict[str, tuple[str, ...]] = {
     "nvidia.fabric.langchain.deepagents": ("mcp", "langchain-mcp-adapters"),
 }
@@ -315,18 +315,14 @@ def _merge_env_secrets(
     return {**agent_secrets, **target_secrets}
 
 
-#: ``${NAME}`` as it appears in a stdio MCP server's ``env`` after resolution.
 _ENV_TEMPLATE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
 def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpecInline | None) -> dict[str, Any]:
     """Name each stdio MCP server's bound secrets in its ``env`` as ``${NAME}`` templates.
 
-    An MCP stdio server is spawned with a fixed default environment plus the server's own ``env``; it
-    does not inherit the harness process's environment, so a secret that reaches the process as
-    ``NAME`` still never reaches the server. The environment merge keeps secret names out of the
-    server config on purpose (values must not be persisted), so the resolver adds the *template*
-    here and the runtime that holds the value expands it at launch. A template is not a credential.
+    A stdio MCP server does not inherit the harness process's environment, only its own ``env``; the
+    runtime holding the value expands the template at launch, so nothing persisted carries a value.
     """
     if environment is None or not environment.mcp:
         return config
@@ -340,6 +336,24 @@ def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpe
             **{env_name: f"${{{env_name}}}" for env_name in fulfillment.secrets},
         }
     return config
+
+
+def _without_mcp_env_templates(config: dict[str, Any]) -> dict[str, Any]:
+    """The config minus stdio MCP server ``${NAME}`` env templates, for a runtime that cannot expand them."""
+    servers = ((config.get("mcp") or {}).get("servers")) or {}
+    templated = {
+        name: server
+        for name, server in servers.items()
+        if isinstance(server, dict)
+        and any(isinstance(v, str) and _ENV_TEMPLATE.match(v) for v in (server.get("env") or {}).values())
+    }
+    if not templated:
+        return config
+    stripped = copy.deepcopy(config)
+    for name in templated:
+        env = stripped["mcp"]["servers"][name]["env"]
+        stripped["mcp"]["servers"][name]["env"] = {k: v for k, v in env.items() if not _ENV_TEMPLATE.match(v)}
+    return stripped
 
 
 def _expand_mcp_secret_env(config: dict[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
@@ -394,7 +408,9 @@ async def _resolve_registered_agent(
     fabric_package = target.agent_kwargs.get("fabric_package")
     agent_kwargs: dict[str, Any] = {
         **target.agent_kwargs,
-        "fabric_config": _without_gateway_placeholders(agent.config),
+        # The runner inside the task container expands no templates; a literal "${NAME}" is worse than
+        # no variable, so a Harbor agent's stdio servers go without the secret (see the Harbor docs).
+        "fabric_config": _without_mcp_env_templates(_without_gateway_placeholders(agent.config)),
         "fabric_package": fabric_package if isinstance(fabric_package, str) else _default_fabric_package(adapter_id),
     }
     return target.model_copy(

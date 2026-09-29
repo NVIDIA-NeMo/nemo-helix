@@ -311,8 +311,9 @@ in: the agent runs as the SDK's `FabricInstalledAgent` (so any task image works)
 `agent_kwargs.fabric_config` carries the whole translated config, with `fabric_package` derived from
 the harness and pinned to the platform's Fabric version unless you set it. For the deepagents harness
 the pin also covers `mcp` and `langchain-mcp-adapters` at the platform's versions, because a clean
-install otherwise resolves an `mcp` major the adapter cannot import. `fabric_package` accepts several
-whitespace-separated requirements, so your own pin can do the same. Installing the agent into
+install otherwise resolves an `mcp` major the adapter cannot import. `fabric_package` is split like a shell command
+line, so your own pin can do the same; quote a requirement that contains spaces, such as one with an
+environment marker. Installing the agent into
 each task container takes minutes the first time, so raise `agent_setup_timeout_multiplier` as the
 example does — Harbor's default is tuned for prebuilt agents. The persisted job spec
 shows the filled-in target with `source.agent` qualified; the job never looks the agent up.
@@ -328,10 +329,11 @@ local run. A registered agent carries no `model_name`: its model is part of what
 is a different registered agent.
 
 One limitation inside the task container: a secret bound to a **stdio** MCP server through
-`mcp.<name>.secrets` reaches the agent's environment but not the server itself. The resolver names it in
-the server's `env` as a `${NAME}` template, which the host Fabric runner expands at launch, but the
-runner inside the task container does not. Use a network-transport server, or pass the value another
-way, until that runner learns to.
+`mcp.<name>.secrets` reaches the agent's environment but not the server itself. On the host Fabric
+runner the resolver names it in the server's `env` as a `${NAME}` template and the runner fills it at
+launch; the runner inside a task container expands no templates, so for a Harbor target the template
+is dropped rather than handed to the server as a literal string. Use a network-transport server, or
+pass the value another way, until that runner learns to.
 
 ## Next steps
 
