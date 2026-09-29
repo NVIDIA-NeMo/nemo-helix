@@ -30,6 +30,8 @@ Keep custom metric code dependency-light. Local execution runs your metric in th
 
 ## Prerequisites
 
+Use Python 3.13. The Evaluator job runtime rejects a Cloudpickle metric bundle created on a different Python minor version, and the default task image runs Python 3.13.
+
 Install the PyPI `nemo-helix` wrapper package, which includes the Evaluator SDK. The `all` extra is defined by the wrapper package; if you are working from a source checkout, run `make bootstrap` from the repository root instead.
 
 ```bash
