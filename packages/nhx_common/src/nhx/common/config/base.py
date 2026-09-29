@@ -228,7 +228,9 @@ class OIDCConfig(BaseSettings):
     default_scopes: str = Field(
         default="openid profile email offline_access",
         description="Space-separated OAuth scopes to request during authentication. "
-        "For Azure AD with custom API, use: 'api://{app-id}/.default openid profile email'",
+        "Include short NeMo Helix API scopes such as 'platform:read platform:write' only when the "
+        "IdP application exposes them. If the IdP requires resource-qualified API scope names, set "
+        "scope_prefix instead of putting qualified values here.",
     )
 
     workload_token_exchange_enabled: bool = Field(
@@ -326,9 +328,10 @@ class OIDCConfig(BaseSettings):
 
     scope_prefix: str | None = Field(
         default=None,
-        description="Prefix to strip from token scopes before authorization. "
-        "For example, if IdP returns 'api://my-app/models:read', set prefix to "
-        "'api://my-app/' to normalize to 'models:read'. "
+        description="Optional provider prefix for NeMo Helix API scopes. Clients prepend it to short "
+        "API scopes during login, and NeMo Helix strips it from returned token scopes before authorization. "
+        "For example, if IdP scopes use 'api://my-app/models:read', set prefix to "
+        "'api://my-app/' so NeMo Helix normalizes the value to 'models:read'. "
         "If not set, scopes are used as-is.",
     )
 
