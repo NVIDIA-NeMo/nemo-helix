@@ -127,6 +127,19 @@ def test_direct_builders_apply_the_connect_cap_to_the_transport_and_per_request(
         assert built._timeout == expected
 
 
+def test_direct_builders_own_the_transport_they_create() -> None:
+    """The builder creates the httpx client, so closing the NemoClient must close it."""
+    client = build_direct_nemo_client(base_url="http://localhost:8080")
+    client.close()
+    assert client._http.is_closed
+
+
+async def test_direct_async_builder_owns_the_transport_it_creates() -> None:
+    async_client = build_direct_async_nemo_client(base_url="http://localhost:8080")
+    await async_client.aclose()
+    assert async_client._http.is_closed
+
+
 @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
 def test_config_builders_apply_the_connect_cap(_discover, tmp_path: Path) -> None:
     config = _oauth_config(tmp_path)
