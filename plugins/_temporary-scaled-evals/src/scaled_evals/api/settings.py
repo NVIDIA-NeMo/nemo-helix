@@ -225,6 +225,12 @@ class Settings(BaseSettings):
         allow_inf_nan=False,
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
     )
+    # Platform Secret holding the OpenSandbox API key, exposed to evaluation
+    # Jobs only (never task-image builds) as OPENSANDBOX_API_KEY.
+    platform_jobs_opensandbox_api_key_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_OPENSANDBOX_API_KEY_SECRET",
+    )
     # Entity Store migration flags. Projection writes a derived read model while
     # Postgres stays authoritative; reads only flip once parity is established,
     # so the two are deliberately separate switches.
@@ -483,6 +489,34 @@ class Settings(BaseSettings):
     gym_sandbox_opensandbox_host_env_file: str | None = None
     # Named Docker volume shared by api and gym-runner containers (compose).
     gym_sandbox_opensandbox_docker_volume: str = "scaled-evals-gym-opensandbox-work"
+
+    # --- harbor_opensandbox (Harbor 0.20 + NemoOpenSandboxEnvironment) ------
+    # Off by default. Harbor runs as a child process of the dispatcher and
+    # creates one OpenSandbox sandbox per trial. OPENSANDBOX_DOMAIN and
+    # OPENSANDBOX_API_KEY (or OPEN_SANDBOX_*) come from the process environment,
+    # overridden by the optional env file; they are handed to the Harbor child's
+    # environment only and never reach the rendered config or the trial sandbox.
+    harbor_opensandbox_enabled: bool = False
+    harbor_opensandbox_env_file: str | None = None
+    # Harbor config template (agents, retries, timeouts). The backend owns its
+    # environment block, so the template's environment section is replaced.
+    harbor_opensandbox_config_path: str | None = None
+    harbor_opensandbox_work_dir: str = "/tmp/harbor-opensandbox"
+    # Harbor's jobs_dir relative to the selected Harbor runner directory.
+    harbor_opensandbox_jobs_dir: str = "jobs/harbor-opensandbox"
+    harbor_opensandbox_protocol: Literal["http", "https"] = "https"
+    # Comma-separated. The model endpoint trial agents call (inference gateway or
+    # Switchyard host), always added to the trusted egress allowlist.
+    harbor_opensandbox_model_endpoint_hosts: str = ""
+    # Comma-separated operator allowlist: hostnames, *.wildcard hostnames, IPs,
+    # or CIDRs every trial may reach in addition to the model endpoint.
+    harbor_opensandbox_allowed_hosts: str = ""
+    harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "default_action"
+    # Identifies this deployment in sandbox ownership metadata so cleanup never
+    # matches another deployment's sandboxes on a shared control plane.
+    harbor_opensandbox_deployment_id: str = "scaled-evals"
+    harbor_opensandbox_sandbox_timeout_seconds: int = 3600
+    harbor_opensandbox_cleanup_timeout_seconds: int = 120
 
     # When set, gym dispatch uses the interim compose submitter: one-shot gym-runner
     # containers via the Docker socket. Production should use the same image ref

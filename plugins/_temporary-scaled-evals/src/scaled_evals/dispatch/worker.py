@@ -158,6 +158,7 @@ _HARBOR_PROFILE_TEMPLATE_KEYS = ("config", "harbor_config", "template", "harbor_
 # sandbox_k8s stops a sandbox after this long when the profile omits lifecycle_timeout.
 _SANDBOX_LIFECYCLE_DEFAULT_SECONDS = 3600.0
 _SANDBOX_K8S_RUNTIME = "sandbox_k8s"
+_SUCCESS_TEARDOWN_RUNTIMES = frozenset({_SANDBOX_K8S_RUNTIME, "harbor_opensandbox"})
 
 
 def _profile_lifecycle_timeout_seconds(row: Mapping[str, Any]) -> float | None:
@@ -2617,8 +2618,8 @@ class Dispatcher:
         backend: RuntimeBackend,
         handle: LaunchHandle,
     ) -> str | None:
-        """Best-effort bounded cleanup for completed Kubernetes sandboxes."""
-        if runtime != "sandbox_k8s":
+        """Best-effort bounded cleanup for completed Kubernetes and OpenSandbox sandboxes."""
+        if runtime not in _SUCCESS_TEARDOWN_RUNTIMES:
             return None
         attempts = 3
         for attempt in range(1, attempts + 1):

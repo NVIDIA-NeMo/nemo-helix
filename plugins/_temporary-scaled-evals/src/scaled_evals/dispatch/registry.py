@@ -22,7 +22,10 @@ from scaled_evals.dispatch.runtime_backend import (
     RuntimeBackendRegistration,
 )
 
-_BUILTIN_RUNTIME_BACKEND_PLUGINS = ("scaled_evals.dispatch.sandbox_k8s",)
+_BUILTIN_RUNTIME_BACKEND_PLUGINS = (
+    "scaled_evals.dispatch.sandbox_k8s",
+    "scaled_evals.dispatch.harbor_opensandbox",
+)
 
 
 class RuntimeBackendRegistry:
