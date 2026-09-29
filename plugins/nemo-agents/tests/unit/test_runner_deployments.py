@@ -36,7 +36,7 @@ from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
 requires_hermes_adapter = pytest.mark.skipif(
-    find_spec("nemo_fabric_adapters.hermes") is None,
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
     reason="needs the hermes harness adapter, which is not installed on Python 3.14",
 )
 
