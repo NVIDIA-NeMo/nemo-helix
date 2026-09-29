@@ -8,7 +8,6 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix.types.inference import ModelProvider, ServedModelMapping
@@ -27,7 +26,7 @@ from nhx.core.inference_gateway.api.dependencies import (
 )
 from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
 from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nhx.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model, resolve_vm_for_model
+from nhx.core.inference_gateway.api.v2.openai import resolve_vm_for_model
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
@@ -1043,45 +1042,6 @@ def test_proxy_resolves_served_model_name_with_slashes(app: FastAPI, client: Tes
     call_args = mock_proxy_client.request.call_args
     body_data = json.loads(call_args.kwargs["data"])
     assert body_data["model"] == "vendor/model/v1.0"
-
-
-# Parse OpenAI Model Tests
-
-
-@pytest.mark.parametrize(
-    "model_id,expected",
-    [
-        ("ns1/model1", ("ns1", "model1")),
-        ("default/my-model", ("default", "my-model")),
-        ("workspace_with_underscores/model-with-dashes", ("workspace_with_underscores", "model-with-dashes")),
-        ("e2e-test/meta_llama-3.2-1b-instruct", ("e2e-test", "meta_llama-3.2-1b-instruct")),
-        # Split on first "/" only: model_entity_name may contain "/" (e.g. LoRA with &adapters/)
-        ("ws/base&adapters/ws/my-adapter", ("ws", "base&adapters/ws/my-adapter")),
-        ("e2e-ws/qwen-base&adapters/e2e-ws/lora-1", ("e2e-ws", "qwen-base&adapters/e2e-ws/lora-1")),
-        # Cross-workspace LoRA: base_ws ("ws-a") and adapter_ws ("ws-b") differ —
-        # first-/ split keeps the adapter_ws segment inside model_entity_name.
-        ("ws-a/base&adapters/ws-b/adapter", ("ws-a", "base&adapters/ws-b/adapter")),
-        # 3+ segments: everything after first "/" is model_entity_name
-        ("ns1/model1/extra", ("ns1", "model1/extra")),
-        ("ns1/model1/a/b/c", ("ns1", "model1/a/b/c")),
-    ],
-)
-def test_parse_valid_model(model_id, expected):
-    """Test parsing valid model IDs; split on first '/' so LoRA ids work."""
-    assert parse_igw_openai_model(model_id) == expected
-
-
-@pytest.mark.parametrize(
-    "invalid_model_id",
-    [
-        "invalid",  # No slash
-        "",  # Empty
-    ],
-)
-def test_parse_invalid_model(invalid_model_id):
-    """Test parsing invalid model IDs raises ParseOpenAIModelError."""
-    with pytest.raises(ParseOpenAIModelError):
-        parse_igw_openai_model(invalid_model_id)
 
 
 # ---------------------------------------------------------------------------

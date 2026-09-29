@@ -32,7 +32,7 @@ from nemo_helix_plugin.inference_middleware import (
 )
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
+from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
 from nhx.core.inference_gateway.api.errors import (
@@ -1037,8 +1037,8 @@ async def virtual_model_proxy(
             # Example: body ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` ->
             # ``base-ws/base&adapters/a-ws/a-name``.
             _, adapter_workspace, adapter_name = adapter_parts
-            json_body["model"] = (
-                f"{virtual_model.default_model_entity}{ADAPTERS_INFIX}{adapter_workspace}/{adapter_name}"
+            json_body["model"] = format_adapter_composite(
+                virtual_model.default_model_entity, adapter_workspace, adapter_name
             )
         else:
             json_body["model"] = virtual_model.default_model_entity
