@@ -9,21 +9,20 @@ agent keeps Fabric's spec/result protocol and replaces only the install step: it
 through whatever package manager the image has, installs ``uv``, and builds the Fabric virtualenv
 from a uv-managed interpreter. Nothing is required of the task's Dockerfile.
 
-Select it with ``agent_import_path`` and configure it with ``agent_kwargs``::
+Select it with ``agent_import_path`` and hand it the agent through ``agent_kwargs``::
 
     HarborRuntimeConfig(
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
-            "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
+            "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
             "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
         },
-        agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
         agent_env_from_host=["NVIDIA_API_KEY"],
     )
 
-It accepts every ``FabricAgent`` keyword plus :class:`NemoFabricAgent`'s ``fabric_model_api_key_env``
-and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is required
--- the harness extra to install cannot be derived from the adapter id.
+It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabric's install/run
+keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
+required: the harness extra to install cannot be derived from the config.
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
 yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstalledAgent._exec``
@@ -55,8 +54,8 @@ DEFAULT_FABRIC_PYTHON_VERSION = "3.12"
 #: a killed phase produces no ``RunResult`` at all -- no trajectory, no error, nothing to debug, just
 #: an ``AgentTimeoutError``. Measured on `terminal-bench-sample`: six of ten trials died that way.
 #: A ceiling cannot be derived from the task, so this is a deliberately generous guess whose only job
-#: is to make the harness stop on its own terms. Pass ``fabric_max_turns`` to size it properly, or
-#: ``fabric_max_turns=None`` for Fabric's unbounded behaviour.
+#: is to make the harness stop on its own terms. Set ``runtime.max_turns`` in the config to size it
+#: properly, or an explicit ``null`` there for Fabric's unbounded behaviour.
 DEFAULT_FABRIC_MAX_TURNS = 50
 #: uv release the installer is pinned to.
 #:
@@ -162,8 +161,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
             mcp_servers=mcp_servers,
             skills_dir=skills_dir,
         )
-        # An explicit `fabric_max_turns=None` still means unbounded; only absence takes the default.
-        fabric_kwargs.setdefault("fabric_max_turns", DEFAULT_FABRIC_MAX_TURNS)
+        fabric_kwargs.setdefault("fabric_default_max_turns", DEFAULT_FABRIC_MAX_TURNS)
         # `**fabric_kwargs` rather than an enumerated signature, so every FabricAgent constructor
         # argument stays reachable without this class tracking upstream's parameter list.
         self.fabric = NemoFabricAgent(
