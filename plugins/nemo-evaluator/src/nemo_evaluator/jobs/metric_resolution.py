@@ -28,12 +28,11 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricWithModels
 from nemo_evaluator_sdk.resolver_protocols import ModelResolver
 from nemo_evaluator_sdk.values import Model, ModelRef
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 
 def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
@@ -127,7 +126,7 @@ async def resolve_metrics_to_inline(
     *,
     workspace: str,
     entity_client: EntityClient | None,
-    async_sdk: AsyncNeMoHelix,
+    async_sdk: AsyncHelixClient,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 

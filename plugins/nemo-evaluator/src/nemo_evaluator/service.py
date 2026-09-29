@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
+from nemo_evaluator.api.v2 import live as live_routes
 from nemo_evaluator.api.v2 import metrics as metrics_routes
 from nemo_evaluator.api.v2 import results as results_routes
 from nemo_evaluator.api.v2 import tasks as tasks_routes
@@ -143,6 +144,13 @@ class EvaluatorPluginService(NemoService):
                 router=tasksets_routes.router,
                 tag="Evaluator Plugin Tasksets Routes",
                 description="Stored taskset CRUD routes.",
+                prefix="/v2/workspaces/{workspace}",
+            ),
+            RouterSpec(
+                # POST /apis/evaluator/v2/workspaces/{workspace}/live.
+                router=live_routes.router,
+                tag="Evaluator Plugin Live Evaluation Route",
+                description="Single-row evaluation run in-process, without creating a job.",
                 prefix="/v2/workspaces/{workspace}",
             ),
         ]
