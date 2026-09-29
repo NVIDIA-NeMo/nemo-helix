@@ -14,7 +14,7 @@ Create evidence-backed product release notes from local Git history. Work at the
 
 Require a release ref. Resolve it locally; do not fetch or require GitHub access. The candidate ref defaults to `HEAD`.
 
-- **Draft** is the default. Require a target version and release date, update `docs/about/release-notes/current-release.mdx`, and finish with a coverage report.
+- **Draft** is the default. Require a target version and release date. When the target version is a new release, first cut over the prior release note: copy the existing `current-release.mdx` content to `docs/about/release-notes/release-<major>-<minor>-<patch>.mdx` (dashed version, matching the existing archive naming), add it to `docs/about/release-notes/index.mdx`, and add its Fern nav entry in `docs/fern/versions/latest.yml`. Skip the cutover when the target version is still the current page. Then update `docs/about/release-notes/current-release.mdx` with the new release content and finish with a coverage report.
 - **Audit** is read-only. Check an existing release note, defaulting to `docs/about/release-notes/current-release.mdx`, and return the coverage report without editing it.
 
 If a required draft input is missing, ask for it before editing. Accept an explicit alternate notes path. Never publish a release, create a tag, or run the release workflow as part of this skill.
@@ -94,7 +94,17 @@ git log --cherry-pick --right-only --no-merges \
   '<first-parent>...<release-line-parent>'
 ```
 
-Inspect the merge result against its first parent when conflict resolution may have changed behavior:
+That command excludes merge commits, so it misses a behavior change introduced only while resolving a conflict inside the release line. Enumerate the release-line merge commits in the same range, then diff each one against its first parent:
+
+```bash
+git log --first-parent --merges \
+  --format='%H%x09%cs%x09%s' \
+  '<first-parent>...<release-line-parent>'
+
+git diff --find-renames '<release-line-merge>^1..<release-line-merge>'
+```
+
+Separately, inspect the candidate-side merge result against its first parent, since conflict resolution can also change behavior there:
 
 ```bash
 git diff --find-renames '<first-parent>..<merge>'
@@ -122,7 +132,7 @@ Cluster related commits into one user outcome. Maintain a working ledger with:
 
 Include user-visible features, behavior changes, important fixes, migrations, compatibility changes, and material operational changes. Summarize internal refactors, tests, CI, dependency refreshes, and maintenance compactly unless they change installation, security, compatibility, performance, or operations for users.
 
-Search the whole candidate tree for corroborating docs and interfaces; do not assume documentation changed in the comparison range. A local Fern page counts as published only if it is reachable from `docs/fern/versions/latest.yml`. A generated CLI reference may verify syntax, but a command listing alone does not replace conceptual or task documentation for a substantial feature. Official external documentation may supplement local docs; it substitutes for local product documentation only when the capability genuinely belongs to that external product.
+Cluster related commits from the name-status diff and the candidate-only subjects first, then read patches and search for corroborating docs and interfaces only for the resulting user-visible clusters; an unfiltered search of the whole candidate tree does not scale for a release spanning hundreds of commits. Do not assume documentation changed in the comparison range. A local Fern page counts as published only if it is reachable from `docs/fern/versions/latest.yml`. A generated CLI reference may verify syntax, but a command listing alone does not replace conceptual or task documentation for a substantial feature. Official external documentation may supplement local docs; it substitutes for local product documentation only when the capability genuinely belongs to that external product.
 
 Verify CLI syntax in command definitions, generated reference docs, or published task documentation. Verify Studio labels and navigation in the candidate UI source or published docs. Never invent a command, flag, route, menu label, limitation, or compatibility claim.
 
@@ -134,7 +144,7 @@ Before editing in draft mode, group every otherwise-includable outcome whose doc
 - include while explicitly stating that documentation is unavailable; or
 - defer until documentation is added.
 
-Ask once for the group rather than interrupting for each outcome. If interaction is unavailable or the user requested a headless/non-interactive run, omit undocumented outcomes from the feature list and report them as release-readiness gaps. Do not silently treat an undocumented feature as complete.
+Ask once for the group rather than interrupting for each outcome. If interaction is unavailable or the user requested a headless/non-interactive run, include each shipped, user-visible outcome in the note anyway, marked `(documentation not yet available)` per [references/note-contract.md](references/note-contract.md), and record the missing documentation as a release-readiness gap. Reserve omission for internal-only changes or an outcome the user has already asked to defer. Do not silently treat an undocumented feature as complete, and do not drop a shipped outcome from the notes solely because documentation is missing.
 
 Audit mode never needs this pause: mark each undocumented outcome as a gap and state whether the existing note currently includes it.
 
@@ -145,10 +155,10 @@ Follow the structure and wording rules in [references/note-contract.md](referenc
 In draft mode:
 
 - Preserve accurate existing content and metadata, then reconcile it with the ledger.
-- Use one structured block per user outcome, combining tightly related commits.
+- Use one bullet per user outcome, combining tightly related commits into a single bullet.
 - Use exact canonical Fern URLs for documentation.
 - Put internal-only items in a compact maintenance section; do not inflate them into highlights.
-- Keep install, upgrade, compatibility, constraints, and known-issue sections only when supported by the candidate tree and relevant to the target version.
+- Keep install, upgrade, compatibility, constraints, and known-issue sections only when supported by the candidate tree and relevant to the target version. Re-verify each carried-forward bullet against the candidate tree individually rather than copying it with only the version number changed — a carried-forward constraint or compatibility claim can reference a command, version, or capability that no longer exists.
 - Inspect the final diff and ensure every factual claim maps to ledger evidence.
 
 In audit mode, compare every existing note entry to the ledger and report unsupported claims, missing user-visible outcomes, duplicate coverage, missing or gated documentation, unverified interfaces, and stale compatibility or constraint text.
@@ -164,7 +174,13 @@ make docs-check
 make docs-broken-links
 ```
 
-Do not claim a blocked or failed check passed. If the checks modify tracked files, inspect those changes before including them.
+When the drafted or migration text carries forward legacy product, repository, or image names, also run the rename-consistency hook on the changed files:
+
+```bash
+uv run pre-commit run verify-nemo-helix-rename --files <changed release-note paths>
+```
+
+Do not claim a blocked or failed check passed. If the checks modify tracked files, inspect those changes before including them. Put the coverage ledger and the exact command output for every check in the PR description so the draft is reviewable without re-running them.
 
 End both modes with:
 

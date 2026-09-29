@@ -30,37 +30,26 @@ A feature release normally uses:
 ```md
 ## Highlights
 
-<A short list of the most consequential outcomes.>
+- **<Short outcome name>.** <A one- to two-sentence summary of the most
+  consequential change and its effect, for each of the release's most
+  consequential outcomes.>
 
 ## What's included
 
 ### <Established product area>
 
-#### <User outcome>
-
-**Description:** <What changed, who benefits, and any essential boundary.>
-
-**Documentation:** [<Task or concept title>](/documentation/<canonical-path>)
-
-**Use it:**
-
-- **CLI:** `<verified command>`
-- **Studio:** Open **<verified navigation labels>**.
+- <One or more sentences on a user-visible outcome: what changed, who
+  benefits, any essential boundary, and, only where a reader needs it to
+  adopt the change, a verified CLI command, Studio navigation label, or
+  documentation link inline in prose.> Combine tightly related outcomes into
+  one bullet rather than emitting near-duplicate bullets.
 ```
 
-Include only applicable interface bullets. When neither CLI nor Studio applies, keep the field explicit:
+Keep documentation links and verified CLI or Studio entry points in the evidence ledger for every outcome. Inline a link or command into the bullet itself only for the outcomes where a reader needs it to adopt the change; do not inline one for every bullet.
 
-```md
-**Use it:** This behavior applies automatically; there is no separate CLI or Studio entry point.
-```
+For an outcome that ships without documentation, append `(documentation not yet available)` to its bullet and record the gap in the coverage report.
 
-For an outcome the user explicitly chose to include without documentation, write:
-
-```md
-**Documentation:** Not yet available.
-```
-
-Do not use that marker without the explicit interactive decision described by the skill. Headless drafting omits such outcomes from the feature list.
+Do not use that marker for an outcome the user chose to omit or defer instead of include per [step 5 of SKILL.md](../SKILL.md). In headless drafting, use it for every shipped, user-visible outcome that lacks documentation — do not drop the outcome from the note.
 
 After product areas, use only the release-level sections supported by evidence:
 
