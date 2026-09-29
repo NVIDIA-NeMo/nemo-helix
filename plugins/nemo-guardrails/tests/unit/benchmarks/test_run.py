@@ -10,7 +10,7 @@ import httpx
 from nemo_guardrails_plugin.benchmarks.paths import RunPaths, build_run_paths
 from nemo_guardrails_plugin.benchmarks.run import _build_nhx_process, _smoke_test
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 
 def _run_paths(tmp_path: Path) -> RunPaths:
@@ -56,8 +56,8 @@ def test_smoke_test_retries_until_virtual_model_route_is_ready(monkeypatch) -> N
 
     monkeypatch.setattr("nemo_guardrails_plugin.benchmarks.run.time.sleep", lambda _seconds: None)
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        sdk = NeMoHelix(base_url="http://platform.test", http_client=http_client, max_retries=0)
+        client = NemoClient(base_url="http://platform.test", http_client=http_client)
 
-        _smoke_test(sdk, _seeded_resources())
+        _smoke_test(client, _seeded_resources())
 
     assert attempts == 2
