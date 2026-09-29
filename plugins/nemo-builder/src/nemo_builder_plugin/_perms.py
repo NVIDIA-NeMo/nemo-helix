@@ -46,3 +46,7 @@ class BuildPerms(PermissionSet, namespace="builder.builds"):
 class ContainerImagePerms(PermissionSet, namespace="builder.container-images"):
     LIST = perm("List container images")
     READ = perm("Read a container image")
+    #: Held by whoever may submit a build, since a build's last step delivers its signatures as the
+    #: submitter. It authorizes the delivery, not the result: what makes a row ready is a signature
+    #: the route verifies, and nothing a caller says.
+    COMPLETE = perm("Deliver the signature that completes a container image")

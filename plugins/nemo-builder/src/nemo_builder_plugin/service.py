@@ -9,6 +9,11 @@ thing a caller needs to poll is the **images**. A set of ten produces ten rows t
 ``ready`` independently, and a single job status cannot say which. Hand-writing also keeps the
 compiler a pure function called from here, rather than I/O smuggled into ``compile()``.
 
+``POST /container-images/{name}/signature`` is how a row goes ``ready``: the build's last step
+delivers the signed payload and signature the credential broker returned, and the route verifies
+them against the backend's trust root before writing anything (``completion.py``). The caller is
+authorized for the workspace, but what the route trusts is the signature.
+
 Every route carries ``@scope.*`` and ``@path_rule``; without them the OPA bundle build fails.
 """
 
@@ -20,8 +25,9 @@ from typing import ClassVar, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
-from nemo_builder_plugin.backend import BackendRefused
+from nemo_builder_plugin.backend import BackendRefused, SignatureRefused
 from nemo_builder_plugin.backends import load_backend
+from nemo_builder_plugin.completion import CompletionConflict, SignatureDelivery, complete
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.schema import BuildSet
@@ -181,5 +187,60 @@ def _build_router() -> APIRouter:
             return await entity_client.get(ContainerImage, name=name, workspace=workspace)
         except NemoEntityNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+
+    @router.post("/container-images/{name}/signature", response_model=ContainerImage, tags=["Builder"])
+    @scope.write
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ContainerImagePerms.COMPLETE])
+    async def deliver_signature(
+        workspace: str,
+        name: str,
+        body: SignatureDelivery,
+        entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    ) -> ContainerImage:
+        """Deliver an image's signature; the row goes `ready` if it verifies.
+
+        A signature for a row already `ready` with the same digest is accepted again, so a step that
+        reruns still completes. 422 for a signature that does not verify or is not this row's; 409
+        for a row that has settled otherwise.
+        """
+        config = BuilderConfig.get()
+        try:
+            policy = load_backend(config).signature_policy()
+        except BackendRefused as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            row = await complete(
+                entity_client,
+                workspace=workspace,
+                name=name,
+                delivered=body,
+                policy=policy,
+            )
+        except NemoEntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+        except SignatureRefused as exc:
+            logger.warning(
+                "signature for %s/%s refused: %s",
+                sanitize_for_log(workspace),
+                sanitize_for_log(name),
+                sanitize_for_log(exc),
+            )
+            raise HTTPException(status_code=422, detail=f"Signature refused: {exc}") from exc
+        except CompletionConflict as exc:
+            logger.warning(
+                "signature for %s/%s conflicts: %s",
+                sanitize_for_log(workspace),
+                sanitize_for_log(name),
+                sanitize_for_log(exc),
+            )
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        logger.info(
+            "image %s/%s ready: %s (verified against %s)",
+            sanitize_for_log(workspace),
+            sanitize_for_log(name),
+            sanitize_for_log(row.image_ref),
+            policy.trust_root,
+        )
+        return row
 
     return router
