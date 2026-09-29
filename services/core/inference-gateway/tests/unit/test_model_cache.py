@@ -475,6 +475,46 @@ def test_rebuild_model_entity_map_skips_malformed_entity_ids(caplog):
     assert len(cache.model_entity_info_map) == 1
 
 
+def test_rebuild_model_entity_map_if_changed_encapsulates_signature():
+    """rebuild_model_entity_map_if_changed owns the signature compute+compare inside ModelCache.
+
+    Pins the public contract ironcommit asked for: callers pass the provider list and get back
+    whether a rebuild ran; the signature bookkeeping stays private to ModelCache and never leaks
+    out to refresh_model_cache.
+    """
+    cache = ModelCache()
+    provider = ModelProvider(
+        workspace="test-ns",
+        name="provider1",
+        host_url="http://provider1.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        served_models=[ServedModelMapping(model_entity_id="ws/model-a", served_model_name="model-a-v1")],
+    )
+    cache.update_model_info(ModelProviderInfo(model_provider=provider))
+    providers = [provider]
+
+    # First call: no prior signature -> rebuild runs.
+    assert cache.rebuild_model_entity_map_if_changed(providers) is True
+    assert cache.get_from_model_entity("ws", "model-a") is not None
+
+    # Identical provider layer -> signature unchanged -> rebuild skipped.
+    assert cache.rebuild_model_entity_map_if_changed(providers) is False
+
+    # A changed served-model id -> new signature -> rebuild runs again.
+    changed_provider = ModelProvider(
+        workspace="test-ns",
+        name="provider1",
+        host_url="http://provider1.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        served_models=[ServedModelMapping(model_entity_id="ws/model-b", served_model_name="model-b-v1")],
+    )
+    cache.update_model_info(ModelProviderInfo(model_provider=changed_provider))
+    assert cache.rebuild_model_entity_map_if_changed([changed_provider]) is True
+    assert cache.get_from_model_entity("ws", "model-b") is not None
+
+
 @pytest.mark.asyncio
 async def test_refresh_model_cache_rebuilds_entity_map(mock_nhx_sdk):
     """Test that refresh_model_cache rebuilds the model entity map."""

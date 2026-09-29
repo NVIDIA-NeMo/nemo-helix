@@ -97,10 +97,10 @@ class ModelCache:
     _entity_map_signature: frozenset[tuple[str, str, tuple[tuple[str, str], ...]]] | None = field(default=None)
     """Signature of the provider layer as of the last ``rebuild_model_entity_map`` run.
 
-    Used by :func:`refresh_model_cache` to skip a redundant rebuild when the provider set
-    and its served-models are unchanged since the previous cycle. ``None`` means "no rebuild
-    has run yet" (forces the first rebuild); the signature is computed inline in
-    :func:`refresh_model_cache`.
+    Private to :class:`ModelCache`: :meth:`rebuild_model_entity_map_if_changed` owns computing,
+    comparing, and updating it, so the skip-when-unchanged optimization is encapsulated here rather
+    than in :func:`refresh_model_cache`. ``None`` means "no rebuild has run yet" (forces the first
+    rebuild).
     """
 
     def get_from_provider(self, workspace: str, provider_name: str) -> ModelProviderInfo | None:
@@ -152,6 +152,40 @@ class ModelCache:
                 model_entity_info.model_providers.append((served_model.served_model_name, model_provider_info))
                 rebuilt_map[key] = model_entity_info
         self.model_entity_info_map = rebuilt_map
+
+    def rebuild_model_entity_map_if_changed(self, model_providers: list[ModelProvider]) -> bool:
+        """Rebuild the model-entity map only when the provider layer changed since the last cycle.
+
+        Computes a signature over ``model_providers`` (each provider's identity + its ordered
+        served-models) and compares it to the last-rebuild signature. On a change it rebuilds and
+        records the new signature; otherwise it skips the rebuild. Returns ``True`` when a rebuild
+        ran, ``False`` when it was skipped.
+
+        Skipping is a compute-only optimization: it saves no network calls, but avoids the
+        synchronous O(providers x served_models) rebuild burst on the event loop every cycle.
+
+        The signature is order-sensitive over each provider's served_models because the rebuild
+        appends to an entity's ``model_providers`` list in that order and consumers pick ``[0]`` -- a
+        reorder is a real routing change and must invalidate. Metadata (spec/finetuning_type/
+        backend_format) and provider config (host_url/secrets) are excluded: both are applied in
+        place, not via rebuild. Cold start is covered by the initial ``None`` signature, so an empty
+        map with an unchanged signature (no served_models yet, or only malformed ids) is a valid
+        steady state and is correctly skipped.
+        """
+        signature = frozenset(
+            (
+                mp.workspace,
+                mp.name,
+                tuple((sm.model_entity_id, sm.served_model_name) for sm in (mp.served_models or [])),
+            )
+            for mp in model_providers
+        )
+        if signature == self._entity_map_signature:
+            logger.debug("Provider layer unchanged since last cycle; skipping model entity map rebuild")
+            return False
+        self.rebuild_model_entity_map()
+        self._entity_map_signature = signature
+        return True
 
     def update_model_entity_metadata(self, model_entities: list[ModelEntity]) -> None:
         """Populate cached ModelEntity metadata used by inference middleware."""
@@ -298,30 +332,10 @@ async def refresh_model_cache(
             secrets_sdk=secrets_sdk,
         )
 
-    # Skip the entity-map rebuild when the provider layer is unchanged since the last
-    # cycle. Compute-only optimization: it saves no network calls, but avoids the
-    # synchronous O(providers x served_models) rebuild burst on the event loop every cycle.
-    #
-    # The signature is order-sensitive over each provider's served_models because the
-    # rebuild appends to model_providers[] in that order and consumers pick [0] — a reorder
-    # is a real routing change and must invalidate. Metadata (spec/finetuning_type/
-    # backend_format) and provider config (host_url/secrets) are excluded: both are applied
-    # in place, not via rebuild. Cold start is covered by the initial None signature, so an
-    # empty map with an unchanged signature (no served_models yet, or only malformed ids) is
-    # a valid steady state and is correctly skipped.
-    entity_map_signature = frozenset(
-        (
-            mp.workspace,
-            mp.name,
-            tuple((sm.model_entity_id, sm.served_model_name) for sm in (mp.served_models or [])),
-        )
-        for mp in model_providers
-    )
-    if entity_map_signature != model_cache._entity_map_signature:
-        model_cache.rebuild_model_entity_map()
-        model_cache._entity_map_signature = entity_map_signature
-    else:
-        logger.debug("Provider layer unchanged since last cycle; skipping model entity map rebuild")
+    # Rebuild the entity map only when the provider layer changed since the last cycle. ModelCache
+    # owns the signature compute+compare (see rebuild_model_entity_map_if_changed); refresh no longer
+    # touches the private signature field.
+    model_cache.rebuild_model_entity_map_if_changed(model_providers)
     if model_entity_getter is not None:
         try:
             model_entities = await model_entity_getter()
