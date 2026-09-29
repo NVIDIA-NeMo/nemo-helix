@@ -9,7 +9,7 @@ Use **Agents** in the NeMo Studio workspace sidebar to review and operate agent 
 
 ## Current Agent Experience
 
-New agents use the Platform-managed `nemo-agents-spec-v1` `agent.yaml` format. NeMo Helix translates this durable configuration into the NVIDIA Agent Intelligence Toolkit Fabric runtime configuration when it deploys the agent. Fabric is the execution layer; `nemo-agents-spec-v1` remains the configuration contract that you author and store.
+New agents use the NeMo Helix-managed `nemo-agents-spec-v1` `agent.yaml` format. NeMo Helix translates this durable configuration into the NVIDIA Agent Intelligence Toolkit Fabric runtime configuration when it deploys the agent. Fabric is the execution layer; `nemo-agents-spec-v1` remains the configuration contract that you author and store.
 
 This Fabric-first path is recommended for new agents. Studio can also display legacy `nat-workflow-v1` agents, so the fields shown on the **Details** tab depend on the agent's config format. Create a sample `nemo-agents-spec-v1` agent with **Create Example Agent**, or register your own agent through the `nemo agents` CLI or Agents API. Studio does not currently provide a general-purpose editor for authoring an arbitrary `agent.yaml`.
 
@@ -20,7 +20,7 @@ The Agents table shows the agents in the selected workspace, including their dep
 | Action | Where | Result |
 |--------|-------|--------|
 | Review details | Select an agent | Opens the agent details page with deployment, log, chat, evaluation, and configuration views. |
-| Create a sample agent | **Create Example Agent** | Creates a Platform-managed example agent in the current workspace. |
+| Create a sample agent | **Create Example Agent** | Creates a NeMo Helix-managed example agent in the current workspace. |
 | Deploy an agent | Row actions > **Deploy** | Creates a deployment for the selected agent. |
 | Clone an agent | Row actions > **Clone** | Creates a copy of the agent definition with a new name. |
 | Chat with a deployment | Agent details page > **Chat** tab | Opens chat for a running deployment. |

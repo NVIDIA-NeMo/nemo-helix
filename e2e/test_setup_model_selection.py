@@ -102,7 +102,6 @@ def _run_auto_setup(client: NemoClient, workspace: str, provider_name: str) -> M
         patch(f"{SETUP_MOD}._auto_setup", return_value=provider_name),
         patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
         patch(f"{SETUP_MOD}._maybe_install_skills"),
-        patch(f"{SETUP_MOD}._maybe_deploy_agent"),
         patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
     ):
         clients = SetupClients(
@@ -116,7 +115,6 @@ def _run_auto_setup(client: NemoClient, workspace: str, provider_name: str) -> M
             workspace,
             client.base_url,
             install_skills=False,
-            deploy_agent=False,
         )
 
     if not save_pair.call_args_list:

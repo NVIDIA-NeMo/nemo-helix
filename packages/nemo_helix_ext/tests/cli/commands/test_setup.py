@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
@@ -35,7 +34,6 @@ from nemo_helix_ext.cli.commands.setup import (
     KeyValidationResult,
     ModelPair,
     SetupClients,
-    _agent_config_path,
     _agent_exists,
     _agents_api_ready,
     _agents_plugin_available,
@@ -47,7 +45,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _check_platform_reachable_with_retries,
     _configure_local_connection,
     _create_provider,
-    _deploy_demo_agent,
+    _deploy_setup_agent,
     _detect_coding_agents,
     _detect_startup_port_conflict,
     _ensure_port_available_for_start,
@@ -59,7 +57,6 @@ from nemo_helix_ext.cli.commands.setup import (
     _last_startup_service,
     _load_persisted_data_dir,
     _load_skills_with_warnings,
-    _maybe_deploy_agent,
     _maybe_deploy_sample_agent,
     _maybe_install_skills,
     _maybe_start_services,
@@ -123,6 +120,14 @@ from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from pydantic import SecretStr
 
 SETUP_MOD = "nemo_helix_ext.cli.commands.setup"
+_TEST_FABRIC_CONFIG = (
+    "config_format: nemo-agents-spec-v1\n"
+    "name: email-security-triage\n"
+    "models:\n"
+    "  default:\n"
+    "    provider: nvidia\n"
+    "    model: bundled-model\n"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -131,7 +136,7 @@ def _silence_telemetry():
 
     These are direct-call unit tests with no telemetry intent. Several exercise
     the real setup wrappers (`_create_provider`, `_wait_for_models`,
-    `_deploy_demo_agent`, `_auto_setup`), which call the real `emit_event`. With
+    `_deploy_setup_agent`, `_auto_setup`), which call the real `emit_event`. With
     telemetry enabled by default that constructs a `TelemetryHandler` and
     schedules `_flush_events`, whose orphaned coroutine surfaces later as a
     "coroutine ... was never awaited" RuntimeWarning (blamed on whichever
@@ -1622,25 +1627,6 @@ class TestLocalDataDirHelpers:
         assert str(after.clusters[0].base_url).rstrip("/") == "http://localhost:8080"
 
 
-class TestMaybeDeployAgentPluginCheck:
-    def test_skips_without_prompting_when_plugin_missing(self):
-        """When plugin is not available, user should never be prompted."""
-        with (
-            patch(f"{SETUP_MOD}._agents_plugin_available", return_value=False),
-            patch(f"{SETUP_MOD}.prompt_choice") as mock_prompt,
-        ):
-            _maybe_deploy_agent("http://localhost:8080", "default", auto=False, deploy_agent=None)
-        mock_prompt.assert_not_called()
-
-    def test_prompts_when_plugin_available(self):
-        with (
-            patch(f"{SETUP_MOD}._agents_plugin_available", return_value=True),
-            patch(f"{SETUP_MOD}.prompt_choice", return_value="no") as mock_prompt,
-        ):
-            _maybe_deploy_agent("http://localhost:8080", "default", auto=False, deploy_agent=None)
-        mock_prompt.assert_called_once()
-
-
 # ---------------------------------------------------------------------------
 # Skills installation helpers
 # ---------------------------------------------------------------------------
@@ -3056,7 +3042,6 @@ class TestAutoModelPairSelection:
             patch(f"{SETUP_MOD}._get_all_model_entity_ids", return_value=["default/discovered"]),
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3065,7 +3050,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         save_pair.assert_called_once_with(cli_context, ModelPair(default="default/quality", fast="default/fast"))
@@ -3082,7 +3066,6 @@ class TestAutoModelPairSelection:
             ) as get_model_ids,
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3091,7 +3074,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         get_model_ids.assert_called_once_with(client, "default", provider_name="anthropic")
@@ -3114,7 +3096,6 @@ class TestAutoModelPairSelection:
             ),
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3123,7 +3104,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         save_pair.assert_called_once_with(
@@ -3146,7 +3126,6 @@ class TestAutoModelPairSelection:
             ),
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3155,7 +3134,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         save_pair.assert_called_once_with(
@@ -3181,7 +3159,6 @@ class TestAutoModelPairSelection:
             ),
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3190,7 +3167,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         save_pair.assert_not_called()
@@ -3205,7 +3181,6 @@ class TestAutoModelPairSelection:
             patch(f"{SETUP_MOD}._get_all_model_entity_ids", return_value=[]),
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
             patch(f"{SETUP_MOD}.console.print") as print_message,
         ):
@@ -3215,7 +3190,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         save_pair.assert_not_called()
@@ -3232,7 +3206,6 @@ class TestAutoModelPairSelection:
             patch(f"{SETUP_MOD}._get_all_model_entity_ids", return_value=["default/a-model"]),
             patch(f"{SETUP_MOD}._save_model_pair"),
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
             patch(f"{SETUP_MOD}.console.print") as print_message,
         ):
@@ -3242,7 +3215,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         printed = " ".join(str(c) for c in print_message.call_args_list)
@@ -3262,7 +3234,6 @@ class TestAutoModelPairSelection:
             ) as select_pair,
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3271,7 +3242,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         select_pair.assert_called_once_with(client, "default", ["default/a-model"])
@@ -3289,7 +3259,6 @@ class TestAutoModelPairSelection:
             patch(f"{SETUP_MOD}._select_usable_model_pair", return_value=None),
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
             patch(f"{SETUP_MOD}.console.print") as print_message,
         ):
@@ -3299,7 +3268,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         save_pair.assert_not_called()
@@ -3315,7 +3283,6 @@ class TestAutoModelPairSelection:
             patch(f"{SETUP_MOD}._select_usable_model_pair") as select_pair,
             patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
             patch(f"{SETUP_MOD}._maybe_install_skills"),
-            patch(f"{SETUP_MOD}._maybe_deploy_agent"),
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
         ):
             _run_auto_mode(
@@ -3324,7 +3291,6 @@ class TestAutoModelPairSelection:
                 "default",
                 "http://localhost:8080",
                 install_skills=False,
-                deploy_agent=False,
             )
 
         select_pair.assert_not_called()
@@ -4038,7 +4004,7 @@ class TestAgentApiTLS:
             )
 
         mock_get.assert_called_once_with(
-            "https://nemo.example.com/apis/agents/v2/workspaces/default/agents/calculator-agent",
+            "https://nemo.example.com/apis/agents/v2/workspaces/default/agents/email-security-triage",
             headers=None,
             timeout=10.0,
             verify="/ctx/ca.pem",
@@ -4067,9 +4033,9 @@ class TestAgentApiTLS:
             verify="/ctx/ca.pem",
         )
 
-    def test_deploy_demo_agent_uses_context_certificate_authority_for_httpx_calls(self, tmp_path, spinner_console):
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n", encoding="utf-8")
+    def test_deploy_setup_agent_uses_context_certificate_authority_for_httpx_calls(self, tmp_path, spinner_console):
+        config = tmp_path / "agent.yaml"
+        config.write_text(_TEST_FABRIC_CONFIG, encoding="utf-8")
         exists_resp = MagicMock()
         exists_resp.status_code = 404
         create_resp = MagicMock()
@@ -4078,7 +4044,7 @@ class TestAgentApiTLS:
         deploy_resp = MagicMock()
         deploy_resp.status_code = 200
         deploy_resp.raise_for_status = MagicMock()
-        deploy_resp.json.return_value = {"name": "calculator-agent-abc12345"}
+        deploy_resp.json.return_value = {"name": "email-security-triage-abc12345"}
         status_resp = MagicMock()
         status_resp.status_code = 200
         status_resp.json.return_value = {"status": "running"}
@@ -4091,7 +4057,7 @@ class TestAgentApiTLS:
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
         ):
             assert (
-                _deploy_demo_agent(
+                _deploy_setup_agent(
                     "https://nemo.example.com",
                     "default",
                     config,
@@ -4106,35 +4072,12 @@ class TestAgentApiTLS:
 
 
 # ---------------------------------------------------------------------------
-# Progress spinner tests — _deploy_demo_agent
+# Progress spinner tests — _deploy_setup_agent
 # ---------------------------------------------------------------------------
 
 
-class TestDeployDemoAgentSpinner:
+class TestDeploySampleAgentSpinner:
     _MOD = "nemo_helix_ext.cli.commands.setup"
-
-    def test_agent_config_path_finds_package_local_yaml(self, monkeypatch, tmp_path):
-        """Packaged wheels bundle calculator-agent.yml inside the calculator_agent package."""
-        package_dir = tmp_path / "calculator_agent"
-        package_dir.mkdir()
-        (package_dir / "__init__.py").write_text("", encoding="utf-8")
-        config = package_dir / "calculator-agent.yml"
-        config.write_text("llms: {}\n", encoding="utf-8")
-        monkeypatch.syspath_prepend(str(tmp_path))
-        monkeypatch.delitem(sys.modules, "calculator_agent", raising=False)
-
-        assert _agent_config_path() == config
-
-    def test_agent_config_path_finds_namespace_package_yaml(self, monkeypatch, tmp_path):
-        """calculator_agent is an implicit namespace package, so __file__ may be None."""
-        package_dir = tmp_path / "calculator_agent"
-        package_dir.mkdir()
-        config = package_dir / "calculator-agent.yml"
-        config.write_text("llms: {}\n", encoding="utf-8")
-        monkeypatch.syspath_prepend(str(tmp_path))
-        monkeypatch.delitem(sys.modules, "calculator_agent", raising=False)
-
-        assert _agent_config_path() == config
 
     def test_sample_agent_config_path_uses_packaged_resource(self):
         config = _sample_agent_config_path()
@@ -4157,8 +4100,8 @@ class TestDeployDemoAgentSpinner:
         deploy_resp.status_code = 200
         deploy_resp.raise_for_status = MagicMock()
         deploy_resp.json.return_value = {
-            "name": "calculator-agent-abc12345",
-            "agent": "calculator-agent",
+            "name": "email-security-triage-abc12345",
+            "agent": "email-security-triage",
             "status": "pending",
         }
 
@@ -4166,15 +4109,19 @@ class TestDeployDemoAgentSpinner:
         for s in status_sequence:
             r = MagicMock()
             r.status_code = 200
-            r.json.return_value = {"name": "calculator-agent-abc12345", "agent": "calculator-agent", "status": s}
+            r.json.return_value = {
+                "name": "email-security-triage-abc12345",
+                "agent": "email-security-triage",
+                "status": s,
+            }
             status_resps.append(r)
 
         return [create_resp, deploy_resp] + status_resps
 
     def test_shows_spinner_during_deployment_wait(self, tmp_path, spinner_console):
         """console.status() should be active while polling deployment status."""
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text(_TEST_FABRIC_CONFIG)
 
         responses = self._mock_deploy_responses(status_sequence=["pending", "running"])
         mock_console, _ = spinner_console
@@ -4186,14 +4133,14 @@ class TestDeployDemoAgentSpinner:
             patch(f"{self._MOD}._pause"),
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3]),
         ):
-            result = _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
 
         assert result is True
         mock_console.status.assert_called()
 
     def test_reports_deployed_only_after_running_status(self, tmp_path, spinner_console):
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text(_TEST_FABRIC_CONFIG)
 
         responses = self._mock_deploy_responses(status_sequence=["failed"])
         mock_console, _ = spinner_console
@@ -4205,7 +4152,7 @@ class TestDeployDemoAgentSpinner:
             patch(f"{self._MOD}._pause"),
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
         ):
-            result = _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
 
         printed = [str(call.args[0]) for call in mock_console.print.call_args_list]
         assert result is False
@@ -4214,8 +4161,8 @@ class TestDeployDemoAgentSpinner:
 
     def test_spinner_updates_with_elapsed_time(self, tmp_path, spinner_console):
         """status.update() should include elapsed seconds during deploy polling."""
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text(_TEST_FABRIC_CONFIG)
 
         responses = self._mock_deploy_responses(status_sequence=["pending", "pending", "running"])
         _, mock_status = spinner_console
@@ -4227,15 +4174,15 @@ class TestDeployDemoAgentSpinner:
             patch(f"{self._MOD}._pause"),
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3, 4, 5]),
         ):
-            _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+            _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
 
         update_texts = [c.args[0] for c in mock_status.update.call_args_list]
         assert any("s)" in t for t in update_texts), f"Expected elapsed time in updates: {update_texts}"
 
     def test_uses_reduced_http_timeout(self, tmp_path, spinner_console):
         """Deployment status GET should use a short HTTP timeout (<=3s)."""
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text(_TEST_FABRIC_CONFIG)
 
         responses = self._mock_deploy_responses(status_sequence=["running"])
 
@@ -4246,7 +4193,7 @@ class TestDeployDemoAgentSpinner:
             patch(f"{self._MOD}._pause"),
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
         ):
-            _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+            _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
 
         get_calls = mock_get.call_args_list
         for c in get_calls:
@@ -4254,8 +4201,8 @@ class TestDeployDemoAgentSpinner:
 
     def test_polls_specific_deployment_by_name(self, tmp_path, spinner_console):
         """The poll must GET the specific deployment, not list all deployments."""
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms: {}\n")
+        config = tmp_path / "agent.yaml"
+        config.write_text(_TEST_FABRIC_CONFIG)
 
         responses = self._mock_deploy_responses(status_sequence=["running"])
 
@@ -4266,39 +4213,11 @@ class TestDeployDemoAgentSpinner:
             patch(f"{self._MOD}._pause"),
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
         ):
-            result = _deploy_demo_agent("http://localhost:8080", "default", config, default_model="m")
+            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
 
         assert result is True
         url = mock_get.call_args_list[0].args[0]
-        assert "/deployments/calculator-agent-abc12345" in url
-
-    def test_expands_default_model_placeholder_on_create(self, tmp_path, spinner_console):
-        """The built-in YAML uses ``${NEMO_DEFAULT_MODEL}``; resolve before POST
-        because the agents service has no user context to resolve it itself.
-        Regression for AIRCORE-601.
-        """
-        config = tmp_path / "calculator-agent.yml"
-        config.write_text("llms:\n  agent:\n    _type: openai\n    model_name: ${NEMO_DEFAULT_MODEL}\n")
-
-        responses = self._mock_deploy_responses(status_sequence=["running"])
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]) as mock_post,
-            patch(f"{self._MOD}._agent_exists", return_value=False),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
-        ):
-            _deploy_demo_agent(
-                "http://localhost:8080",
-                "default",
-                config,
-                default_model="nvidia-nemotron-3-super-v3",
-            )
-
-        create_call = mock_post.call_args_list[0]
-        sent_config = create_call.kwargs["json"]["config"]
-        assert sent_config["llms"]["agent"]["model_name"] == "nvidia-nemotron-3-super-v3"
+        assert "/deployments/email-security-triage-abc12345" in url
 
     def test_deploys_named_fabric_agent_with_setup_model(self, tmp_path, spinner_console):
         config = tmp_path / "agent.yaml"
@@ -4324,7 +4243,7 @@ class TestDeployDemoAgentSpinner:
             patch(f"{self._MOD}._pause"),
             patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
         ):
-            result = _deploy_demo_agent(
+            result = _deploy_setup_agent(
                 "http://localhost:8080",
                 "sample",
                 config,
@@ -4373,7 +4292,7 @@ class TestMaybeDeploySampleAgent:
             patch(f"{self._MOD}._agents_plugin_available", return_value=True),
             patch(f"{self._MOD}._sample_agent_config_path", return_value=config),
             patch(f"{self._MOD}._wait_for_agents_api", return_value=True),
-            patch(f"{self._MOD}._deploy_demo_agent", return_value=True) as deploy_agent,
+            patch(f"{self._MOD}._deploy_setup_agent", return_value=True) as deploy_agent,
         ):
             result = _maybe_deploy_sample_agent(
                 "http://localhost:8080",
@@ -4399,130 +4318,13 @@ class TestMaybeDeploySampleAgent:
         with (
             patch(f"{self._MOD}._agents_plugin_available", return_value=True),
             patch(f"{self._MOD}._sample_agent_config_path") as config_path,
-            patch(f"{self._MOD}._deploy_demo_agent") as deploy_agent,
+            patch(f"{self._MOD}._deploy_setup_agent") as deploy_agent,
         ):
             result = _maybe_deploy_sample_agent("http://localhost:8080", "sample", None)
 
         assert result is False
         config_path.assert_not_called()
         deploy_agent.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# `_maybe_deploy_agent` guards
-# ---------------------------------------------------------------------------
-
-
-class TestMaybeDeployAgentGuards:
-    _MOD = "nemo_helix_ext.cli.commands.setup"
-
-    def test_skips_deploy_when_default_model_missing(self):
-        """No default model selected → skip deploy so the agent service never
-        stores an unresolved ``${NEMO_DEFAULT_MODEL}``. Regression for AIRCORE-601.
-        """
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._deploy_demo_agent") as mock_deploy,
-        ):
-            result = _maybe_deploy_agent(
-                "http://localhost:8080",
-                "default",
-                auto=True,
-                deploy_agent=True,
-                default_model=None,
-            )
-
-        mock_deploy.assert_not_called()
-        assert result is False
-
-    def test_returns_false_when_plugin_unavailable(self):
-        with patch(f"{self._MOD}._agents_plugin_available", return_value=False):
-            result = _maybe_deploy_agent(
-                "http://localhost:8080", "default", auto=True, deploy_agent=True, default_model="m"
-            )
-        assert result is False
-
-    def test_returns_false_in_auto_mode_without_explicit_flag(self):
-        with patch(f"{self._MOD}._agents_plugin_available", return_value=True):
-            result = _maybe_deploy_agent(
-                "http://localhost:8080", "default", auto=True, deploy_agent=None, default_model="m"
-            )
-        assert result is False
-
-    def test_returns_false_when_config_path_missing(self):
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._agent_config_path", return_value=None),
-        ):
-            result = _maybe_deploy_agent(
-                "http://localhost:8080", "default", auto=True, deploy_agent=True, default_model="m"
-            )
-        assert result is False
-
-    def test_returns_true_on_successful_deploy(self, spinner_console):
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._agent_config_path", return_value=MagicMock()),
-            patch(f"{self._MOD}._agents_api_ready", return_value=True),
-            patch(f"{self._MOD}._deploy_demo_agent", return_value=True),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1]),
-        ):
-            result = _maybe_deploy_agent(
-                "http://localhost:8080", "default", auto=False, deploy_agent=True, default_model="m"
-            )
-        assert result is True
-
-    def test_returns_false_when_deploy_raises(self, spinner_console):
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._agent_config_path", return_value=MagicMock()),
-            patch(f"{self._MOD}._agents_api_ready", return_value=True),
-            patch(f"{self._MOD}._deploy_demo_agent", side_effect=RuntimeError("boom")),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1]),
-        ):
-            result = _maybe_deploy_agent(
-                "http://localhost:8080", "default", auto=False, deploy_agent=True, default_model="m"
-            )
-        assert result is False
-
-
-# ---------------------------------------------------------------------------
-# Progress spinner tests — agents API readiness in _maybe_deploy_agent
-# ---------------------------------------------------------------------------
-
-
-class TestAgentsApiReadinessSpinner:
-    _MOD = "nemo_helix_ext.cli.commands.setup"
-
-    def test_shows_spinner_while_waiting_for_agents_api(self, spinner_console):
-        """console.status() should be active while waiting for agents API readiness."""
-        mock_console, _ = spinner_console
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._agent_config_path", return_value=MagicMock()),
-            patch(f"{self._MOD}._agents_api_ready", side_effect=[False, True]),
-            patch(f"{self._MOD}._deploy_demo_agent", return_value=True),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3]),
-        ):
-            _maybe_deploy_agent("http://localhost:8080", "default", auto=False, deploy_agent=True, default_model="m")
-
-        mock_console.status.assert_called()
-
-    def test_uses_poll_interval_constant(self, spinner_console):
-        """Should use _AGENT_API_READINESS_POLL_INTERVAL, not a hardcoded value."""
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._agent_config_path", return_value=MagicMock()),
-            patch(f"{self._MOD}._agents_api_ready", side_effect=[False, True]),
-            patch(f"{self._MOD}._deploy_demo_agent", return_value=True),
-            patch(f"{self._MOD}._pause") as mock_pause,
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3]),
-        ):
-            _maybe_deploy_agent("http://localhost:8080", "default", auto=False, deploy_agent=True, default_model="m")
-
-        pause_values = [c.args[0] for c in mock_pause.call_args_list]
-        assert all(v == _AGENT_API_READINESS_POLL_INTERVAL for v in pause_values)
 
 
 # ---------------------------------------------------------------------------
@@ -4823,7 +4625,7 @@ class TestSetupCommandRemoteFlow:
         `_maybe_start_services` returns "ready" when it finds a reachable
         platform. Resolution used to live only inside the start-local and
         connect-remote branches, so this path kept the Typer default and
-        provisioned the workspace, secrets, providers and demo agent into the
+        provisioned the workspace, secrets, providers and sample agent into the
         literal "default" while the user sat in another workspace.
         """
         ctx, cli_context = _make_setup_command_ctx(workspace="team-a")

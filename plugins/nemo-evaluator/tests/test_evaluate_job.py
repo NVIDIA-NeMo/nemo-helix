@@ -412,7 +412,7 @@ def test_cli_evaluate_uses_flat_submit_without_local_run() -> None:
     assert result.exit_code == 0
     output = result.output
     assert "--spec" in output
-    assert "--base-url" in output
+    assert "--base-url" not in output
     assert "--profile" in output
     assert "Run locally, in-process." not in result.output
     assert "explain" in output
