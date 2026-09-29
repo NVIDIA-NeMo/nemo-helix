@@ -19,8 +19,8 @@ from nemo_helix_plugin.client.adapter import AsyncHelixClient
 class DataDesignerValidationContext:
     """Async-only context for remote config validation and provider resolution."""
 
-    def __init__(self, async_sdk: AsyncHelixClient, workspace: str) -> None:
-        self._async_sdk = async_sdk
+    def __init__(self, async_client: AsyncHelixClient, workspace: str) -> None:
+        self._async_client = async_client
         self._workspace = workspace
         self._validated_filesystem_roots: set[str] = set()
 
@@ -42,13 +42,13 @@ class DataDesignerValidationContext:
             errors.append(e)
 
         try:
-            if validated_root := await validate_seed(config, self._workspace, self._async_sdk):
+            if validated_root := await validate_seed(config, self._workspace, self._async_client):
                 self._validated_filesystem_roots.add(validated_root)
         except NDDError as e:
             errors.append(e)
 
         try:
-            await ensure_nemotron_personas_filesets(config, self._async_sdk)
+            await ensure_nemotron_personas_filesets(config, self._async_client)
         except NDDError as e:
             errors.append(e)
 
@@ -58,7 +58,7 @@ class DataDesignerValidationContext:
         if (
             igw_registry := await make_model_provider_registry(
                 model_configs,
-                sdk=self._async_sdk,
+                client=self._async_client,
                 default_workspace=self._workspace,
             )
         ) is not None:
@@ -67,5 +67,5 @@ class DataDesignerValidationContext:
         return [make_noop_provider()]
 
 
-def create_validation_context(async_sdk: AsyncHelixClient, workspace: str) -> DataDesignerValidationContext:
-    return DataDesignerValidationContext(async_sdk, workspace)
+def create_validation_context(async_client: AsyncHelixClient, workspace: str) -> DataDesignerValidationContext:
+    return DataDesignerValidationContext(async_client, workspace)

@@ -28,7 +28,7 @@ def run() -> int:
     return run_step_config(
         step_config=step_config,
         ctx=ctx,
-        sdk=client,
+        client=client,
     )
 
 

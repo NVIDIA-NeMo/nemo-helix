@@ -780,6 +780,22 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             url_resolver=client._url_resolver,
         )
 
+    def to_async(self) -> AsyncNemoClient:
+        """Return an :class:`AsyncNemoClient` with this client's configuration.
+
+        The async client builds and owns its own transport, so close it (or use
+        it as an async context manager) when done.
+        """
+        return AsyncNemoClient(
+            base_url=self.base_url,
+            workspace=self.workspace,
+            auth=self._auth,
+            default_headers=self._default_headers or None,
+            timeout=self._timeout,
+            retry=self._retry,
+            url_resolver=self._url_resolver,
+        )
+
     def close(self) -> None:
         """Close the underlying sync HTTP transport."""
         if self._owns_http:
