@@ -263,4 +263,5 @@ client = cli_state(typer_ctx).typed_client(MyPluginClient)
 ```
 
 `list` and `get` commands take the shared `ListOutputFormatOption` / `EntityOutputFormatOption` and print
-with `nemo_helix_plugin.cli_output.format_output`; see the `nhx-cli` skill for the full pattern.
+with `nemo_helix_plugin.cli_output.format_output`; see the `nhx-cli` skill and
+`plugins/example-plugin/src/nemo_example_plugin/cli.py` for the full pattern.
