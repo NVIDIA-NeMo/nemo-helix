@@ -39,6 +39,19 @@ _SIMS = [
 ]
 
 
+class _FakeSDK:
+    """Stand-in for the generated SDK that records whether it was closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aenter__(self) -> "_FakeSDK":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
+
+
 def _intake_subject(**overrides) -> Subject:
     config = {"agent": "a", "workspace": "w", "base_url": "u", **overrides}
     return Subject(name="nvq", type="intake", config=config)
@@ -88,7 +101,7 @@ def test_intake_check_basic_auth_reports_missing_password_env_name(monkeypatch: 
 async def test_intake_analyze_basic_auth_injects_built_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GLAMR_INTAKE_USER", "intake")
     monkeypatch.setenv("GLAMR_INTAKE_PASSWORD", "secret")
-    sentinel = object()
+    sentinel = _FakeSDK()
     built: dict[str, object] = {}
     calls: dict[str, object] = {}
 
@@ -101,6 +114,7 @@ async def test_intake_analyze_basic_auth_injects_built_client(monkeypatch: pytes
         return "REPORT"
 
     monkeypatch.setattr("evaluation.adapters.build_basic_auth_intake_client", fake_builder)
+    monkeypatch.setattr("evaluation.adapters.client_from_platform", lambda platform, client_cls: platform)
     monkeypatch.setattr("evaluation.adapters.run_analyst", fake_run_analyst)
 
     report = await IntakeAdapter(_basic_intake_subject()).analyze(
@@ -112,6 +126,7 @@ async def test_intake_analyze_basic_auth_injects_built_client(monkeypatch: pytes
 
     assert report == "REPORT"
     assert calls["client"] is sentinel
+    assert sentinel.closed
     assert calls["enable_observability"] is False
     assert built == {
         "base_url": "https://agenthub.aire.nvidia.com",
@@ -132,7 +147,7 @@ def test_build_adapter_unknown_type_exits():
 
 async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
     calls: dict[str, object] = {}
-    built_client = object()
+    built_client = _FakeSDK()
 
     async def fake_run_analyst(**kwargs):
         calls.update(kwargs)
@@ -140,6 +155,7 @@ async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr("evaluation.adapters.run_analyst", fake_run_analyst)
     monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
+    monkeypatch.setattr("evaluation.adapters.client_from_platform", lambda platform, client_cls: platform)
     out = tmp_path / "insights.json"
     report = await build_adapter(_intake_subject()).analyze(record=None, since=None, verbose=True, out_path=out)
     assert report == "REPORT"
@@ -148,7 +164,24 @@ async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
     assert calls["base_url"] == "u"
     assert calls["ethos"] is None
     assert calls["client"] is built_client
+    assert built_client.closed
     assert calls["enable_observability"] is True
+
+
+async def test_intake_analyze_closes_sdk_when_analyst_fails(monkeypatch, tmp_path: Path):
+    built_client = _FakeSDK()
+
+    async def failing_run_analyst(**kwargs):
+        raise RuntimeError("analyst failed")
+
+    monkeypatch.setattr("evaluation.adapters.run_analyst", failing_run_analyst)
+    monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
+    monkeypatch.setattr("evaluation.adapters.client_from_platform", lambda platform, client_cls: platform)
+    with pytest.raises(RuntimeError, match="analyst failed"):
+        await build_adapter(_intake_subject()).analyze(
+            record=None, since=None, verbose=False, out_path=tmp_path / "insights.json"
+        )
+    assert built_client.closed
 
 
 async def test_intake_analyze_missing_keys_exits(tmp_path: Path):
@@ -318,6 +351,7 @@ async def test_benchmark_produce_records_run_without_analyzing(monkeypatch, tmp_
 
     monkeypatch.setattr("evaluation.adapters.run_analyst", fake_run_analyst)
     monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: object())
+    monkeypatch.setattr("evaluation.adapters.client_from_platform", lambda platform, client_cls: platform)
 
     cfg = {**_CFG, "tau2_data_dir": str(tmp_path), "tau2_bin": "tau2"}
     record = await BenchmarkAdapter(Subject("tau2-airline", "benchmark", cfg)).produce()
@@ -385,7 +419,9 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
         return "REPORT-OK"
 
     monkeypatch.setattr("evaluation.adapters.run_analyst", fake_run_analyst)
-    monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: object())
+    built_client = _FakeSDK()
+    monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
+    monkeypatch.setattr("evaluation.adapters.client_from_platform", lambda platform, client_cls: platform)
 
     cfg = {**_CFG, "tau2_data_dir": str(tmp_path), "tau2_bin": "tau2"}
     record: dict[str, object] = {
@@ -419,6 +455,7 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
     assert seen["base_url"] == "http://localhost:8080"
     assert seen["local_only"] is True  # benchmark runs capture to file and never write to the platform
     assert seen["analyst_evaluation"] == analyst_evaluation
+    assert built_client.closed
 
 
 async def test_benchmark_analyze_without_record_raises(tmp_path):

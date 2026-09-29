@@ -6,7 +6,7 @@
 from typing import Any, cast
 
 import pytest
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
 from nemo_insights_plugin.analyst import run as run_module
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
@@ -41,12 +41,11 @@ def _stub_model_adapter(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]
     models_client = object()
     seen["adapted_model_client"] = models_client
 
-    def fake_client_from_platform(client: object, client_cls: object) -> object:
+    def fake_from_client(client: object) -> object:
         seen["platform_client"] = client
-        seen["models_client_cls"] = client_cls
         return models_client
 
-    monkeypatch.setattr(run_module, "client_from_platform", fake_client_from_platform)
+    monkeypatch.setattr(run_module.AsyncModelsClient, "from_client", fake_from_client)
 
 
 def _stub_pipeline(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]) -> None:
@@ -104,7 +103,7 @@ async def test_injected_client_is_used_and_closed(monkeypatch: pytest.MonkeyPatc
         ethos=None,
         workspace="workspace",
         base_url="https://platform",
-        client=cast(AsyncNeMoHelix, client),
+        client=cast(AsyncNemoClient, client),
     )
 
     assert report == "REPORT"
@@ -112,7 +111,6 @@ async def test_injected_client_is_used_and_closed(monkeypatch: pytest.MonkeyPatc
     build_kwargs = cast(dict[str, object], seen["build_kwargs"])
     assert build_kwargs["existing"] == []
     assert seen["platform_client"] is client
-    assert seen["models_client_cls"] is run_module.AsyncModelsClient
     assert seen["model_client"] is seen["adapted_model_client"]
     model_clients = cast(ConfiguredModelClients, seen["model_clients"])
     assert cast(FakeModelClient, model_clients.default).closed
@@ -144,7 +142,7 @@ async def test_client_closed_when_backend_construction_raises(monkeypatch: pytes
             ethos=None,
             workspace="workspace",
             base_url="https://platform",
-            client=cast(AsyncNeMoHelix, client),
+            client=cast(AsyncNemoClient, client),
         )
 
     assert model.closed
@@ -166,7 +164,7 @@ async def test_client_closed_when_model_resolution_raises(monkeypatch: pytest.Mo
             ethos=None,
             workspace="workspace",
             base_url="https://platform",
-            client=cast(AsyncNeMoHelix, client),
+            client=cast(AsyncNemoClient, client),
         )
 
     assert client.closed
@@ -223,7 +221,7 @@ async def test_client_closed_when_observability_shutdown_raises(monkeypatch: pyt
             ethos=None,
             workspace="workspace",
             base_url="https://platform",
-            client=cast(AsyncNeMoHelix, client),
+            client=cast(AsyncNemoClient, client),
         )
 
     assert client.closed
@@ -253,7 +251,7 @@ async def test_evaluation_context_is_forwarded_to_default_on_observability(monke
         ethos=None,
         workspace="default",
         base_url="http://localhost:8080",
-        client=cast(AsyncNeMoHelix, client),
+        client=cast(AsyncNemoClient, client),
         analyst_evaluation=evaluation_context,
     )
 
@@ -281,7 +279,7 @@ async def test_per_run_observability_opt_out_skips_setup(monkeypatch: pytest.Mon
         ethos=None,
         workspace="default",
         base_url="https://remote.example",
-        client=cast(AsyncNeMoHelix, client),
+        client=cast(AsyncNemoClient, client),
         enable_observability=False,
     )
 
@@ -300,7 +298,7 @@ async def test_ethos_reaches_the_analyst_through_the_change_set_entry_point(
         ethos="# Ethos\n\nBe careful.",
         workspace="workspace",
         base_url="https://platform",
-        client=cast(AsyncNeMoHelix, FakeClient()),
+        client=cast(AsyncNemoClient, FakeClient()),
     )
 
     build_kwargs = cast(dict[str, object], seen["build_kwargs"])

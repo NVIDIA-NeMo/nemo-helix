@@ -24,6 +24,8 @@ from evaluation.otlp_ingest import export_spans, post_evaluator_results, trace_i
 from evaluation.registry import Subject
 from evaluation.tau2run import load_tasks, policy_version, read_policy, resolve_paths, run_tau2
 from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
 from nemo_insights_plugin.analyst.run import run_analyst
 from nemo_insights_plugin.platform_client import make_client
@@ -89,20 +91,22 @@ class IntakeAdapter:
         cfg = self.subject.config
         if missing := self.check():
             raise SystemExit(f"intake evaluation '{self.subject.name}' is missing: {', '.join(missing)}")
-        client = self._basic_auth_client() if cfg.get("auth") == "basic" else make_client(str(cfg["base_url"]))
-        return await run_analyst(
-            agent=cfg["agent"],
-            ethos=None,
-            workspace=cfg["workspace"],
-            base_url=cfg["base_url"],
-            client=client,
-            insights_output=str(out_path),
-            local_only=True,
-            verbose=verbose,
-            since=since,
-            analyst_evaluation=self.analyst_evaluation,
-            enable_observability=cfg.get("auth") != "basic",
-        )
+        sdk = self._basic_auth_client() if cfg.get("auth") == "basic" else make_client(str(cfg["base_url"]))
+        # The derived typed client does not own the SDK's transport, so close the SDK here.
+        async with sdk:
+            return await run_analyst(
+                agent=cfg["agent"],
+                ethos=None,
+                workspace=cfg["workspace"],
+                base_url=cfg["base_url"],
+                client=client_from_platform(sdk, AsyncNemoClient),
+                insights_output=str(out_path),
+                local_only=True,
+                verbose=verbose,
+                since=since,
+                analyst_evaluation=self.analyst_evaluation,
+                enable_observability=cfg.get("auth") != "basic",
+            )
 
     def _basic_auth_client(self) -> AsyncNeMoHelix:
         """Build the basic-auth client configured for this Intake subject."""
@@ -299,19 +303,21 @@ class BenchmarkAdapter:
             f"analyzing realistic workspace '{workspace}' run '{evaluation_id}' (oracle withheld — unaided eval)",
             file=sys.stderr,
         )
-        return await run_analyst(
-            agent=str(record["agent"]),
-            ethos=policy,
-            workspace=workspace,
-            base_url=str(record["base_url"]),
-            client=make_client(str(record["base_url"])),
-            insights_output=str(out_path),
-            local_only=True,
-            verbose=verbose,
-            since=since,
-            evaluation_id=evaluation_id,
-            analyst_evaluation=self.analyst_evaluation,
-        )
+        # The derived typed client does not own the SDK's transport, so close the SDK here.
+        async with make_client(str(record["base_url"])) as sdk:
+            return await run_analyst(
+                agent=str(record["agent"]),
+                ethos=policy,
+                workspace=workspace,
+                base_url=str(record["base_url"]),
+                client=client_from_platform(sdk, AsyncNemoClient),
+                insights_output=str(out_path),
+                local_only=True,
+                verbose=verbose,
+                since=since,
+                evaluation_id=evaluation_id,
+                analyst_evaluation=self.analyst_evaluation,
+            )
 
 
 _ADAPTERS: dict[str, type[IntakeAdapter] | type[BenchmarkAdapter]] = {
