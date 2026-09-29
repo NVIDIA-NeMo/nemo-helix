@@ -3,7 +3,7 @@
 
 """SDK resources for the auditor plugin.
 
-Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.auditor`` via the
+Mounted on :class:`~nemo_helix_plugin.client.client.NemoClient` as ``client.auditor`` via the
 ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
 
 - ``client.auditor.plugin_status()`` — service healthz check.
@@ -30,8 +30,6 @@ from nemo_auditor.jobs.audit import AuditInputSpec, AuditJob
 from nemo_auditor.sdk_resources.configs import _AsyncConfigResource, _ConfigResource
 from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, AuditorJobResource
 from nemo_auditor.sdk_resources.targets import _AsyncTargetResource, _TargetResource
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -54,7 +52,7 @@ def _local_job_context(*, workspace: str, job_name: str) -> JobContext:
 class AuditorPluginResource:
     """Sync SDK namespace mounted as ``client.auditor``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         self._platform = platform
         self._http_client = platform._client
         self._configs: _ConfigResource | None = None
@@ -157,7 +155,7 @@ class AuditorPluginResource:
         return AuditJob().run(
             spec.model_dump(mode="json"),
             ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
-            sdk=client_from_platform(self._platform, NemoClient),
+            sdk=self._platform,
         )
 
     def _resolve_config(self, value: AuditConfig | str, *, default_workspace: str) -> AuditConfig:
@@ -179,7 +177,7 @@ class AuditorPluginResource:
 class AsyncAuditorPluginResource:
     """Async SDK namespace mounted as ``client.auditor``."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
         self._http_client = platform._client
         self._configs: _AsyncConfigResource | None = None
@@ -274,7 +272,7 @@ class AsyncAuditorPluginResource:
             AuditJob().run,
             spec.model_dump(mode="json"),
             ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
-            async_sdk=client_from_platform(self._platform, AsyncNemoClient),
+            async_sdk=self._platform,
         )
 
     async def _resolve_config(self, value: AuditConfig | str, *, default_workspace: str) -> AuditConfig:
