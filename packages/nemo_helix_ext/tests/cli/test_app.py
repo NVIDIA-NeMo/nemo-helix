@@ -626,6 +626,30 @@ def test_plugin_loader_registers_unavailable_command_for_broken_jobs():
     assert "No such option: --spec" not in result.output
 
 
+def test_plugin_loader_hides_completion_options_on_plain_typer_apps():
+    """Plugins build plain ``typer.Typer`` apps; completion belongs to the root ``nemo`` app."""
+    plugin_app = typer.Typer(help="Plugin help")
+
+    @plugin_app.command("hello")
+    def hello() -> None:
+        typer.echo("hi")
+
+    class _PluginCLI(NemoCLI):
+        name = "example"
+
+        def get_cli(self) -> typer.Typer:
+            return plugin_app
+
+    with (
+        patch("nemo_helix_ext.cli.app._discover_plugin_job_entry_points", return_value=None),
+        patch("nemo_helix_ext.cli.app._discover_plugin_function_entry_points", return_value=None),
+        patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", return_value=_PluginCLI),
+    ):
+        loaded = lazy_plugin_loader("example", "fake.module:PluginCLI")()
+
+    assert [param.name for param in loaded.params] == []
+
+
 def test_plugin_loader_surfaces_broken_cli_error():
     with patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", side_effect=RuntimeError("broken")):
         with pytest.raises(click.ClickException, match="Failed to load plugin commands for 'example': broken"):
