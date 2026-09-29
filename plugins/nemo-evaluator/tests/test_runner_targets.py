@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -29,6 +30,9 @@ HARBOR_CARRIED_VALUES = {
     "agent_import_path": "custom_agent:Agent",
     "agent_model_name": "model",
     "agent_kwargs": {"temperature": 0.2},
+    # A bare ref travels as-is; the platform resolves it in the job's workspace.
+    "env_secrets": {"OPENAI_API_KEY": "openai-api-key"},
+    "env_vars": {"FABRIC_LOG": "debug"},
     "n_attempts": 2,
     "n_concurrent_trials": 3,
     "max_retries": 2,
@@ -41,7 +45,6 @@ HARBOR_REJECTED_VALUES = {
     "force_rerun": True,
     "quiet": False,
     "agent_dir": Path("local-agent"),
-    "agent_env_from_host": ["MODEL_API_KEY"],
     "timeout_multiplier": 2.0,
     "agent_timeout_multiplier": 2.0,
     "verifier_timeout_multiplier": 2.0,
@@ -59,7 +62,40 @@ def test_harbor_configuration_survives_submission_without_local_storage(tmp_path
         scoped.setattr(Path, "mkdir", Mock(side_effect=AssertionError("local filesystem modified")))
         target = runner_to_target(runner)
     assert isinstance(target, HarborRunnerTarget)
-    assert target.model_dump(mode="json") == {"kind": "harbor", "env_secrets": {}, **HARBOR_CARRIED_VALUES}
+    assert target.model_dump(mode="json") == {"kind": "harbor", **HARBOR_CARRIED_VALUES}
+
+
+_FAKE_KEY = "sk-not-a-real-key-0123456789"
+
+
+@pytest.mark.parametrize(
+    ("env_vars", "message"),
+    [
+        ({"X": "${WORKER_VAR}"}, "looks like a ${NAME} template"),
+        ({"MODEL_CREDS": _FAKE_KEY}, "look like plaintext credentials"),
+        ({"OPENAI_API_KEY": "x"}, "appear in both env_vars and env_secrets"),
+    ],
+)
+def test_harbor_invalid_env_vars_surface_their_own_message_without_the_value(tmp_path, env_vars, message):
+    # `model_copy` skips validators, so the target's own validation is what refuses it.
+    config = HarborRuntimeConfig(
+        jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": SecretRef("openai-api-key")}
+    ).model_copy(update={"env_vars": env_vars})
+
+    with pytest.raises(UnsubmittableRunnerError, match=re.escape(message)) as excinfo:
+        runner_to_target(HarborAgentTaskRunner(config=config))
+
+    assert _FAKE_KEY not in str(excinfo.value)
+    assert _FAKE_KEY not in str(excinfo.value.__cause__)
+
+
+def test_nested_harbor_target_error_does_not_echo_the_value():
+    with pytest.raises(ValidationError) as excinfo:
+        AgentEvalInputSpec.model_validate(
+            {"tasks": TasksetRef("suite"), "target": {"kind": "harbor", "env_vars": {"MODEL_CREDS": _FAKE_KEY}}}
+        )
+    assert "plaintext credentials" in str(excinfo.value)
+    assert _FAKE_KEY not in str(excinfo.value)
 
 
 def test_every_harbor_runtime_field_has_a_submission_policy():

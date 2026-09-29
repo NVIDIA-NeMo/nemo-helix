@@ -144,7 +144,7 @@ def test_harbor_execution_without_extra_has_actionable_error(
 
     _block_harbor_import(monkeypatch)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
-    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None)
+    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None, env_templates={})
 
     async def invoke_run_job() -> None:
         await run_job()

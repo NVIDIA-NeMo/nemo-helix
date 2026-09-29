@@ -6,7 +6,7 @@
 Harbor owns the sandbox and the verifier; NeMo Fabric owns the agent harness. The bridge is
 :class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent.NemoFabricAgent`, selected with
 ``agent_import_path`` and configured with ``agent_kwargs`` -- the same two fields a platform
-``HarborRunnerTarget`` carries. The model API key never appears in the config: ``agent_env_from_host``
+``HarborRunnerTarget`` carries. The model API key never appears in the config: ``env_secrets``
 names it, Harbor resolves it from this process's environment when it creates the agent, and the job
 directory's ``config.json`` records only ``${NVIDIA_API_KEY}``.
 
@@ -26,11 +26,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NVIDIA_MODEL_BASE_URL
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
+from nemo_evaluator_sdk.values import SecretRef
 from pydantic import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,8 @@ async def _main(jobs_dir: Path, *, model: str, api_key_env: str, job_name: str |
         # `provider/model`: the provider picks the credential variable and endpoint (nvidia ->
         # NVIDIA_API_KEY, https://integrate.api.nvidia.com/v1) and the full id is kept.
         agent_model_name=model,
-        agent_env_from_host=[api_key_env],
+        # An exact ref: the local lookup reads exactly the variable `api_key_env` names.
+        env_secrets={api_key_env: SecretRef(api_key_env)},
         n_concurrent_trials=1,
         # Installing Fabric and the deepagents harness in the container takes a few minutes the
         # first time; Harbor's default agent-setup timeout is tuned for prebuilt agents.
@@ -119,8 +121,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     api_key_env = api_key_env_for(args.model, args.api_key_env)
-    if not os.environ.get(api_key_env):
-        raise SystemExit(f"{api_key_env} is not set; the agent forwards it into the task container.")
+    # Fail before any work with a one-line message; the runner applies the same lookup.
+    resolver = LocalSecretResolver()
+    if resolver.find_env_name(SecretRef(api_key_env)) is None:
+        raise SystemExit(resolver.missing_secret_message(SecretRef(api_key_env)))
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     asyncio.run(_main(args.jobs_dir, model=args.model, api_key_env=api_key_env, job_name=args.job_name))
 

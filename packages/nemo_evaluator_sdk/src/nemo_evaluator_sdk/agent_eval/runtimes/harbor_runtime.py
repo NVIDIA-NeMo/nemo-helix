@@ -65,6 +65,11 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
     normalize_harbor_instruction,
     private_directory,
 )
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_env import (
+    harbor_env_templates,
+    validate_harbor_env,
+    warn_unscrubbed_secret_keys,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import harbor_scoring_metrics
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import (
     HARBOR_DATASET_PATH_KEY,
@@ -81,6 +86,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, AgentEvalTaskset, as_base_task
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.metrics.protocol import Metric
+from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
+from nemo_evaluator_sdk.values.common import SecretRef
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 logger = logging.getLogger(__name__)
@@ -102,7 +110,7 @@ _IMPORT_DIGEST_CHARS = 12
 # a stale one. A file, not a directory: Harbor rmtree's stray directories in a job dir.
 CACHE_STAMP_FILENAME = ".nemo-eval-harbor-cache.json"
 # Public so downstreams can assert the SDK is new enough to own cache staleness.
-CACHE_STAMP_VERSION = 2
+CACHE_STAMP_VERSION = 3
 # Excluded from the cache fingerprint — see :func:`_cache_stamp` for why each one.
 _CACHE_IRRELEVANT_OPTIONS = frozenset(
     {"jobs_dir", "job_name", "force_rerun", "quiet", "n_concurrent_trials", "agent_dir", "reward_key"}
@@ -137,7 +145,8 @@ class HarborRuntimeConfig(BaseModel):
     the fields are mapped onto Harbor's ``JobConfig`` lazily at run time.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Validation error text never echoes inputs, so a rejected credential isn't printed back.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     jobs_dir: Path | None = Field(
         default=None,
@@ -167,16 +176,26 @@ class HarborRuntimeConfig(BaseModel):
         description=(
             "Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
             "``--ak key=value``. Not for secrets: Harbor persists these unredacted across the job dir. "
-            "Credential-shaped plaintext is rejected, but that check is a heuristic — name credentials "
-            "in ``agent_env_from_host`` regardless."
+            "Credential-shaped plaintext is rejected, but that check is a heuristic — put credentials "
+            "in ``env_secrets`` regardless."
         ),
     )
-    agent_env_from_host: list[str] = Field(
-        default_factory=list,
+    env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
         description=(
-            "Host environment variables forwarded to the Harbor agent as ``AgentConfig.env`` templates "
-            "(``${NAME}``). Harbor resolves each from this process's environment when it creates the agent and "
-            "persists only the template, so the value never reaches the job dir's ``config.json``."
+            "Environment variables for the Harbor agent, sourced from secrets, as {ENV_NAME: secret-ref}. "
+            "Works standalone and on the platform. Standalone, ``my-workspace/openai-api-key`` is read from "
+            "``MY_WORKSPACE_OPENAI_API_KEY``, falling back to ``OPENAI_API_KEY``; submitted, the platform resolves "
+            "the reference (a bare ref in the job's workspace). Harbor receives a ``${NAME}`` template for the "
+            "env var holding the value, so the value is never written to ``os.environ`` or the job dir."
+        ),
+    )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Non-secret environment variables for the Harbor agent, as literal values. They travel in the "
+            "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, "
+            "PASSWORD, CREDENTIAL or AUTH) are rejected; use ``env_secrets`` for credentials."
         ),
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
@@ -200,7 +219,12 @@ class HarborRuntimeConfig(BaseModel):
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
-        require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
+        require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        return self
+
+    @model_validator(mode="after")
+    def _env_vars_are_harbor_safe(self) -> HarborRuntimeConfig:
+        validate_harbor_env(self.env_vars, self.env_secrets)
         return self
 
     @model_validator(mode="after")
@@ -245,6 +269,10 @@ class HarborAgentTaskRunner:
 
     ``job_dir`` is the directory Harbor writes its per-trial
     ``<task>__<hash>/result.json`` files into.
+
+    ``secret_resolver`` names the env var holding each ``env_secrets`` entry; it must implement
+    :class:`~nemo_evaluator_sdk.resolver_protocols.EnvSecretSource`. Defaults to
+    :class:`~nemo_evaluator_sdk.resolvers.LocalSecretResolver`; platform jobs pass their own.
     """
 
     def __init__(
@@ -256,6 +284,7 @@ class HarborAgentTaskRunner:
         job_dir: str | Path | None = None,
         run_job: RunJob | None = None,
         reward_key: str = DEFAULT_REWARD_KEY,
+        secret_resolver: EnvSecretSource | None = None,
     ) -> None:
         if config is None and job_dir is None:
             raise ValueError("provide either a HarborRuntimeConfig or an explicit job_dir")
@@ -264,6 +293,12 @@ class HarborAgentTaskRunner:
         self._task_names = task_names
         self._job_dir = Path(job_dir) if job_dir is not None else None
         self._run_job = run_job
+        self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
+        if config is not None and config.env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
+            raise TypeError(
+                f"{type(self._secret_resolver).__name__} can't name an env var holding a secret. Harbor env_secrets "
+                "need an env-backed resolver (LocalSecretResolver locally; the platform supplies its own)."
+            )
         self._reward_key = config.reward_key if config is not None else reward_key
         validate_reward_key(self._reward_key)
 
@@ -283,7 +318,10 @@ class HarborAgentTaskRunner:
                 "agent_import_path": config.agent_import_path if config is not None else None,
                 "agent_model_name": config.agent_model_name if config is not None else None,
                 "agent_kwargs": redact_credentials(config.agent_kwargs) if config is not None else None,
-                "agent_env_from_host": list(config.agent_env_from_host) if config is not None else None,
+                "env_secrets": {name: ref.root for name, ref in config.env_secrets.items()}
+                if config is not None
+                else None,
+                "env_vars": redact_credentials(config.env_vars) if config is not None else None,
                 "effective_agent": _effective_harbor_agent(config),
                 "n_attempts": config.n_attempts if config is not None else None,
                 # Native mode resolves the concrete job directory inside run_tasks (the name defaults
@@ -367,6 +405,11 @@ class HarborAgentTaskRunner:
                 # actually being scored so a filter like `harbor/hello-world` still
                 # selects the `hello-world/` directory.
                 harbor_task_names = folder_names or self._task_names
+                # Found on every actual execution, never cached on the runner, so a rotated or removed
+                # secret is picked up by the next one; cache hits above need no credentials. Done before
+                # `_build_native_job`, whose `run_job` may rmtree the job dir: a missing secret must
+                # never cost completed trials. `run_job` re-checks `env_vars` before its rmtree.
+                env_templates = harbor_env_templates(self._config.env_secrets, self._secret_resolver)
                 job_dir, run_job = _build_native_job(
                     self._config,
                     dataset_path,
@@ -378,6 +421,7 @@ class HarborAgentTaskRunner:
                     # content-addressed rather than a fresh uuid per run and Harbor's
                     # JobConfig comparison can therefore match (AALGO-430).
                     force_rerun=(self._config.force_rerun or stale),
+                    env_templates=env_templates,
                 )
                 # Fingerprint the inputs *before* running and confirm they are
                 # unchanged afterwards. Stamping only the post-run state would label
@@ -777,8 +821,8 @@ def _cache_stamp(
     *content* is hashed separately, so a relocated but identical agent still hits;
     and ``reward_key``, which only selects which reward
     :func:`build_trials_from_job_dir` reads back and must not cost a Docker re-run.
-    ``agent_env_from_host`` participates by name only: the values they resolve to at run
-    time are not fingerprinted, so rotating a credential keeps the cache valid.
+    ``env_secrets`` participates by ref and ``env_vars`` by value: secret values are not
+    fingerprinted, so rotating a credential keeps the cache valid.
     """
     # Missing execution storage is invalid configuration, not a best-effort filesystem failure.
     jobs_dir = _require_jobs_dir(config)
@@ -913,6 +957,7 @@ def _build_native_job(
     *,
     job_name: str | None = None,
     force_rerun: bool | None = None,
+    env_templates: Mapping[str, str],
 ) -> tuple[Path, RunJob]:
     """Build a Harbor ``JobConfig`` from ``config`` and return ``(job_dir, run_job)``.
 
@@ -929,7 +974,19 @@ def _build_native_job(
         force_rerun: Overrides ``config.force_rerun`` for this build. Passed rather
             than applied via ``model_copy`` so the caller's config is never mutated
             and the job name stays fixed.
+        env_templates: ``${<source var>}`` template per ``config.env_secrets`` key, from
+            :func:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_env.harbor_env_templates`. Required, with
+            no default: computing it here would look secrets up after the ``force_rerun`` rmtree, and an
+            empty default would silently drop them. For example, with
+            ``env_secrets={"OPENAI_API_KEY": SecretRef("my-workspace/openai-api-key")}`` and only
+            ``MY_WORKSPACE_OPENAI_API_KEY`` exported, it is
+            ``{"OPENAI_API_KEY": "${MY_WORKSPACE_OPENAI_API_KEY}"}``;
+            in a platform job it is ``{"OPENAI_API_KEY": "${OPENAI_API_KEY}"}``.
     """
+    if set(env_templates) != set(config.env_secrets):
+        raise ValueError(
+            f"env_templates keys {sorted(env_templates)} don't match env_secrets keys {sorted(config.env_secrets)}"
+        )
     jobs_dir = _require_jobs_dir(config)
     resolved_name = job_name if job_name is not None else _resolve_job_dir(config)[0]
     job_dir = _validated_job_dir(jobs_dir, resolved_name)
@@ -939,7 +996,10 @@ def _build_native_job(
         # First, ahead of the Harbor import and the force_rerun rmtree below. Not redundant with the
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
-        require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
+        require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        validate_harbor_env(config.env_vars, config.env_secrets)
+        # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
+        warn_unscrubbed_secret_keys(config.env_secrets)
         try:
             from harbor.job import DatasetConfig, Job, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
             from harbor.models.job.config import RetryConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
@@ -1025,7 +1085,9 @@ def _build_native_job(
         agent_options: dict[str, Any] = {
             "model_name": config.agent_model_name,
             "kwargs": dict(config.agent_kwargs),
-            "env": {name: f"${{{name}}}" for name in config.agent_env_from_host},
+            # Secret templates merged last, so a secret always wins over a same-named literal. Literal
+            # env_vars reach only the agent: nothing here is written to os.environ.
+            "env": {**config.env_vars, **env_templates},
         }
         if config.agent_import_path is None:
             await _create_and_run(AgentConfig(name=config.agent_name or "oracle", **agent_options))

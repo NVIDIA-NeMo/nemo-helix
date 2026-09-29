@@ -276,7 +276,7 @@ async def test_errored_stamped_job_is_served_without_invoking_harbor(
     config, job_dir, task = _sdk_errored_job(tmp_path)
     calls: list[bool] = []
 
-    def fake_build(runtime_config, _dataset_path, _task_names, *, job_name=None, force_rerun=None):
+    def fake_build(runtime_config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 

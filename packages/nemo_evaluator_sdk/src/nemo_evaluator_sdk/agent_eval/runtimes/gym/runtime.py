@@ -46,28 +46,14 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
     trials_from_rollouts,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
+from nemo_evaluator_sdk.agent_eval.runtimes.secrets import resolve_env_secrets
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.resolver_protocols import SecretResolver
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
-from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregateScore
 
 logger = logging.getLogger(__name__)
-
-
-async def _resolve_env_secrets(env_secrets: Mapping[str, SecretRef], secret_resolver: SecretResolver) -> dict[str, str]:
-    resolved: dict[str, str] = {}
-    for env_var, secret_ref in env_secrets.items():
-        value = await secret_resolver.resolve_secret(secret_ref)
-        if value is None:
-            raise ValueError(
-                f"could not resolve secret {secret_ref.root!r} for env var {env_var!r}. Locally that means "
-                "no matching environment variable was set; in a job it means the platform did not resolve "
-                "the reference."
-            )
-        resolved[env_var] = value
-    return resolved
 
 
 class GymAgentTaskRunner:
@@ -92,7 +78,7 @@ class GymAgentTaskRunner:
 
         Call before :meth:`run_tasks`, which otherwise resolves locally.
         """
-        self._resolved_env = await _resolve_env_secrets(self._config.env_secrets, secret_resolver)
+        self._resolved_env = await resolve_env_secrets(self._config.env_secrets, secret_resolver)
         self._secrets_resolved = True
 
     @property

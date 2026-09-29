@@ -104,7 +104,8 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
                 "agent_name",
                 "agent_import_path",
                 "agent_kwargs",
-                "agent_env_from_host",
+                "env_secrets",
+                "env_vars",
                 "effective_agent",
                 "n_attempts",
                 "jobs_dir",
@@ -320,19 +321,25 @@ def test_harbor_agent_kwargs_cannot_carry_a_credential_into_the_run_bundle() -> 
     assert recorded == {"fabric_adapter_id": "nvidia.fabric.codex", "extra_env": {"HOME": "/root"}}
 
 
-def test_harbor_records_agent_env_from_host_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_harbor_records_env_secret_refs_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+    from nemo_evaluator_sdk.values.common import SecretRef
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-recorded")
     runner = HarborAgentTaskRunner(
-        config=HarborRuntimeConfig(jobs_dir=Path("/jobs"), agent_env_from_host=["OPENAI_API_KEY", "FABRIC_LOG"])
+        config=HarborRuntimeConfig(
+            jobs_dir=Path("/jobs"),
+            env_secrets={"OPENAI_API_KEY": SecretRef("openai-api-key")},
+            env_vars={"FABRIC_LOG": "debug"},
+        )
     )
 
     recorded = runner.runner_info().config
 
-    assert recorded["agent_env_from_host"] == ["OPENAI_API_KEY", "FABRIC_LOG"]
+    assert recorded["env_secrets"] == {"OPENAI_API_KEY": "openai-api-key"}
+    assert recorded["env_vars"] == {"FABRIC_LOG": "debug"}
     assert "should-not-be-recorded" not in json.dumps(recorded)
 
 
