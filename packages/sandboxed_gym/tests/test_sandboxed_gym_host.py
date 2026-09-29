@@ -32,6 +32,25 @@ def test_bootstrap_env_rejects_opensandbox_credentials():
         validate_bootstrap_env({"OPENSANDBOX_API_KEY": "secret"})
 
 
+def test_sandbox_bootstrap_env_never_inherits_the_process_environment(monkeypatch):
+    """The sandbox env is a constructed allowlist, never a copy of the trusted process's env.
+
+    The episode broker inherits its Ray actor's runtime env, which carries the episode-backend
+    credential. That credential must reach the broker and never the job sandbox; this is the half
+    of the boundary the package owns.
+    """
+    from sandboxed_gym.config import BrokerEndpoint
+    from sandboxed_gym.orchestrator import build_gym_host_spec
+
+    monkeypatch.setenv("NHX_TEST_AMBIENT_SENTINEL", "ambient-sentinel")
+    broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
+
+    env = build_gym_host_spec(_serve_cfg(), broker).bootstrap_env
+
+    assert "NHX_TEST_AMBIENT_SENTINEL" not in env
+    assert not any("ambient-sentinel" in value for value in env.values())
+
+
 def test_build_bootstrap_env_sets_required_keys():
     env = build_bootstrap_env(
         "job-1",
