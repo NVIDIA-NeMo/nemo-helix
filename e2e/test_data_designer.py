@@ -62,7 +62,7 @@ def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
 
 def _data_designer(client: NemoClient) -> DataDesignerResource:
     """High-level Data Designer resource driven by the typed platform client."""
-    return DataDesignerResource(client)  # ty: ignore[invalid-argument-type]
+    return DataDesignerResource(client)
 
 
 def _make_mock_provider(client: NemoClient, workspace: str) -> str:
@@ -363,14 +363,11 @@ def _single_model_config(provider_name: str, model: str) -> dd.DataDesignerConfi
 def test_check_models_passes_for_servable_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
     """The only place a real model probe runs: integration tests cannot, because
     the engine's HTTP client does not carry their ASGI transport.
-
-    check_models runs the engine pass, which still converts the generated SDK
-    handle (data_designer_nemo.sdk_translation), so the probe is driven from ``sdk``.
     """
     provider_name = _make_mock_provider(client, workspace)
     config_builder = _setup_dd_config(provider_name)
 
-    report = sdk.data_designer.check_models(config_builder, workspace=workspace)
+    report = _data_designer(client).check_models(config_builder, workspace=workspace)
 
     assert report.ok, [(e.error_type, e.message) for e in report.errors]
 
@@ -380,17 +377,15 @@ def test_check_models_catches_model_the_provider_cannot_serve(
 ) -> None:
     """validate can be green while check_models is red;
     only the latter makes a live inference call.
-
-    Both run the engine pass, which still converts the generated SDK handle
-    (data_designer_nemo.sdk_translation), so the probes are driven from ``sdk``.
     """
     provider_name = _make_unservable_model_provider(client, workspace)
     config_builder = _single_model_config(provider_name, MODEL_UNSERVABLE)
 
-    validation_report = sdk.data_designer.validate(config_builder, workspace=workspace)
+    data_designer = _data_designer(client)
+    validation_report = data_designer.validate(config_builder, workspace=workspace)
     assert validation_report.ok, [e.message for e in validation_report.errors]
 
-    report = sdk.data_designer.check_models(config_builder, workspace=workspace)
+    report = data_designer.check_models(config_builder, workspace=workspace)
 
     assert not report.ok
     assert report.errors
