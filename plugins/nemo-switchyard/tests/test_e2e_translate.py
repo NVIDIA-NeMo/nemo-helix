@@ -264,3 +264,70 @@ class TestE2ETranslate:
         assert translate_key in middleware_state.VM_NAME_TO_CONFIG_HASH
         assert middleware_state.VM_NAME_TO_CONFIG_HASH[random_key] in middleware_state.FACTORIES_BY_CONFIG_HASH
         assert middleware_state.VM_NAME_TO_CONFIG_HASH[translate_key] in middleware_state.FACTORIES_BY_CONFIG_HASH
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "body", "expect_done"),
+    [
+        ("v1/responses", {"model": "ws/gpt", "input": "hi", "stream": True}, False),
+        (
+            "v1/chat/completions",
+            {"model": "ws/gpt", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+            True,
+        ),
+    ],
+)
+async def test_translated_stream_serializes_in_client_wire_format(path: str, body: dict, expect_done: bool) -> None:
+    """A streamed chat-completions backend reaches a Responses API client as
+    ``event:``/``data:`` frames ending in ``response.completed``, and a
+    chat-completions client as ``data: <chunk>`` frames ending in ``[DONE]``."""
+    from nhx.core.inference_gateway.api.middleware_registry import build_inference_response
+    from nhx.core.inference_gateway.api.proxy import stream_response_result
+
+    translate = MiddlewareCall(
+        name="nemo-switchyard", config_type="translate", config={"target_format": "openai", "enable_stats": False}
+    )
+    vm = VirtualModel(
+        id="vm-wire",
+        workspace="ws",
+        name="wire",
+        models=[VirtualModelInferenceConfig(model="ws/gpt", backend_format=BackendFormat.OPENAI_CHAT)],
+        request_middleware=[translate],
+        response_middleware=[translate],
+        post_response_middleware=[],
+    )
+    middleware = SwitchyardMiddleware()
+    await middleware.on_startup()
+    try:
+        await middleware.on_virtual_model_upserted(vm)
+        ctx = InferenceMiddlewareContext(
+            request_id="wire",
+            workspace="ws",
+            virtual_model_name="wire",
+            original_request=InferenceRequest(body=dict(body), headers={}, path=path),
+        )
+        request = InferenceRequest(body=dict(body), headers={}, path=path)
+        request.typed_body = request.body
+        await middleware.process_request(ctx, request, {"config_type": "translate"})
+        ctx.backend_format = BackendFormat.OPENAI_CHAT
+
+        async def backend_chunks():
+            base = {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "ws/gpt"}
+            for delta, finish in (({"role": "assistant", "content": "Hel"}, None), ({"content": "lo"}, "stop")):
+                yield {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+
+        response = build_inference_response(backend_chunks(), {}, BackendFormat.OPENAI_CHAT)
+        response = await middleware.process_response(ctx, response, {"config_type": "translate"})
+        streamed = await stream_response_result(response, 200, {})
+        wire = b"".join([chunk async for chunk in streamed.body_iterator]).decode()
+    finally:
+        await middleware.on_shutdown()
+
+    assert wire.endswith("data: [DONE]\n\n") is expect_done
+    if expect_done:
+        assert wire.startswith('data: {"id": "c1"')
+    else:
+        assert wire.startswith("event: response.created\ndata: {")
+        assert "event: response.completed\ndata: {" in wire
+        assert "[DONE]" not in wire

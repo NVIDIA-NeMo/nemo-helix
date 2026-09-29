@@ -191,17 +191,23 @@ async def test_write_back_response_anthropic_streaming():
     assert response.typed_body is None
 
 
-def test_write_back_response_responses_api_streaming():
+@pytest.mark.asyncio
+async def test_write_back_response_responses_api_streaming_marks_stream_preframed():
+    """Switchyard's Responses translator yields complete SSE frames, so IGW must
+    be told to write them verbatim rather than JSON-encode each one."""
+    from nhx.core.inference_gateway.api.typed_response import PreframedSSEStream
     from switchyard.lib.chat_response.openai_responses import ResponsesApiStream
 
+    frame = 'event: response.completed\ndata: {"type": "response.completed"}\n\n'
+
     async def _src():
-        return
-        yield  # noqa: unreachable
+        yield frame
 
     rs = ResponsesApiStream(_src())
     response = InferenceResponse(result={}, headers={})
     write_back_response(response, ResponsesApiStreamingChatResponse(rs))
-    assert response.result is rs
+    assert isinstance(response.result, PreframedSSEStream)
+    assert [f async for f in response.result] == [frame]
     assert response.typed_body is None
 
 

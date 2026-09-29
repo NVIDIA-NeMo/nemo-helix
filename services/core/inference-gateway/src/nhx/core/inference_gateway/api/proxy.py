@@ -49,6 +49,7 @@ from nhx.core.inference_gateway.api.middleware_registry import (
 )
 from nhx.core.inference_gateway.api.mock_provider import handle_mock_request, is_mock_provider
 from nhx.core.inference_gateway.api.typed_request import build_inference_request
+from nhx.core.inference_gateway.api.typed_response import PreframedSSEStream
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -924,9 +925,10 @@ async def stream_response_result(
 
     - ``dict`` → streamed as a single JSON body.
     - Pydantic model → dumped as JSON and streamed as a single JSON body.
-    - ``AsyncIterator`` → re-encoded as SSE (``data: {...}\\n\\n`` per chunk,
-      terminated with ``data: [DONE]\\n\\n``). Pydantic chunks are dumped with
-      ``mode="json"`` before serialization.
+    - :class:`PreframedSSEStream` → each frame written verbatim, no terminator.
+    - Any other ``AsyncIterator`` → re-encoded as SSE (``data: {...}\\n\\n`` per
+      chunk, terminated with ``data: [DONE]\\n\\n``). Pydantic chunks are dumped
+      with ``mode="json"`` before serialization.
 
     Body-framing headers (``content-length``, ``content-encoding``,
     ``transfer-encoding``, ``content-type``) are stripped from *headers* and
@@ -947,6 +949,17 @@ async def stream_response_result(
             _json_gen(),
             status_code=status_code,
             headers={**safe_headers, "content-type": "application/json"},
+        )
+    elif isinstance(response_payload, PreframedSSEStream):
+
+        async def _preframed_gen():
+            async for frame in response_payload:
+                yield frame.encode()
+
+        return StreamingResponse(
+            _preframed_gen(),
+            status_code=status_code,
+            headers={**safe_headers, "content-type": "text/event-stream"},
         )
     else:
         # AsyncIterator — re-encode as SSE

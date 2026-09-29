@@ -20,7 +20,7 @@ All translation (streaming and non-streaming) goes through the Switchyard respon
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator
 from typing import cast
 
 import anthropic.types as anthropic_types
@@ -33,7 +33,7 @@ from nemo_helix_plugin.inference_middleware import (
     TypedResponseResult,
 )
 from nemo_switchyard._processors import CTX_PATH_UPDATE
-from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
+from nhx.core.inference_gateway.api.typed_response import PreframedSSEStream, TypedResponseStream
 from switchyard.lib.chat_request.base import ChatRequest
 from switchyard.lib.chat_response.anthropic import (
     AnthropicChatResponse,
@@ -129,9 +129,9 @@ def write_back_response(response: InferenceResponse, processed: ChatResponse) ->
 
     Streaming (``StreamingChatResponse`` / ``AnthropicStreamingChatResponse`` /
     ``ResponsesApiStreamingChatResponse``):
-        ``response.result`` is replaced with ``processed.stream`` directly. IGW's
-        ``_sse_gen`` already calls ``_json_ready_payload(chunk)`` per item so no
-        wrapping is needed. ``typed_body`` is cleared to ``None`` — there is no
+        ``response.result`` is replaced with ``processed.stream``, wrapped in
+        ``PreframedSSEStream`` for Responses API streams, whose items are complete
+        SSE frames. ``typed_body`` is cleared to ``None`` — there is no
         typed-iterator wrapper for translated streams yet.
 
     Raises ``InferenceMiddlewareError`` (500) for unexpected types so any future
@@ -144,10 +144,12 @@ def write_back_response(response: InferenceResponse, processed: ChatResponse) ->
         response.result = processed.body.model_dump(mode="json")
         return
 
-    if isinstance(
-        processed,
-        (StreamingChatResponse, AnthropicStreamingChatResponse, ResponsesApiStreamingChatResponse),
-    ):
+    if isinstance(processed, ResponsesApiStreamingChatResponse):
+        response.result = PreframedSSEStream(cast(AsyncIterable[str], processed.stream))
+        response.typed_body = None
+        return
+
+    if isinstance(processed, (StreamingChatResponse, AnthropicStreamingChatResponse)):
         response.result = processed.stream
         response.typed_body = None  # intentional: no typed wrapper for translated streams
         return

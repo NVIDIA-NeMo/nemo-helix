@@ -56,6 +56,7 @@ from nhx.core.inference_gateway.api.proxy import (
     stream_response_result,
     virtual_model_proxy,
 )
+from nhx.core.inference_gateway.api.typed_response import PreframedSSEStream
 from pytest_httpserver import HTTPServer
 
 
@@ -294,6 +295,50 @@ async def test_stream_response_result_replays_raw_stream_with_unrecognised_chunk
     assert 'data: {"id": "invalid"}' in body
     assert 'data: {"vendor_passthrough": "raw-tail"}' in body
     assert "data: [DONE]" in body
+
+
+_RESPONSES_FRAMES = [
+    'event: response.created\ndata: {"type": "response.created", "response": {"id": "resp_1"}}\n\n',
+    'event: response.output_text.delta\ndata: {"type": "response.output_text.delta", "delta": "h\u00e9"}\n\n',
+    'event: response.completed\ndata: {"type": "response.completed", "response": {"id": "resp_1"}}\n\n',
+]
+
+
+async def _frames(frames: list[str]) -> AsyncIterator[str]:
+    for frame in frames:
+        yield frame
+
+
+@pytest.mark.asyncio
+async def test_stream_response_result_writes_preframed_sse_verbatim():
+    """Responses API clients need the ``event:`` lines and must not see a
+    chat-completions ``data: [DONE]`` terminator; re-wrapping each frame as
+    ``data: "<json string>"`` hides ``response.completed`` from them."""
+    envelope = InferenceResponse(result=PreframedSSEStream(_frames(_RESPONSES_FRAMES)), headers={})
+
+    response = await stream_response_result(envelope, 200, {"content-type": "application/json", "content-length": "9"})
+
+    assert response.headers["content-type"] == "text/event-stream"
+    assert "content-length" not in response.headers
+    assert (await _read_streaming_response(response)).decode() == "".join(_RESPONSES_FRAMES)
+
+
+@pytest.mark.asyncio
+async def test_stream_response_result_empty_preframed_stream_writes_nothing():
+    response = await stream_response_result(PreframedSSEStream(_frames([])), 200, {})
+
+    assert await _read_streaming_response(response) == b""
+
+
+@pytest.mark.asyncio
+async def test_stream_response_result_frames_plain_string_chunks_as_json():
+    """Only an explicit ``PreframedSSEStream`` bypasses framing: a bare iterator
+    of strings keeps the ``data: <json>`` + ``[DONE]`` framing."""
+    response = await stream_response_result(_frames(["event: x\ndata: {}\n\n"]), 200, {})
+
+    assert (
+        await _read_streaming_response(response)
+    ).decode() == 'data: "event: x\\ndata: {}\\n\\n"\n\ndata: [DONE]\n\n'
 
 
 @pytest.mark.asyncio

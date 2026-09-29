@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterable
 from typing import Any, AsyncIterator, Literal, cast
 
 import anthropic.types as anthropic_types
@@ -159,3 +160,13 @@ def parse_typed_stream(
     use ``TypedResponseStream.raw_chunks()`` directly.
     """
     return cast(AsyncIterator[TypedResponseChunk], TypedResponseStream(backend_format, result))
+
+
+class PreframedSSEStream(AsyncIterator[str]):
+    """Streaming ``InferenceResponse.result`` of complete SSE frames, which IGW writes verbatim."""
+
+    def __init__(self, frames: AsyncIterable[str]) -> None:
+        self._frames = frames.__aiter__()
+
+    async def __anext__(self) -> str:
+        return await self._frames.__anext__()

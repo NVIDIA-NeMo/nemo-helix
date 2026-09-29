@@ -27,6 +27,7 @@ from nhx.core.inference_gateway.api.dependencies import (
 )
 from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
 from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
+from nhx.core.inference_gateway.api.typed_response import PreframedSSEStream
 from nhx.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model, resolve_vm_for_model
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
@@ -1478,7 +1479,11 @@ def test_virtual_model_proxy_mock_provider_keeps_qualified_body_model(app: FastA
     assert response.json().get("id") == "mock-ok"
 
 
-def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(app: FastAPI, client: TestClient, mocker):
+def _install_streaming_mock_vm(app: FastAPI, mocker, workspace: str, served_name: str) -> str:
+    """Serve ``workspace/served_name`` through a VM backed by a streaming mock provider.
+
+    Returns the qualified model id to put in the request body.
+    """
     from nhx.core.inference_gateway.api.mock_provider.responses import (
         MOCK_RESPONSE_MAP_HEADER,
         MOCK_SERVED_MODELS_HEADER,
@@ -1489,8 +1494,6 @@ def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(ap
         return_value="igw-mock-",
     )
 
-    workspace = "vm-mock-ws"
-    served_name = "stream-model"
     qualified_id = f"{workspace}/{served_name}"
     mock_body = {
         "id": "mock-stream",
@@ -1523,6 +1526,14 @@ def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(ap
     vm_cache.rebuild([_make_sdk_vm(workspace, served_name, default_model_entity=qualified_id)])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
+    return qualified_id
+
+
+def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(app: FastAPI, client: TestClient, mocker):
+    workspace = "vm-mock-ws"
+    served_name = "stream-model"
+    qualified_id = _install_streaming_mock_vm(app, mocker, workspace, served_name)
+
     plugin = MagicMock(spec=NemoInferenceMiddleware)
 
     async def process_response(ctx, response: InferenceResponse, cfg):
@@ -1543,3 +1554,44 @@ def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(ap
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "data: [DONE]" in response.text
     plugin.process_response.assert_awaited_once()
+
+
+def test_virtual_model_proxy_streams_preframed_responses_sse_verbatim(app: FastAPI, client: TestClient, mocker):
+    """A response middleware that translates to the Responses API returns complete
+    ``event:``/``data:`` frames; the route must deliver them unchanged, ending on
+    ``response.completed`` rather than a chat-completions ``data: [DONE]``."""
+    workspace = "vm-mock-ws"
+    served_name = "stream-model"
+    qualified_id = _install_streaming_mock_vm(app, mocker, workspace, served_name)
+    emitted: list[str] = []
+
+    async def to_responses_frames(chunks):
+        async for chunk in chunks:
+            delta = chunk["choices"][0]["delta"].get("content") or ""
+            frame = f"event: response.output_text.delta\ndata: {json.dumps({'type': 'response.output_text.delta', 'delta': delta})}\n\n"
+            emitted.append(frame)
+            yield frame
+        frame = 'event: response.completed\ndata: {"type": "response.completed"}\n\n'
+        emitted.append(frame)
+        yield frame
+
+    plugin = MagicMock(spec=NemoInferenceMiddleware)
+
+    async def process_response(ctx, response: InferenceResponse, cfg):
+        response.result = PreframedSSEStream(to_responses_frames(response.result))
+        response.typed_body = None
+        return response
+
+    plugin.process_response = AsyncMock(side_effect=process_response)
+    registry = _make_registry_with_plugin(workspace, served_name, plugin, phase="response")
+    app.dependency_overrides[global_middleware_registry] = lambda: registry
+
+    response = client.post(
+        f"/v2/workspaces/{workspace}/openai/-/v1/responses",
+        json={"model": qualified_id, "input": "hi", "stream": True},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(emitted) > 1
+    assert response.text == "".join(emitted)
