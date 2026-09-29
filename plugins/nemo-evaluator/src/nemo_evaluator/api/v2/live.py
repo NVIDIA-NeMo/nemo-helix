@@ -3,29 +3,17 @@
 
 """Direct in-process evaluation under /apis/evaluator/v2/workspaces/{workspace}/live.
 
-One dataset row, generated and scored inline: no job record, no result artifacts, no Intake
-publish. This is the interactive path behind Studio's Live Test panel, where a user checks an
-evaluation config against a single row before saving it.
+One dataset row, scored inline: no job record, no result artifacts, no Intake publish. This is the
+interactive path behind Studio's Live Test panel.
 
-Every other long-running evaluation in this plugin is offloaded to a Job worker, and this route
-deliberately breaks that pattern. Three constraints keep it from reintroducing the blocking that
-pattern exists to avoid, and none of them are optional:
+Every other long-running evaluation in this plugin is offloaded to a Job worker. This route
+deliberately breaks that pattern, so three constraints keep it from reintroducing the blocking that
+pattern exists to avoid:
 
-* ``await Evaluator().run(...)``, never ``run_sync``. ``run_sync`` detects the running loop, spawns
-  a worker thread and joins it, which would block this worker's event loop for the whole of
-  generation plus judge inference. ``EvaluateJob._run_evaluator`` is a sync method and calls
-  ``run_sync`` correctly; the structure there is worth copying, the call form is not.
-* A module-level semaphore, so N simultaneous requests cannot fan out to N generations plus N judge
-  calls. Excess is rejected rather than queued.
-* An outer timeout covering generation and judging together, bounding the handler even when a
-  per-request ``request_timeout`` does not fire.
-
-Two smaller shapes of the handler are load-bearing too. Reference resolution runs *inside* the
-error mapping rather than ahead of it: an unresolvable judge ``ModelRef`` is the most common real
-failure -- Studio's own notes record unavailable models surfacing as a 502 from an upstream 404 --
-and outside the mapping it would reach the caller as a bare 500 carrying no detail. And the
-concurrency check reads ``locked()`` immediately before ``acquire`` with no await between them, so
-nothing can slip in between and turn a rejection into a queued request.
+* ``await Evaluator().run(...)``, never ``run_sync``, which joins a worker thread and would pin
+  this worker's event loop for the whole of generation plus judge inference.
+* A module-level semaphore, so simultaneous requests cannot fan out without bound.
+* An outer timeout covering generation and judging together.
 """
 
 from __future__ import annotations
@@ -37,7 +25,11 @@ from typing import Any, Self
 from fastapi import APIRouter, Depends, HTTPException, status
 from nemo_evaluator.api.schemas import MetricRefOrInline
 from nemo_evaluator.authz import scope
-from nemo_evaluator.jobs.metric_resolution import resolve_metrics_to_inline, to_runtime_bundle
+from nemo_evaluator.jobs.metric_resolution import (
+    HelixMetricSecretResolver,
+    resolve_metrics_to_inline,
+    to_runtime_bundle,
+)
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend
 from nemo_evaluator_sdk.execution.config import resolve_params
@@ -47,72 +39,36 @@ from nemo_evaluator_sdk.metrics.protocol import Metric, MetricWithModels
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
 from nemo_evaluator_sdk.resolver_protocols import SecretResolver
 from nemo_evaluator_sdk.values import FieldMapping, Model
-from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.params import RunConfig, RunConfigOnlineModel
 from nemo_evaluator_sdk.values.results import AggregateScore
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import get_entity_client
-from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
-#: Ceiling on the whole handler: generation plus judging, not judging alone. Matches the 120s the
-#: Live Test panel already allows, so the route never outlives the client waiting on it.
+#: Ceiling on the whole handler, matching what the Live Test panel allows.
 LIVE_TIMEOUT_S = 120
 
-#: Per-upstream-call timeout. Generation and judging run sequentially on a single row, so two of
-#: these must still fit inside LIVE_TIMEOUT_S.
+#: Per-upstream-call timeout; two of these must still fit inside LIVE_TIMEOUT_S.
 LIVE_REQUEST_TIMEOUT_S = 55
 
-#: Cap on metrics per request, so /live cannot be used to run a full evaluation past the Jobs
-#: service. The row cap is enforced by the dataset field and reinforced by ``limit_samples=1``.
-#: Sized to fit every metric type that scores without external infrastructure in one call.
+#: Keeps /live from being used to run a full evaluation past the Jobs service.
 MAX_METRICS = 24
 
-#: Cap on *model-backed* metrics, which is where the cost actually is. Measured on one row: seven
-#: deterministic metrics score in ~11ms, while adding a single llm-judge takes ~3.7s, because the
-#: expense is an upstream inference call per metric and not the metric count. With MAX_CONCURRENT
-#: this bounds a worker's outbound fan-out at MAX_JUDGE_METRICS * MAX_CONCURRENT calls.
+#: Bounds outbound inference: each model-backed metric costs an upstream call.
 MAX_MODEL_BACKED_METRICS = 4
 
-#: Simultaneous in-flight scoring calls *per process*. Each one can hold a generation and a judge
-#: call, so this bounds outbound inference, not just handler count.
+#: Simultaneous in-flight scoring calls per process.
 MAX_CONCURRENT = 4
 
 _SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
-
-
-class _HelixSecretResolver:
-    """Resolve a metric's secret references through the Secrets service, as the calling principal.
-
-    The SDK's default ``LocalSecretResolver`` reads ``os.environ``, which a job populates through
-    ``build_task_environment`` and a request handler has no way to. This is the in-process
-    equivalent, and it deliberately uses the *request-scoped* client: a service-privileged one
-    would let any caller read another workspace's key and have a judge at a URL of their choosing
-    receive it. An unqualified ref resolves in the request's own workspace.
-    """
-
-    def __init__(self, secrets_client: AsyncSecretsClient, *, workspace: str) -> None:
-        """Bind the resolver to one caller's credentials and workspace."""
-        self._secrets_client = secrets_client
-        self._workspace = workspace
-
-    async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
-        """Return the secret's value, or ``None`` when the caller cannot see one by that name."""
-        ref = parse_entity_ref(secret_ref.root, self._workspace)
-        try:
-            response = await self._secrets_client.access_secret(name=ref.name, workspace=ref.workspace)
-        except NotFoundError:
-            return None
-        return response.data().value
 
 
 class LivePerms(PermissionSet, namespace="evaluator.live"):
@@ -259,7 +215,7 @@ async def run_live_evaluation(
                 request.metrics, workspace=workspace, entity_client=entity_client, async_client=async_client
             )
             params = _live_params(request.params, request.target)
-            secret_resolver = _HelixSecretResolver(
+            secret_resolver = HelixMetricSecretResolver(
                 client_from_platform(async_client, AsyncSecretsClient), workspace=workspace
             )
             async with asyncio.timeout(LIVE_TIMEOUT_S):
@@ -277,9 +233,7 @@ async def run_live_evaluation(
             logger.warning(f"Live evaluation failed: {type(exc).__name__}")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
-    # Per-metric errors are how a partial failure stays diagnosable, but a run where *nothing*
-    # scored did not partially succeed -- returning 200 there would let a client that reads only
-    # `scores` mistake a total failure for an empty result.
+    # Nothing scored is a total failure, not a partial one.
     if results and all(entry.error is not None for entry in results):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -291,12 +245,8 @@ async def run_live_evaluation(
 def _reject_target_secret(target: Model | None) -> None:
     """Reject a target carrying an ``api_key_secret``, which this route cannot resolve.
 
-    A job reaches its target's key because the compiler turns ``api_key_secret`` into a
-    ``from_secret`` task environment variable and ``Model.api_key`` reads it back out of the
-    process environment. In-process there is nothing to read: the only ways to supply it would be
-    mutating ``os.environ`` per request, which leaks one caller's credential into another's
-    request, or threading a resolved key through the SDK's generation path, which does not take
-    one. Rejecting is the honest answer until the SDK accepts a key.
+    ``Model.api_key`` reads the process environment, which a job container populates and a request
+    handler cannot. The SDK's generation path takes no resolved key, so there is nowhere to put one.
     """
     if target is not None and target.api_key_secret is not None:
         raise HTTPException(
@@ -318,7 +268,7 @@ async def _resolve_metrics(
 
     Resolution is shared with the job path so a judge ``ModelRef`` resolves the same way here: the
     SDK's default ``LocalModelResolver`` starts empty and would reject every reference. Any secrets
-    those metrics carry are resolved separately, by :class:`_HelixSecretResolver`.
+    those metrics carry are resolved separately, by :class:`HelixMetricSecretResolver`.
     """
     resolved = await resolve_metrics_to_inline(
         list(metrics),
@@ -344,14 +294,10 @@ def _live_params(
 ) -> RunConfig | RunConfigOnlineModel:
     """Return execution params with the interactive settings pinned.
 
-    The SDK's defaults are built for batch jobs. Three of them are actively wrong for a live test:
-    three retries with backoff turn a 502 into a long wait before an opaque failure, an unbounded
-    request timeout lets one call outlive the handler, and ``ignore_request_failure`` would return
-    a NaN score on a request that never succeeded. Pinning ``max_retries=0`` here is what removes
-    the original reason for generating client-side.
-
-    A model target requires ``RunConfigOnlineModel``, so a bare ``RunConfig`` is widened rather than
-    making the caller restate settings this function is about to pin anyway.
+    The SDK's defaults are built for batch jobs: retries with backoff hide the upstream status, an
+    unbounded request timeout outlives the handler, and ``ignore_request_failure`` would report a
+    NaN score for a request that never succeeded. A model target is widened to
+    ``RunConfigOnlineModel``, which carries those three knobs.
     """
     if target is not None and not isinstance(params, RunConfigOnlineModel):
         params = RunConfigOnlineModel.model_validate(params.model_dump() if params is not None else {})
@@ -375,19 +321,14 @@ async def _score(
 ) -> tuple[str | None, list[LiveMetricResult]]:
     """Score the row and report each metric's outcome separately.
 
-    Offline, each metric runs on its own so a failure names the metric that caused it and leaves
-    the others' scores intact. That costs nothing worth counting -- offline scoring is pure CPU
-    over a single row -- and it is the only way to get per-metric attribution, since the SDK
-    aborts a whole run on the first failure unless failures are tolerated, and tolerating them is
-    not available to the offline ``RunConfig``.
-
-    Online, the run stays single: the target must generate exactly once, and re-running per metric
-    would re-generate per metric. A metric failure there still fails the request as a whole.
+    Offline, each metric runs on its own, so a failure names the metric that caused it and leaves
+    the others' scores intact: the SDK aborts a whole run on the first failure, and the offline
+    ``RunConfig`` cannot tolerate failures. Online the run stays single, because the target must
+    generate exactly once, so a metric failure there fails the request as a whole.
     """
     if isinstance(request.target, Model):
         result = await _run(metrics, request=request, params=params, secret_resolver=secret_resolver)
-        # One run, so scores arrive namespaced under the keys the SDK assigned. Regrouping by those
-        # keys keeps the response shape identical to the offline path.
+        # Regroup the namespaced scores so the response matches the offline path.
         keys = unique_metric_keys(metrics)
         by_key: dict[str, list[AggregateScore]] = {key: [] for key in keys}
         for score in result.aggregate_scores.scores:

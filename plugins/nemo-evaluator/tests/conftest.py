@@ -8,10 +8,14 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import LogicalOperation
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
 
 
 def matches_filter(entity, operation) -> bool:
@@ -169,3 +173,38 @@ def entity_store() -> FakeEntityStore:
     module wins and the import fails.
     """
     return FakeEntityStore()
+
+
+# ---- judge secret resolution ----------------------------------------------
+
+
+class FakeAccessResponse:
+    """Stands in for the typed client's response wrapper, whose `data()` yields the payload."""
+
+    def __init__(self, payload: HelixSecretAccessResponse) -> None:
+        self._payload = payload
+
+    def data(self) -> HelixSecretAccessResponse:
+        return self._payload
+
+
+class FakeSecretsClient(AsyncSecretsClient):
+    """Answers secret lookups from a dict and records every (workspace, name) it was asked for."""
+
+    def __init__(self, secrets: dict[tuple[str, str], str] | None = None) -> None:
+        super().__init__(base_url="http://secrets.invalid", workspace="default")
+        self._secrets = secrets or {}
+        self.lookups: list[tuple[str, str]] = []
+
+    async def access_secret(self, *, workspace: str | None = None, name: str) -> FakeAccessResponse:
+        key = (workspace or "default", name)
+        self.lookups.append(key)
+        if key not in self._secrets:
+            raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
+        return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
+
+
+@pytest.fixture
+def make_secrets_client():
+    """Return a factory for Secrets clients seeded with ``(workspace, name) -> value``."""
+    return FakeSecretsClient

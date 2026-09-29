@@ -33,13 +33,11 @@ from nemo_evaluator_sdk.metrics.tool_calling import ToolCallingMetric
 from nemo_evaluator_sdk.values.common import SecretRef, SupportedJobTypes
 from nemo_evaluator_sdk.values.models import Model
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
 
 _BASE = "/v2/workspaces/default/live"
 
@@ -315,80 +313,7 @@ async def test_excess_concurrency_is_rejected_not_fanned_out(monkeypatch: pytest
     assert peak == 1
 
 
-# ---- judge secret resolution ----------------------------------------------
-
-
-class _FakeAccessResponse:
-    """Stands in for the typed client's response wrapper, whose `data()` yields the payload."""
-
-    def __init__(self, payload: HelixSecretAccessResponse) -> None:
-        self._payload = payload
-
-    def data(self) -> HelixSecretAccessResponse:
-        return self._payload
-
-
-class _FakeSecretsClient(AsyncSecretsClient):
-    """Answers secret lookups from a dict and records every (workspace, name) it was asked for."""
-
-    def __init__(self, secrets: dict[tuple[str, str], str] | None = None) -> None:
-        super().__init__(base_url="http://secrets.invalid", workspace="default")
-        self._secrets = secrets or {}
-        self.lookups: list[tuple[str, str]] = []
-
-    async def access_secret(self, *, workspace: str | None = None, name: str) -> _FakeAccessResponse:
-        key = (workspace or "default", name)
-        self.lookups.append(key)
-        if key not in self._secrets:
-            raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
-        return _FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
-
-
-@pytest.mark.asyncio
-async def test_resolver_returns_the_secret_value() -> None:
-    client = _FakeSecretsClient({("default", "judge-key"): "sk-live-abc"})
-    resolver = live_routes._HelixSecretResolver(client, workspace="default")
-
-    assert await resolver.resolve_secret(SecretRef(root="judge-key")) == "sk-live-abc"
-
-
-@pytest.mark.asyncio
-async def test_unqualified_ref_resolves_in_the_request_workspace() -> None:
-    """An unqualified name must not silently fall back to the client's own default workspace."""
-    client = _FakeSecretsClient({("team-a", "judge-key"): "sk-team-a"})
-    resolver = live_routes._HelixSecretResolver(client, workspace="team-a")
-
-    assert await resolver.resolve_secret(SecretRef(root="judge-key")) == "sk-team-a"
-    assert client.lookups == [("team-a", "judge-key")]
-
-
-@pytest.mark.asyncio
-async def test_qualified_ref_resolves_in_the_named_workspace() -> None:
-    """A workspace-qualified ref is honoured; the Secrets service authorizes it, not this resolver."""
-    client = _FakeSecretsClient({("team-b", "judge-key"): "sk-team-b"})
-    resolver = live_routes._HelixSecretResolver(client, workspace="team-a")
-
-    assert await resolver.resolve_secret(SecretRef(root="team-b/judge-key")) == "sk-team-b"
-    assert client.lookups == [("team-b", "judge-key")]
-
-
-@pytest.mark.asyncio
-async def test_missing_secret_resolves_to_none_rather_than_raising() -> None:
-    """`None` is the protocol's answer for "no such secret"; the metric turns it into the error."""
-    client = _FakeSecretsClient()
-    resolver = live_routes._HelixSecretResolver(client, workspace="default")
-
-    assert await resolver.resolve_secret(SecretRef(root="absent")) is None
-
-
-@pytest.mark.asyncio
-async def test_malformed_ref_is_rejected() -> None:
-    client = _FakeSecretsClient()
-    resolver = live_routes._HelixSecretResolver(client, workspace="default")
-
-    with pytest.raises(ValueError):
-        await resolver.resolve_secret(SecretRef(root="too/many/parts"))
-    assert client.lookups == []
+# ---- judge secret wiring ---------------------------------------------------
 
 
 def _judge_metric(secret: str | None) -> dict[str, Any]:
@@ -407,14 +332,14 @@ def _judge_metric(secret: str | None) -> dict[str, Any]:
     return MetricInline.model_validate_json(bundle.model_dump_json()).model_dump(mode="json")
 
 
-def _app_with_secrets(secrets: dict[tuple[str, str], str]) -> tuple[FastAPI, _FakeSecretsClient]:
+def _app_with_secrets(make_secrets_client, secrets: dict[tuple[str, str], str]) -> tuple[FastAPI, object]:
     app = _build_app()
-    secrets_client = _FakeSecretsClient(secrets)
+    secrets_client = make_secrets_client(secrets)
     app.dependency_overrides[get_nemo_client] = lambda: secrets_client
     return app, secrets_client
 
 
-def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch, make_secrets_client) -> None:
     """End to end: the route's resolver, not the SDK's env-reading default, supplies the judge key.
 
     The unit tests above exercise the resolver directly; only this one proves it is actually the
@@ -432,7 +357,7 @@ def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
 
-    app, secrets_client = _app_with_secrets({("default", "judge-key"): "sk-judge-secret"})
+    app, secrets_client = _app_with_secrets(make_secrets_client, {("default", "judge-key"): "sk-judge-secret"})
     with TestClient(app) as client:
         resp = client.post(
             _BASE,
@@ -448,7 +373,7 @@ def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch) -
     assert seen_keys and set(seen_keys) == {"sk-judge-secret"}
 
 
-def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.MonkeyPatch, make_secrets_client) -> None:
     """An unresolvable judge key must not come back as a score on a 200."""
 
     async def fake_judge_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
@@ -457,7 +382,7 @@ def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
 
-    app, secrets_client = _app_with_secrets({})
+    app, secrets_client = _app_with_secrets(make_secrets_client, {})
     with TestClient(app) as client:
         resp = client.post(
             _BASE,
