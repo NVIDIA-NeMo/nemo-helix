@@ -244,17 +244,13 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     assert isinstance(command, click.Group)
     for job_name in {job_cls.name for job_cls in jobs.values()}:
         job_command = command.commands[job_name]
-        assert not isinstance(job_command, click.Group)
+        # Non-legacy jobs submit from the group callback and keep only `explain` as a subcommand.
+        assert isinstance(job_command, click.Group)
+        assert set(job_command.commands) == {"explain"}
         for legacy_verb in ("run", "submit"):
             legacy_result = CliRunner().invoke(app, [job_name, legacy_verb])
             assert legacy_result.exit_code == 2
-            assert "Got unexpected extra argument" in legacy_result.output
-
-    for job_cls in jobs.values():
-        job_command = command.commands[job_cls.name]
-        if isinstance(job_command, click.Group):
-            assert "run" not in job_command.commands
-            assert "submit" not in job_command.commands
+            assert f"No such command '{legacy_verb}'" in legacy_result.output
 
 
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
