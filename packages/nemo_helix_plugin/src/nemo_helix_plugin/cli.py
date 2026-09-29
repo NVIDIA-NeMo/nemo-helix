@@ -72,14 +72,19 @@ class NemoCLI(_NamedPlugin):
     Plugins that contribute :class:`~nemo_helix_plugin.function.NemoFunction` or
     :class:`~nemo_helix_plugin.job.NemoJob` primitives get an auto-generated CLI
     surface (``run`` / ``submit`` / ``explain`` verbs with one Typer flag per
-    spec leaf). Override :meth:`update_function_cli` or :meth:`update_job_cli`
-    to amend that surface — add a flag, drop a flag, replace the verb entirely,
-    or anything else Typer permits. Both hooks default to no-ops, so plugins
-    that don't override them get today's auto-generated surface unchanged.
+    spec leaf). Set :attr:`auto_inject_function_commands` or
+    :attr:`auto_inject_job_commands` to ``False`` when a plugin owns the full CLI
+    surface itself. Otherwise, override :meth:`update_function_cli` or
+    :meth:`update_job_cli` to amend that surface — add a flag, drop a flag,
+    replace the verb entirely, or anything else Typer permits. Both hooks
+    default to no-ops, so plugins that don't override them get today's
+    auto-generated surface unchanged.
     """
 
     name: ClassVar[str]
     description: ClassVar[str] = ""
+    auto_inject_function_commands: ClassVar[bool] = True
+    auto_inject_job_commands: ClassVar[bool] = True
 
     @abstractmethod
     def get_cli(self) -> typer.Typer:

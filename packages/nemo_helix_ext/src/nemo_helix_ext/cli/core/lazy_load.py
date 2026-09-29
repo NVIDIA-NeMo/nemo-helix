@@ -169,7 +169,7 @@ def lazy_plugin_loader(plugin_name: str, import_path: str) -> Callable[[], click
             logger.warning("Failed to load CLI plugin %r from %r", plugin_name, import_path, exc_info=True)
             raise click.ClickException(f"Failed to load plugin commands for {plugin_name!r}: {exc}") from exc
 
-        job_entry_points = _discover_plugin_job_entry_points()
+        job_entry_points = _discover_plugin_job_entry_points() if cli_obj.auto_inject_job_commands else None
         if job_entry_points is not None:
             plugin_jobs = {}
             for job_name, job_entry_point in job_entry_points.items():
@@ -195,7 +195,9 @@ def lazy_plugin_loader(plugin_name: str, import_path: str) -> Callable[[], click
         # Functions live alongside jobs at the plugin level; mirror the
         # same per-plugin filtering so a multi-plugin install only sees
         # this plugin's functions in the resolved CLI tree.
-        function_entry_points = _discover_plugin_function_entry_points()
+        function_entry_points = (
+            _discover_plugin_function_entry_points() if cli_obj.auto_inject_function_commands else None
+        )
         if function_entry_points is not None:
             plugin_functions = {}
             for fn_name, fn_entry_point in function_entry_points.items():

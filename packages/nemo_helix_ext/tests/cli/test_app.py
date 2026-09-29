@@ -626,6 +626,34 @@ def test_plugin_loader_registers_unavailable_command_for_broken_jobs():
     assert "No such option: --spec" not in result.output
 
 
+def test_plugin_loader_skips_job_auto_injection_when_disabled():
+    plugin_app = typer.Typer(help="Plugin help")
+
+    @plugin_app.command()
+    def status() -> None:
+        pass
+
+    class _PluginCLI(NemoCLI):
+        name = "customization"
+        auto_inject_job_commands = False
+
+        def get_cli(self) -> typer.Typer:
+            return plugin_app
+
+    job = MagicMock()
+
+    with (
+        patch("nemo_helix_ext.cli.app._add_plugin_job_commands") as mock_add_jobs,
+        patch("nemo_helix_ext.cli.app._discover_plugin_job_entry_points", return_value={"customization.job": job}),
+        patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", return_value=_PluginCLI),
+    ):
+        loaded = lazy_plugin_loader("customization", "fake.module:PluginCLI")()
+
+    assert isinstance(loaded, click.Command)
+    job.load.assert_not_called()
+    mock_add_jobs.assert_not_called()
+
+
 def test_plugin_loader_surfaces_broken_cli_error():
     with patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", side_effect=RuntimeError("broken")):
         with pytest.raises(click.ClickException, match="Failed to load plugin commands for 'example': broken"):

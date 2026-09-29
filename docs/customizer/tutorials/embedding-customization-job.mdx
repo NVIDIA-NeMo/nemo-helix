@@ -325,7 +325,7 @@ These values match the Nemotron embed recipe apart from epochs. This job trains 
 Equivalent CLI:
 
 ```bash
-nemo customization automodel.jobs submit --workspace default --name embed-nvdocs --spec '{
+nemo customization automodel submit --workspace default --name embed-nvdocs --spec '{
   "model": "default/nemotron-3-embed-1b",
   "dataset": {"training": "default/nvdocs-embed-artifacts"},
   "training": {
