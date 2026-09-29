@@ -42,9 +42,20 @@ _CREDENTIAL_VALUE = re.compile(
 _CREDENTIAL_VALUE_MIN_CHARS = 16
 
 
-def _names_a_variable(path: str) -> bool:
-    """A ``*_env`` key (Fabric's ``api_key_env``) holds the *name* of an environment variable, not a value."""
-    return path.rpartition(".")[2].casefold().endswith("_env")
+_ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _names_a_variable(path: str, value: Any) -> bool:
+    """A ``*_env`` key (Fabric's ``api_key_env``) holds the *name* of an environment variable, not a value.
+
+    The exemption needs both halves: a key that says "name" and a value shaped like one. A token
+    written where the name belongs is not a name and takes the ordinary marker route.
+    """
+    return (
+        path.rpartition(".")[2].casefold().endswith("_env")
+        and isinstance(value, str)
+        and _ENV_VAR_NAME.fullmatch(value) is not None
+    )
 
 
 def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[str, Any]:
@@ -71,7 +82,7 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[s
         path = f"{_prefix}{key}"
         if isinstance(value, Mapping):
             redacted[key] = redact_credentials(value, f"{path}.")
-        elif not _names_a_variable(path) and any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
+        elif not _names_a_variable(path, value) and any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
             redacted[key] = _REDACTED
         elif isinstance(value, (list, tuple)):
             redacted[key] = [_redact_list_item(item, path) for item in value]
@@ -126,7 +137,7 @@ def _exposed_paths(path: str, value: Any) -> list[str]:
         return [nested for item in value for nested in _exposed_paths(path, item)]
     if not isinstance(value, str) or not value or _ENV_TEMPLATE.fullmatch(value):
         return []
-    if not _names_a_variable(path) and _SECRET_KEY_MARKER_RE.search(path.casefold()):
+    if not _names_a_variable(path, value) and _SECRET_KEY_MARKER_RE.search(path.casefold()):
         return [path]
     return [path] if is_credential_value(value) else []
 

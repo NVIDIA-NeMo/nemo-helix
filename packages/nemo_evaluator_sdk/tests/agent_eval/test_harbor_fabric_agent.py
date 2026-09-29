@@ -259,11 +259,17 @@ def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value
         with pytest.raises(ValueError, match=f"fabric_config.environment.env.{name}"):
             HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs={"fabric_config": leaked})
 
+    # The name exemption is for names: a value that is not shaped like one gets no pass from the key.
+    misnamed = _registered_agent_config()
+    misnamed["models"]["default"]["api_key_env"] = "an-unrecognised-real-secret"
+    with pytest.raises(ValueError, match="fabric_config.models.default.api_key_env"):
+        HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs={"fabric_config": misnamed})
+
 
 def test_provenance_redaction_keeps_variable_names_and_redacts_values() -> None:
     config = _registered_agent_config()
     config["environment"]["env"]["MY_API_KEY"] = "an-unrecognised-real-secret"
-    config["models"]["default"]["api_key_env"] = "sk-" + "a" * 40  # a value where a name belongs
+    config["models"]["default"]["api_key_env"] = "not a variable name"  # a value where a name belongs
 
     recorded = redact_credentials({"fabric_config": config, "api_key": "plain"})
 
