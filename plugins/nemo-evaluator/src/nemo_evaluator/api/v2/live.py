@@ -210,15 +210,17 @@ async def run_live_evaluation(
         )
     async with _SEMAPHORE:
         try:
-            _reject_target_secret(request.target)
-            metrics = await _resolve_metrics(
-                request.metrics, workspace=workspace, entity_client=entity_client, async_client=async_client
-            )
-            params = _live_params(request.params, request.target)
-            secret_resolver = HelixMetricSecretResolver(
-                client_from_platform(async_client, AsyncSecretsClient), workspace=workspace
-            )
+            # Reference resolution reaches the entity store, Files and Models, so it is bounded by
+            # the same timeout as scoring; outside it a slow lookup would hold a slot indefinitely.
             async with asyncio.timeout(LIVE_TIMEOUT_S):
+                _reject_target_secret(request.target)
+                metrics = await _resolve_metrics(
+                    request.metrics, workspace=workspace, entity_client=entity_client, async_client=async_client
+                )
+                params = _live_params(request.params, request.target)
+                secret_resolver = HelixMetricSecretResolver(
+                    client_from_platform(async_client, AsyncSecretsClient), workspace=workspace
+                )
                 output, results = await _score(metrics, request=request, params=params, secret_resolver=secret_resolver)
         except HTTPException:
             raise
@@ -230,7 +232,10 @@ async def run_live_evaluation(
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
         except Exception as exc:
-            logger.warning(f"Live evaluation failed: {type(exc).__name__}")
+            # The SDK's own wording is returned deliberately: naming the failing metric and the
+            # upstream status is why scoring runs through the evaluator at all. The caller is
+            # authenticated, workspace-scoped, and supplied the metrics and models named back.
+            logger.exception("Live evaluation failed")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
     # Nothing scored is a total failure, not a partial one.
