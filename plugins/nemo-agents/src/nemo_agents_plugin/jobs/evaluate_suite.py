@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar, Literal
 
+from nemo_agents_plugin.jobs.job_usage import evaluation_batch_token_usage
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
@@ -266,6 +267,15 @@ class EvaluateSuiteJob(NemoJob):
                 repeats=cfg.repeats,
             )
         )
+        if ctx is not None:
+            expected_executions = len(evals) * (cfg.repeats if runner.name == "harbor" else 1)
+            usage = evaluation_batch_token_usage(
+                output,
+                runner=runner.name,
+                expected_executions=expected_executions,
+            )
+            if usage is not None:
+                ctx.usage.report_totals(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
         return {
             "status": "completed",
             "runner": runner.name,
