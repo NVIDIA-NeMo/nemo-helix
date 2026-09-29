@@ -18,6 +18,7 @@ import pytest
 import typer
 from click.testing import Result
 from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.cli.core.help_formatter import NhxGroup
 from nemo_helix_ext.config.config import ConfigParams
 from nemo_helix_plugin.client.client import NemoClient
 from nhx.intake.cli import ExperimentsCLI, IntakeCLI
@@ -42,11 +43,28 @@ class Recorder:
         return self.requests[-1]
 
 
+def _mounted(app: typer.Typer, name: str) -> typer.Typer:
+    """Mount a plugin app under an ``NhxGroup`` root, the way ``nemo`` mounts ``nemo.cli`` groups.
+
+    The host restyles every command it hands out (help, usage errors), so the
+    plugin's own plain ``typer.Typer`` apps are tested as users see them.
+    """
+    root = typer.Typer(cls=NhxGroup, add_completion=False)
+
+    @root.callback()
+    def _root() -> None:
+        pass
+
+    root.add_typer(app, name=name)
+    return root
+
+
 @dataclass
 class CliHarness:
     """Runs a plugin Typer app against a scripted typed client."""
 
     app: typer.Typer
+    name: str
 
     def run(
         self,
@@ -65,7 +83,7 @@ class CliHarness:
         )
         overrides: ConfigParams = {"base_url": "http://test", "output_format": output_format}
         state = CLIContext(overrides=overrides, _client=client)
-        result = CliRunner().invoke(self.app, args, obj=state, input=input)
+        result = CliRunner().invoke(_mounted(self.app, self.name), [self.name, *args], obj=state, input=input)
         return result, recorder
 
     @staticmethod
@@ -96,9 +114,9 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
 @pytest.fixture(scope="session")
 def experiments_cli() -> CliHarness:
-    return CliHarness(ExperimentsCLI().get_cli())
+    return CliHarness(ExperimentsCLI().get_cli(), ExperimentsCLI.name)
 
 
 @pytest.fixture(scope="session")
 def intake_cli() -> CliHarness:
-    return CliHarness(IntakeCLI().get_cli())
+    return CliHarness(IntakeCLI().get_cli(), IntakeCLI.name)
