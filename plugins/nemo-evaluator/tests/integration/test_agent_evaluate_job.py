@@ -563,7 +563,7 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
     # The taskset expanded to BOTH members and both were scored: the numeric metric aggregates to
     # count == number of members (one sample per task, one trial each), with no NaNs, and mean == 1.0
     # because the mock model returns "DONE" for every task (so every task's output contains "DONE").
-    result = client.evaluator.agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
+    result = evaluator.agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
     if target_kind != "offline":
         assert (result.target_kind, result.target_name) == (target_kind, model_name)
     assert result.scores.scores, "run produced no aggregated scores"
