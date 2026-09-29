@@ -68,7 +68,7 @@ the managed ClickHouse container before deleting any bind-mounted data.
 nemo --help                # All commands
 nemo models list           # Available models
 nemo chat                  # Chat with your default model
-nemo services status       # Platform health
+nemo services status       # platform health
 nemo skills list           # Skills installed on the platform
 ```
 
@@ -133,7 +133,7 @@ See the [current release notes](https://docs.nvidia.com/nemo-helix/documentation
 
 ## Skills
 
-`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. Platform-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
+`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. NeMo Helix-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
 
 To install or refresh skills for a built-in coding agent, use `--agent`. For another Agent Skills-compatible harness, point `--path` at that harness's skills directory.
 
