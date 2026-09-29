@@ -12,7 +12,7 @@
 
 Make the agents you ship faster, more accurate, and safer.
 
-NeMo Helix is an extensible Open Source agentic control plane to improve and harden agents and agentic software. It builds on the NeMo OSS Libraries like Evaluator, Guardrails, Data Designer, Automodel, and NeMo RL, exposing them as a cohesive set of interfaces locally or in Kubernetes. Everything is exposed programmatically through REST APIs, a CLI, and a Python SDK, which allows agents or other applications easy access. Helix also ships with NeMo Studio, a modern web UI for humans to monitor and orchestrate your system.
+NeMo Helix is an extensible OSS agentic control plane for building automated systems to improve and harden agents and agentic software. It builds on the NeMo OSS Libraries like Fabric, Evaluator, Guardrails, Data Designer, Automodel, and NeMo RL, exposing them as a cohesive set of interfaces locally or in Kubernetes. Everything is exposed programmatically through REST APIs, a CLI, and a Python SDK, which allows agents or other applications easy access. Helix also ships with NeMo Studio, a modern web UI for humans to monitor and orchestrate your system.
 
 Helix extends the NeMo Libraries by introducing common infrastructure primitives that allow multi-agent systems to operate at scale. These are designed as interoperable and modular plugins for common operations like agent execution, sandboxing with OpenShell, file storage, secrets management, auth, model management, and inference middleware. Each of these ships with a sane default, but can be easily replaced with your infrastructure of choice.
 
