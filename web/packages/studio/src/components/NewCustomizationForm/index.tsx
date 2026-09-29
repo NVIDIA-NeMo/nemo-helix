@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import { useCustomizationCreateAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
@@ -19,6 +20,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { CustomizationFilesetCreateModal } from '@studio/components/CustomizationFilesetCreateModal';
 import { CustomizationFilesetSelect } from '@studio/components/customizer/CustomizationFilesetSelect';
 import { BackendSelectionSection } from '@studio/components/NewCustomizationForm/BackendSelectionSection';
 import {
@@ -54,6 +56,7 @@ import {
 } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
+  DATASET_FIELD_BY_BACKEND,
   FORM_DEFAULTS,
   customizationFormSchema,
   formToAutomodelCreate,
@@ -156,6 +159,10 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   // over when the training method changes and back.
   const [deployBaseModel, setDeployBaseModel] = useState(DEPLOY_BY_DEFAULT);
   const [deployOutputModel, setDeployOutputModel] = useState(DEPLOY_BY_DEFAULT);
+  // Owned here rather than in `CustomizationFilesetSelect` because the modal it opens
+  // renders a `<form>`, and a form nested inside this one never receives its own submit
+  // event. See `CustomizationFilesetSelectProps.onRequestNewDataset`.
+  const [datasetModalOpen, setDatasetModalOpen] = useState(false);
 
   const defaultValues = useMemo<CustomizationFormFields>(() => {
     if (initialValues) return initialValues;
@@ -518,7 +525,10 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                       </>
                     )}
                     <Divider />
-                    <CustomizationFilesetSelect disabled={isPending} />
+                    <CustomizationFilesetSelect
+                      disabled={isPending}
+                      onRequestNewDataset={() => setDatasetModalOpen(true)}
+                    />
                     <Divider />
                     {isGrpo ? <GrpoParametersSection /> : <GeneralParametersSection />}
                     {usesLoraControls && (
@@ -574,6 +584,24 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
               </Flex>
             </Stack>
           </form>
+          {/* Outside the `<form>` on purpose — see `datasetModalOpen` above. */}
+          {datasetModalOpen && (
+            <CustomizationFilesetCreateModal
+              open
+              onClose={() => setDatasetModalOpen(false)}
+              onFilesetCreated={(createdFileset) => {
+                form.setValue(
+                  DATASET_FIELD_BY_BACKEND[backend],
+                  getEntityReference(createdFileset),
+                  {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  }
+                );
+                setDatasetModalOpen(false);
+              }}
+            />
+          )}
         </FormProvider>
       </Stack>
     </AccessibleTitle>
