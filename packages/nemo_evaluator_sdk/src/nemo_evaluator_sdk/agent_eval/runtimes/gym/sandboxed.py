@@ -170,7 +170,7 @@ class SandboxedGymAgentTaskRunner:
     """An ``AgentTaskRunner`` that collects rollouts from a sandboxed Gym host over HTTP.
 
     By default every example goes to ``config.rollout_url`` in one POST. ``collect`` replaces that
-    step, e.g. with a session's ``run_rollouts``, which chunks the batch and retries.
+    step, e.g. with a session's ``arun_rollouts``, which chunks the batch and retries.
     """
 
     def __init__(self, *, config: SandboxedGymRuntimeConfig, collect: RolloutCollector | None = None) -> None:

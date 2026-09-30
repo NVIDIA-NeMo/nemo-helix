@@ -19,6 +19,7 @@ themselves, which no amount of local wiring can.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -101,6 +102,9 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
     reply: tuple[int, dict[str, Any]] | None = None
     #: Held per POST, so concurrent POSTs overlap long enough to be counted.
     delay_s = 0.0
+    #: When set, each POST blocks until this event is set, holding the request in flight.
+    gate: threading.Event | None = None
+    post_received = threading.Event()
     in_flight = 0
     peak_in_flight = 0
     _lock = threading.Lock()
@@ -123,6 +127,9 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
             cls.received_payloads.append(payload)
             cls.in_flight += 1
             cls.peak_in_flight = max(cls.peak_in_flight, cls.in_flight)
+        cls.post_received.set()
+        if cls.gate is not None:
+            cls.gate.wait(timeout=30)
         time.sleep(cls.delay_s)
         with cls._lock:
             cls.in_flight -= 1
@@ -196,6 +203,8 @@ def stub_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[_StubHostProvider
     _StubGymHostHandler.received_payloads = []
     _StubGymHostHandler.reply = None
     _StubGymHostHandler.delay_s = 0.0
+    _StubGymHostHandler.gate = None
+    _StubGymHostHandler.post_received = threading.Event()
     _StubGymHostHandler.in_flight = _StubGymHostHandler.peak_in_flight = 0
     provider = _StubHostProvider()
     # Patched where the orchestrator looks it up, so the orchestrator itself stays untouched.
@@ -346,6 +355,48 @@ async def test_the_host_is_destroyed_when_the_run_fails(
         await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
 
     assert stub_provider.destroyed == ["stub-host"]
+
+
+async def test_cancelling_a_run_stops_it_sending_the_rollouts_still_queued(
+    stub_provider: _StubHostProvider, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled job must not go on posting its remaining chunks, and retrying them, to a host
+    its own teardown has already destroyed."""
+    from sandboxed_gym.orchestrator import SandboxedGymSession
+
+    attempts: list[list[dict[str, Any]]] = []
+    first_attempt_returned = threading.Event()
+    post_chunk = SandboxedGymSession._post_chunk
+
+    def _counted_post_chunk(self: SandboxedGymSession, chunk: list[dict[str, Any]]) -> list[Any]:
+        attempts.append(chunk)
+        try:
+            return post_chunk(self, chunk)
+        finally:
+            first_attempt_returned.set()
+
+    monkeypatch.setattr(SandboxedGymSession, "_post_chunk", _counted_post_chunk)
+    release = _StubGymHostHandler.gate = threading.Event()
+    # Six single-example chunks, one in flight at a time: five are still queued at cancellation.
+    runner = SessionBackedGymRunner(
+        target=_target(num_repeats=3, concurrency=1), plan=_plan(), job_id="eval-job-cancelled"
+    )
+    run = asyncio.create_task(runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path)))
+    try:
+        assert await asyncio.to_thread(_StubGymHostHandler.post_received.wait, 10), "the first chunk never arrived"
+
+        run.cancel()
+        done, _ = await asyncio.wait({run}, timeout=10)
+
+        assert run in done, "cancellation must not wait for the chunk in flight to come back"
+        assert run.cancelled()
+        assert stub_provider.destroyed == ["stub-host"]
+    finally:
+        release.set()
+    assert await asyncio.to_thread(first_attempt_returned.wait, 10)
+    # A leaked dispatcher sends the next chunk within milliseconds of the first returning.
+    await asyncio.sleep(0.5)
+    assert len(attempts) == 1, f"{len(attempts) - 1} chunk POST(s) attempted after the run was cancelled"
 
 
 async def _raise_boom(*args: Any, **kwargs: Any) -> Any:

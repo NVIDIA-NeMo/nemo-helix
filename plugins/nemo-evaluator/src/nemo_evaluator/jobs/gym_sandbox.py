@@ -501,7 +501,7 @@ class SessionBackedGymRunner:
                     num_repeats=self._target.num_repeats,
                     reward_key=self._target.reward_key,
                 ),
-                collect=lambda examples: asyncio.to_thread(session.run_rollouts, examples),
+                collect=session.arun_rollouts,
             )
             return await self._delegate.run_tasks(tasks, config)
         finally:

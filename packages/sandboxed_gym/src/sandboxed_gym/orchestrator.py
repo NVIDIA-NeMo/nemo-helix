@@ -334,7 +334,7 @@ def build_gym_host_spec(
 
 
 class SandboxedGymSession:
-    """Live broker + host session. ``run_rollouts`` returns raw Gym host results."""
+    """Live broker + host session. ``arun_rollouts`` / ``run_rollouts`` return raw Gym host results."""
 
     def __init__(
         self,
@@ -380,15 +380,22 @@ class SandboxedGymSession:
         )
 
     def run_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
+        """Blocking form of :meth:`arun_rollouts`."""
+        return _run_coro_sync(self.arun_rollouts(examples))
+
+    async def arun_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
         """Run ``examples`` on the host as bounded concurrent chunks.
 
         Results are not in input order and never have been -- Gym yields through
         ``as_completed``. Attribution travels on each result as ``_ng_task_index`` /
         ``_ng_rollout_index``; see ``_with_row_identity`` in the host runtime.
+
+        Cancelling the awaiting task stops the batch: queued chunks are never sent and retry
+        backoffs end. A chunk already in flight finishes its HTTP call in its worker thread.
         """
         if not examples:
             raise ValueError("rollout batch must not be empty")
-        return _run_coro_sync(self._post_all_chunks(examples))
+        return await self._post_all_chunks(examples)
 
     async def _post_all_chunks(self, examples: list[dict[str, Any]]) -> list[Any]:
         chunks = [examples[start : start + self._chunk_size] for start in range(0, len(examples), self._chunk_size)]
