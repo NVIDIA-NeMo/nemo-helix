@@ -498,6 +498,11 @@ def _dependency_failure_detail(
     # Machine-readable upstream-status token (cross-service contract; see
     # _UPSTREAM_STATUS_TOKEN_PREFIX). Placed after the human guidance so it never disrupts
     # the readable message, but is always present for a programmatic consumer to parse.
+    #
+    # ORDERING IS LOAD-BEARING: the token MUST precede the echoed ``error_body``. The consumer
+    # parses with re.search (first match wins), so keeping our token ahead of the untrusted
+    # upstream body guarantees a body that happens to contain a ``[nemo_upstream_status=...]``
+    # substring can't shadow the genuine status. Do not move the token after error_body.
     status_token = _upstream_status_token(status_code)
     if error_body:
         return f"{first} {guidance} {status_token} Upstream response: {error_body}"

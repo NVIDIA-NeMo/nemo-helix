@@ -17,6 +17,7 @@ from nhx.core.models.config import ControllerConfig
 from nhx.core.models.controllers.context import ModelContext
 from nhx.core.models.controllers.entity_cache import ModelEntityCache
 from nhx.core.models.controllers.provider_reconciler import (
+    _AUTH_FAILURE_STATUS_PREFIX,
     PROVIDER_ERROR_RETRY_INTERVAL_SECONDS,
     PROVIDER_ERROR_THRESHOLD_SECONDS,
     PROVIDER_LOST_THRESHOLD_SECONDS,
@@ -1884,6 +1885,7 @@ def _make_provider():
         created_at=None,
         updated_at=None,
         served_models=None,
+        status_message=None,
     ):
         now = datetime.now(timezone.utc)
         return ModelProvider(
@@ -1894,6 +1896,7 @@ def _make_provider():
             created_at=created_at or now,
             updated_at=updated_at or now,
             served_models=served_models or [],
+            status_message=status_message if status_message is not None else "",
         )
 
     return _factory
@@ -2071,6 +2074,72 @@ async def test_error_provider_transitions_to_lost(reconciler, _make_provider):
     assert call_kwargs["status"] == "LOST"
     assert "permanently failed" in call_kwargs["status_message"]
     assert ctx.model_provider is updated_provider
+
+
+@pytest.mark.asyncio
+async def test_auth_demoted_provider_not_escalated_to_lost(reconciler, _make_provider):
+    """Regression: a provider demoted to ERROR by an authoritative auth failure must NOT be
+    escalated to LOST even when its created_at is long past the LOST threshold.
+
+    Before the fix, a mature (previously-READY) provider whose key expired would demote
+    READY→ERROR on one cycle, then jump straight to LOST on the next cycle because the LOST
+    gate measured age from created_at (long past for any real provider). LOST is reserved for a
+    provider that never worked; an auth-demoted provider must stay in recoverable ERROR (fixed by
+    rotating the key, which resets it via upsert). The auth marker on status_message is what
+    exempts it from the LOST gate.
+    """
+    now = datetime.now(timezone.utc)
+    provider = _make_provider(
+        status=ModelProviderStatus.ERROR,
+        # Old enough that the LOST threshold WOULD fire if it weren't auth-demoted.
+        created_at=now - timedelta(seconds=PROVIDER_LOST_THRESHOLD_SECONDS + 600),
+        updated_at=now - timedelta(seconds=PROVIDER_ERROR_RETRY_INTERVAL_SECONDS + 5),
+        status_message=_AUTH_FAILURE_STATUS_PREFIX + "upstream rejected credentials (HTTP 401)",
+    )
+    ctx = ModelContext(model_provider=provider)
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    # Discovery still fails with the same authoritative auth error on this retry cycle.
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryAuthError(status_code=401, message="upstream rejected credentials (HTTP 401)"),
+    ) as mock_query:
+        await reconciler.reconcile_model_providers([ctx])
+
+    # It must NOT be marked LOST. The retry cooldown had elapsed, so discovery is retried and the
+    # provider is re-written as ERROR (recoverable), never LOST.
+    mock_query.assert_called_once()
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
+    assert call_kwargs["status"] == "ERROR"
+    assert call_kwargs["status"] != "LOST"
+    # The re-written status_message keeps the auth marker so the exemption persists next cycle.
+    assert call_kwargs["status_message"].startswith(_AUTH_FAILURE_STATUS_PREFIX)
+
+
+@pytest.mark.asyncio
+async def test_auth_demoted_provider_within_cooldown_is_left_untouched(reconciler, _make_provider):
+    """An auth-demoted ERROR provider still inside its retry cooldown is neither escalated to LOST
+    nor re-probed — it is simply left alone until the cooldown elapses."""
+    now = datetime.now(timezone.utc)
+    provider = _make_provider(
+        status=ModelProviderStatus.ERROR,
+        created_at=now - timedelta(seconds=PROVIDER_LOST_THRESHOLD_SECONDS + 600),
+        updated_at=now,  # just updated → within cooldown
+        status_message=_AUTH_FAILURE_STATUS_PREFIX + "upstream rejected credentials (HTTP 403)",
+    )
+    ctx = ModelContext(model_provider=provider)
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(reconciler, "_discover_models") as mock_query:
+        await reconciler.reconcile_model_providers([ctx])
+
+    # Neither LOST nor a re-probe: the cooldown short-circuits after the LOST exemption.
+    mock_query.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
 
 
 @pytest.mark.asyncio

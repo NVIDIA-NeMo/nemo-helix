@@ -94,6 +94,14 @@ PROVIDER_ERROR_RETRY_INTERVAL_SECONDS = 60
 # Seconds from provider creation before a persistently-failing provider is marked LOST
 PROVIDER_LOST_THRESHOLD_SECONDS = 900
 
+# Stable prefix stamped on the status_message when a provider is demoted to ERROR because the
+# upstream authoritatively rejected our credentials (401/403). LOST escalation is reserved for a
+# provider that NEVER came up (a CREATED provider whose discovery kept failing); a provider demoted
+# from a previously-working state on an auth failure must stay in a RECOVERABLE ERROR until its key
+# is fixed (the upsert key/host reset re-evaluates it), so the LOST gate reads this marker back off
+# the persisted status_message to exempt it — never auto-burying a fixable credential problem.
+_AUTH_FAILURE_STATUS_PREFIX = "Provider discovery failed (auth): "
+
 
 def _infer_backend_format(model_name: str) -> str:
     """Infer backend_format from a model name. Defaults to OPENAI_CHAT."""
@@ -495,7 +503,13 @@ class ModelProviderReconciler:
 
         # ERROR providers: check LOST escalation, then enforce slow retry cadence.
         if provider.status == ModelProviderStatus.ERROR:
-            if self._is_past_lost_threshold(provider, provider_id, now):
+            # LOST is reserved for a provider that never worked (CREATED that kept failing
+            # discovery). A provider demoted to ERROR by an authoritative auth failure carries the
+            # auth marker in its status_message; it must stay recoverable (fixable by rotating the
+            # key, which resets it via upsert) and must NOT be auto-buried as LOST — otherwise a
+            # mature, previously-READY provider whose key expired would jump straight to LOST on
+            # the cycle after demotion (its creation is long past the LOST threshold).
+            if not self._is_auth_demoted(provider) and self._is_past_lost_threshold(provider, provider_id, now):
                 await self._mark_lost(ctx, provider, provider_id)
                 return
             if self._is_within_retry_cooldown(provider, now):
@@ -516,10 +530,11 @@ class ModelProviderReconciler:
                 # _on_transient_failure). served_models are left untouched: the provider
                 # config is intact, only its credentials are being rejected, so keeping the
                 # last-known routes avoids churning entity links on a fixable auth problem.
-                status_message = (
-                    f"Provider discovery failed: {auth_err.message}"
-                    if auth_err.message
-                    else "Provider discovery failed: upstream rejected credentials"
+                # Stamp the auth marker so the LOST-escalation gate can recognise this ERROR as a
+                # recoverable credential rejection (see _AUTH_FAILURE_STATUS_PREFIX) and never bury
+                # it as LOST.
+                status_message = _AUTH_FAILURE_STATUS_PREFIX + (
+                    auth_err.message if auth_err.message else "upstream rejected credentials"
                 )
                 if provider.status != ModelProviderStatus.ERROR:
                     logger.warning(
@@ -721,6 +736,17 @@ class ModelProviderReconciler:
     # -------------------------------------------------------------------------
     # Status machine
     # -------------------------------------------------------------------------
+
+    def _is_auth_demoted(self, provider: ModelProvider) -> bool:
+        """Return True if this provider is in ERROR due to an authoritative auth failure.
+
+        Recognised by the stable ``_AUTH_FAILURE_STATUS_PREFIX`` marker stamped on the
+        status_message at demotion time. Such a provider is recoverable (fix the key → upsert
+        resets it) and must be exempt from LOST escalation, which is reserved for a provider that
+        never worked.
+        """
+        message = provider.status_message or ""
+        return message.startswith(_AUTH_FAILURE_STATUS_PREFIX)
 
     def _is_past_lost_threshold(self, provider: ModelProvider, provider_id: str, now: datetime) -> bool:
         """Return True if this ERROR provider has been alive longer than PROVIDER_LOST_THRESHOLD_SECONDS."""
@@ -936,9 +962,20 @@ class ModelProviderReconciler:
                         status_code=upstream_status,
                         message=f"upstream rejected credentials (HTTP {upstream_status})",
                     )
-                # 404 / no upstream-status token (older IGW) — backend has no GET /v1/models
-                # route. Mark non-compliant (stays READY, model entity routing disabled).
-                logger.info(f"Backend for {provider_id} rejected GET /v1/models (424), disabling model entity routing")
+                # Not an auth rejection. Two sub-cases, both non-compliant (stays READY, model
+                # entity routing disabled), but logged distinctly so an operator can tell a real
+                # "no GET /v1/models route" (404) apart from an older IGW that predates the
+                # machine-readable token (upstream_status is None):
+                if upstream_status is None:
+                    logger.info(
+                        f"Backend for {provider_id} rejected GET /v1/models (424) with no upstream-status "
+                        f"token (older gateway?); treating as non-compliant, disabling model entity routing"
+                    )
+                else:
+                    logger.info(
+                        f"Backend for {provider_id} has no GET /v1/models route (upstream HTTP {upstream_status}); "
+                        f"treating as non-compliant, disabling model entity routing"
+                    )
                 return DiscoveryNonCompliant()
             # Other 4xx/5xx (e.g. 424 unresolved-secret, 502, 429, 5xx) — treat as transient
             logger.debug(
