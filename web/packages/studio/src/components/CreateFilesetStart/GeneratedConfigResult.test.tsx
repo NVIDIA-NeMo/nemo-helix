@@ -53,6 +53,18 @@ describe('GeneratedConfigResult', () => {
     expect(screen.getByRole('button', { name: /view config/i })).toBeInTheDocument();
   });
 
+  it('suggests a larger model when the draft is rejected', () => {
+    renderResult();
+
+    expect(screen.getByText(/consider selecting a larger model/i)).toBeInTheDocument();
+  });
+
+  it('does not suggest a larger model for a loadable draft', () => {
+    renderResult({ validation: VALID_WITH_WARNING });
+
+    expect(screen.queryByText(/consider selecting a larger model/i)).not.toBeInTheDocument();
+  });
+
   it('hides View config when there is no output to show', () => {
     renderResult({ rawOutput: null });
 
