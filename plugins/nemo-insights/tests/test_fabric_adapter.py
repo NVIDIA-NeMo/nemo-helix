@@ -271,7 +271,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         return AnalystResult(summary="done"), object()
 
     @asynccontextmanager
-    async def fake_plugin(config: Any) -> AsyncIterator[None]:
+    async def fake_activate(config: Any) -> AsyncIterator[None]:
         seen["plugin_config"] = config
         # Relay resolves header_env against the environment while exporting,
         # so the variables have to be set for the duration of the run.
@@ -279,7 +279,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         yield
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
-    monkeypatch.setattr(fabric_adapter.relay_plugin, "plugin", fake_plugin)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
     monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
