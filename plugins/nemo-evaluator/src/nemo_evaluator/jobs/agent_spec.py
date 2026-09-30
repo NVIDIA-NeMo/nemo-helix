@@ -353,7 +353,12 @@ class HarborRunnerTarget(BaseModel):
 
 
 class GymAgentSource(BaseModel):
-    """A Gym agent, selected the way ``gym`` selects one: a component, its config, and the instance."""
+    """A Gym agent, selected the way ``gym`` selects one: a component, its config, and the instance.
+
+    The keys are Gym's words rather than the target's former ``agent`` / ``agent_config`` /
+    ``agent_ref_name``: a sibling source member names a platform agent under ``agent``, and the union's
+    members must share no required key.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
