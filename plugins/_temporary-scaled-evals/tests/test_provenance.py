@@ -63,7 +63,6 @@ def _row(**overrides):  # noqa: ANN001, ANN202
         "network_policy_config": {},
         "framework_profile_id": "cfg_framework",
         "harbor_profile_id": "cfg_harbor",
-        "switchyard_profile_id": "cfg_switchyard",
         "intake_profile_id": "cfg_intake",
         "credentials": {"openai": "cred_openai"},
         "harbor_config": {
@@ -71,10 +70,6 @@ def _row(**overrides):  # noqa: ANN001, ANN202
                 "SAFE_PROFILE": "dev",
                 "POLICY_API_KEY": "sk-do-not-serialize",
             }
-        },
-        "switchyard_config": {
-            "book_mode": "closed",
-            "switchyard_routing_profiles_yaml": "defaults:\n  api_key: ${OPENAI_API_KEY}\n",
         },
         "intake_config": {
             "endpoint": "https://intake.example.test/apis/intake/v2",
@@ -111,11 +106,9 @@ def test_run_provenance_manifest_schema_round_trips(tmp_path, monkeypatch) -> No
     assert parsed.schema_version == MANIFEST_SCHEMA_VERSION
     assert parsed.control_plane.git_sha == "abc123"
     assert parsed.runtime.network_policy == "unrestricted"
-    assert parsed.runtime.effective_isolation.model_gateway == "restricted"
-    assert parsed.runtime.effective_isolation.bypass_resistant is False
+    assert parsed.runtime.effective_isolation.direct_egress == "unrestricted"
+    assert parsed.runtime.effective_isolation.model_gateway == "none"
     assert parsed.runtime.effective_isolation.platform_verified is False
-    assert parsed.runtime.effective_isolation.warnings
-    assert "configured inference endpoint" in parsed.runtime.effective_isolation.warnings[0]
     assert parsed.runtime.runner_image_digest == "sha256:resolved"
     assert parsed.runtime.runner_image_ref == "registry.example/runner@sha256:resolved"
     assert parsed.config.requested_framework_version == "stable"
@@ -671,63 +664,6 @@ def test_gym_provenance_keeps_invalid_legacy_profile_hash_only(tmp_path) -> None
     assert "sk-observed-secret-must-not-serialize" not in serialized
     assert "sk-agent-secret-must-not-serialize" not in serialized
     assert "/private/legacy/path" not in serialized
-
-
-def test_run_provenance_manifest_includes_switchyard_lease_without_secrets(
-    tmp_path,
-) -> None:
-    manifest = build_run_provenance_manifest(
-        _row(
-            switchyard_topology="dedicated_retry",
-            switchyard={
-                "profile_id": "cfg_switchyard",
-                "namespace": "evals",
-                "name": "switchyard-ev-test123",
-                "service_name": "switchyard-ev-test123",
-                "config_map_name": "switchyard-ev-test123-routes",
-                "secret_name": "switchyard-ev-test123-secrets",
-                "network_policy_name": "switchyard-ev-test123-sandbox-egress",
-                "endpoint": "http://switchyard-ev-test123.evals.svc.cluster.local:4000",
-                "openai_base_url": "http://switchyard-ev-test123.evals.svc.cluster.local:4000/v1",
-                "anthropic_base_url": "http://switchyard-ev-test123.evals.svc.cluster.local:4000",
-                "inbound": "openai",
-                "port": 4000,
-                "manifest_hash": "sha256:manifest",
-                "config_hash": "sha256:config",
-                "artifact_path": "switchyard/",
-                "image_ref": "artifactory.example/scaled-evals/switchyard:sha-aaa",
-                "image_digest": f"artifactory.example/scaled-evals/switchyard@sha256:{'1' * 64}",
-                "source_project": "NVIDIA-NeMo/Switchyard",
-                "source_ref": "a" * 40,
-                "source_commit": "a" * 40,
-                "context_path": ".",
-                "dockerfile_path": "benchmark/switchyard-server.Dockerfile",
-                "dockerfile_sha256": "c" * 64,
-                "context_hash": "b" * 64,
-            },
-            switchyard_drain_until="2026-06-23T12:05:00+00:00",
-        ),
-        status="succeeded",
-        artifact_prefix="evaluations/ev_test123/artifacts/",
-        artifact_root=tmp_path,
-    )
-
-    payload = manifest.model_dump_json(exclude_none=True)
-    assert manifest.switchyard is not None
-    assert manifest.switchyard.topology == "dedicated_retry"
-    assert manifest.switchyard.deployment == "switchyard-ev-test123"
-    assert manifest.switchyard.network_policy == "switchyard-ev-test123-sandbox-egress"
-    assert manifest.switchyard.drain_until == "2026-06-23T12:05:00+00:00"
-    assert manifest.switchyard.image_ref == "artifactory.example/scaled-evals/switchyard:sha-aaa"
-    assert manifest.switchyard.image_digest == (f"artifactory.example/scaled-evals/switchyard@sha256:{'1' * 64}")
-    assert manifest.switchyard.source_project == "NVIDIA-NeMo/Switchyard"
-    assert manifest.switchyard.source_ref == "a" * 40
-    assert manifest.switchyard.source_commit == "a" * 40
-    assert manifest.switchyard.context_path == "."
-    assert manifest.switchyard.dockerfile_path == "benchmark/switchyard-server.Dockerfile"
-    assert manifest.switchyard.dockerfile_sha256 == "c" * 64
-    assert manifest.switchyard.context_hash == "b" * 64
-    assert "sk-do-not-serialize" not in payload
 
 
 def test_run_provenance_manifest_reports_variant_operational_overrides(tmp_path) -> None:  # noqa: ANN001

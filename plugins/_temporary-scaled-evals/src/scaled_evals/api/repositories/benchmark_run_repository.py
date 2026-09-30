@@ -32,9 +32,9 @@ BENCHMARK_RUN_COLUMNS = (
     "runner_image_ref, runner_image_digest, framework_adapter_version, sandbox_k8s_version, "
     "runner_metadata, "
     "benchmark_id, benchmark_revision, "
-    "framework_profile_id, harbor_profile_id, switchyard_profile_id, intake_profile_id, "
+    "framework_profile_id, harbor_profile_id, intake_profile_id, "
     "credentials, runtime, network_policy, network_policy_config, parallelism, "
-    "max_concurrent_members, visibility, "
+    "visibility, "
     "cancelled_at, created_at, updated_at"
 )
 _TERMINAL_STATUSES = ("succeeded", "failed", "cancelled")
@@ -401,14 +401,12 @@ class BenchmarkRunRepository:
         members: builtins.list[dict],
         framework_profile_id: str | None,
         harbor_profile_id: str | None,
-        switchyard_profile_id: str | None,
         intake_profile_id: str | None,
         credentials: dict[str, str],
         runtime: str,
         network_policy: str,
         network_policy_config: dict[str, Any],
         parallelism: int,
-        max_concurrent_members: int | None,
         visibility: str,
         owner_id: str,
         n_attempts: int = 1,
@@ -441,13 +439,13 @@ class BenchmarkRunRepository:
                     runner_image_ref, runner_image_digest,
                     framework_adapter_version, sandbox_k8s_version, runner_metadata,
                     benchmark_id, benchmark_revision,
-                    framework_profile_id, harbor_profile_id, switchyard_profile_id,
+                    framework_profile_id, harbor_profile_id,
                     intake_profile_id, credentials, runtime, network_policy,
-                    network_policy_config, parallelism, max_concurrent_members, visibility
+                    network_policy_config, parallelism, visibility
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING {BENCHMARK_RUN_COLUMNS}
                 """,
@@ -467,14 +465,12 @@ class BenchmarkRunRepository:
                     benchmark_revision,
                     framework_profile_id,
                     harbor_profile_id,
-                    switchyard_profile_id,
                     intake_profile_id,
                     Json(credentials),
                     runtime,
                     network_policy,
                     Json(network_policy_config),
                     parallelism,
-                    max_concurrent_members,
                     visibility,
                 ),
             )
@@ -496,7 +492,6 @@ class BenchmarkRunRepository:
                     task_revision=member["task_revision"],
                     framework_profile_id=member_framework_profile_id,
                     harbor_profile_id=(member_framework_profile_id if framework == "harbor" else harbor_profile_id),
-                    switchyard_profile_id=switchyard_profile_id,
                     intake_profile_id=intake_profile_id,
                     credentials=credentials,
                     extra_skill_object_keys=extra_skill_object_keys or [],
@@ -645,25 +640,6 @@ class BenchmarkRunRepository:
                         "cancelled",
                         member.get("status_detail"),
                     )
-            if run is not None:
-                cur.execute(
-                    """
-                    UPDATE benchmark_switchyard_launches
-                    SET status = 'cleanup_pending', permit_expires_at = NOW(), updated_at = NOW()
-                    WHERE benchmark_run_id = %s
-                      AND status IN ('launching', 'running')
-                    """,
-                    (run_id,),
-                )
-                cur.execute(
-                    """
-                    UPDATE benchmark_switchyard_campaigns
-                    SET cancel_requested_at = COALESCE(cancel_requested_at, NOW()),
-                        updated_at = NOW()
-                    WHERE benchmark_run_id = %s
-                    """,
-                    (run_id,),
-                )
         return run, cancelled_now, cancelled_members
 
     def soft_delete(self, run_id: str) -> bool:

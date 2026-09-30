@@ -40,12 +40,6 @@ def _first_metric(metrics: dict[str, Any], names: tuple[str, ...]) -> int | None
 
 def _payload_metric(payload: TrialPayload, names: tuple[str, ...]) -> int | None:
     body = payload.payload
-    extra = body.get("extra")
-    routing = extra.get("switchyard_routing") if isinstance(extra, dict) else None
-    if isinstance(routing, dict):
-        value = _first_metric(routing, names)
-        if value is not None:
-            return value
     metrics = body.get("final_metrics")
     if not isinstance(metrics, dict):
         return None
@@ -60,8 +54,6 @@ def _raw_usage_source(payload: TrialPayload) -> str:
     extra = payload.payload.get("extra")
     if not isinstance(extra, dict):
         return "unknown"
-    if isinstance(extra.get("switchyard_routing"), dict):
-        return "switchyard-session-stats"
     trial_result = extra.get("trial_result")
     if isinstance(trial_result, dict):
         agent_result = trial_result.get("agent_result")
@@ -92,9 +84,6 @@ def _cost(payload: TrialPayload) -> tuple[float | None, str]:
         raw_cost = _non_negative_number(final_metrics.get("total_cost_usd"))
         cost = float(raw_cost) if raw_cost is not None else None
     extra = body.get("extra")
-    routing = extra.get("switchyard_routing") if isinstance(extra, dict) else None
-    if isinstance(routing, dict):
-        return cost, "estimated" if routing.get("cost_status") == "complete" else "unknown"
     trial_result = extra.get("trial_result") if isinstance(extra, dict) else None
     agent_result = trial_result.get("agent_result") if isinstance(trial_result, dict) else None
     if isinstance(agent_result, dict) and _non_negative_number(agent_result.get("cost_usd")) is not None:

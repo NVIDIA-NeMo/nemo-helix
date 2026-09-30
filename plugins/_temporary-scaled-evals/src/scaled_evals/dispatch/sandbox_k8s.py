@@ -844,12 +844,7 @@ def _bind_network_policy(
     network_policy: str,
     network_policy_config: Mapping[str, Any],
 ) -> str:
-    """Make the evaluation's direct-egress policy authoritative.
-
-    Switchyard may add a separate, evaluation-scoped grant to its own proxy.
-    Kubernetes combines matching policies additively, so this function owns
-    only direct sandbox egress and never infers a Switchyard book mode.
-    """
+    """Make the evaluation's direct-egress policy authoritative."""
     config = yaml.safe_load(config_text) or {}
     if not isinstance(config, dict):
         raise ValueError("rendered Harbor config must be an object")
@@ -1678,8 +1673,8 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     # Claim mode returns warm-pool capacity through the claim controller. Do not
     # directly delete its adopted Sandbox/Pod. Direct CRD mode owns both the pod
     # and the optional NetworkPolicy, including old-UID orphans left by a failed
-    # controller reconciliation. The evaluation label is shared with Switchyard,
-    # so it must never be used for dependent deletion. Discover the Sandbox CR
+    # controller reconciliation. The evaluation label may select resources other
+    # than the sandbox, so it must never be used for dependent deletion. Discover the Sandbox CR
     # names first, then use sandbox-k8s's ownership label on Pods and policies.
     dependent_selector = f"sandbox-k8s/sandbox in ({','.join(sandbox_names)})"
     if not template_name:

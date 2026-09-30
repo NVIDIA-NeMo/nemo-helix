@@ -76,7 +76,6 @@ def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> Cre
         framework_version=run.get("framework_version"),
         framework_profile_id=run.get("framework_profile_id"),
         member_framework_profile_ids=dict(runner_metadata.get("member_framework_profile_ids") or {}),
-        switchyard_profile_id=run.get("switchyard_profile_id"),
         intake_profile_id=run.get("intake_profile_id"),
         credentials=dict(run.get("credentials") or {}),
         agent_bundle_id=_agent_bundle_id(runner_metadata),
@@ -89,7 +88,6 @@ def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> Cre
         network_policy_config=dict(run.get("network_policy_config") or {}),
         n_attempts=int(member.get("n_attempts") or 1),
         parallelism=int(run["parallelism"]),
-        max_concurrent_members=run.get("max_concurrent_members"),
         visibility=run.get("visibility") or "private",
     )
 
@@ -129,7 +127,6 @@ def _create_command(body: CreateBenchmarkRunRequest) -> list[str]:
         )
     for option, value in (
         ("--framework-profile-id", body.framework_profile_id),
-        ("--switchyard-profile-id", body.switchyard_profile_id),
         ("--intake-profile-id", body.intake_profile_id),
         ("--agent-bundle", body.agent_bundle_id),
     ):
@@ -147,8 +144,6 @@ def _create_command(body: CreateBenchmarkRunRequest) -> list[str]:
         command.extend(["--instruction-postfix", body.instruction_postfix])
     for turn in body.initial_user_turns:
         command.extend(["--initial-user-turn", turn])
-    if body.max_concurrent_members is not None:
-        command.extend(["--max-concurrent-members", str(body.max_concurrent_members)])
     return command
 
 
@@ -235,7 +230,6 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         members=spawn,
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
-        switchyard_profile_id=body.switchyard_profile_id,
         intake_profile_id=body.intake_profile_id,
         credentials=body.credentials,
         extra_skill_object_keys=body.extra_skill_object_keys,
@@ -247,11 +241,6 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         network_policy_config=body.network_policy_config,
         n_attempts=body.n_attempts,
         parallelism=body.parallelism,
-        max_concurrent_members=(
-            body.max_concurrent_members
-            if body.max_concurrent_members is not None
-            else (len(members) if body.switchyard_profile_id is not None else None)
-        ),
         visibility=body.visibility,
         owner_id=current.owner_id,
     )
@@ -366,7 +355,7 @@ def cancel_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
 
     Idempotent: a run already terminal is returned unchanged. The member
     evaluations are flipped to `cancelled`, then launched members follow the
-    same runtime and Switchyard teardown path as single-evaluation cancellation.
+    same runtime teardown path as single-evaluation cancellation.
     """
     row, _cancelled_now, cancelled_members = db.benchmark_runs.cancel(run_id)
     if row is None:

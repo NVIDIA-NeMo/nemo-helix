@@ -112,7 +112,6 @@ def test_metrics(monkeypatch) -> None:  # noqa: ANN001
             "oldest_worker_lease_seconds": 0.0,
             "stuck_jobs": [],
             "backend_failures": [],
-            "switchyard_teardown": {},
         },
     )
     response = client.get("/v1/metrics")

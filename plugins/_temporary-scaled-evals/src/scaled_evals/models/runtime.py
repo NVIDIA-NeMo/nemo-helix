@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -65,9 +65,6 @@ class LaunchSpec(BaseModel):
     framework_config: dict[str, Any] = Field(default_factory=dict)
     harbor_config: dict[str, Any] = Field(default_factory=dict)
     harbor_dataset_image_imports: list[dict[str, Any]] = Field(default_factory=list)
-    switchyard_profile_id: str | None = None
-    switchyard_config: dict[str, Any] = Field(default_factory=dict)
-    switchyard: SwitchyardLease | None = None
     intake_profile_id: str | None = None
     credentials: dict[str, str] = Field(default_factory=dict)
     credential_env: dict[str, str] = Field(default_factory=dict)
@@ -81,50 +78,6 @@ class LaunchHandle(BaseModel):
     backend: str
     external_id: str
     raw: dict[str, Any] = Field(default_factory=dict)
-
-
-class SwitchyardLease(BaseModel):
-    """Per-evaluation managed resource or external endpoint identity.
-
-    Secret material is intentionally absent. The lease is safe to persist in
-    Postgres, pass through LaunchSpec, and record in provenance.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    profile_id: str
-    benchmark_run_id: str | None = None
-    mode: Literal["managed", "external"] = "managed"
-    namespace: str | None = None
-    name: str | None = None
-    service_name: str | None = None
-    config_map_name: str | None = None
-    secret_name: str | None = None
-    network_policy_name: str | None = None
-    endpoint: str
-    openai_base_url: str
-    anthropic_base_url: str
-    inbound: str
-    port: int
-    book_mode: str | None = None
-    resource_labels: dict[str, str] = Field(default_factory=dict)
-    endpoint_identity: str | None = None
-    trust_warning: str | None = None
-    manifest_hash: str | None = None
-    config_hash: str | None = None
-    drain_seconds: float | None = None
-    routing_stats_path: str = "/v1/routing/stats"
-    routing_stats_max_bytes: int = 1_048_576
-    artifact_path: str | None = None
-    image_ref: str | None = None
-    image_digest: str | None = None
-    source_project: str | None = None
-    source_ref: str | None = None
-    source_commit: str | None = None
-    context_path: str | None = None
-    dockerfile_path: str | None = None
-    dockerfile_sha256: str | None = None
-    context_hash: str | None = None
 
 
 class RuntimeStatus(BaseModel):

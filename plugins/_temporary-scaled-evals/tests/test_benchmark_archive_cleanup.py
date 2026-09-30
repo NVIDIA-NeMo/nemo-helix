@@ -153,10 +153,6 @@ def test_idle_dispatcher_reconciles_crashed_upload(monkeypatch):
     for method in (
         # Drained first now that Platform Jobs is the default execution path.
         "claim_next_execution_cleanup",
-        "claim_next_switchyard_teardown",
-        "claim_next_switchyard_campaign_cleanup",
-        "claim_next_switchyard_campaign_finalization",
-        "claim_next_switchyard_campaign_deletion",
         "claim_next",
         "claim_next_evidence",
         "claim_next_archive",
