@@ -16,7 +16,7 @@ from nemo_evaluator.jobs.metric_resolution import to_inline
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator.task_refs import validate_scoring
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborTasksetLoader
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborTasksetLoader
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentOutput, TrialError
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric

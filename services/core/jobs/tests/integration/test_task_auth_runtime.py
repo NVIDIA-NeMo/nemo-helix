@@ -6,7 +6,7 @@
 These tests cover the runtime half of the jobs auth propagation story:
 
 - the task receives ``NHX_PRINCIPAL``
-- ``get_task_sdk(as_service=...)`` converts that into service + on-behalf-of headers
+- ``get_task_nemo_client(...)`` converts that into service + on-behalf-of headers
 - downstream services authorize based on the delegated user's permissions
 """
 
@@ -17,7 +17,6 @@ import os
 from typing import Protocol
 
 import pytest
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
@@ -43,13 +42,13 @@ def _secret_access_task_module() -> _SecretAccessTask:
     class _Task:
         @staticmethod
         def run(*, http_client) -> str:
-            from nhx.common.sdk_factory import get_task_sdk
+            from nhx.common.client_factory import get_task_nemo_client
 
             workspace = os.environ["NEMO_JOB_WORKSPACE"]
             secret_name = os.environ["NEMO_TEST_SECRET_NAME"]
 
-            task_sdk = get_task_sdk(as_service="jobs", http_client=http_client)
-            result = client_from_platform(task_sdk, SecretsClient).access_secret(
+            task_client = get_task_nemo_client("jobs", http_client=http_client)
+            result = SecretsClient.from_client(task_client).access_secret(
                 name=secret_name,
                 workspace=workspace,
             )

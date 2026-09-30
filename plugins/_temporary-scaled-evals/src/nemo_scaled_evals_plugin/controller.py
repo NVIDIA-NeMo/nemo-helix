@@ -14,15 +14,14 @@ from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.client_provider import get_async_nemo_client, get_nemo_client
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entities.base import SyncEntityClient
 from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -81,8 +80,8 @@ class ScaledEvalsJobsController(NemoController):
         return self._healthy
 
     async def on_startup(self) -> None:
-        sdk = get_async_platform_sdk(as_service="scaled-evals", internal=True)
-        self._jobs = client_from_platform(sdk, AsyncJobsClient)
+        client = get_async_nemo_client(as_service="scaled-evals", internal=True)
+        self._jobs = AsyncJobsClient.from_client(client)
         if (
             settings.platform_jobs_provider == "cpu"
             and (settings.platform_build_jobs_enabled or settings.platform_evaluation_jobs_enabled)
@@ -90,10 +89,7 @@ class ScaledEvalsJobsController(NemoController):
         ):
             raise RuntimeError("SCALED_EVALS_PLATFORM_JOBS_IMAGE is required when Platform Jobs are enabled")
         if settings.entity_store_projection_enabled:
-            entities = client_from_platform(
-                get_platform_sdk(as_service="scaled-evals", internal=True),
-                EntitiesClient,
-            )
+            entities = EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True))
             self._projection = EvaluationProjectionWriter(
                 SyncEntityClient(entities),
                 workspace=settings.entity_store_workspace,

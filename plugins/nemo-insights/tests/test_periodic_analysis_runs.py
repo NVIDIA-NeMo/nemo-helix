@@ -47,8 +47,8 @@ def _controller(job_status: HelixJobStatus = HelixJobStatus.COMPLETED):
     jobs.get_job.return_value = MagicMock(data=lambda: job)
     controller._entities = entities
     controller._jobs = jobs
-    # The controller only adapts this into typed clients; an idle typed client satisfies the adapter.
-    controller._sdk = AsyncNemoClient(base_url="http://insights.test")  # ty: ignore[invalid-assignment]
+    # The controller only derives typed clients from this idle client.
+    controller._client = AsyncNemoClient(base_url="http://insights.test")
     controller._config = InsightsConfig()
     return controller, entities, jobs
 

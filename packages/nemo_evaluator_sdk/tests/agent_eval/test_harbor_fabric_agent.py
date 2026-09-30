@@ -11,8 +11,8 @@ import pytest
 pytest.importorskip("harbor", reason="NemoFabricAgent subclasses Harbor's BaseAgent")
 
 from harbor.models.task.config import MCPServerConfig
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import FLAT_CONFIG_KWARGS, NemoFabricAgent
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import FLAT_CONFIG_KWARGS, NemoFabricAgent
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import credential_shaped_settings, redact_credentials
 from nemo_fabric import RelayAtifConfig, RelayAtofConfig
 from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT
@@ -243,7 +243,7 @@ def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value
     under a credential-named key is refused -- an issued token, an unrecognised secret, or the placeholder."""
     config = HarborRuntimeConfig(
         jobs_dir=tmp_path,
-        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
+        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent",
         agent_kwargs={"fabric_config": _registered_agent_config()},
     )
     kept = config.agent_kwargs["fabric_config"]

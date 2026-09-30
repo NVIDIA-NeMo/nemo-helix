@@ -323,16 +323,18 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
 # SDK helpers (reuse the Insights plugin's own client/preflight code)         #
 # --------------------------------------------------------------------------- #
 def _count_traces() -> int:
+    from nemo_helix_plugin.client.adapter import client_from_platform
+    from nemo_helix_plugin.client.client import AsyncNemoClient
     from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
     from nemo_insights_plugin.platform_client import make_client
 
     async def _run() -> int:
-        client = make_client(BASE_URL)
-        backend = make_analyst_backend(client=client, insights_output=None)
+        sdk = make_client(BASE_URL)
+        backend = make_analyst_backend(client=client_from_platform(sdk, AsyncNemoClient), insights_output=None)
         try:
             return await backend.count_agent_sessions(agent=TEST_AGENT, workspace=WORKSPACE)
         finally:
-            await client.close()
+            await sdk.close()
 
     return asyncio.run(_run())
 

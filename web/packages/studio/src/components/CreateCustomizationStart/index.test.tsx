@@ -70,7 +70,6 @@ const nameAlreadyTaken = (name: string, storage: Record<string, unknown>) => [
 const provisionSelectedTemplate = async (onContinue: Mock) => {
   const user = userEvent.setup();
   renderStart(onContinue);
-  await user.click(screen.getByText('Start from a template'));
   await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
   await user.click(continueButton());
 };
@@ -83,19 +82,33 @@ describe('CreateCustomizationStart', () => {
     serveDefaultRows();
   });
 
-  it('offers a way in for each start option', () => {
+  it('offers every way in at once', () => {
     renderStart();
-    expect(screen.getByText('Start from a template')).toBeInTheDocument();
     expect(screen.getByText('Build from scratch')).toBeInTheDocument();
+    for (const template of CUSTOMIZATION_TEMPLATES) {
+      expect(screen.getByText(template.title)).toBeInTheDocument();
+    }
   });
 
-  it('keeps Continue disabled until an option is picked', async () => {
+  it('keeps Continue disabled until something is picked', async () => {
     const user = userEvent.setup();
     renderStart();
-    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
+    expect(continueButton()).toBeDisabled();
 
     await user.click(screen.getByText('Build from scratch'));
     expect(continueButton()).toBeEnabled();
+  });
+
+  it('opens on the template rung, and waits for a recipe', async () => {
+    const user = userEvent.setup();
+    renderStart();
+
+    expect(screen.getByRole('radio', { name: 'Start from a template' })).toBeChecked();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
+
+    await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
   });
 
   it('hands "from scratch" over without any form values', async () => {
@@ -110,23 +123,9 @@ describe('CreateCustomizationStart', () => {
   });
 
   describe('templates', () => {
-    it('shows a card per recipe once the option is picked', async () => {
+    it('arms Continue as soon as a recipe is picked', async () => {
       const user = userEvent.setup();
       renderStart();
-
-      await user.click(screen.getByText('Start from a template'));
-      for (const template of CUSTOMIZATION_TEMPLATES) {
-        expect(screen.getByText(template.title)).toBeInTheDocument();
-      }
-    });
-
-    /** Picking the option is not picking a recipe — Continue has nothing to act on yet. */
-    it('will not continue until a recipe is selected', async () => {
-      const user = userEvent.setup();
-      renderStart();
-
-      await user.click(screen.getByText('Start from a template'));
-      expect(continueButton()).toBeDisabled();
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
       expect(continueButton()).toBeEnabled();
@@ -137,7 +136,6 @@ describe('CreateCustomizationStart', () => {
       const onContinue = vi.fn();
       renderStart(onContinue);
 
-      await user.click(screen.getByText('Start from a template'));
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
       await user.click(continueButton());
 
@@ -158,7 +156,6 @@ describe('CreateCustomizationStart', () => {
       const user = userEvent.setup();
       renderStart();
 
-      await user.click(screen.getByText('Start from a template'));
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
       await user.click(continueButton());
 
@@ -180,7 +177,6 @@ describe('CreateCustomizationStart', () => {
       const onContinue = vi.fn();
       renderStart(onContinue);
 
-      await user.click(screen.getByText('Start from a template'));
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
       await user.click(continueButton());
 
@@ -244,7 +240,6 @@ describe('CreateCustomizationStart', () => {
       const onContinue = vi.fn();
       renderStart(onContinue);
 
-      await user.click(screen.getByText('Start from a template'));
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
       await user.click(continueButton());
 

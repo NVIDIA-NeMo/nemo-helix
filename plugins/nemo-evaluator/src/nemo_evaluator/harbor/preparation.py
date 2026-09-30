@@ -13,9 +13,9 @@ from nemo_evaluator.harbor.tasks import StoredHarborTask
 from nemo_evaluator.jobs.agent_spec import ResolvedTask
 from nemo_evaluator.jobs.harbor_scoring import harbor_scoring_task
 from nemo_evaluator.jobs.utils import run_with_isolated_async_client
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import normalize_harbor_instruction
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import harbor_scoring_metrics
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HARBOR_DATASET_PATH_KEY, HARBOR_TASK_DIR_KEY
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import normalize_harbor_instruction
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_DATASET_PATH_KEY, HARBOR_TASK_DIR_KEY
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient

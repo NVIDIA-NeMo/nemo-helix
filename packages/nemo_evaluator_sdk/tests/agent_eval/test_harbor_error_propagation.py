@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborRuntimeConfig,
     run_harbor_eval,
 )

@@ -51,6 +51,7 @@ from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGame
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_agent_hardener_plugin.project_resolver import build_project_manifest_dict, inspect_project
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -59,7 +60,6 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
-from nemo_helix_plugin.sdk_provider import get_platform_sdk
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
@@ -170,13 +170,13 @@ async def validate_model_config(workspace: str, body: ValidateModelRequest) -> V
     Resolves the chosen Secret to its value (if any) and lists ``{base_url}/models``. Never leaks the key —
     only the boolean verdict + the reachable model ids come back, so the UI can offer real options.
     """
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _validate() -> ValidateModelResponse:
         # Falls back to the provisioned agent-hardener key when no Secret is named — the documented meaning of
         # a null `api_key_secret`. Probing with no key at all reported 401 for every model that a run would
         # in fact reach, which made this endpoint (and Studio's "Test connection") reject valid choices.
-        api_key = resolve_model_key(sdk, body.api_key_secret, workspace=workspace)
+        api_key = resolve_model_key(client, body.api_key_secret, workspace=workspace)
         verdict = validate_choice(body.model, body.base_url, api_key)
         return ValidateModelResponse(
             ok=verdict.ok, reason=verdict.reason, available=verdict.available, detail=verdict.detail
@@ -193,10 +193,10 @@ async def inspect_agent_endpoint(workspace: str, body: InspectAgentRequest) -> I
 
     Read-only: fetches the stored agent config and its running deployment; nothing is materialized.
     """
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _inspect() -> tuple[str, int, list[str], list[str], list[str]]:
-        return inspect_agent(body.agent, sdk=sdk, default_workspace=workspace)
+        return inspect_agent(body.agent, client=client, default_workspace=workspace)
 
     try:
         ref, port, secrets, egress, warnings = await run_in_threadpool(_inspect)
@@ -215,11 +215,11 @@ async def inspect_project_endpoint(workspace: str, body: InspectProjectRequest) 
     pre-fill everything derivable and prompt for only the rest, so bringing your own image is a short
     form rather than authoring a manifest.
     """
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _inspect() -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
-            project_dir = download_and_extract_project(sdk, body.project_fileset, Path(tmp))
+            project_dir = download_and_extract_project(client, body.project_fileset, Path(tmp))
             return inspect_project(project_dir, dockerfile=body.dockerfile or None)
 
     try:
@@ -307,15 +307,15 @@ async def _resolve_and_store_scaffold(
     target: the run downloads this instead of re-resolving, so nothing it depends on can be silently
     re-derived. Shared by create and refresh — the only two ways a scaffold is produced.
     """
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
 
-    # resolve_agent_to_manifest is sync + network-bound (sdk.agents.get), and so is the upload;
+    # resolve_agent_to_manifest is sync + network-bound (AgentsResource(client).get), and so is the upload;
     # keep both off the event loop. The temp dir must outlive the upload, hence one closure.
     def _resolve_and_upload() -> tuple[ResolvedManifest, str]:
         with tempfile.TemporaryDirectory() as tmp:
             resolved = resolve_agent_to_manifest(
                 agent_ref,
-                sdk=sdk,
+                client=client,
                 base_url=base_url(),
                 default_workspace=workspace,
                 manifest_dir=Path(tmp),
@@ -323,7 +323,7 @@ async def _resolve_and_store_scaffold(
                 port=port,
                 secrets=secrets,
             )
-            return resolved, upload_project_dir(sdk, resolved.project_dir, workspace=workspace)
+            return resolved, upload_project_dir(client, resolved.project_dir, workspace=workspace)
 
     try:
         return await run_in_threadpool(_resolve_and_upload)
@@ -368,12 +368,12 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
     nothing to freeze — the upload *is* the frozen target. Caller-supplied values win over derived
     ones: they were asked for precisely because the project could not state them.
     """
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _inspect() -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
             return inspect_project(
-                download_and_extract_project(sdk, body.project_fileset or "", Path(tmp)),
+                download_and_extract_project(client, body.project_fileset or "", Path(tmp)),
                 dockerfile=body.dockerfile or None,
             )
 
@@ -516,7 +516,7 @@ async def refresh_manifest(
     updated = await entity_client.update(existing)
 
     if stale and stale != fileset:
-        await run_in_threadpool(delete_fileset, get_platform_sdk(as_service="agent-hardener", internal=True), stale)
+        await run_in_threadpool(delete_fileset, get_nemo_client(as_service="agent-hardener", internal=True), stale)
     return updated
 
 
@@ -540,6 +540,6 @@ async def delete_manifest(
     # bundle we deleted early would be unrunnable if the delete above had failed.
     #
     # The service uploads `agent_fileset` itself, so it owns it and is safe to remove it here.
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
     if existing.agent_fileset:
-        await run_in_threadpool(delete_fileset, sdk, existing.agent_fileset)
+        await run_in_threadpool(delete_fileset, client, existing.agent_fileset)

@@ -30,9 +30,13 @@ Reference plugins such as `plugins/example-plugin/` are not installed by default
 
 ### Switchyard middleware
 
-`plugins/nemo-switchyard/` is an inference middleware plugin. It registers the `nemo-switchyard` middleware entry point, which can be referenced from a VirtualModel's `request_middleware` or `response_middleware`.
+`plugins/nemo-switchyard/` is an inference middleware plugin. Its distribution
+name is `nemo-switchyard-plugin`, while the `nemo-switchyard` middleware entry
+point remains the name used by VirtualModels.
 
-The middleware is installed by default through the root workspace's `enabled-plugins` group. The plugin vendors the required subset of the Switchyard library under `plugins/nemo-switchyard/vendor/switchyard/`, so no separate checkout, `SWITCHYARD_PATH`, or PyPI-shadow workaround is needed.
+The middleware is installed by default through the root workspace's
+`enabled-plugins` group and depends on `nemo-switchyard==0.3.0` for the native
+Python bindings.
 
 ```bash
 uv sync
@@ -45,8 +49,12 @@ With the platform running, use `nemo-switchyard` in VirtualModel middleware conf
 ```json
 {
   "name": "nemo-switchyard",
-  "config_type": "translate",
-  "config": {"target_format": "auto", "enable_stats": false}
+  "config_type": "random_routing",
+  "config": {
+    "strong": {"model": "workspace/model-a"},
+    "weak": {"model": "workspace/model-b"},
+    "strong_probability": 0.5
+  }
 }
 ```
 
@@ -68,7 +76,7 @@ The package name is the `name` field in the plugin's `pyproject.toml`, not the d
 | `nemo-scaled-evals/` | `nemo-scaled-evals-plugin` (Phase 1 ephemeral; install `-e`) |
 | `nemo-guardrails/` | `nemo-guardrails-plugin` |
 | `nemo-insights/` | `nemo-insights-plugin` |
-| `nemo-switchyard/` | `nemo-switchyard` |
+| `nemo-switchyard/` | `nemo-switchyard-plugin` |
 
 Example:
 

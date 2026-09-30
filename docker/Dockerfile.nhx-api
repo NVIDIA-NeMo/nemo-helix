@@ -37,6 +37,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --active --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
     --reinstall-package annoy --refresh-package annoy --no-binary-package annoy --no-cache
 
+# Native routing requires the extension and the IGW adapter in the same image.
+RUN /app/.venv/bin/python -c 'import switchyard_rust; import nemo_switchyard.middleware'
+
 # Fail the build if pip is broken or duplicated (regression guard).
 RUN /app/.venv/bin/pip --version && \
     test "$(ls -d /app/.venv/lib/python3.13/site-packages/pip-*.dist-info | wc -l)" -eq 1

@@ -112,8 +112,8 @@ class TestEntitiesMCPServerSmoke:
                 raise RuntimeError("platform unavailable")
 
         monkeypatch.setattr(
-            "nhx.core.entities.mcp.server.client_from_platform",
-            lambda sdk, client_cls: FailingWorkspacesClient(),
+            "nhx.core.entities.mcp.server.WorkspacesClient.from_client",
+            lambda client: FailingWorkspacesClient(),
         )
         bad_server = create_server("http://unused.example.com")
         tool_result = await bad_server.call_tool("list_workspaces", {})

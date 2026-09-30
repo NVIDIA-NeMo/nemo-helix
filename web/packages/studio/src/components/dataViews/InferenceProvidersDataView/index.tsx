@@ -98,6 +98,11 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
     {
       query: {
         placeholderData: keepPreviousData,
+        // Provider status (READY/ERROR/...) is computed asynchronously by the Models
+        // Controller's reconciler, so the badge can go stale between reconcile cycles.
+        // Poll on a modest interval so the list reflects status changes without a manual
+        // remount/refocus.
+        refetchInterval: 20_000,
       },
     }
   );

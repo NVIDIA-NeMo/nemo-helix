@@ -91,7 +91,7 @@ def test_deploy_default_waits_and_returns_success_on_running() -> None:
     with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--base-url", "http://test", "--timeout", "10"],
+            ["deploy", "--agent", "calc", "--timeout", "10"],
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
@@ -128,7 +128,7 @@ def test_deploy_default_exits_failure_when_subprocess_dies() -> None:
     with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--base-url", "http://test", "--timeout", "10"],
+            ["deploy", "--agent", "calc", "--timeout", "10"],
         )
 
     assert result.exit_code == 1, result.stdout
@@ -165,7 +165,7 @@ def test_deploy_polls_through_multiple_pending_responses() -> None:
     with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--base-url", "http://test", "--timeout", "60"],
+            ["deploy", "--agent", "calc", "--timeout", "60"],
         )
 
     assert result.exit_code == 0, result.stdout
@@ -188,7 +188,7 @@ def test_deploy_no_wait_returns_immediately_with_pending_json() -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--no-wait", "--base-url", "http://test"],
+            ["deploy", "--agent", "calc", "--no-wait"],
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
@@ -250,7 +250,7 @@ def test_deployments_wait_agent_resolves_latest_active_deployment_across_pages()
     with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deployments", "wait", "--agent", "calc", "--base-url", "http://test", "--timeout", "10"],
+            ["deployments", "wait", "--agent", "calc", "--timeout", "10"],
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
@@ -286,7 +286,7 @@ def test_logs_prints_file_contents_from_deterministic_path() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["logs", "calc-1", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["logs", "calc-1"])
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "agent boot ok" in result.stdout
@@ -301,7 +301,7 @@ def test_logs_path_only_prints_path_without_reading_file() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(lambda r: httpx.Response(404)):
-        result = CliRunner().invoke(app, ["logs", "calc-1", "--path", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["logs", "calc-1", "--path"])
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert expected_path in result.stdout
@@ -321,10 +321,8 @@ def test_logs_uses_workspace_to_separate_same_named_deployments() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(lambda r: httpx.Response(404)):
-        default_result = CliRunner().invoke(app, ["logs", "shared", "--base-url", "http://test"])
-        other_result = CliRunner().invoke(
-            app, ["logs", "shared", "--workspace", "other-ws", "--base-url", "http://test"]
-        )
+        default_result = CliRunner().invoke(app, ["logs", "shared"])
+        other_result = CliRunner().invoke(app, ["logs", "shared", "--workspace", "other-ws"])
 
     assert default_result.exit_code == 0
     assert "from default workspace" in default_result.stdout
@@ -339,7 +337,7 @@ def test_logs_reports_helpful_error_when_file_missing() -> None:
     """If the log file isn't on disk yet, exit 1 with a useful hint."""
     app = AgentsCLI().get_cli()
     with _install_mock_transport(lambda r: httpx.Response(404)):
-        result = CliRunner().invoke(app, ["logs", "never-spawned", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["logs", "never-spawned"])
 
     assert result.exit_code == 1
     assert "log file does not exist" in result.stderr
@@ -353,7 +351,7 @@ def test_logs_tail_prints_only_last_n_lines() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(lambda r: httpx.Response(404)):
-        result = CliRunner().invoke(app, ["logs", "calc-1", "--tail", "3", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["logs", "calc-1", "--tail", "3"])
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "line-19" in result.stdout
@@ -368,7 +366,7 @@ def test_logs_tail_rejects_non_positive_values() -> None:
     app = AgentsCLI().get_cli()
     for value in ("0", "-1"):
         with _install_mock_transport(lambda r: httpx.Response(404)):
-            result = CliRunner().invoke(app, ["logs", "calc-1", "--tail", value, "--base-url", "http://test"])
+            result = CliRunner().invoke(app, ["logs", "calc-1", "--tail", value])
 
         assert result.exit_code == 1, f"--tail {value} should reject"
         assert "positive" in result.stderr
@@ -416,7 +414,7 @@ def test_logs_resolves_most_recent_deployment_for_agent() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["logs", "--agent", "calc", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["logs", "--agent", "calc"])
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "calc-2 ok" in result.stdout
@@ -464,7 +462,7 @@ def test_logs_agent_resolution_fetches_all_deployment_pages() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["logs", "--agent", "calc", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["logs", "--agent", "calc"])
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "calc-2 from page 2" in result.stdout
@@ -475,7 +473,7 @@ def test_logs_agent_resolution_fetches_all_deployment_pages() -> None:
 def test_logs_requires_name_or_agent() -> None:
     """Calling ``logs`` with neither argument exits 1 with a usage error."""
     app = AgentsCLI().get_cli()
-    result = CliRunner().invoke(app, ["logs", "--base-url", "http://test"])
+    result = CliRunner().invoke(app, ["logs"])
 
     assert result.exit_code == 1
     assert "deployment name or --agent" in result.stderr

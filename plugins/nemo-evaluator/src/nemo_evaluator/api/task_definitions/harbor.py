@@ -9,7 +9,7 @@ from filesets import parse_fileset_ref
 from nemo_evaluator.api.fields import MetricInline, MetricRefOrInline
 from nemo_evaluator.api.task_definitions.provenance import TaskProvenance
 from nemo_evaluator.content_hash import DIGEST_PATTERN
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import validate_archive_path
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import validate_archive_path
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_helix_plugin.refs import FILESET_REF_PATTERN
 from pydantic import BaseModel, ConfigDict, Field, field_validator

@@ -4,7 +4,7 @@
 from pathlib import Path
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask, HarborTaskCollection
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask, HarborTaskCollection
 
 
 def test_collection_and_scoring_preserve_source(tmp_path: Path):
@@ -31,7 +31,7 @@ def _package(root: Path, name: str = "test/native") -> Path:
 
 
 def test_discovery_validates_and_ignores_root_noise(tmp_path):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     root = _package(tmp_path / "one")
     (tmp_path / "README.md").write_text("notes")
@@ -46,7 +46,7 @@ def test_discovery_validates_and_ignores_root_noise(tmp_path):
 
 async def test_native_selection_uses_typed_paths(tmp_path):
     from harbor.models.job.config import DatasetConfig
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
         _dataset_path_from_tasks,
         _harbor_folder_names,
         discover_harbor_tasks,
@@ -108,7 +108,7 @@ async def test_finalization_and_persisted_scoring_boundary(tmp_path):
 
 
 async def test_typed_selection_rejects_redirect_before_touching_cache(tmp_path):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
         HarborAgentTaskRunner,
         HarborRuntimeConfig,
         discover_harbor_tasks,
@@ -130,14 +130,14 @@ async def test_typed_selection_rejects_redirect_before_touching_cache(tmp_path):
     with pytest.raises(ValueError, match="override"):
         await runner.run_tasks(tasks)
     assert marker.read_text() == "existing"
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _task_dirs_for
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _task_dirs_for
 
     assert _task_dirs_for(a, tasks) == {tasks[0].id: source}
 
 
 @pytest.mark.parametrize("kind", ["root_symlink", "hidden_symlink", "case_duplicate", "empty"])
 def test_discovery_root_policy(tmp_path, kind):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     root = tmp_path / "suite"
     root.mkdir()
@@ -156,7 +156,7 @@ def test_discovery_root_policy(tmp_path, kind):
 
 @pytest.mark.parametrize("target", ["test.sh", "../../outside"])
 def test_discovery_keeps_only_task_internal_symlinks(tmp_path, target):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     (tmp_path / "outside").write_text("secret")
     (tmp_path / "suite").mkdir()
@@ -193,7 +193,7 @@ async def test_views_validate_against_finalized_reward_outputs(tmp_path):
             ]
 
         def scoring_metrics(self, task, trials):
-            from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import harbor_scoring_metrics
+            from nemo_evaluator_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
 
             return harbor_scoring_metrics(task, trials, reward_key="reward")
 

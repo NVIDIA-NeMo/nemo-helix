@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,7 +76,7 @@ from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig, validate_gym_task_row
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
 from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
@@ -660,12 +661,16 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
+        bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
+        if bundle_dir.exists():
+            shutil.rmtree(bundle_dir)
         run_config = AgentEvalRunConfig(
             params=params,
             prompt_template=prompt_template,
             parallelism=spec.max_concurrent_tasks,
             labels=spec.labels,
             fail_fast=spec.fail_fast,
+            work_dir=bundle_dir,
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)

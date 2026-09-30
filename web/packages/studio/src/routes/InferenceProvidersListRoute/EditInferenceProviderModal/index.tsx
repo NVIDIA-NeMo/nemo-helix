@@ -123,8 +123,10 @@ export const EditInferenceProviderModal: FC<EditInferenceProviderModalProps> = (
           required_extra_body: provider.required_extra_body,
           required_extra_headers: provider.required_extra_headers,
           model_deployment_id: provider.model_deployment_id,
-          status: provider.status,
-          status_message: provider.status_message ?? undefined,
+          // Deliberately omit status/status_message on edit. The server resets status to
+          // CREATED when the key or host_url changes so the reconciler re-evaluates;
+          // re-sending the old status here would fight that (and previously re-asserted a
+          // stale READY on a rotated key). Let the backend own provider status.
         },
       });
     } catch {

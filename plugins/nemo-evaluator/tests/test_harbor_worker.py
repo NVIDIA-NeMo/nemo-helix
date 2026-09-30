@@ -22,7 +22,7 @@ from nemo_evaluator.jobs.metric_resolution import to_inline
 from nemo_evaluator.revisions import publish_revision
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRewardMetric
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRewardMetric
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
