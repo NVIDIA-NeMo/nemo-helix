@@ -29,11 +29,10 @@ ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
 # If the RL fork's uv.lock and its submodule pins drift (`uv sync --frozen` fails), pass
 # `--build-arg UV_SYNC_MODE=` to relock instead.
 #
-# The ref defaults to a SHA, not a branch, for the reason docker-bake.hcl gives for its own pin: a
-# branch moves under the build and silently invalidates the heavy uv-sync layer below. Bake passes
-# NEMO_RL_REF explicitly, so this default only serves a direct `docker build`; keep the two in step.
+# NEMO_RL_REF has no default because docker-bake.hcl holds the only pin; the ADD below must guard
+# it, since an empty ref would clone the fork's default branch instead of failing.
 ARG NEMO_RL_REPO=https://github.com/soluwalana/RL.git
-ARG NEMO_RL_REF=a5b789d7cc1551600bff82285afd5da13a55c35e
+ARG NEMO_RL_REF=
 
 # uv 0.11.18 bundles a vulnerable quinn-proto (0.12 has breaking changes, so stay on 0.11.x).
 # Official CPython 3.13.15 is copied from python:3.13.15-slim-bookworm. uv's catalog has no
@@ -55,7 +54,7 @@ FROM ${CPYTHON_IMAGE} AS cpython
 FROM scratch AS nemo-rl
 ARG NEMO_RL_REPO
 ARG NEMO_RL_REF
-ADD ${NEMO_RL_REPO}#${NEMO_RL_REF} /
+ADD ["${NEMO_RL_REPO}#${NEMO_RL_REF:?NEMO_RL_REF must be set; docker buildx bake passes the pin from docker-bake.hcl, a direct docker build needs --build-arg NEMO_RL_REF=<sha>}", "/"]
 
 # ---- base: cuda-dl-base + system deps + cmake + uv + python 3.13 (mirrors RL's own base stage) ----
 FROM ${BASE_IMAGE} AS base
