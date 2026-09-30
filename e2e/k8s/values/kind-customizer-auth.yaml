@@ -8,6 +8,11 @@
 #     -f e2e/k8s/values/kind-customizer-auth.yaml \
 #     --set platformConfig.customizer.tasks_image=<registry>/nhx-tasks:<tag>
 
+# The edge proxy strips X-NHX-Principal-* headers from external requests; the e2e
+# harness authenticates with those headers. Authorization is still enforced by the API.
+envoyProxy:
+  enabled: false
+
 platformConfig:
   auth:
     enabled: true
