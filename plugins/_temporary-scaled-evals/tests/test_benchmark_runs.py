@@ -80,7 +80,6 @@ def _run_row(**overrides) -> dict:
         "benchmark_revision": 1,
         "framework_profile_id": None,
         "harbor_profile_id": None,
-        "switchyard_profile_id": None,
         "intake_profile_id": None,
         "credentials": {},
         "runtime": "sandbox_k8s",
@@ -337,20 +336,6 @@ def test_derive_cancelled_reports_member_teardown_progress() -> None:
     assert "teardown failed: 1" in view["status_detail"]
 
 
-def test_max_concurrent_members_does_not_require_switchyard() -> None:
-    from scaled_evals.api.schemas.benchmark_runs import CreateBenchmarkRunRequest
-
-    request = CreateBenchmarkRunRequest(
-        name="capped",
-        benchmark_id="bm_test",
-        parallelism=4,
-        max_concurrent_members=50,
-    )
-
-    assert request.max_concurrent_members == 50
-    assert request.switchyard_profile_id is None
-
-
 def test_benchmark_request_supports_full_member_execution_contract() -> None:
     from scaled_evals.api.schemas.benchmark_runs import CreateBenchmarkRunRequest
 
@@ -367,28 +352,6 @@ def test_benchmark_request_supports_full_member_execution_contract() -> None:
     assert request.n_attempts == 3
     assert request.extra_skill_object_keys == ["skills/review/SKILL.md"]
     assert request.initial_user_turns == ["Initialize", "/review"]
-
-
-def test_shared_switchyard_campaign_preserves_trial_parallelism_semantics() -> None:
-    from pydantic import ValidationError
-    from scaled_evals.api.schemas.benchmark_runs import CreateBenchmarkRunRequest
-
-    request = CreateBenchmarkRunRequest(
-        name="shared",
-        benchmark_id="bm_test",
-        switchyard_profile_id="cfg_switchyard",
-        parallelism=1,
-        max_concurrent_members=1024,
-    )
-    assert request.max_concurrent_members == 1024
-
-    with pytest.raises(ValidationError, match="parallelism=1"):
-        CreateBenchmarkRunRequest(
-            name="not-exact",
-            benchmark_id="bm_test",
-            switchyard_profile_id="cfg_switchyard",
-            parallelism=2,
-        )
 
 
 # ---- POST /benchmark-runs: spawn run + member evaluations -----------------
@@ -584,31 +547,13 @@ def test_create_run_fans_out_full_member_execution_contract() -> None:
     execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
     member_insert = next(c for c in execs if "INSERT INTO evaluations" in c.args[0])
     params = member_insert.args[1]
-    assert params[19:23] == (
+    assert params[18:22] == (
         ["skills/review/SKILL.md"],
         "inspect first",
         "summarize last",
         ["Initialize", "/review"],
     )
-    assert params[26] == 3
-
-
-def test_create_run_persists_non_switchyard_member_cap() -> None:
-    conn = _conn(
-        fetchone=[{"current_revision": 1}, _run_row(max_concurrent_members=50), _member_eval(0)],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
-    )
-    _use_conn(conn)
-
-    resp = client.post(
-        "/v1/benchmark-runs",
-        json={"name": "suite run", "benchmark_id": "bm_suite", "max_concurrent_members": 50},
-    )
-
-    assert resp.status_code == 202, resp.text
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    run_insert = next(c for c in execs if "INSERT INTO benchmark_runs" in c.args[0])
-    assert run_insert.args[1][22] == 50
+    assert params[25] == 3
 
 
 def test_create_run_fans_out_network_policy() -> None:
@@ -640,8 +585,8 @@ def test_create_run_fans_out_network_policy() -> None:
     execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
     run_insert = next(c for c in execs if "INSERT INTO benchmark_runs" in c.args[0])
     member_insert = next(c for c in execs if "INSERT INTO evaluations" in c.args[0])
-    assert run_insert.args[1][19] == "default_deny"
-    assert member_insert.args[1][24] == "default_deny"
+    assert run_insert.args[1][18] == "default_deny"
+    assert member_insert.args[1][23] == "default_deny"
 
 
 def test_create_run_resolves_version_once_for_run_and_members() -> None:
@@ -800,7 +745,6 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         harbor_profile_id="cfg_h",
         credentials={"openai": "cred_openai"},
         parallelism=2,
-        max_concurrent_members=4,
     )
     member = _member_eval(0, status="failed", reward=None)
     source = {
@@ -810,7 +754,6 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         "framework_version": "0.6.3",
         "runner_metadata": run["runner_metadata"],
         "framework_profile_id": None,
-        "switchyard_profile_id": None,
         "intake_profile_id": None,
         "credentials": run["credentials"],
         "extra_skill_object_keys": ["skills/review/SKILL.md"],
@@ -839,10 +782,8 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
     assert body["request"]["initial_user_turns"] == ["Initialize", "/review"]
     assert body["request"]["agent_bundle_id"] == "ab_codex"
     assert body["request"]["member_framework_profile_ids"] == {"task_0": "cfg_member"}
-    assert body["request"]["max_concurrent_members"] == 4
     assert body["cli_command"][:3] == ["scaled-evals", "benchmark-run", "create"]
     assert "--n-attempts" in body["cli_command"]
-    assert "--max-concurrent-members" in body["cli_command"]
     assert "task_0=cfg_member" in body["cli_command"]
 
 
@@ -890,7 +831,6 @@ def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch)
         runtime="sandbox_k8s",
         backend_handle={"backend": "sandbox_k8s", "external_id": "job-123"},
         dispatch_job_name=None,
-        switchyard_profile_id=None,
         cancel_teardown_status="pending",
     )
     conn = _conn(

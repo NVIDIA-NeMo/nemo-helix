@@ -31,9 +31,10 @@ from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.build_repository import TaskBuildJob, TaskBuildRepository
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
+from scaled_evals.api.repositories.execution_cleanup_repository import ExecutionCleanupRepository
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
-from scaled_evals.dispatch.worker import _retry_delay_seconds
+from scaled_evals.dispatch.worker import _retry_delay_seconds, teardown_orphaned_execution
 
 LOG = logging.getLogger(__name__)
 _ACTIVE_JOB_STATUSES = {
@@ -141,6 +142,7 @@ class ScaledEvalsJobsController(NemoController):
                 ("submit_evaluation", self._drain(self._submit_one_evaluation)),
                 ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
                 ("cancel_evaluations", self._cancel_evaluation_jobs),
+                ("cleanup_executions", self._drain(self._cleanup_one_execution)),
             ]
         if self._projection is not None:
             phases.append(("project_evaluations", self._project_evaluations))
@@ -262,6 +264,21 @@ class ScaledEvalsJobsController(NemoController):
         else:
             detail = f"Platform evaluation job ended as {status.status.value}"
         await asyncio.to_thread(self._fail_evaluation_job, row, detail)
+        return True
+
+    async def _cleanup_one_execution(self) -> bool:
+        """Tear down one orphaned execution runtime; return False only when none remain."""
+        return await asyncio.to_thread(self._cleanup_execution)
+
+    def _cleanup_execution(self) -> bool:
+        with pooled_connection() as conn:
+            cleanup = ExecutionCleanupRepository(conn).claim_one(
+                worker_id=self._worker_id,
+                claim_timeout=TaskBuildWorker.claim_timeout,
+            )
+        if cleanup is None:
+            return False
+        teardown_orphaned_execution(cleanup, worker_id=self._worker_id, connect=pooled_connection)
         return True
 
     async def _cancel_evaluation_jobs(self) -> None:

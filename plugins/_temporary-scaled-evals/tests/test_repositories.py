@@ -25,15 +25,10 @@ try:
         ExecutionTelemetryRepository,
     )
     from scaled_evals.api.repositories.ops_repository import OperationsRepository
-    from scaled_evals.api.repositories.runtime_resource_repository import RuntimeResourceRepository
-    from scaled_evals.api.repositories.switchyard_campaign_repository import (
-        SwitchyardCampaignRepository,
-    )
     from scaled_evals.api.repositories.task_repository import TaskRepository
     from scaled_evals.api.repositories.user_repository import UserRepository
     from scaled_evals.api.schemas.common import encode_cursor
     from scaled_evals.models.evaluations import EvaluationResultSummary, EvaluationResultWrite
-    from scaled_evals.models.runtime import SwitchyardLease
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -167,7 +162,7 @@ def test_config_profile_create_parameterizes_name() -> None:
     ConfigProfileRepository(conn).create(
         "cfg_safe",
         name=MALICIOUS,
-        type="switchyard",
+        type="intake",
         config={"route": MALICIOUS},
     )
 
@@ -434,18 +429,7 @@ def test_evaluation_stale_dispatch_job_failure_is_guarded() -> None:
     assert "dispatch_job_name = %s" in sql
     event_params = _executed_sql_and_params(cur, 1)[1]
     assert event_params == ("ev_safe", "status", "failed", MALICIOUS)
-    switchyard_sql, switchyard_params = _executed_sql_and_params(cur, 2)
-    assert "UPDATE evaluation_runtime_resources" in switchyard_sql
-    assert "kind = 'switchyard'" in switchyard_sql
-    assert "status IN ('provisioned', 'draining', 'delete_failed')" in switchyard_sql
-    assert "drain_until = NOW()" in switchyard_sql
-    assert switchyard_params == ("ev_safe",)
-    campaign_sql, campaign_params = _executed_sql_and_params(cur, 3)
-    assert "UPDATE benchmark_switchyard_launches" in campaign_sql
-    assert "status = 'cleanup_pending'" in campaign_sql
-    assert "permit_expires_at = NOW()" in campaign_sql
-    assert "status IN ('launching', 'running')" in campaign_sql
-    assert campaign_params == ("ev_safe",)
+    assert len(cur.execute.call_args_list) == 2
 
 
 def test_evaluation_stale_dispatch_job_failure_noops_when_guard_misses() -> None:
@@ -651,7 +635,6 @@ def test_operations_snapshot_parameterizes_thresholds() -> None:
     cur.fetchall.side_effect = [
         [{"status": "queued", "runtime": "sandbox_k8s", "count": 3}],
         [{"runtime": "sandbox_k8s", "count": 1}],
-        [{"status": "delete_failed", "count": 1}],
     ]
 
     snapshot = OperationsRepository(conn).dispatch_observability_snapshot(
@@ -671,7 +654,6 @@ def test_operations_snapshot_parameterizes_thresholds() -> None:
     assert second_params == (111, 222, 333)
     assert snapshot["stuck_jobs"] == [{"status": "queued", "runtime": "sandbox_k8s", "count": 3}]
     assert snapshot["backend_failures"] == [{"runtime": "sandbox_k8s", "count": 1}]
-    assert snapshot["switchyard_teardown"] == {"delete_failed": 1}
 
 
 def test_operations_heartbeat_uses_dict_row_factory() -> None:
@@ -739,370 +721,6 @@ def test_operations_fleet_totals_include_jobs_executions_and_trials() -> None:
     assert "SUM(current_execution)" in sql
     assert "SUM(n_trials)" in sql
     assert len(cur.execute.call_args.args) == 1
-
-
-def test_runtime_resource_upsert_switchyard_parameterizes_metadata() -> None:
-    conn, cur = _conn()
-    lease = SwitchyardLease(
-        profile_id="cfg_sw",
-        namespace="evals",
-        name="switchyard-safe",
-        service_name="switchyard-safe",
-        config_map_name="switchyard-safe-routes",
-        secret_name="switchyard-safe-secrets",
-        endpoint=MALICIOUS,
-        openai_base_url=f"{MALICIOUS}/v1",
-        anthropic_base_url=MALICIOUS,
-        inbound="openai",
-        port=4000,
-    )
-
-    RuntimeResourceRepository(conn).upsert_switchyard_provisioned(
-        evaluation_id="ev_safe",
-        execution_number=2,
-        lease=lease,
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert MALICIOUS not in sql
-    assert "ON CONFLICT (evaluation_id, execution_number, kind)" in sql
-    assert params[0:2] == ("ev_safe", 2)
-    assert params[5] == MALICIOUS
-
-
-def test_switchyard_runtime_resource_queries_are_execution_scoped() -> None:
-    conn, cur = _conn()
-    repository = RuntimeResourceRepository(conn)
-
-    repository.get_switchyard("ev_safe", 3)
-    repository.mark_switchyard_draining("ev_safe", 3, drain_seconds=30)
-
-    get_sql, get_params = _executed_sql_and_params(cur)
-    assert "execution_number = %s" in get_sql
-    assert get_params == ("ev_safe", 3)
-    drain_sql, drain_params = _executed_sql_and_params(cur, 1)
-    assert "execution_number = %s" in drain_sql
-    assert drain_params[1:] == ("ev_safe", 3)
-
-
-def test_switchyard_campaign_provision_claim_persists_before_external_mutation() -> None:
-    conn, cur = _conn()
-    cur.fetchone.side_effect = [
-        {
-            "benchmark_run_id": "bmr_safe",
-            "status": "provisioning",
-            "profile_id": "cfg_sw",
-            "config_hash": "sha256:config",
-            "credential_hash": "sha256:credential",
-            "max_concurrent_members": 128,
-            "cancel_requested_at": None,
-            "claim_owner": None,
-            "claim_expires_at": None,
-        },
-        {
-            "benchmark_run_id": "bmr_safe",
-            "status": "provisioning",
-            "profile_id": "cfg_sw",
-        },
-    ]
-
-    _row, owns = SwitchyardCampaignRepository(conn).ensure_and_claim_provisioning(
-        benchmark_run_id="bmr_safe",
-        profile_id="cfg_sw",
-        config_hash="sha256:config",
-        credential_hash="sha256:credential",
-        max_concurrent_members=128,
-        worker_id="worker-a",
-        claim_seconds=30,
-    )
-
-    assert owns is True
-    sql = [str(call.args[0]) for call in cur.execute.call_args_list]
-    assert "INSERT INTO benchmark_switchyard_campaigns" in sql[0]
-    assert "FOR UPDATE" in sql[1]
-    assert "cancel_requested_at IS NULL" in sql[2]
-
-
-def test_switchyard_campaign_failed_provision_persists_cleanup_identity() -> None:
-    conn, cur = _conn()
-    lease = SwitchyardLease(
-        profile_id="cfg_sw",
-        namespace="evals",
-        name="switchyard-bmr-safe",
-        service_name="switchyard-bmr-safe",
-        config_map_name="switchyard-bmr-safe-routes",
-        secret_name="switchyard-bmr-safe-secrets",
-        endpoint="http://switchyard-bmr-safe.evals.svc.cluster.local:4000",
-        openai_base_url="http://switchyard-bmr-safe.evals.svc.cluster.local:4000/v1",
-        anthropic_base_url="http://switchyard-bmr-safe.evals.svc.cluster.local:4000",
-        inbound="openai",
-        port=4000,
-    )
-
-    SwitchyardCampaignRepository(conn).mark_provision_failed(
-        "bmr_safe",
-        worker_id="worker-a",
-        claim_attempt=3,
-        detail="readiness failed; rollback failed",
-        lease=lease,
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "metadata = COALESCE(%s::jsonb, metadata::jsonb)" in sql
-    assert params[1:4] == ("evals", "switchyard-bmr-safe", lease.endpoint)
-    assert params[4].obj["name"] == "switchyard-bmr-safe"
-    assert params[-1] == 3
-
-
-def test_switchyard_campaign_heartbeat_is_fenced_by_claim_attempt() -> None:
-    conn, cur = _conn()
-    cur.rowcount = 1
-
-    renewed = SwitchyardCampaignRepository(conn).renew_provisioning_claim(
-        "bmr_safe",
-        worker_id="worker-a",
-        claim_attempt=4,
-        claim_seconds=30,
-    )
-
-    assert renewed is True
-    sql, params = _executed_sql_and_params(cur)
-    assert "claim_expires_at = NOW()" in sql
-    assert "claim_owner = %s AND claim_attempt = %s" in sql
-    assert params == (30, "bmr_safe", "worker-a", 4)
-
-
-def test_switchyard_campaign_missing_ready_resources_are_atomically_reclaimed() -> None:
-    conn, cur = _conn()
-    cur.fetchone.side_effect = [
-        {
-            "benchmark_run_id": "bmr_safe",
-            "status": "ready",
-            "cancel_requested_at": None,
-        },
-        {
-            "benchmark_run_id": "bmr_safe",
-            "status": "provisioning",
-            "claim_owner": "worker-a",
-            "claim_attempt": 5,
-        },
-    ]
-
-    claimed = SwitchyardCampaignRepository(conn).claim_ready_reprovisioning(
-        "bmr_safe",
-        worker_id="worker-a",
-        claim_seconds=30,
-        detail="deployment not found",
-    )
-
-    assert claimed is not None
-    assert claimed["claim_attempt"] == 5
-    sql = [str(call.args[0]) for call in cur.execute.call_args_list]
-    assert "FOR UPDATE" in sql[0]
-    assert "SET status = 'provisioning'" in sql[1]
-    assert "claim_attempt = claim_attempt + 1" in sql[1]
-
-
-def test_switchyard_campaign_ready_unavailable_marks_stale_ready_campaign() -> None:
-    conn, cur = _conn()
-
-    SwitchyardCampaignRepository(conn).mark_ready_unavailable(
-        "bmr_safe",
-        detail="deployment not found",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "status = 'provision_failed'" in sql
-    assert "WHERE benchmark_run_id = %s AND status = 'ready'" in sql
-    assert params == ("deployment not found", "bmr_safe")
-
-
-def test_switchyard_campaign_permit_is_campaign_wide_and_atomic() -> None:
-    conn, cur = _conn()
-    cur.fetchone.side_effect = [
-        {"status": "ready", "max_concurrent_members": 512, "cancel_requested_at": None},
-        None,
-        {"count": 511},
-    ]
-
-    decision = SwitchyardCampaignRepository(conn).acquire_launch_permit(
-        benchmark_run_id="bmr_safe",
-        evaluation_id="ev_safe",
-        worker_id="worker-a",
-        lease_seconds=30,
-    )
-
-    assert decision == "launch"
-    sql = "\n".join(str(call.args[0]) for call in cur.execute.call_args_list)
-    assert "FROM benchmark_switchyard_campaigns" in sql
-    assert "FOR UPDATE" in sql
-    assert "status IN ('launching', 'running', 'cleanup_pending')" in sql
-    assert "INSERT INTO benchmark_switchyard_launches" in sql
-
-
-def test_switchyard_campaign_permit_honors_campaign_capacity() -> None:
-    conn, cur = _conn()
-    cur.fetchone.side_effect = [
-        {"status": "ready", "max_concurrent_members": 512, "cancel_requested_at": None},
-        None,
-        {"count": 512},
-    ]
-
-    decision = SwitchyardCampaignRepository(conn).acquire_launch_permit(
-        benchmark_run_id="bmr_safe",
-        evaluation_id="ev_wait",
-        worker_id="worker-a",
-        lease_seconds=30,
-    )
-
-    assert decision == "wait"
-    sql = "\n".join(str(call.args[0]) for call in cur.execute.call_args_list)
-    assert "INSERT INTO benchmark_switchyard_launches" not in sql
-
-
-def test_switchyard_campaign_finalizer_waits_for_terminal_members_and_cleanup() -> None:
-    conn, cur = _conn()
-    cur.fetchone.return_value = None
-
-    assert (
-        SwitchyardCampaignRepository(conn).claim_finalizable(
-            worker_id="worker-a",
-            claim_seconds=30,
-        )
-        is None
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "e.status NOT IN ('succeeded', 'failed', 'cancelled')" in sql
-    assert "c.status IN (" in sql and "'provisioning'" in sql
-    assert "AND EXISTS" in sql
-    assert "l.status IN ('launching', 'running', 'cleanup_pending')" in sql
-    assert "'finalizing'" in sql
-    assert "RETURNING" in sql and "c.benchmark_run_id" in sql
-    assert "FOR UPDATE SKIP LOCKED" in sql
-    assert params == ("worker-a", 30)
-
-
-def test_switchyard_campaign_cleanup_claim_respects_retry_lease() -> None:
-    conn, cur = _conn()
-
-    SwitchyardCampaignRepository(conn).claim_cleanup(worker_id="worker-a", claim_seconds=30)
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "l.permit_expires_at IS NULL OR l.permit_expires_at <= NOW()" in sql
-    assert "OR l.status = 'cleanup_pending'" not in sql
-    assert params == ("worker-a", 30)
-
-
-def test_switchyard_campaign_cleanup_can_be_abandoned_with_diagnostics() -> None:
-    conn, cur = _conn()
-
-    SwitchyardCampaignRepository(conn).abandon_cleanup("ev_safe", detail="delete failed")
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "status = 'cleanup_acknowledged'" in sql
-    assert "cleanup_error = %s" in sql
-    assert "permit_expires_at = NULL" in sql
-    assert params == ("delete failed", "ev_safe")
-
-
-def test_switchyard_campaign_records_managed_lease_before_apply() -> None:
-    conn, cur = _conn()
-    cur.rowcount = 1
-    lease = SwitchyardLease(
-        profile_id="cfg_sw",
-        benchmark_run_id="bmr_safe",
-        namespace="evals",
-        name="switchyard-bmr-safe",
-        service_name="switchyard-bmr-safe",
-        config_map_name="switchyard-bmr-safe-routes",
-        secret_name="switchyard-bmr-safe-secrets",
-        endpoint="http://switchyard-bmr-safe.evals.svc.cluster.local:4000",
-        openai_base_url="http://switchyard-bmr-safe.evals.svc.cluster.local:4000/v1",
-        anthropic_base_url="http://switchyard-bmr-safe.evals.svc.cluster.local:4000",
-        inbound="openai",
-        port=4000,
-    )
-
-    assert SwitchyardCampaignRepository(conn).record_provisioning_lease(
-        "bmr_safe",
-        worker_id="worker-a",
-        claim_attempt=2,
-        lease=lease,
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "status = 'provisioning'" in sql
-    assert "cancel_requested_at IS NULL" in sql
-    assert "resource_name = %s" in sql
-    assert params[0:3] == ("evals", "switchyard-bmr-safe", lease.endpoint)
-    assert params[4:] == ("bmr_safe", "worker-a", 2)
-
-
-def test_switchyard_campaign_deletion_does_not_wait_for_member_archives() -> None:
-    conn, cur = _conn()
-
-    SwitchyardCampaignRepository(conn).claim_due_deletion(
-        worker_id="worker-a",
-        claim_seconds=900,
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "c.drain_until <= NOW()" in sql
-    assert "e.evidence_status" not in sql
-    assert "e.archive_status" not in sql
-    assert params == ("worker-a", 900)
-
-
-def test_switchyard_campaign_failed_deletion_has_retry_backoff() -> None:
-    conn, cur = _conn()
-
-    SwitchyardCampaignRepository(conn).mark_delete_failed(
-        "bmr_safe",
-        worker_id="worker-a",
-        detail="kubectl unavailable",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "claim_expires_at = NOW() + INTERVAL '30 seconds'" in sql
-    assert params == ("kubectl unavailable", "bmr_safe", "worker-a")
-
-
-def test_switchyard_campaign_cannot_mark_deleted_without_resource_identity() -> None:
-    conn, cur = _conn()
-
-    SwitchyardCampaignRepository(conn).mark_deleted("bmr_safe", worker_id="worker-a")
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "resource_name IS NOT NULL" in sql
-    assert params == ("bmr_safe", "worker-a")
-
-
-def test_switchyard_resource_teardown_recovers_terminal_provisioned_leaks() -> None:
-    conn, cur = _conn()
-
-    RuntimeResourceRepository(conn).claim_due_switchyard_teardown(
-        claim_timeout=30,
-        worker_id="worker-a",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "JOIN evaluations e ON e.id = r.evaluation_id" in sql
-    assert "r.status = 'provisioned'" in sql
-    assert "e.status IN ('succeeded', 'failed', 'cancelled')" in sql
-    assert "INTERVAL '5 minutes'" in sql
-    assert params == (30, 30, "worker-a")
-
-
-def test_evaluation_evidence_claim_waits_for_campaign_evidence() -> None:
-    conn, cur = _conn()
-    cur.fetchone.return_value = None
-
-    EvaluationRepository(conn).claim_next_evidence(claim_timeout=30, worker_id="worker-a")
-
-    sql, _params = _executed_sql_and_params(cur)
-    assert "benchmark_switchyard_campaigns" in sql
-    assert "c.evidence_status NOT IN ('ready', 'unavailable')" in sql
 
 
 def test_repository_order_rejects_unallowed_sort_direction() -> None:
@@ -1303,7 +921,6 @@ def test_evaluation_create_persists_initial_user_turn_order() -> None:
         task_revision=1,
         framework_profile_id=None,
         harbor_profile_id=None,
-        switchyard_profile_id=None,
         intake_profile_id=None,
         credentials={},
         extra_skill_object_keys=[],
