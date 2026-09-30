@@ -275,6 +275,16 @@ def _resolve_gym_paths(
     )
 
 
+def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
+    """``create.resource`` must match ``sandbox.resources``."""
+    options: dict[str, Any] = {}
+    if gym.sandbox_server_protocol:
+        options["connection"] = {"protocol": gym.sandbox_server_protocol}
+    if gym.sandbox_resources:
+        options["create"] = {"resource": dict(gym.sandbox_resources)}
+    return options
+
+
 def _build_nemo_gym_env_config(
     customizer_config: TrainingStepConfig,
     job_ctx: NHXJobContext,
@@ -363,9 +373,8 @@ def _build_nemo_gym_env_config(
             ),
             # Only emitted when the operator declared it, so an unset value leaves
             # NeMo-RL's own default in place rather than this compiler asserting one.
-            host_provider_options=(
-                {"connection": {"protocol": gym.sandbox_server_protocol}} if gym.sandbox_server_protocol else {}
-            ),
+            # create.resource must match resources.
+            host_provider_options=_sandbox_host_provider_options(gym),
             # Same rule: unset leaves the OpenSandbox server's default in place.
             resources=gym.sandbox_resources or None,
             environment_pvc_claim=mounts.environment_pvc_claim,

@@ -800,6 +800,8 @@ def test_sandbox_resources_reach_the_sandbox_when_the_operator_sets_them(
 
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
     assert sandbox["resources"] == {"cpu": "2", "memory": "8Gi"}
+    # create.resource must match resources.
+    assert sandbox["host_provider_options"]["create"] == {"resource": {"cpu": "2", "memory": "8Gi"}}
 
 
 def test_sandbox_resources_unset_leaves_the_provider_default(
