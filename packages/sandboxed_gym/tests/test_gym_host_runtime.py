@@ -488,6 +488,16 @@ def test_no_manifest_is_a_no_op(tmp_path, monkeypatch):
     assert runtime._load_runtime_environment_package(str(tmp_path), required=False) is None
 
 
+def test_compose_without_selection_keeps_caller_config_paths(tmp_path):
+    package = _load_composition_package(tmp_path, agents=("selected_agent",), resources_servers=("selected_resources",))
+    global_config = {"config_paths": ["/job/environment/responses_api_models/vllm_model/configs/policy_model.yaml"]}
+
+    configured = runtime._compose_gym_config_with_environment_package(global_config, package)
+
+    assert configured["config_paths"] == global_config["config_paths"]
+    assert configured is not global_config
+
+
 def test_compose_without_package_returns_a_copy():
     global_config = {"config_paths": ["image-owned.yaml"]}
 

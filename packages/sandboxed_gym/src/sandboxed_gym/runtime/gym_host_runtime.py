@@ -581,6 +581,9 @@ def _compose_gym_config_with_environment_package(
         if selection is not None:
             raise RuntimeError("Gym component selection was supplied without an environment package")
         return gym_config
+    if selection is None:
+        # Training writes config_paths itself. Eval supplies component selection.
+        return gym_config
     if not isinstance(selection, dict):
         raise RuntimeError("A mounted environment package requires Gym component selection metadata")
 
