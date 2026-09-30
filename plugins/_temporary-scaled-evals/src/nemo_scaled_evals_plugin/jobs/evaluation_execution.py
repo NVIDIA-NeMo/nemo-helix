@@ -74,13 +74,16 @@ class EvaluationExecutionJob(NemoJob):
         )
 
     def run(self, config: dict[str, Any]) -> dict[str, Any]:
-        """Execute the existing dispatcher for the specified execution."""
+        """Execute the specified execution, then publish its evidence and archive."""
         spec = EvaluationExecutionSpec.model_validate(config)
-        _dispatcher_cls()().run(
+        dispatcher = _dispatcher_cls()()
+        dispatcher.run(
             spec.evaluation_id,
             maintain_claim=False,
             expected_execution_number=spec.execution_number,
         )
+        # A no-op when the execution was retried rather than terminalized.
+        dispatcher.finalize(spec.evaluation_id)
         return {
             "status": "completed",
             "evaluation_id": spec.evaluation_id,

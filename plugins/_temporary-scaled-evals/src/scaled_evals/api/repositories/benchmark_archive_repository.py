@@ -14,6 +14,10 @@ _MEMBER_COLUMNS = """
     id, task_id, task_revision, status, current_execution,
     archive_object_key, archive_built_at, archive_size_bytes
 """
+_CLAIMABLE = """
+    b.deleted_at IS NULL AND (a.status = 'queued' OR
+        (a.status = 'building' AND a.claimed_at < NOW() - (%s * INTERVAL '1 second')))
+"""
 
 
 class BenchmarkArchiveRepository:
@@ -90,17 +94,31 @@ class BenchmarkArchiveRepository:
             assert row is not None
             return row
 
-    def claim(self, *, claim_timeout: float) -> dict | None:
+    def list_claimable(self, *, claim_timeout: float, limit: int) -> list[dict]:
+        """Return archives a builder may claim, without claiming them."""
         with self.conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
+                SELECT a.benchmark_run_id, a.generation, a.attempts FROM benchmark_run_archives a
+                JOIN benchmark_runs b ON b.id = a.benchmark_run_id
+                WHERE {_CLAIMABLE} ORDER BY a.requested_at LIMIT %s
+                """,
+                (claim_timeout, limit),
+            )
+            return cur.fetchall()
+
+    def claim(self, *, claim_timeout: float, run_id: str | None = None) -> dict | None:
+        # A targeted claim waits out short locks (cleanup sweeps) instead of
+        # skipping: its caller is a Job whose name is fixed for this attempt.
+        lock = "FOR UPDATE OF a" if run_id else "FOR UPDATE OF a SKIP LOCKED"
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"""
                 WITH candidate AS (
                     SELECT a.benchmark_run_id FROM benchmark_run_archives a
                     JOIN benchmark_runs b ON b.id = a.benchmark_run_id
-                    WHERE b.deleted_at IS NULL AND (a.status = 'queued' OR
-                        (a.status = 'building' AND
-                         a.claimed_at < NOW() - (%s * INTERVAL '1 second')))
-                    ORDER BY a.requested_at FOR UPDATE OF a SKIP LOCKED LIMIT 1
+                    WHERE {_CLAIMABLE} AND (%s::text IS NULL OR a.benchmark_run_id = %s)
+                    ORDER BY a.requested_at {lock} LIMIT 1
                 )
                 UPDATE benchmark_run_archives a SET
                     status = CASE WHEN a.attempts >= 3 THEN 'failed' ELSE 'building' END,
@@ -110,7 +128,7 @@ class BenchmarkArchiveRepository:
                 FROM candidate c WHERE a.benchmark_run_id = c.benchmark_run_id
                 RETURNING a.*
                 """,
-                (claim_timeout, str(uuid4())),
+                (claim_timeout, run_id, run_id, str(uuid4())),
             )
             return cur.fetchone()
 
