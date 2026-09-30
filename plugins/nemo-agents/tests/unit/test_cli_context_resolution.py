@@ -131,11 +131,13 @@ def test_per_command_base_url_flag_is_gone() -> None:
     assert "No such option" in result.output
 
 
-def test_base_url_falls_back_to_configured_context() -> None:
-    """With no flag/env, agents commands target the configured context base URL.
+def test_base_url_comes_from_cli_state() -> None:
+    """Agents commands target the base URL the CLI state resolved.
 
     This is the P0 regression: previously agents ignored the shared config
-    and silently hit localhost:8080.
+    and silently hit localhost:8080. How the state resolves the URL (global
+    flag, ``NHX_BASE_URL``, config file) is pinned end to end in
+    ``nemo_helix_ext``'s ``test_plugin_base_url_resolution.py``.
     """
     captured: list[httpx.Request] = []
     app = AgentsCLI().get_cli()
