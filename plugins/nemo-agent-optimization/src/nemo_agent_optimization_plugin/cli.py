@@ -19,7 +19,12 @@ from typing import ClassVar
 import typer
 from nemo_agent_optimization_plugin.client import AgentOptimizationClient
 from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
+from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_options import ListOutputFormatOption, NoTruncateOption, OutputColumnsOption
+from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output
+from nemo_helix_plugin.cli_state import cli_state, resolve_output_format
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.commands import add_job_commands
 from nemo_helix_plugin.discovery import discover
@@ -29,6 +34,8 @@ logger = logging.getLogger(__name__)
 #: How long to wait on the platform. Short on purpose: this is a listing command,
 #: and an unreachable platform should cost a noticeable pause, not a hang.
 STRATEGIES_TIMEOUT_SECONDS = 10.0
+
+STRATEGY_COLUMNS = [Column("name", "Name"), Column("description", "Description")]
 
 #: Entry-point group a plugin joins to hang its own verbs off this group.
 #:
@@ -62,32 +69,50 @@ class AgentOptimizeCLI(NemoCLI):
         add_job_commands(app, {"agent-optimization.run-strategy": RunStrategyJob}, cli=self)
 
         @app.command("list-strategies")
-        def list_strategies() -> None:
-            """List the strategies `--strategy` accepts, one name per line.
+        def list_strategies(
+            ctx: typer.Context,
+            output_format: ListOutputFormatOption = None,
+            no_truncate: NoTruncateOption = None,
+            columns: OutputColumnsOption = None,
+        ) -> None:
+            """List installed strategies and what each one optimizes.
 
-            Only the platform is asked, because only the platform runs the job: a
-            client venv without a strategy plugin still submits to a server that
-            has it, and vice versa. Answering from this environment instead would
-            describe a different machine, so an unreachable platform is an error
-            rather than a cue to guess.
+            Every name listed is a valid `--strategy`. Only the platform is asked,
+            because only the platform runs the job: a client venv without a strategy
+            plugin still submits to a server that has it, and vice versa. Answering
+            from this environment instead would describe a different machine, so an
+            unreachable platform is an error rather than a cue to guess.
 
-            Stdout carries names and nothing else, so `for s in $(nemo agents optimize
-            list-strategies)` is safe: an empty platform prints nothing there. The
-            target is announced once on stderr by the shared base-URL resolver.
+            Output follows every other `nemo` list command: a table on a terminal,
+            JSON when piped, so a script reads the names with
+            `-f json | jq -r '.[].name'`. The target is announced once on stderr by
+            the shared base-URL resolver.
             """
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            check_output_columns_with_format(columns, resolved_output_format)
+            if resolved_output_format == "code":
+                handle_code_generation(
+                    AgentOptimizationClient, "list_strategies", {}, resolved_output_format, cli_state(ctx)
+                )
+                return
             try:
-                names, target = _remote_strategy_names()
+                strategies, target = _remote_strategies()
             except NemoClientError as exc:
                 # Covers all three failure modes the typed client distinguishes: transport,
                 # HTTP status, and a response body that does not match the schema.
                 typer.echo(f"Error: could not list the platform's strategies: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
 
-            if not names:
+            if not strategies:
                 typer.echo(f"No optimization strategies are installed on {target}.", err=True)
-                return
-            for name in names:
-                typer.echo(name)
+            state = ctx.obj
+            format_output(
+                strategies,
+                is_list=True,
+                output_format=resolved_output_format,
+                output_columns=columns if columns and columns.strip() != "default" else STRATEGY_COLUMNS,
+                no_truncate=no_truncate if state is None else state.get_no_truncate(no_truncate),
+            )
 
         _register_contributed_subcommands(app)
         return app
@@ -115,7 +140,7 @@ def _register_contributed_subcommands(group: typer.Typer) -> None:
             logger.warning("Optimize CLI contribution %r failed to register", name, exc_info=True)
 
 
-def _remote_strategy_names() -> tuple[list[str], str]:
+def _remote_strategies() -> tuple[list[OptimizationStrategy], str]:
     """Ask the platform for its installed strategies. Raises if it cannot answer.
 
     The platform comes from the global ``nemo --base-url`` / ``nemo --context``, and
@@ -140,4 +165,4 @@ def _remote_strategy_names() -> tuple[list[str], str]:
             timeout=STRATEGIES_TIMEOUT_SECONDS,
         ) as client:
             listing = client.list_strategies().data()
-    return [strategy.name for strategy in listing.data], target
+    return listing.data, target
