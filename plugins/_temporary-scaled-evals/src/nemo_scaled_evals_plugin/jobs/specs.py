@@ -32,3 +32,11 @@ class EvaluationExecutionSpec(BaseModel):
     deadline_seconds: int = Field(ge=1)
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class BenchmarkArchiveBuildSpec(BaseModel):
+    """Describe one benchmark-run archive build attempt."""
+
+    benchmark_run_id: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid", frozen=True)

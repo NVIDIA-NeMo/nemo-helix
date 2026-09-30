@@ -13,13 +13,14 @@ from typing import Any
 import anyio.from_thread
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import evaluation_execution_job_name
-from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec, TaskImageBuildSpec
-from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
+from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
+from pydantic import BaseModel
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
@@ -77,8 +78,8 @@ class EvaluationSubmitter:
     async def create_job(
         self,
         name: str,
-        job_cls: type[TaskImageBuildJob] | type[EvaluationExecutionJob],
-        spec: TaskImageBuildSpec | EvaluationExecutionSpec,
+        job_cls: type[NemoJob],
+        spec: BaseModel,
     ) -> Any:
         platform_spec = await job_cls.compile(
             workspace=settings.platform_jobs_workspace,
