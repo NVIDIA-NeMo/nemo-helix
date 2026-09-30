@@ -74,7 +74,7 @@ Colima VM that runs it — refuse, so rootlesskit dies with
 `fork/exec /proc/self/exe: permission denied`. The documented workaround
 installs an AppArmor profile on the host, which a dev stack should not require.
 
-The hosted-cluster, identity-provider, Switchyard, and Gym environment blocks are
+The hosted-cluster, identity-provider, and Gym environment blocks are
 not carried over; none are part of Phase 1.
 
 ## scaled-evals' own database

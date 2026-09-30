@@ -199,17 +199,6 @@ class OperationsRepository:
             )
             backend_failures = [{"runtime": str(row["runtime"]), "count": int(row["count"])} for row in cur.fetchall()]
 
-            cur.execute(
-                """
-                SELECT status::text AS status, COUNT(*) AS count
-                FROM evaluation_runtime_resources
-                WHERE kind = 'switchyard'
-                  AND status IN ('draining', 'delete_failed')
-                GROUP BY status
-                """
-            )
-            switchyard_teardown = {str(row["status"]): int(row["count"]) for row in cur.fetchall()}
-
         return {
             "oldest_queued_seconds": float(summary.get("oldest_queued_seconds") or 0),
             "unclaimed_queued": int(summary.get("unclaimed_queued") or 0),
@@ -218,7 +207,6 @@ class OperationsRepository:
             "oldest_worker_lease_seconds": float(summary.get("oldest_worker_lease_seconds") or 0),
             "stuck_jobs": stuck_jobs,
             "backend_failures": backend_failures,
-            "switchyard_teardown": switchyard_teardown,
         }
 
     def ready_task_pack_revisions(self, *, limit: int) -> list[dict]:

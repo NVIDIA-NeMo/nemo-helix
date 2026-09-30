@@ -123,12 +123,3 @@ def test_manifest_rejects_unknown_fields_and_invalid_counts(monkeypatch, tmp_pat
     legacy = BenchmarkArchiveManifest.model_validate(data)
     assert legacy.harbor_job_id is None
     assert legacy.members[0].artifact_integrity == "manifest_missing"
-
-
-def test_export_core_has_no_switchyard_dependency() -> None:
-    import ast
-
-    import scaled_evals.benchmark_archive as module
-
-    tree = ast.parse(Path(module.__file__).read_text())
-    assert not any(isinstance(node, ast.ImportFrom) and "switchyard" in (node.module or "") for node in ast.walk(tree))

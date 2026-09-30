@@ -48,7 +48,6 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "benchmark_run_id": None,
         "framework_profile_id": "prof_1",
         "harbor_profile_id": None,
-        "switchyard_profile_id": None,
         "intake_profile_id": None,
         "credentials": {"anthropic": "cred_1"},
         "extra_skill_object_keys": ["skills/a.md"],

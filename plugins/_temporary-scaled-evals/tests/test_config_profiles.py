@@ -86,12 +86,12 @@ def test_list_type_filter_scopes_query() -> None:
         yield conn
 
     v1.dependency_overrides[get_conn] = _gen
-    response = client.get("/v1/config-profiles", params={"type": "switchyard"})
+    response = client.get("/v1/config-profiles", params={"type": "intake"})
 
     assert response.status_code == 200
     select = cur.execute.call_args_list[0]
     assert "type = %s" in select.args[0]
-    assert "switchyard" in select.args[1]
+    assert "intake" in select.args[1]
 
 
 # ---------- get -----------------------------------------------------------
@@ -150,7 +150,6 @@ def test_create_accepts_gym_type() -> None:
     [
         ("harbor", {"harbor_config": 123}),
         ("gym", {}),
-        ("switchyard", {"replicas": 0}),
         ("intake", {"app": "missing-workspace"}),
     ],
 )
@@ -206,50 +205,12 @@ def test_create_rejects_invalid_gym_profile_before_persistence() -> None:
     assert response.json()["detail"]["error"]["code"] == "invalid_config"
 
 
-def test_create_external_switchyard_rejects_unapproved_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "switchyard_external_allowed_hosts", "approved.example.com")
+def test_create_rejects_retired_switchyard_type() -> None:
     response = client.post(
         "/v1/config-profiles",
-        json={
-            "name": "external",
-            "type": "switchyard",
-            "config": {"mode": "external", "endpoint": "https://metadata.google.internal"},
-        },
+        json={"name": "retired", "type": "switchyard", "config": {}},
     )
     assert response.status_code == 422
-    assert response.json()["detail"]["error"]["code"] == "invalid_config"
-
-
-def test_create_external_switchyard_accepts_operator_approved_https_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "switchyard_external_allowed_hosts", "switchyard.example.com")
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.return_value = {
-        "id": "cfg_external",
-        "name": "external",
-        "type": "switchyard",
-        "config": {"mode": "external", "endpoint": "https://switchyard.example.com"},
-        "created_at": "2026-07-07T00:00:00Z",
-        "updated_at": "2026-07-07T00:00:00Z",
-    }
-
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    v1.dependency_overrides[get_conn] = _gen
-    response = client.post(
-        "/v1/config-profiles",
-        json={
-            "name": "external",
-            "type": "switchyard",
-            "config": {"mode": "external", "endpoint": "https://switchyard.example.com"},
-        },
-    )
-    assert response.status_code == 201, response.text
 
 
 # ---------- patch / delete: 404 on missing --------------------------------
@@ -266,7 +227,6 @@ def test_patch_returns_404_when_missing() -> None:
     [
         ("harbor", {"env": []}),
         ("gym", {}),
-        ("switchyard", {"port": 0}),
         ("intake", {"workspace": 42}),
     ],
 )

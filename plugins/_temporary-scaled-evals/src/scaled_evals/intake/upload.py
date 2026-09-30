@@ -12,15 +12,13 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.intake.atif_payload import (
     IntakeError,
-    load_json_if_exists,
-    switchyard_model_metrics,
     trial_payloads,
 )
 from scaled_evals.intake.client import post_atif_payload
@@ -61,20 +59,6 @@ def upload_job_atif(
     if not job_dir.is_dir():
         raise IntakeError(f"Harbor job directory does not exist: {job_dir}")
 
-    routing_stats = load_json_if_exists(job_dir / "switchyard" / "routing_stats_final.json")
-    per_model_metrics = switchyard_model_metrics(routing_stats)
-    if per_model_metrics:
-        experiment = replace(
-            experiment,
-            metadata={
-                **experiment.metadata,
-                **{
-                    metric: json.dumps(values, separators=(",", ":"), sort_keys=True)
-                    for metric, values in per_model_metrics.items()
-                },
-            },
-        )
-
     evaluation_id = build_experiment_name(experiment.benchmark, experiment.run_key)
     payloads = trial_payloads(
         job_dir,
@@ -84,7 +68,6 @@ def upload_job_atif(
         evaluation_run_id=evaluation_run_id,
         evaluation_id=evaluation_id,
         test_case_id=test_case_id,
-        routing_stats=routing_stats,
     )
     ensured_id = ensure_experiment(target.base_url, target.workspace, experiment, timeout)
     if ensured_id != evaluation_id:
