@@ -194,8 +194,6 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
         controller_module,
         "settings",
         SimpleNamespace(
-            platform_build_jobs_enabled=True,
-            platform_evaluation_jobs_enabled=True,
             platform_jobs_phase_batch_size=20,
             platform_jobs_phase_budget_seconds=5.0,
         ),
@@ -311,13 +309,8 @@ def test_immediate_submission_is_best_effort(monkeypatch: pytest.MonkeyPatch) ->
     sdk = MagicMock(side_effect=RuntimeError("platform unreachable"))
     monkeypatch.setattr(submitter_module, "get_async_platform_sdk", sdk)
 
-    monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=False))
-    submitter_module.submit_evaluation_now("eval_1")
-    sdk.assert_not_called()
-
     # The committed row is the handoff: a failure here must not fail the API
     # request, because the controller submits the row on its next pass.
-    monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=True))
     submitter_module.submit_evaluation_now("eval_1")
     sdk.assert_called_once()
 
@@ -333,7 +326,6 @@ def test_controller_tears_down_orphaned_executions(monkeypatch: pytest.MonkeyPat
     )
     teardown = MagicMock()
     monkeypatch.setattr(controller_module, "teardown_orphaned_execution", teardown)
-    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", True)
     controller = ScaledEvalsJobsController()
 
     assert "cleanup_executions" in dict(controller._phases())
@@ -348,7 +340,6 @@ def test_controller_tears_down_orphaned_executions(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.asyncio
 async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", True)
     monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
     controller = ScaledEvalsJobsController()
     controller._jobs = cast(Any, AsyncMock())

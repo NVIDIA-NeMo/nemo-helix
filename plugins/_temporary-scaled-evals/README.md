@@ -150,18 +150,17 @@ have not finished execution, evidence, teardown, and individual archive generati
 produce a 409 rather than an incomplete snapshot. Repeated requests reuse queued,
 building, or ready work; `force` replaces a ready/failed export, not an active build.
 
-With Platform Jobs enabled (the default), the scaled-evals Jobs controller submits
+The scaled-evals Jobs controller submits
 one `scaled-evals.benchmark-archive-build` Job per claim attempt, and the Job takes
 the lease when it starts. Each evaluation Job builds its own evidence and archive;
-the controller rebuilds any a Job left behind. With Platform Jobs disabled, the
-separate dispatch worker does this work. Leases survive restarts, and changed member executions/archives
+the controller rebuilds any a Job left behind. Leases survive restarts, and changed member executions/archives
 prevent publication of the in-progress export. Upload failures and lease loss
 trigger cleanup of unpublished claim-token objects. Cleanup rechecks the archive
 row under a lock before deleting: a lost commit acknowledgement must not delete
 a successfully published archive. If the database or object store is unavailable,
 cleanup defers rather than guessing.
 
-The controller (or, without Platform Jobs, an idle dispatch worker) also reconciles archive prefixes periodically, retaining the
+The controller also reconciles archive prefixes periodically, retaining the
 published object and the current building claim's object. This recovers objects
 left by process crashes, failed deletions, superseded generations, or an upload
 that completed after a revoked worker exited. The per-run throttle is persisted
@@ -324,7 +323,7 @@ curl -s -X POST $B/v1/tasks -H 'content-type: application/json' \
 ```
 
 `readyz` returns 503 `degraded` with `postgres: ok` and `schema: ok`. The failing
-`object_store`, `buildkit`, `registry`, and `build_worker` checks are expected until
+`object_store`, `buildkit`, and `registry` checks are expected until
 T1.3/T1.5 stand those up; the control plane itself is healthy. `POST /v1/tasks` returns
 201 with a presigned upload URL, which needs an object store before the upload
 completes.
@@ -339,18 +338,15 @@ docker rm -f scaled-evals-pg
 
 ## Background execution
 
-With `SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED=true` and
-`SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED=true`, the
-`scaled-evals-jobs` controller submits task builds and evaluation executions to
+The `scaled-evals-jobs` controller submits task builds and evaluation executions to
 Platform Jobs. Creating or retrying a single evaluation also submits its Job
 from the API right after the row commits; the controller submits anything that
 path misses, including benchmark-run members. Postgres remains the metadata
 source of truth during this migration. Nothing limits how many evaluations run at once; the controller
 submits every queued evaluation, bounded only by its per-pass batch size.
 
-`scaled-evals-dispatch-worker` remains deployed for cleanup, provenance, and
-SBOM queues. The legacy `scaled-evals-build-worker` command remains available
-only for deployments that leave Platform Jobs disabled.
+There is no separate worker process. The controller also runs execution cleanup,
+the evidence and archive backstops, and benchmark archive cleanup.
 
 ## Licensing
 

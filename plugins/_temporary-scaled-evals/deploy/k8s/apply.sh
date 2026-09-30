@@ -31,7 +31,7 @@ fi
 # keep running with the old settings until something restarted them.
 #
 # Only the keys local.env defines are replaced, so neither the ${HOME} in
-# workers.yaml nor the kubelet's own $(VAR) references are touched.
+# ${HOME} in the manifests nor the kubelet's own $(VAR) references are touched.
 render() {
   local tmp
   tmp="$(mktemp -d)"
@@ -91,7 +91,7 @@ fi
 
 echo "==> applying"
 render | kubectl apply -f -
-kubectl delete deployment -n "$NS" scaled-evals-build-worker --ignore-not-found
+kubectl delete deployment -n "$NS" scaled-evals-build-worker scaled-evals-dispatch-worker --ignore-not-found
 
 # Create the auth Secret before waiting for workloads; the recurring CronJob
 # updates it in place without putting an empty credential into the manifests.

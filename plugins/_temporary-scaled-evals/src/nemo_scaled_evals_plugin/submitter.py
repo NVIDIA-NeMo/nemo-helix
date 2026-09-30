@@ -147,8 +147,6 @@ def submit_evaluation_now(evaluation_id: str) -> None:
         evaluation_id: the evaluation whose row was just committed.
 
     """
-    if not settings.platform_evaluation_jobs_enabled:
-        return
     try:
         jobs = client_from_platform(get_async_platform_sdk(as_service="scaled-evals", internal=True), AsyncJobsClient)
         submitter = EvaluationSubmitter(jobs, f"scaled-evals-api:{socket.gethostname()}")

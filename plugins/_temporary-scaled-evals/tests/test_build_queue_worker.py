@@ -98,36 +98,6 @@ def test_worker_records_failure_after_final_attempt(monkeypatch: pytest.MonkeyPa
     )
 
 
-def test_worker_survives_transient_claim_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    worker = TaskBuildWorker(connect=_connect)
-    work_once = MagicMock(side_effect=[RuntimeError("database restarting"), False])
-    monkeypatch.setattr(worker, "work_once", work_once)
-
-    def stop_after_idle(_seconds: float) -> None:
-        if work_once.call_count == 2:
-            raise KeyboardInterrupt
-
-    worker.sleep = stop_after_idle
-
-    with pytest.raises(KeyboardInterrupt):
-        worker.work_forever(idle_sleep=0.01)
-
-    assert work_once.call_count == 2
-
-
-def test_idle_worker_publishes_presence_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    repo = MagicMock()
-    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
-    worker = TaskBuildWorker(connect=_connect)
-    worker.work_once = MagicMock(return_value=False)
-    worker.sleep = MagicMock(side_effect=KeyboardInterrupt)
-
-    with pytest.raises(KeyboardInterrupt):
-        worker.work_forever(idle_sleep=0.01)
-
-    repo.heartbeat_worker.assert_called_once_with(worker.worker_id)
-
-
 def test_cloudbuild_job_resolves_registry_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     build = MagicMock(return_value=("registry.example.com/team/task:rev2", "sha256:" + "a" * 64))
     monkeypatch.setattr(queue_worker, "build_cloud_revision_image", build)

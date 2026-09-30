@@ -26,8 +26,6 @@ dependencies = [
 
 [project.scripts]
 scaled-evals = "scaled_evals.cli.main:cli"
-scaled-evals-dispatch-worker = "scaled_evals.dispatch.main:main"
-scaled-evals-build-worker = "scaled_evals.api.build.main:main"
 scaled-evals-rotate-credential-key = "scaled_evals.api.rotate_credential_key:main"
 scaled-evals-migrate = "nemo_scaled_evals_plugin.migrations:main"
 

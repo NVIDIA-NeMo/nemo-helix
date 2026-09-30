@@ -71,11 +71,7 @@ class EvaluationExecutionJob(NemoJob):
         """Execute the specified execution, then publish its evidence and archive."""
         spec = EvaluationExecutionSpec.model_validate(config)
         dispatcher = Dispatcher()
-        dispatcher.run(
-            spec.evaluation_id,
-            maintain_claim=False,
-            expected_execution_number=spec.execution_number,
-        )
+        dispatcher.run(spec.evaluation_id, expected_execution_number=spec.execution_number)
         # A no-op when the execution was retried rather than terminalized.
         dispatcher.finalize(spec.evaluation_id)
         return {
