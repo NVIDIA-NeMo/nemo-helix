@@ -208,8 +208,7 @@ runs:
           guardrails-benchmark:
             - 'plugins/nemo-guardrails/**'
             - 'services/guardrails/**'
-            - 'packages/nemo_helix_plugin/src/nemo_helix_plugin/client/**'
-            - 'packages/nemo_helix_plugin/src/nemo_helix_plugin/inference_gateway/**'
+            - 'packages/nemo_helix_plugin/**'
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
             - 'packages/nemo_helix_plugin/**'
