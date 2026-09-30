@@ -60,6 +60,7 @@ from psycopg.rows import dict_row
 from scaled_evals.api import s3
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
@@ -87,6 +88,7 @@ from scaled_evals.dispatch.harbor_dataset_images import (
     effective_image_mode,
     prepare_dataset_images,
 )
+from scaled_evals.dispatch.harbor_opensandbox import APPLIED_EGRESS_SUMMARY_FILENAME
 from scaled_evals.dispatch.registry import get_backend, get_backend_capabilities
 from scaled_evals.dispatch.runtime_backend import (
     LaunchHandle,
@@ -981,6 +983,14 @@ class Dispatcher:
                 except Exception:  # noqa: BLE001 — most runs have no extra-skill artifact
                     skill_materials = []
                 row["extra_skill_materials"] = skill_materials
+                if row.get("runtime") == HARBOR_OPENSANDBOX_RUNTIME:
+                    try:
+                        applied_egress = s3.read_json_object(
+                            s3.evaluation_artifact_key(evaluation_id, APPLIED_EGRESS_SUMMARY_FILENAME)
+                        ).get("sandboxes", [])
+                    except Exception:  # noqa: BLE001 — runs that never started a sandbox have no summary
+                        applied_egress = []
+                    row["opensandbox_applied_egress"] = applied_egress
 
             prefix = f"scaled-evals-evidence-{evaluation_id}-"
             with tempfile.TemporaryDirectory(prefix=prefix) as tmp:

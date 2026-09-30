@@ -78,7 +78,7 @@ from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, RuntimeStatus
 LOG = logging.getLogger(__name__)
 
 NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
-PROVENANCE_FILENAME = "nemo-opensandbox-provenance.json"
+APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
 SUPPORTED_NETWORK_POLICIES = ("default_deny",)
 CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
 
@@ -412,18 +412,11 @@ def collect_applied_egress(job_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
-def write_provenance(job_dir: Path, handle: LaunchHandle, *, cleanup: Mapping[str, Any] | None = None) -> None:
-    applied = collect_applied_egress(job_dir)
-    document = {
-        **dict(handle.raw.get("provenance") or {}),
-        "ownership": handle.raw.get("ownership"),
-        "applied_egress": applied,
-        "applied_policy_sha256s": sorted({str(item["policy_sha256"]) for item in applied if item["policy_sha256"]}),
-    }
-    if cleanup is not None:
-        document["cleanup"] = dict(cleanup)
+def write_applied_egress_summary(job_dir: Path) -> None:
+    """Collect the per-trial records into one artifact the evidence builder reads into provenance."""
+    document = {"sandboxes": collect_applied_egress(job_dir)}
     job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / PROVENANCE_FILENAME).write_text(json.dumps(document, indent=2, sort_keys=True))
+    (job_dir / APPLIED_EGRESS_SUMMARY_FILENAME).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
 
 def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> StatusReader:
@@ -434,9 +427,9 @@ def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> 
         if status.phase in {"succeeded", "failed"}:
             job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
             try:
-                write_provenance(job_dir, handle)
+                write_applied_egress_summary(job_dir)
             except OSError as exc:
-                LOG.warning("harbor_opensandbox provenance for %s failed: %s", handle.external_id, exc)
+                LOG.warning("harbor_opensandbox applied-egress summary for %s failed: %s", handle.external_id, exc)
         return status
 
     return read
@@ -467,7 +460,6 @@ def make_harbor_opensandbox_terminator(
             failures.append(f"harbor runner termination failed: {exc}")
 
         selector = dict(handle.raw.get("ownership") or {})
-        report: dict[str, Any]
         try:
             validate_selector(selector)
             if selector.get(DEPLOYMENT_METADATA_KEY) != settings.harbor_opensandbox_deployment_id:
@@ -490,20 +482,18 @@ def make_harbor_opensandbox_terminator(
                     argv += ["--selector", f"{key}={value}"]
             env = connection_env(os.environ if environ is None else environ, env_file)
             completed = cleanup_runner(argv, env, timeout_s + 60)
-            report = _parse_cleanup_report(completed.stdout)
-            report["exit_code"] = completed.returncode
             if completed.returncode != 0:
+                report = _parse_cleanup_report(completed.stdout)
                 detail = report.get("error") or f"sandboxes still live: {report.get('remaining')}"
                 failures.append(f"OpenSandbox cleanup failed: {detail}")
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
-            report = {"error": f"{type(exc).__name__}: {exc}"}
             failures.append(f"OpenSandbox cleanup failed: {exc}")
 
         job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
         try:
-            write_provenance(job_dir, handle, cleanup=report)
+            write_applied_egress_summary(job_dir)
         except OSError as exc:
-            LOG.warning("harbor_opensandbox provenance for %s failed: %s", handle.external_id, exc)
+            LOG.warning("harbor_opensandbox applied-egress summary for %s failed: %s", handle.external_id, exc)
         if failures:
             raise RuntimeError("; ".join(failures))
 
