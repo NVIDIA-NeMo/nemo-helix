@@ -55,6 +55,8 @@ packages/nemo_helix_ext/src/nemo_helix_ext/cli/
     ├── manifest_registry.py  # TOP_LEVEL_ENTRIES: every built-in group/command
     ├── secrets.py            # REFERENCE port for core groups
     └── ...
+
+plugins/example-plugin/src/nemo_example_plugin/cli.py   # REFERENCE for plugin groups
 ```
 
 ## Running the CLI During Development
@@ -66,8 +68,8 @@ make update-cli                     # regenerate the CLI reference docs
 
 ## Adding or Changing a Command Group
 
-Template: `commands/secrets.py` + `tests/cli/commands/test_secrets.py`; plugin groups follow the same
-pattern.
+Templates: `commands/secrets.py` + `tests/cli/commands/test_secrets.py` for core groups,
+`plugins/example-plugin/src/nemo_example_plugin/cli.py` + its `tests/test_cli.py` for plugin groups.
 
 ### Pattern
 
@@ -177,7 +179,7 @@ help string; `tests/cli/test_app.py::test_manifest_help_matches_loaded_manual_en
 
 Plugin-hosted group: subclass `nemo_helix_plugin.cli.NemoCLI` in the owning package and register it
 under `[project.entry-points."nemo.cli"]` in that package's `pyproject.toml` (see
-`plugins/nemo-guardrails/src/nemo_guardrails_plugin/cli.py`). Run `uv sync --frozen --all-packages` so the entry point is installed. A plugin
+`plugins/example-plugin`). Run `uv sync --frozen --all-packages` so the entry point is installed. A plugin
 group with the same name as a built-in core group replaces it.
 
 ### Missing typed endpoint

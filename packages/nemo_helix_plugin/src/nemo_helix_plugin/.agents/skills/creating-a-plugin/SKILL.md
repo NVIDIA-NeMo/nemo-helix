@@ -147,6 +147,11 @@ class MyCLI(NemoCLI):
         return app
 ```
 
+For commands that call the platform, take the typed client from `cli_state(ctx)` and use the shared
+options and output helpers in `nemo_helix_plugin` (`--workspace`, `--output-format`, `-f code`); see
+`plugins/example-plugin/src/nemo_example_plugin/cli.py`. Never add a per-command `--base-url`: the
+platform comes from the global `nemo --base-url` / `--context`.
+
 **Add a job:**
 
 ```python

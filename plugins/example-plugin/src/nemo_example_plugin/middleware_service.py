@@ -28,38 +28,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_example_plugin._perms import ExampleMiddlewareConfigPerms
 from nemo_example_plugin.authz import scope
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
+from nemo_example_plugin.types.payloads import (
+    CreateExampleMiddlewareConfigRequest,
+    UpdateExampleMiddlewareConfigRequest,
+)
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Request schemas
-# ---------------------------------------------------------------------------
-
-
-class CreateExampleMiddlewareConfigRequest(BaseModel):
-    """Request body for creating an :class:`~nemo_example_plugin.middleware_config.ExampleMiddlewareConfig`."""
-
-    name: str
-    blocked_keywords: list[str] = []
-    block_message: str = "Your request contains content that is not permitted."
-
-
-class UpdateExampleMiddlewareConfigRequest(BaseModel):
-    """Request body for partially updating an existing config (PATCH semantics).
-
-    Omitted fields retain their current values.
-    """
-
-    blocked_keywords: list[str] | None = None
-    block_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
