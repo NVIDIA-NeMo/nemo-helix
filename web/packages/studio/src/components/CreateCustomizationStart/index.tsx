@@ -43,13 +43,16 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   // nothing here blocks it. The promise resolves regardless of whether this is still on
   // screen, and `onContinue` navigates — so without this, finishing setup would yank the
   // user to the form from wherever they had gone.
+  // Set on the way in as well as cleared on the way out: StrictMode runs an effect, its
+  // cleanup, then the effect again, so a cleanup-only version latches to false on mount in
+  // development and never hands anything over.
   const mounted = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    []
-  );
+    };
+  }, []);
 
   const selectedOption = START_OPTIONS.find((option) => option.id === selectedId) ?? null;
 
