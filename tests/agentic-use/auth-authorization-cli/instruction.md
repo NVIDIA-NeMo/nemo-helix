@@ -3,13 +3,13 @@
 
 # Authorization Flow (CLI)
 
-You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 
-Complete the following authorization and role-based access control operations using the `nhx` CLI:
+Complete the following authorization and role-based access control operations using the `nemo` CLI:
 
 1. Create a workspace named `harbor-auth-test` with description `"Workspace for authorization testing"`
 2. List the members of the workspace to confirm you (the workspace creator) are an Admin

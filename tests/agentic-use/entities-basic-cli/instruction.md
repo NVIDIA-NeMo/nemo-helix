@@ -3,13 +3,13 @@
 
 # Entity CRUD Operations (CLI)
 
-You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 
-Complete the following entity CRUD operations using the `nhx` CLI:
+Complete the following entity CRUD operations using the `nemo` CLI:
 
 1. Create an entity of type `model` named `harbor-test-model` with data `{"framework": "pytorch", "version": "1.0", "description": "Test model for harbor eval"}`
 2. Verify the entity was created by retrieving it

@@ -4,7 +4,6 @@ workspace-basic-cli-easy
 secrets-crud-cli-easy
 files-crud-cli-easy
 entities-basic-cli-easy
-evaluator-simple-job-cli-easy
 inference-provider-reg-cli-easy
 auditor-target-crud-cli-easy
 auditor-config-crud-cli-easy

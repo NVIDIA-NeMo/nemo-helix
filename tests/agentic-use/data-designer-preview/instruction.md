@@ -3,9 +3,9 @@
 
 # Data Designer Preview
 
-You have access to the `nhx` CLI and the NeMo Helix Python SDK for NeMo Helix operations. Your task is to set up inference and generate a preview of synthetic data using the Data Designer with both sampler and LLM-generated columns.
+You have access to the `nemo` CLI and the NeMo Helix Python SDK for NeMo Helix operations. Your task is to set up inference and generate a preview of synthetic data using the Data Designer with both sampler and LLM-generated columns.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The Python SDK is available at `/app/.venv/bin/python` with `from nemo_helix import NeMoHelix`. Both connect to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The Python SDK is available at `/app/.venv/bin/python` with `from nemo_helix import NeMoHelix`. Both connect to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 

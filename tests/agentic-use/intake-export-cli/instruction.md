@@ -3,9 +3,9 @@
 
 # Export Intake Entries to File (CLI)
 
-You have access to the `nhx` CLI for NeMo Helix operations, and `curl` for HTTP requests. Note: MCP tools are not available in this environment - you must use the CLI or HTTP API.
+You have access to the `nemo` CLI for NeMo Helix operations, and `curl` for HTTP requests. Note: MCP tools are not available in this environment - you must use the CLI or HTTP API.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The NeMo Helix API server is running at http://localhost:8080.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The NeMo Helix API server is running at http://localhost:8080.
 
 ## Task
 

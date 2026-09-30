@@ -201,47 +201,6 @@
     }
   },
   {
-    "id": "evaluator-simple-job-cli-easy",
-    "task_name": "evaluator-simple-job-cli-easy",
-    "input_obj": "# Simple Custom Evaluation Job (CLI)\n\nYou have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.\n\nThe `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.\n\n## Available CLI Commands\n\n### Workspace Commands\n\n- `nemo workspaces create <name>` - Create a workspace\n\n### Fileset Commands\n\nAll fileset commands accept `--workspace <name>` to specify the workspace.\n\n- `nemo files filesets create <name> --workspace <workspace>` - Create a fileset\n- `nemo files upload <local_path> <fileset_name> --workspace <workspace>` - Upload a file to a fileset\n- `nemo files list <fileset_name> --workspace <workspace>` - List files in a fileset\n\n### Evaluation Metric Commands\n\nAll evaluation commands accept `--workspace <name>` to specify the workspace.\n\n- `nemo evaluation metrics create <name> --type string-check --params '<json>' --workspace <workspace>` - Create a metric\n- `nemo evaluation metrics list --workspace <workspace>` - List metrics\n\nThe `string-check` metric type compares fields using an operation. Example params JSON:\n```json\n{\"field\": \"output\", \"expected_field\": \"expected\", \"operation\": \"equals\"}\n```\n\n### Evaluation Run Commands\n\n- `nemo evaluation metrics run --name <metric_name> --data '<jsonl_rows>' --workspace <workspace>` - Run a synchronous evaluation with inline data\n\nEach row in `--data` should be a JSON object with the fields referenced by the metric (e.g., `output` and `expected`).\n\n### Metric Job Commands\n\n- `nemo evaluation metric-jobs create <job_name> --metric-name <metric_name> --dataset-fileset <fileset_name> --workspace <workspace>` - Create an async metric evaluation job\n- `nemo evaluation metric-jobs get <job_name> --workspace <workspace>` - Check job status\n- `nemo evaluation metric-jobs list --workspace <workspace>` - List all metric jobs\n\n**Note:** In some environments, jobs may stay in \"created\" status if the job controller is not running \u2014 that is expected.\n\n## Task\n\nSet up and run a custom evaluation using a string-check metric via the `nhx` CLI:\n\n1. **Create a workspace** named `eval-test-workspace`\n\n2. **Prepare and upload a dataset** - Create a JSONL dataset file with rows containing `output` and `expected` fields, for example:\n   ```jsonl\n   {\"output\": \"hello\", \"expected\": \"hello\"}\n   {\"output\": \"world\", \"expected\": \"world\"}\n   {\"output\": \"foo\", \"expected\": \"bar\"}\n   ```\n   Include at least one row where the output does NOT match the expected value. Upload it to the NeMo Helix Files service as a fileset named `eval-dataset` in the `eval-test-workspace` workspace.\n\n3. **Create a string-check metric** in the workspace that compares the `output` field against the `expected` field using an equals operation\n\n4. **Run a synchronous evaluation** using the metric you created against a small inline dataset. Verify that matching rows score 1.0 and mismatched rows score 0.0.\n\n5. **Create an asynchronous metric evaluation job** that references the `eval-dataset` fileset and the metric you created. Note: in some environments, the job may stay in \"created\" status if the job controller is not running - that is expected.\n\n6. **Check the job status** to confirm the job was created successfully\n\n## Success Criteria\n\nThe task is complete when:\n- A workspace `eval-test-workspace` exists\n- A fileset `eval-dataset` exists with the dataset uploaded\n- A string-check metric exists in the workspace\n- A synchronous evaluation has returned results with scores\n- A metric evaluation job has been created",
-    "expected_output_obj": "",
-    "expected_trajectory": [],
-    "full_dataset_entry": {
-      "task_name": "evaluator-simple-job-cli-easy",
-      "inputs": {
-        "instruction": "evaluator-simple-job-cli-easy/instruction.md",
-        "task_toml": "evaluator-simple-job-cli-easy/task.toml",
-        "workflow": "evaluator-simple-job-cli-easy/workflow.yml",
-        "environment_dockerfile": "evaluator-simple-job-cli-easy/environment/Dockerfile",
-        "environment_setup_scripts": []
-      },
-      "correctness_oracle": {
-        "pytest_file": "evaluator-simple-job-cli-easy/tests/test_outputs.py"
-      },
-      "task_metadata": {
-        "difficulty": "easy",
-        "category": "evaluator",
-        "tags": [
-          "evaluator",
-          "metric-job",
-          "string-check",
-          "cli"
-        ]
-      },
-      "runtime_requirements": {
-        "requires_docker_compose": false,
-        "requires_gpu": false,
-        "requires_docker_socket": false,
-        "allow_internet": true
-      },
-      "timeouts_sec": {
-        "agent": 600.0,
-        "verifier": 60.0,
-        "build": 600.0
-      }
-    }
-  },
-  {
     "id": "inference-provider-reg-cli-easy",
     "task_name": "inference-provider-reg-cli-easy",
     "input_obj": "# Model Provider Registration (CLI)\n\nYou have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.\n\n## Task\n\nComplete the following model provider registration operations using the `nemo` CLI:\n\n1. Create a secret named `harbor-provider-api-key` with the value `test-api-key-12345` and description `API key for test provider`\n2. Register a model provider named `harbor-test-provider` with:\n   - Host URL: `https://integrate.api.nvidia.com/v1`\n   - API key secret name: `harbor-provider-api-key`\n   - Description: `Test inference provider for harbor eval`\n3. Verify the provider was registered by listing all providers with `nemo inference providers list`\n4. Retrieve the provider details with `nemo inference providers get harbor-test-provider`\n5. Delete the provider `harbor-test-provider`\n6. Register a final provider named `harbor-final-provider` with:\n   - Host URL: `https://integrate.api.nvidia.com/v1`\n   - API key secret name: `harbor-provider-api-key`\n   - Description: `Final provider for verification`\n\n## Available CLI Commands\n\nThe `nemo` CLI is available at `/app/.venv/bin/nemo`. You can use these commands:\n\n### Secrets Commands\n- `nemo secrets create <name> --data \"<value>\" --description \"<description>\"` - Create a secret directly\n- `nemo secrets get <name>` - Retrieve secret metadata\n- `nemo secrets list` - List all secrets\n\n### Inference Provider Commands\n- `nemo inference providers create <name> --host-url <url> --api-key-secret-name <secret_name> --description \"<description>\"` - Register a model provider\n- `nemo inference providers list` - List all registered providers\n- `nemo inference providers get <name>` - Get provider details\n- `nemo inference providers delete <name>` - Delete a provider\n\nNote: The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.\n\n## Success Criteria\n\nThe task is complete when:\n- A secret named `harbor-provider-api-key` exists\n- The provider `harbor-test-provider` was registered and then deleted (should no longer exist)\n- A provider named `harbor-final-provider` exists with host URL `https://integrate.api.nvidia.com/v1` and description `Final provider for verification`",

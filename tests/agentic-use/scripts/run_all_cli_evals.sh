@@ -44,9 +44,6 @@ EVAL_BASES=(
     auth-authorization-cli
     data-designer-config-cli
     entities-basic-cli
-    evaluator-academic-benchmark-cli
-    evaluator-llm-judge-cli
-    evaluator-simple-job-cli
     files-crud-cli
     files-upload-dataset-cli
     guardrails-content-safety-cli

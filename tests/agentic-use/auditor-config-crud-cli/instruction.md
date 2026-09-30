@@ -3,13 +3,13 @@
 
 # Auditor Config CRUD Operations (CLI)
 
-You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 
-Complete the following auditor configuration CRUD operations using the `nhx` CLI:
+Complete the following auditor configuration CRUD operations using the `nemo` CLI:
 
 1. List the existing global audit configs to understand the available structure (there should be a "default" config)
 2. Create an audit config named `harbor-test-config` with description `Test config for harbor eval` that uses the `dan.AutoDANCached` probe

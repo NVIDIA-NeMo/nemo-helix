@@ -5,9 +5,9 @@
 
 This task tests submitting and running a real LoRA fine-tuning job through the **nemo-customizer** plugin with the **nhx-automodel** backend. Training is dispatched through the NeMo Helix jobs pipeline to GPU containers built from the dev registry.
 
-You have access to the `nemo` and `nhx` CLIs for NeMo Helix operations. Note: MCP tools are not available in this environment — you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment — you must use the CLI.
 
-The CLIs are available at `/app/.venv/bin/nemo` and `/app/.venv/bin/nhx`. The platform API runs at http://localhost:8080. CLI auth is pre-configured.
+The CLI is available at `/app/.venv/bin/nemo`. The platform API runs at http://localhost:8080. CLI auth is pre-configured.
 
 ## Context
 

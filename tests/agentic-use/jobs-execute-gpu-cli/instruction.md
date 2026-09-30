@@ -5,9 +5,9 @@
 
 This task tests your ability to create and run GPU jobs through the NeMo Helix jobs system. The jobs controller dispatches real Docker containers with GPU access.
 
-You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
@@ -23,9 +23,9 @@ The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the loca
 
 1. Create a GPU job named `gpu-verify-job` in workspace `gpu-job-workspace` that runs `nvidia-smi` in the `nvidia/cuda:12.8.0-base-ubuntu22.04` container to verify GPU access.
 
-2. Poll for completion using `nhx jobs get-status gpu-verify-job --workspace gpu-job-workspace` until it reaches a terminal status (`completed` or `error`).
+2. Poll for completion using `nemo jobs get-status gpu-verify-job --workspace gpu-job-workspace` until it reaches a terminal status (`completed` or `error`).
 
-3. If completed, retrieve the job logs with `nhx jobs get-logs gpu-verify-job --workspace gpu-job-workspace` to confirm nvidia-smi output.
+3. If completed, retrieve the job logs with `nemo jobs get-logs gpu-verify-job --workspace gpu-job-workspace` to confirm nvidia-smi output.
 
 ### Part 2: Create a GPU compute job
 
@@ -49,7 +49,7 @@ The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the loca
 Use `--input-data` to pass the full request body:
 
 ```bash
-nhx jobs create --workspace gpu-job-workspace --input-data '{
+nemo jobs create --workspace gpu-job-workspace --input-data '{
   "name": "job-name",
   "source": "agent-eval",
   "spec": {},
@@ -77,9 +77,9 @@ nhx jobs create --workspace gpu-job-workspace --input-data '{
 **Important:** For `get-status`, `get`, and `get-logs`, the job name is a **positional argument**:
 
 ```bash
-nhx jobs get-status <name> --workspace <ws>
-nhx jobs get <name> --workspace <ws>
-nhx jobs get-logs <name> --workspace <ws>
+nemo jobs get-status <name> --workspace <ws>
+nemo jobs get <name> --workspace <ws>
+nemo jobs get-logs <name> --workspace <ws>
 ```
 
 ## Success Criteria

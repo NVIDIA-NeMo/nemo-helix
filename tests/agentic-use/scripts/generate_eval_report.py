@@ -193,7 +193,6 @@ def match_pairs(results: list[TrialResult]) -> list[EvalPairComparison]:
         "auth-authorization-cli",
         "data-designer-config-cli",
         "entities-basic-cli",
-        "evaluator-simple-job-cli",
         "files-crud-cli",
         "files-upload-dataset-cli",
         "guardrails-content-safety-cli",

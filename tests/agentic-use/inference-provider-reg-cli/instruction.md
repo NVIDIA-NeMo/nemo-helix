@@ -3,13 +3,13 @@
 
 # Model Provider Registration (CLI)
 
-You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 
-Complete the following model provider registration operations using the `nhx` CLI:
+Complete the following model provider registration operations using the `nemo` CLI:
 
 1. Create a secret named `harbor-provider-api-key` with the value `test-api-key-12345` and description `API key for test provider`
 2. Register a model provider named `harbor-test-provider` with:

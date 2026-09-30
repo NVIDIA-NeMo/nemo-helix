@@ -14,14 +14,6 @@ data-designer-preview
 data-designer-preview-easy
 entities-basic-cli
 entities-basic-cli-easy
-evaluator-academic-benchmark-cli
-evaluator-academic-benchmark-cli-easy
-evaluator-llm-judge-cli
-evaluator-llm-judge-cli-easy
-evaluator-simple-job-cli
-evaluator-simple-job-cli-easy
-evaluator-tool-calling-cli
-evaluator-zero-config-judge-cli
 files-crud-cli
 files-crud-cli-easy
 files-upload-dataset-cli
