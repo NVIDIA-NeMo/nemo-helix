@@ -13,8 +13,9 @@ from scaled_evals.api.settings import settings
 from scaled_evals.harbor_runners import resolve_harbor_runner
 from scaled_evals.models.gym_identity import GYM_RUNTIME_LANES
 
-# NemoOpenSandboxEnvironment overrides Harbor internals, so it is qualified against exactly one release.
+# Runtime name evaluations select to run Harbor trials in OpenSandbox sandboxes.
 HARBOR_OPENSANDBOX_RUNTIME = "harbor_opensandbox"
+# The only Harbor release the runtime accepts: NemoOpenSandboxEnvironment overrides Harbor internals.
 HARBOR_OPENSANDBOX_HARBOR_VERSION = "0.20.0"
 
 

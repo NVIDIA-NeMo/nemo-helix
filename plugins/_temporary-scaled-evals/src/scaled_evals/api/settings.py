@@ -497,13 +497,16 @@ class Settings(BaseSettings):
     # overridden by the optional env file; they are handed to the Harbor child's
     # environment only and never reach the rendered config or the trial sandbox.
     harbor_opensandbox_enabled: bool = False
+    # Optional env file with OpenSandbox connection settings; overrides the process environment.
     harbor_opensandbox_env_file: str | None = None
     # Harbor config template (agents, retries, timeouts). The backend owns its
     # environment block, so the template's environment section is replaced.
     harbor_opensandbox_config_path: str | None = None
+    # Per-evaluation staging directory for the task, rendered config, env file and Harbor log.
     harbor_opensandbox_work_dir: str = "/tmp/harbor-opensandbox"
     # Harbor's jobs_dir relative to the selected Harbor runner directory.
     harbor_opensandbox_jobs_dir: str = "jobs/harbor-opensandbox"
+    # Protocol for OpenSandbox API calls, used by both Harbor and the cleanup module.
     harbor_opensandbox_protocol: Literal["http", "https"] = "https"
     # Comma-separated. The model endpoint trial agents call (inference gateway or
     # Switchyard host), always added to the trusted egress allowlist.
@@ -511,11 +514,14 @@ class Settings(BaseSettings):
     # Comma-separated operator allowlist: hostnames, *.wildcard hostnames, IPs,
     # or CIDRs every trial may reach in addition to the model endpoint.
     harbor_opensandbox_allowed_hosts: str = ""
+    # How strictly each sandbox's applied egress policy is checked; "off" is deliberately not allowed.
     harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "default_action"
     # Identifies this deployment in sandbox ownership metadata so cleanup never
     # matches another deployment's sandboxes on a shared control plane.
     harbor_opensandbox_deployment_id: str = "scaled-evals"
+    # Longest a sandbox may live before OpenSandbox stops it, as a backstop if cleanup never runs.
     harbor_opensandbox_sandbox_timeout_seconds: int = 3600
+    # How long cleanup waits for an evaluation's sandboxes to die before reporting them as remaining.
     harbor_opensandbox_cleanup_timeout_seconds: int = 120
 
     # When set, gym dispatch uses the interim compose submitter: one-shot gym-runner
