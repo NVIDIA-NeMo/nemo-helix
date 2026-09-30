@@ -111,7 +111,6 @@ class AuthClient(BaseModel):
             AuthorizationResult with allowed=True/False and optional reason
 
         Raises:
-            InvalidScopeFormatError: If a scope string looks like a permission (dot-separated).
             httpx.ConnectError: If PDP cannot be reached
             httpx.TimeoutException: If PDP times out
             httpx.HTTPStatusError: If PDP returns an error response

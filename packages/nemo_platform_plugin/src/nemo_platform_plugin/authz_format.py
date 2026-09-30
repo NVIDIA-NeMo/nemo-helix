@@ -105,22 +105,12 @@ def validate_nmp_scope_strings_for_config(scopes: list[str], *, context: str) ->
 def validate_runtime_authorize_scopes(scopes: list[str] | None) -> None:
     """Validate scopes passed to :meth:`AuthClient.authorize_request`.
 
-    OIDC may send scopes without colons (e.g. ``openid``); those are allowed.
-    Reject values that are valid *permission* ids — the usual mix-up when calling
-    the PDP with token/scopes.
-
-    Raises:
-        InvalidScopeFormatError: If a scope string matches NeMo Platform permission syntax.
+    Runtime token scopes come from external identity providers. Providers commonly include
+    non-platform values such as ``openid``, URNs, ``.default``, or dotted provider scopes, so
+    the PDP filters them against configured platform scope families instead of rejecting them here.
     """
     if not scopes:
         return
-
-    for s in scopes:
-        if looks_like_mistaken_permission_for_scope(s):
-            raise InvalidScopeFormatError(
-                f"Invalid scope {s!r}: this value uses permission syntax (dots). "
-                f"Scopes use colons (e.g. 'secrets:read'). Did you pass a permission by mistake?"
-            )
 
 
 def validate_static_authz_data(data: dict[str, Any]) -> None:
