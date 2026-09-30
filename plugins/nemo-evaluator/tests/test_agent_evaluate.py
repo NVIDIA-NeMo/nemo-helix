@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs, TasksetRef
+from nemo_evaluator.api.schemas import AgentRef, MetadataItem, MetricInline, TaskInputs, TasksetRef
 from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.config import EvaluatorConfig
@@ -2475,3 +2475,40 @@ async def test_non_gym_submission_never_prepares_gym(monkeypatch, target: Target
     )
     assert isinstance(result, AgentEvalSpec)
     assert result.target == target
+
+
+async def test_compile_registered_gym_agent_stages_its_package_before_evaluation(mocker: MockerFixture) -> None:
+    """A registered agent stages even with no environment FileSet: the package it runs from is built by that step."""
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
+    mocker.patch(
+        "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
+        side_effect=lambda name: f"registry.example/{name}:test",
+    )
+    _enable_fileset_sandbox(mocker)
+    target = GymRunnerTarget(
+        source=RegisteredAgentSource(
+            agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+        ),
+        resources_server="mcqa",
+        resolved_config={
+            "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+            "skills": {"paths": ["skills/a"]},
+        },
+    )
+
+    compiled = await AgentEvalJob.compile(
+        workspace="dev",
+        spec=AgentEvalSpec(tasks=[_task_spec()], target=target),
+        entity_client=object(),
+        job_name=None,
+        async_sdk=_async_sdk(),
+    )
+
+    stage, evaluate = HelixJobSpec.model_validate(compiled).steps
+    assert (stage.name, evaluate.name) == ("stage-environment", "agent-evaluate")
+    config = cast(dict[str, Any], stage.config)
+    assert "environment" not in config and config["agent_files"] == "dev/agent-files-0123abcd4567"
+    package = config["gym_registered_agent"]
+    assert package["agent"] == "dev/calc" and package["resolved_config"] == target.resolved_config
+    assert package["requirements"][0].startswith("nemo-fabric[deepagents,relay]==")

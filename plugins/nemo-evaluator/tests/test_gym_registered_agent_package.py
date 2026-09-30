@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The Gym environment package the staging step assembles for a registered agent."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+from nemo_evaluator.api.schemas import AgentRef
+from nemo_evaluator.jobs.gym_environment_package import (
+    parse_environment_manifest,
+    validate_environment_manifest_against_listing,
+)
+from nemo_evaluator.jobs.gym_registered_agent_package import (
+    ENVIRONMENT_MOUNT_PATH,
+    GymRegisteredAgentPackageSpec,
+    wheel_download_command,
+    write_registered_agent_package,
+)
+
+_CONFIG = {
+    "metadata": {"name": "calc"},
+    "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+    "runtime": {"timeout_seconds": 900},
+    "skills": {"paths": ["skills/a"]},
+}
+
+
+def _spec(**overrides) -> GymRegisteredAgentPackageSpec:
+    fields = dict(
+        agent=AgentRef(root="dev/Calc-Agent"),
+        resolved_config=_CONFIG,
+        requirements=["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"],
+    )
+    fields.update(overrides)
+    return GymRegisteredAgentPackageSpec(**fields)
+
+
+def _fake_download(calls: list):
+    def download(requirements, destination: Path, python_version: str, platform):
+        calls.append((list(requirements), python_version, platform))
+        (destination / "nemo_fabric-0.3.0-py3-none-any.whl").write_bytes(b"")
+
+    return download
+
+
+def _listing(root: Path) -> list[str]:
+    return [p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()]
+
+
+def test_the_package_is_a_valid_wheels_v1_environment_running_the_platform_component(tmp_path: Path) -> None:
+    root = tmp_path / "environment"
+    root.mkdir()
+    ethos = tmp_path / "ethos"
+    (ethos / "skills" / "a").mkdir(parents=True)
+    (ethos / "skills" / "a" / "SKILL.md").write_text("# a")
+    calls: list = []
+
+    config_path = write_registered_agent_package(root, _spec(), agent_files=ethos, download=_fake_download(calls))
+
+    assert config_path == "responses_api_agents/nemo_registered_agent/configs/registered_calc_agent.yaml"
+    manifest = parse_environment_manifest((root / "nemo-environment.yaml").read_text())
+    assert manifest.format == "wheels-v1" and list(manifest.config_paths) == [config_path]
+    validate_environment_manifest_against_listing(manifest, _listing(root))
+    component = root / "responses_api_agents" / "nemo_registered_agent"
+    assert "class NeMoRegisteredAgent(" in (component / "app.py").read_text()
+    assert (component / "requirements.txt").read_text().splitlines() == [
+        "nemo-fabric[deepagents,relay]==0.3.0",
+        "mcp==1.29.0",
+    ]
+    assert (component / "agents" / "registered_calc_agent" / "skills" / "a" / "SKILL.md").is_file()
+    instance = yaml.safe_load((root / config_path).read_text())["registered_calc_agent"]["responses_api_agents"][
+        "nemo_registered_agent"
+    ]
+    assert instance["fabric_config"] == _CONFIG
+    assert (
+        instance["fabric_config_base_dir"]
+        == f"{ENVIRONMENT_MOUNT_PATH}/responses_api_agents/nemo_registered_agent/agents/registered_calc_agent"
+    )
+    assert instance["resources_server"] == {
+        "type": "resources_servers",
+        "name": "???",
+    }  # bound by the resolver's Hydra override
+    assert instance["model_server"] == {"type": "responses_api_models", "name": "policy_model"}
+    assert instance["timeout"] == 900
+    assert calls == [(["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"], "3.13", None)]
+
+
+def test_a_users_wheels_environment_is_extended_and_a_native_one_refused(tmp_path: Path) -> None:
+    root = tmp_path / "environment"
+    (root / "resources_servers" / "greet" / "configs").mkdir(parents=True)
+    (root / "resources_servers" / "greet" / "configs" / "greet.yaml").write_text("greet: {}\n")
+    (root / "wheels").mkdir()
+    (root / "wheels" / "greet-1.0-py3-none-any.whl").write_bytes(b"")
+    (root / "nemo-environment.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "format": "wheels-v1",
+                "config_paths": ["resources_servers/greet/configs/greet.yaml"],
+                "metadata": {"name": "greet"},
+            }
+        )
+    )
+
+    config_path = write_registered_agent_package(root, _spec(), agent_files=None, download=_fake_download([]))
+
+    manifest = parse_environment_manifest((root / "nemo-environment.yaml").read_text())
+    assert list(manifest.config_paths) == ["resources_servers/greet/configs/greet.yaml", config_path]
+    assert manifest.metadata.name == "greet"
+    validate_environment_manifest_against_listing(manifest, _listing(root))
+    instance = yaml.safe_load((root / config_path).read_text())["registered_calc_agent"]["responses_api_agents"][
+        "nemo_registered_agent"
+    ]
+    assert instance["fabric_config_base_dir"] is None  # no Ethos files, nothing to resolve relative paths against
+
+    native = tmp_path / "native"
+    native.mkdir()
+    (native / "nemo-environment.yaml").write_text(
+        yaml.safe_dump(
+            {"format": "native-v1", "config_paths": ["resources_servers/x/configs/x.yaml"], "metadata": {"name": "x"}}
+        )
+    )
+    with pytest.raises(ValueError, match="wheels-v1"):
+        write_registered_agent_package(native, _spec(), agent_files=None, download=_fake_download([]))
+
+
+def test_the_wheelhouse_is_downloaded_for_the_hosts_interpreter_not_the_job_containers(tmp_path: Path) -> None:
+    """pip matches platform tags exactly, so both manylinux tags a wheel may carry are requested."""
+    command = wheel_download_command(["nemo-fabric[relay]==0.3.0"], tmp_path, "3.13", "arm64")
+    assert command[command.index("--python-version") + 1] == "3.13"
+    assert command[command.index("--abi") + 1] == "cp313"
+    assert "--only-binary=:all:" in command
+    assert [command[i + 1] for i, a in enumerate(command) if a == "--platform"] == [
+        "manylinux2014_aarch64",
+        "manylinux_2_28_aarch64",
+    ]
+    assert command[-1] == "nemo-fabric[relay]==0.3.0"
+    assert "--platform" in wheel_download_command(
+        ["x"], tmp_path, "3.13", None
+    )  # the container's own arch, still Linux tags

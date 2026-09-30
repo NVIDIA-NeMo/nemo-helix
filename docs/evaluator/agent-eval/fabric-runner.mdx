@@ -451,7 +451,9 @@ runs with. The copy is deleted when the run completes; a failed run keeps it for
 DeepAgents harness, which reads files only through its per-trial workspace, each skill bundle is copied
 into the trial workspace under `.agents/skills/<name>/` for the run and removed afterwards. The same source
 shape is a [Harbor target's `source`](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#run-a-registered-agent),
-which runs the registered agent inside each task container instead of on the host.
+which runs the registered agent inside each task container instead of on the host, and a
+[Gym target's `source`](/documentation/evaluate-models/agent-eval/gym-runner#run-a-registered-agent), which runs it
+on the sandboxed Gym host with its model on Gym's policy server.
 
 There is no model override: the model is part of what the agent *is*, so a different model is a
 different registered agent. What an evaluation does get to shape is the **environment** the agent runs
