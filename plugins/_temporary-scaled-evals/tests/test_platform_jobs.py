@@ -11,16 +11,19 @@ import pytest
 
 pytest.importorskip("nemo_scaled_evals_plugin")
 
+import nemo_scaled_evals_plugin.jobs.benchmark_archive_build as benchmark_archive_job_module
 import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
 import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
 import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
+from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
+    benchmark_archive_job_name,
     evaluation_execution_job_name,
     task_image_build_job_name,
 )
-from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec, TaskImageBuildSpec
+from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, EvaluationExecutionSpec, TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from pydantic import ValidationError
 from scaled_evals.api.settings import settings
@@ -168,6 +171,37 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
         "execution_number": 4,
     }
     dispatcher.run.assert_called_once_with("eval_1", maintain_claim=False, expected_execution_number=4)
+    dispatcher.finalize.assert_called_once_with("eval_1")
+
+
+@pytest.mark.asyncio
+async def test_benchmark_archive_job_claims_only_its_own_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = BenchmarkArchiveBuildSpec(benchmark_run_id="run_1")
+    compiled = await BenchmarkArchiveBuildJob.compile(
+        workspace="default",
+        spec=spec,
+        entity_client=object(),
+        job_name=None,
+        async_sdk=object(),
+        options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+    )
+    assert compiled.steps[0].executor.container.command == ["nemo_scaled_evals_plugin.tasks.benchmark_archive_build"]
+    assert compiled.steps[0].config == {"benchmark_run_id": "run_1"}
+    # Each rebuild request and each lease attempt gets its own Job.
+    name = benchmark_archive_job_name("run_1", "0123456789abcdef", 1)
+    assert name == "scaled-evals-benchmark-archive-run_1-01234567-a1"
+    assert name != benchmark_archive_job_name("run_1", "fedcba9876543210", 1)
+
+    repo = MagicMock()
+    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    dispatcher = MagicMock(claim_timeout=30.0)
+    monkeypatch.setattr(benchmark_archive_job_module, "Dispatcher", lambda: dispatcher)
+    claimed = {"benchmark_run_id": "run_1", "status": "building", "claim_token": "t"}
+    for row, built in ((claimed, True), (None, False), ({**claimed, "status": "failed"}, False)):
+        repo.claim.return_value = row
+        assert BenchmarkArchiveBuildJob().run(spec.model_dump())["built"] is built
+    repo.claim.assert_called_with(claim_timeout=30.0, run_id="run_1")
+    dispatcher.build_benchmark_archive.assert_called_once_with(claimed)
 
 
 def test_jobs_are_discovered_from_plugin_entry_points() -> None:
@@ -178,6 +212,7 @@ def test_jobs_are_discovered_from_plugin_entry_points() -> None:
     jobs = discover_jobs()
     assert jobs["scaled-evals.task-image-build"] is TaskImageBuildJob
     assert jobs["scaled-evals.evaluation-execution"] is EvaluationExecutionJob
+    assert jobs["scaled-evals.benchmark-archive-build"] is BenchmarkArchiveBuildJob
     assert discover_controllers()["scaled-evals-jobs"] is ScaledEvalsJobsController
 
 
@@ -202,7 +237,7 @@ def test_platform_jobs_default_on_and_legacy_workers_stand_down() -> None:
     The GKE acceptance matrix passed end to end, so Platform Jobs is the
     default execution path. The legacy in-process workers must not race it:
     the build queue worker returns without claiming, and the dispatcher skips
-    evaluation claims while still draining cleanup rows.
+    evaluation claims and leaves the evidence and archive queues to the controller.
     """
     from scaled_evals.api.settings import Settings
 

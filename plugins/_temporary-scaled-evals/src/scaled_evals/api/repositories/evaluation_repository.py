@@ -223,6 +223,7 @@ _ARCHIVE_CLAIM_SQL = """
               archive_claimed_at IS NULL
               OR archive_claimed_at < NOW() - (%s * INTERVAL '1 second')
           )
+          AND (%s::text IS NULL OR id = %s)
         ORDER BY COALESCE(archive_requested_at, updated_at), id
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -249,6 +250,7 @@ _EVIDENCE_CLAIM_SQL = """
               evidence_claimed_at IS NULL
               OR evidence_claimed_at < NOW() - (%s * INTERVAL '1 second')
           )
+          AND (%s::text IS NULL OR id = %s)
         ORDER BY COALESCE(evidence_requested_at, updated_at), id
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -1216,14 +1218,18 @@ class EvaluationRepository:
                 )
             return row
 
-    def claim_next_archive(self, *, claim_timeout: float, worker_id: str) -> dict | None:
+    def claim_next_archive(
+        self, *, claim_timeout: float, worker_id: str, evaluation_id: str | None = None
+    ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_ARCHIVE_CLAIM_SQL, (claim_timeout, worker_id))
+            cur.execute(_ARCHIVE_CLAIM_SQL, (claim_timeout, evaluation_id, evaluation_id, worker_id))
             return cur.fetchone()
 
-    def claim_next_evidence(self, *, claim_timeout: float, worker_id: str) -> dict | None:
+    def claim_next_evidence(
+        self, *, claim_timeout: float, worker_id: str, evaluation_id: str | None = None
+    ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_EVIDENCE_CLAIM_SQL, (claim_timeout, worker_id))
+            cur.execute(_EVIDENCE_CLAIM_SQL, (claim_timeout, evaluation_id, evaluation_id, worker_id))
             return cur.fetchone()
 
     def mark_evidence_ready(
