@@ -30,6 +30,12 @@ class EvaluationExecutionSpec(BaseModel):
     execution_number: int = Field(ge=1)
     runtime: str = Field(min_length=1)
     deadline_seconds: int = Field(ge=1)
+    # Entity Store workspace holding this execution's `ScaledEvaluationExecution`,
+    # named after the Job. None for Jobs submitted before inputs were written
+    # there; those still load the run from Postgres.
+    inputs_workspace: str | None = None
+    # Project status and result changes into Entity Store as the Job writes them.
+    project_evaluation: bool = False
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

@@ -3,8 +3,10 @@
 
 """Project evaluation rows into Entity Store and read them back.
 
-The writer is driven by the controller and is the only producer, so a row never
-needs a cross-entity transaction to stay consistent. The reader reproduces the
+The controller writes every changed row, and each evaluation Job writes its own
+row as it changes status. Each write is a single-entity compare-and-swap that
+never goes backwards in `row_updated_at`, so no cross-entity transaction is
+needed to stay consistent. The reader reproduces the
 SQL predicates in `EvaluationRepository.list`/`get` closely enough that the
 existing response schemas are rebuilt byte-for-byte from the projection.
 """
@@ -95,7 +97,7 @@ def entity_to_row(entity: ScaledEvaluation) -> dict[str, Any]:
 
 
 class EvaluationProjectionWriter:
-    """Upsert evaluation rows into Entity Store, newest change first."""
+    """Upsert evaluation rows into Entity Store, never replacing a newer row."""
 
     def __init__(self, client: SyncEntityClient, *, workspace: str) -> None:
         self._client = client
@@ -125,6 +127,11 @@ class EvaluationProjectionWriter:
             existing = self._client.get(ScaledEvaluation, entity.name, workspace=self._workspace)
         except EntityNotFoundError:
             self._client.create(entity)
+            return
+        # The controller and the evaluation Job both project. Never let a row
+        # read earlier overwrite a newer one: the controller's watermark has
+        # already moved past it, so nothing would repair the regression.
+        if existing.row_updated_at > entity.row_updated_at:
             return
         # Copy the fresh projection onto the stored object rather than updating
         # the new one: `id` and `db_version` are read-only views over private
@@ -264,12 +271,13 @@ def evaluation_reader() -> EvaluationProjectionReader:
     global _reader
     with _reader_lock:
         if _reader is None:
-            entities = EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True))
-            _reader = EvaluationProjectionReader(
-                SyncEntityClient(entities),
-                workspace=settings.entity_store_workspace,
-            )
+            _reader = EvaluationProjectionReader(platform_entities(), workspace=settings.entity_store_workspace)
         return _reader
+
+
+def platform_entities() -> SyncEntityClient:
+    """Return an Entity Store client acting as the scaled-evals service."""
+    return SyncEntityClient(EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True)))
 
 
 def parity_report(row: dict[str, Any], projected: dict[str, Any]) -> list[str]:
