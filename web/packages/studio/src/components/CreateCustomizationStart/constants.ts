@@ -3,13 +3,21 @@
 
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
 import { ADVANCED, INTERMEDIATE } from '@studio/components/StartOptions/levels';
-import { Plus } from 'lucide-react';
+import { LayoutTemplate, Plus } from 'lucide-react';
 
 /**
  * The non-template ways in. "Start from a template" is not among them — templates are
  * picked directly from the group below the divider rather than behind an option.
  */
 export const START_OPTIONS: StartOption[] = [
+  {
+    id: 'template',
+    title: 'Start from a template',
+    description: 'Begin from a ready-made recipe that brings its own model and dataset.',
+    icon: LayoutTemplate,
+    tag: INTERMEDIATE,
+    enabled: true,
+  },
   {
     id: 'scratch',
     title: 'Build from scratch',
@@ -22,10 +30,3 @@ export const START_OPTIONS: StartOption[] = [
 
 /** All templates share a task and method today, so they form one group. */
 export const TEMPLATE_GROUP_TITLE = 'Text-to-SQL, LoRA';
-
-/**
- * A recipe provisions its own model and dataset, so it asks less than the full form. This
- * flow has no guided path, so nothing here is tagged Beginner — but the rung still has to
- * match Data Designer's, where a template means the same thing.
- */
-export const TEMPLATES_TAG = INTERMEDIATE;

@@ -51,6 +51,8 @@ const renderStart = (onContinue: Mock = vi.fn()) => {
   );
 };
 
+const continueButton = () => screen.getByRole('button', { name: /continue/i });
+
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 
 /** 409s the named fileset on create, and serves `storage` when it is fetched back. */
@@ -69,6 +71,7 @@ const provisionSelectedTemplate = async (onContinue: Mock) => {
   const user = userEvent.setup();
   renderStart(onContinue);
   await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+  await user.click(continueButton());
 };
 
 describe('CreateCustomizationStart', () => {
@@ -87,25 +90,54 @@ describe('CreateCustomizationStart', () => {
     }
   });
 
-  it('hands "from scratch" over on the click itself', async () => {
+  it('keeps Continue disabled until something is picked', async () => {
+    const user = userEvent.setup();
+    renderStart();
+    expect(continueButton()).toBeDisabled();
+
+    await user.click(screen.getByText('Build from scratch'));
+    expect(continueButton()).toBeEnabled();
+  });
+
+  it('opens on the template rung, and waits for a recipe', async () => {
+    const user = userEvent.setup();
+    renderStart();
+
+    expect(screen.getByRole('radio', { name: 'Start from a template' })).toBeChecked();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
+
+    await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
+  });
+
+  it('hands "from scratch" over without any form values', async () => {
     const user = userEvent.setup();
     const onContinue = vi.fn();
     renderStart(onContinue);
 
     await user.click(screen.getByText('Build from scratch'));
+    await user.click(continueButton());
 
-    // No confirm step: the pick is the action.
-    expect(onContinue).toHaveBeenCalledExactlyOnceWith({ optionId: 'scratch' });
-    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
+    expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
   });
 
   describe('templates', () => {
+    it('arms Continue as soon as a recipe is picked', async () => {
+      const user = userEvent.setup();
+      renderStart();
+
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      expect(continueButton()).toBeEnabled();
+    });
+
     it('provisions the recipe and hands over the form values it produced', async () => {
       const user = userEvent.setup();
       const onContinue = vi.fn();
       renderStart(onContinue);
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
 
       await waitFor(
         () =>
@@ -125,6 +157,7 @@ describe('CreateCustomizationStart', () => {
       renderStart();
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
 
       const { dataset } = CUSTOMIZATION_TEMPLATES[0];
       await waitFor(() =>
@@ -145,6 +178,7 @@ describe('CreateCustomizationStart', () => {
       renderStart(onContinue);
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
 
       expect(await screen.findByText(/No dataset file matched/i)).toBeInTheDocument();
       expect(onContinue).not.toHaveBeenCalled();
@@ -185,13 +219,14 @@ describe('CreateCustomizationStart', () => {
     });
 
     /**
-     * Provisioning takes long enough that the tiles stay on screen. Now that a click is
-     * the action, a second click mid-flight would start a rival flow over the first.
+     * Provisioning takes long enough that the cards stay on screen behind a disabled
+     * Continue. Changing the selection mid-flight used to leave the finished setup handing
+     * the form a recipe the user had moved off.
      *
      * The mocked read would otherwise resolve before a click could land, so the response is
      * held open to make the in-flight window real rather than a race.
      */
-    it('ignores clicks on the other tiles while setup is running', async () => {
+    it('ignores clicks on the option cards while setup is running', async () => {
       let releaseRows: () => void = () => {};
       const held = new Promise<void>((resolve) => {
         releaseRows = resolve;
@@ -206,20 +241,11 @@ describe('CreateCustomizationStart', () => {
       renderStart(onContinue);
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
 
-      // Setup is now parked on the held read, with every tile still mounted.
+      // Setup is now parked on the held read. The cards are still mounted and clickable.
       await user.click(screen.getByText('Build from scratch'));
-
-      // The picked tile reads its progress under its own name, which stays put.
-      // The exact step depends on how far setup got, so match a live label, not one string.
-      expect(await screen.findByRole('status')).toHaveTextContent(/…$/);
       expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title)).toBeInTheDocument();
-      // Its description keeps its box so the tile does not resize mid-flight, but it is
-      // no longer part of the tile's meaning. (jsdom loads no CSS, so only this is assertable.)
-      expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].description)).toHaveAttribute(
-        'aria-hidden',
-        'true'
-      );
 
       releaseRows();
       await waitFor(

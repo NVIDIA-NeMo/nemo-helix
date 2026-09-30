@@ -11,7 +11,7 @@ import type {
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import type { LucideIcon } from 'lucide-react';
 
-export type StartOptionId = 'ai' | 'scratch';
+export type StartOptionId = 'ai' | 'template' | 'scratch';
 
 export type { StartOptionTag };
 
@@ -94,6 +94,14 @@ export type StartSelection =
   | { optionId: 'scratch' }
   | { optionId: 'template'; templateId: string }
   | { optionId: 'ai'; jobRequest: DataDesignerJobRequest };
+
+export interface StartOptionDetailProps {
+  option: StartOption;
+  selectedTemplateId: string | null;
+  onSelectTemplate: (templateId: string) => void;
+  workspace: string;
+  onValidConfig: (jobRequest: DataDesignerJobRequest | null) => void;
+}
 
 export interface CreateFilesetStartProps {
   /** Workspace whose models the "Describe with AI" option draws from. */

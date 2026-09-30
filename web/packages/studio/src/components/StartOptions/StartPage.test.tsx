@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StartPage } from '@studio/components/StartOptions/StartPage';
-import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Box, Plus } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 
 const OPTIONS = [
   {
@@ -17,247 +16,82 @@ const OPTIONS = [
     tag: { label: 'Advanced', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
+  {
+    id: 'ai',
+    title: 'Describe with AI',
+    description: 'Say what you need.',
+    icon: Sparkles,
+    tag: { label: 'Beginner', color: 'gray', kind: 'solid' } as const,
+    enabled: true,
+  },
 ];
 
-const group = (over: Partial<StartTemplateGroup> = {}): StartTemplateGroup => ({
-  id: 'g1',
-  title: 'Group One',
-  templates: [{ id: 't1', name: 'Template One', description: 'Does a thing.', icon: Box }],
-  ...over,
-});
-
-const renderPage = (
-  groups: StartTemplateGroup[],
-  onSelect: (id: string) => void = () => undefined
-) =>
+const renderPage = (over: Partial<React.ComponentProps<typeof StartPage>> = {}) =>
   render(
     <TestProviders>
       <StartPage
         heading="Page Title"
         headingDescription="Page Description"
         options={OPTIONS}
-        templateGroups={groups}
-        onSelect={onSelect}
+        value="scratch"
+        onChange={() => undefined}
+        canContinue
+        onContinue={() => undefined}
+        {...over}
       />
     </TestProviders>
   );
 
-describe('StartPage accessibility', () => {
-  it('names the group holding the options and templates', () => {
-    renderPage([group()]);
+describe('StartPage', () => {
+  it('names the group holding the options', () => {
+    renderPage();
 
-    // The tiles carry no visible prompt, so without this the set is announced unnamed.
-    expect(screen.getByRole('group', { name: 'How do you want to start?' })).toBeInTheDocument();
-  });
-});
-
-describe('StartPage badges', () => {
-  it('names each template section from its own heading', () => {
-    renderPage([group()]);
-
-    expect(screen.getByRole('group', { name: 'Group One' })).toBeInTheDocument();
+    // KUI sets the role but takes its name from a wrapping FormField, which this page has
+    // no visible prompt for — without a name the group is announced as an unnamed one.
+    expect(
+      screen.getByRole('radiogroup', { name: 'How do you want to start?' })
+    ).toBeInTheDocument();
   });
 
-  it('leaves the divider label and tag readable', () => {
-    render(
-      <TestProviders>
-        <StartPage
-          heading="Page Title"
-          headingDescription="Page Description"
-          options={OPTIONS}
-          templateGroups={[group()]}
-          templatesTag={{ label: 'Intermediate', color: 'gray', kind: 'solid' }}
-          onSelect={() => undefined}
-        />
-      </TestProviders>
+  it('ties an option tag to the choice it qualifies', () => {
+    renderPage();
+
+    // The tag is not part of the radio's name, so without this it is never read out
+    // against the option it belongs to.
+    expect(screen.getByRole('radio', { name: 'Build from scratch' })).toHaveAttribute(
+      'aria-describedby',
+      'scratch-tag'
     );
-
-    // Only the rules either side are decorative; the label and tag carry meaning.
-    // `getByText` reads hidden nodes too, so skip anything under aria-hidden — otherwise
-    // this passes whether or not the row is hidden.
-    const readable = { ignore: '[aria-hidden="true"], [aria-hidden="true"] *' } as const;
-    expect(screen.getByText('OR START FROM A TEMPLATE', readable)).toBeInTheDocument();
-    expect(screen.getByText('Intermediate', readable)).toBeInTheDocument();
   });
 
-  it('shows an option tag on its tile', () => {
-    renderPage([group()]);
+  it('shows the detail panel the caller gives it', () => {
+    renderPage({ slotDetail: <div>Recipe list</div> });
 
-    expect(screen.getByText('Advanced')).toBeInTheDocument();
+    expect(screen.getByText('Recipe list')).toBeInTheDocument();
   });
 
-  it('shows the templates tag on the divider', () => {
-    render(
-      <TestProviders>
-        <StartPage
-          heading="Page Title"
-          headingDescription="Page Description"
-          options={OPTIONS}
-          templateGroups={[group()]}
-          templatesTag={{ label: 'Intermediate', color: 'gray', kind: 'solid' }}
-          onSelect={() => undefined}
-        />
-      </TestProviders>
-    );
+  it('reports the selection rather than acting on it', async () => {
+    const onChange = vi.fn();
+    const onContinue = vi.fn();
+    renderPage({ onChange, onContinue });
 
-    expect(screen.getByText('Intermediate')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'Describe with AI' }));
+
+    // Choosing a way in reveals its panel; nothing starts until Continue.
+    expect(onChange).toHaveBeenCalledWith('ai');
+    expect(onContinue).not.toHaveBeenCalled();
   });
 
-  it('leaves the divider bare when no templates tag is given', () => {
-    renderPage([group()]);
+  it('says what is missing while Continue is disabled', () => {
+    renderPage({ canContinue: false, blockedHint: 'Pick a recipe to continue.' });
 
-    expect(screen.queryByText('Intermediate')).not.toBeInTheDocument();
-  });
-});
-
-describe('StartPage template groups', () => {
-  it('renders every group it is given', () => {
-    renderPage([
-      group(),
-      group({
-        id: 'g2',
-        title: 'Group Two',
-        templates: [{ id: 't2', name: 'Template Two', description: 'Does another.', icon: Box }],
-      }),
-    ]);
-
-    expect(screen.getByText('Group One')).toBeInTheDocument();
-    expect(screen.getByText('Group Two')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
   });
 
-  /** The section must hold its place, or the page reflows when the fetch lands. */
-  it('keeps a loading group on the page instead of dropping it', () => {
-    renderPage([group({ templates: [], loading: true })]);
+  it('drops the hint once Continue is available', () => {
+    renderPage({ canContinue: true, blockedHint: 'Pick a recipe to continue.' });
 
-    expect(screen.getByText('Group One')).toBeInTheDocument();
-    expect(screen.getAllByLabelText('Loading Group One').length).toBeGreaterThan(0);
-  });
-
-  it('drops a group that finished loading with nothing in it', () => {
-    renderPage([group({ templates: [] })]);
-
-    expect(screen.queryByText('Group One')).not.toBeInTheDocument();
-  });
-
-  it('offers no tile for a group that is still loading', () => {
-    renderPage([group({ templates: [], loading: true })]);
-
-    expect(screen.queryByRole('button', { name: /Template One/ })).not.toBeInTheDocument();
-  });
-});
-
-describe('StartPage selection', () => {
-  it('runs the flow on the first click, with no confirm step', async () => {
-    const onSelect = vi.fn();
-    renderPage([group()], onSelect);
-
-    await userEvent.click(screen.getByRole('button', { name: /Build from scratch/ }));
-
-    expect(onSelect).toHaveBeenCalledExactlyOnceWith('scratch');
-    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
-  });
-
-  it('starts a template the same way', async () => {
-    const onSelect = vi.fn();
-    renderPage([group()], onSelect);
-
-    await userEvent.click(screen.getByRole('button', { name: /Template One/ }));
-
-    expect(onSelect).toHaveBeenCalledExactlyOnceWith('t1');
-  });
-
-  it('ignores clicks on a tile that is not wired up', async () => {
-    const onSelect = vi.fn();
-    render(
-      <TestProviders>
-        <StartPage
-          heading="Page Title"
-          headingDescription="Page Description"
-          options={[{ ...OPTIONS[0], enabled: false }]}
-          onSelect={onSelect}
-        />
-      </TestProviders>
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: /Build from scratch/ }));
-
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it('locks every tile while a pick is being acted on', async () => {
-    const onSelect = vi.fn();
-    render(
-      <TestProviders>
-        <StartPage
-          heading="Page Title"
-          headingDescription="Page Description"
-          options={OPTIONS}
-          templateGroups={[group()]}
-          onSelect={onSelect}
-          disabled
-          busyId="t1"
-          busyLabel="Registering model"
-        />
-      </TestProviders>
-    );
-
-    // Without this a second setup can start over the first one mid-flight.
-    await userEvent.click(screen.getByRole('button', { name: /Build from scratch/ }));
-
-    expect(onSelect).not.toHaveBeenCalled();
-    expect(screen.getByText('Registering model')).toBeInTheDocument();
-  });
-
-  it('takes the busy tile out of play without dimming it like an unavailable one', async () => {
-    const onSelect = vi.fn();
-    render(
-      <TestProviders>
-        <StartPage
-          heading="Page Title"
-          headingDescription="Page Description"
-          options={OPTIONS}
-          templateGroups={[group()]}
-          onSelect={onSelect}
-          disabled
-          busyId="t1"
-          busyLabel="Registering model"
-        />
-      </TestProviders>
-    );
-
-    const busyTile = screen.getByRole('button', { name: /Template One/ });
-    await userEvent.click(busyTile);
-
-    // Clicking again must not start a second setup, but the tile doing the work should
-    // read as active rather than unavailable, so it keeps the undimmed styling.
-    expect(onSelect).not.toHaveBeenCalled();
-    expect(busyTile).toBeDisabled();
-    expect(busyTile).toHaveAttribute('aria-busy', 'true');
-    expect(busyTile).not.toHaveClass('opacity-50');
-    expect(screen.getByRole('button', { name: /Build from scratch/ })).toHaveClass('opacity-50');
-  });
-
-  it('swaps the busy tile description for the status, keeping its name', () => {
-    render(
-      <TestProviders>
-        <StartPage
-          heading="Page Title"
-          headingDescription="Page Description"
-          options={OPTIONS}
-          templateGroups={[group()]}
-          onSelect={() => undefined}
-          disabled
-          busyId="t1"
-          busyLabel="Registering model"
-        />
-      </TestProviders>
-    );
-
-    // The name stays put; only the line under it becomes the progress.
-    expect(screen.getByText('Template One')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Registering model');
-    expect(screen.getByText('Does a thing.')).toHaveAttribute('aria-hidden', 'true');
-    // Untouched tiles read normally.
-    expect(screen.getByText('Build from scratch')).toBeInTheDocument();
+    expect(screen.queryByText('Pick a recipe to continue.')).not.toBeInTheDocument();
   });
 });

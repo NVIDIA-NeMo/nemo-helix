@@ -11,103 +11,109 @@ const renderStart = () => {
   return { onContinue };
 };
 
-/** The drafting step's own Continue; the landing page no longer has one. */
-const continueButton = () => screen.getByRole('button', { name: /continue/i });
-
 describe('CreateFilesetStart', () => {
-  it('offers every way in at once', () => {
+  it('renders all start options', () => {
     renderStart();
 
     expect(screen.getByText('Describe with AI')).toBeInTheDocument();
+    expect(screen.getByText('Start from a template')).toBeInTheDocument();
     expect(screen.getByText('Build from scratch')).toBeInTheDocument();
-    // Templates are picked outright, so they are on the page rather than behind an option.
+  });
+
+  it('opens on the template rung with its recipes already showing', () => {
+    renderStart();
+
+    // The likeliest way in, so the page starts there rather than on an empty panel.
+    expect(screen.getByRole('radio', { name: 'Start from a template' })).toBeChecked();
     expect(screen.getByText('Instruction fine-tuning (SFT)')).toBeInTheDocument();
   });
 
-  it('groups the templates under the sections their tags name', () => {
+  it('waits for a recipe before enabling Continue', () => {
     renderStart();
 
-    expect(screen.getByText('Evaluation')).toBeInTheDocument();
-    expect(screen.getByText('Fine-tuning')).toBeInTheDocument();
-    // Tags that name no section of their own collect here rather than each getting a heading.
-    expect(screen.getByText('Other')).toBeInTheDocument();
+    // The option is chosen, but the option alone is not a job.
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
   });
 
-  it('badges each way in with how much it asks of you', () => {
-    renderStart();
-
-    expect(screen.getByText('Beginner')).toBeInTheDocument();
-    expect(screen.getByText('Advanced')).toBeInTheDocument();
-    expect(screen.getByText('Intermediate')).toBeInTheDocument();
-  });
-
-  it('hands "from scratch" over on the click itself', async () => {
+  it('selecting Build from scratch reveals Continue and invokes onContinue with "scratch"', async () => {
     const user = userEvent.setup();
     const { onContinue } = renderStart();
 
     await user.click(screen.getByText('Build from scratch'));
 
-    // No confirm step: the pick is the action.
-    expect(onContinue).toHaveBeenCalledExactlyOnceWith({ optionId: 'scratch' });
-    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
+    const continueButton = screen.getByRole('button', { name: /continue/i });
+    expect(continueButton).toBeEnabled();
+
+    await user.click(continueButton);
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
   });
 
-  it('hands a template over by id on the click itself', async () => {
+  it('reveals template cards but keeps Continue disabled until a template is chosen', async () => {
+    const user = userEvent.setup();
+    renderStart();
+
+    await user.click(screen.getByText('Start from a template'));
+
+    expect(screen.getByText('Instruction fine-tuning (SFT)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
+  });
+
+  it('choosing a template enables Continue and invokes onContinue with the template id', async () => {
     const user = userEvent.setup();
     const { onContinue } = renderStart();
 
+    await user.click(screen.getByText('Start from a template'));
     await user.click(screen.getByText('Instruction fine-tuning (SFT)'));
 
-    expect(onContinue).toHaveBeenCalledExactlyOnceWith({
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onContinue).toHaveBeenCalledWith({
       optionId: 'template',
       templateId: 'sft-instruction',
     });
   });
 
-  describe('describe with AI', () => {
-    /** The only option that asks for something else before the canvas. */
-    it('goes to the drafting screen rather than straight to the canvas', async () => {
-      const user = userEvent.setup();
-      const { onContinue } = renderStart();
+  it('switching options clears a prior template selection', async () => {
+    const user = userEvent.setup();
+    renderStart();
 
-      await user.click(screen.getByText('Describe with AI'));
+    await user.click(screen.getByText('Start from a template'));
+    await user.click(screen.getByText('Instruction fine-tuning (SFT)'));
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
 
-      expect(
-        screen.getByRole('textbox', { name: /what do you want to generate/i })
-      ).toBeInTheDocument();
-      expect(onContinue).not.toHaveBeenCalled();
-    });
+    await user.click(screen.getByText('Build from scratch'));
+    await user.click(screen.getByText('Start from a template'));
 
-    it('will not continue until a config is generated', async () => {
-      const user = userEvent.setup();
-      renderStart();
+    // Template selection was reset when the option changed, so Continue is blocked again.
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+  });
 
-      await user.click(screen.getByText('Describe with AI'));
+  it('selecting Describe with AI keeps Continue disabled until a config is generated', async () => {
+    const user = userEvent.setup();
+    renderStart();
 
-      expect(continueButton()).toBeDisabled();
-    });
+    await user.click(screen.getByText('Describe with AI'));
 
-    it('blocks an empty generate with field errors instead of calling the model', async () => {
-      const user = userEvent.setup();
-      renderStart();
+    expect(
+      screen.getByRole('textbox', { name: /what do you want to generate/i })
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByText('Generate a valid config to continue.')).toBeInTheDocument();
+  });
 
-      await user.click(screen.getByText('Describe with AI'));
-      await user.click(screen.getByRole('button', { name: /generate/i }));
+  it('blocks an empty generate with field errors instead of calling the model', async () => {
+    const user = userEvent.setup();
+    renderStart();
 
-      expect(await screen.findByText('Choose a model to draft the config.')).toBeInTheDocument();
-      expect(screen.getByText('Describe the fileset you want.')).toBeInTheDocument();
-      expect(continueButton()).toBeDisabled();
-    });
+    await user.click(screen.getByText('Describe with AI'));
+    await user.click(screen.getByRole('button', { name: /generate/i }));
 
-    it('goes back to the options without having started anything', async () => {
-      const user = userEvent.setup();
-      const { onContinue } = renderStart();
-
-      await user.click(screen.getByText('Describe with AI'));
-      await user.click(screen.getByRole('button', { name: /back/i }));
-
-      expect(screen.getByText('Build from scratch')).toBeInTheDocument();
-      expect(onContinue).not.toHaveBeenCalled();
-    });
+    expect(await screen.findByText('Choose a model to draft the config.')).toBeInTheDocument();
+    expect(screen.getByText('Describe the fileset you want.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
   });
 });

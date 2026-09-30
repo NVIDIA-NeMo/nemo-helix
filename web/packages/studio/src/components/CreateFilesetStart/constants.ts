@@ -4,7 +4,7 @@
 import type { StartOption } from '@studio/components/CreateFilesetStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
 import { ADVANCED, BEGINNER, INTERMEDIATE } from '@studio/components/StartOptions/levels';
-import { Plus, Sparkles } from 'lucide-react';
+import { LayoutTemplate, Plus, Sparkles } from 'lucide-react';
 
 /**
  * Example prompts offered as pills inside an empty prompt field. Each is a complete,
@@ -28,9 +28,6 @@ export const PROMPT_SUGGESTIONS: PromptSuggestion[] = [
   },
 ];
 
-/** A template does more for you than the empty canvas, less than describing it in words. */
-export const TEMPLATES_TAG = INTERMEDIATE;
-
 /** The non-template ways in; templates are picked directly, below the divider. */
 export const START_OPTIONS: StartOption[] = [
   {
@@ -40,6 +37,14 @@ export const START_OPTIONS: StartOption[] = [
       'Tell us what you need in plain language. AI drafts the columns and prompts — then you refine everything visually.',
     icon: Sparkles,
     tag: BEGINNER,
+    enabled: true,
+  },
+  {
+    id: 'template',
+    title: 'Start from a template',
+    description: 'Begin from a ready-made recipe and adjust it, instead of an empty canvas.',
+    icon: LayoutTemplate,
+    tag: INTERMEDIATE,
     enabled: true,
   },
   {

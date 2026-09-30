@@ -4,7 +4,7 @@
 import type { StartOption as SharedStartOption } from '@studio/components/StartOptions/types';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 
-export type StartOptionId = 'scratch';
+export type StartOptionId = 'template' | 'scratch';
 
 export type StartOption = SharedStartOption<StartOptionId>;
 
