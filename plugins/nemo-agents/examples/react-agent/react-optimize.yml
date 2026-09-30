@@ -30,7 +30,7 @@ llms:
   # LLM used by the agent workflow — its hyperparameters are optimised.
   # base_url and api_key are injected automatically by the platform
   # (routes through the Inference Gateway).  For local runs without the
-  # platform, override via `nemo --base-url` or NEMO_BASE_URL.
+  # platform, override via `nemo --base-url` or NHX_BASE_URL.
   llm:
     _type: openai
     model_name: nvidia-nemotron-3-5-lightning-30b-a3b
