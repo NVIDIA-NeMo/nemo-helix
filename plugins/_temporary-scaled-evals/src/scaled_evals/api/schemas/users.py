@@ -15,10 +15,8 @@ class PrincipalInfo(BaseModel):
 
 
 class UserQuotaSummary(BaseModel):
-    evaluations_active_max: int
     evaluations_active: int
     tasks_owned: int
-    sandbox_slots_max: int
     sandbox_slots_active: int
 
 

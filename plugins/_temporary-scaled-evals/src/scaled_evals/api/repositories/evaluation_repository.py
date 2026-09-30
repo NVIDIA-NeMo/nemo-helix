@@ -75,81 +75,36 @@ EVALUATION_DETAIL_COLUMNS = (
 _CANCELLABLE_SQL = "('blocked', 'queued', 'provisioning', 'running')"
 RetryBlockReason = Literal["terminal_artifacts_finalizing", "benchmark_unavailable"]
 
-_DISPATCH_CLAIM_LOCK_ID = 1936024438
-_CLAIM_LOCK_SQL = "SELECT pg_advisory_xact_lock(%s)"
+_CLAIMABLE_SQL = """
+    e.deleted_at IS NULL
+    AND e.status IN ('queued', 'provisioning', 'running')
+    AND e.dispatch_job_name IS NULL
+    AND (e.next_retry_at IS NULL OR e.next_retry_at <= statement_timestamp())
+    AND (
+        e.dispatch_claimed_at IS NULL
+        OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
+    )
+"""
 
-_CLAIM_SQL = """
-    WITH active_usage AS MATERIALIZED (
-        SELECT COALESCE(SUM(parallelism), 0)::BIGINT AS cluster_slots
-        FROM evaluations
-        WHERE deleted_at IS NULL
-          AND status IN ('provisioning', 'running')
-    ),
-    ranked_candidate AS MATERIALIZED (
+# Concurrent claimants may pick the same candidate. The UPDATE re-checks the
+# claim predicates against the committed row, so exactly one wins and the rest
+# get no row. There is no admission here; capacity is left to platform core.
+# ponytail: a losing claimant returns None and ends its drain pass early, so
+# replicas contend rather than cooperate. Upgrade path: return several
+# candidates and try each until one update lands.
+_CLAIM_SQL = f"""
+    WITH candidate AS (
         SELECT e.id, e.status
         FROM evaluations e
-        CROSS JOIN active_usage usage
-        LEFT JOIN benchmark_runs br
-          ON br.id = e.benchmark_run_id
-        LEFT JOIN LATERAL (
-            SELECT COALESCE(SUM(owned.parallelism), 0)::BIGINT AS owner_slots
-            FROM evaluations owned
-            WHERE owned.deleted_at IS NULL
-              AND owned.status IN ('provisioning', 'running')
-              AND owned.owner_id IS NOT DISTINCT FROM e.owner_id
-        ) owner_usage ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT COUNT(*)::BIGINT AS active_members
-            FROM evaluations member
-            WHERE member.deleted_at IS NULL
-              AND member.status IN ('provisioning', 'running')
-              AND member.benchmark_run_id = e.benchmark_run_id
-        ) benchmark_usage ON e.benchmark_run_id IS NOT NULL
-        WHERE e.deleted_at IS NULL
-          AND e.status IN ('queued', 'provisioning', 'running')
-          AND e.dispatch_job_name IS NULL
-          AND (e.next_retry_at IS NULL OR e.next_retry_at <= statement_timestamp())
-          AND (
-              e.dispatch_claimed_at IS NULL
-              OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
-          )
-          AND (
-              e.status <> 'queued'
-              OR (
-                  e.parallelism <= %s
-                  AND usage.cluster_slots + e.parallelism <= %s
-                  AND owner_usage.owner_slots + e.parallelism <= %s
-                  AND (
-                      e.benchmark_run_id IS NULL
-                      OR br.max_concurrent_members IS NULL
-                      OR benchmark_usage.active_members < br.max_concurrent_members
-                  )
-              )
-          )
+        WHERE {_CLAIMABLE_SQL}
         ORDER BY
             CASE e.status
                 WHEN 'running' THEN 0
                 WHEN 'provisioning' THEN 1
-                WHEN 'queued' THEN 2
-                ELSE 3
+                ELSE 2
             END,
-            -- Once recovery work is exhausted, admit the owner currently
-            -- consuming the fewest sandbox slots. This prevents one older
-            -- benchmark from monopolizing a smaller dispatch-worker pool.
-            CASE WHEN e.status = 'queued' THEN owner_usage.owner_slots ELSE 0 END,
             e.created_at
         LIMIT 1
-    ),
-    candidate AS (
-        -- Keep row locking in a separate, non-aggregate SELECT. PostgreSQL
-        -- rejects FOR UPDATE anywhere in the ranked query because it contains
-        -- aggregate capacity subqueries, even when the lock is qualified.
-        SELECT e.id, e.status
-        FROM evaluations e
-        JOIN ranked_candidate ranked
-          ON ranked.id = e.id
-         AND ranked.status = e.status
-        FOR UPDATE OF e SKIP LOCKED
     )
     UPDATE evaluations e
     SET status = CASE WHEN e.status = 'queued' THEN 'provisioning' ELSE e.status END,
@@ -164,10 +119,8 @@ _CLAIM_SQL = """
         updated_at = statement_timestamp()
     FROM candidate
     WHERE e.id = candidate.id
-      AND (
-          e.dispatch_claimed_at IS NULL
-          OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
-      )
+      AND e.status = candidate.status
+      AND {_CLAIMABLE_SQL}
     RETURNING e.id, candidate.status AS previous_status, e.status
 """
 
@@ -1237,33 +1190,9 @@ class EvaluationRepository:
             )
             return cur.rowcount != 0
 
-    def claim_next(
-        self,
-        *,
-        claim_timeout: float,
-        worker_id: str,
-        cluster_slot_limit: int = 500,
-        per_user_slot_limit: int = 50,
-    ) -> dict | None:
+    def claim_next(self, *, claim_timeout: float, worker_id: str) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            # Take the admission lock in its own statement. PostgreSQL establishes
-            # a READ COMMITTED snapshot at statement start, so putting the lock in
-            # the claim query lets waiters retain a snapshot from before the prior
-            # worker committed. Those waiters can then all select and launch the
-            # same evaluation. Acquiring first makes the claim query start with a
-            # fresh snapshot after the previous claimant commits.
-            cur.execute(_CLAIM_LOCK_SQL, (_DISPATCH_CLAIM_LOCK_ID,))
-            cur.execute(
-                _CLAIM_SQL,
-                (
-                    claim_timeout,
-                    per_user_slot_limit,
-                    cluster_slot_limit,
-                    per_user_slot_limit,
-                    worker_id,
-                    claim_timeout,
-                ),
-            )
+            cur.execute(_CLAIM_SQL, (claim_timeout, worker_id, claim_timeout))
             row = cur.fetchone()
             if row is not None and row.get("previous_status") == "queued" and row.get("status") == "provisioning":
                 self.insert_status_event(
@@ -1438,7 +1367,6 @@ class EvaluationRepository:
                       )
                     ORDER BY e.dispatch_claimed_at NULLS FIRST, e.created_at, e.id
                     LIMIT 1
-                    FOR UPDATE OF e SKIP LOCKED
                 )
                 UPDATE evaluations e
                 SET dispatch_reconcile_claimed_at = NOW(),
@@ -1446,10 +1374,14 @@ class EvaluationRepository:
                     updated_at = NOW()
                 FROM candidate
                 WHERE e.id = candidate.id
+                  AND (
+                      e.dispatch_reconcile_claimed_at IS NULL
+                      OR e.dispatch_reconcile_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
                 RETURNING e.id, e.status, e.current_execution, e.dispatch_job_name,
                           e.dispatch_job_uid
                 """,
-                (stale_seconds, claim_timeout, worker_id),
+                (stale_seconds, claim_timeout, worker_id, claim_timeout),
             )
             return cur.fetchone()
 

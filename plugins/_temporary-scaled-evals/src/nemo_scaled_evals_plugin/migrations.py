@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _CONNECT_RETRY_INTERVAL_SECONDS = 2.0
 
 # Serializes DDL across concurrent API replicas and any operator running the
-# console script. Must stay distinct from _DISPATCH_CLAIM_LOCK_ID (1936024438).
+# console script.
 _MIGRATION_LOCK_ID = 1936024439
 
 # `evaluations` exists in every released schema, so it survives the

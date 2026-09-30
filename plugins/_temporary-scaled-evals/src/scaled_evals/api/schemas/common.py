@@ -162,8 +162,6 @@ class AdminCapacityResponse(BaseModel):
     active_runs: int = 0
     queued_runs: int = 0
     active_slots: int = 0
-    cluster_limit: int
-    per_user_limit: int
     stub: bool = False
 
 
