@@ -313,7 +313,7 @@ name = "nemo-helix"
 [project.entry-points]
 
 [tool.bundle-package]
-nemo-switchyard = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard" }
+nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", deps_group = "nemo-switchyard" }
 switchyard = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchyard", module = "switchyard" }
 """.lstrip(),
         encoding="utf-8",
@@ -321,7 +321,7 @@ switchyard = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchy
     (plugin_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-switchyard"
+name = "nemo-switchyard-plugin"
 dependencies = ["nemo-helix", "switchyard", "httpx>=0.28"]
 
 [project.scripts]
@@ -693,14 +693,14 @@ manual = ["keep-me"]
 nemo-switchyard-aiohttp = ["stale-dependency"]
 
 [tool.bundle-package]
-nemo-switchyard = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", optional-dependencies-prefix = "nemo-switchyard-", inherit = { "entry-points" = ["nemo.*"], "optional-dependencies" = ["aio*"], scripts = ["switchyard-*"] } }
+nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", optional-dependencies-prefix = "nemo-switchyard-", inherit = { "entry-points" = ["nemo.*"], "optional-dependencies" = ["aio*"], scripts = ["switchyard-*"] }, deps_group = "nemo-switchyard" }
 """.lstrip(),
         encoding="utf-8",
     )
     (plugin_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-switchyard"
+name = "nemo-switchyard-plugin"
 dependencies = ["httpx>=0.28"]
 
 [project.scripts]
