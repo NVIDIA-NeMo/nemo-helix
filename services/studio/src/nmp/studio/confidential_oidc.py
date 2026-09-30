@@ -18,7 +18,7 @@ import os
 import secrets
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -31,12 +31,7 @@ VERIFIER_COOKIE = "nhx_studio_oidc_verifier"
 SESSION_COOKIE = "nhx_studio_oidc_session"
 DEFAULT_SCOPE = "openid profile email"
 SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 8
-COOKIE_KWARGS = {
-    "httponly": True,
-    "samesite": "lax",
-    "secure": True,
-    "path": "/studio",
-}
+COOKIE_PATH = "/studio"
 
 
 class OidcSession(BaseModel):
@@ -71,8 +66,8 @@ def build_confidential_oidc_router(config: StudioConfig) -> APIRouter:
             "code_challenge_method": "S256",
         }
         response = RedirectResponse(f"{settings.authorization_endpoint}?{urlencode(params)}")
-        response.set_cookie(STATE_COOKIE, state, max_age=300, **COOKIE_KWARGS)
-        response.set_cookie(VERIFIER_COOKIE, verifier, max_age=300, **COOKIE_KWARGS)
+        _set_studio_cookie(response, STATE_COOKIE, state, max_age=300)
+        _set_studio_cookie(response, VERIFIER_COOKIE, verifier, max_age=300)
         return response
 
     @router.get("/studio/auth/confidential/callback")
@@ -95,9 +90,14 @@ def build_confidential_oidc_router(config: StudioConfig) -> APIRouter:
         _SESSIONS[session_id] = _session_from_token_response(token_response)
 
         response = RedirectResponse(_studio_root(request, config))
-        response.delete_cookie(STATE_COOKIE, path="/studio")
-        response.delete_cookie(VERIFIER_COOKIE, path="/studio")
-        response.set_cookie(session_id_cookie_name(config), session_id, max_age=SESSION_COOKIE_MAX_AGE_SECONDS, **COOKIE_KWARGS)
+        response.delete_cookie(STATE_COOKIE, path=COOKIE_PATH)
+        response.delete_cookie(VERIFIER_COOKIE, path=COOKIE_PATH)
+        _set_studio_cookie(
+            response,
+            session_id_cookie_name(config),
+            session_id,
+            max_age=SESSION_COOKIE_MAX_AGE_SECONDS,
+        )
         return response
 
     @router.get("/studio/auth/confidential/token")
@@ -121,7 +121,7 @@ def build_confidential_oidc_router(config: StudioConfig) -> APIRouter:
         if session_id:
             _SESSIONS.pop(session_id, None)
         response = Response(status_code=status.HTTP_204_NO_CONTENT)
-        response.delete_cookie(session_id_cookie_name(config), path="/studio")
+        response.delete_cookie(session_id_cookie_name(config), path=COOKIE_PATH)
         return response
 
     return router
@@ -144,10 +144,14 @@ def _settings(config: StudioConfig) -> _Settings:
             or config._resolve_config_path("auth.oidc.authorization_endpoint")
             or ""
         ),
-        token_endpoint=config.confidential_oidc.token_endpoint or config._resolve_config_path("auth.oidc.token_endpoint") or "",
+        token_endpoint=config.confidential_oidc.token_endpoint
+        or config._resolve_config_path("auth.oidc.token_endpoint")
+        or "",
         client_id=config.confidential_oidc.client_id or config._resolve_config_path("auth.oidc.client_id") or "",
         client_secret=client_secret,
-        scope=config.confidential_oidc.scope or config._resolve_config_path("auth.oidc.default_scopes") or DEFAULT_SCOPE,
+        scope=config.confidential_oidc.scope
+        or config._resolve_config_path("auth.oidc.default_scopes")
+        or DEFAULT_SCOPE,
     )
     missing = [name for name, value in values.model_dump().items() if not value]
     if missing:
@@ -176,13 +180,25 @@ def session_id_cookie_name(config: StudioConfig) -> str:
     return config.confidential_oidc.session_cookie_name or SESSION_COOKIE
 
 
+def _set_studio_cookie(response: Response, key: str, value: str, *, max_age: int) -> None:
+    response.set_cookie(
+        key,
+        value,
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+        path=COOKIE_PATH,
+    )
+
+
 def _code_challenge(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def _basic_auth(client_id: str, client_secret: str) -> str:
-    raw = f"{client_id}:{client_secret}".encode("utf-8")
+    raw = f"{quote(client_id, safe='')}:{quote(client_secret, safe='')}".encode("utf-8")
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
@@ -218,12 +234,13 @@ async def _exchange_code(
 def _session_from_token_response(data: dict[str, Any]) -> OidcSession:
     expires_in = data.get("expires_in")
     expires_at = int(time.time()) + int(expires_in) if isinstance(expires_in, int | float) else None
+    token_type = data.get("token_type")
     return OidcSession(
         access_token=data.get("access_token") if isinstance(data.get("access_token"), str) else None,
         id_token=data.get("id_token") if isinstance(data.get("id_token"), str) else None,
         refresh_token=data.get("refresh_token") if isinstance(data.get("refresh_token"), str) else None,
         expires_at=expires_at,
-        token_type=data.get("token_type") if isinstance(data.get("token_type"), str) else "Bearer",
+        token_type=token_type if isinstance(token_type, str) else "Bearer",
     )
 
 
@@ -235,7 +252,9 @@ def _session_from_request(request: Request, config: StudioConfig) -> OidcSession
 
 
 def _select_bearer_token(session: OidcSession, config: StudioConfig) -> str | None:
-    source = config.confidential_oidc.bearer_token_source or config._resolve_config_path("auth.oidc.bearer_token_source")
+    source = config.confidential_oidc.bearer_token_source or config._resolve_config_path(
+        "auth.oidc.bearer_token_source"
+    )
     if source == "id_token":
         return session.id_token
     return session.access_token
