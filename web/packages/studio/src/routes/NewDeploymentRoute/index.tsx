@@ -44,6 +44,7 @@ import {
 import { useCreateDeploymentBySource } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { useHuggingFaceNameDefault } from '@studio/routes/NewDeploymentRoute/useHuggingFaceNameDefault';
 import { WorkspaceSourceFields } from '@studio/routes/NewDeploymentRoute/WorkspaceSourceFields';
+import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
 import { getWorkspaceDeploymentsRoute } from '@studio/routes/utils';
 import { FC, useCallback, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
@@ -102,6 +103,7 @@ export const NewDeploymentRoute: FC = () => {
   const { createDeploymentFromWizard, isSubmitting, submitError, statusMessage } =
     useCreateDeploymentBySource(workspace);
   const [advancedAccordion, setAdvancedAccordion] = useState<string>();
+  const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
 
   // Read once at mount: the page owns the form after that, and re-seeding on a
   // URL change would silently discard whatever the user has typed.
@@ -166,7 +168,7 @@ export const NewDeploymentRoute: FC = () => {
                 slotFooter={
                   <Stack gap="2">
                     {statusMessage ? (
-                      <Text kind="body/regular/sm" color="secondary" className="mr-auto max-w-full">
+                      <Text kind="body/regular/sm" className="mr-auto max-w-full text-secondary">
                         {statusMessage}
                       </Text>
                     ) : null}
@@ -235,6 +237,7 @@ export const NewDeploymentRoute: FC = () => {
                       errors={errors}
                       queryEnabled={!!workspace}
                       workspace={workspace}
+                      onRequestNewSecret={() => setCreateSecretModalOpen(true)}
                     />
                   )}
                   {source === SOURCE_WORKSPACE && (
@@ -270,6 +273,16 @@ export const NewDeploymentRoute: FC = () => {
             </Flex>
           </Stack>
         </form>
+        {/* Outside the `<form>` on purpose — see `HuggingFaceSourceFieldsProps.onRequestNewSecret`. */}
+        <CreateSecretModal
+          workspace={workspace}
+          open={createSecretModalOpen}
+          onClose={() => setCreateSecretModalOpen(false)}
+          onSecretCreated={(secretName) => {
+            setValue('hfTokenSecret', secretName, { shouldValidate: true });
+            setCreateSecretModalOpen(false);
+          }}
+        />
       </Stack>
     </AccessibleTitle>
   );

@@ -50,6 +50,7 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     rewrite_gateway_models,
     routes_inference_through_gateway,
 )
+from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     materialize_agent_workdir,
@@ -60,8 +61,8 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
     wants_intake_atif_export,
 )
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.job import NemoJob
@@ -359,8 +360,7 @@ class ExecuteAgentJob(NemoJob):
 
         workdir = None
         if request.workdir is not None:
-            async_sdk_handle = cast(AsyncNeMoHelix, async_sdk)
-            files_client = client_from_platform(async_sdk_handle, AsyncFilesClient)
+            files_client = client_from_platform(cast(AsyncNemoClient, async_sdk), AsyncFilesClient)
             workdir = await validate_agent_workdir(request.workdir, files_client, default_workspace=workspace)
 
         extension = request.extension or _make_noop_extension_config()
@@ -438,7 +438,7 @@ class ExecuteAgentJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict:
         step_config = ExecuteAgentStepConfig.model_validate(config)
         agent_ref = f"{step_config.agent.workspace}/{step_config.agent.name}"
         # Logged before validation so a config that fails to parse still names the agent it belonged to.
@@ -524,6 +524,10 @@ class ExecuteAgentJob(NemoJob):
             logger.info(
                 "Agent %s returned status=%s after %.1fs.", agent_ref, result.status, time.monotonic() - started_at
             )
+
+            usage = fabric_output_token_usage(result.output)
+            if usage is not None:
+                ctx.usage.report_totals(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
 
             fabric_run_result_ref = _save_json_result(
                 ctx,

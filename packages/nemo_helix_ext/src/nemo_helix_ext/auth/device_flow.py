@@ -4,14 +4,19 @@
 """OAuth 2.0 Device Authorization Flow (RFC 8628) implementation."""
 
 import asyncio
+import json
+import os
 import time
+import uuid
 import webbrowser
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 from rich.console import Console
 from rich.panel import Panel
 
+from nemo_helix_ext.auth.helpers import BearerTokenSource, parse_bearer_token_source
 from nemo_helix_ext.auth.token_provider import refresh_token_grant
 from nemo_helix_ext.client.tls import httpx_tls_config_from_env
 
@@ -44,10 +49,18 @@ class TokenResponse:
     token_type: str
     expires_in: int
     scope: str | None
+    bearer_token_source: BearerTokenSource = "access_token"
 
     @property
     def token_for_nhx(self) -> str:
         """Return the token to use for NeMo Helix authentication."""
+        source = parse_bearer_token_source(self.bearer_token_source)
+        if source == "id_token":
+            if not self.id_token:
+                raise DeviceFlowError(
+                    "The cluster requires an ID token for API authentication, but the identity provider did not return one"
+                )
+            return self.id_token
         return self.access_token
 
 
@@ -55,6 +68,53 @@ class DeviceFlowError(Exception):
     """Device flow authentication error."""
 
     pass
+
+
+_DEVICE_ID_FILENAME = "oidc-device-id"
+_DEVICE_ID_FILE_MODE = 0o600
+_DEVICE_ID_DIRECTORY_MODE = 0o700
+
+
+def _device_id_path() -> Path:
+    state_home = os.environ.get("XDG_STATE_HOME")
+    state_root = Path(state_home).expanduser() if state_home else Path.home() / ".local" / "state"
+    return state_root / "nhx" / _DEVICE_ID_FILENAME
+
+
+def _read_device_id(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+        return str(uuid.UUID(value))
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+
+
+def _load_or_create_device_id() -> str:
+    """Return a stable, random identifier for this CLI installation."""
+    path = _device_id_path()
+    if existing := _read_device_id(path):
+        try:
+            os.chmod(path, _DEVICE_ID_FILE_MODE)
+            return existing
+        except OSError as exc:
+            raise DeviceFlowError(f"Failed to secure the CLI device identifier at {path}: {exc}") from exc
+
+    try:
+        path.parent.mkdir(mode=_DEVICE_ID_DIRECTORY_MODE, parents=True, exist_ok=True)
+        generated = str(uuid.uuid4())
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _DEVICE_ID_FILE_MODE)
+        except FileExistsError:
+            if existing := _read_device_id(path):
+                return existing
+            fd = os.open(path, os.O_WRONLY | os.O_TRUNC, _DEVICE_ID_FILE_MODE)
+
+        with os.fdopen(fd, "w", encoding="utf-8") as device_id_file:
+            device_id_file.write(f"{generated}\n")
+        os.chmod(path, _DEVICE_ID_FILE_MODE)
+        return generated
+    except OSError as exc:
+        raise DeviceFlowError(f"Failed to persist the CLI device identifier at {path}: {exc}") from exc
 
 
 class DeviceFlow:
@@ -67,25 +127,50 @@ class DeviceFlow:
         client_id: str,
         scope: str = "openid email profile",
         certificate_authority: str | None = None,
+        bearer_token_source: BearerTokenSource = "access_token",
+        include_device_id: bool = False,
+        device_display_name: str | None = None,
+        include_scope_in_token_request: bool = True,
     ):
         self.device_authorization_endpoint = device_authorization_endpoint
         self.token_endpoint = token_endpoint
         self.client_id = client_id
         self.scope = scope
+        self.bearer_token_source = bearer_token_source
+        self.device_id = _load_or_create_device_id() if include_device_id else None
+        self.device_display_name = device_display_name
+        self.include_scope_in_token_request = include_scope_in_token_request
         self.certificate_authority = certificate_authority
 
     async def start_device_authorization(self) -> DeviceCodeResponse:
         """Start the device authorization flow."""
         async with httpx.AsyncClient(**httpx_tls_config_from_env(self.certificate_authority)) as client:
+            request_data = {
+                "client_id": self.client_id,
+                "scope": self.scope,
+            }
+            if self.device_id is not None:
+                request_data["device_id"] = self.device_id
+            if self.device_display_name is not None:
+                request_data["display_name"] = self.device_display_name
+
             response = await client.post(
                 self.device_authorization_endpoint,
-                data={
-                    "client_id": self.client_id,
-                    "scope": self.scope,
-                },
+                data=request_data,
                 timeout=30.0,
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                try:
+                    error_data = response.json()
+                except (json.JSONDecodeError, ValueError):
+                    error_data = {}
+                detail = error_data.get("error_description") or error_data.get("error") or response.text.strip()
+                detail_suffix = f": {detail}" if detail else ""
+                raise DeviceFlowError(
+                    f"Device authorization request failed with HTTP {response.status_code}{detail_suffix}"
+                ) from exc
             data = response.json()
 
             return DeviceCodeResponse(
@@ -110,16 +195,16 @@ class DeviceFlow:
             while time.time() - start_time < expires_in:
                 await _async_pause(interval)
 
-                response = await client.post(
-                    self.token_endpoint,
-                    data={
-                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                        "client_id": self.client_id,
-                        "device_code": device_code,
-                        "scope": self.scope,  # Casdoor doesn't propagate scope from DeviceAuthCache
-                    },
-                    timeout=30.0,
-                )
+                request_data = {
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "client_id": self.client_id,
+                    "device_code": device_code,
+                }
+                if self.include_scope_in_token_request:
+                    # Casdoor does not propagate scope from DeviceAuthCache.
+                    request_data["scope"] = self.scope
+
+                response = await client.post(self.token_endpoint, data=request_data, timeout=30.0)
 
                 if response.status_code == 200:
                     data = response.json()
@@ -130,9 +215,15 @@ class DeviceFlow:
                         token_type=data.get("token_type", "Bearer"),
                         expires_in=data.get("expires_in", 3600),
                         scope=data.get("scope"),
+                        bearer_token_source=self.bearer_token_source,
                     )
 
-                error_data = response.json()
+                try:
+                    error_data = response.json()
+                except (json.JSONDecodeError, ValueError):
+                    if response.status_code == 401:
+                        raise DeviceFlowError("Device code is invalid or expired") from None
+                    raise DeviceFlowError(f"Token request failed with HTTP {response.status_code}") from None
                 error = error_data.get("error")
 
                 if error == "authorization_pending":
@@ -157,6 +248,10 @@ async def authenticate_with_device_flow(
     scope: str = "openid email profile",
     open_browser: bool = True,
     certificate_authority: str | None = None,
+    bearer_token_source: BearerTokenSource = "access_token",
+    include_device_id: bool = False,
+    device_display_name: str | None = None,
+    include_scope_in_token_request: bool = True,
 ) -> TokenResponse:
     """Perform OAuth device flow authentication.
 
@@ -166,6 +261,10 @@ async def authenticate_with_device_flow(
         client_id: OAuth client ID
         scope: OAuth scopes to request
         open_browser: Whether to automatically open the browser
+        bearer_token_source: Token response field to use as the NeMo Helix bearer
+        include_device_id: Whether to include a generated device_id extension parameter
+        device_display_name: Optional human-readable name shown by the identity provider
+        include_scope_in_token_request: Whether token polling includes the requested scope
 
     Returns:
         TokenResponse with access and refresh tokens
@@ -175,6 +274,10 @@ async def authenticate_with_device_flow(
         token_endpoint=token_endpoint,
         client_id=client_id,
         scope=scope,
+        bearer_token_source=bearer_token_source,
+        include_device_id=include_device_id,
+        device_display_name=device_display_name,
+        include_scope_in_token_request=include_scope_in_token_request,
         certificate_authority=certificate_authority,
     )
 
@@ -220,6 +323,7 @@ async def refresh_access_token(
     refresh_token: str,
     scope: str | None = None,
     certificate_authority: str | None = None,
+    bearer_token_source: BearerTokenSource = "access_token",
 ) -> TokenResponse:
     """
     Refresh an access token using a refresh token.
@@ -255,6 +359,7 @@ async def refresh_access_token(
         token_type=data.get("token_type", "Bearer"),
         expires_in=data.get("expires_in", 3600),
         scope=data.get("scope"),
+        bearer_token_source=bearer_token_source,
     )
 
 
@@ -265,6 +370,7 @@ def authenticate_with_password_grant(
     password: str,
     scope: str = "openid profile email",
     certificate_authority: str | None = None,
+    bearer_token_source: BearerTokenSource = "access_token",
 ) -> TokenResponse:
     """Obtain tokens using the Resource Owner Password Credentials grant (RFC 6749).
 
@@ -308,4 +414,5 @@ def authenticate_with_password_grant(
         token_type=resp_data.get("token_type", "Bearer"),
         expires_in=resp_data.get("expires_in", 3600),
         scope=resp_data.get("scope"),
+        bearer_token_source=bearer_token_source,
     )

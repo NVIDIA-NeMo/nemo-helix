@@ -6,10 +6,9 @@
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
-from nhx.common.service.dependencies import get_sdk_client
+from nhx.common.service.dependencies import get_nemo_client
 from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
 from nhx.intake.repository.annotations import AnnotationsRepository
 from nhx.intake.repository.clickhouse.annotations import ClickHouseAnnotationsRepository
@@ -28,11 +27,11 @@ from nhx.intake.spans.service import IntakeSpansService
 
 async def require_workspace_access(
     workspace: str,
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> None:
     """Validate that the request principal can access the path workspace."""
 
-    (await client_from_platform(sdk, AsyncWorkspacesClient).get_workspace(name=workspace)).data()
+    (await AsyncWorkspacesClient.from_client(client).get_workspace(name=workspace)).data()
 
 
 def validate_list_query_params(request: Request, additional_params: set[str] | None = None) -> None:

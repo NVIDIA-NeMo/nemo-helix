@@ -120,7 +120,7 @@ def test_resolve_eval_config_fileset_without_sdk_raises(tmp_path: Path, ctx: Job
     with pytest.raises(Exception) as exc:
         with job._resolve_eval_config(spec, ctx=ctx, sdk=None):
             pass
-    assert "sdk" in str(exc.value).lower()
+    assert "platform client" in str(exc.value)
 
 
 def test_resolve_output_fileset_uploads_on_clean_exit(tmp_path: Path, ctx: JobContext) -> None:

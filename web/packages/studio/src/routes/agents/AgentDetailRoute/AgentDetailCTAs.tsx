@@ -63,7 +63,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   const actions: Action[] = [
     {
       id: 'evaluate',
-      label: 'Run evaluation',
+      label: 'Run Evaluation',
       disabled: !canRunEvaluation,
       onClick: onRunEvaluation,
     },

@@ -111,7 +111,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
           <AnonymizerRecordSkeleton outputHeading={pendingOutputHeading} />
         ) : error ? null : (
           <Flex align="center" className="flex-1" justify="center">
-            <Text color="secondary" kind="body/regular/md">
+            <Text className="text-secondary" kind="body/regular/md">
               {wasStopped
                 ? 'Preview stopped before any records arrived.'
                 : hasRun

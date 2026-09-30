@@ -193,7 +193,7 @@ async def test_delete_job_nonexistent_job(mock_dispatcher: JobDispatcher):
 async def test_delete_job_non_terminal_job_raises_without_deleting_data(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    _mock_files_client,
+    mock_files_client,
 ):
     """Deleting an active job is refused before metadata or fileset cleanup."""
     job_id, job_name, attempt_id, step_id, _, _ = await create_test_job_data(mock_store, "active-delete-test-job")
@@ -214,7 +214,7 @@ async def test_delete_job_non_terminal_job_raises_without_deleting_data(
     assert await count_entities(mock_store, HelixJobStep, {"attempt_id": attempt_id}) == 1
     assert await count_entities(mock_store, HelixJobTask, {"step_id": step_id}) == 1
     assert await count_entities(mock_store, HelixJobResult, {"job": job_id}) == 1
-    _mock_files_client.delete_fileset.assert_not_called()
+    mock_files_client.delete_fileset.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -292,11 +292,11 @@ async def test_delete_job_deletes_related_entities_across_all_pages(
 async def test_delete_job_serializes_with_rerun_job(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nhx_client,
+    mock_files_client,
 ):
     """A rerun request cannot create a new attempt while deletion is cleaning up."""
     _, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-rerun-lock-test-job")
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+    other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
 
     delete_started = asyncio.Event()
     allow_delete = asyncio.Event()
@@ -333,12 +333,12 @@ async def test_delete_job_serializes_with_rerun_job(
 async def test_delete_job_serializes_with_same_name_create(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nhx_client,
+    mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """A same-name create waits until delete finishes all cleanup for the old job."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-create-lock-test-job")
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+    other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
     create_request = sample_platform_job_request.model_copy(update={"name": job_name})
 
     delete_started = asyncio.Event()
@@ -380,12 +380,12 @@ async def test_delete_job_serializes_with_same_name_create(
 async def test_delete_job_serializes_with_task_creation(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nhx_client,
+    mock_files_client,
 ):
     """A task update cannot create a late child row after delete cleanup starts."""
     job_id, job_name, _, step_id, _, _ = await create_test_job_data(mock_store, "delete-task-lock-test-job")
     step = await mock_store.get_by_id(HelixJobStep, step_id)
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+    other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
 
     delete_started = asyncio.Event()
     allow_delete = asyncio.Event()
@@ -434,11 +434,11 @@ async def test_delete_job_serializes_with_task_creation(
 async def test_delete_job_serializes_with_result_creation(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nhx_client,
+    mock_files_client,
 ):
     """A result create cannot recreate associated data after delete cleanup starts."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-result-lock-test-job")
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+    other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
 
     delete_started = asyncio.Event()
     allow_delete = asyncio.Event()
@@ -599,11 +599,9 @@ async def test_delete_job_missing_fileset_succeeds(mock_dispatcher: JobDispatche
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-missing-fileset-job")
 
     # Simulate the fileset already being gone by making the mock files client raise NotFoundError
-    mock_files = AsyncMock()
-    mock_files.delete_fileset = AsyncMock(side_effect=NotFoundError.__new__(NotFoundError))
+    mock_dispatcher.files.delete_fileset = AsyncMock(side_effect=NotFoundError.__new__(NotFoundError))
 
-    with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-        deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
+    deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
     assert deleted is True
 
     # The job entity itself should be gone
@@ -614,7 +612,7 @@ async def test_delete_job_missing_fileset_succeeds(mock_dispatcher: JobDispatche
 async def test_create_job_uses_existing_output_location(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    _mock_files_client,
+    mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """A supplied output_location becomes the fileset and is persisted as provenance; nothing created."""
@@ -623,8 +621,8 @@ async def test_create_job_uses_existing_output_location(
     job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
 
     assert job.fileset == "my-eval-fileset"
-    _mock_files_client.get_fileset.assert_awaited_once()
-    _mock_files_client.create_fileset.assert_not_called()
+    mock_files_client.get_fileset.assert_awaited_once()
+    mock_files_client.create_fileset.assert_not_called()
 
     stored = await mock_store.get(HelixJob, job.name, workspace=DEFAULT_WORKSPACE)
     assert stored.output_location == "my-eval-fileset"
@@ -633,57 +631,57 @@ async def test_create_job_uses_existing_output_location(
 @pytest.mark.asyncio
 async def test_create_job_output_location_not_found_raises(
     mock_dispatcher: JobDispatcher,
-    _mock_files_client,
+    mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """A supplied output_location that does not exist is rejected and never auto-created."""
     from nemo_helix_plugin.client.errors import NotFoundError
     from nhx.core.jobs.app.dispatcher import JobOutputLocationError
 
-    _mock_files_client.get_fileset.side_effect = NotFoundError.__new__(NotFoundError)
+    mock_files_client.get_fileset.side_effect = NotFoundError.__new__(NotFoundError)
     request = sample_platform_job_request.model_copy(update={"output_location": "ghost-fileset"})
 
     with pytest.raises(JobOutputLocationError):
         await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
 
-    _mock_files_client.create_fileset.assert_not_called()
+    mock_files_client.create_fileset.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_create_job_output_location_forbidden_raises(
     mock_dispatcher: JobDispatcher,
-    _mock_files_client,
+    mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """A supplied output_location the caller cannot access is rejected, never auto-created."""
     from nemo_helix_plugin.client.errors import PermissionDeniedError
     from nhx.core.jobs.app.dispatcher import JobOutputLocationError
 
-    _mock_files_client.get_fileset.side_effect = PermissionDeniedError.__new__(PermissionDeniedError)
+    mock_files_client.get_fileset.side_effect = PermissionDeniedError.__new__(PermissionDeniedError)
     request = sample_platform_job_request.model_copy(update={"output_location": "forbidden-fileset"})
 
     with pytest.raises(JobOutputLocationError):
         await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
 
-    _mock_files_client.create_fileset.assert_not_called()
+    mock_files_client.create_fileset.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_create_job_without_output_location_auto_creates_fileset(
     mock_dispatcher: JobDispatcher,
-    _mock_files_client,
+    mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """With no output_location, the dispatcher auto-creates a per-job fileset (unchanged behavior)."""
     job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
     assert job.fileset == "test-fileset-id"
-    _mock_files_client.create_fileset.assert_awaited_once()
+    mock_files_client.create_fileset.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_delete_job_leaves_caller_supplied_fileset(
-    mock_dispatcher: JobDispatcher, mock_store: EntityClient, _mock_files_client
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, mock_files_client
 ):
     """Deleting a job whose fileset was caller-supplied removes the job but leaves the fileset."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(
@@ -693,13 +691,13 @@ async def test_delete_job_leaves_caller_supplied_fileset(
     deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    _mock_files_client.delete_fileset.assert_not_called()
+    mock_files_client.delete_fileset.assert_not_called()
     await verify_job_data_exists(mock_store, job_id, should_exist=False)
 
 
 @pytest.mark.asyncio
 async def test_delete_job_deletes_owned_fileset(
-    mock_dispatcher: JobDispatcher, mock_store: EntityClient, _mock_files_client
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, mock_files_client
 ):
     """Deleting a job that owns its fileset (output_location unset) removes that fileset too."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(
@@ -709,13 +707,13 @@ async def test_delete_job_deletes_owned_fileset(
     deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    _mock_files_client.delete_fileset.assert_awaited_once()
+    mock_files_client.delete_fileset.assert_awaited_once()
     await verify_job_data_exists(mock_store, job_id, should_exist=False)
 
 
 @pytest.mark.asyncio
 async def test_delete_job_leaves_caller_fileset_named_like_owned(
-    mock_dispatcher: JobDispatcher, mock_store: EntityClient, _mock_files_client
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, mock_files_client
 ):
     """A caller-supplied fileset named exactly like an auto-created one is still left intact.
 
@@ -732,14 +730,14 @@ async def test_delete_job_leaves_caller_fileset_named_like_owned(
     deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    _mock_files_client.delete_fileset.assert_not_called()
+    mock_files_client.delete_fileset.assert_not_called()
     await verify_job_data_exists(mock_store, job_id, should_exist=False)
 
 
 @pytest.mark.asyncio
 async def test_create_then_delete_auto_fileset_round_trip(
     mock_dispatcher: JobDispatcher,
-    _mock_files_client,
+    mock_files_client,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     """The auto-created fileset the dispatcher makes is exactly the one delete removes.
@@ -755,7 +753,7 @@ async def test_create_then_delete_auto_fileset_round_trip(
         response.data.return_value = fileset
         return response
 
-    _mock_files_client.create_fileset.side_effect = _echo_create
+    mock_files_client.create_fileset.side_effect = _echo_create
 
     job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
     assert job.fileset == f"job-fileset-{job.name}"
@@ -767,7 +765,7 @@ async def test_create_then_delete_auto_fileset_round_trip(
     deleted = await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
 
     assert deleted is True
-    _mock_files_client.delete_fileset.assert_awaited_once_with(
+    mock_files_client.delete_fileset.assert_awaited_once_with(
         name=f"job-fileset-{job.name}", workspace=DEFAULT_WORKSPACE
     )
 
@@ -1317,8 +1315,6 @@ async def test_list_steps_across_multiple_workspaces(
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-        # Create mock SDK with patched files client
-        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1326,49 +1322,48 @@ async def test_list_steps_across_multiple_workspaces(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-            # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+        # Create dispatcher with the multi-workspace store
+        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
 
-            # Create jobs in workspace "default"
-            job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+        # Create jobs in workspace "default"
+        job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-            job2_request = CreateHelixJobRequest(
-                name="test-job-2",
-                description="Second test job",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
+        job2_request = CreateHelixJobRequest(
+            name="test-job-2",
+            description="Second test job",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
 
-            # Create jobs in workspace "other-workspace"
-            job3_request = CreateHelixJobRequest(
-                name="test-job-3",
-                description="Third test job in other workspace",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
+        # Create jobs in workspace "other-workspace"
+        job3_request = CreateHelixJobRequest(
+            name="test-job-3",
+            description="Third test job in other workspace",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
 
-            job4_request = CreateHelixJobRequest(
-                name="test-job-4",
-                description="Fourth test job in other workspace",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
+        job4_request = CreateHelixJobRequest(
+            name="test-job-4",
+            description="Fourth test job in other workspace",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
 
         # List steps in "default" workspace
         step_filter = HelixJobStepsListFilter()
@@ -1447,7 +1442,6 @@ async def test_list_steps_with_status_filter(
     from nhx.testing import create_test_client
 
     with create_test_client(client_type=EntityClient) as mock_store:
-        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1455,9 +1449,8 @@ async def test_list_steps_with_status_filter(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
-            await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
         # Filtering by a status that no step has should return nothing — the
         # important assertion is that the call doesn't raise.
@@ -1487,8 +1480,6 @@ async def test_list_jobs_across_multiple_workspaces(
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-        # Create mock SDK with patched files client
-        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1496,49 +1487,48 @@ async def test_list_jobs_across_multiple_workspaces(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-            # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
+        # Create dispatcher with the multi-workspace store
+        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
 
-            # Create jobs in workspace "default"
-            job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+        # Create jobs in workspace "default"
+        job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
-            job2_request = CreateHelixJobRequest(
-                name="test-job-2",
-                description="Second test job",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
+        job2_request = CreateHelixJobRequest(
+            name="test-job-2",
+            description="Second test job",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job2 = await mock_dispatcher.create_job(job2_request, DEFAULT_WORKSPACE)
 
-            # Create jobs in workspace "other-workspace"
-            job3_request = CreateHelixJobRequest(
-                name="test-job-3",
-                description="Third test job in other workspace",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
+        # Create jobs in workspace "other-workspace"
+        job3_request = CreateHelixJobRequest(
+            name="test-job-3",
+            description="Third test job in other workspace",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job3 = await mock_dispatcher.create_job(job3_request, "other-workspace")
 
-            job4_request = CreateHelixJobRequest(
-                name="test-job-4",
-                description="Fourth test job in other workspace",
-                project="test-project",
-                source=TestConstants.SOURCE,
-                spec=TestConstants.SPEC_BASIC,
-                platform_spec=TestConstants.PLATFORM_SPEC,
-                ownership=TestConstants.OWNERSHIP_BASIC,
-                custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
-            )
-            job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
+        job4_request = CreateHelixJobRequest(
+            name="test-job-4",
+            description="Fourth test job in other workspace",
+            project="test-project",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            ownership=TestConstants.OWNERSHIP_BASIC,
+            custom_fields=TestConstants.CUSTOM_FIELDS_BASIC,
+        )
+        job4 = await mock_dispatcher.create_job(job4_request, "other-workspace")
 
         # List jobs in "default" workspace
         jobs_default, count_default = await mock_dispatcher.list_jobs(

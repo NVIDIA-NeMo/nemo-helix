@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
+import { selectOidcBearerToken } from '@nemo/sdk/src/utils/oidcBearerToken';
 import { useMutation, UseMutationOptions } from '@tanstack/react-query';
 import OpenAI from 'openai';
 import type { ChatCompletion, ChatCompletionCreateParams } from 'openai/resources/index.mjs';
@@ -118,9 +119,13 @@ export const createChatCompletion = async (
  */
 export const useChatCompletion = (mutationOptions?: UseChatCompletionOptions) => {
   const auth = useAuth();
+  const bearerToken = selectOidcBearerToken(
+    auth?.user,
+    import.meta.env.VITE_AUTH_BEARER_TOKEN_SOURCE
+  );
   return useMutation({
     ...mutationOptions,
     mutationFn: (params: UseChatCompletionParams) =>
-      createChatCompletion({ accessToken: auth?.user?.access_token, ...params }),
+      createChatCompletion({ accessToken: bearerToken, ...params }),
   });
 };

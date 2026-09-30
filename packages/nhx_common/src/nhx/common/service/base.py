@@ -18,7 +18,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute, iter_route_contexts
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.api.utils import register_query_param_schemas
 from nhx.common.config import Configuration, HelixConfig, ServiceConfig, get_platform_config
 from nhx.common.controller import Controller
@@ -256,6 +256,12 @@ class DependencyProvider:
 
         return get_async_nemo_client(http_client=self.get_http_client())
 
+    def get_request_scoped_sync_nemo_client(self) -> NemoClient:
+        """Return a fresh sync NemoClient with request-scoped headers."""
+        from nhx.common.client_factory import get_nemo_client
+
+        return get_nemo_client(http_client=self.get_sync_http_client())
+
     def get_effective_principal_id(self, request: Request) -> str:
         """Return the effective principal ID from the current request auth context."""
         from nhx.common.auth import get_auth_client
@@ -263,7 +269,15 @@ class DependencyProvider:
         return get_auth_client(request).principal.effective_id
 
     def setup_dependencies(self, app: FastAPI, service: "Service") -> None:
-        """Configure FastAPI dependency overrides."""
+        """Bind shared FastAPI dependencies to this service's request-scoped providers.
+
+        Algorithm:
+            - Replace platform authorization and client factories with request-aware providers.
+            - Expose the effective principal, entity client, and platform configuration.
+            - Register the service configuration only when this service owns one.
+        """
+        from nemo_helix_plugin.dependencies import get_request_authorizer
+        from nhx.common.auth.dependencies import get_request_authorizer as request_authorizer
         from nhx.common.service.dependencies import (
             get_effective_principal_id,
             get_entity_client,
@@ -271,12 +285,15 @@ class DependencyProvider:
             get_platform_config,
             get_sdk_client,
             get_service_config,
+            get_sync_nemo_client,
             get_sync_sdk_client,
         )
 
+        app.dependency_overrides[get_request_authorizer] = request_authorizer
         app.dependency_overrides[get_sdk_client] = self.get_request_scoped_sdk
         app.dependency_overrides[get_sync_sdk_client] = self.get_request_scoped_sync_sdk
         app.dependency_overrides[get_nemo_client] = self.get_request_scoped_nemo_client
+        app.dependency_overrides[get_sync_nemo_client] = self.get_request_scoped_sync_nemo_client
         app.dependency_overrides[get_entity_client] = self.get_entity_client
         app.dependency_overrides[get_effective_principal_id] = self.get_effective_principal_id
         app.dependency_overrides[get_platform_config] = self.get_platform_config

@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import { useCustomizationCreateAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
@@ -19,6 +20,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { CustomizationFilesetCreateModal } from '@studio/components/CustomizationFilesetCreateModal';
 import { CustomizationFilesetSelect } from '@studio/components/customizer/CustomizationFilesetSelect';
 import { BackendSelectionSection } from '@studio/components/NewCustomizationForm/BackendSelectionSection';
 import {
@@ -38,6 +40,7 @@ import { ModelSelectionSection } from '@studio/components/NewCustomizationForm/M
 import { OutputDeploymentSection } from '@studio/components/NewCustomizationForm/OutputDeploymentSection';
 import { RewardEnvironmentSection } from '@studio/components/NewCustomizationForm/RewardEnvironmentSection';
 import { TrainingMethodSection } from '@studio/components/NewCustomizationForm/TrainingMethodSection';
+import { DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import {
   useBaseModelDeploymentReadiness,
   type BaseModelDeploymentState,
@@ -53,6 +56,7 @@ import {
 } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
+  DATASET_FIELD_BY_BACKEND,
   FORM_DEFAULTS,
   customizationFormSchema,
   formToAutomodelCreate,
@@ -155,6 +159,10 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   // over when the training method changes and back.
   const [deployBaseModel, setDeployBaseModel] = useState(DEPLOY_BY_DEFAULT);
   const [deployOutputModel, setDeployOutputModel] = useState(DEPLOY_BY_DEFAULT);
+  // Owned here rather than in `CustomizationFilesetSelect` because the modal it opens
+  // renders a `<form>`, and a form nested inside this one never receives its own submit
+  // event. See `CustomizationFilesetSelectProps.onRequestNewDataset`.
+  const [datasetModalOpen, setDatasetModalOpen] = useState(false);
 
   const defaultValues = useMemo<CustomizationFormFields>(() => {
     if (initialValues) return initialValues;
@@ -225,7 +233,9 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   }) as string | undefined;
   const outputName = useWatch({ control: form.control, name: 'outputName' });
 
-  const readiness = useBaseModelDeploymentReadiness(baseModelRef, { enabled: isAdapterRun });
+  const readiness = useBaseModelDeploymentReadiness(baseModelRef, {
+    enabled: DEPLOYMENTS_ENABLED && isAdapterRun,
+  });
 
   // Whether there is a deployment left to create at all. Only the adapter flow can
   // answer "no": its target is the base model, which may already be serving LoRA — or
@@ -233,7 +243,13 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   // `!== 'serving-lora'`. A full-weight run targets a model that does not exist yet,
   // so nothing can be serving it and nothing had to be looked up — the same reason
   // `launch_model` guards its existing-deployment check with `is_lora`.
-  const needsDeployment = isAdapterRun ? CREATE_DEPLOYMENT_STATES.includes(readiness.state) : true;
+  // Gated on DEPLOYMENTS_ENABLED before anything else: with deployments off there is
+  // no Deployments page to manage what this would create, so the question is withheld
+  // entirely — no section is rendered and `onSubmit` creates no config. A cloned
+  // `deployment_config` is dropped with it, the same as when the user opts out.
+  const needsDeployment =
+    DEPLOYMENTS_ENABLED &&
+    (isAdapterRun ? CREATE_DEPLOYMENT_STATES.includes(readiness.state) : true);
   const deployRequested = isAdapterRun ? deployBaseModel : deployOutputModel;
 
   // Separate form: these fields drive their own API calls and are not part of any
@@ -472,7 +488,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                   slotFooter={
                     <Flex className="w-full items-center justify-end gap-2">
                       {deployStage ? (
-                        <Text kind="body/regular/sm" color="secondary" className="mr-auto">
+                        <Text kind="body/regular/sm" className="mr-auto text-secondary">
                           {deployStage}
                         </Text>
                       ) : null}
@@ -509,7 +525,10 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                       </>
                     )}
                     <Divider />
-                    <CustomizationFilesetSelect disabled={isPending} />
+                    <CustomizationFilesetSelect
+                      disabled={isPending}
+                      onRequestNewDataset={() => setDatasetModalOpen(true)}
+                    />
                     <Divider />
                     {isGrpo ? <GrpoParametersSection /> : <GeneralParametersSection />}
                     {usesLoraControls && (
@@ -528,28 +547,32 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                     <IntegrationsSection backend={backend} />
                     <Divider />
                     <ComputeResourcesSection />
-                    <Divider />
-                    {/* Every run produces something servable, so the section is always
-                        offered — what differs is the target. An adapter is served by a
-                        deployment of its base model; anything else is served by a
-                        deployment of the model the run itself emits. */}
-                    {isAdapterRun ? (
-                      <DeploymentSection
-                        readiness={readiness}
-                        control={deployForm.control}
-                        errors={deployForm.formState.errors}
-                        baseModelRef={baseModelRef ?? ''}
-                        deployBaseModel={deployBaseModel}
-                        onDeployBaseModelChange={setDeployBaseModel}
-                      />
-                    ) : (
-                      <OutputDeploymentSection
-                        control={deployForm.control}
-                        errors={deployForm.formState.errors}
-                        outputName={outputName ?? ''}
-                        deployOutputModel={deployOutputModel}
-                        onDeployOutputModelChange={setDeployOutputModel}
-                      />
+                    {/* Every run produces something servable, so the section is offered
+                        wherever deployments are — what differs is the target. An adapter
+                        is served by a deployment of its base model; anything else is
+                        served by a deployment of the model the run itself emits. */}
+                    {DEPLOYMENTS_ENABLED && (
+                      <>
+                        <Divider />
+                        {isAdapterRun ? (
+                          <DeploymentSection
+                            readiness={readiness}
+                            control={deployForm.control}
+                            errors={deployForm.formState.errors}
+                            baseModelRef={baseModelRef ?? ''}
+                            deployBaseModel={deployBaseModel}
+                            onDeployBaseModelChange={setDeployBaseModel}
+                          />
+                        ) : (
+                          <OutputDeploymentSection
+                            control={deployForm.control}
+                            errors={deployForm.formState.errors}
+                            outputName={outputName ?? ''}
+                            deployOutputModel={deployOutputModel}
+                            onDeployOutputModelChange={setDeployOutputModel}
+                          />
+                        )}
+                      </>
                     )}
                     {validationErrors.length > 0 && (
                       <Banner kind="inline" ref={errorBannerRef} status="error">
@@ -561,6 +584,24 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
               </Flex>
             </Stack>
           </form>
+          {/* Outside the `<form>` on purpose — see `datasetModalOpen` above. */}
+          {datasetModalOpen && (
+            <CustomizationFilesetCreateModal
+              open
+              onClose={() => setDatasetModalOpen(false)}
+              onFilesetCreated={(createdFileset) => {
+                form.setValue(
+                  DATASET_FIELD_BY_BACKEND[backend],
+                  getEntityReference(createdFileset),
+                  {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  }
+                );
+                setDatasetModalOpen(false);
+              }}
+            />
+          )}
         </FormProvider>
       </Stack>
     </AccessibleTitle>

@@ -60,8 +60,8 @@ packages = ["src/scaled_evals", "src/nemo_scaled_evals_plugin"]
 "db" = "scaled_evals/db"
 
 [tool.uv.sources]
-nemo-helix = { workspace = true }
-nemo-helix-plugin = { workspace = true }
+nemo-helix = { path = "../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

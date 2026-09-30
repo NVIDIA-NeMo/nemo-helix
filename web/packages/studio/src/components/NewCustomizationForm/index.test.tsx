@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// The wizard's deployment section is gated on the deployments preview flag, which is
+// off by default. Turn it on so the suite below can exercise it; the flag-off behavior
+// has its own file, since the flag is read once at module load and cannot be flipped
+// per-test. Hoisted so it lands before `constants/featureFlags` parses the env.
+vi.hoisted(() => {
+  vi.stubEnv('VITE_FF_DEPLOYMENTS_ENABLED', 'true');
+});
+
 // vi.mock calls below are hoisted by vitest, so this import still resolves the mocks.
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import { NewCustomizationForm } from '@studio/components/NewCustomizationForm';
@@ -260,6 +268,30 @@ describe('NewCustomizationForm', () => {
       training: 'default/commonsense_qa',
       validation: 'default/commonsense_qa',
     });
+  });
+
+  /**
+   * Regression guard for the create-dataset modal navigating the page instead of creating
+   * a dataset. The modal renders its own `<form>`; when it was rendered from inside the
+   * wizard's `<form>`, browsers did not deliver the nested form's submit event to any
+   * ancestor (whatwg/dom#756), so React — which delegates `submit` at the root container —
+   * never ran the modal's `onSubmit`, nothing called `preventDefault`, and clicking
+   * "Add to Customization" did a native GET to the current URL.
+   *
+   * jsdom bubbles the nested submit, so it cannot reproduce the navigation; assert the
+   * structure that caused it instead.
+   */
+  it('renders the create-dataset modal outside the wizard form', async () => {
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" />);
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: 'New Dataset' }));
+
+    expect(await screen.findByText('Create New Dataset')).toBeInTheDocument();
+    // Testing Library has no query for DOM structure, and structure is the whole point here.
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('form form')).toBeNull();
   });
 
   it('asks the API for fine-tunable models instead of filtering the page client-side', async () => {

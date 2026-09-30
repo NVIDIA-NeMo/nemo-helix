@@ -48,7 +48,7 @@ export const PrivacyProtection = () => {
                 <Flex align="center" gap="1">
                   <Text kind="label/regular/md">{item.label}</Text>
                 </Flex>
-                <Text kind="body/regular/sm" color="secondary" className="text-left">
+                <Text kind="body/regular/sm" className="text-left text-secondary">
                   {item.description}
                 </Text>
               </Flex>

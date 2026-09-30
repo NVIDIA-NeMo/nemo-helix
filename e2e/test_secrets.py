@@ -9,13 +9,12 @@ work correctly when running against a fully deployed NHX platform.
 
 import uuid
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
 
-def test_secret_create_and_list(sdk: NeMoHelix, workspace: str):
+def test_secret_create_and_list(client: NemoClient, workspace: str):
     """Test creating a secret and listing it in the workspace.
 
     This test verifies the secrets system works end-to-end:
@@ -25,7 +24,7 @@ def test_secret_create_and_list(sdk: NeMoHelix, workspace: str):
     """
     secret_name = f"e2e-secret-{uuid.uuid4().hex[:8]}"
     secret_value = "e2e-test-secret-value"
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
 
     # Create a secret
     secret = secrets.create_secret(
@@ -46,7 +45,7 @@ def test_secret_create_and_list(sdk: NeMoHelix, workspace: str):
     assert retrieved_secret.workspace == workspace
 
 
-def test_secret_create_duplicate_fails(sdk: NeMoHelix, workspace: str):
+def test_secret_create_duplicate_fails(client: NemoClient, workspace: str):
     """Test that creating a secret with a duplicate name fails.
 
     This test verifies that the secrets system enforces unique
@@ -56,7 +55,7 @@ def test_secret_create_duplicate_fails(sdk: NeMoHelix, workspace: str):
     secret_value = "e2e-duplicate-test-secret-value"
 
     # Create the initial secret
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     secrets.create_secret(
         workspace=workspace,
         body=HelixSecretCreateRequest(name=secret_name, value=secret_value),
@@ -74,7 +73,7 @@ def test_secret_create_duplicate_fails(sdk: NeMoHelix, workspace: str):
         assert "already exists" in str(e) or "duplicate" in str(e)
 
 
-def test_secret_create_and_delete(sdk: NeMoHelix, workspace: str):
+def test_secret_create_and_delete(client: NemoClient, workspace: str):
     """Test creating and deleting a secret.
 
     This test verifies that a secret can be created and then deleted,
@@ -84,7 +83,7 @@ def test_secret_create_and_delete(sdk: NeMoHelix, workspace: str):
     secret_value = "e2e-delete-test-secret-value"
 
     # Create a secret
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     secrets.create_secret(
         workspace=workspace,
         body=HelixSecretCreateRequest(name=secret_name, value=secret_value),
@@ -107,7 +106,7 @@ def test_secret_create_and_delete(sdk: NeMoHelix, workspace: str):
     assert secret_name not in secret_names
 
 
-def test_secret_data_not_in_create_response(sdk: NeMoHelix, workspace: str):
+def test_secret_data_not_in_create_response(client: NemoClient, workspace: str):
     """Test that secret data is not exposed in the create response.
 
     This test verifies that when creating a secret, the response does not
@@ -117,7 +116,7 @@ def test_secret_data_not_in_create_response(sdk: NeMoHelix, workspace: str):
     secret_value = "this-should-not-appear-in-response"
 
     secret = (
-        client_from_platform(sdk, SecretsClient)
+        SecretsClient.from_client(client)
         .create_secret(
             workspace=workspace,
             body=HelixSecretCreateRequest(name=secret_name, value=secret_value),
@@ -136,7 +135,7 @@ def test_secret_data_not_in_create_response(sdk: NeMoHelix, workspace: str):
     assert "_data" not in secret_dict
 
 
-def test_secret_data_not_in_retrieve_response(sdk: NeMoHelix, workspace: str):
+def test_secret_data_not_in_retrieve_response(client: NemoClient, workspace: str):
     """Test that secret data is not exposed in the retrieve response.
 
     This test verifies that when retrieving a secret by name, the response
@@ -144,7 +143,7 @@ def test_secret_data_not_in_retrieve_response(sdk: NeMoHelix, workspace: str):
     """
     secret_name = f"e2e-no-data-retrieve-{uuid.uuid4().hex[:8]}"
     secret_value = "this-should-not-appear-in-retrieve"
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
 
     secrets.create_secret(
         workspace=workspace,
@@ -164,7 +163,7 @@ def test_secret_data_not_in_retrieve_response(sdk: NeMoHelix, workspace: str):
     assert "_data" not in secret_dict
 
 
-def test_secret_data_not_in_list_response(sdk: NeMoHelix, workspace: str):
+def test_secret_data_not_in_list_response(client: NemoClient, workspace: str):
     """Test that secret data is not exposed in the list response.
 
     This test verifies that when listing secrets, none of the secrets
@@ -173,7 +172,7 @@ def test_secret_data_not_in_list_response(sdk: NeMoHelix, workspace: str):
     secret_name = f"e2e-no-data-list-{uuid.uuid4().hex[:8]}"
     secret_value = "this-should-not-appear-in-list"
 
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     secrets.create_secret(
         workspace=workspace,
         body=HelixSecretCreateRequest(name=secret_name, value=secret_value),

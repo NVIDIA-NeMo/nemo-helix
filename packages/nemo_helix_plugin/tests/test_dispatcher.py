@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
@@ -65,10 +64,6 @@ def _setup_env(
         _fake_platform_job_results,
     )
     return config_path
-
-
-def _sdk() -> NeMoHelix:
-    return NeMoHelix(base_url="http://platform.test", workspace="ws")
 
 
 def _sync_client() -> NemoClient:
@@ -174,7 +169,7 @@ class TestTypedTaskDispatch:
                 return {"status": "completed"}
 
         try:
-            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sdk()))
+            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sync_client()))
         finally:
             client.close()
 
@@ -206,7 +201,7 @@ class TestTypedTaskDispatch:
                 return {"status": "completed"}
 
         try:
-            rc = run_task_with_async_client(_Job, async_client=client, ctx=build_ctx_from_env(_sdk()))
+            rc = run_task_with_async_client(_Job, async_client=client, ctx=build_ctx_from_env(_sync_client()))
         finally:
             import asyncio
 
@@ -237,7 +232,7 @@ class TestTypedTaskDispatch:
                 return {"status": "completed"}
 
         try:
-            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sdk()))
+            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sync_client()))
         finally:
             client.close()
 
@@ -258,7 +253,7 @@ class TestTypedTaskDispatch:
                 raise RuntimeError("kaboom")
 
         try:
-            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sdk()))
+            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sync_client()))
         finally:
             client.close()
 
@@ -280,7 +275,7 @@ class TestTypedTaskDispatch:
 
         try:
             with pytest.raises(LocalRunError, match="fileset upload"):
-                run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sdk()))
+                run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sync_client()))
         finally:
             client.close()
 
@@ -299,7 +294,7 @@ class TestTypedTaskDispatch:
                 return {"status": "completed"}
 
         try:
-            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sdk()))
+            rc = run_task_with_client(_Job, client=client, ctx=build_ctx_from_env(_sync_client()))
         finally:
             client.close()
 
@@ -332,7 +327,7 @@ class TestBuildCtxFromEnv:
         monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(ephemeral))
         monkeypatch.setenv("NEMO_JOB_ID", "submitted-job-name")
 
-        ctx = build_ctx_from_env(_sdk())
+        ctx = build_ctx_from_env(_sync_client())
 
         assert ctx.workspace == "platform-ws"
         assert ctx.storage.persistent == persistent
@@ -360,7 +355,7 @@ class TestBuildCtxFromEnv:
         monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
         monkeypatch.setenv("NEMO_JOB_ID", "evaluate-agent-abc123")
 
-        build_ctx_from_env(_sdk())
+        build_ctx_from_env(_sync_client())
 
         assert captured["job_name"] == "evaluate-agent-abc123"
         assert captured["workspace"] == "ws"
@@ -376,7 +371,7 @@ class TestBuildCtxFromEnv:
         monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
         monkeypatch.setenv("NEMO_JOB_ID", "submitted-job-name")
 
-        ctx = build_ctx_from_env(_sdk())
+        ctx = build_ctx_from_env(_sync_client())
 
         assert ctx.results is sentinel
 
@@ -390,7 +385,7 @@ class TestBuildCtxFromEnv:
         monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
         monkeypatch.setenv("NEMO_JOB_ID", "submitted-job-name")
 
-        ctx = build_ctx_from_env(_sdk())
+        ctx = build_ctx_from_env(_sync_client())
 
         assert ctx.usage is usage
         assert capture.call_args.kwargs["job_name"] == "submitted-job-name"
@@ -401,19 +396,19 @@ class TestBuildCtxFromEnv:
         monkeypatch.delenv("NEMO_JOB_WORKSPACE", raising=False)
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_WORKSPACE"):
-            build_ctx_from_env(_sdk())
+            build_ctx_from_env(_sync_client())
 
     def test_empty_workspace_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_JOB_WORKSPACE", "")
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_WORKSPACE"):
-            build_ctx_from_env(_sdk())
+            build_ctx_from_env(_sync_client())
 
     def test_whitespace_workspace_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_JOB_WORKSPACE", "   ")
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_WORKSPACE"):
-            build_ctx_from_env(_sdk())
+            build_ctx_from_env(_sync_client())
 
     def test_missing_persistent_storage_builds_ctx_but_access_raises(
         self,
@@ -426,7 +421,7 @@ class TestBuildCtxFromEnv:
         monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
         monkeypatch.setenv("NEMO_JOB_ID", "test-job")
 
-        ctx = build_ctx_from_env(_sdk())
+        ctx = build_ctx_from_env(_sync_client())
         assert ctx.storage.ephemeral == tmp_path / "e"
 
         with pytest.raises(RuntimeError, match="did not request persistent storage"):
@@ -438,7 +433,7 @@ class TestBuildCtxFromEnv:
         monkeypatch.delenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", raising=False)
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH"):
-            build_ctx_from_env(_sdk())
+            build_ctx_from_env(_sync_client())
 
     def test_missing_job_id_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
@@ -447,4 +442,4 @@ class TestBuildCtxFromEnv:
         monkeypatch.delenv("NEMO_JOB_ID", raising=False)
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_ID"):
-            build_ctx_from_env(_sdk())
+            build_ctx_from_env(_sync_client())

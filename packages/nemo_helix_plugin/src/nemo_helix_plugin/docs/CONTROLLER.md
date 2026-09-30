@@ -10,7 +10,7 @@ from nemo_helix_plugin.controller import NemoController
 
 class NemoController(_NamedPlugin):
     name: ClassVar[str]                    # REQUIRED — kebab-case; matches entry-point key
-    dependencies: ClassVar[list[str]] = [] # platform services to wait for before startup
+    dependencies: ClassVar[list[str]] = [] # Helix services to wait for before startup
 
     # Must implement:
     @abstractmethod

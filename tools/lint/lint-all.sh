@@ -20,7 +20,6 @@ declare -a scripts=(
   "lint-python-types:tools/lint/lint-python-types.sh"
   "lint-sdk-vendored:tools/lint/lint-sdk-vendored.sh"
   "lint-web-sdk:tools/lint/lint-web-sdk.sh"
-  "lint-cli:tools/lint/lint-cli.sh"
   "lint-auth-config:tools/lint/lint-auth-config.sh"
   "lint-merge-conflict:tools/lint/lint-merge-conflict.sh"
   "lint-copyright-headers:tools/lint/lint-copyright-headers.sh"

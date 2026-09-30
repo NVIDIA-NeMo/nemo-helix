@@ -20,8 +20,7 @@ import uuid
 import pytest
 from filesets import FilesetFileSystem
 from huggingface_hub import snapshot_download
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError as ClientBadRequestError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, ListFilesQueryParams
@@ -33,7 +32,7 @@ from nhx.core.files.testing.utils import create_fileset
 class TestHuggingfaceRevisionResolution:
     """Test that mutable revisions are resolved to immutable commit SHAs."""
 
-    def test_fileset_resolves_main_to_commit_sha(self, sdk: NeMoHelix):
+    def test_fileset_resolves_main_to_commit_sha(self, client: NemoClient):
         """Test that creating a fileset with revision='main' resolves to a commit SHA.
 
         This verifies the fix for cache staleness: when a user creates a fileset
@@ -43,7 +42,7 @@ class TestHuggingfaceRevisionResolution:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -53,7 +52,7 @@ class TestHuggingfaceRevisionResolution:
             },
         ) as fileset:
             # Get the persisted fileset to check resolved values
-            files = client_from_platform(sdk, FilesClient)
+            files = FilesClient.from_client(client)
             persisted = files.get_fileset(
                 name=fileset.name,
                 workspace=fileset.workspace,
@@ -76,14 +75,14 @@ class TestHuggingfaceRevisionResolution:
                 f"original_revision should be 'main', got: {storage.original_revision}"
             )
 
-    def test_fileset_with_explicit_sha_preserves_both(self, sdk: NeMoHelix):
+    def test_fileset_with_explicit_sha_preserves_both(self, client: NemoClient):
         """Test that creating a fileset with an explicit SHA preserves it correctly."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         # First, get a valid commit SHA from the repo
         temp_name = f"hf-temp-{uuid.uuid4().hex[:8]}"
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             temp_name,
             storage={
                 "type": "huggingface",
@@ -92,7 +91,7 @@ class TestHuggingfaceRevisionResolution:
                 "revision": "main",
             },
         ) as temp_fileset:
-            files = client_from_platform(sdk, FilesClient)
+            files = FilesClient.from_client(client)
             temp_persisted = files.get_fileset(
                 name=temp_fileset.name,
                 workspace=temp_fileset.workspace,
@@ -101,7 +100,7 @@ class TestHuggingfaceRevisionResolution:
 
         # Now create a fileset with the explicit SHA
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -125,13 +124,13 @@ class TestHuggingfaceRevisionResolution:
 class TestHuggingfaceStorageBackend:
     """Test Huggingface storage backend with real Huggingface Hub."""
 
-    def test_list_files_from_public_dataset(self, sdk: NeMoHelix):
+    def test_list_files_from_public_dataset(self, client: NemoClient):
         """Test listing files from a public Huggingface dataset."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         # Create fileset with Huggingface storage backend pointing to a small public dataset
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -141,10 +140,7 @@ class TestHuggingfaceStorageBackend:
         ) as fileset:
             # List files from the Huggingface repo
             files_response = (
-                client_from_platform(sdk, FilesClient)
-                .list_files(name=fileset.name, workspace=fileset.workspace)
-                .data()
-                .data
+                FilesClient.from_client(client).list_files(name=fileset.name, workspace=fileset.workspace).data().data
             )
 
             # Should have files in the repo
@@ -154,7 +150,7 @@ class TestHuggingfaceStorageBackend:
             file_paths = {f.path for f in files_response}
             assert "config.json" in file_paths
 
-    def test_gated_repo_fails_on_fileset_creation(self, sdk: NeMoHelix):
+    def test_gated_repo_fails_on_fileset_creation(self, client: NemoClient):
         """Test that creating a fileset with a gated repo fails during validation.
 
         Gated repos like meta-llama/Llama-4-Scout-17B-16E-Instruct require access approval.
@@ -166,7 +162,7 @@ class TestHuggingfaceStorageBackend:
         """
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
-        files = client_from_platform(sdk, FilesClient)
+        files = FilesClient.from_client(client)
         with pytest.raises(ClientBadRequestError) as exc_info:
             files.create_fileset(
                 workspace="default",
@@ -184,12 +180,12 @@ class TestHuggingfaceStorageBackend:
         assert exc_info.value.status_code == 400
         assert "Access denied" in str(exc_info.value) or "gated" in str(exc_info.value).lower()
 
-    def test_download_file_from_public_dataset(self, sdk: NeMoHelix):
+    def test_download_file_from_public_dataset(self, client: NemoClient):
         """Test downloading a file from a public Huggingface dataset."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -199,7 +195,7 @@ class TestHuggingfaceStorageBackend:
         ) as fileset:
             # Download config.json
             content = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="config.json")
                 .read()
             )
@@ -208,12 +204,12 @@ class TestHuggingfaceStorageBackend:
             config = json.loads(content)
             assert isinstance(config, dict)
 
-    def test_download_with_range_request(self, sdk: NeMoHelix):
+    def test_download_with_range_request(self, client: NemoClient):
         """Test partial download using HTTP Range header."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -222,7 +218,7 @@ class TestHuggingfaceStorageBackend:
             },
         ) as fileset:
             # First get full file to know its size
-            files = client_from_platform(sdk, FilesClient)
+            files = FilesClient.from_client(client)
             full_content = files.download_file(
                 name=fileset.name, workspace=fileset.workspace, path="config.json"
             ).read()
@@ -236,7 +232,7 @@ class TestHuggingfaceStorageBackend:
             assert len(range_content) == 50
             assert range_content == full_content[:50]
 
-    def test_file_exists_with_file_path(self, sdk: NeMoHelix):
+    def test_file_exists_with_file_path(self, client: NemoClient):
         """Test _exists with a file path returns True for existing files.
 
         This tests the fix for HuggingFace's list_repo_tree which expects directory
@@ -248,7 +244,7 @@ class TestHuggingfaceStorageBackend:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -256,7 +252,7 @@ class TestHuggingfaceStorageBackend:
                 "repo_type": "model",
             },
         ) as fileset:
-            fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+            fs = FilesetFileSystem(client=FilesClient.from_client(client))
             file_path = f"{fileset.workspace}/{fileset.name}#config.json"
 
             # This would fail with EntryNotFoundError before the fix
@@ -266,13 +262,13 @@ class TestHuggingfaceStorageBackend:
 
     def test_file_exists_with_nonexistent_path_returns_false(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
     ):
         """Test _exists with a non-existent path returns False."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -280,7 +276,7 @@ class TestHuggingfaceStorageBackend:
                 "repo_type": "model",
             },
         ) as fileset:
-            fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+            fs = FilesetFileSystem(client=FilesClient.from_client(client))
             file_path = f"{fileset.workspace}/{fileset.name}#nonexistent/file/path.txt"
 
             # Should return False, not raise an error
@@ -290,7 +286,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_get_downloads_single_file(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         tmp_path,
     ):
         """Test _get downloads a single file correctly.
@@ -302,7 +298,7 @@ class TestHuggingfaceStorageBackend:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -310,7 +306,7 @@ class TestHuggingfaceStorageBackend:
                 "repo_type": "model",
             },
         ) as fileset:
-            fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+            fs = FilesetFileSystem(client=FilesClient.from_client(client))
             file_path = f"{fileset.workspace}/{fileset.name}#config.json"
 
             # Download single file
@@ -326,7 +322,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_get_downloads_directory_with_trailing_slash(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         tmp_path,
     ):
         """Test _get with trailing slash copies contents directly into dest.
@@ -338,7 +334,7 @@ class TestHuggingfaceStorageBackend:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -346,7 +342,7 @@ class TestHuggingfaceStorageBackend:
                 "repo_type": "model",
             },
         ) as fileset:
-            fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+            fs = FilesetFileSystem(client=FilesClient.from_client(client))
             # Trailing slash on source - copy contents directly
             dir_path = f"{fileset.workspace}/{fileset.name}#/"
 
@@ -357,7 +353,7 @@ class TestHuggingfaceStorageBackend:
 
     def test_get_downloads_directory_without_trailing_slash(
         self,
-        sdk: NeMoHelix,
+        client: NemoClient,
         tmp_path,
     ):
         """Test _get for fileset root copies contents directly.
@@ -370,7 +366,7 @@ class TestHuggingfaceStorageBackend:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -378,7 +374,7 @@ class TestHuggingfaceStorageBackend:
                 "repo_type": "model",
             },
         ) as fileset:
-            fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+            fs = FilesetFileSystem(client=FilesClient.from_client(client))
             # No trailing slash on source - for fileset root, copies contents directly
             dir_path = f"{fileset.workspace}/{fileset.name}#"
 
@@ -392,7 +388,7 @@ class TestHuggingfaceStorageBackend:
 class TestHuggingfaceCaching:
     """Test that HuggingFace downloads are properly cached."""
 
-    def test_cache_path_uses_resolved_sha_not_mutable_ref(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
+    def test_cache_path_uses_resolved_sha_not_mutable_ref(self, client: NemoClient, cache_storage_impl: StorageImpl):
         """Test that cache paths use resolved commit SHA, not mutable refs like 'main'.
 
         This verifies the fix for cache staleness: cache paths should be based on
@@ -403,7 +399,7 @@ class TestHuggingfaceCaching:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -413,7 +409,7 @@ class TestHuggingfaceCaching:
             },
         ) as fileset:
             # Get the resolved commit SHA
-            files = client_from_platform(sdk, FilesClient)
+            files = FilesClient.from_client(client)
             persisted = files.get_fileset(
                 name=fileset.name,
                 workspace=fileset.workspace,
@@ -423,7 +419,7 @@ class TestHuggingfaceCaching:
 
             # Download a file to populate the cache
             content = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="config.json")
                 .read()
             )
@@ -449,7 +445,7 @@ class TestHuggingfaceCaching:
                 f"config.json should be cached under repo path. Found: {[f.path for f in repo_cached]}"
             )
 
-    def test_second_download_uses_cache(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl, mocker):
+    def test_second_download_uses_cache(self, client: NemoClient, cache_storage_impl: StorageImpl, mocker):
         """Test that the second download of the same file uses the cache."""
 
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
@@ -462,7 +458,7 @@ class TestHuggingfaceCaching:
         )
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -473,7 +469,7 @@ class TestHuggingfaceCaching:
         ) as fileset:
             # First download - should fetch from source (cache miss)
             content1 = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="config.json")
                 .read()
             )
@@ -485,7 +481,7 @@ class TestHuggingfaceCaching:
 
             # Second download - should be served from cache (no source fetch)
             content2 = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="config.json")
                 .read()
             )
@@ -507,12 +503,12 @@ class TestHuggingfaceCaching:
             cached_file = config_cached[0]
             assert cached_file.size == len(content1)
 
-    def test_different_files_cached_separately(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
+    def test_different_files_cached_separately(self, client: NemoClient, cache_storage_impl: StorageImpl):
         """Test that different files from the same repo are cached separately."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -523,14 +519,14 @@ class TestHuggingfaceCaching:
         ) as fileset:
             # Download config.json
             config_content = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="config.json")
                 .read()
             )
 
             # Download tokenizer_config.json (different file)
             tokenizer_content = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="tokenizer_config.json")
                 .read()
             )
@@ -540,7 +536,7 @@ class TestHuggingfaceCaching:
 
             # Download config.json again - should be from cache
             config_content2 = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .download_file(name=fileset.name, workspace=fileset.workspace, path="config.json")
                 .read()
             )
@@ -562,12 +558,12 @@ class TestHuggingfaceCaching:
         )
         assert tokenizer_cached[0].size == len(tokenizer_content)
 
-    def test_byte_range_requests_bypass_cache(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
+    def test_byte_range_requests_bypass_cache(self, client: NemoClient, cache_storage_impl: StorageImpl):
         """Test that byte range requests bypass the cache but full downloads use cache."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -577,7 +573,7 @@ class TestHuggingfaceCaching:
             },
         ) as fileset:
             # First, do a full download to populate cache
-            files = client_from_platform(sdk, FilesClient)
+            files = FilesClient.from_client(client)
             full_content = files.download_file(
                 name=fileset.name, workspace=fileset.workspace, path="config.json"
             ).read()
@@ -611,12 +607,12 @@ class TestHuggingfaceCaching:
             config_after = [f for f in repo_cached_after if "config.json" in f.path]
             assert len(config_after) == 1, "Cache should not duplicate for byte range requests"
 
-    def test_cache_warming_on_create(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
+    def test_cache_warming_on_create(self, client: NemoClient, cache_storage_impl: StorageImpl):
         """Test that cache=True warms cache on fileset creation."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -630,7 +626,7 @@ class TestHuggingfaceCaching:
             max_attempts = 30
             for _ in range(max_attempts):
                 files_response = (
-                    client_from_platform(sdk, FilesClient)
+                    FilesClient.from_client(client)
                     .list_files(
                         name=fileset.name,
                         workspace=fileset.workspace,
@@ -653,12 +649,12 @@ class TestHuggingfaceCaching:
             for f in files_response:
                 assert f.cache_status == "cached", f"File {f.path} should be cached, got {f.cache_status}"
 
-    def test_cache_warming_disabled_by_default(self, sdk: NeMoHelix, cache_storage_impl: StorageImpl):
+    def test_cache_warming_disabled_by_default(self, client: NemoClient, cache_storage_impl: StorageImpl):
         """Test that cache=False (default) does not warm cache."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -673,7 +669,7 @@ class TestHuggingfaceCaching:
 
             # Check cache status - files should NOT be cached
             files_response = (
-                client_from_platform(sdk, FilesClient)
+                FilesClient.from_client(client)
                 .list_files(
                     name=fileset.name,
                     workspace=fileset.workspace,
@@ -696,7 +692,7 @@ class TestHuggingfaceHubClientCompatibility:
     with external HuggingFace storage backends.
     """
 
-    def test_snapshot_download_via_hf_compat_api(self, sdk: NeMoHelix, tmp_path, hf_asgi_client):
+    def test_snapshot_download_via_hf_compat_api(self, client: NemoClient, tmp_path, hf_asgi_client):
         """Test downloading a fileset using huggingface_hub's snapshot_download.
 
         This validates that the HF-compat API endpoints (/v2/hf/...) work correctly
@@ -706,7 +702,7 @@ class TestHuggingfaceHubClientCompatibility:
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -715,7 +711,7 @@ class TestHuggingfaceHubClientCompatibility:
             },
         ) as fileset:
             # Get the base URL from the SDK's httpx client
-            base_url = str(sdk._client.base_url).rstrip("/")
+            base_url = str(client._client.base_url).rstrip("/")
 
             # Use huggingface_hub's snapshot_download with our HF-compat endpoint
             local_dir = snapshot_download(
@@ -734,12 +730,12 @@ class TestHuggingfaceHubClientCompatibility:
                 config = json.load(f)
             assert isinstance(config, dict)
 
-    def test_snapshot_download_creates_correct_structure(self, sdk: NeMoHelix, tmp_path, hf_asgi_client):
+    def test_snapshot_download_creates_correct_structure(self, client: NemoClient, tmp_path, hf_asgi_client):
         """Test that snapshot_download preserves the repository file structure."""
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -747,11 +743,11 @@ class TestHuggingfaceHubClientCompatibility:
                 "repo_type": "model",
             },
         ) as fileset:
-            base_url = str(sdk._client.base_url).rstrip("/")
+            base_url = str(client._client.base_url).rstrip("/")
 
             # First, list files to know what to expect
             files_response = (
-                client_from_platform(sdk, FilesClient).list_files(name=fileset.name, workspace=fileset.workspace).data()
+                FilesClient.from_client(client).list_files(name=fileset.name, workspace=fileset.workspace).data()
             )
             expected_files = {f.path for f in files_response}
 
@@ -768,13 +764,13 @@ class TestHuggingfaceHubClientCompatibility:
                 local_path = os.path.join(local_dir, expected_file)
                 assert os.path.exists(local_path), f"Expected file {expected_file} not found at {local_path}"
 
-    def test_download_config_files_excluding_large_model_files(self, sdk: NeMoHelix, tmp_path):
+    def test_download_config_files_excluding_large_model_files(self, client: NemoClient, tmp_path):
         """Test downloading only config files from a model repo, excluding large model files.
 
         This test demonstrates:
         1. Listing all files in the repo
         2. Filtering to get only small config files (excluding large model files)
-        3. Downloading just those files using sdk.files.download with a list of paths
+        3. Downloading just those files using files_resource.download with a list of paths
         4. Download creates necessary directories when local_path doesn't exist
         """
         name = f"hf-test-{uuid.uuid4().hex[:8]}"
@@ -791,7 +787,7 @@ class TestHuggingfaceHubClientCompatibility:
         )
 
         with create_fileset(
-            sdk,
+            FilesClient.from_client(client),
             name,
             storage={
                 "type": "huggingface",
@@ -801,10 +797,7 @@ class TestHuggingfaceHubClientCompatibility:
         ) as fileset:
             # 1. List all files in the repo
             all_files = (
-                client_from_platform(sdk, FilesClient)
-                .list_files(name=fileset.name, workspace=fileset.workspace)
-                .data()
-                .data
+                FilesClient.from_client(client).list_files(name=fileset.name, workspace=fileset.workspace).data().data
             )
 
             # 2. Filter to get only config files (exclude large model files)
@@ -813,7 +806,7 @@ class TestHuggingfaceHubClientCompatibility:
             assert len(config_only_paths) > 0, "Should have some config files"
 
             # 3. Download each config file to a nested path that doesn't exist yet
-            downloads = client_from_platform(sdk, FilesClient)
+            downloads = FilesClient.from_client(client)
             download_dir = tmp_path / "nested" / "path" / "downloads"
             assert not download_dir.exists(), "Directory should not exist before download"
 

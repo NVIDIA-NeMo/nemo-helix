@@ -120,8 +120,13 @@ class TestDiscoverNhxConfig:
             "oidc": {
                 "issuer": "https://idp.example.com",
                 "client_id": "nhx-app",
+                "cli_client_id": "nhx-cli",
+                "bearer_token_source": "id_token",
                 "token_endpoint": "https://idp.example.com/api/login/oauth/access_token",
                 "device_authorization_endpoint": "https://idp.example.com/api/login/oauth/device/code",
+                "device_authorization_requires_device_id": True,
+                "device_authorization_display_name": "NeMo Helix CLI",
+                "device_token_request_includes_scope": False,
                 "default_scopes": "openid profile",
                 "scope_prefix": "api://nhx/",
             },
@@ -132,8 +137,13 @@ class TestDiscoverNhxConfig:
             auth_enabled=True,
             issuer="https://idp.example.com",
             client_id="nhx-app",
+            cli_client_id="nhx-cli",
+            bearer_token_source="id_token",
             token_endpoint="https://idp.example.com/api/login/oauth/access_token",
             device_authorization_endpoint="https://idp.example.com/api/login/oauth/device/code",
+            device_authorization_requires_device_id=True,
+            device_authorization_display_name="NeMo Helix CLI",
+            device_token_request_includes_scope=False,
             default_scopes="openid profile",
             scope_prefix="api://nhx/",
         )
@@ -144,6 +154,14 @@ class TestDiscoverNhxConfig:
         assert result.auth_enabled is False
         assert result.client_id is None
         assert result.token_endpoint is None
+
+    def test_rejects_unknown_bearer_token_source(self, httpserver: HTTPServer):
+        httpserver.expect_request("/apis/auth/discovery").respond_with_json(
+            {"auth_enabled": True, "oidc": {"bearer_token_source": "refresh_token"}}
+        )
+
+        with pytest.raises(ValueError, match="bearer_token_source"):
+            discover_nhx_config(httpserver.url_for(""))
 
     def test_handles_missing_oidc_key(self, httpserver: HTTPServer):
         httpserver.expect_request("/apis/auth/discovery").respond_with_json({"auth_enabled": True})

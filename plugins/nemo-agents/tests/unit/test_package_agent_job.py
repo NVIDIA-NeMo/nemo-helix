@@ -349,20 +349,25 @@ class TestRun:
 
 class TestTaskEntrypointWiring:
     """The build context comes from an async fileset download, so the entrypoint
-    must hand ``run`` an async SDK — without it the image silently loses skills."""
+    must hand ``run`` an async client; without it the image silently loses skills."""
 
-    def test_entrypoint_passes_async_sdk(self) -> None:
+    def test_entrypoint_passes_async_client(self) -> None:
         import nemo_agents_plugin.tasks.package.__main__ as entrypoint
 
         with (
-            patch.object(entrypoint, "get_task_sdk", return_value="sync"),
-            patch.object(entrypoint, "get_async_task_sdk", return_value="async") as async_sdk,
-            patch.object(entrypoint, "run_task", return_value=0) as run_task,
+            patch.object(entrypoint, "get_task_nemo_client", return_value="sync") as sync_client,
+            patch.object(entrypoint, "get_async_task_nemo_client", return_value="async") as async_client,
+            patch.object(entrypoint, "build_ctx_from_env", return_value="ctx") as build_ctx,
+            patch.object(entrypoint, "read_step_config", return_value={}),
+            patch.object(PackageAgentJob, "run", return_value={"status": "completed"}) as run,
         ):
             assert entrypoint.main() == 0
 
-        async_sdk.assert_called_once_with("agents")
-        assert run_task.call_args.kwargs["async_sdk"] == "async"
+        sync_client.assert_called_once_with("agents")
+        build_ctx.assert_called_once_with("sync")
+        async_client.assert_called_once_with("agents")
+        assert run.call_args.kwargs["async_sdk"] == "async"
+        assert run.call_args.kwargs["ctx"] == "ctx"
 
     def test_missing_client_warns_about_dropped_artifacts(self, caplog) -> None:
         async def _noop(**kwargs: Any) -> None:

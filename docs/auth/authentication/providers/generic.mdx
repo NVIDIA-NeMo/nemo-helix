@@ -16,8 +16,10 @@ Verify your IdP meets these requirements:
 - [ ] Supports **OpenID Connect** (not just OAuth2)
 - [ ] Exposes a `.well-known/openid-configuration` discovery document
 - [ ] Supports the **device authorization grant** (required for `nemo auth login`)
-- [ ] Allows creating **custom API scopes** (`platform:read`, `platform:write`)
-- [ ] Includes **email** (or equivalent claim) in access tokens
+- [ ] Issues signed JWT bearer tokens, or signed ID tokens if you configure `bearer_token_source: "id_token"`
+- [ ] Includes **email** (or equivalent claim) in the selected bearer token
+- [ ] If you use group-based role bindings, includes group or entitlement values in a JWT claim that can be configured as `groups_claim`
+- [ ] If you use API-scope restrictions during OIDC login, can expose and return NeMo Helix API scopes such as `platform:read` and `platform:write`
 - [ ] Supports **JWKS** for token signature validation
 
 ## Configuration Template
@@ -32,11 +34,13 @@ auth:
  # Uncomment and adjust if your IdP uses non-standard claim names:
  # email_claim: "email"
  # subject_claim: "sub"
+ # Set this to the claim that contains group or entitlement values
+ # you will bind to NeMo Helix workspace roles.
  # groups_claim: "groups"
- # Uncomment if your IdP prefixes scopes:
- # scope_prefix: "<prefix>/"
- default_scopes: "openid profile email offline_access platform:read platform:write"
+ default_scopes: "platform:read platform:write openid profile email offline_access"
 ```
+
+Keep short NeMo Helix API scope names in `default_scopes`. If your IdP requires resource-qualified API scopes, such as `api://<app-client-id>/platform:read`, configure the deployment's `scope_prefix` so auth discovery can tell clients which prefix to apply. If you do not want OIDC login tokens to carry API-scope restrictions, omit the `platform:*` scopes; NeMo Helix still enforces role bindings.
 
 ## Claim Mapping Reference
 

@@ -8,6 +8,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
+import { getIntakeTracesRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -106,7 +107,24 @@ describe('IntakeTracesTable', () => {
     expect(screen.getByText('Started At')).toBeInTheDocument();
     expect(screen.getAllByText('Status')).not.toHaveLength(0);
     expect(screen.getByText('Session ID')).toBeInTheDocument();
+    expect(screen.getAllByText('Agent')).not.toHaveLength(0);
     expect(screen.queryByText('Evaluation Run ID')).not.toBeInTheDocument();
+  });
+
+  it('filters trace list requests by agent from a deep link', async () => {
+    const agentParams: (string | null)[] = [];
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
+        agentParams.push(new URL(request.url).searchParams.get('filter[agent_name]'));
+        return HttpResponse.json(mockTracesPage);
+      })
+    );
+
+    renderRoute(<IntakeTracesTable workspace="default" />, {
+      history: getIntakeTracesRoute('default', { agentName: 'email-security-triage' }),
+    });
+
+    await waitFor(() => expect(agentParams).toContain('email-security-triage'));
   });
   it('offers the intake skill and CLI when no traces have been ingested', async () => {
     const user = userEvent.setup();

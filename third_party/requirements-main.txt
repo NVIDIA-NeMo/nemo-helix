@@ -8,6 +8,7 @@
     #   nemo-helix
 -e ./packages/filesets ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
+    #   nemo-evaluator-plugin
     #   nemo-helix
     #   nemo-helix-plugin
     #   nhx-customization-common
@@ -28,11 +29,10 @@
     #   nemo-optimization-plugin
 -e ./packages/nemo_helix ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
-    #   data-designer-nemo
+    #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
     #   nemo-auditor-plugin
-    #   nemo-data-designer-plugin
     #   nemo-guardrails-plugin
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
@@ -40,10 +40,13 @@
     #   nemo-unsloth-plugin
     #   nemohelix
 -e ./packages/nemo_helix_ext ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via nemohelix
+    # via
+    #   nemo-helix
+    #   nemohelix
 -e ./packages/nemo_helix_plugin ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   data-designer-nemo
+    #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
     #   nemo-auditor-plugin
@@ -114,15 +117,18 @@
     #   nhx-platform
 -e ./packages/sandboxed_gym ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via nemo-evaluator-sdk
+-e ./plugins/nemo-agent-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   nemo-helix
+    #   nemo-optimization-plugin
 -e ./plugins/nemo-agents ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-agents/examples/calculator-agent ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   nemo-helix
+    #   nemo-optimization-plugin
+-e ./plugins/nemo-agents/examples/nemo-agent-config/email-security-triage ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-agents-plugin
     #   nemo-helix
--e ./plugins/nemo-agents/examples/email-phishing-analyzer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via nemo-agents-plugin
--e ./plugins/nemo-agents/examples/email-security-analyst ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via nemo-agents-plugin
 -e ./plugins/nemo-anonymizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-auditor ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
@@ -139,9 +145,6 @@
 -e ./plugins/nemo-guardrails ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-insights ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-agents-plugin
-    #   nemo-helix
 -e ./plugins/nemo-rl ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-safe-synthesizer
 -e ./plugins/nemo-switchyard ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -910,6 +913,7 @@ fastapi==0.138.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   harbor
     #   mlflow-skinny
     #   mlx-vlm
+    #   nemo-agent-optimization-plugin
     #   nemo-anonymizer-plugin
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
@@ -2116,8 +2120,8 @@ nemo-relay-cli-bin==0.7.3 ; (platform_machine == 'arm64' and sys_platform == 'da
     # via
     #   nemo-fabric-adapters-claude
     #   nemo-fabric-adapters-codex
-nemo-safe-synthesizer==0.1.7 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:07ad037e6ded8f7020039fa88efdab4aaaf805ea52fb8238380086e0811eaaf0
+nemo-safe-synthesizer==0.1.13 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:61577bf0458549912b8baffddd5d704858da4101b234c537f8d278b105fff086
     # via
     #   nemo-helix
     #   nemo-safe-synthesizer-plugin
@@ -2309,9 +2313,6 @@ nvidia-nat-config-optimizer==1.9.0a20260811 ; (platform_machine == 'arm64' and s
 nvidia-nat-core==1.9.0a20260811 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:3c2ee4cd30591929ade7ce37ffc9c9da820e0187f2918c0b364d7d1f93c82e7d
     # via
-    #   nemo-agents-example-calculator
-    #   nemo-agents-example-email-phishing
-    #   nemo-agents-example-email-security
     #   nemo-agents-plugin
     #   nemo-helix
     #   nvidia-nat-config-optimizer
@@ -2327,7 +2328,6 @@ nvidia-nat-eval==1.9.0a20260811 ; (platform_machine == 'arm64' and sys_platform 
 nvidia-nat-langchain==1.9.0a20260811 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:d55c2d81161c1ce57845b9eceac94c46df977e832e5d9b2000a7c71773de1659
     # via
-    #   nemo-agents-example-calculator
     #   nemo-agents-plugin
     #   nemo-helix
 nvidia-nat-opentelemetry==1.9.0a20260811 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -3037,6 +3037,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   litellm
     #   mcp
     #   mlflow-skinny
+    #   nemo-agent-optimization-plugin
     #   nemo-anonymizer
     #   nemo-auditor-plugin
     #   nemo-automodel-plugin
@@ -4046,6 +4047,7 @@ typer==0.25.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   fastapi-cloud-cli
     #   harbor
     #   instructor
+    #   nemo-agent-optimization-plugin
     #   nemo-auditor-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin

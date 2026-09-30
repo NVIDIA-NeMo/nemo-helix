@@ -442,7 +442,7 @@ def get_async_nemo_client(
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.
 
-    Used by middleware and controllers that run inside the platform service
+    Used by middleware and controllers that run inside the Helix service
     process and need an async client.
     """
     return _resolve_provider().get_async_nemo_client(

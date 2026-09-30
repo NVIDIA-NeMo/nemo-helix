@@ -13,7 +13,7 @@ interface RecordSectionProps {
 /** Shared by the record view and its skeleton so the two stay aligned. */
 export const RecordSection: FC<RecordSectionProps> = ({ heading, className, children }) => (
   <Stack className={className} gap="density-md">
-    <Text color="secondary" kind="label/regular/md">
+    <Text className="text-secondary" kind="label/regular/md">
       {heading}
     </Text>
     {children}

@@ -88,14 +88,15 @@ my-suite/
   ...
 ```
 
-`discover_harbor_tasks` reads each folder into an `AgentEvalTask`: the `[task] name` becomes the task
-`id` and its human-readable `intent`, and `instruction.md` becomes `inputs["instruction"]` — the
-instruction the agent is prompted with. See
+The standalone SDK's `discover_harbor_tasks()` returns a `HarborTaskCollection` of
+`HarborAgentEvalTask` objects. The Harbor framework task name becomes `id` and `intent`; normalized
+instructions become `inputs["instruction"]`. Each `HarborAgentEvalTask` has an absolute `source_dir` pointing
+at its original location. The same objects work locally and with platform task resources. See
 [Harbor's task documentation](https://www.harborframework.com/docs/tasks) for the full task format.
 
-Those two files are the discovery contract, not a complete task — Harbor also needs an environment
-and a verifier to run the task and emit rewards. To author a new task, scaffold it with Harbor's own
-CLI rather than writing the files by hand:
+The collection supports repeatable iteration, indexing, and slicing; use `list(tasks)` if you
+need a mutable list. Discovery validates private copies and then releases them, so the original
+packages must remain available for execution or publication. To scaffold a complete package:
 
 ```bash
 harbor init my-org/my-task --task
@@ -106,6 +107,20 @@ stubs, then prints the files to fill in. Add `--steps N` for a multi-step task, 
 initialize a dataset. See [Harbor's documentation](https://www.harborframework.com/docs/tasks) for
 the full task format and the rest of its CLI.
 
+A single run takes either all discovered tasks or all plain `AgentEvalTask` objects, not a mix.
+To run plain tasks, including tasks reloaded from a results bundle, convert any discovered ones with
+`as_base_task()` and tell the runner where the packages live:
+
+```python
+from nemo_evaluator_sdk.agent_eval.tasks import as_base_task
+
+tasks = [as_base_task(task) for task in tasks]
+runner = HarborAgentTaskRunner(config=config, dataset_path="./mydataset")
+```
+
+`as_base_task()` is also the way to get a plain copy of a discovered task:
+`AgentEvalTask.model_validate(dict(task))` rejects the extra `source_dir` field.
+
 <Note>
 
 The repo ships a one-task
@@ -115,7 +130,272 @@ your own Harbor suite.
 
 </Note>
 
+### Upload and Register Harbor Tasks
+
+Discover local task packages, publish each task, then create a taskset from the returned IDs:
+
+```python
+from pathlib import Path
+
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+from nemo_evaluator.sdk.resources import Evaluator
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+
+evaluator = Evaluator(client=EvaluatorClient(base_url="http://localhost:8080", workspace="default"))
+remote_task_ids = []
+for task in discover_harbor_tasks("./mydataset"):
+    # Native ids look like "my-org/my-task"; a registration name cannot contain "/".
+    remote_task = evaluator.tasks.replace(task.id.replace("/", "-"), task=task)
+    remote_task_ids.append(remote_task.id)
+evaluator.tasksets.create("suite", tasks=remote_task_ids)
+```
+
+`create` requires a new name. `replace` creates or updates a task or taskset; identical content
+reuses its revision. Registration names are bare names of at most 255 characters, using letters,
+digits, underscores, hyphens or dots. Choose stable, distinct names for your tasks.
+
+Task IDs identify stored records. A taskset pins their current revisions when it is published;
+concurrent task updates before that call may be included. Later task updates do not change the
+stored taskset. Task publication and taskset publication are separate operations.
+
+To publish a single task, discover its directory and pass the task directly:
+
+```python
+task = discover_harbor_tasks("./my_task")[0]
+remote_task = evaluator.tasks.replace(task.id.replace("/", "-"), task=task)
+```
+
+The resource creates or reuses the default fileset, uploads and verifies the archive, then
+registers the task.
+
+To publish additional metrics or views, see [Custom metrics and views](#custom-metrics-and-views).
+
+The default location is `<workspace>/harbor-tasks`, with an independent content-addressed
+path per task. Dataset directory names are not implicit storage prefixes. Archive references
+use `workspace/fileset#relative/path`. Every upload is downloaded and checksum-verified;
+registration and workers independently verify it. Existing archive bytes may be replaced by
+ordinary Files uploads. Cleanup is caller-managed because archives may be shared.
+
+Discovery accepts one task directory or a dataset directory and excludes `task_template` with
+a warning. Regular files and hidden real directories at the dataset root are skipped. Special
+entries, malformed visible directories, empty datasets, and duplicate native IDs fail discovery.
+Each task is revalidated when published.
+The publication loop is not atomic: earlier task writes survive later failures. If an entity
+write fails after preparation, `TaskPublicationError.prepared_task` retains the prepared input
+for retry through `replace`, without reuploading. The original error is available as its cause.
+A lost task-write response remains an error; retrying `create` may conflict if it committed.
+
+If you already have a generated SDK instance, use the supported factory:
+
+```python
+from nemo_helix_plugin.sdk import NeMoHelix
+
+sdk = NeMoHelix(base_url="http://localhost:8080")
+evaluator = Evaluator.from_sdk(sdk)
+```
+
+Async resources provide the same workflow with awaited `create` and `replace` calls:
+
+```python
+import asyncio
+
+from pathlib import Path
+
+from nemo_evaluator.sdk.resources import AsyncEvaluator
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
+
+async def publish_task_async() -> None:
+    async with AsyncNeMoHelix(base_url="http://localhost:8080") as async_sdk:
+        async_evaluator = AsyncEvaluator.from_sdk(async_sdk)
+        task = discover_harbor_tasks("./my_task")[0]
+        stored_task = await async_evaluator.tasks.replace(
+            task.id.replace("/", "-"), task=task, workspace="default",
+        )
+        await async_evaluator.tasksets.create(
+            "async-suite", tasks=[stored_task.id], workspace="default",
+        )
+
+asyncio.run(publish_task_async())
+```
+
+A verified multistep task may have no root instruction; the captured archive remains authoritative.
+
+#### Submission snapshots and worker preparation
+
+Both task references and taskset references expand at submission. Before a job is created, the
+service validates stored definitions, unique task identities, metric/model dependencies, and views.
+The canonical job embeds each selected definition and its resolved scoring. Republishing or deleting
+task/taskset records afterward does not change that job's selected tasks.
+
+Workers download the referenced archives through the Files service, verify hashes, safely extract and
+validate native Harbor packages, and construct the local dataset. Archive availability, permissions,
+and native-package failures remain execution-time checks. Saved-trial rescoring skips these archive
+operations; metric evidence must still be available.
+
+
+#### Custom metrics and views
+
+Stored Harbor tasks support additional SDK metrics and semantic views. The plugin always scores
+`HarborRewardMetric` first, then the metrics you supply. An omitted or empty `metrics` list keeps
+reward-only scoring. Keep the discovered `HarborRewardMetric` as is: publication rejects a missing,
+duplicate, or customized one. To rename the primary reward, set `reward_key` on
+`HarborRuntimeConfig`.
+
+Supply additional metrics and views directly on the publication source. Built-in metrics need
+no explicit packager; custom Python metrics require `metric_bundle_packager=`.
+
+```python
+from pathlib import Path
+
+from nemo_evaluator.api.fields import TasksetRef
+from nemo_evaluator.sdk.resources import Evaluator
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
+from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+
+evaluator_client = EvaluatorClient(base_url="http://localhost:8080", workspace="default")
+evaluator = Evaluator(client=evaluator_client)
+source = discover_harbor_tasks("./my_task")[0]
+source.metrics.append(ExactMatchMetric(reference="Done", candidate="{{sample.output_text}}"))
+source.views["quality"] = SemanticView(reducer=SemanticReducer.MEAN, signals=[
+    ViewSignal(metric="harbor_reward", output="reward"),
+    ViewSignal(metric="exact-match", output="exact-match"),
+])
+task = evaluator.tasks.replace(source.id.replace("/", "-"), task=source)
+evaluator.tasksets.replace("scored-suite", tasks=[task.id])
+job = evaluator.submit(
+    tasks=TasksetRef("default/scored-suite"),
+    target=HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(agent_name="oracle"),
+    ),
+)
+job.wait_until_done()
+results = evaluator.agent_eval_results.list(job_id=job.name)
+```
+
+- **Scoring resolution:** Evaluator loads metrics and views from each selected task revision.
+  The runner supplies the primary Harbor reward, even when additional metrics are empty.
+- **Task publication:** Resource methods package, upload and verify Harbor sources before registering them.
+- **Views:** Reference the primary output (`reward`, or the target's `reward_key`) and declared
+  custom metric outputs.
+
+#### Rescore saved Harbor trials
+
+Pass saved trials to `evaluator.submit(tasks=..., trials=...)` instead of a live `target`.
+
+Submit a stored taskset reference with saved SDK trials and omit `target`. Submission
+snapshots the selected definitions and resolves their scoring. The worker applies `HarborRewardMetric`, additional metrics, and views without
+looking up task/taskset records, downloading task archives, or running the agent or verifier. Metric evidence such as traces and
+artifacts must still be accessible from the worker.
+
+With no target, rescoring uses the deployment's normal evaluator execution backend rather than
+Harbor's host subprocess override. Its configured worker image and dependencies must be available.
+
+```python
+from pathlib import Path
+
+from nemo_evaluator.api.schemas import TasksetRef
+from nemo_evaluator.sdk.resources import Evaluator
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+
+trials = [
+    AgentEvalTrial.model_validate_json(line)
+    for line in Path("./trials.jsonl").read_text().splitlines()
+    if line.strip()
+]
+evaluator = Evaluator(client=EvaluatorClient(base_url="http://localhost:8080", workspace="default"))
+job = evaluator.submit(tasks=TasksetRef("default/suite"), trials=trials)
+job.wait_until_done()
+results = evaluator.agent_eval_results.list(job_id=job.name)
+```
+
+- **Change scoring:** Publish task revisions with new metrics/views → update the taskset → submit
+  with the same trials. Unknown trial tasks and selected tasks without trials fail.
+- **Resolution and size:** New submissions resolve task/taskset selectors and metric/model dependencies again.
+  Canonical jobs contain an ordered list of task definition snapshots, so job size grows with the selected definitions
+  and inline metric bundles. Each snapshot retains its original entity name and revision digest as provenance.
+- **Reward key:** Every trial must contain the same valid `metadata["harbor_primary_reward_key"]`
+  (for example, `"reward"`). Rescoring
+  preserves that primary selection and discovers secondary outputs from saved rewards; renaming
+  an output does not reinterpret the primary value.
+- **Older trials:** Missing reward-key metadata is rejected. Re-import original results with the
+  current SDK's `build_trials_from_job_dir(job_dir, tasks, reward_key="reward")` from
+  `nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime`, using SDK tasks with the original native
+  IDs and the original reward key (`"reward"` is illustrative). This rebuilds metadata without
+  rerunning Harbor. Keep or publish referenced evidence where the scoring worker can read it.
+
+#### Harbor Tasks and Taskset Grouping in Fileset
+Task resource publication stores new archives in `<workspace>/harbor-tasks` for both
+single-task and dataset directories. Existing archives in `harbor-tasksets` remain valid;
+their stored references are unchanged.
+
+- `workspace` selects where Tasks and Tasksets are registered and the default
+  `<workspace>/harbor-tasks` fileset.
+- `fileset_ref` overrides the destination workspace/fileset without changing the registration workspace.
+- `path_prefix` defaults to empty for every independent task publication.
+  Set an explicit prefix to group archive paths under a dataset or release name.
+- The first argument to `tasks.create`/`replace` is the registered task name.
+- Publish a taskset separately with `tasksets.create`/`replace(..., tasks=remote_task_ids)`.
+
+For example, a single task with `path_prefix="release-1"` is stored at
+`default/harbor-tasks#release-1/my_task/<H1>/task_archive`.
+
+```text
+default/harbor-tasks#my_task/
+└── <H1>/
+    └── task_archive
+default/harbor-tasks#mydataset/
+├── my_task/
+│   └── <H1>/
+│       └── task_archive
+└── search/
+    └── <H2>/
+        └── task_archive
+```
+
+`H1`, `H2` are SHA-256 of completed compressed task_archive bytes.
+
+Each task_archive contains one named directory:
+
+```txt
+my_task/
+├── task.toml
+├── instruction.md
+├── environment/
+│   └── Dockerfile
+├── tests/
+│   └── test.sh
+└── ...all other task files and empty directories...
+```
+
+#### Task Archiving Details
+
+- The uploader captures a quiescent source and packages entries in sorted order.
+- Tar timestamps are normalized, and the gzip header contains no timestamp. Compression is stable
+  within the same tooling, but a compressor upgrade may produce a new hash.
+- The uploader verifies the stored bytes and native structure after downloading the archive.
+- The named task root, full permission bits (`0o7777`), dotfiles, ignored files, and empty directories
+  are preserved.
+- Original file ownership is not preserved. Archive UID and GID values are normalized to `0`;
+  extracted files remain owned by the worker process without using `chown`.
+- Workers retain Harbor's Docker transfer behavior.
+- Symlinks inside a task are preserved as links when their target is relative and resolves inside the
+  task directory, for example `tests/run.sh -> test.sh`. Absolute, escaping, dangling, and cyclic
+  links are rejected, as are links at `task.toml`, `instruction.md`, `.gitignore`, and step
+  directories. Harbor copies links as links, so a link that crosses directories Harbor transfers
+  separately (such as `tests/data -> ../environment/data`) dangles inside the container.
+- Special files and tar hard-link entries are rejected. A hard-linked regular file in the source task is
+  archived as an ordinary file with its own copy of the content.
+
+#### Constraints
+Server registration and workers independently verify archive bytes, bounded extraction, native metadata
+and packaged step references. Initial limits are 100,000 entries, 4 GiB per file, 16 GiB payload, plus bounded
+compressed/expanded streams and tar metadata records.
+
 ## Run it
+### Standalone SDK
 
 A Harbor run is a normal agent-eval run: `AgentEvaluator().run(tasks=..., target=runner)`, exactly like
 the [quickstart](/documentation/evaluate-models/agent-eval/quickstart) (a callable) and the
@@ -184,6 +464,116 @@ through the host `subprocess` executor. Standalone SDK runs using `run_harbor_ev
 `HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
 
 </Note>
+### Platform Plugin
+
+After [uploading and registering the tasks](#upload-and-register-harbor-tasks), submit their
+taskset reference with a Harbor target. These examples use `default/suite`, matching the taskset
+created above. Use `workspace/name#<full-content-digest>` to select a specific taskset revision. The `oracle` agent runs
+the task's reference solution without model credentials.
+
+The job host needs Python 3.12+, Harbor, and a running Docker daemon. Local deployments with the
+Docker or `none` runtime predefine a `subprocess` execution profile named `default`, unless the
+subprocess executor is disabled. Harbor selects that provider explicitly. The examples use this
+profile; CLI submissions can select another configured subprocess profile by name.
+Running Harbor job in Kubernetes or Docker execution profile is not supported at this time.
+
+<Tabs>
+<Tab title="SDK">
+
+Use `evaluator.submit` with `HarborAgentTaskRunner`. It uses the deployment's **default**
+execution profile, which must use the `subprocess` job executor.
+
+```python
+from nemo_evaluator.api.fields import TasksetRef
+from nemo_evaluator.sdk.resources import Evaluator
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+
+evaluator = Evaluator(client=EvaluatorClient(base_url="http://localhost:8080", workspace="default"))
+job = evaluator.submit(
+    tasks=TasksetRef("default/suite"),
+    target=HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(
+            agent_name="oracle", reward_key="reward",
+        ),
+    ),
+)
+print(job.name)
+job.wait_until_done()
+results = evaluator.agent_eval_results.list(job_id=job.name)
+```
+
+Submission rejects local dataset/task selection overrides, offline runners, host-environment
+forwarding, and non-default settings that the job target cannot preserve, including named local
+runs, `force_rerun`, `quiet=False`, `agent_dir`, and timeout multipliers. A runner cannot carry
+Platform secrets: for an agent that needs credentials, submit a Harbor target with `env_secrets`
+through the CLI tab instead.
+
+The example prints the generated job name, waits for completion, and retrieves the stored results.
+
+</Tab>
+<Tab title="CLI">
+
+Save the job input as `harbor-eval.json`:
+
+```bash
+cat > harbor-eval.json <<'JSON'
+{
+  "tasks": "default/suite",
+  "target": {
+    "kind": "harbor",
+    "agent_name": "oracle",
+    "reward_key": "reward"
+  }
+}
+JSON
+```
+
+Submit it from your NeMo Helix source checkout. Save the response so polling can reuse the
+generated job name (`jq` is required):
+
+```bash
+uv run nemo evaluator agent-evaluate \
+  --base-url http://localhost:8080 \
+  --workspace default \
+  --profile default \
+  --spec-file harbor-eval.json > harbor-job.json
+jq '{name, status}' harbor-job.json
+```
+
+Example output (your job name will differ):
+
+```json
+{
+  "name": "nemo-evaluator.agent-27iuxxxc",
+  "status": "created"
+}
+```
+
+Poll every two seconds until the job completes or reaches an unsuccessful terminal status:
+
+```bash
+JOB_NAME=$(jq -er '.name' harbor-job.json)
+while true; do
+  STATUS=$(uv run nemo jobs get-status "$JOB_NAME" --workspace default -f json | jq -er '.status') || break
+  printf '%s\n' "$STATUS"
+  case "$STATUS" in
+    completed|error|cancelled) break ;;
+  esac
+  sleep 2
+done
+```
+
+Example output (intermediate states and repetitions depend on when polling starts):
+
+```text
+pending
+active
+completed
+```
+
+</Tab>
+</Tabs>
 
 ## Choosing an agent
 
@@ -193,7 +583,8 @@ through the host `subprocess` executor. Standalone SDK runs using `run_harbor_ev
 - **`agent_name`** — a built-in Harbor agent (for example `"oracle"`, Harbor's reference agent, handy
   as a smoke test that the harness and dataset are wired up).
 - **`agent_import_path`** — your own Harbor agent, e.g. `"my_agent_module:MyAgent"`. Set `agent_dir`
-  as well when it's a loose file rather than an installed package. Overrides `agent_name`.
+  as well for a loose local source tree. Overrides `agent_name`. Platform-submitted jobs do not
+  currently accept `agent_dir`; see [Standalone and submitted custom agents](#standalone-and-submitted-custom-agents).
 - **`agent_model_name`** — the model slug handed to the agent.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
@@ -213,8 +604,8 @@ through the host `subprocess` executor. Standalone SDK runs using `run_harbor_ev
   it creates the agent and persists only the template, so the value never reaches `config.json`.
   Provenance records the names, never the values.
 
-The agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks
-into the agent's constructor:
+The shared agent fields map onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks into
+the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `AgentConfig` field:
 
 ```text
 HarborRunnerTarget / HarborRuntimeConfig
@@ -228,6 +619,11 @@ HarborRunnerTarget / HarborRuntimeConfig
                      Harbor AgentFactory constructs
                      FabricAgent(model_name=..., extra_env=..., **kwargs)
 ```
+
+### Standalone and submitted custom agents
+
+Loose wrapper source through `agent_dir` is supported only by standalone `nemo-evaluator-sdk` runs.
+It is not supported by submitted `nemo-evaluator` plugin jobs.
 
 For example, NeMo Fabric's
 [`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
@@ -248,12 +644,13 @@ config = HarborRuntimeConfig(
 )
 ```
 
-The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
+The fields shared with platform submission appear on `HarborRunnerTarget`, the `target` of an
 `AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate`. Instead of
 `agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
 to NeMo Helix secret reference. The service resolves each reference into the job's environment at
 compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
-spec, the run bundle, nor `config.json`:
+spec, the run bundle, nor `config.json`. This installed NeMo Fabric adapter example needs no loose
+source directory:
 
 ```json
 {
@@ -271,12 +668,41 @@ spec, the run bundle, nor `config.json`:
 }
 ```
 
+### Built-in Codex agent
+
+Harbor registers `codex` as a built-in installed agent. It installs the requested Codex CLI version
+inside each task container, so neither an `agent_import_path` nor wrapper-source upload is required.
+For a direct plugin job target:
+
+```python
+from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+from nemo_evaluator_sdk import SecretRef
+
+target = HarborRunnerTarget(
+    agent_name="codex",
+    agent_model_name="gpt-5.6-luna",
+    agent_kwargs={"version": "0.153.0"},
+    env_secrets={
+        "OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key"),
+    },
+)
+```
+
+Replace the model and secret reference with values available to your account. The task image needs
+network access and the system tools Harbor's Codex adapter uses to install the CLI. The CLI version
+above is an explicit reproducibility pin, not a platform-wide default.
+
 ## How scoring works
 
 1. Harbor runs each task in its sandbox and writes a `<task>__<hash>/result.json` per trial, including
    the reward mapping from the task's [verifier](https://www.harborframework.com/docs/tasks).
 2. `reward_key` identifies the primary reward by name. If not specified, it defaults to `reward`.
    Mapping order and alphabetical order never select the primary.
+   The `HarborRewardMetric` that `discover_harbor_tasks` attaches to each task is a placeholder. The
+   runner replaces it with one named after `reward_key`, so changing `output_name`, `description` or
+   `labels` on the task has no effect. When rescoring saved trials, the key recorded in those trials
+   is used; if you rescore with `AgentEvaluator.run(tasks, trials)` and no runner, the task's metric
+   is used as is.
 3. The primary output is required. On a scoreable trial, a finite numeric value is emitted unchanged;
    a missing or unusable primary emits `0.0` and a diagnostic instead of skipping the trial.
 4. Other keys from that task's Harbor-valid results become optional secondaries:
@@ -453,7 +879,23 @@ result = asyncio.run(
 )
 ```
 
-It uses the same `AgentEvaluator` and `HarborRewardMetric` under the hood. Prefer the explicit form
+It uses the same `AgentEvaluator` and `HarborRewardMetric` under the hood. `metrics=` replaces the
+task metrics, so keep `HarborRewardMetric()` in the list or the reward is not scored:
+
+```python
+from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
+from nemo_evaluator_sdk.metrics.runner_rewards import HarborRewardMetric
+
+result = asyncio.run(
+    run_harbor_eval(
+        HarborRuntimeConfig(jobs_dir=Path("./harbor-jobs"), agent_name="oracle"),
+        dataset_path=Path("path/to/my-suite"),
+        metrics=[HarborRewardMetric(), ExactMatchMetric(reference="Done", candidate="{{sample.output_text}}")],
+    )
+)
+```
+
+Prefer the explicit form
 above when you want to mix Harbor tasks with other tasks or metrics, or share one evaluator across
 targets.
 

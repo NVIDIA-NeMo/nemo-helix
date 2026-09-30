@@ -110,12 +110,26 @@ class LoRAParams(_PEFTParams):
         description="Merge LoRA weights into base model after training. "
         "Produces a full-weight checkpoint instead of an adapter.",
     )
+    use_memory_efficient_lora: Optional[bool] = Field(
+        default=None,
+        description="Use Automodel's lower-memory LoRA path. Recommended for large MoE checkpoints. Omit to use Automodel's default, which is on.",
+    )
     use_dora: bool = Field(
         default=False,
         description="Enable DoRA (Weight-Decomposed Low-Rank Adaptation). "
         "Decomposes weight updates into magnitude and direction components. "
         "Can improve quality especially at low ranks, but adds training overhead.",
     )
+
+    @model_validator(mode="after")
+    def _module_filters_are_mutually_exclusive(self) -> Self:
+        """Automodel's PeftConfig takes one filter or the other, never both."""
+        if self.target_modules and self.exclude_modules:
+            raise ValueError(
+                "target_modules and exclude_modules are mutually exclusive; "
+                "name the modules to adapt, or the ones to skip, but not both."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_unsupported_features(self) -> Self:
@@ -212,11 +226,82 @@ class ParallelismParams(BaseModel):
     context_parallel_size: int = Field(default=1, gt=0, description="Context parallel size.")
     expert_parallel_size: Optional[int] = Field(default=None, gt=0, description="Expert parallel size (MoE models).")
     sequence_parallel: bool = Field(default=False, description="Enable sequence parallelism.")
+    pipeline: Optional["PipelineParams"] = Field(
+        default=None, description="Pipeline schedule settings. Read only when pipeline_parallel_size > 1."
+    )
 
 
 # ============================================================
 # Training Method Discriminated Union
 # ============================================================
+
+
+class BackendParams(BaseModel):
+    """Which implementation Automodel uses for each model component.
+
+    Fields default to ``None`` meaning "leave it to Automodel", whose own defaults depend
+    on what the training node provides; only explicitly set values are forwarded.
+    """
+
+    attn: Optional[Literal["te", "sdpa", "flex", "eager", "tilelang"]] = Field(
+        default=None, description="Attention kernel."
+    )
+    linear: Optional[Literal["torch", "te", "quack"]] = Field(default=None, description="Linear-layer kernel.")
+    rms_norm: Optional[Literal["torch", "torch_fp32", "te", "quack"]] = Field(
+        default=None, description="RMSNorm kernel."
+    )
+    rope: Optional[Literal["torch", "quack"]] = Field(default=None, description="Rotary embedding kernel.")
+    rope_fusion: Optional[bool] = Field(default=None, description="Fuse rotary embedding into attention.")
+    experts: Optional[Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"]] = Field(
+        default=None, description="MoE expert compute kernel."
+    )
+    dispatcher: Optional[Literal["torch", "deepep", "hybridep", "uccl_ep"]] = Field(
+        default=None, description="MoE token routing between expert-parallel ranks."
+    )
+    fake_balanced_gate: Optional[bool] = Field(default=None, description="Route tokens evenly; benchmarking aid.")
+    enable_hf_state_dict_adapter: Optional[bool] = Field(
+        default=None, description="Save and load checkpoints in HuggingFace layout."
+    )
+    enable_fsdp_optimizations: Optional[bool] = Field(
+        default=None, description="Enable Automodel's additional FSDP2 sharding optimizations."
+    )
+
+
+class PipelineParams(BaseModel):
+    """How work is scheduled across pipeline stages. Read only when pipeline_parallel_size > 1."""
+
+    pp_schedule: Optional[str] = Field(default=None, description="Pipeline schedule name, e.g. 'interleaved1f1b'.")
+    pp_microbatch_size: Optional[int] = Field(default=None, gt=0, description="Micro-batch size per stage.")
+    round_virtual_stages_to_pp_multiple: Optional[Literal["up", "down"]] = Field(
+        default=None, description="Round virtual stages to a multiple of the pipeline size."
+    )
+    scale_grads_in_schedule: Optional[bool] = Field(default=None, description="Scale gradients inside the schedule.")
+    patch_inner_model: Optional[bool] = Field(default=None, description="Patch the inner transformer module.")
+    patch_causal_lm_model: Optional[bool] = Field(default=None, description="Patch the causal-LM wrapper.")
+
+
+class MTPParams(BaseModel):
+    """Multi-Token Prediction overrides for checkpoints trained with MTP heads.
+
+    Automodel builds MTP from the checkpoint's own config; each field here overrides one
+    setting, and only the fields that are set reach the model. Support differs per model.
+    """
+
+    num_nextn_predict_layers: Optional[int] = Field(
+        default=None, gt=0, description="How many tokens ahead to predict. Omit to keep the checkpoint's own value."
+    )
+    use_repeated_layer: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
+            "(Nemotron-H in r0.6.0); omit it for others."
+        ),
+    )
+    loss_scaling_factor: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Weight of the MTP loss term relative to the main loss. Omit to keep the model's default (0.1).",
+    )
 
 
 class _TrainingBase(BaseModel):
@@ -344,6 +429,29 @@ class _TrainingBase(BaseModel):
         gt=0,
         description="Samples analyzed to estimate the optimal pack size when sequence packing is enabled.",
     )
+    packed_sequence_size: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Pin the packed sequence length instead of estimating it. Requires sequence_packing.",
+    )
+    activation_checkpointing: bool = Field(
+        default=False,
+        description="Recompute intermediate activations in the backward pass instead of storing them. "
+        "Substantially lowers memory use for a modest slowdown.",
+    )
+    mtp: Optional[MTPParams] = Field(
+        default=None,
+        description="Multi-Token Prediction settings. Omit for checkpoints trained without MTP heads.",
+    )
+    backend: Optional[BackendParams] = Field(
+        default=None,
+        description="Low-level kernel selection for the model's components. "
+        "Omit to let Automodel choose based on the hardware it lands on.",
+    )
+    shuffle: bool = Field(
+        default=True,
+        description="Reshuffle training examples each epoch.",
+    )
 
     # --- Model ---
     max_seq_length: int = Field(
@@ -401,6 +509,14 @@ class _TrainingBase(BaseModel):
         if "warmup_steps" not in self.model_fields_set:
             updates["warmup_steps"] = warmup
         return self.model_copy(update=updates)
+
+    @model_validator(mode="after")
+    def _explicit_pack_size_needs_packing(self) -> Self:
+        # Automodel reads packed_sequence_size only when packing is on, so a size set
+        # against packing=false is silently ignored -- and the run is slower than asked for.
+        if self.packed_sequence_size is not None and not self.sequence_packing:
+            raise ValueError("packed_sequence_size requires sequence_packing=true.")
+        return self
 
     @property
     def finetuning_type(self) -> FinetuningType:

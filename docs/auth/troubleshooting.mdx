@@ -56,13 +56,13 @@ When something goes wrong with authentication or authorization, start here. Prob
 
  Verify your email appears and has the expected role (Viewer, Editor, or Admin).
 
-2. Check your token scopes. Decode the JWT and verify the required scopes are present:
+2. If the token includes NeMo Helix API scopes, check that the required scopes are present:
 
  ```bash
  nemo auth token --decode
  ```
 
- Look for `scp` or `scope` — ensure `platform:write` is present for write operations.
+ Look for `scp` or `scope` — ensure `platform:write` or the API-specific write scope is present for write operations.
 
 3. Account for role propagation delay. After adding a member, wait up to 30 seconds (or up to `policy_data_refresh_interval`) for the change to take effect.
 
@@ -70,7 +70,7 @@ When something goes wrong with authentication or authorization, start here. Prob
 
 - Missing role binding — you're not a member of the workspace
 - Insufficient role — you have Viewer but need Editor for create/update/delete
-- Token scope too narrow — logged in with `--scope "platform:read"` but trying to write
+- Token scope too narrow — logged in with `--scope "platform:read"` or using a read-only scoped token but trying to write
 - Role not yet propagated — just added as a member; wait and retry
 
 ## "`nemo auth login` Fails with an IdP Error"
@@ -81,7 +81,7 @@ The requested scope is not configured or admin consent has not been granted.
 
 **Fix**: In Azure Portal → App Registration → API Permissions, ensure:
 
-- Custom scopes (`platform:read`, `platform:write`) are defined under "Expose an API"
+- API scopes (`platform:read`, `platform:write`) are defined under "Expose an API" if your deployment requests them during login
 - Admin consent is granted for the scopes
 
 ### "Device flow not enabled" or "Public client flows not allowed"
@@ -134,7 +134,7 @@ The `client_id` in NeMo Helix config doesn't match the application in your IdP.
 
 3. Check that auth headers are stripped from external requests. Try sending a request with `X-NHX-Principal-Id` or `X-NHX-Scopes` from outside the cluster — those headers should be stripped by the gateway.
 
-4. Verify the PDP is reachable from platform services. If using external OPA, check that the OPA sidecar/service is running and the bundle endpoint is accessible.
+4. Verify the PDP is reachable from Helix services. If using external OPA, check that the OPA sidecar/service is running and the bundle endpoint is accessible.
 
 ## "Role Change Doesn't Take Effect"
 

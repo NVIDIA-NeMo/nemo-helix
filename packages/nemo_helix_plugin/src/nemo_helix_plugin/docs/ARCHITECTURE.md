@@ -40,11 +40,11 @@ Plugins that provide an agent register one `NemoCLI` subclass under
 
 ```toml
 [project.entry-points."nemo.cli.agents"]
-"analyst" = "nemo_insights_plugin.analyst.cli:AnalystCLI"
+"example-agent" = "example_plugin.cli:ExampleAgentCLI"
 ```
 
-`AnalystCLI` must be a `NemoCLI` subclass with `name = "analyst"`. This
-registers `nemo agents analyst ...`. Agent names must be unique kebab-case
+`ExampleAgentCLI` must be a `NemoCLI` subclass with `name = "example-agent"`. This
+registers `nemo agents example-agent ...`. Agent names must be unique kebab-case
 nouns, and commands beneath an agent must be verbs.
 
 ## Startup sequence

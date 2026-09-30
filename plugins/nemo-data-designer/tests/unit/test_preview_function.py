@@ -16,8 +16,8 @@ from fastapi.testclient import TestClient
 from nemo_data_designer_plugin.functions import preview as preview_module
 from nemo_data_designer_plugin.functions._types import LogFrame, PreviewSpec
 from nemo_data_designer_plugin.functions.preview import PreviewFunction
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.dependencies import get_sdk_client, get_sync_sdk_client
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.dependencies import get_nemo_client, get_sync_nemo_client
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
 from pydantic import BaseModel
@@ -37,12 +37,12 @@ def _config() -> dd.DataDesignerConfig:
     return builder.build()
 
 
-def _sync_sdk() -> NeMoHelix:
-    return NeMoHelix(base_url="http://testserver", workspace="default")
+def _sync_client() -> NemoClient:
+    return NemoClient(base_url="http://testserver", workspace="default")
 
 
-def _async_sdk() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://testserver", workspace="default")
+def _async_client() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://testserver", workspace="default")
 
 
 async def _resolve_runnable_config(
@@ -78,8 +78,8 @@ async def test_preview_function_streams_worker_frames_and_done(monkeypatch: pyte
         async for frame in PreviewFunction().run(
             PreviewSpec(config=_config(), num_records=2),
             ctx=FunctionContext(workspace="team-a"),
-            sdk=_sync_sdk(),
-            async_sdk=_async_sdk(),
+            sdk=_sync_client(),
+            async_sdk=_async_client(),
         )
     ]
 
@@ -111,8 +111,8 @@ async def test_preview_function_runs_model_health_check_off_event_loop(monkeypat
         async for frame in PreviewFunction().run(
             PreviewSpec(config=_config(), num_records=2),
             ctx=FunctionContext(workspace="team-a"),
-            sdk=_sync_sdk(),
-            async_sdk=_async_sdk(),
+            sdk=_sync_client(),
+            async_sdk=_async_client(),
         )
     ]
 
@@ -136,8 +136,8 @@ def test_preview_route_streams_ndjson_and_heartbeats(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(preview_module, "resolve_runnable_config", _resolve_runnable_config)
 
     app = FastAPI()
-    app.dependency_overrides[get_sdk_client] = _async_sdk
-    app.dependency_overrides[get_sync_sdk_client] = _sync_sdk
+    app.dependency_overrides[get_nemo_client] = _async_client
+    app.dependency_overrides[get_sync_nemo_client] = _sync_client
     app.include_router(
         add_function_routes(PreviewFunction, heartbeat_interval_seconds=0.01),
         prefix="/apis/data-designer/v2/workspaces/{workspace}",

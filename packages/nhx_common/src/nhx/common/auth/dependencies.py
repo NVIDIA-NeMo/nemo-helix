@@ -216,3 +216,20 @@ def auth_as_service(service: Optional[str] = None) -> Generator[None, None, None
         yield
     finally:
         auth_client_context.reset(token)
+
+
+def get_request_authorizer(request: Request):
+    """Bind authorization to the authenticated caller and original scopes."""
+    client = get_auth_client(request)
+    if client.resolved_bearer_token is not None:
+        scopes = client.resolved_bearer_token.scopes
+    else:
+        # Internal principal headers are authenticated by middleware before dependency resolution.
+        scopes = request.headers.get("x-nhx-scopes", "").split() or None
+
+    async def authorize(method: str, path: str) -> None:
+        result = await client.authorize_request(method, path, scopes=scopes)
+        if not result.allowed:
+            raise HTTPException(status_code=403, detail="Access to taskset member denied")
+
+    return authorize

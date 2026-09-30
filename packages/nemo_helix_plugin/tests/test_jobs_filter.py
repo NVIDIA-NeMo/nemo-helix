@@ -24,20 +24,20 @@ from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
-from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.jobs.api_factory import job_route_factory
 from pydantic import BaseModel, ConfigDict
 from starlette.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
-def _patch_client_from_platform():
-    """The factory calls ``client_from_platform(sdk, AsyncJobsClient)``; the test's
+def _patch_jobs_client():
+    """The factory calls ``AsyncJobsClient.from_client(async_client)``; the test's
     ``_CapturingSdk`` exposes the captured client as ``sdk.jobs_client``, so route
     it through here."""
     with patch(
-        "nemo_helix_plugin.jobs.api_factory.client_from_platform",
-        side_effect=lambda sdk, _cls: sdk.jobs_client,
+        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
+        side_effect=lambda sdk: sdk.jobs_client,
     ):
         yield
 
@@ -82,8 +82,8 @@ def _fake_list_response():
 class _CapturingSdk:
     """Captures kwargs passed to ``JobsClient.list_jobs(...)`` for assertion.
 
-    The factory now calls ``client_from_platform(sdk, AsyncJobsClient).list_jobs(...)``.
-    ``_build_app`` patches ``client_from_platform`` to return this object's
+    The factory calls ``AsyncJobsClient.from_client(async_client).list_jobs(...)``.
+    The autouse fixture patches ``from_client`` to return this object's
     ``jobs_client`` so the ``list_jobs`` kwargs are captured here.
     """
 
@@ -108,7 +108,7 @@ def _build_app() -> tuple[FastAPI, _CapturingSdk]:
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
 
     sdk = _CapturingSdk()
-    app.dependency_overrides[get_sdk_client] = lambda: sdk
+    app.dependency_overrides[get_nemo_client] = lambda: sdk
     app.dependency_overrides[get_entity_client] = lambda: SimpleNamespace()
     return app, sdk
 
@@ -519,7 +519,7 @@ def _build_create_app() -> tuple[FastAPI, _CreateCapturingSdk]:
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
 
     sdk = _CreateCapturingSdk()
-    app.dependency_overrides[get_sdk_client] = lambda: sdk
+    app.dependency_overrides[get_nemo_client] = lambda: sdk
     app.dependency_overrides[get_entity_client] = lambda: SimpleNamespace()
     return app, sdk
 

@@ -15,10 +15,7 @@ from typing import Any, Generator
 import pytest
 from fastmcp import FastMCP
 from mcp.types import TextContent
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
-from nhx.common.sdk_factory import get_platform_sdk
 from nhx.core.mcp.server import create_server
 
 
@@ -29,10 +26,10 @@ def nhx_base_url() -> str:
 
 
 @pytest.fixture(scope="module")
-def nemo_sdk(nhx_base_url: str) -> Generator[NeMoHelix, None, None]:
-    """Create NeMo SDK client for direct API validation."""
-    client = get_platform_sdk(base_url=nhx_base_url)
-    yield client
+def workspaces_client(nhx_base_url: str) -> Generator[WorkspacesClient, None, None]:
+    """Typed workspaces client for direct API validation."""
+    with WorkspacesClient(base_url=nhx_base_url) as client:
+        yield client
 
 
 @pytest.fixture(scope="module")
@@ -51,10 +48,10 @@ def _text_content(tool_result: Any) -> str:
 class TestMCPServerSmoke:
     """Smoke tests for MCP server basic functionality."""
 
-    def test_nhx_connection(self, nemo_sdk: NeMoHelix) -> None:
+    def test_nhx_connection(self, workspaces_client: WorkspacesClient) -> None:
         """Verify we can connect to NeMo Helix instance."""
         # This will raise if NeMo Helix is not accessible
-        response = client_from_platform(nemo_sdk, WorkspacesClient).list_workspaces()
+        response = workspaces_client.list_workspaces()
         assert response is not None
         assert response.page().items is not None
 
@@ -70,9 +67,9 @@ class TestMCPServerSmoke:
         assert "list_workspaces" in tool_names
 
     @pytest.mark.asyncio
-    async def test_list_workspaces_matches_sdk(self, mcp_server: FastMCP, nemo_sdk: NeMoHelix) -> None:
+    async def test_list_workspaces_matches_api(self, mcp_server: FastMCP, workspaces_client: WorkspacesClient) -> None:
         """
-        Verify MCP tool returns consistent data with SDK.
+        Verify MCP tool returns consistent data with the API.
 
         This ensures the MCP server is properly connected to NeMo Helix
         and returning real data.
@@ -80,8 +77,8 @@ class TestMCPServerSmoke:
         import json
 
         # Get workspaces via SDK
-        sdk_response = client_from_platform(nemo_sdk, WorkspacesClient).list_workspaces()
-        sdk_workspace_ids = {ws.id for ws in sdk_response.items()}
+        api_response = workspaces_client.list_workspaces()
+        api_workspace_ids = {ws.id for ws in api_response.items()}
 
         # Get workspaces via MCP tool
         tool_result = await mcp_server.call_tool("list_workspaces", {})
@@ -92,13 +89,13 @@ class TestMCPServerSmoke:
         # Verify MCP returns same workspace IDs
         mcp_workspace_ids = {ws["id"] for ws in mcp_result["workspaces"]}
 
-        assert sdk_workspace_ids == mcp_workspace_ids, (
-            f"MCP workspaces {mcp_workspace_ids} should match SDK workspaces {sdk_workspace_ids}"
+        assert api_workspace_ids == mcp_workspace_ids, (
+            f"MCP workspaces {mcp_workspace_ids} should match API workspaces {api_workspace_ids}"
         )
 
         # Verify counts match
-        assert mcp_result["total"] == sdk_response.page().metadata["total_results"], (
-            f"MCP total {mcp_result['total']} should match SDK count {sdk_response.page().metadata['total_results']}"
+        assert mcp_result["total"] == api_response.page().metadata["total_results"], (
+            f"MCP total {mcp_result['total']} should match API count {api_response.page().metadata['total_results']}"
         )
 
     @pytest.mark.asyncio

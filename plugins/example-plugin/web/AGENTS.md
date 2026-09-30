@@ -97,7 +97,7 @@ import { AssistantChat, StudioDataView, useStudioDataViewState } from '@nemo/com
   callback and the caller supplies it from `host.sdk`; `CreateSecretModal`'s
   `onCreate` and `fetchAllPages`' page fetcher are the pattern.
 - **`AssistantChat` is shared.** A plugin can point it at an authenticated,
-  OpenAI-compatible `baseURL`; Studio supplies its current access token and
+  OpenAI-compatible `baseURL`; Studio supplies its current configured bearer and
   chat runtime. Use `messageContentProps.markdownLinkComponent` when a plugin
   owns trusted, in-app citation targets. The plugin should still own the panel,
   prompts, endpoint, and citation behavior specific to its feature.
@@ -238,7 +238,8 @@ UI route is gated behind the `pluginsEnabled` flag (on by default).
   scans `web/packages/**`, not this dir. Stick to the semantic tokens Studio uses
   (grep `web/packages/studio/src` for `bg-surface`, `text-subtle`) and KUI
   components (self-styled). Arbitrary utility classes won't have CSS.
-- **Never expose refresh tokens.** Only `accessToken` / `getAccessToken` cross the
-  boundary — never reach for Studio's OIDC context.
+- **Never expose refresh tokens.** Only the configured platform bearer (an access
+  token or ID token) crosses through `accessToken` / `getAccessToken` — never
+  reach for Studio's OIDC context.
 - **New shared singletons** with internal dynamic imports need `codeSplitting:
   false` in Studio's vendor build; here you only add the name to `external`.

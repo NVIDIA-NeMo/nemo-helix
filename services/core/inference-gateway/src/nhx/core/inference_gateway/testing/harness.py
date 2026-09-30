@@ -30,17 +30,29 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
-from nemo_helix import AsyncNeMoHelix, NeMoHelix, omit
-from nemo_helix.types.inference import ModelProvider
-from nemo_helix.types.inference.middleware_call_param import MiddlewareCallParam
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_helix.types.inference.virtual_model_inference_config_param import VirtualModelInferenceConfigParam
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.discovery import discover_inference_middleware
+from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient, InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.inference_middleware import NemoInferenceMiddleware
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    CreateModelProviderRequest,
+    ModelProvider,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+)
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import (
+    CreateVirtualModelRequest,
+    MiddlewareCall,
+    VirtualModel,
+    VirtualModelInferenceConfig,
+)
 from nhx.common.entities.client import EntityClient
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.common.service.headers import build_downstream_service_headers
@@ -86,8 +98,8 @@ workspace."""
 class IGWPluginHarness:
     """Integration harness for IGW middleware plugins.
 
-    Owns a :class:`~nhx.testing.client.ClientContext` (sync + async SDK,
-    :class:`TestClient`, :class:`EntityClient`) backed by an in-process
+    Owns a :class:`~nhx.testing.client.ClientContext` (sync + async typed
+    clients, :class:`TestClient`, :class:`EntityClient`) backed by an in-process
     ASGI IGW + Models app, the mock-NIM :class:`HTTPServer` (the only
     real socket), and a :class:`MockChatCompletionsHandler` pre-mounted
     at ``POST /v1/chat/completions``.
@@ -96,7 +108,14 @@ class IGWPluginHarness:
     """
 
     sdk: NeMoHelix
+    """Generated SDK handle kept for plugin test suites that adapt it with
+    ``client_from_platform``."""
     async_sdk: AsyncNeMoHelix
+    """Generated async SDK handle the IGW cache refresh functions require."""
+    client: NemoClient
+    """Sync typed platform client the harness uses for its own entity CRUD
+    and gateway calls."""
+    async_client: AsyncNemoClient
     test_client: TestClient
     entity_client: EntityClient
 
@@ -165,6 +184,8 @@ class IGWPluginHarness:
         return cls(
             sdk=client_context.sdk,
             async_sdk=client_context.async_sdk,
+            client=NemoClient(base_url="http://testserver", http_client=client_context.test_client),
+            async_client=client_context.async_client,
             test_client=client_context.test_client,
             entity_client=client_context.entity_client,
             mock_nim=mock_nim,
@@ -206,9 +227,10 @@ class IGWPluginHarness:
           :func:`refresh_virtual_model_cache`. In practice every test
           calls :meth:`add_virtual_model` which triggers a refresh.
         """
+        virtual_models = VirtualModelsClient.from_client(self.client)
         for workspace, name in reversed(self._virtual_models):
             try:
-                self.sdk.inference.virtual_models.delete(name=name, workspace=workspace)
+                virtual_models.delete_virtual_model(name=name, workspace=workspace)
             except Exception:  # noqa: BLE001  # see _cleanup docstring
                 logger.warning(
                     "Failed to delete VirtualModel %r in workspace %r during harness cleanup",
@@ -217,9 +239,10 @@ class IGWPluginHarness:
                     exc_info=True,
                 )
 
+        models = ModelsClient.from_client(self.client)
         for workspace, name in reversed(self._providers):
             try:
-                self.sdk.inference.providers.delete(name=name, workspace=workspace)
+                models.delete_provider(name=name, workspace=workspace)
             except Exception:  # noqa: BLE001  # see _cleanup docstring
                 logger.warning(
                     "Failed to delete ModelProvider %r in workspace %r during harness cleanup",
@@ -228,7 +251,7 @@ class IGWPluginHarness:
                     exc_info=True,
                 )
 
-        secrets = client_from_platform(self.sdk, SecretsClient)
+        secrets = SecretsClient.from_client(self.client)
         for workspace, name in reversed(self._secrets):
             try:
                 secrets.delete_secret(name=name, workspace=workspace)
@@ -468,7 +491,7 @@ class IGWPluginHarness:
         Returns *name* so it chains cleanly into
         :meth:`add_provider` (``api_key_secret_name=harness.create_secret(...)``).
         """
-        secrets = client_from_platform(self.sdk, SecretsClient)
+        secrets = SecretsClient.from_client(self.client)
         secrets.create_secret(
             body=HelixSecretCreateRequest(name=name, value=SecretStr(value), description=description),
             workspace=workspace,
@@ -507,7 +530,7 @@ class IGWPluginHarness:
                 An explicit duplicate raises ``ConflictError`` so isolation
                 breakage fails loudly.
             host_url: Override the default mock-NIM URL.
-            enabled_models: Optional enabled-models list for the SDK.
+            enabled_models: Optional enabled-models list for the provider.
             api_key_secret_name: Existing Secret name to attach as the
                 provider's bearer token. Create it via
                 :meth:`create_secret` first. Triggers a full cache refresh
@@ -525,34 +548,39 @@ class IGWPluginHarness:
         provider_name = name or short_unique_name("provider")
         host = host_url or self.nim_host_url
 
-        self.sdk.inference.providers.create(
+        models = ModelsClient.from_client(self.client)
+        models.create_provider(
             workspace=workspace,
-            name=provider_name,
-            host_url=host,
-            enabled_models=list(enabled_models) if enabled_models is not None else omit,
-            api_key_secret_name=api_key_secret_name if api_key_secret_name is not None else omit,
+            body=CreateModelProviderRequest(
+                name=provider_name,
+                host_url=host,
+                enabled_models=list(enabled_models) if enabled_models is not None else None,
+                api_key_secret_name=api_key_secret_name,
+            ),
         )
         # Track right after create so a later raise from update_status /
         # retrieve still leaves the provider eligible for teardown.
         self._providers.append((workspace, provider_name))
 
         # served_models has to go through update_status — the create path doesn't accept it.
-        self.sdk.inference.providers.update_status(
+        models.update_provider_status(
             name=provider_name,
             workspace=workspace,
-            served_models=[
-                {
-                    "model_entity_id": f"{workspace}/{entity_name}",
-                    "served_model_name": served_name,
-                }
-                for entity_name, served_name in served_models.items()
-            ],
+            body=UpdateModelProviderStatusRequest(
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id=f"{workspace}/{entity_name}",
+                        served_model_name=served_name,
+                    )
+                    for entity_name, served_name in served_models.items()
+                ]
+            ),
         )
 
         # Read authoritative state back so the cache stays in sync with
         # whatever id / served_models shape / timestamps the entity store
         # actually assigned.
-        provider = self.sdk.inference.providers.retrieve(name=provider_name, workspace=workspace)
+        provider = models.get_provider(name=provider_name, workspace=workspace).data()
 
         if api_key_secret_name is not None:
             # Full refresh resolves the secret via the secrets SDK.
@@ -570,11 +598,11 @@ class IGWPluginHarness:
         workspace: str,
         name: str,
         default_model_entity: str | None = None,
-        models: Sequence[VirtualModelInferenceConfigParam] = (),
-        request_middleware: Sequence[MiddlewareCallParam] = (),
-        response_middleware: Sequence[MiddlewareCallParam] = (),
-        post_response_middleware: Sequence[MiddlewareCallParam] = (),
-    ) -> SDKVirtualModel:
+        models: Sequence[VirtualModelInferenceConfig | Mapping[str, Any]] = (),
+        request_middleware: Sequence[MiddlewareCall | Mapping[str, Any]] = (),
+        response_middleware: Sequence[MiddlewareCall | Mapping[str, Any]] = (),
+        post_response_middleware: Sequence[MiddlewareCall | Mapping[str, Any]] = (),
+    ) -> VirtualModel:
         """Create a VirtualModel and refresh the VM cache so it routes immediately.
 
         Sync entry — uses :func:`asyncio.run`, so don't call this inside
@@ -622,11 +650,11 @@ class IGWPluginHarness:
         workspace: str,
         name: str,
         default_model_entity: str | None = None,
-        models: Sequence[VirtualModelInferenceConfigParam] = (),
-        request_middleware: Sequence[MiddlewareCallParam] = (),
-        response_middleware: Sequence[MiddlewareCallParam] = (),
-        post_response_middleware: Sequence[MiddlewareCallParam] = (),
-    ) -> SDKVirtualModel:
+        models: Sequence[VirtualModelInferenceConfig | Mapping[str, Any]] = (),
+        request_middleware: Sequence[MiddlewareCall | Mapping[str, Any]] = (),
+        response_middleware: Sequence[MiddlewareCall | Mapping[str, Any]] = (),
+        post_response_middleware: Sequence[MiddlewareCall | Mapping[str, Any]] = (),
+    ) -> VirtualModel:
         """Async sibling of :meth:`add_virtual_model`."""
         vm = self._create_virtual_model(
             workspace=workspace,
@@ -664,13 +692,12 @@ class IGWPluginHarness:
         workspace: str,
         name: str,
         default_model_entity: str | None,
-        models: Sequence[VirtualModelInferenceConfigParam],
-        request_middleware: Sequence[MiddlewareCallParam],
-        response_middleware: Sequence[MiddlewareCallParam],
-        post_response_middleware: Sequence[MiddlewareCallParam],
-    ) -> SDKVirtualModel:
+        models: Sequence[VirtualModelInferenceConfig | Mapping[str, Any]],
+        request_middleware: Sequence[MiddlewareCall | Mapping[str, Any]],
+        response_middleware: Sequence[MiddlewareCall | Mapping[str, Any]],
+        post_response_middleware: Sequence[MiddlewareCall | Mapping[str, Any]],
+    ) -> VirtualModel:
         create_kwargs: dict[str, Any] = {
-            "workspace": workspace,
             "name": name,
             "request_middleware": list(request_middleware),
             "response_middleware": list(response_middleware),
@@ -679,11 +706,14 @@ class IGWPluginHarness:
         if default_model_entity is not None:
             create_kwargs["default_model_entity"] = default_model_entity
         if models:
-            # SDK expects an Iterable of VirtualModelInferenceConfigParam
-            # (TypedDict). Skip when empty so we don't send an empty list
-            # that some validators treat as "explicitly clear models".
+            # Skip when empty so we don't send an empty list that some
+            # validators treat as "explicitly clear models".
             create_kwargs["models"] = list(models)
-        vm = self.sdk.inference.virtual_models.create(**create_kwargs)
+        vm = (
+            VirtualModelsClient.from_client(self.client)
+            .create_virtual_model(workspace=workspace, body=CreateVirtualModelRequest(**create_kwargs))
+            .data()
+        )
         self._virtual_models.append((workspace, name))
         return vm
 
@@ -753,14 +783,12 @@ class IGWPluginHarness:
         body: dict[str, Any],
         extra_headers: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Call IGW's OpenAI-compatible chat completions endpoint via the SDK."""
-        result = self.sdk.inference.gateway.openai.post(
-            "v1/chat/completions",
-            workspace=workspace,
-            body=body,
-            extra_headers=dict(extra_headers) if extra_headers is not None else None,
-        )
-        return _coerce_dict(result)
+        """Call IGW's OpenAI-compatible chat completions endpoint via the typed client."""
+        gateway = InferenceGatewayClient.from_client(self.client)
+        if extra_headers:
+            gateway = gateway.with_headers(extra_headers)
+        result = gateway.openai_post(workspace=workspace, trailing_uri="v1/chat/completions", body=JsonBody(body))
+        return _coerce_dict(result.data())
 
     async def achat_completions(
         self,
@@ -770,13 +798,11 @@ class IGWPluginHarness:
         extra_headers: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Async sibling of :meth:`chat_completions`."""
-        result = await self.async_sdk.inference.gateway.openai.post(
-            "v1/chat/completions",
-            workspace=workspace,
-            body=body,
-            extra_headers=dict(extra_headers) if extra_headers is not None else None,
-        )
-        return _coerce_dict(result)
+        gateway = AsyncInferenceGatewayClient.from_client(self.async_client)
+        if extra_headers:
+            gateway = gateway.with_headers(extra_headers)
+        result = await gateway.openai_post(workspace=workspace, trailing_uri="v1/chat/completions", body=JsonBody(body))
+        return _coerce_dict(result.data())
 
     def stream_chat_completions(
         self,
@@ -787,7 +813,7 @@ class IGWPluginHarness:
     ) -> list[dict[str, Any]] | dict[str, Any]:
         """Call the chat-completions endpoint with ``stream=True``.
 
-        Uses :class:`TestClient` directly because the SDK's ``post``
+        Uses :class:`TestClient` directly because the typed client's ``post``
         buffers the full body before returning, defeating streaming.
 
         Return type depends on ``Content-Type``:
@@ -1005,7 +1031,7 @@ class IGWPluginHarness:
 
 
 def _coerce_dict(value: Any) -> dict[str, Any]:
-    """Cast an SDK response (dict or Pydantic model) to ``dict``."""
+    """Cast a gateway response body (dict or Pydantic model) to ``dict``."""
     if isinstance(value, dict):
         return value
     if hasattr(value, "model_dump"):

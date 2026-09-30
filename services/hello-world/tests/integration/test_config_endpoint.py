@@ -6,7 +6,7 @@
 from typing import Generator
 
 import pytest
-from nemo_helix import NeMoHelix
+from fastapi.testclient import TestClient
 from nhx.common.config import HelixConfig
 from nhx.common.service.dependencies import get_platform_config
 from nhx.hello_world.config import HelloWorldConfig
@@ -28,10 +28,11 @@ class TestConfigInfoEndpoint:
         return HelloWorldConfig(greeting_prefix="Howdy", max_message_length=200)
 
     @pytest.fixture
-    def sdk(self, mock_platform_config, mock_service_config) -> Generator[NeMoHelix, None, None]:
-        """Create SDK client with mocked configs."""
+    def http_client(self, mock_platform_config, mock_service_config) -> Generator[TestClient, None, None]:
+        """Create a test client with mocked configs."""
         with create_test_client(
             HelloWorldService,
+            client_type=TestClient,
             dependency_overrides={
                 get_platform_config: lambda: mock_platform_config,
             },
@@ -39,9 +40,9 @@ class TestConfigInfoEndpoint:
         ) as client:
             yield client
 
-    def test_config_info_returns_both_configs(self, sdk: NeMoHelix):
+    def test_config_info_returns_both_configs(self, http_client: TestClient):
         """Test GET /config-info returns both platform and service config values."""
-        response = sdk._client.get("/apis/hello-world/v2/workspaces/default/config-info")
+        response = http_client.get("/apis/hello-world/v2/workspaces/default/config-info")
 
         assert response.status_code == 200
         data = response.json()
@@ -56,12 +57,13 @@ class TestConfigInfoEndpoint:
 
         with create_test_client(
             HelloWorldService,
+            client_type=TestClient,
             dependency_overrides={
                 get_platform_config: lambda: default_platform,
             },
             service_configs={HelloWorldService: default_service},
-        ) as sdk:
-            response = sdk._client.get("/apis/hello-world/v2/workspaces/default/config-info")
+        ) as http_client:
+            response = http_client.get("/apis/hello-world/v2/workspaces/default/config-info")
 
             assert response.status_code == 200
             data = response.json()

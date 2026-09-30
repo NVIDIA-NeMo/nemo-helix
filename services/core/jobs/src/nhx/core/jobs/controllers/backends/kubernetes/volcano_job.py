@@ -43,6 +43,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_pod_template_spec,
     delete_configmap,
     get_namespace_from_environment,
+    image_pull_backoff_failure,
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
@@ -394,6 +395,8 @@ class VolcanoJobBackend(
                 )
             return self.sync_active(step, volcano_job)
         elif step.status == HelixJobStatus.PENDING:
+            if volcano_job is not None and (result := self.enforce_image_pull_ttl(step, volcano_job)):
+                return result
             if volcano_job is not None and (
                 result := self.enforce_sync_ttl(
                     step,
@@ -620,6 +623,32 @@ class VolcanoJobBackend(
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
         return JobUpdate(status=status, status_details=status_details)
+
+    def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, volcano_job: dict) -> JobUpdate | None:
+        """Fail a step whose image the kubelet has been retrying for too long.
+
+        The decision is the same one the Kubernetes backend makes; only the
+        teardown differs, so both share ``image_pull_backoff_failure``. Without
+        this a Volcano job stuck on a bad reference waits out
+        ``ttl_seconds_before_active`` and reports a scheduling timeout that
+        never names the image.
+        """
+        message = image_pull_backoff_failure(
+            self._core_v1,
+            self.namespace,
+            step,
+            self._execution_profile_config.ttl_seconds_image_pull,
+        )
+        if message is None:
+            return None
+
+        return self.sync_remove_job_with_status(
+            step,
+            HelixJobStatus.ERROR,
+            volcano_job,
+            status_details={"message": message},
+            error_details={"message": message},
+        )
 
     def enforce_sync_ttl(
         self,

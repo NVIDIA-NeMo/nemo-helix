@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 from nemo_evaluator.api.schemas import (
     EvaluatorTaskDefinition,
@@ -15,6 +17,7 @@ from nemo_evaluator.api.schemas import (
     TaskInputs,
 )
 from nemo_evaluator.api.service.task_service import MetricRefNotFoundError, TaskService
+from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
@@ -87,6 +90,17 @@ def _task_input() -> TaskInput:
     )
 
 
+@pytest.fixture(autouse=True)
+def verified_archive_projection(monkeypatch):
+    # These tests isolate entity/API semantics; real archive verification has separate tests.
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import NativeTask
+
+    async def verify(spec, files_client):
+        return NativeTask("fixture", spec.instruction, spec.config)
+
+    monkeypatch.setattr("nemo_evaluator.api.service.task_service.verify_definition", verify)
+
+
 @pytest.fixture
 def metric_service() -> _FakeMetricService:
     return _FakeMetricService()
@@ -94,7 +108,7 @@ def metric_service() -> _FakeMetricService:
 
 @pytest.fixture
 def service(metric_service: _FakeMetricService, entity_store) -> TaskService:
-    return TaskService(entity_store, metric_service)
+    return TaskService(entity_store, metric_service, files_client=Mock())
 
 
 async def test_create_then_get(service: TaskService) -> None:
@@ -102,13 +116,14 @@ async def test_create_then_get(service: TaskService) -> None:
 
     assert isinstance(created, Task)
     assert created.name == "task-1"
-    assert created.id == "task-task-1"
+    assert created.id
     assert _evaluator_spec(created).intent == "Answer the question."
     assert isinstance(_evaluator_spec(created).metrics[0], MetricRef)
     assert created.created_at is not None
 
     got = await service.get_task("default", "task-1")
     assert got is not None and got.name == "task-1"
+    assert got.id == created.id
 
 
 async def test_create_normalizes_inline_metrics_to_refs(
@@ -219,7 +234,7 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
     """A head with no revision would break the invariant every consumer relies on — `#latest`
     always resolves and `revision` is never 0. There is no cross-entity transaction, so create
     must undo itself rather than leave a half-created task behind."""
-    service = TaskService(entity_store, metric_service)
+    service = TaskService(entity_store, metric_service, files_client=Mock())
 
     real_create = type(entity_store).create
 
@@ -240,7 +255,7 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
 async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:
     """Losing the optimistic lock is a client-retryable conflict, not a server fault — the route
     maps this to 409, so the service must let it through rather than swallowing it."""
-    service = TaskService(entity_store, metric_service)
+    service = TaskService(entity_store, metric_service, files_client=Mock())
     await service.create_task("task-1", _task_input(), workspace="default")
 
     async def _stale(entity, *, original_name=None):
@@ -261,7 +276,7 @@ async def test_replace_leaves_no_uncovered_head_content_when_publishing_fails(
     happens leaves nothing behind. Committing the head first would instead make a plain GET —
     which reads the head — return content that `#latest` does not resolve to.
     """
-    service = TaskService(entity_store, metric_service)
+    service = TaskService(entity_store, metric_service, files_client=Mock())
     await service.create_task("task-1", _task_input(), workspace="default")
 
     real_create = type(entity_store).create
@@ -316,7 +331,7 @@ async def test_rollback_failure_does_not_mask_the_original_error(
     metric_service: _FakeMetricService, entity_store
 ) -> None:
     """If cleanup also fails, the caller must still see *why* the publish failed."""
-    service = TaskService(entity_store, metric_service)
+    service = TaskService(entity_store, metric_service, files_client=Mock())
     real_create = type(entity_store).create
 
     async def _boom(entity):
@@ -393,13 +408,24 @@ def _harbor_input(digest: str = "a" * 64) -> TaskInput:
     return TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
-            archive_ref="default/harbor-tasks#packages/org-name/abc/dist.tar.gz",
-            archive_digest=digest,
+            native_task_id="fixture",
+            harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+            source=HarborArchiveSource(
+                fileset_ref="default/harbor-tasks#packages/org-name/abc/files",
+                files_hash=digest,
+            ),
             instruction="Fix the failing test.",
             config={"verifier": {"type": "pytest"}},
         ),
         metadata=[MetadataItem(key="suite", value="swe")],
     )
+
+
+async def test_harbor_registration_rejects_incorrect_native_identity(service):
+    request = _harbor_input()
+    request.spec.native_task_id = "incorrect"
+    with pytest.raises(ValueError, match="native_task_id does not match"):
+        await service.create_task("incorrect", request, workspace="default")
 
 
 async def test_stores_a_harbor_task(service: TaskService) -> None:
@@ -408,7 +434,7 @@ async def test_stores_a_harbor_task(service: TaskService) -> None:
 
     assert published
     assert created.spec.kind == "harbor"
-    assert created.spec.archive_ref.endswith("dist.tar.gz")
+    assert created.spec.source.fileset_ref.endswith("files")
     assert created.spec.config == {"verifier": {"type": "pytest"}}
 
 
@@ -422,19 +448,25 @@ async def test_harbor_task_publishes_revisions_like_any_other(service: TaskServi
     assert published and changed.revision == 2
 
 
-async def test_a_harbor_task_never_reaches_the_metric_service(
+async def test_reward_only_harbor_task_does_not_need_metric_service(
     service: TaskService, metric_service: _FakeMetricService
 ) -> None:
-    """Metric normalization is agent-eval-specific: a Harbor task is scored by Harbor's own reward,
-    and its spec arrives already in stored form.
-
-    Both entry points, not just the write: a Harbor spec must not be validated against stored
-    metrics either, so ``_normalize_spec`` has to short-circuit before ref resolution rather than
-    merely find nothing to offload.
-    """
+    """The mandatory reward metric needs no stored metric entity."""
     await service.create_task("fix-test", _harbor_input(), workspace="default")
     assert metric_service.stored == []
     assert metric_service.looked_up == []
+
+
+async def test_harbor_additional_metrics_are_normalized(service: TaskService, metric_service: _FakeMetricService):
+    task = _harbor_input()
+    task.spec.metrics = [_inline_metric(), MetricRef("default/stored-metric")]
+    created, _ = await service.create_task("custom-scoring", task, workspace="default")
+    assert len(metric_service.stored) == 1
+    assert metric_service.looked_up == [("default", "stored-metric")]
+    assert all(isinstance(metric, MetricRef) for metric in created.spec.metrics)
+    again, published = await service.replace_task("custom-scoring", task, workspace="default")
+    assert not published
+    assert again.revision == created.revision
 
 
 async def test_kinds_with_matching_metadata_do_not_share_a_digest(service: TaskService) -> None:
@@ -449,16 +481,20 @@ async def test_kinds_with_matching_metadata_do_not_share_a_digest(service: TaskS
 
 
 async def test_harbor_config_is_stored_but_not_hashed(service: TaskService) -> None:
-    """`config` is a projection of task.toml, which lives inside the archive — a real change moves
-    `archive_digest`. Hashing the projection too would make our history sensitive to Harbor's
+    """`config` is a projection of task.toml, which lives inside the tree — a real change moves
+    `files_hash`. Hashing the projection too would make our history sensitive to Harbor's
     serialization: a release that reordered keys would cut a revision for byte-identical files."""
     await service.create_task("fix-test", _harbor_input(), workspace="default")
 
     reserialized = TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
-            archive_ref="default/harbor-tasks#packages/org-name/abc/dist.tar.gz",
-            archive_digest="a" * 64,
+            native_task_id="fixture",
+            harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+            source=HarborArchiveSource(
+                fileset_ref="default/harbor-tasks#packages/org-name/abc/files",
+                files_hash="a" * 64,
+            ),
             instruction="Fix the failing test.",
             config={"verifier": {"type": "pytest"}, "added_by_a_new_harbor_release": True},
         ),
@@ -482,7 +518,7 @@ async def test_harbor_config_is_stored_but_not_hashed(service: TaskService) -> N
 async def test_reference_only_change_publishes_a_revision(service: TaskService) -> None:
     """The mirror of the Harbor ``config`` case, and the reason the two differ.
 
-    ``config`` is excluded because it is a projection of content ``archive_digest`` already covers.
+    ``config`` is excluded because it is a projection of content ``files_hash`` already covers.
     ``reference`` is nothing of the sort: it is the ground truth a metric grades against, so a task
     whose reference changed scores differently and must be a distinct revision. Deduping it onto the
     old digest would let a pinned taskset silently re-grade.
@@ -510,8 +546,8 @@ async def test_reference_only_change_publishes_a_revision(service: TaskService) 
     assert _evaluator_spec(changed).reference == {"expected": "Lyon"}
 
 
-async def test_a_real_archive_change_does_cut_a_revision(service: TaskService) -> None:
-    """The flip side: `archive_digest` is the authoritative identity, so it must still move."""
+async def test_a_real_tree_change_does_cut_a_revision(service: TaskService) -> None:
+    """The flip side: `files_hash` is the authoritative identity, so it must still move."""
     await service.create_task("fix-test", _harbor_input(), workspace="default")
     changed, published = await service.replace_task("fix-test", _harbor_input(digest="b" * 64), workspace="default")
     assert published and changed.revision == 2

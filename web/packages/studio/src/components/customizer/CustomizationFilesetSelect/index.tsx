@@ -16,7 +16,6 @@ import {
   useFilesListFilesets as useListFilesets,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
-import { FilesetOutput as Fileset } from '@nemo/sdk/generated/platform/schema';
 import {
   Anchor,
   Block,
@@ -30,7 +29,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { CustomizationFilesetCreateModal } from '@studio/components/CustomizationFilesetCreateModal';
 import { FileValidationPanel } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel';
 import { PatternsTooltipTrigger } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel/PatternsTooltip';
 import { Loading } from '@studio/components/Layouts/Loading';
@@ -44,18 +42,31 @@ import {
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
 import { Database, FolderOpen } from 'lucide-react';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { FC, useEffect, useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 
 const NEW_DATASET_VALUE = '__new_dataset__';
 
 export interface CustomizationFilesetSelectProps {
   disabled?: boolean;
+  /**
+   * Asks the owner of the wizard form to open the create-dataset modal.
+   *
+   * The modal cannot be rendered from here: it renders a `<form>`, and this component
+   * sits inside the wizard's own `<form>`. Browsers do not bubble a nested form's submit
+   * event to its ancestors (whatwg/dom#756), so React — which delegates `submit` at the
+   * root container — never dispatches it, the modal's `onSubmit` never runs, nothing
+   * calls `preventDefault`, and the browser navigates away. The owner renders the modal
+   * outside the form instead, matching `SecretSearchableSelect`'s `onRequestNewSecret`.
+   */
+  onRequestNewDataset: () => void;
 }
 
-export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = ({ disabled }) => {
+export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = ({
+  disabled,
+  onRequestNewDataset,
+}) => {
   const workspace = useWorkspaceFromPath();
-  const [openModal, setOpenModal] = useState<'create' | undefined>();
 
   const { control, setValue } = useFormContext<CustomizationFormFields>();
   const backend = useWatch({ control, name: 'backend' });
@@ -124,14 +135,9 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     setValue(field, hasValidation ? ref : undefined, { shouldValidate: false });
   }, [backend, hasValidation, isDiscovering, discoveryError, selectedRef, setValue]);
 
-  const onCreate = (createdFileset: Fileset) => {
-    setSelectedRef(getEntityReference(createdFileset));
-    setOpenModal(undefined);
-  };
-
   const handleSelectChange = (value: string) => {
     if (value === NEW_DATASET_VALUE) {
-      setOpenModal('create');
+      onRequestNewDataset();
       return;
     }
     const picked = filesets.find((f) => getEntityReference(f) === value);
@@ -246,7 +252,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
         />
       )}
       {backend === 'rl' && trainingType === 'dpo' && (
-        <Text kind="body/regular/md" color="secondary">
+        <Text className="text-secondary" kind="body/regular/md">
           Dataset must contain <strong>training.jsonl</strong> in a preference format (chosen /
           rejected pairs, BinaryPreference, Tulu3, HelpSteer3, or native Preference).{' '}
           <strong>validation.jsonl</strong> is optional — training data is split automatically when
@@ -282,14 +288,6 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
         label={hasMissingTrainingFiles ? undefined : 'How are files matched within the Dataset?'}
       />
       {fetchFilesetStatus === 'success' && <FileValidationPanel validation={validation} />}
-
-      {openModal === 'create' && (
-        <CustomizationFilesetCreateModal
-          open
-          onClose={() => setOpenModal(undefined)}
-          onFilesetCreated={onCreate}
-        />
-      )}
 
       {previewFile && (
         <SidePanel

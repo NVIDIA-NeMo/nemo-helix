@@ -54,7 +54,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.values.results import AggregateScore
 from pydantic import BaseModel, ConfigDict, Field
-from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S
+from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S, render_host_error
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,10 @@ def _unpack_model_call_captures(records: list[dict[str, Any]], work_dir: Path) -
         logger.info("Sandboxed Gym host returned no model-call captures; traces will carry no per-call timing.")
         return None
     return capture_dir
+
+
+def _host_error_message(rollout_url: str, error: object) -> str:
+    return f"sandboxed Gym host reported an error from {rollout_url}: {render_host_error(error)}"
 
 
 class SandboxedGymRuntimeConfig(BaseModel):
@@ -263,11 +267,16 @@ class SandboxedGymAgentTaskRunner:
             )
         elapsed = time.monotonic() - started
         if response.status_code >= 400:
-            # The body is the host's own error envelope; it names which example or server failed,
-            # which the status code alone does not.
+            # A bootstrap failure arrives here as a 503 carrying the same envelope a 200 would, so
+            # render it the same way. Truncating the raw body instead cuts the output tail short.
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            error = payload.get("error") if isinstance(payload, Mapping) else None
+            detail = render_host_error(error) if error is not None else response.text[:2000]
             raise RuntimeError(
-                f"sandboxed Gym host returned {response.status_code} from {self._config.rollout_url}: "
-                f"{response.text[:2000]}"
+                f"sandboxed Gym host returned {response.status_code} from {self._config.rollout_url}: {detail}"
             )
         body = self._decode_body(response, elapsed)
         error = body.get("error") if isinstance(body, Mapping) else None
@@ -276,10 +285,7 @@ class SandboxedGymAgentTaskRunner:
             # connection open past the sandbox proxy's first-byte cap. A failure after that point
             # has only the body left to travel in, and carries the code and traceback that say
             # which of Gym's layers raised.
-            raise RuntimeError(
-                f"sandboxed Gym host reported an error from {self._config.rollout_url}: "
-                f"{error if isinstance(error, str) else json.dumps(error)[:2000]}"
-            )
+            raise RuntimeError(_host_error_message(self._config.rollout_url, error))
         results = body.get("results") if isinstance(body, Mapping) else None
         if not isinstance(results, list):
             raise RuntimeError(

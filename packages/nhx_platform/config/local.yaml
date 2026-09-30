@@ -59,7 +59,7 @@ jobs:
   # services/core/jobs/src/nhx/core/jobs/api/v2/jobs/endpoints.py), so jobs
   # submitted with a CPU container step run on the host subprocess backend
   # rather than being dispatched to the Docker backend (which currently fails
-  # because the `nhx-cpu-tasks` image is not available — see the temp comment
+  # because the `nhx-tasks` image is not available — see the temp comment
   # in services/core/jobs/src/nhx/core/jobs/controllers/backends/config.py).
   # Deployers that have a working Docker or Kubernetes setup may register
   # additional image-backed profiles here under different (provider, profile)

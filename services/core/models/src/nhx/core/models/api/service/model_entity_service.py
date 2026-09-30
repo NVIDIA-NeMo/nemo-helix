@@ -8,7 +8,8 @@ import logging
 import re
 from collections import defaultdict
 
-from nemo_helix import AsyncNeMoHelix, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, NGCStorageConfig
 from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput
 from nhx.common.api.common import Page, PaginationData
@@ -17,7 +18,6 @@ from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthClient
 from nhx.common.entities import ALL_WORKSPACES, ListResponse
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.core.models.api.permissions import can_set_tool_call_plugin, check_fileset_access
 from nhx.core.models.config import config
 from nhx.core.models.entities import Adapter, Model, ModelDeploymentConfig
@@ -58,32 +58,32 @@ def _repo_id_matches_trusted(repo_id: str, patterns: list[str]) -> bool:
 
 
 async def get_fileset_and_files_list(
-    sdk: AsyncNeMoHelix, workspace: str, fileset_ref: str | None
+    files: AsyncFilesClient, workspace: str, fileset_ref: str | None
 ) -> tuple[FilesetOutput, list[FilesetFileOutput]]:
     """Validate that the fileset exists and the user has access."""
     if not fileset_ref:
         raise FilesetValidationError("Fileset reference is required")
 
     try:
-        fileset = await check_fileset_access(sdk, fileset_ref, workspace)
-        files = await sdk.files.list(workspace=fileset.workspace, fileset=fileset.name)
+        fileset = await check_fileset_access(files, fileset_ref, workspace)
+        fileset_files = (await files.list_files(workspace=fileset.workspace, name=fileset.name)).data()
     except PermissionDeniedError:
         raise PermissionError(f"Access denied to fileset '{fileset_ref}'") from None
     except NotFoundError as err:
         raise FilesetValidationError(f"Fileset {fileset_ref}, does not exist") from err
 
-    if len(files.data) == 0:
+    if len(fileset_files.data) == 0:
         raise FilesetValidationError(f"Fileset {fileset_ref}, exists but is empty")
 
-    return fileset, files.data
+    return fileset, fileset_files.data
 
 
-async def is_trusted_repo_id(sdk: AsyncNeMoHelix, workspace: str, fileset_ref: str) -> bool:
+async def is_trusted_repo_id(files: AsyncFilesClient, workspace: str, fileset_ref: str) -> bool:
     if not config.trust_remote_code.enabled:
         return False
 
     try:
-        fileset, _ = await get_fileset_and_files_list(sdk, workspace, fileset_ref)
+        fileset, _ = await get_fileset_and_files_list(files, workspace, fileset_ref)
         if fileset.storage.type == "huggingface":
             hf: HuggingfaceStorageConfig = fileset.storage
             if _repo_id_matches_trusted(hf.repo_id, config.trust_remote_code.hf_allow_list):
@@ -235,9 +235,9 @@ async def validate_tool_call_plugin_allowed(auth_client: AuthClient, workspace: 
 class ModelEntityService:
     """Service layer for Model Entity operations."""
 
-    def __init__(self, entity_client: EntityClient, sdk: AsyncNeMoHelix | None = None):
+    def __init__(self, entity_client: EntityClient, files: AsyncFilesClient):
         self.entity_client = entity_client
-        self.sdk = sdk or get_async_platform_sdk()
+        self.files = files
 
     async def _fetch_all_entities(
         self,
@@ -510,7 +510,7 @@ class ModelEntityService:
         if "spec" in update_data:
             model.spec = update_data["spec"]
         if "fileset" in update_data:
-            await get_fileset_and_files_list(self.sdk, workspace, update_data["fileset"])
+            await get_fileset_and_files_list(self.files, workspace, update_data["fileset"])
             model.fileset = update_data["fileset"]
         if "finetuning_type" in update_data:
             model.finetuning_type = update_data["finetuning_type"]

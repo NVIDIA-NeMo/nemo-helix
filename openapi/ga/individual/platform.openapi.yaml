@@ -67,9 +67,15 @@ paths:
         \ browser-based flows\n  - `token_endpoint`: Token exchange endpoint\n  -\
         \ `device_authorization_endpoint`: Device flow authorization endpoint (for\
         \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
-        \ client ID to use\n  - `default_scopes`: OAuth scopes to request during authentication\n\
-        \  - `scope_prefix`: Prefix to prepend to custom scopes (those with ':' or\
-        \ '.default')\n  - `workload_token_exchange_enabled`: Whether SDK workload\
+        \ client ID to use\n  - `cli_client_id`: Optional OAuth client ID dedicated\
+        \ to interactive CLI authentication\n  - `bearer_token_source`: Token response\
+        \ field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
+        \ Whether CLI device requests must include a generated `device_id`\n  - `device_authorization_display_name`:\
+        \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
+        \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\
+        \ OAuth scopes to request during authentication\n  - `scope_prefix`: Prefix\
+        \ clients prepend to NeMo Helix API scopes and NeMo Helix strips from returned\
+        \ token scopes\n  - `workload_token_exchange_enabled`: Whether SDK workload\
         \ identity token exchange is enabled\n  - `workload_client_id`: OAuth client\
         \ ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
         \ Token endpoint to use only for workload identity token exchange\n  - `workload_audience`:\
@@ -11364,7 +11370,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -15296,7 +15302,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -15467,7 +15473,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -15478,6 +15484,14 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        ttl_seconds_image_pull:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Image Pull
+          description: How long a pod may spend in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 600
         namespace:
           title: Namespace
           description: Kubernetes namespace to submit the job to. If not set, it will
@@ -17665,6 +17679,27 @@ components:
         client_id:
           type: string
           title: Client Id
+        cli_client_id:
+          title: Cli Client Id
+          type: string
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        device_authorization_requires_device_id:
+          type: boolean
+          title: Device Authorization Requires Device Id
+          default: false
+        device_authorization_display_name:
+          title: Device Authorization Display Name
+          type: string
+        device_token_request_includes_scope:
+          type: boolean
+          title: Device Token Request Includes Scope
+          default: true
         default_scopes:
           type: string
           title: Default Scopes
@@ -19527,7 +19562,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -20787,7 +20822,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -20798,6 +20833,14 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        ttl_seconds_image_pull:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Image Pull
+          description: How long a pod may spend in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 600
         namespace:
           title: Namespace
           description: Kubernetes namespace to submit the job to. If not set, it will

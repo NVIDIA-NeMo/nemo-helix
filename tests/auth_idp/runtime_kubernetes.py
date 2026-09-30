@@ -22,8 +22,8 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from nemo_helix import DefaultHttpxClient, NeMoHelix
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.auth.token_claims import groups_from_claim
 
 from tests.auth_idp.common import jwt_claims
@@ -1190,14 +1190,14 @@ class KubernetesAuthIdpRuntime:
             ),
         )
 
-    def e2e_setup_sdk(self) -> NeMoHelix:
-        return self._sdk_for_token(self.e2e_setup_token().access_token)
+    def e2e_setup_client(self) -> NemoClient:
+        return self._client_for_token(self.e2e_setup_token().access_token)
 
-    def interactive_user_sdk(self) -> NeMoHelix:
-        return self._sdk_for_token(self.interactive_user_token().access_token)
+    def interactive_user_client(self) -> NemoClient:
+        return self._client_for_token(self.interactive_user_token().access_token)
 
-    def workload_provider_sdk(self) -> NeMoHelix:
-        return self._sdk_for_token(self.workload_platform_token().access_token)
+    def workload_provider_client(self) -> NemoClient:
+        return self._client_for_token(self.workload_platform_token().access_token)
 
     def workload_role_principals(self) -> list[str]:
         return [f"system:serviceaccounts:{getattr(self, 'namespace', NAMESPACE)}"]
@@ -1401,10 +1401,10 @@ class KubernetesAuthIdpRuntime:
 
         return _exchange_token_with_retries(token_endpoint, grant, tls_config={"verify": self.verify})
 
-    def _sdk_for_token(self, token: str) -> NeMoHelix:
-        return NeMoHelix(
+    def _client_for_token(self, token: str) -> NemoClient:
+        return NemoClient(
             base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-            http_client=DefaultHttpxClient(verify=self.verify),
+            auth=token,
+            http_client=httpx.Client(verify=self.verify),
+            owns_http_client=True,
         )

@@ -6,6 +6,7 @@ import json
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
 from nemo_automodel_plugin.schema import AutomodelJobInput, DeploymentParams, ExportSpec
+from pydantic import ValidationError
 
 
 def test_reject_output_model() -> None:
@@ -329,3 +330,110 @@ def test_cli_serialization_carries_distributed_inbatch_negative(tmp_path) -> Non
     spec = AutomodelJobInput.model_validate(dumped)
     assert spec.training.retrieval is not None
     assert spec.training.retrieval.do_distributed_inbatch_negative is True
+
+
+def test_lora_rejects_both_module_filters() -> None:
+    """Automodel's PeftConfig takes target_modules or exclude_modules, never both."""
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "qwen",
+                "dataset": {"training": "default/train"},
+                "training": {
+                    "finetuning_type": "lora",
+                    "lora": {"target_modules": ["*.q_proj"], "exclude_modules": ["*.out_proj"]},
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "lora",
+    [{"target_modules": ["*.q_proj"]}, {"exclude_modules": ["*.out_proj"]}, {}],
+    ids=["target-only", "exclude-only", "neither"],
+)
+def test_lora_accepts_either_module_filter_alone(lora: dict[str, list[str]]) -> None:
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "qwen",
+            "dataset": {"training": "default/train"},
+            "training": {"finetuning_type": "lora", "lora": lora},
+        }
+    )
+    assert spec.training.lora is not None
+
+
+def test_backend_rejects_an_unknown_kernel() -> None:
+    """The typed surface is the point: a bad value fails at submit, not in the container."""
+    with pytest.raises(ValidationError, match="backend"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "qwen",
+                "dataset": {"training": "default/train"},
+                "training": {"finetuning_type": "lora", "backend": {"experts": "not-a-kernel"}},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [{"attn": "cudnn"}, {"dispatcher": "mok"}],
+    ids=["attn-cudnn", "dispatcher-mok"],
+)
+def test_backend_rejects_kernels_the_pinned_automodel_lacks(backend: dict[str, str]) -> None:
+    """Automodel r0.6.0 has neither; it would fall back or fail inside the training container."""
+    with pytest.raises(ValidationError, match="backend"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "qwen",
+                "dataset": {"training": "default/train"},
+                "training": {"finetuning_type": "lora", "backend": backend},
+            }
+        )
+
+
+def test_backend_rejects_an_unknown_field() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "qwen",
+                "dataset": {"training": "default/train"},
+                "training": {"finetuning_type": "lora", "backend": {"dispatchr": "deepep"}},
+            }
+        )
+
+
+def test_backend_accepts_the_moe_recipe_combination() -> None:
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "qwen",
+            "dataset": {"training": "default/train"},
+            "training": {
+                "finetuning_type": "lora",
+                "backend": {
+                    "attn": "te",
+                    "linear": "torch",
+                    "rms_norm": "torch_fp32",
+                    "experts": "gmm",
+                    "dispatcher": "deepep",
+                    "enable_hf_state_dict_adapter": True,
+                },
+            },
+        }
+    )
+    assert spec.training.backend is not None
+    assert spec.training.backend.dispatcher == "deepep"
+    # Unset fields stay None so Automodel's hardware-aware defaults survive.
+    assert spec.training.backend.rope is None
+
+
+def test_pipeline_schedule_rejects_an_unknown_rounding_mode() -> None:
+    with pytest.raises(ValidationError, match="pipeline"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "qwen",
+                "dataset": {"training": "default/train"},
+                "training": {"finetuning_type": "lora"},
+                "parallelism": {"pipeline": {"round_virtual_stages_to_pp_multiple": "sideways"}},
+            }
+        )

@@ -21,16 +21,10 @@ Lookup order for the provider
    implementation that reads ``NHX_BASE_URL`` and ``NHX_PRINCIPAL``.  Works
    for local development and gateway-routed task containers.
 
-Usage from a plugin ``__main__.py``::
-
-    from nemo_helix_plugin.client.adapter import client_from_platform
-    from nemo_helix_plugin.client.client import NemoClient
-    from nemo_helix_plugin.sdk_provider import get_task_sdk
-    from nemo_helix_plugin.tasks.dispatcher import build_ctx_from_env, run_task_with_client
-
-    sdk = get_task_sdk("evaluator")
-    client = client_from_platform(sdk, NemoClient)
-    sys.exit(run_task_with_client(EvaluateJob, client=client, ctx=build_ctx_from_env(sdk)))
+Task entrypoints should build their client with
+:func:`nemo_helix_plugin.client_provider.get_task_nemo_client` and hand it to
+:func:`nemo_helix_plugin.tasks.dispatcher.build_ctx_from_env`; this module
+remains for callers that still need the generated SDK.
 """
 
 from __future__ import annotations

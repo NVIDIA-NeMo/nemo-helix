@@ -54,7 +54,7 @@ def ensure_library_logging_handler() -> Generator[None, None, None]:
     """Attach a logging handler to the upstream ``data_designer`` logger.
 
     Deliberately *not* part of :func:`with_logging`. Most SDK calls run the
-    engine somewhere else — the platform service for ``preview``, a job
+    engine somewhere else — the Helix service for ``preview``, a job
     subprocess for ``create`` — and route its logs back as data, which the
     caller already renders. Attaching a handler here for those calls would print
     the same records a second time whenever the service happens to share the

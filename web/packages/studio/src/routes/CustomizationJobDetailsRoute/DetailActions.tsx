@@ -3,7 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
-import { CJobCancellableStatuses, CJobLaunchableStatuses } from '@nemo/common/src/constants/query';
+import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { toError } from '@nemo/common/src/utils/logger';
 import { useCustomizationCancelAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
@@ -11,10 +11,10 @@ import { useCustomizationCancelRlJob } from '@nemo/sdk/generated/customizer/rl-j
 import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer/unsloth-jobs';
 import { getJobsGetJobQueryKey } from '@nemo/sdk/generated/platform/jobs';
 import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
-import { Button, Flex } from '@nvidia/foundations-react-core';
+import { Flex } from '@nvidia/foundations-react-core';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getNewCustomizationJobRoute, getNewEvaluationMetricRoute } from '@studio/routes/utils';
+import { getNewCustomizationJobRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, Copy } from 'lucide-react';
@@ -22,7 +22,6 @@ import { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface DetailActionsProps {
-  model?: string;
   status?: HelixJobStatus;
   /** Training backend of this job, needed to target the correct per-backend cancel endpoint. */
   backend?: CustomizationBackend;
@@ -34,7 +33,7 @@ interface DetailActionsProps {
 /**
  * This component renders the primary top-level CTAs for the customization job details page.
  */
-export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, name, job }) => {
+export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, job }) => {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -86,18 +85,9 @@ export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, 
 
   const isCancellable = status !== undefined && CJobCancellableStatuses.includes(status);
   const isCancelling = isPending || status === HelixJobStatus.cancelling;
-  const isLaunchable = status !== undefined && CJobLaunchableStatuses.includes(status);
 
   return (
     <Flex gap="density-sm" align="center">
-      {isLaunchable && (
-        <Button
-          color="brand"
-          onClick={() => navigate(getNewEvaluationMetricRoute(workspace, { model }))}
-        >
-          Evaluate
-        </Button>
-      )}
       <QuickActionsMenuRoot
         actions={[
           {

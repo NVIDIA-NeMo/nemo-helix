@@ -18,7 +18,7 @@ import httpx
 from fastapi.testclient import TestClient
 from nemo_helix import AsyncNeMoHelix, NeMoHelix, NotGiven, not_given
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
@@ -53,6 +53,9 @@ class ClientContext:
     async_sdk: AsyncNeMoHelix
     """Asynchronous NeMoHelix SDK client."""
 
+    client: NemoClient
+    """Synchronous typed platform client."""
+
     async_client: AsyncNemoClient
     """Asynchronous typed platform client."""
 
@@ -66,7 +69,9 @@ class ClientContext:
     """Captured requests when access_log=True was passed to create_test_client."""
 
 
-ClientT = TypeVar("ClientT", TestClient, AsyncNemoClient, AsyncNeMoHelix, NeMoHelix, EntityClient, ClientContext)
+ClientT = TypeVar(
+    "ClientT", TestClient, NemoClient, AsyncNemoClient, AsyncNeMoHelix, NeMoHelix, EntityClient, ClientContext
+)
 
 
 class SDKTestClientAdapter(httpx.Client):
@@ -254,8 +259,8 @@ def create_test_client(
 
     Args:
         *service_types: One or more Service classes to test
-        client_type: The client type to yield. One of TestClient, AsyncNemoClient,
-                     AsyncNeMoHelix, NeMoHelix, or EntityClient. Defaults to NeMoHelix.
+        client_type: The client type to yield. One of TestClient, NemoClient, AsyncNemoClient,
+                     AsyncNeMoHelix, NeMoHelix, EntityClient, or ClientContext. Defaults to NeMoHelix.
         dependency_overrides: Custom dependency overrides dict. If get_entity_client
                       is not in dependency_overrides, an EntityClient will be created.
         service_configs: Optional map of service class → config. Overrides defaults
@@ -539,6 +544,7 @@ def create_test_client(
                 max_retries=0,
             )
             _install_asgi_files_resource(sdk)
+            sync_client = NemoClient(base_url="http://testserver", http_client=sdk_http_client, workspace=workspace)
 
             for svc in services_to_start:
                 svc.dependency_provider._sync_http_client = sdk_http_client
@@ -661,6 +667,8 @@ def create_test_client(
 
             if selected_client_type is TestClient:
                 yield client  # ty: ignore[invalid-yield]
+            elif selected_client_type is NemoClient:
+                yield sync_client  # ty: ignore[invalid-yield]
             elif selected_client_type is AsyncNemoClient:
                 yield async_client  # ty: ignore[invalid-yield]
             elif selected_client_type is AsyncNeMoHelix:
@@ -671,6 +679,7 @@ def create_test_client(
                 yield ClientContext(
                     sdk=sdk,
                     async_sdk=async_sdk,
+                    client=sync_client,
                     async_client=async_client,
                     entity_client=entity_client,
                     test_client=client,

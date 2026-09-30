@@ -59,6 +59,7 @@ export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const JOBS_ENABLED = featureFlags.jobsEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
 export const MODEL_COMPARE_ENABLED = featureFlags.modelCompareEnabled !== false;
+export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
 export const OPTIMIZER_ENABLED = featureFlags.optimizerEnabled !== false;
 export const PLUGINS_ENABLED = featureFlags.pluginsEnabled !== false;
@@ -80,6 +81,7 @@ export const isLocalDevelopmentEnv = getEnvVar('VITE_IS_LOC_ENV')?.toLowerCase()
 // Vars used by the oidc provider
 export const AUTH_CLIENT_ID = getEnvVar('VITE_AUTH_CLIENT_ID');
 export const AUTH_AUTHORITY = getEnvVar('VITE_AUTH_AUTHORITY');
+export const AUTH_BEARER_TOKEN_SOURCE = getEnvVar('VITE_AUTH_BEARER_TOKEN_SOURCE');
 export const AUTH_SCOPES = getEnvVar('VITE_AUTH_SCOPES');
 export const AUTH_SCOPE_PREFIX = getEnvVar('VITE_AUTH_SCOPE_PREFIX');
 

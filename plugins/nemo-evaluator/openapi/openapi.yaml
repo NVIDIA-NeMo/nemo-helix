@@ -2554,9 +2554,14 @@ components:
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
+            minItems: 1
+          - items:
+              $ref: '#/components/schemas/TaskRef'
+            type: array
+            minItems: 1
           title: Tasks
-          description: 'Tasks to evaluate: an inline list (at least one) or a reference
-            to a stored taskset.'
+          description: 'Tasks to evaluate: a nonempty list containing only inline
+            tasks or only task references, or a stored taskset reference.'
       additionalProperties: false
       type: object
       required:
@@ -2565,14 +2570,11 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` is either an inline list of tasks (whose metrics may be inline or
-        references) or a
+        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
+        reference.
 
-        :class:`TasksetRef` naming a stored taskset whose member tasks are loaded
-        and expanded during spec
-
-        resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks``
-        list.'
+        Stored definitions and scoring expand at submission; Harbor archives are prepared
+        on the worker.'
     AgentEvalResult:
       properties:
         id:
@@ -2722,18 +2724,18 @@ components:
             result bundle. Omit to publish nowhere.
         tasks:
           items:
-            $ref: '#/components/schemas/AgentEvalTaskSpec'
+            $ref: '#/components/schemas/ResolvedTask'
           type: array
           minItems: 1
           title: Tasks
-          description: Tasks to evaluate; at least one is required.
+          description: Resolved task snapshots in execution order. Only archive materialization
+            remains on the worker.
       additionalProperties: false
       type: object
       required:
       - tasks
       title: AgentEvalSpec
-      description: 'Canonical agent-evaluation spec: tasks with all metric references
-        resolved to inline.'
+      description: Canonical evaluation containing self-contained, resolved task snapshots.
     AgentEvalTaskInput:
       properties:
         id:
@@ -2786,56 +2788,6 @@ components:
       title: AgentEvalTaskInput
       description: 'Submitter-facing task DTO: metrics may be inline bundles or stored-metric
         references.'
-    AgentEvalTaskSpec:
-      properties:
-        id:
-          type: string
-          title: Id
-          description: Stable task identifier, unique within the task collection.
-        intent:
-          type: string
-          title: Intent
-          description: Human-readable description of the desired agent behavior.
-        inputs:
-          allOf:
-          - $ref: '#/components/schemas/TaskInputs'
-          description: Inputs supplied to the task.
-        reference:
-          additionalProperties: true
-          type: object
-          title: Reference
-          description: Grader-only ground truth (held-out tests, expected outputs,
-            rubric data). Surfaced to metrics but never seeded into the agent's workspace
-            or shown to the agent, so a metric can grade against artifacts the agent
-            cannot influence.
-        views:
-          additionalProperties:
-            $ref: '#/components/schemas/SemanticView'
-          type: object
-          title: Views
-          description: Optional reporting views mapping this task's metric outputs
-            into named semantic scores.
-        metadata:
-          items:
-            $ref: '#/components/schemas/MetadataItem'
-          type: array
-          title: Metadata
-          description: Key/value annotations for the task.
-        metrics:
-          items:
-            $ref: '#/components/schemas/MetricInline'
-          type: array
-          title: Metrics
-          description: Inline metric bundles that score this task; reconstructed to
-            runtime metrics at run time.
-      additionalProperties: false
-      type: object
-      required:
-      - id
-      - intent
-      title: AgentEvalTaskSpec
-      description: 'Canonical task DTO: metrics fully resolved to inline bundles,
-        reconstructed at run time.'
     AgentEvalTrial:
       properties:
         id:
@@ -3913,16 +3865,6 @@ components:
           allOf:
           - $ref: '#/components/schemas/TaskInputs'
           description: Inputs supplied to the task.
-        metrics:
-          items:
-            anyOf:
-            - $ref: '#/components/schemas/MetricInline'
-            - $ref: '#/components/schemas/MetricRef'
-          type: array
-          title: Metrics
-          description: "Metrics that score this task \u2014 stored-metric references,\
-            \ and inline bundles on create (normalized to derived stored metrics before\
-            \ the task is persisted)."
         reference:
           additionalProperties: true
           type: object
@@ -3939,6 +3881,16 @@ components:
           title: Views
           description: Optional reporting views mapping metric outputs into named
             semantic scores.
+        metrics:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/MetricInline'
+            - $ref: '#/components/schemas/MetricRef'
+          type: array
+          title: Metrics
+          description: "Metrics that score this task \u2014 stored-metric references,\
+            \ and inline bundles on create (normalized to derived stored metrics before\
+            \ the task is persisted)."
       additionalProperties: false
       type: object
       required:
@@ -4313,6 +4265,45 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HarborArchiveSource:
+      properties:
+        kind:
+          type: string
+          const: fileset-archive
+          title: Kind
+          default: fileset-archive
+        fileset_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Fileset Ref
+          description: "Exact qualified archive object reference: workspace/fileset#relative/path.\
+            \ Workspace, fileset name, and path must each be NFC-normalized and at\
+            \ most 4096 UTF-8 bytes. Path segments must be nonempty, must not be '.'\
+            \ or '..', and must not end in a space or dot. Control characters (U+0000\u2013\
+            U+001F and U+007F), backslashes, %, ?, #, and : are forbidden within each\
+            \ component. Absolute paths, a//b, a/../b, and trailing slashes are rejected.\
+            \ These canonicalization constraints are enforced by the server in addition\
+            \ to the pattern."
+          examples:
+          - default/harbor-tasks#suite/task/task_archive
+        files_hash:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Files Hash
+          description: SHA-256 of the exact compressed archive bytes.
+        archive_format:
+          type: string
+          const: tar-gzip-v1
+          title: Archive Format
+          default: tar-gzip-v1
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_ref
+      - files_hash
+      title: HarborArchiveSource
     HarborRunnerTarget:
       properties:
         kind:
@@ -4417,54 +4408,77 @@ components:
           type: string
           const: harbor
           title: Kind
-          description: Task kind discriminator.
-        archive_ref:
+        native_task_id:
           type: string
-          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
-          title: Archive Ref
-          description: 'Files reference to the task''s packaged directory (format:
-            workspace/fileset#path).'
-        archive_digest:
-          type: string
-          maxLength: 64
-          minLength: 64
-          pattern: ^[0-9a-f]{64}$
-          title: Archive Digest
-          description: "Content hash Harbor computed over the task directory. This\
-            \ is the authoritative identity of a Harbor task's content \u2014 every\
-            \ file, including task.toml."
+          minLength: 1
+          title: Native Task Id
+          description: Native task identity, independently verified from the archive.
+        source:
+          $ref: '#/components/schemas/HarborArchiveSource'
+        harbor_hash:
+          $ref: '#/components/schemas/HarborTaskHash'
         instruction:
           title: Instruction
-          description: The task's instruction text, when it has one (multi-step tasks
-            may not).
           type: string
         config:
           additionalProperties: true
           type: object
           title: Config
-          description: "Harbor's own task configuration (verifier, agent, environment,\
-            \ steps), as published. A queryable projection of task.toml \u2014 inspect\
-            \ a task's verifier without downloading the archive. Opaque here: Harbor\
-            \ owns this schema."
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Reporting views over the primary Harbor reward and declared
+            additional metric outputs.
+        metrics:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/MetricInline'
+            - $ref: '#/components/schemas/MetricRef'
+          type: array
+          title: Metrics
+          description: Additional metrics, appended to the mandatory HarborRewardMetric.
+            Inline bundles are normalized to stored metric references on registration.
+            Do not include HarborRewardMetric here.
       additionalProperties: false
       type: object
       required:
       - kind
-      - archive_ref
-      - archive_digest
+      - native_task_id
+      - source
+      - harbor_hash
       title: HarborTaskDefinition
-      description: "A reference to the task's packaged files, plus a projection of\
-        \ Harbor's own config.\n\nHarbor identifies a task by a *directory* \u2014\
-        \ ``task.toml``, an instruction, an environment \u2014 so\nwhat is stored\
-        \ is a reference to that directory's archive in the Files service, not the\
-        \ files\nthemselves. One fileset per task, so a task shared by several tasksets\
-        \ is stored once. The\narchive is materialized back into ``<dir>/<task-name>/``\
-        \ at run time, which is the layout\nHarbor's own discovery expects.\n\nWhich\
-        \ agent runs the task is *not* stored here. That comes from the run's target\n\
-        (``HarborRunnerTarget``), so the same stored task can be evaluated against\
-        \ different agents.\nHarbor's own ``[agent]`` block \u2014 carried inside\
-        \ ``config`` \u2014 configures how the agent *phase*\nruns (timeout, user,\
-        \ network policy), not which agent it is."
+    HarborTaskHash:
+      properties:
+        digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Digest
+        method:
+          type: string
+          const: harbor-packager-content-v1
+          title: Method
+          default: harbor-packager-content-v1
+        harbor_version:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Harbor Version
+        source_commit:
+          title: Source Commit
+          type: string
+          maxLength: 128
+      additionalProperties: false
+      type: object
+      required:
+      - digest
+      - harbor_version
+      title: HarborTaskHash
+      description: Producer fingerprint for future use; never an integrity or execution
+        gate.
     HelixJobListResultResponse:
       properties:
         data:
@@ -5470,6 +5484,141 @@ components:
       type: object
       title: ReasoningParams
       description: Custom settings that control the model's reasoning behavior.
+    ResolvedEvaluatorTaskDefinition:
+      properties:
+        kind:
+          type: string
+          const: evaluator
+          title: Kind
+          description: Task kind discriminator.
+        intent:
+          type: string
+          title: Intent
+          description: Human-readable description of the desired agent behavior.
+        inputs:
+          allOf:
+          - $ref: '#/components/schemas/TaskInputs'
+          description: Inputs supplied to the task.
+        reference:
+          additionalProperties: true
+          type: object
+          title: Reference
+          description: 'Grader-only ground truth (held-out tests, expected outputs,
+            rubric data). Surfaced to metrics but never seeded into the agent''s workspace
+            or shown to the agent, so a metric can grade against artifacts the agent
+            cannot influence. Held out from the *agent*, not from the API: anyone
+            who can read the task can read this.'
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Optional reporting views mapping metric outputs into named
+            semantic scores.
+        provenance:
+          $ref: '#/components/schemas/TaskProvenance'
+        metrics:
+          items:
+            $ref: '#/components/schemas/MetricInline'
+          type: array
+          title: Metrics
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - intent
+      title: ResolvedEvaluatorTaskDefinition
+      description: Job snapshot with expanded metrics and the original stored revision,
+        if any.
+    ResolvedHarborTaskDefinition:
+      properties:
+        kind:
+          type: string
+          const: harbor
+          title: Kind
+        native_task_id:
+          type: string
+          minLength: 1
+          title: Native Task Id
+          description: Native task identity, independently verified from the archive.
+        source:
+          $ref: '#/components/schemas/HarborArchiveSource'
+        harbor_hash:
+          $ref: '#/components/schemas/HarborTaskHash'
+        instruction:
+          title: Instruction
+          type: string
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Reporting views over the primary Harbor reward and declared
+            additional metric outputs.
+        provenance:
+          $ref: '#/components/schemas/TaskProvenance'
+        metrics:
+          items:
+            $ref: '#/components/schemas/MetricInline'
+          type: array
+          title: Metrics
+          description: Resolved additional metrics, appended to the mandatory HarborRewardMetric.
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - native_task_id
+      - source
+      - harbor_hash
+      - provenance
+      title: ResolvedHarborTaskDefinition
+      description: Job snapshot with expanded metrics and the original stored revision.
+    ResolvedTask:
+      properties:
+        id:
+          type: string
+          title: Id
+        spec:
+          oneOf:
+          - $ref: '#/components/schemas/ResolvedEvaluatorTaskDefinition'
+          - $ref: '#/components/schemas/ResolvedHarborTaskDefinition'
+          title: Spec
+          discriminator:
+            propertyName: kind
+            mapping:
+              evaluator: '#/components/schemas/ResolvedEvaluatorTaskDefinition'
+              harbor: '#/components/schemas/ResolvedHarborTaskDefinition'
+        metadata:
+          items:
+            $ref: '#/components/schemas/MetadataItem'
+          type: array
+          title: Metadata
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - spec
+      title: ResolvedTask
+      description: 'A task captured in the canonical specification of a submitted
+        job.
+
+
+        This submission-time snapshot is distinct from a persisted task revision:
+        it contains the
+
+        runtime identity, metadata, and execution-ready definition with metric references
+        expanded.
+
+        For a stored task, ``spec.provenance`` identifies the immutable revision from
+        which the
+
+        snapshot was derived. Expanding metric/model references does not rewrite that
+
+        provenance digest; an inline task has no stored revision or provenance.'
     ResultFilter:
       additionalProperties: false
       description: Traits shared by both result collections (used directly for agent-eval
@@ -6329,6 +6478,25 @@ components:
 
         Additional task- or runtime-specific inputs, such as `gym_row` for Gym tasks,
         are also accepted fields.'
+    TaskProvenance:
+      properties:
+        entity_name:
+          type: string
+          title: Entity Name
+        revision_digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Revision Digest
+      additionalProperties: false
+      type: object
+      required:
+      - entity_name
+      - revision_digest
+      title: TaskProvenance
+      description: The digest identifies the published revision, not its expanded
+        job snapshot.
     TaskRef:
       type: string
       pattern: ^[\w\-.]+(/[\w\-.]+)?(#[\w\-.]+)?$
@@ -6408,8 +6576,8 @@ components:
           description: References to the member tasks (set semantics; duplicates rejected).
         files_ref:
           title: Files Ref
-          description: "Files reference to the taskset's own files \u2014 shared by\
-            \ its members, owned by none."
+          description: Reference to taskset-level files shared across member tasks,
+            such as a common scoring script.
           type: string
           pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
         metadata:
@@ -6479,6 +6647,11 @@ components:
       title: TasksetFilter
       type: object
     TasksetInput:
+      oneOf:
+      - required:
+        - tasks
+      - required:
+        - task_ids
       properties:
         description:
           title: Description
@@ -6495,6 +6668,14 @@ components:
             change underneath you when a member republishes. Because membership is
             a set, the stored order is canonical rather than the submitted order:
             reordering the same members is not a content change and publishes no revision.'
+        task_ids:
+          items:
+            type: string
+            minLength: 1
+          type: array
+          title: Task Ids
+          description: Stored task record IDs; mutually exclusive with tasks. Resolved
+            on write.
         files_ref:
           title: Files Ref
           description: "Files reference to the taskset's own files \u2014 shared by\

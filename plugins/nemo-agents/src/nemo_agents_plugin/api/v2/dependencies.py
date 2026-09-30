@@ -8,16 +8,15 @@ a single location.
 """
 
 from fastapi import Depends
-from nemo_agents_plugin.spec_revision import files_client_for
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 
 
-def get_files_client(sdk: AsyncNeMoHelix = Depends(get_sdk_client)) -> AsyncFilesClient | None:
-    """Provide a Files service client sharing the request's SDK transport, or None."""
-    return files_client_for(sdk)
+def get_files_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> AsyncFilesClient:
+    """Provide a Files service client sharing the request's platform client transport."""
+    return AsyncFilesClient.from_client(client)
 
 
 __all__ = ["get_entity_client", "get_files_client"]

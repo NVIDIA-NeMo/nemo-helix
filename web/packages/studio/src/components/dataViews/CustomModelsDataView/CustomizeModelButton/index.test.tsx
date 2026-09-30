@@ -70,7 +70,7 @@ describe('CustomizeModelButton', () => {
       renderRoute();
       await user.click(screen.getByRole('button', { name: 'Customize a Model' }));
       expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
-        `/workspaces/${workspace1.workspace}/customizations/fine-tuned/new`
+        `/workspaces/${workspace1.workspace}/fine-tune/new`
       );
     });
 
@@ -110,7 +110,7 @@ describe('CustomizeModelButton', () => {
       renderRoute({ model: testModel });
       await user.click(screen.getByRole('button', { name: /Customize this Model/ }));
       expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
-        `/workspaces/${workspace1.workspace}/customizations/fine-tuned/new`
+        `/workspaces/${workspace1.workspace}/fine-tune/new`
       );
     });
   });

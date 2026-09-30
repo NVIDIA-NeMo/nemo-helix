@@ -72,9 +72,11 @@ version = "0.0.0"
 # Insights analyst plugin convenience group.
 insights = ["nemo-insights-plugin"]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
-# The scaled-evals plugin stays out of `enabled-plugins` so a platform install does not
-# pick it up. CI still has to see it, so the lint and pytest entry points ask for this
-# group by name; without it neither the plugin nor psycopg is importable there.
+# The scaled-evals plugin is opt-in: it is a path dependency rather than a workspace
+# member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
+# external config (e.g. `credentials_encryption_key`) and would otherwise fail readiness.
+# CI still has to see it, so the lint and pytest entry points ask for this group by name;
+# without it neither the plugin nor psycopg is importable there.
 scaled-evals = [
   "nemo-scaled-evals-plugin",
 ]
@@ -240,11 +242,12 @@ agents-deepagents-e2e-services = [
   "nemo-agents-plugin[deepagents]",
 ]
 
-# CPU task dependencies (for nhx-cpu-tasks container)
+# CPU task dependencies (for nhx-tasks container)
 # Services that have CPU-only batch tasks
 cpu-tasks = [
   { include-group = "nhx-base" },
   { include-group = "nhx-task-runtime" },
+  "nemo-agent-optimization-plugin",
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[all]",
@@ -361,7 +364,7 @@ override-dependencies = [
   "jaraco-context>=6.1.0",    # High OOS – nhx-auditor-tasks + customizer
   "joserfc>=1.7.2",
   "pyasn1>=0.6.4",            # High OOS – nhx-auditor-tasks + customizer
-  "setuptools>=78.1.1",       # High OOS – nhx-cpu-tasks/gpu-tasks/customizer-tasks
+  "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
   "urllib3>=2.7.0",           # High OOS – nhx-auditor-tasks + customizer
   "wheel>=0.46.2",            # High OOS – widespread
   "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks
@@ -424,19 +427,18 @@ nemo-helix-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
-nemo-scaled-evals-plugin = { workspace = true }
+nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-auditor-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
 nemo-switchyard-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
-nemo-agents-example-calculator = { workspace = true }
-nemo-agents-example-email-phishing = { workspace = true }
-nemo-agents-example-email-security = { workspace = true }
+nemo-agent-config-example-email-security-triage = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
 nemo-automodel-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nhx-automodel = { workspace = true }
@@ -487,20 +489,18 @@ members = [
   "packages/models",
   "plugins/nemo-guardrails",
   "plugins/nemo-evaluator",
-  "plugins/_temporary-scaled-evals",
   "plugins/nemo-auditor",
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
-  "plugins/nemo-agents/examples/calculator-agent",
-  "plugins/nemo-agents/examples/email-phishing-analyzer",
-  "plugins/nemo-agents/examples/email-security-analyst",
   "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent",
+  "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage",
   "plugins/nemo-customizer",
   "plugins/nemo-automodel",
   "plugins/nemo-optimization",
+  "plugins/nemo-agent-optimization",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "services/automodel",
@@ -618,6 +618,8 @@ extra-paths = [
   "plugins/nemo-guardrails/src",
   # So ``integration.*`` and ``from .utils import`` resolve in plugin tests (PEP 420).
   "plugins/nemo-guardrails/tests",
+  # agent-hardener is a virtual workspace member (not installed by default); add its src so ty resolves it.
+  "plugins/nemo-agent-hardener/src",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
   # nemo-evaluator plugin is not a workspace member; add its src so ty can

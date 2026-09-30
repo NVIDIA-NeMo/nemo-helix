@@ -240,7 +240,7 @@ class StableRailsConfig:
       override ``engine``/``parameters`` (ex. a custom ``base_url``) while
       leaving the model name to the request body.
     - Non-main ``base_url`` values are resolved against the IGW route table.
-    - Static ``default_headers`` are preserved; platform service headers are
+    - Static ``default_headers`` are preserved; Helix service headers are
       added by the header-aware NIM client at call time.
 
     ``content_hash`` is sha256 of canonical JSON of ``rails``. Equal hashes

@@ -209,7 +209,7 @@ export const GrpoParametersSection = () => {
               </AccordionTrigger>
               <AccordionContent>
                 <Stack gap="density-md" className="pt-density-md">
-                  <Text kind="body/regular/sm" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/sm">
                     Rescaling maps rewards onto a new range, so a wrong answer can be penalised
                     rather than merely less rewarded. Leave all four blank for no rescaling; set any
                     one and the rest fall back to the shown defaults.
@@ -263,7 +263,7 @@ export const GrpoParametersSection = () => {
                     disabled={disabled}
                   />
                   <Divider />
-                  <Text kind="body/regular/sm" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/sm">
                     Shaping softens the penalty for responses cut off at the length limit instead of
                     scoring them a flat zero.
                   </Text>
@@ -642,7 +642,7 @@ export const GrpoParametersSection = () => {
                     value={opt.value}
                     label={<Text kind="body/bold/md">{opt.title}</Text>}
                     description={
-                      <Text kind="body/regular/md" color="secondary">
+                      <Text className="text-secondary" kind="body/regular/md">
                         {opt.description}
                       </Text>
                     }

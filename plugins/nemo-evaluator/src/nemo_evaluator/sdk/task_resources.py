@@ -3,17 +3,30 @@
 
 """SDK resources for managing stored agent-eval tasks (``client.evaluator.tasks``).
 
-Thin client over the evaluator service's ``/tasks`` create/get/list/delete API. A task is sent as a
+Client wrappers over the evaluator service's ``/tasks`` create/get/list/delete API. A task is sent as a
 :class:`TaskInput` (its metrics inline and/or as references to stored metrics) and returned as the
 :class:`Task` DTO; the service owns persistence in the entity store.
+
+Local sources are prepared and verified before the resource writes a task entity.
 """
 
 from __future__ import annotations
 
+import re
+from collections.abc import Awaitable, Callable
+from typing import Any, overload
+
+from nemo_evaluator.api.fields import TaskRef
 from nemo_evaluator.api.schemas import Revision, Task, TaskInput
+from nemo_evaluator.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evaluator.sdk.query_params import list_params, project_params, revision_selector
+from nemo_evaluator.sdk.task_preparation import TaskPublicationError, prepare_task, prepare_task_async
+from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackager
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.evaluator.types import CreateTaskRequest, ReplaceTaskRequest
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.schema import Page
 
 
@@ -23,32 +36,207 @@ class EvaluatorTasksResource:
     def __init__(self, client: EvaluatorClient) -> None:
         self._client = client
 
-    def create(self, name: str, *, task: TaskInput, project: str | None = None, workspace: str | None = None) -> Task:
-        """Store a new task (addressed by workspace/name)."""
-        response = self._client.create_task(
-            name=name,
+    def _write(
+        self,
+        name: str,
+        *,
+        task: TaskInput | AgentEvalTask,
+        project: str | None,
+        workspace: str | None,
+        metric_bundle_packager: MetricBundlePackager | None,
+        fileset_ref: str | None,
+        path_prefix: str | None,
+        send: Callable[..., Any],
+        request: type[CreateTaskRequest] | type[ReplaceTaskRequest],
+    ) -> Task:
+        """Shared body of ``create`` and ``replace``; ``send`` and ``request`` select the endpoint."""
+        workspace = self._client.resolve_workspace(workspace)
+        if len(name) > MAX_NAME_LENGTH or re.fullmatch(NAME_PATTERN, name) is None:
+            raise ValueError("Invalid task registration name")
+        TaskRef(f"{workspace}/{name}")
+        needs_preparation = isinstance(task, AgentEvalTask)
+        if needs_preparation:
+            prepared = prepare_task(
+                task,
+                files_client=FilesClient.from_client(self._client),
+                workspace=workspace,
+                fileset_ref=fileset_ref,
+                path_prefix=path_prefix,
+                metric_bundle_packager=metric_bundle_packager,
+            )
+        else:
+            if any(value is not None for value in (fileset_ref, path_prefix, metric_bundle_packager)):
+                raise ValueError("Preparation options cannot be used with TaskInput")
+            prepared = task
+        try:
+            response = send(
+                name=name,
+                workspace=workspace,
+                body=request(root=prepared.model_dump(mode="json")),
+                query_params=project_params(project),
+            )
+            return Task.model_validate(response.data().model_dump(mode="json"))
+        except Exception as exc:
+            if needs_preparation:
+                raise TaskPublicationError(prepared) from exc
+            raise
+
+    @overload
+    def create(
+        self,
+        name: str,
+        *,
+        task: HarborAgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task: ...
+
+    @overload
+    def create(
+        self,
+        name: str,
+        *,
+        task: AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> Task: ...
+
+    @overload
+    def create(
+        self, name: str, *, task: TaskInput, project: str | None = None, workspace: str | None = None
+    ) -> Task: ...
+
+    def create(
+        self,
+        name: str,
+        *,
+        task: TaskInput | AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task:
+        """Prepare and create a task; an existing name conflicts.
+
+        Algorithm:
+            - Resolve the workspace and validate the registration name.
+            - Prepare local sources, or validate that a ready ``TaskInput`` has no preparation options.
+            - Create the entity and preserve prepared input in ``TaskPublicationError`` if registration fails.
+        """
+        return self._write(
+            name,
+            task=task,
+            project=project,
             workspace=workspace,
-            body=CreateTaskRequest(root=task.model_dump(mode="json")),
-            query_params=project_params(project),
+            metric_bundle_packager=metric_bundle_packager,
+            fileset_ref=fileset_ref,
+            path_prefix=path_prefix,
+            send=self._client.create_task,
+            request=CreateTaskRequest,
         )
-        return Task.model_validate(response.data().model_dump(mode="json"))
 
-    def replace(self, name: str, *, task: TaskInput, project: str | None = None, workspace: str | None = None) -> Task:
-        """Publish a revision of a task, creating it if absent.
+    @overload
+    def replace(
+        self,
+        name: str,
+        *,
+        task: HarborAgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task: ...
 
-        Upsert, so a publisher needs no existence check. Submitting content identical to the current
-        revision publishes nothing and returns the task unchanged.
+    @overload
+    def replace(
+        self,
+        name: str,
+        *,
+        task: AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> Task: ...
 
-        The response body is the same either way, so this does not report whether a revision was
-        cut — the server signals that with 201 vs 200, which is discarded here. Compare the returned
-        ``revision`` against a prior read if you need to know."""
-        response = self._client.replace_task(
-            name=name,
+    @overload
+    def replace(
+        self, name: str, *, task: TaskInput, project: str | None = None, workspace: str | None = None
+    ) -> Task: ...
+
+    def replace(
+        self,
+        name: str,
+        *,
+        task: TaskInput | AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task:
+        """Prepare and replace a task, creating it when absent.
+
+        Algorithm:
+            - Resolve the workspace and validate the registration name.
+            - Prepare local sources, or validate that a ready ``TaskInput`` has no preparation options.
+            - Upsert the entity and preserve prepared input in ``TaskPublicationError`` if registration fails.
+        """
+        return self._write(
+            name,
+            task=task,
+            project=project,
             workspace=workspace,
-            body=ReplaceTaskRequest(root=task.model_dump(mode="json")),
-            query_params=project_params(project),
+            metric_bundle_packager=metric_bundle_packager,
+            fileset_ref=fileset_ref,
+            path_prefix=path_prefix,
+            send=self._client.replace_task,
+            request=ReplaceTaskRequest,
         )
-        return Task.model_validate(response.data().model_dump(mode="json"))
+
+    @overload
+    def prepare(
+        self,
+        task: HarborAgentEvalTask,
+        *,
+        workspace: str | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> TaskInput: ...
+
+    @overload
+    def prepare(
+        self,
+        task: AgentEvalTask,
+        *,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> TaskInput: ...
+
+    def prepare(
+        self,
+        task: AgentEvalTask,
+        *,
+        workspace: str | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> TaskInput:
+        """Prepare scoring and upload/verify Harbor content without creating entities."""
+        return prepare_task(
+            task,
+            files_client=FilesClient.from_client(self._client),
+            workspace=self._client.resolve_workspace(workspace),
+            fileset_ref=fileset_ref,
+            path_prefix=path_prefix,
+            metric_bundle_packager=metric_bundle_packager,
+        )
 
     def list_revisions(
         self, name: str, *, page: int = 1, page_size: int = 100, workspace: str | None = None
@@ -125,36 +313,207 @@ class AsyncEvaluatorTasksResource:
     def __init__(self, client: AsyncEvaluatorClient) -> None:
         self._client = client
 
+    async def _write(
+        self,
+        name: str,
+        *,
+        task: TaskInput | AgentEvalTask,
+        project: str | None,
+        workspace: str | None,
+        metric_bundle_packager: MetricBundlePackager | None,
+        fileset_ref: str | None,
+        path_prefix: str | None,
+        send: Callable[..., Awaitable[Any]],
+        request: type[CreateTaskRequest] | type[ReplaceTaskRequest],
+    ) -> Task:
+        """Shared body of ``create`` and ``replace``; ``send`` and ``request`` select the endpoint."""
+        workspace = self._client.resolve_workspace(workspace)
+        if len(name) > MAX_NAME_LENGTH or re.fullmatch(NAME_PATTERN, name) is None:
+            raise ValueError("Invalid task registration name")
+        TaskRef(f"{workspace}/{name}")
+        needs_preparation = isinstance(task, AgentEvalTask)
+        if needs_preparation:
+            prepared = await prepare_task_async(
+                task,
+                files_client=AsyncFilesClient.from_client(self._client),
+                workspace=workspace,
+                fileset_ref=fileset_ref,
+                path_prefix=path_prefix,
+                metric_bundle_packager=metric_bundle_packager,
+            )
+        else:
+            if any(value is not None for value in (fileset_ref, path_prefix, metric_bundle_packager)):
+                raise ValueError("Preparation options cannot be used with TaskInput")
+            prepared = task
+        try:
+            response = await send(
+                name=name,
+                workspace=workspace,
+                body=request(root=prepared.model_dump(mode="json")),
+                query_params=project_params(project),
+            )
+            return Task.model_validate(response.data().model_dump(mode="json"))
+        except Exception as exc:
+            if needs_preparation:
+                raise TaskPublicationError(prepared) from exc
+            raise
+
+    @overload
+    async def create(
+        self,
+        name: str,
+        *,
+        task: HarborAgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task: ...
+
+    @overload
+    async def create(
+        self,
+        name: str,
+        *,
+        task: AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> Task: ...
+
+    @overload
     async def create(
         self, name: str, *, task: TaskInput, project: str | None = None, workspace: str | None = None
-    ) -> Task:
-        """Store a new task (addressed by workspace/name)."""
-        response = await self._client.create_task(
-            name=name,
-            workspace=workspace,
-            body=CreateTaskRequest(root=task.model_dump(mode="json")),
-            query_params=project_params(project),
-        )
-        return Task.model_validate(response.data().model_dump(mode="json"))
+    ) -> Task: ...
 
+    async def create(
+        self,
+        name: str,
+        *,
+        task: TaskInput | AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task:
+        """Asynchronously prepare and create a task; an existing name conflicts.
+
+        Algorithm:
+            - Resolve the workspace and validate the registration name.
+            - Prepare local sources asynchronously, or reject preparation options for a ready ``TaskInput``.
+            - Create the entity and preserve prepared input in ``TaskPublicationError`` if registration fails.
+        """
+        return await self._write(
+            name,
+            task=task,
+            project=project,
+            workspace=workspace,
+            metric_bundle_packager=metric_bundle_packager,
+            fileset_ref=fileset_ref,
+            path_prefix=path_prefix,
+            send=self._client.create_task,
+            request=CreateTaskRequest,
+        )
+
+    @overload
+    async def replace(
+        self,
+        name: str,
+        *,
+        task: HarborAgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+    ) -> Task: ...
+
+    @overload
+    async def replace(
+        self,
+        name: str,
+        *,
+        task: AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> Task: ...
+
+    @overload
     async def replace(
         self, name: str, *, task: TaskInput, project: str | None = None, workspace: str | None = None
+    ) -> Task: ...
+
+    async def replace(
+        self,
+        name: str,
+        *,
+        task: TaskInput | AgentEvalTask,
+        project: str | None = None,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
     ) -> Task:
-        """Publish a revision of a task, creating it if absent.
+        """Asynchronously prepare and replace a task, creating it when absent.
 
-        Upsert, so a publisher needs no existence check. Submitting content identical to the current
-        revision publishes nothing and returns the task unchanged.
-
-        The response body is the same either way, so this does not report whether a revision was
-        cut — the server signals that with 201 vs 200, which is discarded here. Compare the returned
-        ``revision`` against a prior read if you need to know."""
-        response = await self._client.replace_task(
-            name=name,
+        Algorithm:
+            - Resolve the workspace and validate the registration name.
+            - Prepare local sources asynchronously, or reject preparation options for a ready ``TaskInput``.
+            - Upsert the entity and preserve prepared input in ``TaskPublicationError`` if registration fails.
+        """
+        return await self._write(
+            name,
+            task=task,
+            project=project,
             workspace=workspace,
-            body=ReplaceTaskRequest(root=task.model_dump(mode="json")),
-            query_params=project_params(project),
+            metric_bundle_packager=metric_bundle_packager,
+            fileset_ref=fileset_ref,
+            path_prefix=path_prefix,
+            send=self._client.replace_task,
+            request=ReplaceTaskRequest,
         )
-        return Task.model_validate(response.data().model_dump(mode="json"))
+
+    @overload
+    async def prepare(
+        self,
+        task: HarborAgentEvalTask,
+        *,
+        workspace: str | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> TaskInput: ...
+
+    @overload
+    async def prepare(
+        self,
+        task: AgentEvalTask,
+        *,
+        workspace: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> TaskInput: ...
+
+    async def prepare(
+        self,
+        task: AgentEvalTask,
+        *,
+        workspace: str | None = None,
+        fileset_ref: str | None = None,
+        path_prefix: str | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> TaskInput:
+        """Prepare scoring and upload/verify Harbor content without creating entities."""
+        return await prepare_task_async(
+            task,
+            files_client=AsyncFilesClient.from_client(self._client),
+            workspace=self._client.resolve_workspace(workspace),
+            fileset_ref=fileset_ref,
+            path_prefix=path_prefix,
+            metric_bundle_packager=metric_bundle_packager,
+        )
 
     async def list_revisions(
         self, name: str, *, page: int = 1, page_size: int = 100, workspace: str | None = None

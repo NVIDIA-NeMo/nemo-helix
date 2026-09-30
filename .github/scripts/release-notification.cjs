@@ -39,6 +39,16 @@ async function sendReleaseNotification({ env, fetchImpl }) {
     `Commit: <${env.COMMIT_URL}|${env.SOURCE_SHA.slice(0, 7)}>`,
   ];
 
+  if (published && releaseType === "nightly") {
+    const nightlyInstanceUrl = env.NIGHTLY_INSTANCE_URL?.trim();
+    if (!nightlyInstanceUrl) {
+      throw new Error(
+        "NIGHTLY_INSTANCE_URL secret is required for nightly notifications",
+      );
+    }
+    lines.push(`Nightly instance: <${nightlyInstanceUrl}>`);
+  }
+
   if (published) {
     if (hasPublishedArtifacts) {
       lines.push("", "*Artifacts published:*");
@@ -57,7 +67,7 @@ async function sendReleaseNotification({ env, fetchImpl }) {
           releaseType === "nightly"
             ? `${wheelIndex}/${wheel.package}/`
             : `${wheelIndex.replace(/\/simple$/, "/project")}/${wheel.package}/${env.WHEEL_VERSION}/`;
-        lines.push(`- <${wheelUrl}|${wheel.package}: ${env.WHEEL_VERSION}>`);
+        lines.push(`• <${wheelUrl}|${wheel.package}: ${env.WHEEL_VERSION}>`);
       }
     }
     if (containerIds.length > 0) {
@@ -67,7 +77,7 @@ async function sendReleaseNotification({ env, fetchImpl }) {
           releaseType === "stable"
             ? `<${env.NGC_CATALOG_BASE}/containers/${containerId}|${containerId}>`
             : containerId;
-        lines.push(`- ${container}: ${env.RELEASE_LABEL}`);
+        lines.push(`• ${container}: ${env.RELEASE_LABEL}`);
       }
     }
     if (env.INCLUDE_HELM === "true") {
@@ -76,7 +86,7 @@ async function sendReleaseNotification({ env, fetchImpl }) {
           ? `<${env.NGC_CATALOG_BASE}/helm-charts/nemo-helix|nemo-helix>`
           : "nemo-helix";
       lines.push("*:helm: Helm chart published:*");
-      lines.push(`- ${chart}: ${env.CHART_VERSION}`);
+      lines.push(`• ${chart}: ${env.CHART_VERSION}`);
     }
     if (stagesNightlyWheels) {
       lines.push("", "*:python: Wheel staging dispatched:*");
@@ -84,7 +94,7 @@ async function sendReleaseNotification({ env, fetchImpl }) {
         const wheel = wheelCatalog.find(
           (candidate) => candidate.id === wheelId,
         );
-        lines.push(`- ${wheel.package}: ${env.WHEEL_VERSION}`);
+        lines.push(`• ${wheel.package}: ${env.WHEEL_VERSION}`);
       }
     }
   } else {

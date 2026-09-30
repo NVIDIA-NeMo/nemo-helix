@@ -26,6 +26,7 @@ from nemo_evaluator.api.schemas import (
     TaskInput,
 )
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity
+from nemo_evaluator.harbor.materialization import verify_definition
 from nemo_evaluator.metric_refs import parse_metric_ref
 from nemo_evaluator.revisions import (
     apply_tag,
@@ -42,6 +43,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.filter_ops import FilterOperation
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page, PaginationData
@@ -134,11 +136,20 @@ class TaskEntityStoreProtocol(EntityClientProtocol[TaskEntity], EntityUpdateClie
     service depends on cannot drift from the client that satisfies it.
     """
 
+    async def get_by_id(self, entity_type: type[TaskEntity], entity_id: str) -> TaskEntity:
+        """Load a task record by its immutable entity ID."""
+        ...
+
 
 class TaskService:
     """Create/get/list/delete for persisted agent-eval task entities, exposed as the ``Task`` DTO."""
 
-    def __init__(self, entity_client: TaskEntityStoreProtocol, metric_service: _MetricService):
+    def __init__(
+        self,
+        entity_client: TaskEntityStoreProtocol,
+        metric_service: _MetricService,
+        files_client: AsyncFilesClient | None = None,
+    ):
         self.entity_client = entity_client
         #: The same client, viewed at the revision type. Python has no intersection types, so a
         #: single annotation cannot say "serves TaskEntity *and* TaskRevisionEntity" — but the
@@ -147,6 +158,7 @@ class TaskService:
             EntityClientProtocol[TaskRevisionEntity], entity_client
         )
         self.metric_service = metric_service
+        self.files_client = files_client
 
     async def _normalize_metrics(self, metrics: list[MetricRef | MetricInline], *, workspace: str) -> list[MetricRef]:
         """Resolve a task's submitted metrics to references — inline metrics are stored as derived
@@ -169,12 +181,23 @@ class TaskService:
     async def _normalize_spec(self, spec: TaskDefinition, *, workspace: str) -> TaskDefinition:
         """Narrow a submitted spec to its stored form.
 
-        Only the agent-eval variant changes: its inline metrics are offloaded to derived stored
-        metrics so a persisted task holds references only. A Harbor spec is already in stored form —
-        its archive was uploaded before the task was submitted.
+        Inline metrics are offloaded to derived stored metrics for both task kinds.
+        Harbor archives are independently verified
+        with request credentials before their projections are persisted.
         """
         if isinstance(spec, HarborTaskDefinition):
-            return spec
+            if self.files_client is None:
+                raise ValueError("Harbor registration requires an authenticated Files client")
+            native = await verify_definition(spec, self.files_client)
+            if spec.native_task_id != native.task_id:
+                raise ValueError("Harbor native_task_id does not match the verified archive")
+            return spec.model_copy(
+                update={
+                    "config": native.config,
+                    "instruction": native.instruction,
+                    "metrics": await self._normalize_metrics(spec.metrics, workspace=workspace),
+                }
+            )
         # Same model in and out — only ``metrics`` narrows, from possibly-inline to references.
         return spec.model_copy(update={"metrics": await self._normalize_metrics(spec.metrics, workspace=workspace)})
 
@@ -189,9 +212,13 @@ class TaskService:
     ) -> tuple[Task, bool]:
         """Store a new task and publish it as revision 1.
 
-        Strict create: raises ``ValueError`` if the name is taken. Returns ``(task, published)``,
-        where ``published`` is always ``True`` here — a fresh task always cuts a revision. Use
-        :meth:`replace_task` to publish a further revision of an existing task.
+        Algorithm:
+            - Normalize the submitted definition and create its mutable head record.
+            - Publish revision 1 and its requested tags.
+            - Delete the orphaned head if publication fails, then re-raise the original error.
+
+        Strict create raises ``ValueError`` if the name is taken. ``published`` is always ``True``
+        because a fresh task always creates a revision.
         """
         # Normalize once: ``_apply_content`` would offload the same inline metrics a second time.
         entity = TaskEntity(
@@ -206,7 +233,7 @@ class TaskService:
         except NemoEntityConflictError as exc:
             raise ValueError(f"Task '{workspace}/{name}' already exists") from exc
         try:
-            head, published = await self._publish(created, tags=set(task_input.tags))
+            revision, head, published = await self._publish(created, tags=set(task_input.tags))
         except Exception:
             # A head with no revision would violate the invariant every consumer relies on — that
             # `#latest` always resolves and `revision` is never 0. There is no cross-entity
@@ -222,12 +249,17 @@ class TaskService:
         logger.info(
             "Task created", extra={"workspace": sanitize_for_log(workspace), "task_name": sanitize_for_log(name)}
         )
-        return _entity_to_task(head), published
+        return _revision_to_task(head, revision), published
 
     async def replace_task(
         self, name: str, task_input: TaskInput, *, workspace: str, project: str | None = None
     ) -> tuple[Task, bool]:
         """Replace a task's content and publish the result, creating the task if absent.
+
+        Algorithm:
+            - Delegate to strict creation when no head exists.
+            - Normalize new content and publish the head and revision together.
+            - Persist non-versioned project changes when content publication is a no-op.
 
         Upsert rather than 404-on-missing so a publisher can issue one idempotent call without
         first checking existence — checking then creating is both an extra round trip and a race
@@ -251,7 +283,7 @@ class TaskService:
         # the head (pointers and content together), so a pre-write would be a second round trip
         # whose only distinct effect is a window: if publishing then failed, the head would hold
         # content no revision covers and a plain GET would serve it.
-        published_head, published = await self._publish(head, tags=set(task_input.tags))
+        revision, published_head, published = await self._publish(head, tags=set(task_input.tags))
         if not published:
             # Content matched a revision that is already tagged as requested, so publishing wrote
             # nothing. Anything outside the digest — ``project`` — still has to be persisted.
@@ -264,14 +296,37 @@ class TaskService:
                 "published": published,
             },
         )
-        return _entity_to_task(published_head), published
+        return _revision_to_task(published_head, revision), published
 
-    async def _publish(self, head: TaskEntity, *, tags: set[str]) -> tuple[TaskEntity, bool]:
+    async def _publish(self, head: TaskEntity, *, tags: set[str]) -> tuple[TaskRevisionEntity, TaskEntity, bool]:
         """Freeze the head as a revision. The returned head already carries the new pointers."""
-        _, published_head, created = await publish_revision(
+        revision, published_head, created = await publish_revision(
             self.entity_client, self.revision_client, head, TaskRevisionEntity, tags=tags
         )
-        return published_head, created
+        return revision, published_head, created
+
+    async def head_by_id(self, task_id: str) -> TaskEntity:
+        """Resolve a record identity without allowing revision children or other entity kinds."""
+        head = await self.entity_client.get_by_id(TaskEntity, task_id)
+        if head.parent is not None:
+            raise NemoEntityNotFoundError("Task not found")
+        # get_by_id converts data to the requested model; confirm its actual head identity.
+        actual = await self.entity_client.get(TaskEntity, name=head.name, workspace=head.workspace)
+        if actual.id != task_id:
+            raise NemoEntityNotFoundError("Task not found")
+        return actual
+
+    async def resolve_head_revision(self, head: TaskEntity) -> str:
+        """Return the content digest of a task head's current revision.
+
+        Args:
+            head: Stored task head whose current revision pointer will be followed.
+
+        Returns:
+            Content digest of the selected revision.
+        """
+        revision = await get_revision(self.revision_client, TaskRevisionEntity, head)
+        return revision.content_hash
 
     async def resolve_revision(self, workspace: str, name: str, fragment: str = LATEST_TAG) -> str:
         """Return the content digest of the revision a ref fragment names.

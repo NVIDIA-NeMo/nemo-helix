@@ -72,13 +72,13 @@ class TestTaskRuntimeAuthPropagation:
             client_type=ClientContext,
             workspaces=[workspace],
         ) as ctx:
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            SecretsClient.from_client(admin_client).create_secret(
                 body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(secret_value)),
                 workspace=workspace,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=creator_email,
                 roles=["Viewer"],
@@ -123,8 +123,8 @@ class TestTaskRuntimeAuthPropagation:
             client_type=ClientContext,
             workspaces=[workspace],
         ) as ctx:
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            SecretsClient.from_client(admin_client).create_secret(
                 body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("secret-value")),
                 workspace=workspace,
             )

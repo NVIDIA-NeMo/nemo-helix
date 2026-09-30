@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  encodeColumnFiltersParam,
+  FILTERS_SEARCH_PARAM,
+} from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
+import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   AGENTS_ENABLED,
   ANONYMIZER_ENABLED,
@@ -22,6 +27,7 @@ import {
   JOBS_ENABLED,
   MEMBERS_ENABLED,
   MODEL_COMPARE_ENABLED,
+  MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
   PLUGINS_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
@@ -32,7 +38,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
-import { generatePath, RouteObject } from 'react-router';
+import { createSearchParams, generatePath, RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
   if (!enabled) return [];
@@ -71,6 +77,9 @@ export const gateDataDesignerRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateAnonymizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ANONYMIZER_ENABLED, routes);
+
+export const gateModelEvaluationFormRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(MODEL_EVALUATION_FORM_ENABLED, routes);
 
 export const gateEvaluationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EVALUATOR_ENABLED, routes);
@@ -545,8 +554,15 @@ export const getFilesetFileRoute = (workspace: string, fileset: string, filePath
   });
 };
 
-export const getIntakeTracesRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.intakeTraces, { workspace });
+export const getIntakeTracesRoute = (workspace: string, options: { agentName?: string } = {}) => {
+  const path = generatePath(ROUTES.workspace.intakeTraces, { workspace });
+  if (!options.agentName) return path;
+  const search = createSearchParams({
+    [FILTERS_SEARCH_PARAM]: encodeColumnFiltersParam([
+      { id: AGENT_NAME_FILTER_ID, value: options.agentName },
+    ]),
+  });
+  return `${path}?${search}`;
 };
 
 export const getIntakeSpansRoute = (workspace: string) => {

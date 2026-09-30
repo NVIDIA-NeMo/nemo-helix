@@ -17,7 +17,7 @@ from typing import TypeVar
 
 import pytest
 from nemo_evaluator.api.schemas import LATEST_TAG, EvaluatorTaskDefinition, MetricRef, TaskInputs, TaskRef
-from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity
+from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity
 from nemo_evaluator.revisions import (
     RevisionConflictError,
     RevisionContentMismatchError,
@@ -76,6 +76,7 @@ class FakeStore:
         self._tick += 1
         entity._id = f"id-{self._next_id}"
         entity._created_at = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=self._tick)
+        entity._updated_at = entity._created_at
         self.records[key] = entity.model_copy(deep=True)
         return entity
 
@@ -107,6 +108,9 @@ class FakeStore:
             head.latest_revision = max(head.latest_revision, ordinal)
             head.tags = {**head.tags, LATEST_TAG: ordinal}
 
+    async def get_by_id(self, entity_type, entity_id):
+        raise NotImplementedError("ID lookup uses FakeEntityStore in taskset tests")
+
     async def get(self, entity_type: type[_E], name, *, workspace=None, parent=None) -> _E:
         """Hand back a *copy*, as the real client does — it rebuilds entities from an HTTP response
         and cannot share objects with its caller. Returning the stored instance would let code
@@ -125,7 +129,7 @@ class FakeStore:
         A fake that accepts every update makes correct retry logic untestable and incorrect retry
         logic look fine, so this rejects a write whose base version is stale.
         """
-        if self.before_head_update is not None and isinstance(entity, TaskEntity):
+        if self.before_head_update is not None and isinstance(entity, (TaskEntity, TasksetEntity)):
             hook, self.before_head_update = self.before_head_update, None
             await hook()
         key = self._key(type(entity), original_name or entity.name, entity.workspace, entity._parent)
@@ -807,3 +811,50 @@ async def test_an_accepted_tag_is_usable_as_a_ref_fragment() -> None:
 
     for tag in head.tags:
         TaskRef(f"{head.workspace}/{head.name}#{tag}")
+
+
+@pytest.mark.parametrize("kind", ["task", "taskset"])
+async def test_service_response_is_own_revision_during_head_race(kind):
+    """Advance the head during replacement and verify the response describes its own revision rather than the
+    newer head.
+    """
+    from unittest.mock import AsyncMock
+
+    from nemo_evaluator.api.schemas import TaskInput, TasksetInput
+    from nemo_evaluator.api.service.task_service import TaskService
+    from nemo_evaluator.api.service.taskset_service import TasksetService
+
+    store = FakeStore()
+    tasks = TaskService(store, AsyncMock())
+    if kind == "task":
+        create, replace, get = tasks.create_task, tasks.replace_task, tasks.get_task
+
+        def value(label):
+            return TaskInput(
+                spec=EvaluatorTaskDefinition(kind="evaluator", intent=label, inputs=TaskInputs(), metrics=[])
+            )
+
+        def label(result):
+            return result.spec.intent
+    else:
+        service = TasksetService(store, tasks, authorize_task_read=AsyncMock())
+        create, replace, get = service.create_taskset, service.replace_taskset, service.get_taskset
+
+        def value(label):
+            return TasksetInput(tasks=[], description=label)
+
+        def label(result):
+            return result.description
+
+    await create("race", value("initial"), workspace="default")
+
+    async def advance():
+        await replace("race", value("B"), workspace="default")
+
+    store.before_head_update = advance
+    result, _ = await replace("race", value("A"), workspace="default")
+    assert result.revision == 2
+    assert label(result) == "A"
+    latest = await get("default", "race")
+    assert latest.revision == 3
+    assert label(latest) == "B"

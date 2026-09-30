@@ -96,7 +96,7 @@ def _maybe_bootstrap_environment(config: MasterConfig) -> None:
     # root for native-v1: install_environment_wheels / register_environment_search_root in
     # nemo_rl.environments.gym_env_package, called by the colocated actor
     # (nemo_rl.environments.nemo_gym) and, in mode B, by the in-sandbox host
-    # (nemo_rl.environments.sandbox.gym_host_runtime).
+    # (sandboxed_gym.runtime.gym_host_runtime).
     result = bootstrap_environment_package(root, install_wheels=False)
     logger.info(
         "Validated environment format=%s image_config_root=%s",

@@ -129,7 +129,7 @@ export const RadioCard: FC<RadioCardProps> = ({
           </Flex>
         </Flex>
         {hasDescription && (
-          <Text kind="body/regular/md" color="secondary" className={descriptionClass}>
+          <Text kind="body/regular/md" className={`${descriptionClass} text-secondary`}>
             {description}
           </Text>
         )}

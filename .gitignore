@@ -182,4 +182,4 @@ plugins/_temporary-scaled-evals/deploy/k8s/local.env
 
 # Renames
 sdk/python/nemo-helix/
-services/core/auth/src/nhx/
+services/core/auth/src/nmp/

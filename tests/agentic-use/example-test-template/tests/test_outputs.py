@@ -12,7 +12,7 @@ TODO: Replace the example test below with your actual verification logic.
 
 import os
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 
 # TODO: Rename this test function to describe what it verifies
@@ -25,14 +25,14 @@ def test_todo_replace_with_descriptive_name():
     # TODO: Get any needed environment variables
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 
-    # TODO: Create SDK client and perform verification
-    client = NeMoHelix(base_url=nhx_base_url)  # noqa: F841
+    # TODO: Create a typed client and perform verification
+    client = NemoClient(base_url=nhx_base_url)  # noqa: F841
 
     # TODO: Replace with actual verification logic
     # Example: Check that a resource was created
     #
-    # response = client.workspaces.list()
-    # workspace_names = [ws.name for ws in response.data]
+    # response = WorkspacesClient.from_client(client).list_workspaces()
+    # workspace_names = [ws.name for ws in response.items()]
     # assert "expected-workspace-name" in workspace_names, (
     #     f"Expected workspace was not created! Found: {workspace_names}"
     # )

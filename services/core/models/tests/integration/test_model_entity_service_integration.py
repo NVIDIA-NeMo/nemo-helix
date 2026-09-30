@@ -3,10 +3,9 @@
 
 """Integration tests for Model Entity service with in-memory EntityClient."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.files.metadata import FilesetMetadata
 from nemo_helix_plugin.files.storage_config import LocalStorageConfig
 from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput, ListFilesetFilesResponse
@@ -40,8 +39,8 @@ def entity_client() -> EntityClient:
 
 
 @pytest.fixture
-def _mock_files_client():
-    """Mock the FilesClient returned by client_from_platform in the permissions module."""
+def mock_files_client():
+    """Mock the Files client the service uses for fileset checks."""
     fileset_output = FilesetOutput(
         id="fileset-id-123",
         name="test-fileset",
@@ -55,39 +54,37 @@ def _mock_files_client():
         custom_fields={"key": "value"},
         metadata=FilesetMetadata(),
     )
-    mock_fc = AsyncMock()
-    mock_response = MagicMock()
-    mock_response.data.return_value = fileset_output
-    mock_fc.get_fileset.return_value = mock_response
-    with patch("nhx.core.models.api.permissions.client_from_platform", return_value=mock_fc):
-        yield mock_fc
+    files = AsyncMock()
+    fileset_response = MagicMock()
+    fileset_response.data.return_value = fileset_output
+    files.get_fileset.return_value = fileset_response
+    list_response = MagicMock()
+    list_response.data.return_value = ListFilesetFilesResponse(
+        data=[
+            FilesetFileOutput(
+                file_ref="file-ref-123",
+                file_url="file-url-123",
+                path="path-123",
+                size=123,
+                cache_status="cached",
+            )
+        ]
+    )
+    files.list_files.return_value = list_response
+    return files
 
 
 @pytest.fixture
-def model_entity_service(entity_client, _mock_files_client):
+def model_entity_service(entity_client, mock_files_client):
     """Create a ModelEntityService with MockEntityClient for integration testing."""
-    async_sdk = AsyncMock(spec=AsyncNeMoHelix)
-    async_sdk.files.list = AsyncMock(
-        return_value=ListFilesetFilesResponse(
-            data=[
-                FilesetFileOutput(
-                    file_ref="file-ref-123",
-                    file_url="file-url-123",
-                    path="path-123",
-                    size=123,
-                    cache_status="cached",
-                )
-            ]
-        )
-    )
-    return ModelEntityService(entity_client, sdk=async_sdk)
+    return ModelEntityService(entity_client, files=mock_files_client)
 
 
 @pytest.fixture
 def adapter_entity_service(model_entity_service):
     from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 
-    return AdapterEntityService(model_entity_service.entity_client, sdk=model_entity_service.sdk)
+    return AdapterEntityService(model_entity_service.entity_client, files=model_entity_service.files)
 
 
 @pytest.fixture

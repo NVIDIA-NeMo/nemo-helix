@@ -31,13 +31,13 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalRunJobConfig,
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec, HelixJobStep
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import ValidationError
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://platform.test", workspace="default")
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 def _steps(compiled: HelixJobSpec) -> list[HelixJobStep]:
@@ -93,7 +93,7 @@ async def test_retrieval_generate_compile_is_cpu() -> None:
     assert len(steps) == 1
     executor = _executor(steps[0])
     assert executor["provider"] == "cpu"
-    assert "nhx-cpu-tasks" in executor["container"]["image"]
+    assert "nhx-tasks" in executor["container"]["image"]
 
 
 @pytest.mark.asyncio

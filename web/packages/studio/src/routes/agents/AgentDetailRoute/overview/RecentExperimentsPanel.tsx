@@ -116,7 +116,7 @@ export const RecentExperimentsPanel: FC<RecentExperimentsPanelProps> = ({
                 onRunEvaluation ? (
                   <Button kind="tertiary" onClick={onRunEvaluation}>
                     <FlaskConical size={16} className="text-brand" aria-hidden />
-                    Run evaluation
+                    Run Evaluation
                   </Button>
                 ) : null
               }

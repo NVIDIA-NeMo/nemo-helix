@@ -4,7 +4,7 @@
 """Declarative provider seeding for AUT benchmark runs.
 
 Reads a YAML manifest (``providers.yaml``) describing inference providers and
-their secrets, then creates them on the platform via the NeMo SDK.  An optional
+their secrets, then creates them on the platform via the typed NeMo clients.  An optional
 ``virtual_models`` section in the same manifest declares Switchyard VirtualModels
 to create after provider discovery completes.
 
@@ -141,7 +141,7 @@ def _is_conflict(exc: Exception) -> bool:
     return "409" in msg or "conflict" in msg or "already exists" in msg
 
 
-def _create_secret(sdk: Any, workspace: str, secret_name: str, secret_value: str) -> None:
+def _create_secret(client: Any, workspace: str, secret_name: str, secret_value: str) -> None:
     """Create a platform secret, ignoring conflicts (already exists).
 
     On conflict, the existing secret is kept as-is. This is acceptable for
@@ -149,12 +149,11 @@ def _create_secret(sdk: Any, workspace: str, secret_name: str, secret_value: str
     For long-lived platform instances a stale secret (e.g. rotated key)
     would require manual deletion or an update-on-conflict strategy.
     """
-    from nemo_helix_plugin.client.adapter import client_from_platform
     from nemo_helix_plugin.secrets.client import SecretsClient
     from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
     from pydantic import SecretStr
 
-    secrets = client_from_platform(sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client)
     try:
         secrets.create_secret(
             body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(secret_value)),
@@ -168,18 +167,23 @@ def _create_secret(sdk: Any, workspace: str, secret_name: str, secret_value: str
             raise
 
 
-def _create_provider(sdk: Any, workspace: str, spec: ProviderSpec) -> None:
+def _create_provider(client: Any, workspace: str, spec: ProviderSpec) -> None:
     """Create an inference provider, ignoring conflicts.
 
     Same ephemeral-container tradeoff as :func:`_create_secret` — a
     pre-existing provider with a stale host_url or secret_name is kept.
     """
+    from nemo_helix_plugin.models.client import ModelsClient
+    from nemo_helix_plugin.models.types import CreateModelProviderRequest
+
     try:
-        sdk.inference.providers.create(
-            name=spec.name,
-            host_url=spec.host_url,
-            api_key_secret_name=spec.secret_name,
+        ModelsClient.from_client(client).create_provider(
             workspace=workspace,
+            body=CreateModelProviderRequest(
+                name=spec.name,
+                host_url=spec.host_url,
+                api_key_secret_name=spec.secret_name,
+            ),
         )
         logger.info("Created provider '%s' -> %s", spec.name, spec.host_url)
     except Exception as exc:
@@ -189,8 +193,11 @@ def _create_provider(sdk: Any, workspace: str, spec: ProviderSpec) -> None:
             raise
 
 
-def _wait_for_provider_discovery(sdk: Any, workspace: str, spec: ProviderSpec) -> bool:
+def _wait_for_provider_discovery(client: Any, workspace: str, spec: ProviderSpec) -> bool:
     """Poll until the provider has discovered at least one served model."""
+    from nemo_helix_plugin.models.client import ModelsClient
+
+    models = ModelsClient.from_client(client)
     deadline = time.monotonic() + spec.discovery_timeout_sec
     logger.info(
         "Waiting up to %ds for model discovery on provider '%s'...",
@@ -199,7 +206,7 @@ def _wait_for_provider_discovery(sdk: Any, workspace: str, spec: ProviderSpec) -
     )
     while time.monotonic() < deadline:
         try:
-            provider = sdk.inference.providers.retrieve(name=spec.name, workspace=workspace)
+            provider = models.get_provider(name=spec.name, workspace=workspace).data()
             served = getattr(provider, "served_models", None) or []
             if served:
                 model_ids = [getattr(m, "model_entity_id", str(m)) for m in served]
@@ -215,9 +222,8 @@ def _wait_for_provider_discovery(sdk: Any, workspace: str, spec: ProviderSpec) -
 def _create_virtual_model(base_url: str, workspace: str, spec: VirtualModelSpec) -> None:
     """Create a VirtualModel via the entities REST API, ignoring conflicts.
 
-    Uses urllib (stdlib) rather than the NeMoHelix SDK since the SDK's
-    virtual-models endpoint may not be exposed on all platform versions.
-    Auth is omitted intentionally — local benchmark platforms run with auth
+    Uses urllib (stdlib) so this helper has no client dependency beyond the
+    manifest. Auth is omitted intentionally: local benchmark platforms run with auth
     disabled (NHX_SECRETS_ALLOW_KEY_CREATION=1, no auth service in the
     services list).
     """
@@ -268,11 +274,11 @@ def seed_all(
 
     Returns a :class:`SeedResult` with per-provider and per-vm status.
     """
-    from nemo_helix import NeMoHelix
+    from nemo_helix_plugin.client.client import NemoClient
 
     provider_specs = load_manifest(manifest_path)
     vm_specs = _load_virtual_model_specs(manifest_path)
-    sdk = NeMoHelix(base_url=base_url, workspace=workspace)
+    client = NemoClient(base_url=base_url, workspace=workspace)
     result = SeedResult()
 
     # Track which providers succeeded so VMs can gate on their dependency.
@@ -287,11 +293,11 @@ def seed_all(
             continue
 
         try:
-            _create_secret(sdk, workspace, spec.secret_name, secret_value)
-            _create_provider(sdk, workspace, spec)
+            _create_secret(client, workspace, spec.secret_name, secret_value)
+            _create_provider(client, workspace, spec)
 
             if spec.wait_for_discovery:
-                discovered = _wait_for_provider_discovery(sdk, workspace, spec)
+                discovered = _wait_for_provider_discovery(client, workspace, spec)
                 if not discovered:
                     msg = f"Model discovery timed out after {spec.discovery_timeout_sec}s"
                     logger.warning(msg)

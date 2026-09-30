@@ -10,6 +10,7 @@ from nhx.common.service.dependencies import (
     get_platform_config,
     get_sdk_client,
     get_service_config,
+    get_sync_nemo_client,
     get_sync_sdk_client,
 )
 from nhx.common.service.deptree import CircularDependencyError, resolve_service_loading_order
@@ -26,6 +27,7 @@ __all__ = [
     "get_platform_config",
     "get_sdk_client",
     "get_service_config",
+    "get_sync_nemo_client",
     "get_sync_sdk_client",
     "resolve_service_loading_order",
 ]

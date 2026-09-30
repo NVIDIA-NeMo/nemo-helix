@@ -18,9 +18,11 @@ if TYPE_CHECKING:
 from sandboxed_gym.config import JOB_ID_METADATA_KEY
 from sandboxed_gym.egress import build_egress_policy
 from sandboxed_gym.host.models import (
+    GymHostBootstrapFailed,
     GymHostHandle,
     GymHostSpec,
     GymHostVolumeMount,
+    render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
 
@@ -203,7 +205,13 @@ class OpenSandboxGymHostProvider:
                 body = await asyncio.to_thread(self._get_json, handle.health_url, handle.headers)
                 if body.get("status") == "ready":
                     return
+                if body.get("status") == "failed":
+                    raise GymHostBootstrapFailed(
+                        f"job host {handle.host_id} failed to start: {render_host_error(body.get('error'))}"
+                    )
                 last_error = RuntimeError(f"host not ready: {body!r}")
+            except GymHostBootstrapFailed:
+                raise
             except Exception as exc:
                 last_error = exc
             await asyncio.sleep(_HEALTH_POLL_S)
@@ -221,7 +229,11 @@ class OpenSandboxGymHostProvider:
                 payload = response.read()
         except HTTPError as exc:
             if exc.code == 503:
-                return {"status": "starting"}
+                try:
+                    body = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    body = None
+                return body if isinstance(body, dict) else {"status": "starting"}
             raise
         except URLError:
             raise

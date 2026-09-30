@@ -787,5 +787,7 @@ def test_compile_workload_does_not_mount_workload_identity_on_auth_proxy() -> No
 
     pod_spec = _serialized(compiled.pod_spec_kwargs)
     auth_proxy = next(item for item in pod_spec["init_containers"] if item["name"] == "auth-proxy")
+    auth_proxy_env = {item["name"]: item["value"] for item in auth_proxy.get("env", [])}
+    assert auth_proxy_env["XDG_STATE_HOME"] == "/tmp"
     assert all(env["name"] != WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR for env in auth_proxy.get("env", []))
     assert all(mount["name"] != WORKLOAD_IDENTITY_VOLUME_NAME for mount in auth_proxy.get("volumeMounts", []))

@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks, sandboxed
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
     MODEL_CALLS_RESULT_KEY,
@@ -428,3 +428,64 @@ def test_a_caller_that_numbers_its_own_repeats_keeps_its_numbering() -> None:
     _stamp_rollout_indices(examples)
 
     assert [example[NG_ROLLOUT_INDEX] for example in examples] == [7, 0]
+
+
+def test_a_host_failure_surfaces_the_host_output_not_just_a_loopback_500() -> None:
+    """The component servers report an upstream refusal as a 500 from 127.0.0.1.
+
+    Without the host's own output the caller is left with that address and a Gym traceback, and
+    the sandbox holding the real cause has already been destroyed.
+    """
+    message = sandboxed._host_error_message(
+        "http://sandbox/proxy/8080/rollouts/run",
+        {
+            "code": "internal",
+            "message": "ClientResponseError: 500, url='http://127.0.0.1:5902/run'",
+            "host_output_tail": ["(policy_model) upstream returned 401 Unauthorized"],
+        },
+    )
+
+    assert "(policy_model) upstream returned 401 Unauthorized" in message
+    assert "gym host output" in message, "the tail must be labelled, not spliced into the summary"
+    assert "ClientResponseError" in message, "the host's own error still has to survive"
+
+
+def test_a_host_failure_without_output_reads_as_before() -> None:
+    message = sandboxed._host_error_message("http://sandbox/run", {"code": "internal", "message": "boom"})
+
+    assert "gym host output" not in message
+    assert "boom" in message
+
+
+def test_a_non_mapping_error_is_still_rendered() -> None:
+    """Older hosts send a bare string; it must not become a stack trace in the caller."""
+    assert "plain failure" in sandboxed._host_error_message("http://sandbox/run", "plain failure")
+
+
+async def test_a_503_bootstrap_failure_renders_the_envelope_it_carried(tasks, tmp_path, monkeypatch) -> None:
+    """A host that failed to bootstrap answers 503 with the same envelope a 200 would carry.
+
+    Truncating the raw body instead drops the output tail, which is ordered oldest first, so the
+    cut lands on the traceback that says why the host never started.
+    """
+    tail = [f"bootstrap line {index}" for index in range(80)]
+    host = _FakeHost(
+        status=503,
+        body={
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "PolicyCredentialRejected: the policy endpoint rejected the configured credential",
+                "host_output_tail": tail,
+            }
+        },
+    )
+    runner = runner_against(host, monkeypatch)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    message = str(excinfo.value)
+    assert "rejected the configured credential" in message
+    assert "gym host output" in message, "the tail must be labelled, not left as raw JSON"
+    assert "bootstrap line 0" in message, "the oldest line is where the traceback starts"
+    assert "bootstrap line 79" in message

@@ -16,6 +16,7 @@ from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
 from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.config import get_nemo_config
@@ -29,6 +30,7 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 from nemo_insights_plugin.analysis_runs import mint_analysis_run_name, submit_analysis_run
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
@@ -320,7 +322,8 @@ class InsightsAnalysisController(NemoController):
         await submit_analysis_run(
             workspace=config.workspace,
             request=request,
-            sdk=self.sdk,
+            agents_client=client_from_platform(self.sdk, AsyncAgentsClient),
+            models_client=client_from_platform(self.sdk, AsyncModelsClient),
             entity_client=self.entities,
             name=job_name,
             profile=self.insights_config.analyst.job_profile,

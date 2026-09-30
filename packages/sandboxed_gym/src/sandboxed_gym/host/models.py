@@ -8,6 +8,7 @@ Defines the create/spec and config shapes used by ``SandboxedGymHostProvider`` a
 :mod:`sandboxed_gym.egress`.
 """
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Generic, Mapping, TypeVar
@@ -316,3 +317,23 @@ def build_bootstrap_env(
         env.update(dict(extra))
     validate_bootstrap_env(env)
     return env
+
+
+class GymHostBootstrapFailed(RuntimeError):
+    """The host started its HTTP server but never finished bootstrapping."""
+
+
+def render_host_error(error: object) -> str:
+    """Render a host error envelope, ending with the host's own output when it sent any."""
+    if not isinstance(error, Mapping):
+        return str(error) if error is not None else "no detail reported"
+
+    tail = error.get("host_output_tail")
+    summary = {key: value for key, value in error.items() if key != "host_output_tail"}
+    rendered = json.dumps(summary)[:2000]
+    if isinstance(tail, list) and tail:
+        # Every line the host sent. It already bounded the tail against its own response budget, and
+        # re-bounding here would drop diagnostics that survived the wire.
+        lines = "\n".join(str(line) for line in tail)
+        rendered = f"{rendered}\n--- gym host output ({len(tail)} lines) ---\n{lines}"
+    return rendered

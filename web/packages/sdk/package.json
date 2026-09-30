@@ -9,6 +9,8 @@
     "gen:all": "tsx ./generateAll.ts",
     "gen:all-force": "tsx ./generateAll.ts --force",
     "gen:capabilities": "tsx ./orval/generate-capabilities.ts",
+    "gen:agent-optimization": "tsx ./orval/generate.ts agent-optimization",
+    "gen:agent-optimization-zod": "ORVAL_CLIENT=zod tsx ./orval/generate.ts agent-optimization",
     "gen:agents": "tsx ./orval/generate.ts agents",
     "gen:agents-zod": "ORVAL_CLIENT=zod tsx ./orval/generate.ts agents",
     "gen:anonymizer": "tsx ./orval/generate.ts anonymizer",

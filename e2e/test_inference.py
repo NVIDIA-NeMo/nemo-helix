@@ -16,7 +16,12 @@ import uuid
 from typing import Any, cast
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import InternalServerError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nhx.testing import MockProviderResponse, add_mock_provider
 
 from e2e.utils import collect_sse_chunks
@@ -31,33 +36,34 @@ def _unique_name(prefix: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_provider_create_and_list(sdk: NeMoHelix, workspace: str):
+def test_provider_create_and_list(client: NemoClient, workspace: str):
     """Create a mock provider and verify it appears in the provider list."""
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("crud-provider"),
         mock_response_body={"id": "chatcmpl-test", "choices": []},
     )
 
-    providers = sdk.inference.providers.list(workspace=workspace)
-    names = [p.name for p in providers.data]
+    providers = ModelsClient.from_client(client).list_providers(workspace=workspace)
+    names = [p.name for p in providers.items()]
     assert provider.name in names
 
 
-def test_provider_create_and_delete(sdk: NeMoHelix, workspace: str):
+def test_provider_create_and_delete(client: NemoClient, workspace: str):
     """Create then delete a mock provider."""
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("delete-provider"),
         mock_response_body={"id": "chatcmpl-test", "choices": []},
     )
 
-    sdk.inference.providers.delete(workspace=workspace, name=provider.name)
+    models = ModelsClient.from_client(client)
+    models.delete_provider(workspace=workspace, name=provider.name)
 
-    providers = sdk.inference.providers.list(workspace=workspace)
-    names = [p.name for p in providers.data]
+    providers = models.list_providers(workspace=workspace)
+    names = [p.name for p in providers.items()]
     assert provider.name not in names
 
 
@@ -66,8 +72,9 @@ def test_provider_create_and_delete(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_provider_route(sdk: NeMoHelix, workspace: str):
+def test_chat_completion_via_provider_route(client: NemoClient, workspace: str):
     """Send a chat completion request routed by provider name."""
+    gateway = InferenceGatewayClient.from_client(client)
     chat_response = {
         "id": "chatcmpl-provider",
         "object": "chat.completion",
@@ -82,18 +89,18 @@ def test_chat_completion_via_provider_route(sdk: NeMoHelix, workspace: str):
     }
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("provider-chat"),
         mock_response_body=chat_response,
     )
 
-    response = sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
+    response = gateway.provider_post(
+        trailing_uri="v1/chat/completions",
         name=provider.name,
         workspace=workspace,
-        body={"model": "test", "messages": [{"role": "user", "content": "Hi"}]},
-    )
+        body=JsonBody({"model": "test", "messages": [{"role": "user", "content": "Hi"}]}),
+    ).data()
     response = cast(dict[str, Any], response)
 
     assert response["id"] == "chatcmpl-provider"
@@ -106,8 +113,9 @@ def test_chat_completion_via_provider_route(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, workspace: str):
+def test_chat_completion_via_model_entity_route(client: NemoClient, workspace: str):
     """Send a chat completion request routed by model entity name."""
+    gateway = InferenceGatewayClient.from_client(client)
     entity_name = _unique_name("model-entity")
     chat_response = {
         "id": "chatcmpl-model",
@@ -122,18 +130,18 @@ def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, workspace: str):
     }
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body=chat_response,
     )
 
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_name,
         workspace=workspace,
-        body={"model": "test", "messages": [{"role": "user", "content": "Hi"}]},
-    )
+        body=JsonBody({"model": "test", "messages": [{"role": "user", "content": "Hi"}]}),
+    ).data()
     response = cast(dict[str, Any], response)
 
     assert response["id"] == "chatcmpl-model"
@@ -145,8 +153,9 @@ def test_chat_completion_via_model_entity_route(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_completion_via_openai_route(sdk: NeMoHelix, workspace: str):
+def test_chat_completion_via_openai_route(client: NemoClient, workspace: str):
     """Send a chat completion request via the OpenAI-compatible route."""
+    gateway = InferenceGatewayClient.from_client(client)
     entity_name = _unique_name("openai-model")
     chat_response = {
         "id": "chatcmpl-openai",
@@ -161,20 +170,22 @@ def test_chat_completion_via_openai_route(sdk: NeMoHelix, workspace: str):
     }
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body=chat_response,
     )
 
-    response = sdk.inference.gateway.openai.post(
-        "v1/chat/completions",
+    response = gateway.openai_post(
+        trailing_uri="v1/chat/completions",
         workspace=workspace,
-        body={
-            "model": f"{workspace}/{entity_name}",
-            "messages": [{"role": "user", "content": "Hi"}],
-        },
-    )
+        body=JsonBody(
+            {
+                "model": f"{workspace}/{entity_name}",
+                "messages": [{"role": "user", "content": "Hi"}],
+            }
+        ),
+    ).data()
     response = cast(dict[str, Any], response)
 
     assert response["id"] == "chatcmpl-openai"
@@ -186,7 +197,7 @@ def test_chat_completion_via_openai_route(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_streaming_chat_completion(sdk: NeMoHelix, workspace: str):
+def test_streaming_chat_completion(client: NemoClient, workspace: str):
     """Streaming chat completion returns SSE chunks with content."""
     chat_response = {
         "id": "chatcmpl-stream",
@@ -201,14 +212,14 @@ def test_streaming_chat_completion(sdk: NeMoHelix, workspace: str):
     }
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("stream-provider"),
         mock_response_body=chat_response,
     )
 
     # Make a raw streaming request via httpx
-    with sdk._client.stream(
+    with client._client.stream(
         "POST",
         f"/apis/inference-gateway/v2/workspaces/{workspace}/provider/{provider.name}/-/v1/chat/completions",
         json={
@@ -233,22 +244,23 @@ def test_streaming_chat_completion(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_model_list_via_openai_route(sdk: NeMoHelix, workspace: str):
+def test_model_list_via_openai_route(client: NemoClient, workspace: str):
     """The OpenAI /v1/models endpoint lists routable VirtualModels.
 
     Adding a mock provider creates a model entity, for which the reconciler
     autoprovisions a VirtualModel of the same name — so it appears in the catalog
     (as ``workspace/name``).
     """
+    gateway = InferenceGatewayClient.from_client(client)
     entity_name = _unique_name("listable-model")
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body={"id": "chatcmpl-test", "choices": []},
     )
 
-    models = sdk.inference.gateway.openai.v1.models.list(workspace=workspace)
+    models = gateway.list_openai_models(workspace=workspace).data()
     model_ids = [m.id for m in models.data]
     # The autoprovisioned VirtualModel should appear (as workspace/entity_name)
     assert f"{workspace}/{entity_name}" in model_ids
@@ -259,12 +271,11 @@ def test_model_list_via_openai_route(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_mock_provider_error_simulation(sdk: NeMoHelix, workspace: str):
+def test_mock_provider_error_simulation(client: NemoClient, workspace: str):
     """Mock providers can simulate HTTP error responses."""
-    from nemo_helix import InternalServerError
-
+    gateway = InferenceGatewayClient.from_client(client)
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("error-provider"),
         mock_response_body={"error": {"message": "simulated failure", "type": "server_error"}},
@@ -272,12 +283,12 @@ def test_mock_provider_error_simulation(sdk: NeMoHelix, workspace: str):
     )
 
     with pytest.raises(InternalServerError) as exc_info:
-        sdk.inference.gateway.provider.post(
-            "v1/chat/completions",
+        gateway.provider_post(
+            trailing_uri="v1/chat/completions",
             name=provider.name,
             workspace=workspace,
-            body={"model": "test", "messages": []},
-        )
+            body=JsonBody({"model": "test", "messages": []}),
+        ).data()
 
     assert exc_info.value.status_code == 500
 
@@ -287,13 +298,14 @@ def test_mock_provider_error_simulation(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_per_model_sequential_responses(sdk: NeMoHelix, workspace: str):
+def test_per_model_sequential_responses(client: NemoClient, workspace: str):
     """Mock providers support different sequential responses per model."""
+    gateway = InferenceGatewayClient.from_client(client)
     entity_main = _unique_name("main-llm")
     entity_safety = _unique_name("safety-llm")
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=_unique_name("multi-model"),
         mock_response_body_by_model={
@@ -327,38 +339,38 @@ def test_per_model_sequential_responses(sdk: NeMoHelix, workspace: str):
     )
 
     # Main model returns its response
-    resp = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    resp = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_main,
         workspace=workspace,
-        body={"model": f"{workspace}/{entity_main}", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/{entity_main}", "messages": []}),
+    ).data()
     assert resp["id"] == "main-1"
 
     # Safety model returns first response, then second
-    resp1 = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    resp1 = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_safety,
         workspace=workspace,
-        body={"model": f"{workspace}/{entity_safety}", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/{entity_safety}", "messages": []}),
+    ).data()
     assert resp1["id"] == "safety-1"
 
-    resp2 = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    resp2 = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_safety,
         workspace=workspace,
-        body={"model": f"{workspace}/{entity_safety}", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/{entity_safety}", "messages": []}),
+    ).data()
     assert resp2["id"] == "safety-2"
 
     # Third call clamps to last response
-    resp3 = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    resp3 = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_safety,
         workspace=workspace,
-        body={"model": f"{workspace}/{entity_safety}", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/{entity_safety}", "messages": []}),
+    ).data()
     assert resp3["id"] == "safety-2"
 
 
@@ -367,17 +379,17 @@ def test_per_model_sequential_responses(sdk: NeMoHelix, workspace: str):
 # ---------------------------------------------------------------------------
 
 
-def test_virtual_model_created_by_mock_provider(sdk: NeMoHelix, workspace: str):
+def test_virtual_model_created_by_mock_provider(client: NemoClient, workspace: str):
     """add_mock_provider creates a passthrough VirtualModel for each served entity."""
     entity_name = _unique_name("vm-check")
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=entity_name,
         mock_response_body={"id": "chatcmpl-test", "choices": []},
     )
 
-    vm = sdk.inference.virtual_models.retrieve(workspace=workspace, name=entity_name)
+    vm = VirtualModelsClient.from_client(client).get_virtual_model(workspace=workspace, name=entity_name).data()
     assert vm.name == entity_name
     assert vm.autoprovisioned is True
     assert vm.default_model_entity == f"{workspace}/{entity_name}"

@@ -560,7 +560,9 @@ def test_skill_store_resources_example_matches_the_sdk_and_task_schema() -> None
     assert taskset_call.arguments["name"] == "geography"
     taskset = taskset_call.arguments["taskset"]
     assert isinstance(taskset, TasksetInput)
-    assert TasksetInput.model_validate(taskset.model_dump(mode="json")).tasks == [TaskRef("capital-france")]
+    assert TasksetInput.model_validate(taskset.model_dump(mode="json", exclude_unset=True)).tasks == [
+        TaskRef("capital-france")
+    ]
 
 
 def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:

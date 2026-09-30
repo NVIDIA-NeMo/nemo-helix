@@ -189,7 +189,7 @@ class JobExecutionProfileConfig(_execution_profiles.JobExecutionProfileConfig):
         return self
 
 
-_DEFAULT_TASK_IMAGE_NAME = "nhx-cpu-tasks"
+_DEFAULT_TASK_IMAGE_NAME = "nhx-tasks"
 JOB_RUNTIME_SERVICE_NAMES = ("auth", "jobs", "files", "models", "secrets")
 
 

@@ -13,12 +13,12 @@ describe('VariableButton', () => {
     expect(screen.getByRole('button', { name: /variable/i })).toBeInTheDocument();
   });
 
-  it('opens a menu listing each variable on click', async () => {
+  it('opens a panel listing each variable on click', async () => {
     const user = userEvent.setup();
     render(<VariableButton variables={VARIABLES} onSelect={() => {}} />);
     await user.click(screen.getByRole('button', { name: /variable/i }));
-    expect(await screen.findByRole('menuitem', { name: /input/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /output/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /input/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /output/ })).toBeInTheDocument();
   });
 
   it('calls onSelect with the chosen variable', async () => {
@@ -26,7 +26,7 @@ describe('VariableButton', () => {
     const onSelect = vi.fn();
     render(<VariableButton variables={VARIABLES} onSelect={onSelect} />);
     await user.click(screen.getByRole('button', { name: /variable/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /input/ }));
+    await user.click(await screen.findByRole('button', { name: /input/ }));
     expect(onSelect).toHaveBeenCalledWith({ name: 'input', description: 'The dataset input.' });
   });
 

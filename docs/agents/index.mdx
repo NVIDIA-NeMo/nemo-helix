@@ -63,7 +63,7 @@ Agents are managed end-to-end through the `nemo agents` command group:
 | Redeploy  | `nemo agents redeploy --agent <name> --agent-config <path>`                                                   | Push a changed config to a deployed agent in one step (undeploy → delete → create → deploy). |
 | Wait      | `nemo agents deployments wait --agent <name>`                                                                 | Block until the deployment is `running` or `failed`.                             |
 | Invoke    | `nemo agents invoke --agent <name> --input "..."` or `nemo agents invoke --agent-config <path> --input "..."` | Send a single request through the Agents gateway or run a local config directly. |
-| Optimize  | `nemo agents optimize --optimize-config-fileset <fileset> --optimize-config <path>`                           | Run Fabric-backed numeric HPO (Optuna). Stage the bundle first with `nemo agents optimize prepare-fileset`. See [Optimize Agents](/documentation/agents/optimize-agents). |
+| Optimize  | `nemo agents optimize run-strategy --strategy ...`                                                             | Run various plugin-provided agent optimization strategies. See [Optimize Agents](/documentation/agents/optimize-agents). |
 | Tear down | `nemo agents undeploy --agent <name>` then `nemo agents delete <name>`                                        | Stop the running service and remove the agent entity.                            |
 
 To run an `agent.yaml` directly without registering it on the platform, pass `--agent-config <path>` to `nemo agents invoke` or `nemo agents run`.
@@ -288,9 +288,8 @@ config targets a deployed agent:
   durable container on Docker or Kubernetes, and invoke it through the Agents gateway.
 - [Observe Agents](/documentation/agents/observe-agents): ingest and query agent telemetry with NeMo
   Intake, then review traces, feedback, and evaluator results.
-- [Optimize Agents](/documentation/agents/optimize-agents): Fabric-backed numeric HPO
-  (`nemo agents optimize`), plus model-routing / skill / prompt suggestions for
-  deployed agents.
+- [Optimize Agents](/documentation/agents/optimize-agents): Try various strategies for agent optimization
+  (`nemo agents optimize run-strategy --strategy ...`), including model-routing, skill or prompt improvement, and more.
 - [Add Guardrails to an Agent](/documentation/agents/add-guardrails): route an agent's model traffic
   through input and output rails.
 - [Scan Trace Data](/documentation/agents/scan-trace-data): check recent telemetry for PII and leaked

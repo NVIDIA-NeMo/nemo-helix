@@ -42,7 +42,7 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   onFastModelChange,
 }) => (
   <Stack gap="density-md">
-    <Text kind="body/regular/xs" color="secondary">
+    <Text className="text-secondary" kind="body/regular/xs">
       {unresolved
         ? 'The stored model pair could not be read, so both models are required for this run.'
         : agent

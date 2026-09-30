@@ -74,7 +74,7 @@ The gateway (e.g., Envoy with `ext_authz`) authenticates the bearer token before
 3. Gateway forwards the request with those trusted headers
 4. Services skip bearer-token re-validation and run their normal PDP authorization checks
 
-This rejects unauthenticated requests before they reach platform services while keeping authorization decisions in the normal service middleware path.
+This rejects unauthenticated requests before they reach Helix services while keeping authorization decisions in the normal service middleware path.
 
 ## Principal Model
 
@@ -152,9 +152,9 @@ NeMo Helix uses **workspace-scoped Role-Based Access Control (RBAC)**. All resou
 - The wildcard principal `*` binds a role for all authenticated users at once
 - Workspaces are private by default; the creator becomes Admin automatically
 
-On top of RBAC, NeMo Helix supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through two independent checks:
+On top of RBAC, NeMo Helix supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through role checks, and scoped tokens also pass through API-scope checks:
 
-1. **Scope check** (token level): The JWT must carry at least one of the scopes required by the endpoint (e.g., `platform:read` or `platform:write`). Scopes limit what the *token* can do.
+1. **Scope check** (token level): When the JWT carries NeMo Helix API scopes, at least one scope must match the endpoint (for example, `platform:read` or `platform:write`). Tokens with no NeMo Helix API scopes skip this optional check for backward compatibility. Scopes limit what the *token* can do.
 2. **Permission check** (role level): The principal must have the necessary permissions via role bindings in the workspace. Roles limit what the *user* can do.
 
 Both must pass. This enables least-privilege token usage — for example, an Editor can create a read-only token (`platform:read` only) for monitoring scripts.

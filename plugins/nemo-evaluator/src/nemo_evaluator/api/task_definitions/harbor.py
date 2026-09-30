@@ -1,58 +1,93 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Harbor task kind: a packaged task directory, run and scored by Harbor."""
+"""Self-contained Harbor task archive references."""
 
-from __future__ import annotations
+from typing import Annotated, Any, Literal
 
-from typing import Any, Literal
-
-from nemo_evaluator.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
+from filesets import parse_fileset_ref
+from nemo_evaluator.api.fields import MetricInline, MetricRefOrInline
+from nemo_evaluator.api.task_definitions.provenance import TaskProvenance
+from nemo_evaluator.content_hash import DIGEST_PATTERN
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import validate_archive_path
+from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_helix_plugin.refs import FILESET_REF_PATTERN
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+ArchiveDigest = Annotated[str, Field(pattern=DIGEST_PATTERN, min_length=64, max_length=64)]
 
 
-class HarborTaskDefinition(BaseModel):
-    """A reference to the task's packaged files, plus a projection of Harbor's own config.
+class HarborArchiveSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["fileset-archive"] = "fileset-archive"
+    fileset_ref: str = Field(
+        pattern=FILESET_REF_PATTERN,
+        description=(
+            "Exact qualified archive object reference: workspace/fileset#relative/path. "
+            "Workspace, fileset name, and path must each be NFC-normalized and at most 4096 UTF-8 bytes. "
+            "Path segments must be nonempty, must not be '.' or '..', and must not end in a space or dot. "
+            "Control characters (U+0000–U+001F and U+007F), backslashes, %, ?, #, and : are forbidden "
+            "within each component. Absolute paths, a//b, a/../b, and trailing slashes are rejected. "
+            "These canonicalization constraints are enforced by the server in addition to the pattern."
+        ),
+        examples=["default/harbor-tasks#suite/task/task_archive"],
+    )
+    files_hash: ArchiveDigest = Field(description="SHA-256 of the exact compressed archive bytes.")
+    archive_format: Literal["tar-gzip-v1"] = "tar-gzip-v1"
 
-    Harbor identifies a task by a *directory* — ``task.toml``, an instruction, an environment — so
-    what is stored is a reference to that directory's archive in the Files service, not the files
-    themselves. One fileset per task, so a task shared by several tasksets is stored once. The
-    archive is materialized back into ``<dir>/<task-name>/`` at run time, which is the layout
-    Harbor's own discovery expects.
+    @field_validator("fileset_ref")
+    @classmethod
+    def _reference(cls, value: str) -> str:
+        """Require a fully qualified Fileset reference whose components are safe archive paths."""
+        workspace, name, path = parse_fileset_ref(value, workspace_fallback=None)
+        if not workspace or not name or value != f"{workspace}/{name}#{path}":
+            raise ValueError("Archive references must be qualified and canonical")
+        for part in (workspace, name, path):
+            validate_archive_path(part)
+        return value
 
-    Which agent runs the task is *not* stored here. That comes from the run's target
-    (``HarborRunnerTarget``), so the same stored task can be evaluated against different agents.
-    Harbor's own ``[agent]`` block — carried inside ``config`` — configures how the agent *phase*
-    runs (timeout, user, network policy), not which agent it is.
-    """
+
+class HarborTaskHash(BaseModel):
+    """Producer fingerprint for future use; never an integrity or execution gate."""
 
     model_config = ConfigDict(extra="forbid")
+    digest: ArchiveDigest
+    method: Literal["harbor-packager-content-v1"] = "harbor-packager-content-v1"
+    harbor_version: str = Field(min_length=1, max_length=128)
+    source_commit: str | None = Field(default=None, max_length=128)
 
-    kind: Literal["harbor"] = Field(description="Task kind discriminator.")
-    archive_ref: str = Field(
-        pattern=FILESET_REF_PATTERN,
-        description="Files reference to the task's packaged directory (format: workspace/fileset#path).",
+
+class _HarborTaskDefinitionCommon(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["harbor"]
+    native_task_id: str = Field(
+        min_length=1, description="Native task identity, independently verified from the archive."
     )
-    archive_digest: str = Field(
-        description="Content hash Harbor computed over the task directory. This is the authoritative "
-        "identity of a Harbor task's content — every file, including task.toml.",
-        min_length=DIGEST_LENGTH,
-        max_length=DIGEST_LENGTH,
-        pattern=DIGEST_PATTERN,
-    )
-    instruction: str | None = Field(
-        default=None, description="The task's instruction text, when it has one (multi-step tasks may not)."
-    )
-    # Excluded from the revision digest (see ``_DERIVED_SPEC_FIELDS`` in ``entities``). Safe only
-    # because this is never an execution input: Harbor reads the real ``task.toml`` out of the
-    # materialized archive, and ``archive_digest`` already covers every file in that directory.
-    # Hashing the projection too would add no coverage, and would make revision history sensitive to
-    # Harbor's serialization — a release that reordered keys would cut a revision for byte-identical
-    # files. Anything here that becomes a genuine execution or grading input must be digested.
-    config: dict[str, Any] = Field(
+    source: HarborArchiveSource
+    harbor_hash: HarborTaskHash
+    instruction: str | None = None
+    # Verified task.toml is authoritative, and this projection is excluded from revision identity.
+    config: dict[str, Any] = Field(default_factory=dict)
+    views: dict[str, SemanticView] = Field(
         default_factory=dict,
-        description="Harbor's own task configuration (verifier, agent, environment, steps), as published. "
-        "A queryable projection of task.toml — inspect a task's verifier without downloading the "
-        "archive. Opaque here: Harbor owns this schema.",
+        description="Reporting views over the primary Harbor reward and declared additional metric outputs.",
+    )
+
+
+class HarborTaskDefinition(_HarborTaskDefinitionCommon):
+    metrics: list[MetricRefOrInline] = Field(
+        default_factory=list,
+        description="Additional metrics, appended to the mandatory HarborRewardMetric. Inline bundles are "
+        "normalized to stored metric references on registration. Do not include HarborRewardMetric here.",
+    )
+
+
+class ResolvedHarborTaskDefinition(_HarborTaskDefinitionCommon):
+    """Job snapshot with expanded metrics and the original stored revision."""
+
+    provenance: TaskProvenance
+    metrics: list[MetricInline] = Field(
+        default_factory=list,
+        description="Resolved additional metrics, appended to the mandatory HarborRewardMetric.",
     )

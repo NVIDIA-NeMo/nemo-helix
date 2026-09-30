@@ -17,7 +17,7 @@ Full verification of auth propagation to secret access is done in unit tests
 from typing import Generator
 
 import pytest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nhx.core.models.service import ModelsService
 from nhx.testing import as_user, create_test_client, short_unique_name, unique_email
@@ -30,33 +30,37 @@ from .conftest import (
     get_provider,
     list_deployments,
     list_providers,
-    models_client_from_sdk,
     upsert_provider,
 )
 
+# client is module-scoped (expensive to boot, auth_enabled=True): keep both classes in this
+# file on one xdist worker so they share it instead of each worker re-provisioning it
+# from scratch.
+pytestmark = pytest.mark.xdist_group("models_auth_propagation")
+
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoHelix, None, None]:
-    """SDK client with ModelsService (auth enabled)."""
+def client() -> Generator[ModelsClient, None, None]:
+    """Typed Models client with ModelsService (auth enabled)."""
     with create_test_client(
         ModelsService,
         auth_enabled=True,
-    ) as sdk:
-        yield sdk
+        client_type=NemoClient,
+    ) as platform_client:
+        yield ModelsClient.from_client(platform_client)
 
 
-def _as_service_principal(sdk: NeMoHelix, service_name: str = "models-controller") -> ModelsClient:
-    """Create an SDK client authenticated as a service principal."""
-    return models_client_from_sdk(as_user(sdk, f"service:{service_name}"))
+def _as_service_principal(client: ModelsClient, service_name: str = "models-controller") -> ModelsClient:
+    """Create a typed client authenticated as a service principal."""
+    return as_user(client, f"service:{service_name}")
 
 
 def _create_deployment(
-    user_sdk: NeMoHelix,
+    client: ModelsClient,
     workspace: str = "default",
     prefix: str = "test",
 ):
     """Create a deployment config + deployment, returning the deployment name."""
-    client = models_client_from_sdk(user_sdk)
     config_name = short_unique_name(f"{prefix}-config")
     deployment_name = short_unique_name(f"{prefix}-deploy")
     create_deployment_config(
@@ -77,14 +81,13 @@ def _create_deployment(
 
 
 class TestDeploymentAuthPropagation:
-    def test_auth_context_sanitized_for_regular_user(self, sdk: NeMoHelix):
+    def test_auth_context_sanitized_for_regular_user(self, client: ModelsClient):
         """Regular users should not see auth_context on create, retrieve, or list."""
-        creator_sdk = as_user(sdk, unique_email("creator"), groups=["team-alpha"])
-        deployment = _create_deployment(creator_sdk, prefix="sanitize")
+        creator_client = as_user(client, unique_email("creator"), groups=["team-alpha"])
+        deployment = _create_deployment(creator_client, prefix="sanitize")
 
         # Create response
         assert deployment.auth_context is None, "create: regular user should not see auth_context"
-        creator_client = models_client_from_sdk(creator_sdk)
 
         # Retrieve response
         retrieved = get_deployment(
@@ -99,18 +102,18 @@ class TestDeploymentAuthPropagation:
         assert len(matching) == 1
         assert matching[0].auth_context is None, "list: regular user should not see auth_context"
 
-    def test_auth_context_visible_to_service_principal(self, sdk: NeMoHelix):
+    def test_auth_context_visible_to_service_principal(self, client: ModelsClient):
         """Service principals should see auth_context on retrieve and list."""
         creator_email = unique_email("creator")
         creator_groups = ["team-alpha", "ml-engineers"]
-        creator_sdk = as_user(sdk, creator_email, groups=creator_groups)
-        deployment = _create_deployment(creator_sdk, prefix="svc")
+        creator_client = as_user(client, creator_email, groups=creator_groups)
+        deployment = _create_deployment(creator_client, prefix="svc")
 
-        service_sdk = _as_service_principal(sdk)
+        service_client = _as_service_principal(client)
 
         # Retrieve response
         retrieved = get_deployment(
-            service_sdk,
+            service_client,
             workspace="default",
             name=deployment.name,
         )
@@ -120,32 +123,32 @@ class TestDeploymentAuthPropagation:
         assert retrieved.auth_context.principal_groups == creator_groups
 
         # List response
-        matching = [d for d in list_deployments(service_sdk, workspace="default") if d.name == deployment.name]
+        matching = [d for d in list_deployments(service_client, workspace="default") if d.name == deployment.name]
         assert len(matching) == 1
         assert matching[0].auth_context is not None, "list: service principal should see auth_context"
         assert matching[0].auth_context.principal_id == creator_email
         assert matching[0].auth_context.principal_groups == creator_groups
 
-    def test_auth_context_persisted_across_users(self, sdk: NeMoHelix):
+    def test_auth_context_persisted_across_users(self, client: ModelsClient):
         """Auth context persists the original creator's identity, invisible to other users."""
         creator_email = unique_email("creator")
         creator_groups = ["admins"]
-        creator_sdk = as_user(sdk, creator_email, groups=creator_groups)
-        deployment = _create_deployment(creator_sdk, prefix="persist")
+        creator_client = as_user(client, creator_email, groups=creator_groups)
+        deployment = _create_deployment(creator_client, prefix="persist")
 
         # Different regular user should not see auth_context
-        other_user = as_user(sdk, unique_email("admin"), groups=["admins"])
+        other_user = as_user(client, unique_email("admin"), groups=["admins"])
         retrieved_by_user = get_deployment(
-            models_client_from_sdk(other_user),
+            other_user,
             workspace="default",
             name=deployment.name,
         )
         assert retrieved_by_user.auth_context is None, "Regular user should not see auth_context"
 
         # Service principal should see the original creator's auth_context
-        service_sdk = _as_service_principal(sdk)
+        service_client = _as_service_principal(client)
         retrieved_by_service = get_deployment(
-            service_sdk,
+            service_client,
             workspace="default",
             name=deployment.name,
         )
@@ -155,14 +158,13 @@ class TestDeploymentAuthPropagation:
 
 
 class TestProviderAuthPropagation:
-    def test_auth_context_captured_at_creation(self, sdk: NeMoHelix):
+    def test_auth_context_captured_at_creation(self, client: ModelsClient):
         """Auth context is captured when provider is created, visible to service principals."""
         creator_email = unique_email("creator")
         creator_groups = ["team-beta"]
         provider_name = short_unique_name("auth-prov")
 
-        creator_sdk = as_user(sdk, creator_email, groups=creator_groups)
-        creator_client = models_client_from_sdk(creator_sdk)
+        creator_client = as_user(client, creator_email, groups=creator_groups)
 
         # Regular user should not see auth_context in the create response
         provider = create_provider(
@@ -174,9 +176,9 @@ class TestProviderAuthPropagation:
         assert provider.auth_context is None, "Regular user should not see auth_context"
 
         # Service principal should see it
-        service_sdk = _as_service_principal(sdk)
+        service_client = _as_service_principal(client)
         retrieved = get_provider(
-            service_sdk,
+            service_client,
             workspace="default",
             name=provider_name,
         )
@@ -185,12 +187,11 @@ class TestProviderAuthPropagation:
         assert retrieved.auth_context.principal_email == creator_email
         assert retrieved.auth_context.principal_groups == creator_groups
 
-    def test_auth_context_stripped_for_regular_user_on_list(self, sdk: NeMoHelix):
+    def test_auth_context_stripped_for_regular_user_on_list(self, client: ModelsClient):
         """Auth context should be stripped from list responses for regular users."""
         provider_name = short_unique_name("list-prov")
 
-        creator_sdk = as_user(sdk, unique_email("creator"), groups=["team-gamma"])
-        creator_client = models_client_from_sdk(creator_sdk)
+        creator_client = as_user(client, unique_email("creator"), groups=["team-gamma"])
 
         create_provider(
             creator_client,
@@ -199,19 +200,18 @@ class TestProviderAuthPropagation:
             host_url="http://test.local:8000",
         )
 
-        # List as regular user — auth_context should be stripped
+        # List as regular user, auth_context should be stripped
         matching = [p for p in list_providers(creator_client, workspace="default") if p.name == provider_name]
         assert len(matching) == 1
         assert matching[0].auth_context is None, "Regular user should not see auth_context in list"
 
-    def test_auth_context_on_upsert(self, sdk: NeMoHelix):
+    def test_auth_context_on_upsert(self, client: ModelsClient):
         """Auth context is captured on upsert (create and update paths), visible to service principals."""
         creator_email = unique_email("creator")
         creator_groups = ["ml-ops"]
         provider_name = short_unique_name("upsert-prov")
 
-        creator_sdk = as_user(sdk, creator_email, groups=creator_groups)
-        creator_client = models_client_from_sdk(creator_sdk)
+        creator_client = as_user(client, creator_email, groups=creator_groups)
 
         # Upsert creates a new provider
         provider = upsert_provider(
@@ -223,9 +223,9 @@ class TestProviderAuthPropagation:
         assert provider.auth_context is None, "Regular user should not see auth_context"
 
         # Service principal should see auth_context after create
-        service_sdk = _as_service_principal(sdk)
+        service_client = _as_service_principal(client)
         retrieved = get_provider(
-            service_sdk,
+            service_client,
             workspace="default",
             name=provider_name,
         )
@@ -244,7 +244,7 @@ class TestProviderAuthPropagation:
 
         # Service principal should still see auth_context after update
         retrieved_after_update = get_provider(
-            service_sdk,
+            service_client,
             workspace="default",
             name=provider_name,
         )
