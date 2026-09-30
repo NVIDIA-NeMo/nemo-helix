@@ -28,7 +28,7 @@ WHEELS_V1_SUBDIR = "wheels"
 CUSTOM_AGENT_SUBDIR = "responses_api_agents"
 #: Subdirectory for a custom Gym resources server.
 CUSTOM_RESOURCES_SERVER_SUBDIR = "resources_servers"
-#: Operator-owned Gym model configs. A customer FileSet that ships this tree is rejected.
+#: Gym model configs. A native-v1 ``config_paths`` entry may name one; other files in this tree are rejected.
 OPERATOR_MODEL_SUBDIR = "responses_api_models"
 
 
@@ -96,8 +96,12 @@ class NativeV1Manifest(_ManifestBase):
     @field_validator("config_paths")
     @classmethod
     def _under_gym_component_directories(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        """Keep native-v1 configs inside Gym's agent/resources-server trees, not the model tree."""
-        allowed = (f"{CUSTOM_AGENT_SUBDIR}/", f"{CUSTOM_RESOURCES_SERVER_SUBDIR}/")
+        """Keep native-v1 configs under a Gym server tree."""
+        allowed = (
+            f"{CUSTOM_AGENT_SUBDIR}/",
+            f"{CUSTOM_RESOURCES_SERVER_SUBDIR}/",
+            f"{OPERATOR_MODEL_SUBDIR}/",
+        )
         for value in values:
             if not value.startswith(allowed):
                 raise ValueError(f"native-v1 config_paths must be under {allowed}: {value!r}")
@@ -137,9 +141,11 @@ def validate_environment_manifest_against_listing(
     """Validate package rules decidable from a remote FileSet listing."""
     entries = {path.removeprefix("./") for path in paths}
 
-    # Model YAML is operator-owned (image + VirtualModel). A customer copy would silently
-    # shadow it through Gym extra-root discovery, so refuse it at submit.
-    customer_model_files = sorted(path for path in entries if path.startswith(f"{OPERATOR_MODEL_SUBDIR}/"))
+    # A declared config_path may name a model config. Any other file in that tree is rejected.
+    declared_configs = set(manifest.config_paths)
+    customer_model_files = sorted(
+        path for path in entries if path.startswith(f"{OPERATOR_MODEL_SUBDIR}/") and path not in declared_configs
+    )
     if customer_model_files:
         raise GymEnvironmentPackageError(
             f"customer-provided {OPERATOR_MODEL_SUBDIR} are not supported; model configuration is operator-owned: "
