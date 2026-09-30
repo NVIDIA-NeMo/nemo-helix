@@ -8608,14 +8608,17 @@ nemo auditor configs create [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the config body (without name/workspace).
+* `--data-file <FILE>`: JSON file with the config body (without name/workspace).
 * `--data, -d`: Inline JSON body for the config.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor configs list
 
@@ -8628,11 +8631,20 @@ nemo auditor configs list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo auditor configs get
 
@@ -8649,11 +8661,14 @@ nemo auditor configs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor configs update
 
@@ -8669,14 +8684,17 @@ nemo auditor configs update [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the new config body.
+* `--data-file <FILE>`: JSON file with the new config body.
 * `--data, -d`: Inline JSON body.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor configs delete
 
@@ -8693,7 +8711,6 @@ nemo auditor configs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
@@ -8735,14 +8752,17 @@ nemo auditor targets create [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the target body (without name/workspace).
+* `--data-file <FILE>`: JSON file with the target body (without name/workspace).
 * `--data, -d`: Inline JSON body for the target.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor targets list
 
@@ -8755,11 +8775,20 @@ nemo auditor targets list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo auditor targets get
 
@@ -8776,11 +8805,14 @@ nemo auditor targets get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor targets update
 
@@ -8796,14 +8828,17 @@ nemo auditor targets update [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the new target body.
+* `--data-file <FILE>`: JSON file with the new target body.
 * `--data, -d`: Inline JSON body.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor targets delete
 
@@ -8820,7 +8855,6 @@ nemo auditor targets delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
