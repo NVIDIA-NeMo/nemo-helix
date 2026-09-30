@@ -218,7 +218,10 @@ nemo jobs results download agent-eval-results \
   --output-file agent-eval-results.tar.gz
 ```
 
-The archive contains `trials.jsonl`, `scores.jsonl`, `tasks.jsonl`, and `summary.json`. See
+The archive contains `trials.jsonl`, `scores.jsonl`, `tasks.jsonl`, and `summary.json`, plus Gym's
+output under `gym_run/`: `rollouts.jsonl`, the materialized `gym_input.jsonl`, and the host's
+model-call captures in `gym_run/model_calls/`. Evidence paths in `trials.jsonl` are relative to the
+bundle root, the directory that holds `trials.jsonl`. See
 [Reading Results](/documentation/evaluate-models/agent-eval/reading-results#results-from-platform-jobs)
 for the queryable result record and SDK retrieval path.
 
