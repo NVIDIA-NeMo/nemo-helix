@@ -374,6 +374,16 @@ def _output_of(result: BenchmarkEvaluationResult) -> str | None:
     return output if isinstance(output, str) else None
 
 
+def _inline_rows(dataset: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the request's rows as plain inline data.
+
+    The evaluator's ``dataset`` argument is polymorphic -- inline rows, a file path, or a glob --
+    and this route only ever supplies rows. Rebuilding them here means a path cannot reach the
+    dataset loader even if the request field's declared type is later widened.
+    """
+    return [dict(row) for row in dataset]
+
+
 async def _run(
     metrics: list[Metric],
     *,
@@ -394,7 +404,7 @@ async def _run(
             raise TypeError("model target requires RunConfigOnlineModel")
         return await evaluator.run(
             metrics=metrics,
-            dataset=request.dataset,
+            dataset=_inline_rows(request.dataset),
             config=params,
             target=request.target,
             field_mapping=request.field_mapping,
@@ -404,7 +414,7 @@ async def _run(
         raise TypeError("offline evaluation requires RunConfig")
     return await evaluator.run(
         metrics=metrics,
-        dataset=request.dataset,
+        dataset=_inline_rows(request.dataset),
         config=params,
         target=None,
         field_mapping=request.field_mapping,
