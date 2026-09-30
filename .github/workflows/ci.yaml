@@ -65,6 +65,7 @@ jobs:
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
+      customization-auth: ${{ steps.changes.outputs.customization-auth }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -611,7 +612,7 @@ jobs:
           uv run --frozen pytest \
             e2e \
             -v \
-            -m "not gym_e2e and not full_e2e" \
+            -m "not gym_e2e and not full_e2e and not customization_auth_e2e" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-e2e.xml
@@ -688,6 +689,74 @@ jobs:
           junit-report: report-kubernetes-gym-e2e.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
   
+  kind-customizer-auth-e2e:
+    name: Kind customizer auth e2e
+    needs: [changes, build-cpu-smoke-images]
+    if: >
+      !cancelled() &&
+      needs.build-cpu-smoke-images.result == 'success' &&
+      needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.customization-auth == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    env:
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-customizer-auth
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      # Customization CPU steps run in nhx-tasks instead of nhx-customizer-tasks.
+      - name: Setup Kind cluster with auth enabled
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          kind-image-pull-token: ${{ github.token }}
+          kind-image-pull-user: ${{ github.actor }}
+          helm-extra-args: >-
+            -f e2e/k8s/values/kind-customizer-auth.yaml
+            --set platformConfig.customizer.tasks_image=${{ needs.build-cpu-smoke-images.outputs.image_registry }}/nhx-tasks:${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+
+      - name: Pre-pull customization task image
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-tasks:${IMAGE_TAG}"
+
+      - name: Run customizer auth e2e tests
+        shell: bash
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+        run: |
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          uv run --frozen pytest \
+            e2e/test_customization_auth.py \
+            -v \
+            -m customization_auth_e2e \
+            --run-e2e \
+            --no-cov \
+            --junitxml=report-kubernetes-customizer-auth-e2e.xml
+
+      - name: Finalize Kind customizer auth e2e
+        if: always()
+        uses: ./.github/actions/finalize-kind-e2e
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact-name: kind-customizer-auth-e2e-kubernetes-artifacts
+          junit-report: report-kubernetes-customizer-auth-e2e.xml
+          services-log-dir: ${{ runner.temp }}/e2e-services-logs
+
   kind-network-policy-smoke:
     name: Kind NetworkPolicy smoke
     needs: [changes, build-cpu-smoke-images]
@@ -2558,6 +2627,7 @@ jobs:
       - build-cpu-smoke-images
       - kind-cpu-smoke
       - kind-gym-e2e
+      - kind-customizer-auth-e2e
       - kind-network-policy-smoke
       - helm-lint
       - helm-chart-verifier
