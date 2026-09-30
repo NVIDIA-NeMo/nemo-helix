@@ -55,8 +55,8 @@ RUN UV_CACHE_DIR=/root/.cache/uv \
 # OpenTelemetry is the exception: its frozen lines are replaced by docker/rl/opentelemetry-overrides.txt,
 # which pins one matched release line (see that file for why).
 #
-# nemo-sandboxed-gym is the driver stack. NeMo-RL's SandboxedGymActor imports it at module
-# scope (host models, orchestrator, Ray broker). It is not a dependency of nhx-rl.
+# nemo-sandboxed-gym is not a dependency of nhx-rl. The driver venv gets it here.
+# The nemo_gym worker venvs get the same tree in the following step.
 #
 # UV_CACHE_DIR is overridden to the build-only mount here: the base sets it to /opt/uv_cache, which
 # this step must not write into (that cache is shipped read-only, see below).
@@ -65,30 +65,46 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     umask 022 && \
     UV_CACHE_DIR=/root/.cache/uv \
     uv-glue pip freeze --python /opt/nemo_rl_venv/bin/python --exclude-editable \
-        | grep -E '^[A-Za-z0-9._-]+==' \
-        | grep -Ev '^opentelemetry-' > /tmp/base-overrides.txt && \
+    | grep -E '^[A-Za-z0-9._-]+==' \
+    | grep -Ev '^opentelemetry-' > /tmp/base-overrides.txt && \
     grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt >> /tmp/base-overrides.txt && \
     UV_CACHE_DIR=/root/.cache/uv \
     uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache \
-        --overrides /tmp/base-overrides.txt \
-        -e /app/sdk/python/nemo-helix \
-        -e /app/packages/filesets \
-        -e /app/packages/models \
-        -e /app/packages/nemo_helix_plugin \
-        -e /app/packages/nhx_common \
-        -e /app/packages/nhx_customization_common \
-        -e "/app/packages/sandboxed_gym[server,ray]" \
-        -e "/app/services/rl[integrations]"
+    --overrides /tmp/base-overrides.txt \
+    -e /app/sdk/python/nemo-helix \
+    -e /app/packages/filesets \
+    -e /app/packages/models \
+    -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nhx_common \
+    -e /app/packages/nhx_customization_common \
+    -e "/app/packages/sandboxed_gym[server,ray]" \
+    -e "/app/services/rl[integrations]"
+
+# Same package as the driver venv. These workers import sandboxed_gym.
+RUN --mount=type=cache,target=/root/.cache/uv <<"EOF" bash -eu
+umask 022
+export UV_CACHE_DIR=/root/.cache/uv
+for python in \
+    /opt/ray_venvs/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker/bin/python \
+    /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker/bin/python \
+    /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker/bin/python \
+    /opt/ray_venvs/nemo_rl.environments.nemo_gym.NemoGym/bin/python \
+    /opt/ray_venvs/nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor/bin/python
+do
+    uv-glue pip install --python "${python}" --no-cache --no-deps \
+        -e "/app/packages/sandboxed_gym[server,opensandbox,ray]"
+done
+EOF
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_BIN=uv-glue uv-glue run --no-project --python /opt/nemo_rl_venv/bin/python \
-        /usr/local/bin/collect-python-sdists.py \
-        --python /opt/nemo_rl_venv/bin/python \
-        --output /usr/share/nemo-helix/source-distributions/nhx-rl-training \
-        --baseline-freeze /tmp/base-python-freeze.txt \
-        --label platform-glue
+    /usr/local/bin/collect-python-sdists.py \
+    --python /opt/nemo_rl_venv/bin/python \
+    --output /usr/share/nemo-helix/source-distributions/nhx-rl-training \
+    --baseline-freeze /tmp/base-python-freeze.txt \
+    --label platform-glue
 
 # Late file cleanup for bundled or non-package-managed files.
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
